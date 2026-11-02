@@ -1,253 +1,157 @@
 # erXos overview
 
-erXos is an Erlang-native operating system built around a capability
-microkernel. Erlang processes, messages, links and supervision provide
-the system's common execution and failure model. Hardware protection
-separates groups of those processes into domains; the kernel controls
-their memory and CPU resources, while each runtime schedules its own
-lightweight processes. System services, file systems, the network stack
-and drivers are predominantly Erlang.
+erXos is an operating system built around Erlang: a machine where
+applications, system services and drivers share one way of communicating,
+handling failure and understanding what is running.
 
-The aim is a machine that can be programmed, inspected and changed as one
-live Erlang system, with explicit authority across protection boundaries.
-Native programs fit into that environment through a capability-confined
-POSIX personality. AArch64 is the first architecture, QEMU `virt` the
-first platform, and the Raspberry Pi 4 and 5 the first boards. Apple
-Silicon macOS is the primary development host, followed by Linux.
+The idea is to bring together two things that are often separate: a live
+programming environment you can explore and change while it runs, and an
+operating system with hardware protection and explicit limits on what
+each part may do.
 
-This is an overview of the target design. [design.md](design.md) owns the
-architectural decisions and links to the subsystem specifications;
-[plan.md](plan.md) defines the build order and acceptance gates.
+Imagine following a request from an application into a file service,
+seeing which processes are involved and which code they are executing,
+then updating a service without shutting down the machine. If a driver
+crashes, its supervisor can restart it. If an application misbehaves,
+its memory boundary and resource limits contain it. Those are the kinds
+of everyday experiences the design aims to make possible.
 
-## Kernel, domains and runtimes
+This document introduces the target design. The [architecture](design.md)
+defines its contracts, and the [roadmap](plan.md) sets out how to build
+and test it.
 
-The kernel is a C17 capability microkernel based on the design and
-know-how of L4Re's Fiasco. It knows address spaces, native threads, groups,
-memory objects, capabilities and interrupts. Erlang pids, mailboxes,
-file names, users and POSIX processes belong above it. All runtimes run
-in user mode, including the runtime hosting the trusted system services.
+## Why build an operating system around Erlang?
 
-A **domain** is the principal hardware isolation boundary: an address
-space containing a runtime, its lightweight processes and its own code,
-atom table, ETS tables and registered names. ERTS is the first runtime;
-the kernel/runtime contract accommodates other runtimes without teaching
-the kernel their process models. A native extension has the authority of
-the domain containing it, so code requiring a separate trust boundary
-gets a domain or a sub-space of its own.
+Erlang is a programming language and runtime designed for concurrent,
+long-running systems. Its applications consist of many small processes
+that communicate by sending messages. These are lightweight runtime
+processes: creating one does not require creating a separate operating
+system process.
 
-```mermaid
-flowchart TB
-    subgraph U[User mode]
-        S[System domain: root task and Erlang policy services]
-        A[Application domain: ERTS and Erlang processes]
-        D[Service domains: storage, networking and devices]
-        E[Session domain: shell, handlers and programs in sub-spaces]
-        A <-->|Direct connections| D
-        E <-->|Direct connections| D
-    end
-    K[Capability microkernel: spaces, threads, groups, memory and IRQs]
-    S -->|Domain management through liberx| K
-    A -->|liberx| K
-    D -->|liberx| K
-    E -->|liberx| K
-```
+Failure is part of that model. A process can monitor another process and
+learn when it dies. A supervisor is a process responsible for restarting
+the parts it looks after. Code can also be replaced while the system is
+running. Together, these ideas give developers a practical way to build
+systems that keep working as individual parts fail or change.
 
-The **system domain is the root task**. Its C17 domain library in `liberx`
-constructs and ends domains; Erlang policy decides what each receives.
-One checked system manifest determines the configured domains, devices,
-resource limits, facets and initial connections. The root task is a
-deliberate availability boundary: its fault or a missed watchdog deadline
-records the failure and resets the machine. Other domains can be ended
-and restarted without reconstructing the root task.
+erXos carries that model through the machine. A file service or a driver
+is something you can message, inspect and supervise, just as you would
+an application component. The same tools can explain both application
+behaviour and the services beneath it.
 
-The system domain runs an interpreter-only ERTS image, keeping BeamAsm,
-asmjit and the C++ runtime out of that trusted runtime. Ordinary ERTS
-domains use BeamAsm by default; command domains and deterministic mode
-also use the interpreter image. `liberx` provides the common kernel
-interface and the backends for erXos's kernel, the Fiasco stopgap and
-hosted development. See [the kernel](design-kernel.md),
-[runtimes](design-runtime.md) and [system services](design-system.md).
+The value is continuity: fewer different models to learn, and more of
+the system visible from the environment in which you program it.
 
-## Two schedulers, one resource authority
+## One process world, with walls where they matter
 
-The kernel allocates CPU time to **groups** of threads through grants:
-quotas per period, allowed CPUs and scheduling parameters. Grants form
-a hierarchy bounded by their parents. A runtime schedules its processes
-on the group's **executors**, ordinary preemptible native threads, so an
-Erlang spawn or process switch requires no kernel operation.
+Lightweight Erlang processes give applications structure, but they do
+not provide hardware isolation from a faulty runtime or native code.
+erXos adds that protection through **domains**.
 
-The boundary avoids arbitrary upcalls into a runtime scheduler. Wakeups
-and capacity advice are consumed at runtime safe points; executors do
-not block on external work, which uses separate workers. The kernel
-enforces the grant regardless of what a runtime reports. Native threads
-and Erlang executors therefore compete under the same CPU authority.
+A domain is a protected group of processes with its own runtime, memory
+and resource limits. Applications and services can live in separate
+domains while still using Erlang messages, monitoring and supervision
+across the boundaries. Each receiving runtime checks which outside
+processes are allowed to contact its processes.
 
-There is **no CPU donation** along a service request. Shared services
-run on their own capped grants and admit bounded control work through
-per-client facets and lanes. Bulk computation stays with clients or
-explicitly provisioned work. A busy service can slow its clients, but a
-request cannot silently make the server inherit an unlimited obligation
-to spend CPU. More elaborate scheduling cooperation must outperform the
-plain configuration in matched measurements before earning its place.
+Underneath is a small **capability microkernel** written in C. It
+enforces memory protection, allocates CPU time and controls access to
+kernel objects and devices. A capability is an explicit right to use a
+particular resource. Knowing a name or guessing an identifier does not
+grant that right.
 
-Memory has a corresponding hierarchy of **budgets**, modelled as space
-banks. Every kernel allocation is charged, and deleting a budget deletes
-the objects and child budgets charged to it. Objects that must survive
-a domain are charged to a longer-lived owner: connection memory has
-system-managed lifetime budgets, for example, so a domain's exit cannot
-delete a ring under a surviving peer. Memory commitments reserve the
-resources their faults can need, keeping another service out of the
-kernel's fault path. See [scheduling](design-scheduler.md) and
-[budgets](design-kernel.md#budgets).
+The kernel gives each runtime a bounded share of CPU time; the runtime
+decides which of its lightweight processes to run within that share.
+Memory has explicit budgets too. This preserves inexpensive process
+creation and switching while giving the machine one authority over
+resources.
 
-## One process world, explicit authority
+Every runtime runs with restricted hardware access, including the one
+hosting the trusted system services. Only the kernel runs with full
+hardware privileges. Erlang services decide who should receive resources;
+the kernel enforces the resulting boundaries.
 
-Every Erlang domain is an Erlang node with its own name. Its domain id
-is the node creation, so a pid identifies its owning domain without a
-central pid allocator. Within a domain, retained Erlang behaviour is
-checked against stock OTP. Across domains, distribution is carried over direct
-connections consisting of bounded shared-memory lanes and IRQ doorbells.
-No central router forwards every message.
+## A machine you can understand while it runs
 
-Each receiver owns its **funnel**: it copies and validates incoming frames
-and checks authority against an export table written only by its own
-runtime. The lane identifies the sender's domain. A pid carried as data
-grants nothing by itself. When an owner hands out a pid, it exports
-permission to send and monitor; a cross-domain spawn gives the parent
-the child's rights, while linking or killing an otherwise unrelated
-process requires an explicit export. Missing authority has dead-process
-semantics, preventing an unprivileged caller from probing for a target.
+Inspection is part of the design from the beginning. The console and
+development tools share a view of processes, domains, native programs
+and kernel objects. You can connect activity to source code and see
+kernel scheduling and Erlang scheduling on the same timeline.
 
-Kernel capabilities are a separate mechanism: generation-checked entries
-in per-space tables, with rights that only shrink and transfer at an IPC
-rendezvous into receiver-reserved slots within a domain's sub-space tree.
-Interdomain signals use connections and exports/facets; the domain library
-installs each new domain's initial kernel capabilities. Kernel calls access bulk data
-through memory objects and offsets in the kernel's own mapping, rather
-than dereferencing caller-supplied pointers. Mappings cannot be writable
-and executable together; JIT code is made only by user-mode runtimes in
-images explicitly permitted to do so. Privileged services use
-**facets**, processes bound to one grantee and a scope. Their admission
-paths authenticate origin and mint scoped handles before a handler can
-perform an authority-consuming effect. Names remain useful for discovery
-and debugging without becoming ambient authority.
+That matters when a system is slow or failing. You need to know whether
+a process is waiting for a reply, a service has exhausted its CPU share,
+or a domain has disappeared. Keeping those events in one view helps you
+follow the cause across layers.
 
-This common process world has explicit compatibility boundaries.
-Cross-domain traffic has bounds and export checks; registered-name
-operations and `global`/`pg` registries stay within a domain. A runtime is
-trusted for its own processes, not to enforce another domain's isolation.
-See [domains and messaging](design-domains.md).
+The tools also preserve uncertainty: an unanswered query is shown as a
+timeout, and unavailable information stays unknown. Inspection itself
+is subject to permissions.
 
-## Files, programs and devices
+Development follows the same live model. Compile on the host, upload
+code to the machine, inspect the result and keep working. Live updates
+and supervision make change part of normal operation, though replacing
+code still requires care with application state.
 
-Each domain has its own namespace of paths rooted in file grants. File
-servers hold the roots and rights, so resolving a path cannot escape
-the authority the domain already holds. The protocol is standard
-**9P2000.L**: Erlang terms on internal connections, its standard byte
-encoding at the host and network edges. Inspection is also available as
-a scoped `/proc` tree, and device services expose `/dev`.
+## Familiar tools in a different foundation
 
-A **native program is a port of its session**, executing in a protected
-sub-space rather than acquiring a full Erlang domain. Its Erlang handler
-mediates requests with the authority its starter supplied. It has no
-domain identity, export table or direct service connections. Pipe ends
-are installed by the session, and bulk file bytes use session-provided
-data areas rather than per-byte Erlang messages. A program's descendants
-end with their parent; long-lived services belong under supervision.
-Shared file mappings use one object per file within a session; different
-sessions observe one another through write-back, without a kernel pager
-waiting on a remote file server.
+Erlang is the main language for system services, file systems, the
+network stack and drivers. Thin C shims handle device access and work
+such as checksums and bulk copies where per-byte performance matters.
+This brings more system behaviour into the same inspectable,
+supervised environment as applications.
 
-The POSIX personality uses musl and grows from spawn, descriptors, pipes
-and signals toward `fork`, `exec`, shared libraries, file mappings and
-terminals. It targets recompiled Unix software at roughly QNX's level,
-with documented differences, rather than Linux binary compatibility.
-The shell implements Plan 9's rc language in Erlang and combines Erlang
-commands with native programs such as toybox's applets. Erlang command
-pipelines can carry structured records with status and provenance.
+Native programs have a place too. A Unix-compatible programming interface
+using the musl C library supports recompiled Unix software, with the
+available interface growing in stages. Each program runs in a protected
+space under its session,
+with the authority its starter supplies. The goal is useful Unix
+software alongside Erlang, with compatibility tested and differences
+documented.
 
-Drivers are supervised Erlang processes over thin C device shims. C
-handles register access, DMA address construction and per-byte primitives;
-Erlang handles descriptor processing and policy. Native driver code needs
-a measured justification recorded in the driver table. Device assignment
-is explicit in the manifest. An IOMMU is used where the platform provides
-the required confinement; an unconfined DMA device and its driver remain
-in the trusted base, with release configurations separating them from
-hostile-input parsers. CPU address-space isolation alone cannot confine
-such a device.
+Files retain familiar paths, but each domain has its own view of the
+file tree, containing only the file services and rights it was given.
+The command shell combines Erlang commands and native programs;
+Erlang pipelines can carry structured records, preserving information
+that plain text would lose.
 
-Storage keeps established formats: EROFS under a verified hash tree for
-immutable releases, erXos's Erlang F2FS for writable storage, and FAT for
-exchange. Littlefs supplies the initial writable store; lwIP supplies the
-initial network stack before its Erlang replacement. Signed A/B updates
-use a healthy trial before committing a slot. Private keys live in a
-separate vault domain, reached through purpose-scoped operations rather
-than exported key bytes. Details are in [files](design-files.md),
-[programs](design-programs.md), [the shell](design-shell.md),
-[storage](design-storage.md) and [drivers](design-system.md#drivers).
+## Why this combination matters
 
-## A live machine that can explain itself
+erXos explores whether a whole computer can be easier to reason about
+when its programming model, failure model and inspection tools agree.
+Supervision becomes useful below the application layer. Hardware
+boundaries limit the reach of failures. Explicit permissions and
+resource budgets make dependencies easier to see and constrain.
 
-The console and host tools expose the same inspection schema over kernel
-objects, domains, processes, programs and services. Every value carries
-its reporter and an explicit status: an unanswered query stays a timeout,
-and unavailable data stays unknown or unsupported. Kernel scheduling and
-runtime scheduling appear on one trace timeline. Source locations and
-content-addressed module versions connect activity to code.
+The influences fit that goal: Erlang/OTP supplies processes and
+supervision; L4/Fiasco supplies the microkernel lineage; Plan 9 and
+Inferno inform private file namespaces and a runtime-centred environment;
+Genera inspires a machine that remains open to inspection and change.
 
-Live code loading, supervision and the host's compile/upload loop make
-development part of the running environment. A module's hash identifies
-its bytes; it does not authorize them or undo application state when an
-older version is loaded. Release consoles authenticate into scoped user
-sessions, and evaluating code in the system domain requires its own
-privileged facet. Text from another domain or device passes through a
-terminal escaper before reaching the operator. See
-[the live-machine design](design-live.md).
+These choices have costs. A runtime per domain uses memory. Shared
+services can become bottlenecks. The trusted system domain is a critical
+dependency whose failure resets the machine. Device isolation depends
+on hardware support, and resource limits do not eliminate timing side
+channels. The design treats these as constraints to test and account for.
 
-## Influences and how they fit
+## Getting to a working machine
 
-| Influence | What erXos takes from it |
-| --- | --- |
-| L4/Fiasco | The capability microkernel, kernel threads and IPC gates, helping locks and an established engineering lineage. erXos records each departure from that model. |
-| EROS's space banks | Hierarchical allocation budgets whose destruction revokes and reclaims the objects they own. |
-| Erlang/OTP | Lightweight processes, preemptive runtime scheduling, links, monitors, supervision and live code as the ordinary system model. |
-| Scheduler activations and runtime-oriented scheduling research | The two-level scheduling problem and its failure lessons: retain runtime scheduling while avoiding arbitrary re-entry, blocking executors and unenforced hints. |
-| Genode | Components with explicit resources, memory accounted at service boundaries and CPU supplied through component grants. |
-| Plan 9 and Inferno | Private namespaces, file services, rc, a runtime-centred environment and factotum's separation of key use from key possession. |
-| Genera | The whole machine as an inspectable, modifiable programming environment, with useful structure preserved in its tools. |
-| LionsOS and sDDF | Small driver mechanisms, explicit ownership and bounded queue/notification interfaces, used as design references and driver oracles. |
-| Singularity and capability-system research | Language/runtime-oriented structure and explicit communication contracts, while erXos keeps hardware protection between mutually distrusting domains. |
+The first target is 64-bit Arm, initially in the QEMU emulator and then
+on the Raspberry Pi 4 and 5. Development starts on Apple Silicon macOS,
+with Linux also supported as a host.
 
-The [context and decision ledger](design.md#context),
-[kernel's L4 lineage](design-kernel.md#l4-lineage) and
-[research records](design.md#references) explain these connections and
-the alternatives considered.
+The build path uses established components to reach a usable system:
+Erlang/OTP, musl and a modified Fiasco kernel. Fiasco serves as a
+stopgap behind erXos's own kernel interface; erXos's C kernel replaces
+it after running the same system and passing the conformance tests.
+Development builds run trusted code only until the security closure
+milestone on erXos's own kernel.
 
-## Construction and development path
+The roadmap grows through demonstrations: a booting shell, live
+inspection, protected domains, native programs, persistent files and
+supervised drivers. Behaviour is checked against stock Erlang/OTP and
+independent reference implementations, with performance measured rather
+than inferred from the design.
 
-The implementation rules support the architecture: pure decisions with
-effects at the edge; one-source generated ABI, service and inspection
-bindings; build checks for exclusive access paths; and bounded kernel
-stacks. Independent TLA+/TLC models check protocol designs, while host
-exploration and concrete failure tests check the actual C/Erlang cores.
-Stock OTP, musl and external file-system implementations supply behavioural
-oracles. Fuzzing, sanitizers, weak-memory tests and QEMU/board conformance
-address properties the protocol models do not establish.
-
-The development path reaches a usable vertical slice with modified
-Fiasco, OTP and musl before replacing the stopgap kernel with erXos's C17
-kernel behind the same interface. Replacements are gated on conformance
-and measured behaviour. Hosted mode shortens iteration; QEMU suites under
-TCG and HVF check the virtual target, with board-specific conformance
-tested on hardware. Development builds
-run trusted code only until security closure on erXos's own kernel.
-
-The main tradeoffs are deliberate: a runtime per isolation domain has a
-footprint; bounded shared services can be bottlenecks; the root task is a
-machine-wide availability dependency; hardware determines DMA protection;
-and resource quotas do not eliminate timing or cache side channels.
-Compatibility and performance are tested against named workloads rather
-than assumed from the architecture. [The roadmap](plan.md),
-[generation design](design-generation.md),
-[verification design](design-verification.md) and
-[open work](../TODO.md) carry the details.
+For the next level of detail, read the [architecture](design.md). For
+the sequence of working demonstrations and their acceptance criteria,
+read the [roadmap](plan.md).
