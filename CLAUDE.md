@@ -146,6 +146,14 @@ scripts live in `~/erxos-scratch/tools/`.
 ## Design
 
 * Code should be simple and clean, never over-complicate things.
+* **Judge complexity by the model a maintainer must understand.** Compare
+  the concepts, entities, independently varying states, ownership rules and
+  coordination obligations a change introduces with those it removes across
+  the whole system. Lines of code are a useful proxy for review effort, not
+  an acceptance gate. A larger module is a win when it replaces scattered
+  mechanisms with one clear owner and fewer rules for its callers. Moving
+  the same obligations behind a new interface does not remove them. Follow
+  the [architectural complexity guidance](docs/style.md#architectural-complexity).
 * **Every serious subsystem gets a design first.** Write its design document
   and reference it from `docs/design.md` before implementation. The document
   explains the contract, invariants, authority and ownership, failure paths,
@@ -195,14 +203,14 @@ scripts live in `~/erxos-scratch/tools/`.
   whether changing the architecture would make the edge cases disappear rather
   than handling them one by one. A simpler design that eliminates a class of
   problems beats a clever one that patches each instance.
-* **Enumeration is the smell; "by construction" is the fix.** The tell that the
-  bullet above applies is finding yourself writing a *list*: the callers that
-  must participate, the paths that can run inside a window, the states a value
-  can be in, the cases a check must cover.
-  * A design whose correctness rests on such a list is only ever as good as the
-    list. The list is usually short: each review round adds one more entry, and
-    that entry is never the last.
-  * When that happens, stop adding entries. Ask what makes the enumeration
+* **Open-ended enumeration is the smell; "by construction" is the fix.** The
+  warning is a correctness argument that depends on remembering every caller,
+  execution path or exception that must participate in a protocol. Each new
+  caller can invalidate that argument. An explicit enum or exhaustive switch
+  over a closed set of states can instead make a design easier to understand;
+  spelling out necessary cases is not itself a defect.
+  * When review keeps finding missing participants or exceptions, stop adding
+    entries. Ask what makes the enumeration
     necessary at all, and change that instead, so the property holds *by
     construction* rather than by exclusion:
     * make the illegal state unrepresentable;
@@ -389,9 +397,12 @@ scripts live in `~/erxos-scratch/tools/`.
   in commit abc123)". Code and docs describe the current state of the system.
   The why-and-when belongs in commit messages, which are read in temporal
   context.
-* **Source files are ASCII-only.** This covers `.c`, `.h`, `.S`, `.erl`,
-  `.hrl`, `.rb`, linker scripts, build files and shell scripts; `make check`
-  fails on any byte > 0x7f. Markdown prose is exempt.
+* **erXos-authored source files and generated output are ASCII-only.** This
+  covers `.c`, `.h`, `.S`, `.erl`, `.hrl`, `.rb`, linker scripts, build files
+  and shell scripts; `make check` fails on any byte > 0x7f in erXos-authored
+  code or generated output. Imported upstream text keeps its original
+  copyright names, notices and comments; erXos-authored additions are ASCII.
+  Markdown prose is exempt.
 
 ## Ruby style: functional, idiomatic, elegant
 
@@ -572,7 +583,10 @@ within about 20 percent of the length, write plain code.
     [readability review](docs/style.md#readability-review). Require specific
     functions or passages as evidence. Formatting,
     comment count, and passing tests are insufficient. Address readability
-    findings before committing.
+    findings before committing. For an architectural change, require a
+    before/after comparison of the concepts and maintenance obligations added
+    and removed across the system; a line-count delta alone does not establish
+    simplification.
   - Address every CRITICAL and HIGH finding before committing. Note MEDIUM
     findings in `TODO.md` or the commit message if not fixed.
 * **External review.** Designs and complex code changes also get an external
