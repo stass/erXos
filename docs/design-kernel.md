@@ -5643,8 +5643,9 @@ licences as the files' own headers and the fork's `LICENSE.spdx` state
 them at `50bbe8a9`). So every stopgap build carries GPL code, and nothing
 built on the stopgap is distributed outside the project, in source or
 binary form, until erXos's kernel replaces it, as the rule for stopgaps
-requires: erXos is proprietary, and a part that is not permissive would
-bind what is built on it. `l4re-core` also contains GPL-licensed libraries
+requires. erXos's own code is BSD-2-Clause; the project's stopgap
+distribution restriction also applies to its dependencies. `l4re-core`
+contains GPL-licensed libraries
 (its minimal C and C++ support among them); the import records the link
 closure of `bootstrap` and `sigma0` and the licence of each library in it.
 
@@ -5662,7 +5663,7 @@ kernel debugger, and the import's licence scan lists every file whose
 notice is not permissive, so a review can see that no erXos file derives
 from one. Code that erXos's kernel translates from a permissive Fiasco file
 keeps Fiasco's notice: each such file carries
-`SPDX-License-Identifier: LicenseRef-erXos-proprietary AND MIT`, since it
+`SPDX-License-Identifier: BSD-2-Clause AND MIT`, since it
 holds erXos's own code and Fiasco's, with Kernkonzept's copyright line and
 a line naming the Fiasco file and commit it derives from;
 `kernel/NOTICE-fiasco` holds the MIT text, and the dependency table of

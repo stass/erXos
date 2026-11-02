@@ -146,6 +146,19 @@ scripts live in `~/erxos-scratch/tools/`.
 ## Design
 
 * Code should be simple and clean, never over-complicate things.
+* **Every serious subsystem gets a design first.** Write its design document
+  and reference it from `docs/design.md` before implementation. The document
+  explains the contract, invariants, authority and ownership, failure paths,
+  interfaces and verification approach.
+* **Use design subagents at the appropriate depth.** For normal designs,
+  use `gpt-6.1-sol` subagents at `xhigh` reasoning effort; uncomplicated
+  designs may also use `gpt-6.1-sol` at `high`. For complicated
+  or critical designs, use a `gpt-6-astra` subagent at `xhigh`. Reserve
+  `gpt-6-astra` at `max` for exceptionally difficult designs. Give the agent
+  the goal, context and the user's constraints as required by the delegation
+  rule above; invite it to challenge the approach. These are design-work
+  settings; they do not change the separate code-review and external-review
+  requirements.
 * **Human readability is a requirement.** Follow the
   [readability standard](docs/style.md#readability-standard): another
   developer must understand purpose, data flow, invariants and failure paths
@@ -379,6 +392,78 @@ scripts live in `~/erxos-scratch/tools/`.
 * **Source files are ASCII-only.** This covers `.c`, `.h`, `.S`, `.erl`,
   `.hrl`, `.rb`, linker scripts, build files and shell scripts; `make check`
   fails on any byte > 0x7f. Markdown prose is exempt.
+
+## Ruby style: functional, idiomatic, elegant
+
+Use the installed Ruby; no specific version is required. Ruby is host
+tooling only: write code that reads like the
+problem, not like Java or a shell script. The language rules above still
+apply; this section grants no additional language exceptions. Follow
+[the Ruby style guide](docs/style.md#ruby) as well as these principles.
+
+**Prefer:**
+
+* Immutable values: `Data.define` where available, frozen `Struct` instances,
+  `# frozen_string_literal: true`, and frozen constants and configuration.
+* Pure functions and pipelines: `Enumerable`, `Enumerator::Lazy`, and,
+  where available, `then`, `filter_map`, `each_with_object`, `sum`, `tally`,
+  `group_by` and `zip`.
+  Prefer these to index loops. Keep process execution, filesystem changes
+  and other effects at the edge, around a pure decision core.
+* Small objects with one job. Use `call`-style callables for steps when
+  composition makes the flow clearer:
+  `steps.reduce(input) { |value, step| step.call(value) }`.
+* Keyword arguments for interfaces with more than two parameters, and for
+  flags. No positional boolean flags.
+* Pattern matching (`case ... in`) where the installed Ruby supports it
+  for shape-dependent logic, including deconstructing structured responses.
+* Explicit domain errors under `Erx::Error`. Raise a typed error on failure;
+  do not return `nil` to mean failure. Use `nil` only for an absent value,
+  and distinguish lookup names such as `find_entry` from `fetch_entry`,
+  which must return an entry or raise.
+* Endless methods for clear one-liners where supported. Keep normal bodies when
+  control flow, cleanup or explanation needs more space.
+* Private implementation methods and the smallest public surface.
+
+**Avoid:**
+
+* Mutating arguments or shared state; use `!` methods only on values the
+  operation just created and owns. Local mutation is appropriate for
+  building a result or implementing an effect, with ownership explicit.
+* `unless ... else`, nested ternaries, `and`/`or` as control flow, and
+  untyped catch-all rescues. Translate expected boundary failures into a
+  typed error; propagate errors that cannot be handled. Cleanup must
+  preserve the original exception.
+* Monkey-patching core classes and third-party gems. Use wrapper objects
+  or narrowly scoped refinements.
+* Service classes that are bags of static methods. Group stateless
+  functions in a module; use objects when they own state or resources.
+
+For example, selection should express the predicate directly:
+
+```ruby
+PackLimits = Struct.new(:max_file_bytes, :max_entries, keyword_init: true)
+DEFAULT_PACK_LIMITS = PackLimits.new(max_file_bytes: 1_048_576,
+                                    max_entries: 65_536).freeze
+
+def oversized_entries(entries, limits:)
+  entries.select { |entry| entry.byte_size > limits.max_file_bytes }
+end
+```
+
+**Metaprogramming where it earns its keep.** Use it to remove repetition
+that mirrors data, never for cleverness. Suitable uses include generating
+accessors or validators from validated declarations, small DSLs for
+declarative registries and checks, and `Module#prepend` for cross-cutting
+instrumentation such as timing and run records. Keep the ABI and hardware
+sources and their generated-file checks as defined above; load-time
+metaprogramming does not replace readable checked-in generated outputs.
+
+Generated methods must satisfy `respond_to?` and appear in `methods`.
+Public APIs do not use `method_missing`. Never use `eval` with string
+interpolation. Every metaprogrammed surface has a comment explaining what
+it generates and a test exercising a generated member. If plain code is
+within about 20 percent of the length, write plain code.
 
 ## Tests and sanitizers
 

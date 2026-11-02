@@ -524,6 +524,9 @@ erx_ring_has_space(const erx_ring_t *ring, size_t record_bytes)
 ## Ruby
 
 * Ruby is host tooling only. It never runs on the target.
+* Use the installed Ruby; no specific version is required. Write idiomatic
+  Ruby that names the problem directly, with pure decisions and effects
+  at the edge.
 * Use two-space indentation, `snake_case` methods and variables,
   `CamelCase` classes and modules, and `# frozen_string_literal: true` at the
   top of every file.
@@ -541,6 +544,44 @@ erx_ring_has_space(const erx_ring_t *ring, size_t record_bytes)
   long name. Exit statuses are 0 for success, 1 for failure and 2 for usage
   errors.
 * Tests use minitest.
+
+Prefer immutable values: `Data.define` where available, frozen `Struct` instances and
+frozen constants and configuration. Do not mutate arguments or shared
+state. Use mutating methods only on values the operation just created and
+owns; local mutation may construct a result or carry out an explicit effect.
+
+Use `Enumerable` and `Enumerator::Lazy` operations instead of index loops
+when they express the operation, using features available in the installed
+Ruby: `filter_map`, `each_with_object`, `sum`, `tally`, `group_by` and `zip`.
+Use `then` for a clear pipeline where available. Small
+objects have one job; `call`-style steps compose when that makes the main
+flow easier to read. Stateless functions belong in modules, not classes
+containing only class methods.
+
+Use keyword arguments for interfaces with more than two parameters and
+for flags; no positional boolean flags. Where supported by the installed
+Ruby, prefer pattern matching (`case ... in`) for shape-dependent decisions
+and endless methods for clear one-liners. Use ordinary bodies for multi-step work and private
+implementation methods with the smallest necessary public surface.
+
+Host tools raise explicit domain errors under `Erx::Error`. `nil` means
+absence, never failure; distinguish `find_entry` from `fetch_entry`, which
+returns a value or raises. Translate expected boundary failures into typed
+errors and propagate failures that cannot be handled. Cleanup preserves
+the original exception. Avoid `unless ... else`, nested ternaries,
+`and`/`or` as control flow and untyped catch-all rescues.
+
+Do not monkey-patch core classes or third-party gems; use wrappers or
+narrowly scoped refinements. Metaprogramming removes repetition that
+mirrors data, such as accessors from validated declarations, small DSLs
+for registries and checks, or `Module#prepend` for timing and run records.
+Generated methods satisfy `respond_to?` and appear in `methods`; public
+APIs do not use `method_missing`, and interpolated strings never reach
+`eval`. Each metaprogrammed surface explains what it generates and has a
+test exercising a generated member. If plain code is within about
+20 percent of the length, prefer plain code. These techniques do not
+replace the readable generated files and drift checks required by the ABI
+and hardware contracts.
 
 ## Applying the guide
 
