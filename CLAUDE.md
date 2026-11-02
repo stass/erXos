@@ -20,6 +20,10 @@ supervision and inspection span them all.
 * Flag uncertainty explicitly. If you are not confident about an approach or
   technical detail, say so before proceeding. Confidence without certainty
   causes more damage than admitting a gap.
+* Use plain language in explanations, progress updates and documentation.
+  Name the concrete file, input, check or result. Say "build record" or
+  "source record" rather than "provenance witness"; explain a technical
+  term when it is necessary instead of stacking jargon.
 * I'm always open to ideas on better ways to do things. Please don't hesitate
   to suggest a better way, or one that has long lasting impact over a tactical
   change.

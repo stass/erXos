@@ -18,6 +18,11 @@ Prefer several clear steps when combining operations would obscure their order
 or purpose. Review readability explicitly before committing; passing tests and
 mechanical formatting checks alone do not establish it.
 
+Use plain language in comments, documentation and progress reports. Name the
+actual inputs, files, checks and results. Prefer "build record" or "source
+record" to "provenance witness". Use a technical term when it adds precision,
+and explain it on first use; avoid strings of abstract terms.
+
 ## Architectural complexity
 
 Judge a change by the model a maintainer needs to understand before and after
