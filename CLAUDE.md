@@ -600,8 +600,8 @@ within about 20 percent of the length, write plain code.
   review once the internal reviews pass:
   - A design's external review is the `gpt-6-astra` review of the design
     subagent rule above. A code change's external review runs with the Codex
-    CLI, model `gpt-6.1-sol` at xhigh reasoning effort, in a read-only
-    sandbox:
+    CLI, model `gpt-6.1-sol` at xhigh reasoning effort (high when the code
+    is not especially complex), in a read-only sandbox:
     `codex exec -m gpt-6.1-sol -c model_reasoning_effort='"xhigh"' -s read-only -C <tree> "<prompt>" < /dev/null > review.log 2>&1`.
     Frame the security pass explicitly, as for internal reviews.
   - Close its standard input: without `< /dev/null`, `codex exec` in the
