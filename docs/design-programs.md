@@ -256,7 +256,7 @@ consists of:
 | --- | --- | --- |
 | the **anchor** | a space with no thread and no mapping, the root of the program's tree: its parent is its starter's anchor, or the session's space for a program the shell starts, and its children are the program's image and its children's anchors ([design-kernel.md](design-kernel.md#creating-spaces)) | the session, with every right |
 | the **image** | the space its threads run in, with the program's code mapped from the boot image or a file object; `exec` replaces it under the same anchor ([Exec](#exec)); the program's own sub-spaces, if it is allowed `SPACES`, hang from it | the session, with every right; the program as `ERX_CAP_SELF` |
-| its **budget** | carved by the session from its own, at the limit the session's policy gives the program, so the session's end takes every program with it; it pays only for what the program alone maps and holds: its spaces, its threads, its image's private memory, heap and stacks, its signal IRQ objects, its data objects and anything the program creates. Nothing the session maps is charged to it, since destroying a budget deletes every object charged to it at once ([design-kernel.md](design-kernel.md#budgets)) | the session with every right; the program with `ALLOC`, and `SPACES` when its starter held it and asked for it |
+| its **budget** | carved by the session from its pool for programs, with the policy's floor as its guarantee, what the smallest program needs to start and to end, and as its cap what the session's policy gives the program, the pool's whole size unless the starter asks for less, so the program draws on what its siblings are not using and is refused only when the pool is full, and the session's end takes every program with it; it pays only for what the program alone maps and holds: its spaces, its threads, its image's private memory, heap and stacks, its signal IRQ objects, its data objects and anything the program creates. Nothing the session maps is charged to it, since destroying a budget deletes every object charged to it at once ([design-kernel.md](design-kernel.md#budgets), [design-system.md](design-system.md#resource-policy)) | the session with every right; the program with `ALLOC`, and `SPACES` when its starter held it and asked for it |
 | its **group** | a child of the session's **programs group**, the sub-space group the system domain gives a domain allowed `SPACES` ([design-system.md](design-system.md#sub-spaces)); it charges the program's threads, binds its doorbells, and parks its event executor; the session sets its grant within its own and reads its CPU time | the session with `CONFIGURE`, `SIGNAL` and `ATTACH`; the program with `SIGNAL` and the rights an executor needs to park |
 | its **channel** | two lanes and two doorbells to its handler ([The channel](#the-channel)) | both, as the channel says |
 | its **table** | what the program may reach: its namespace, its opens, its rights beyond files, its children and its pipe ends, kept in Erlang by its handler and at the servers ([The handler](#the-handler)) | the handler |
@@ -1014,7 +1014,7 @@ reserved:
 | 3 | the starter's handler: **validate** | checks the frame against the protocol's grammar and bounds, the requester's right to start commands, its `children` quota and its principal's `programs` quota, and that every end and open the request names is in the requester's table | nothing to undo; `EPERM` without the right, `EAGAIN` at a quota, `EBADF` for an end or open the requester does not hold |
 | 4 | the starter's handler: **resolve** | resolves `Path` through the requester's namespace to an image ([What a program can start](#what-a-program-can-start)); for an executable file, the handler makes its image check and a filler opens it for reading, and the command server makes or finds its code object ([File objects](#file-objects)) | nothing to undo, since a code object belongs to the cache; `ENOENT` for an unknown command, `EACCES` for a file without `rx`, `ETXTBSY` for a file that keeps changing while it is read |
 | 5 | the command server, the program's handler, the pipe server: **reserve** | the command server assigns the next process id, records the program in the starter's job and creates the program's handler, which builds the record: it clones at each server, with a `walk` of no names, a grant for each entry of the requester's namespace, with the requester's rights there, and gives the program an open of its own naming the open-file description of each file, directory, terminal and socket open it hands on, which asks no server anything ([design-files.md](design-files.md#narrowing-for-a-program), [Descriptors and files](#descriptors-and-files)), copies the requester's rights beyond files and its right to start commands, and has the pipe server make an end of the same kind for each pipe end the request names ([design-pipes.md](design-pipes.md#inherited-ends)) | the command server marks the id dead, never to be given again, and drops the job's record; the handler clunks the grants it made, drops the opens it made, and tells the pipe server the ends are gone; `EMFILE` beyond a pipe's read ends, a server's error for a grant it refuses |
-| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan carves the program's budget from the session's, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and the process id as label, and the image below it. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; creates the channel and the data area from the session's own budget, since the session maps both; installs into the image's table the budget, the group, the channel's objects, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; and creates the first thread, stopped, with the values of the budget, the group and the channel's objects in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
+| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and the process id as label, and the image below it. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; creates the channel and the data area from the session's own budget, since the session maps both; installs into the image's table the budget, the group, the channel's objects, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; and creates the first thread, stopped, with the values of the budget, the group and the channel's objects in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
 | 7 | the program's handler | writes the startup message into the image's inbound lane, with the program's `pid`, `ppid` and `pgid`, the data area's value, each descriptor's values in the program's table, and for `erx_exec` the code object's value as `image` | none: the lane is the session's own memory |
 | 8 | the session's job table, then the program's handler | when the program's starter is paused for its job, or the shell starts it for a job it has stopped, the port driver pauses the image first ([Job control](#job-control)); the handler then has the port driver start the first thread | `ERX_EDEAD` when the program was stopped first, by a kill or by its parent's or session's end: the starter still gets `{ok, Pid}`, then the child's end as `SIGKILL` |
 | 9 | the starter's handler, then the program | the handler answers `{ok, Pid}`, before any report about the child, so the reply that introduces a child always precedes the child's states. `liberx`'s start-up runs on the first thread, a worker: it maps the channel, starts the event executor and waits on a umtx word; the event executor takes the startup message from the inbound lane, copying it out as it is published and checking it, and wakes the first thread, which maps the data area and its pipe ends, builds the descriptor table, sets its mask, arms itself for vCPU upcalls with its signal IRQ object and calls `main` | a malformed message ends the program with status 127 before `main`, its reason on standard error when it has one |
@@ -2455,12 +2455,30 @@ define it.
   with `ENOSYS`.
 * **Memory.** `mmap` of anonymous memory with `MAP_PRIVATE` is private
   memory, and with `MAP_SHARED` a shared memory object, which a forked
-  child shares; `mprotect` moves memory among no access, read-only and
-  read-write with the kernel's `erx_space_protect`, which changes the
-  protection of the mappings in a range and keeps their contents, beneath
-  each mapping's ceiling: a protection above a ceiling is refused, and
-  `mprotect` fails with `EACCES`, as POSIX says for a protection the open
-  does not allow
+  child shares. Address space is free and pages are paid for when they
+  are promised: a private anonymous `mmap` with `PROT_NONE` is an
+  `erx_vm_reserve`, which costs its record and nothing else however
+  large, so a program reserves what it may need; with any other
+  protection it is a reserve and a commit, charged to the program's
+  budget in full at the call, so `mmap` fails with `ENOMEM` there and a
+  mapped page never faults for lack of memory (K6), as QNX charges an
+  anonymous mapping at `mmap`. `mprotect` moves memory among no access,
+  read-only and read-write with the kernel's `erx_space_protect`, which
+  changes the protection of the mappings in a range and keeps their
+  contents, beneath each mapping's ceiling: over reserved memory a
+  protection other than `PROT_NONE` commits it, charging the program's
+  budget at the `mprotect`, which fails with `ENOMEM` when the budget
+  cannot cover it and leaves the pages before the refusal accessible, as
+  POSIX allows of a failed `mprotect`; `mprotect(PROT_NONE)` over
+  committed memory keeps the pages, their contents and their charge,
+  which only `munmap` gives up; a protection above a ceiling is refused
+  before anything is committed, so `PROT_EXEC` over reserved private
+  memory commits nothing, and `mprotect` fails with `EACCES`, as POSIX
+  says for a protection the open does not allow. `MAP_NORESERVE` is
+  accepted and has no effect, as
+  on QNX. musl's own `malloc` relies on this: it maps its metadata areas
+  with `PROT_NONE` and unprotects a page at a time with `mprotect`
+  (`musl/src/malloc/mallocng/malloc.c`, `alloc_meta`)
   ([design-kernel.md](design-kernel.md#virtual-memory)). `mmap` of a
   file with `MAP_PRIVATE` maps a copy-on-write child of the file's
   object, or the object itself when read-only ([File
@@ -2586,6 +2604,7 @@ test:
 | the second tier's `fork` copies the parent's memory at the call and fails there with `ENOMEM`, never at a later write | private memory is never shared copy-on-write (K5), and the copy is charged at the call |
 | the second tier's `exec` in a program with other threads first lets them finish the calls that only they can finish, a `posix_spawn`, a `fork`, a passing of descriptors, a redemption or a stop, and runs them on meanwhile, instead of ending them at once, and fails with `E2BIG` past a 192 KiB startup message, before its point of no return | the old image hands its state to the new one and abandons nothing that another party waits on (P12), and the handover's size is checked on the quiet image ([Exec](#exec)) |
 | `system` and `popen` run rc, not sh | the user's decision; erXos ships no POSIX shell |
+| `mprotect` that gives reserved memory access fails with `ENOMEM` when the program's budget cannot cover the pages, and charges at any access, read-only included, where Linux charges a private mapping only when it becomes writable and POSIX names no out-of-memory error for `mprotect` | a readable private page is a real page from the program's reserve, since the kernel shares no zero page, and committed memory never faults for lack of memory (K6); Linux and QNX both allocate at the `mprotect` and refuse with `ENOMEM` |
 | a handler for `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGTRAP` or `SIGSYS` runs for a signal raised with `raise` or `kill`, never for a fault, which ends the program | a fault ends only the faulting space, from the kernel's record ([A program's end](#a-programs-end)) |
 | in the first tier, a program cannot stop or continue itself or another: `kill` and `raise` of `SIGSTOP` fail with `EPERM`, and `SIGTSTP`, `SIGTTIN` and `SIGTTOU` under their default action are discarded | stopping is the session's job control, and a job's process group is orphaned, for whose members POSIX discards those three; the second tier stops and continues programs within a POSIX session ([The terminal](#the-terminal)) |
 | in the first tier, a job is one process group and session that no program can leave | process groups and sessions that programs create come with pseudo-terminals, in the second tier |
@@ -2616,6 +2635,7 @@ test:
 | --- | --- | --- | --- | --- |
 | A spawn is refused: no right to start commands, an unknown command, a file without `rx`, a quota, a pipe's read ends, the session's budget | the starter's handler, from its own checks, the pipe server's or the port driver's answer | nothing: each step's undo ran ([Starting a program](#starting-a-program)) | the step that failed, and the steps before it in reverse | `posix_spawn` returns `EPERM`, `ENOENT`, `EACCES`, `EAGAIN`, `EMFILE` or `ENOMEM`; the shell prints the reason |
 | A program's startup message is malformed | its decoder, `liberx`'s or the command image's, before the program's own code runs | nothing | the program ends | status 127, the reason on its standard error when it has one |
+| A program's `mmap` or `mprotect` cannot be charged: its cap or its session's pool for programs is full | the kernel, at the commit the call makes, before anything of that part changes | the reservation, and the parts of the range given access before the refusal | nothing: a part is charged whole or not at all | `mmap` or `mprotect` returns -1 with `ENOMEM`, and `malloc` returns `NULL` |
 | A program writes a frame outside the protocol's grammar, a request on a busy slot and a notice that is not due among them | the handler's decoder; the port driver's count of the program's credit | nothing | the port driver or the handler ends the program as a fault ends it | its parent sees `SIGSYS`; the shell prints the frame's offset |
 | A frame from the handler is outside the grammar, which only a bug in the session can produce | `liberx`'s decoder | nothing | the program ends | status 127, a line on its standard error |
 | A shared mapping fails after its mapping open is made: the server's refusal, the mapping quota, a fill, the install or `erx_vm_map` | the mapper, the handler or `liberx` | the mapping open, until it closes | the mapper closes the mapping open on a failure of its own; `liberx` closes what arrived and the mapping open on a failure after the handler answered | `mmap` fails with its error; no open or quota remains |
@@ -3009,6 +3029,21 @@ terminal cases.
   test catches; a read-only shared mapping, whose `mprotect` to
   read-write fails with `EACCES`, and a private anonymous mapping that
   `mprotect` moves to no access and back, whose bytes survive; a
+  private anonymous `PROT_NONE` mapping larger than the program's cap,
+  which succeeds, whose `mprotect` to read-write of a part within the
+  cap succeeds and every page of which is then written, whose `mprotect`
+  of a further part beyond the cap fails with `ENOMEM` and leaves the
+  first part accessible, and whose `mprotect` back to `PROT_NONE` keeps
+  the bytes for the next `mprotect` to read, the same program on the
+  development host seeing the same but the `ENOMEM`, with a seeded
+  `liberx` that commits at `mmap` whatever the protection, under which
+  the large reservation fails, and a seeded `erx_space_protect` that
+  skips the charge, which the model of K6 catches; a program that
+  borrows from its session's pool until the pool is full, after which
+  a sibling at its guarantee still commits the whole of it and the shell
+  still starts a command, since the session's own half is untouched,
+  with a seeded chain that leaves `carved` out, under which the
+  sibling's commit fails; a
   `PROT_WRITE` mapping of a descriptor open only for reading, which fails
   with `EACCES`; a write-back that the medium refuses, whose
   `msync` fails with `EIO` and whose pages a later `msync` writes; a store

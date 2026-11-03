@@ -1056,11 +1056,12 @@ applied in this order, each step undoing the ones before it on failure:
    a file object the session holds through an `rx` grant; the handler, a
    process of the session (the owner by default); the parent of the
    program's anchor; the pipe ends and descriptors the program inherits;
-   its startup message; and the limits of its budget and group, which lie
-   within the session's.
+   its startup message; and the guarantee and cap of its budget and the
+   limits of its group, which lie within the session's pool for programs
+   and the session's grant.
 2. **Create the program's spaces** as
    [design-programs.md](design-programs.md#a-program-is-a-port) lays them
-   out: carve the program's budget from the session's; create its group,
+   out: carve the program's budget from the session's pool for programs; create its group,
    a child of the session's programs group with the limits the spec
    gives; create its **anchor**, a space with no thread whose parent is
    its starter's anchor, or the session's space for a program the shell
@@ -1348,11 +1349,17 @@ ERTS's allocators keep their algorithms inside carriers. `erl_mmap` keeps
 its reserve-and-commit structure with its four primitives as kernel calls:
 reserving address space is `erx_vm_reserve`, committing is `erx_vm_commit`
 (restarted until done), decommitting is `erx_vm_decommit`, releasing is
-`erx_vm_release`. Every page is charged to the domain's budget; a commit the
+`erx_vm_release`. Every page is charged to the domain's budget, whose cap
+equals its guarantee, so a commit fails only at the domain's own size,
+never because another domain or a program took memory first
+([design-kernel.md](design-kernel.md#budgets)); a commit the
 budget cannot cover fails, and ERTS reports an allocation failure in the
 usual way, which ends only that domain. The literal range is one
-reservation made at start-up. musl's `malloc` draws pages through the same
-calls from one reserved range.
+reservation made at start-up, which costs its record and nothing more
+until it is committed. musl's `malloc` draws pages through the same
+calls from one reserved range. A runtime that wants warning before a
+commit is refused arms `erx_budget_watch` on its budget with a software
+IRQ object bound to its group, and trims its carriers at the notice.
 
 **No allocator of its own.** The system domain's interpreter image keeps
 ERTS's allocators as every image has them, with no bookkeeping of memory

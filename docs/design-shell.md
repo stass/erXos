@@ -315,7 +315,9 @@ stage it reaches.
 at its `max_heap_size`, against the session's **stage allowance**, an
 eighth of the session's budget, within the half of it the session keeps
 for its own services, the shell, the terminal relay, the handlers and the
-pipe server, and from which no program's budget is carved
+pipe server, and from which no program's budget is carved: the other
+half is the session's pool for programs, a budget of its own, from which
+every program's budget is carved and on which every program draws
 ([design-system.md](design-system.md#resource-policy)). A foreground line
 that does not fit waits for running stages to end, and one that could
 never fit fails with `too many stages`. Every other evaluator, a
