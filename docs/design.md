@@ -2306,20 +2306,6 @@ user:
   crash of the service's coordinator process ends no domain; the domain
   service links every domain pid and stops a domain whose pid dies,
   `kill` included ([design-system.md](design-system.md#ending-a-domain)).
-* **Holds act at the return check.** Pausing a space holds its threads
-  only as they return to user mode, in the kernel's one return check, so a
-  pause never interrupts kernel work: a pause returns once no thread of
-  the space runs user code, a copy waits until none runs kernel code of
-  calls it started, and neither waits for a party outside the space
-  ([design-kernel.md](design-kernel.md#threads-and-faults), K30).
-* **A copier per fork, in the program's group.** `fork` copies the
-  parent's sub-space with `erx_space_copy` on a worker the session's
-  port driver starts for that fork in the program's own group, where
-  programs have groups of their own, so the program's grant drives the
-  copy that holds it, while the child's budget, carved from the
-  session's, pays for the child's memory; a parent has one copier at a
-  time, and the forks in progress are bounded by the session's `programs`
-  quota ([design-programs.md](design-programs.md#the-second-tier)).
 * **A deletion closes first.** Deleting an object invalidates its
   existence lock before it empties its slots, in bounded parts, so the
   object is unreachable from the first part, where Fiasco empties every
@@ -2372,6 +2358,20 @@ user:
 
 Decided by the user, and recorded where each applies:
 
+* **Holds act at the return check.** Pausing a space holds its threads
+  only as they return to user mode, in the kernel's one return check, so a
+  pause never interrupts kernel work: a pause returns once no thread of
+  the space runs user code, a quiesce waits until none runs kernel code
+  of calls it started, and neither waits for a party outside the space
+  ([design-kernel.md](design-kernel.md#threads-and-faults), K30).
+* **A copier per fork, in the program's group.** `fork` copies the
+  parent's sub-space with `erx_space_copy` on a worker the session's
+  port driver starts for that fork in the program's own group, where
+  programs have groups of their own, so the program's grant drives the
+  copy that holds it, while the child's budget, carved from the
+  session's, pays for the child's memory; a parent has one copier at a
+  time, and the forks in progress are bounded by the session's `programs`
+  quota ([design-programs.md](design-programs.md#the-second-tier)).
 * Linux's device tree for the Pi 4 ships unmodified
   ([Dependencies](#dependencies)).
 * erXos's F2FS gets a legal review of its clean room before any
