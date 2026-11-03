@@ -1,8 +1,9 @@
+# Modified by erXos: ignore only the generated top-level config.mak, so the imported dist/config.mak template is tracked.
 *.o
 *.lo
 *.a
 *.so
 *.so.1
-config.mak
+/config.mak
 lib/musl-gcc.specs
 /obj/
