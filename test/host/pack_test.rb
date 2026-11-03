@@ -20,8 +20,10 @@ class PackTest < Minitest::Test
     end
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, '-I', File.join(@root, 'include'),
+                 *flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  File.join(@root, 'kernel/core/pack.c'),
+                 File.join(@root, 'kernel/crypto/blake3/blake3.c'),
+                 File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
                  File.join(@root, 'liberx/generated/abi_reader.c'),
                  File.join(@root, 'tools/host/input.c'),
                  File.join(@root, 'tools/host/pack_check.c'), '-o', @checker],
@@ -80,56 +82,56 @@ class PackTest < Minitest::Test
     reject(bytes, 'magic')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, 32, 4096, width: 8)
-    reject(bytes, 'header_values')
+    reject(PackFixture.rehash(bytes), 'header_values')
   end
 
   def test_file_cannot_overlap_the_index
     bytes = PackFixture.valid
-    PackFixture.integer(bytes, 64 + 8, 0, width: 8)
-    reject(bytes, 'entry_values')
+    PackFixture.integer(bytes, PackFixture.entry_offset(0) + 8, 0, width: 8)
+    reject(PackFixture.rehash(bytes), 'entry_values')
   end
 
   def test_nonzero_archive_padding_is_refused
     bytes = PackFixture.valid
     bytes[1000] = 'x'
-    reject(bytes, 'index_extent')
+    reject(PackFixture.rehash(bytes), 'index_padding')
   end
 
   def test_root_must_be_system_executable_without_jit
     bytes = PackFixture.valid
     root = bytes.byteslice(52, 4).unpack1('V')
-    PackFixture.integer(bytes, 64 + root * 32 + 7, 0, width: 1)
-    reject(bytes, 'release_run')
+    PackFixture.integer(bytes, PackFixture.entry_offset(root) + 7, 0, width: 1)
+    reject(PackFixture.rehash(bytes), 'release_run')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 12, 2)
-    reject(bytes, 'image_header')
+    reject(PackFixture.rehash(bytes), 'image_header')
   end
 
   def test_image_cannot_map_manifest_or_nonzero_tail
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 56, 0, width: 8)
-    reject(bytes, 'image_segment_range')
+    reject(PackFixture.rehash(bytes), 'image_segment_range')
     bytes = PackFixture.valid
     bytes[PackFixture.root_offset(bytes) + 4096 + 128] = 'x'
-    reject(bytes, 'image_payload')
+    reject(PackFixture.rehash(bytes), 'image_payload')
   end
 
   def test_entry_and_complete_phdr_range_must_be_mapped
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 32, 128, width: 8)
-    reject(bytes, 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 40, 100, width: 8)
-    reject(bytes, 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
   end
 
   def test_image_virtual_span_and_flags_are_checked
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 16, 8192, width: 8)
-    reject(bytes, 'image_entry_or_phdr')
+    reject(PackFixture.rehash(bytes), 'image_entry_or_phdr')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, PackFixture.root_offset(bytes) + 56 + 32, 7)
-    reject(bytes, 'image_segment_range')
+    reject(PackFixture.rehash(bytes), 'image_segment_range')
   end
 
   def test_zero_file_writable_segment_has_no_stored_pages
@@ -160,12 +162,123 @@ class PackTest < Minitest::Test
     reject(PackFixture.valid(manifest_bytes: manifest), 'manifest_flags')
     bytes = PackFixture.valid
     PackFixture.integer(bytes, 12, 0)
-    reject(bytes, 'manifest_flags')
+    reject(PackFixture.rehash(bytes), 'manifest_flags')
   end
 
   def test_system_release_cannot_be_split_by_an_unmarked_file
     bytes = PackFixture.valid(paths: ['a', 'b', 'system/root'])
-    PackFixture.integer(bytes, 64 + 7, 1, width: 1)
-    reject(bytes, 'release_run')
+    PackFixture.integer(bytes, PackFixture.entry_offset(0) + 7, 1, width: 1)
+    reject(PackFixture.rehash(bytes), 'release_run')
+  end
+
+  # Damage anywhere in the index run is refused by the index hash before
+  # any structural check runs; the same damage with the hash recomputed is
+  # refused by the check it breaks, so the hash check is what refused first.
+  def test_index_hash_is_checked_before_any_entry
+    strings = PackFixture.field(PackFixture.valid, 40, 8)
+    [PackFixture.entry_offset(0) + 8, strings, 1000].each do |offset|
+      bytes = PackFixture.valid
+      bytes.setbyte(offset, bytes.getbyte(offset) ^ 1)
+      reject(bytes, 'index_hash')
+    end
+    bytes = PackFixture.valid
+    bytes.setbyte(PackFixture.entry_offset(0) + 8, bytes.getbyte(PackFixture.entry_offset(0) + 8) ^ 1)
+    reject(PackFixture.rehash(bytes, files: false), 'entry_values')
+  end
+
+  # The validator reads no file data: a flipped data byte passes it and
+  # fails that file's check alone, naming its entry.
+  def test_damaged_file_fails_its_own_check
+    bytes = PackFixture.valid(paths: ['a', 'system/root'])
+    data = PackFixture.field(bytes, PackFixture.entry_offset(0) + 8, 8)
+    bytes.setbyte(data, bytes.getbyte(data) ^ 1)
+    reject(bytes, 'file_hash')
+    assert_match(/error file_hash 0\n/, check(bytes).last)
+  end
+
+  def test_file_padding_must_be_zero_whatever_the_hash
+    bytes = PackFixture.valid(paths: ['a', 'system/root'])
+    data = PackFixture.field(bytes, PackFixture.entry_offset(0) + 8, 8)
+    bytes[data + 1] = 'x'
+    reject(PackFixture.rehash(bytes), 'padding')
+  end
+
+  def mutated(paths: ['system/root'])
+    bytes = PackFixture.valid(paths: paths)
+    yield bytes
+    PackFixture.rehash(bytes)
+  end
+
+  def flags_of(index) = PackFixture.entry_offset(index) + 7
+
+  def test_archive_length_must_equal_the_header_and_the_last_run
+    bytes = PackFixture.valid
+    reject(bytes.byteslice(0, bytes.bytesize - 4096), 'header_values')
+    reject(bytes + ("\0".b * 4096), 'header_values')
+    cut = bytes.byteslice(0, bytes.bytesize - 4096)
+    PackFixture.integer(cut, 16, cut.bytesize, width: 8)
+    reject(PackFixture.rehash(cut, files: false), 'entry_values')
+    long = bytes + ("\0".b * 4096)
+    PackFixture.integer(long, 16, long.bytesize, width: 8)
+    reject(PackFixture.rehash(long, files: false), 'archive_end')
+  end
+
+  def test_header_bounds
+    reject(mutated { |bytes| PackFixture.integer(bytes, 52, 2) }, 'header_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, 12, 5) }, 'header_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, 24, 65_537) }, 'header_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, 28, 32) }, 'header_values')
+  end
+
+  def test_the_system_configuration_must_be_a_system_file
+    missing = mutated { |bytes| bytes[PackFixture.field(bytes, 40, 8) + 14] = 'e' }
+    reject(missing, 'archive_end')
+    reject(mutated { |bytes| PackFixture.integer(bytes, flags_of(0), 0, width: 1) }, 'manifest_binding')
+    reject(mutated { |bytes| PackFixture.integer(bytes, flags_of(0) - 1, 2, width: 1) }, 'manifest_binding')
+  end
+
+  def test_system_and_seal_marks
+    reject(mutated { |bytes| PackFixture.integer(bytes, flags_of(1), 3, width: 1) }, 'entry_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, flags_of(1), 5, width: 1) }, 'entry_values')
+    split = mutated(paths: ['a', 'b', 'c', 'system/root']) do |bytes|
+      PackFixture.integer(bytes, flags_of(0), 2, width: 1)
+      PackFixture.integer(bytes, flags_of(2), 2, width: 1)
+    end
+    reject(split, 'release_run')
+    one_run = mutated(paths: ['a', 'b', 'c', 'system/root']) do |bytes|
+      PackFixture.integer(bytes, flags_of(0), 2, width: 1)
+      PackFixture.integer(bytes, flags_of(1), 2, width: 1)
+    end
+    assert_equal 0, check(one_run).first
+  end
+
+  def test_entry_values_and_the_string_table
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 24, 1, width: 8) }, 'entry_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 6, 3, width: 1) }, 'entry_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(1), 1 << 31) }, 'path_extent')
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(1), 0) }, 'path_extent')
+    slack = mutated { |bytes| PackFixture.integer(bytes, 48, PackFixture.field(bytes, 48, 4) + 1) }
+    reject(slack, 'path_extent')
+  end
+
+  def test_empty_files_in_the_table_and_at_its_end
+    bytes = PackFixture.valid(paths: ['a', 'system/root', 'z'], file_bytes: ''.b)
+    status, output = check(bytes)
+    assert_equal [0, "ok 4\n"], [status, output]
+    last = PackFixture.entry_offset(3)
+    assert_equal bytes.bytesize, PackFixture.field(bytes, last + 8, 8)
+    assert_equal 0, PackFixture.field(bytes, last + 16, 8)
+  end
+
+  def test_other_versions_are_refused_with_a_diagnostic
+    version_one = PackFixture.valid
+    version_one[0, 64] = ["ERXPACK\0".b, 1, 1, version_one.bytesize, 2, 32, 64, 128, 26, 1,
+                          "\0" * 8].pack('a8VVQ<VVQ<Q<VVa8')
+    status, output = check(version_one)
+    assert_equal [1, "error version 1, expected 2 4294967295\n"], [status, output]
+    bytes = PackFixture.valid
+    PackFixture.integer(bytes, 8, 3)
+    status, output = check(PackFixture.rehash(bytes))
+    assert_equal [1, "error version 3, expected 2 4294967295\n"], [status, output]
   end
 end

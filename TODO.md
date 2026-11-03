@@ -501,12 +501,24 @@ it; git history is the record of completed work.
   ([design-stopgap.md](docs/design-stopgap.md)). Read the entries from the
   linked kernel's references to the archive instead, which needs the proof
   to run after the link as well as before it.
+* [Medium] kernel, boot image: nothing calls the file check yet. WP32
+  writes `bootstrap`'s use of `erx_boot_locate`, `erx_pack_open` and
+  `erx_pack_file_check`; `erx_image_slice` needs the verdict table and
+  hashing in parts of 64 KiB, which `erx_pack_file_check`, hashing a run in
+  one call, cannot give it. Make it a pure stepper the core owns, computing
+  the digest itself, not a digest the caller passes in, so that function
+  stays the one check. The slice also needs `pack.c` in the kernel's archive
+  and its stack proof as well as in `bootstrap`, and must decide what a run
+  of only empty files, an object of no pages, returns. `tools/erx pack` stays refused
+  until the M1 root startup, so `--two-file` and the slot refusal wait for
+  it; and the harness's single-file boot cases need that first stage
+  ([design-kernel.md](docs/design-kernel.md#tests-of-the-boot-image)).
 * [Medium] build, stopgap bootstrap: `kernel/core/pack.c` is left out of
   the kernel's archive (`CoreArchive::BOOTSTRAP_SOURCES`) but is not yet
   linked into `bootstrap`, since nothing there calls it until the boot
   handoff ([design-stopgap.md](docs/design-stopgap.md#boot-handoff)) is
-  written. That package builds a second archive of `pack.c` and
-  `liberx/generated/abi_reader.c` for `bootstrap`'s position-independent
+  written. That package builds a second archive of `pack.c`, BLAKE3's
+  portable C and `liberx/generated/abi_reader.c` for `bootstrap`'s position-independent
   link (`-fPIE`, `-z text` in `fiasco/bootstrap/server/src/Make.rules`),
   adds the seam header `include/erx/core/pack.h` (`erx/pack.h` reaches
   `erx/abi.h`, which is C only), and audits `bootstrap`'s map like the

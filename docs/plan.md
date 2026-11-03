@@ -321,7 +321,7 @@ generated file and finds it unchanged.
   `hw/arch_terms/aarch64.txt`, with its seeded violation
   ([design-kernel.md](design-kernel.md#chokepoint-checks)).
 * The boot-image format: test tooling writes deterministic `ERXPACK`
-  version 1 structural fixtures with `NOTICES`, checked by the host-built
+  version 2 structural fixtures with `NOTICES`, checked by the host-built
   C17 validator and its fuzz target. Production `tools/erx pack` refuses
   output until the real startup planner is available, as specified below.
 * The TLA+/TLC runner and its tested expectation classification, private

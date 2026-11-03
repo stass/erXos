@@ -17,10 +17,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ABI_NOTE_TYPE` | 1 |
 | `ERX_ABI_VERSION` | 1 |
 | `ERX_ARCH_ASID_BITS` | 16 |
+| `ERX_ARCH_BOOT_LOCATOR_OFFSET` | 64 |
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
+| `ERX_BOOT_LOCATOR_VERSION` | 1 |
 | `ERX_BOOT_ROOT` | 4 |
 | `ERX_BOOT_SLOT_A` | 1 |
 | `ERX_BOOT_SLOT_B` | 2 |
@@ -61,6 +63,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_DEVICE_SECRET_STATUS_PRESENT` | 1 |
 | `ERX_DEVICE_SECRET_STATUS_READ_FAILED` | 4 |
 | `ERX_EBUSY` | -8 |
+| `ERX_ECORRUPT` | -17 |
 | `ERX_EDEAD` | -15 |
 | `ERX_EEXIST` | -11 |
 | `ERX_EFAULT` | -10 |
@@ -264,10 +267,11 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_OK` | 0 |
 | `ERX_PACK_DEVELOPMENT` | 1 |
 | `ERX_PACK_ENTRIES_MAX` | 65536 |
+| `ERX_PACK_HASH_SIZE` | 32 |
 | `ERX_PACK_PATH_MAX` | 4096 |
 | `ERX_PACK_STRINGS_MAX` | 4194304 |
 | `ERX_PACK_UNCONFINED_DMA` | 2 |
-| `ERX_PACK_VERSION` | 1 |
+| `ERX_PACK_VERSION` | 2 |
 | `ERX_PAGE_SIZE` | 4096 |
 | `ERX_PERIOD_MAX` | 1000000000 |
 | `ERX_PERIOD_MIN` | 1000000 |
@@ -309,6 +313,35 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_WATCHDOG_PERIOD_MIN` | 1 |
 
 ## Layouts
+
+### `erx_arch_boot_header_t`
+
+Storage: `wire_le`. Prefix size: 64. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `code0` | `u32` | 0 | 1 |
+| `code1` | `u32` | 4 | 1 |
+| `text_offset` | `u64` | 8 | 1 |
+| `image_size` | `u64` | 16 | 1 |
+| `flags` | `u64` | 24 | 1 |
+| `res2` | `u64` | 32 | 1 |
+| `res3` | `u64` | 40 | 1 |
+| `res4` | `u64` | 48 | 1 |
+| `magic` | `arch_boot_magic` | 56 | 1 |
+| `res5` | `u32` | 60 | 1 |
+
+### `erx_boot_locator_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `magic` | `boot_locator_magic` | 0 | 1 |
+| `version` | `u32` | 8 | 1 |
+| `zero` | `u32` | 12 | 1 |
+| `archive_off` | `u64` | 16 | 1 |
+| `archive_size` | `u64` | 24 | 1 |
 
 ### `erx_boot_connection_t`
 
@@ -355,7 +388,7 @@ Storage: `wire_le`. Prefix size: 16. Alignment: 8.
 
 ### `erx_pack_entry_t`
 
-Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+Storage: `wire_le`. Prefix size: 64. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -366,6 +399,7 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `data_off` | `u64` | 8 | 1 |
 | `data_size` | `u64` | 16 | 1 |
 | `manifest_off` | `u64` | 24 | 1 |
+| `file_hash` | `u8` | 32 | 32 |
 
 ### `erx_cap_slot_t`
 
@@ -996,7 +1030,7 @@ Storage: `wire_le`. Prefix size: 272. Alignment: 8.
 
 ### `erx_pack_header_t`
 
-Storage: `wire_le`. Prefix size: 64. Alignment: 8.
+Storage: `wire_le`. Prefix size: 96. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -1011,6 +1045,7 @@ Storage: `wire_le`. Prefix size: 64. Alignment: 8.
 | `strings_size` | `u32` | 48 | 1 |
 | `root_entry` | `u32` | 52 | 1 |
 | `build_id` | `u8` | 56 | 8 |
+| `index_hash` | `u8` | 64 | 32 |
 
 ### `erx_manifest_t`
 

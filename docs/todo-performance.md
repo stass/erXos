@@ -28,6 +28,16 @@ block a milestone's numbers.
   current thread's FP state, hashes with NEON and restores it, as the only
   exception to K10's scan; or checking the largest files in `bootstrap`,
   which may use NEON.
+* **[Low] host tools, the packer hashes with BLAKE3's portable code.**
+  `tools/host/pack_hash.c` builds the only BLAKE3 in the tree, its portable
+  C ([origin](../kernel/crypto/blake3/ORIGIN.md)), though
+  [design-build.md](design-build.md) gives the host tools the SIMD paths,
+  which are not imported. The packer also reads the whole archive into
+  memory to hash it, and each of its three calls of the program rereads it.
+  Packing a small image costs no measurable time; the cost at a full image
+  of tens of MiB is unmeasured. Measure: `tools/erx pack`'s hashing time
+  over a full image on the development host. Fixes: import the SIMD paths
+  for the host build alone, and read only the runs asked for.
 * **[Low] kernel, BLAKE3's round function out of line.** The imported
   BLAKE3 (`kernel/crypto/blake3/blake3_impl.h`) defines `INLINE` as plain
   `static inline`, not upstream's `always_inline`, because

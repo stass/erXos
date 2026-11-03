@@ -23,10 +23,12 @@ struct erx_rights {
 #define ERX_ABI_NOTE_TYPE UINT32_C(1)
 #define ERX_ABI_VERSION UINT32_C(1)
 #define ERX_ARCH_ASID_BITS UINT32_C(16)
+#define ERX_ARCH_BOOT_LOCATOR_OFFSET UINT32_C(64)
 #define ERX_ARCH_ELF_MACHINE UINT16_C(183)
 #define ERX_ARCH_USER_LIMIT UINT64_C(281474976710656)
 #define ERX_BOOT_DET UINT32_C(1)
 #define ERX_BOOT_INSTALLED_ONLY UINT32_C(2)
+#define ERX_BOOT_LOCATOR_VERSION UINT32_C(1)
 #define ERX_BOOT_ROOT UINT32_C(4)
 #define ERX_BOOT_SLOT_A UINT32_C(1)
 #define ERX_BOOT_SLOT_B UINT32_C(2)
@@ -67,6 +69,7 @@ struct erx_rights {
 #define ERX_DEVICE_SECRET_STATUS_PRESENT UINT32_C(1)
 #define ERX_DEVICE_SECRET_STATUS_READ_FAILED UINT32_C(4)
 #define ERX_EBUSY (-INT32_C(8))
+#define ERX_ECORRUPT (-INT32_C(17))
 #define ERX_EDEAD (-INT32_C(15))
 #define ERX_EEXIST (-INT32_C(11))
 #define ERX_EFAULT (-INT32_C(10))
@@ -270,10 +273,11 @@ struct erx_rights {
 #define ERX_OK INT32_C(0)
 #define ERX_PACK_DEVELOPMENT UINT32_C(1)
 #define ERX_PACK_ENTRIES_MAX UINT32_C(65536)
+#define ERX_PACK_HASH_SIZE UINT32_C(32)
 #define ERX_PACK_PATH_MAX UINT32_C(4096)
 #define ERX_PACK_STRINGS_MAX UINT32_C(4194304)
 #define ERX_PACK_UNCONFINED_DMA UINT32_C(2)
-#define ERX_PACK_VERSION UINT32_C(1)
+#define ERX_PACK_VERSION UINT32_C(2)
 #define ERX_PAGE_SIZE UINT32_C(4096)
 #define ERX_PERIOD_MAX UINT64_C(1000000000)
 #define ERX_PERIOD_MIN UINT64_C(1000000)
@@ -324,7 +328,93 @@ typedef uint8_t erx_abi_note_section_t[13];
 #define ERX_ABI_NOTE_SECTION_BYTES { 0x2e, 0x6e, 0x6f, 0x74, 0x65, 0x2e, 0x65, 0x72, 0x78, 0x2e, 0x61, 0x62, 0x69 }
 #define ERX_ABI_NOTE_SECTION_STRING ".note.erx.abi"
 
+typedef uint8_t erx_arch_boot_magic_t[4];
+#define ERX_ARCH_BOOT_MAGIC_SIZE 4
+#define ERX_ARCH_BOOT_MAGIC_BYTES { 0x41, 0x52, 0x4d, 0x64 }
+#define ERX_ARCH_BOOT_MAGIC_STRING "ARMd"
+
+#define ERX_ARCH_BOOT_HEADER_SIZE 64
+#define ERX_ARCH_BOOT_HEADER_ALIGN 8
+#define ERX_ARCH_BOOT_HEADER_OFF_CODE0 0
+#define ERX_ARCH_BOOT_HEADER_OFF_CODE1 4
+#define ERX_ARCH_BOOT_HEADER_OFF_TEXT_OFFSET 8
+#define ERX_ARCH_BOOT_HEADER_OFF_IMAGE_SIZE 16
+#define ERX_ARCH_BOOT_HEADER_OFF_FLAGS 24
+#define ERX_ARCH_BOOT_HEADER_OFF_RES2 32
+#define ERX_ARCH_BOOT_HEADER_OFF_RES3 40
+#define ERX_ARCH_BOOT_HEADER_OFF_RES4 48
+#define ERX_ARCH_BOOT_HEADER_OFF_MAGIC 56
+#define ERX_ARCH_BOOT_HEADER_OFF_RES5 60
+typedef struct erx_arch_boot_header erx_arch_boot_header_t;
+struct erx_arch_boot_header {
+	_Alignas(8) uint32_t	code0;
+	uint32_t	code1;
+	uint64_t	text_offset;
+	uint64_t	image_size;
+	uint64_t	flags;
+	uint64_t	res2;
+	uint64_t	res3;
+	uint64_t	res4;
+	erx_arch_boot_magic_t	magic;
+	uint32_t	res5;
+};
+_Static_assert(sizeof(erx_arch_boot_header_t) == ERX_ARCH_BOOT_HEADER_SIZE, "erx_arch_boot_header size");
+_Static_assert(_Alignof(erx_arch_boot_header_t) == ERX_ARCH_BOOT_HEADER_ALIGN, "erx_arch_boot_header alignment");
+_Static_assert(offsetof(erx_arch_boot_header_t, code0) ==
+    ERX_ARCH_BOOT_HEADER_OFF_CODE0, "erx_arch_boot_header.code0 offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, code1) ==
+    ERX_ARCH_BOOT_HEADER_OFF_CODE1, "erx_arch_boot_header.code1 offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, text_offset) ==
+    ERX_ARCH_BOOT_HEADER_OFF_TEXT_OFFSET, "erx_arch_boot_header.text_offset offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, image_size) ==
+    ERX_ARCH_BOOT_HEADER_OFF_IMAGE_SIZE, "erx_arch_boot_header.image_size offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, flags) ==
+    ERX_ARCH_BOOT_HEADER_OFF_FLAGS, "erx_arch_boot_header.flags offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, res2) ==
+    ERX_ARCH_BOOT_HEADER_OFF_RES2, "erx_arch_boot_header.res2 offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, res3) ==
+    ERX_ARCH_BOOT_HEADER_OFF_RES3, "erx_arch_boot_header.res3 offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, res4) ==
+    ERX_ARCH_BOOT_HEADER_OFF_RES4, "erx_arch_boot_header.res4 offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, magic) ==
+    ERX_ARCH_BOOT_HEADER_OFF_MAGIC, "erx_arch_boot_header.magic offset");
+_Static_assert(offsetof(erx_arch_boot_header_t, res5) ==
+    ERX_ARCH_BOOT_HEADER_OFF_RES5, "erx_arch_boot_header.res5 offset");
+
 typedef uint32_t erx_boot_flags_t;
+
+typedef uint8_t erx_boot_locator_magic_t[8];
+#define ERX_BOOT_LOCATOR_MAGIC_SIZE 8
+#define ERX_BOOT_LOCATOR_MAGIC_BYTES { 0x45, 0x52, 0x58, 0x42, 0x4f, 0x4f, 0x54, 0x00 }
+#define ERX_BOOT_LOCATOR_MAGIC_STRING "ERXBOOT\000"
+
+#define ERX_BOOT_LOCATOR_SIZE 32
+#define ERX_BOOT_LOCATOR_ALIGN 8
+#define ERX_BOOT_LOCATOR_OFF_MAGIC 0
+#define ERX_BOOT_LOCATOR_OFF_VERSION 8
+#define ERX_BOOT_LOCATOR_OFF_ZERO 12
+#define ERX_BOOT_LOCATOR_OFF_ARCHIVE_OFF 16
+#define ERX_BOOT_LOCATOR_OFF_ARCHIVE_SIZE 24
+typedef struct erx_boot_locator erx_boot_locator_t;
+struct erx_boot_locator {
+	_Alignas(8) erx_boot_locator_magic_t	magic;
+	uint32_t	version;
+	uint32_t	zero;
+	uint64_t	archive_off;
+	uint64_t	archive_size;
+};
+_Static_assert(sizeof(erx_boot_locator_t) == ERX_BOOT_LOCATOR_SIZE, "erx_boot_locator size");
+_Static_assert(_Alignof(erx_boot_locator_t) == ERX_BOOT_LOCATOR_ALIGN, "erx_boot_locator alignment");
+_Static_assert(offsetof(erx_boot_locator_t, magic) ==
+    ERX_BOOT_LOCATOR_OFF_MAGIC, "erx_boot_locator.magic offset");
+_Static_assert(offsetof(erx_boot_locator_t, version) ==
+    ERX_BOOT_LOCATOR_OFF_VERSION, "erx_boot_locator.version offset");
+_Static_assert(offsetof(erx_boot_locator_t, zero) ==
+    ERX_BOOT_LOCATOR_OFF_ZERO, "erx_boot_locator.zero offset");
+_Static_assert(offsetof(erx_boot_locator_t, archive_off) ==
+    ERX_BOOT_LOCATOR_OFF_ARCHIVE_OFF, "erx_boot_locator.archive_off offset");
+_Static_assert(offsetof(erx_boot_locator_t, archive_size) ==
+    ERX_BOOT_LOCATOR_OFF_ARCHIVE_SIZE, "erx_boot_locator.archive_size offset");
 
 typedef uint32_t erx_boot_slot_t;
 
@@ -474,7 +564,7 @@ typedef uint8_t erx_entry_flags_t;
 
 typedef uint8_t erx_entry_kind_t;
 
-#define ERX_PACK_ENTRY_SIZE 32
+#define ERX_PACK_ENTRY_SIZE 64
 #define ERX_PACK_ENTRY_ALIGN 8
 #define ERX_PACK_ENTRY_OFF_PATH_OFF 0
 #define ERX_PACK_ENTRY_OFF_PATH_LEN 4
@@ -483,6 +573,7 @@ typedef uint8_t erx_entry_kind_t;
 #define ERX_PACK_ENTRY_OFF_DATA_OFF 8
 #define ERX_PACK_ENTRY_OFF_DATA_SIZE 16
 #define ERX_PACK_ENTRY_OFF_MANIFEST_OFF 24
+#define ERX_PACK_ENTRY_OFF_FILE_HASH 32
 typedef struct erx_pack_entry erx_pack_entry_t;
 struct erx_pack_entry {
 	_Alignas(8) uint32_t	path_off;
@@ -492,6 +583,7 @@ struct erx_pack_entry {
 	uint64_t	data_off;
 	uint64_t	data_size;
 	uint64_t	manifest_off;
+	uint8_t	file_hash[32];
 };
 _Static_assert(sizeof(erx_pack_entry_t) == ERX_PACK_ENTRY_SIZE, "erx_pack_entry size");
 _Static_assert(_Alignof(erx_pack_entry_t) == ERX_PACK_ENTRY_ALIGN, "erx_pack_entry alignment");
@@ -509,6 +601,8 @@ _Static_assert(offsetof(erx_pack_entry_t, data_size) ==
     ERX_PACK_ENTRY_OFF_DATA_SIZE, "erx_pack_entry.data_size offset");
 _Static_assert(offsetof(erx_pack_entry_t, manifest_off) ==
     ERX_PACK_ENTRY_OFF_MANIFEST_OFF, "erx_pack_entry.manifest_off offset");
+_Static_assert(offsetof(erx_pack_entry_t, file_hash) ==
+    ERX_PACK_ENTRY_OFF_FILE_HASH, "erx_pack_entry.file_hash offset");
 
 #define ERX_CAP_SLOT_SIZE 64
 #define ERX_CAP_SLOT_ALIGN 8
@@ -2091,7 +2185,7 @@ typedef uint8_t erx_pack_magic_t[8];
 #define ERX_PACK_MAGIC_BYTES { 0x45, 0x52, 0x58, 0x50, 0x41, 0x43, 0x4b, 0x00 }
 #define ERX_PACK_MAGIC_STRING "ERXPACK\000"
 
-#define ERX_PACK_HEADER_SIZE 64
+#define ERX_PACK_HEADER_SIZE 96
 #define ERX_PACK_HEADER_ALIGN 8
 #define ERX_PACK_HEADER_OFF_MAGIC 0
 #define ERX_PACK_HEADER_OFF_VERSION 8
@@ -2104,6 +2198,7 @@ typedef uint8_t erx_pack_magic_t[8];
 #define ERX_PACK_HEADER_OFF_STRINGS_SIZE 48
 #define ERX_PACK_HEADER_OFF_ROOT_ENTRY 52
 #define ERX_PACK_HEADER_OFF_BUILD_ID 56
+#define ERX_PACK_HEADER_OFF_INDEX_HASH 64
 typedef struct erx_pack_header erx_pack_header_t;
 struct erx_pack_header {
 	_Alignas(8) erx_pack_magic_t	magic;
@@ -2117,6 +2212,7 @@ struct erx_pack_header {
 	uint32_t	strings_size;
 	uint32_t	root_entry;
 	uint8_t	build_id[8];
+	uint8_t	index_hash[32];
 };
 _Static_assert(sizeof(erx_pack_header_t) == ERX_PACK_HEADER_SIZE, "erx_pack_header size");
 _Static_assert(_Alignof(erx_pack_header_t) == ERX_PACK_HEADER_ALIGN, "erx_pack_header alignment");
@@ -2142,6 +2238,8 @@ _Static_assert(offsetof(erx_pack_header_t, root_entry) ==
     ERX_PACK_HEADER_OFF_ROOT_ENTRY, "erx_pack_header.root_entry offset");
 _Static_assert(offsetof(erx_pack_header_t, build_id) ==
     ERX_PACK_HEADER_OFF_BUILD_ID, "erx_pack_header.build_id offset");
+_Static_assert(offsetof(erx_pack_header_t, index_hash) ==
+    ERX_PACK_HEADER_OFF_INDEX_HASH, "erx_pack_header.index_hash offset");
 
 typedef struct erx_pack_offset erx_pack_offset_t;
 struct erx_pack_offset {

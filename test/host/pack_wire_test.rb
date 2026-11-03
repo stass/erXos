@@ -10,15 +10,31 @@ require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/pack_wire'
 
 class PackWireTest < Minitest::Test
+  # The hashing program, compiled here rather than through PackTools.
+  Program = Struct.new(:path) do
+    def run(arguments, runner:, name:, deadline:)
+      runner.run([path, *arguments], name: name, deadline: deadline)
+    end
+  end
+
   def setup
     @root = File.expand_path('../..', __dir__)
     @codec = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: @root).schema)
     @directory = Dir.mktmpdir('pack-wire-')
-    @writer = Erx::PackWire.new(codec: @codec)
+    @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
+    program = File.join(@directory, 'pack-hash')
+    blake3 = File.join(@root, 'kernel/crypto/blake3')
+    @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1',
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
+                 File.join(blake3, 'blake3.c'), File.join(blake3, 'blake3_portable.c'),
+                 File.join(@root, 'tools/host/input.c'), File.join(@root, 'tools/host/pack_hash.c'),
+                 '-o', program], name: 'compile-pack-hash', deadline: 60)
+    hasher = Erx::PackHasher.new(helper: Program.new(program), runner: @runner)
+    @writer = Erx::PackWire.new(codec: @codec, hasher: hasher)
   end
 
   def teardown
-    FileUtils.remove_entry(@directory)
+    FileUtils.remove_entry(@directory) if passed?
   end
 
   def rows
@@ -36,10 +52,11 @@ class PackWireTest < Minitest::Test
     end
     actual = File.binread(path)
     expected = PackFixture.valid
-    # The independent wire fixture deliberately leaves build_id blank. Its
-    # normative offset is 56; the remaining complete wire bytes must agree.
+    # The independent wire fixture leaves build_id blank. Its normative
+    # offset is 56; with it copied and the index hash recomputed by b3sum,
+    # every byte must agree, the file hashes included.
     expected[56, 8] = actual.byteslice(56, 8)
-    assert_equal expected, actual
+    assert_equal PackFixture.rehash(expected, files: false), actual
   end
 
   def test_budget_refusal_precedes_the_first_output_byte
@@ -76,15 +93,15 @@ class PackWireTest < Minitest::Test
     refute_equal images.first.byteslice(56, 8), images.last.byteslice(56, 8)
   end
 
-  def test_build_identity_matches_an_independent_complete_wire_digest
+  def test_build_identity_is_the_index_hash_with_both_identity_fields_zero
     path = File.join(@directory, 'identity')
     File.open(path, 'wb') do |output|
       @writer.write(rows: rows, root_entry: 1, build_kind: 'development', output: output, budget: 1_048_576)
     end
     bytes = File.binread(path)
     identity = bytes.byteslice(56, 8)
-    bytes[56, 8] = "\0".b * 8
-    assert_equal Digest::SHA256.digest(bytes).byteslice(0, 8), identity
+    bytes[56, 40] = "\0".b * 40
+    assert_equal PackFixture.b3sum([bytes.byteslice(0, 4096)]).first.byteslice(0, 8), identity
   end
 
   def test_nonzero_output_position_is_refused_before_effects

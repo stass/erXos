@@ -50,7 +50,7 @@ module Erx
         OutputDirectory.prepare(root: owner_root, path: path + '.deps')
         OutputDirectory.prepare(root: owner_root, path: path + '.objects')
         recipe.fetch('compile_sources').each_with_index do |source, index|
-          runner.run([compiler, *recipe.fetch('flags'), '-I', File.join(root, 'include'),
+          runner.run([compiler, *recipe.fetch('flags'), *PackToolRecipe::INCLUDES.flat_map { |directory| ['-I', File.join(root, directory)] },
                       '-MM', '-MF', File.join(path + '.deps', "#{index}.d"),
                       '-MQ', File.join(path + '.objects', "#{index}.o"), File.join(root, source)],
                      name: "scan-#{name}-#{index}", deadline: 90, chdir: root)
@@ -66,7 +66,7 @@ module Erx
         end
         objects = recipe.fetch('compile_sources').each_with_index.map do |source, index|
           object = File.join(path + '.objects', "#{index}.o")
-          runner.run([compiler, *recipe.fetch('flags'), '-I', File.join(root, 'include'),
+          runner.run([compiler, *recipe.fetch('flags'), *PackToolRecipe::INCLUDES.flat_map { |directory| ['-I', File.join(root, directory)] },
                       '-MMD', '-MF', File.join(path + '.deps', "#{index}.d"), '-MQ', object,
                       '-c', File.join(root, source), '-o', object],
                      name: "compile-#{name}-#{index}", deadline: 90, chdir: root)

@@ -16,10 +16,18 @@ module Erx
   # Producer and verifier share the complete project-input recipe. A record
   # cannot choose a smaller source set or invent another compilation profile.
   module PackToolRecipe
-    PROGRAMS = { 'checker' => ['pack-check', 'kernel/core/pack.c', 'tools/host/pack_check.c'].freeze,
-                 'planner' => ['elf-plan', 'liberx/elf_plan.c', 'tools/host/elf_plan.c'].freeze }.freeze
+    # BLAKE3's portable C, the same sources the kernel builds; the host tools
+    # could take its SIMD code too, which is not imported
+    # (docs/todo-performance.md).
+    BLAKE3 = %w[kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c].freeze
+    # Each program: its binary's name, the cores it links and its main.
+    PROGRAMS = { 'checker' => ['pack-check', ['kernel/core/pack.c', *BLAKE3].freeze, 'tools/host/pack_check.c'].freeze,
+                 'hasher' => ['pack-hash', BLAKE3, 'tools/host/pack_hash.c'].freeze,
+                 'planner' => ['elf-plan', ['liberx/elf_plan.c'].freeze, 'tools/host/elf_plan.c'].freeze }.freeze
     COMMON_SOURCES = %w[liberx/generated/abi_reader.c tools/host/input.c].freeze
     RECIPE_SOURCES = %w[tools/lib/erx/pack_tool_recipe.rb tools/lib/erx/pack_tools.rb tools/lib/erx/elf_plan.rb].freeze
+    # The include directories every program compiles with, from the root.
+    INCLUDES = %w[include kernel/crypto].freeze
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic -O1 -g].freeze
     module_function
 
@@ -28,8 +36,8 @@ module Erx
              (sanitizers - %w[address undefined]).empty?
         raise Error, 'unknown host parser recipe'
       end
-      name, core, main = PROGRAMS.fetch(tool)
-      compile_sources = [core, *COMMON_SOURCES, main]
+      name, cores, main = PROGRAMS.fetch(tool)
+      compile_sources = [*cores, *COMMON_SOURCES, main]
       inputs = (compile_sources + ['tools/host/input.h'] + RECIPE_SOURCES + dependencies).uniq.sort.freeze
       flags = FLAGS + (sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer'])
       recipe_hashes = RECIPE_SOURCES.to_h { |path| [path, Digest::SHA256.file(source_path(root, path)).hexdigest] }

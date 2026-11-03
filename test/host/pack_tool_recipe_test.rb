@@ -13,9 +13,9 @@ class PackToolRecipeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
 
   def copy_project(directory)
-    files = (Erx::PackToolRecipe::PROGRAMS.values.flat_map { |_name, core, main| [core, main] } +
+    files = (Erx::PackToolRecipe::PROGRAMS.values.flat_map { |_name, cores, main| [*cores, main] } +
              Erx::PackToolRecipe::COMMON_SOURCES + Erx::PackToolRecipe::RECIPE_SOURCES + ['tools/host/input.h'] +
-             Dir.glob(File.join(ROOT, 'include/erx/**/*.h')).map { |path| path.delete_prefix(ROOT + '/') }).uniq
+             Dir.glob(%w[include/erx/**/*.h kernel/crypto/blake3/*.h], base: ROOT)).uniq
     files.each do |relative|
       target = File.join(directory, relative)
       FileUtils.mkdir_p(File.dirname(target))

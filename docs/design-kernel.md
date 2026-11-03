@@ -2768,7 +2768,9 @@ header, 96 bytes, at offset 0
   u64     strings_off    96 + nentries * entry_size: after the entry table
   u32     strings_size   at most 4 MiB
   u32     root_entry     index of the root task's executable
-  u8[8]   build_id       identifies the build; the host tool compares it
+  u8[8]   build_id       identifies the build; the host tool compares it: the
+                         first 8 bytes of the index run's BLAKE3 hash with
+                         this field and index_hash read as zeros
   u8[32]  index_hash     BLAKE3 of the index run, with these 32 bytes read
                          as zeros
 entry, 64 bytes, sorted by path, strictly ascending as byte strings
@@ -2799,7 +2801,8 @@ boot; such a signature is not part of this design.
 
 The validator (`kernel/core/pack.c`) reads only the index run, in one
 pass with no recursion, bounded by `nentries` and the total path bytes.
-Its caller supplies 16 KiB of scratch for the bounded path-prefix stack
+Its caller supplies the hasher's state and 16 KiB of scratch for the
+bounded path-prefix stack
 described in
 [File-prefix exclusion](design-abi.md#file-prefix-exclusion); it allocates
 nothing and puts no input-sized array on the kernel stack:
@@ -2808,7 +2811,8 @@ nothing and puts no input-sized array on the kernel stack:
    ([The bootable file](#the-bootable-file)); `total_size` equals it.
 2. The header's fields hold their stated values and ranges; a version
    other than 2 is refused with a diagnostic naming the version found and
-   the one expected, and nothing after the version is read. The entry
+   the one expected, before step 1 or any other check uses a field after
+   the version. The entry
    table starts immediately after the header and the string table
    immediately after the entry table; their declared offsets equal those
    derived positions. The index run, which ends at the first page boundary
@@ -2819,7 +2823,8 @@ nothing and puts no input-sized array on the kernel stack:
    read before this check passes, so a damaged index is refused as
    damaged, not by whichever structural check its damage happens to trip.
    Every byte of the index run after the string table is zero.
-4. Each entry's path lies inside the string table and is valid: UTF-8 with
+4. The paths fill the string table in entry order with nothing between
+   them, so the paths' total length is `strings_size`, and each is valid: UTF-8 with
    no byte below `0x20` and no `0x7f`, components separated by `/`, no
    leading or trailing `/`, no empty component, no `.` or `..`.
 5. Paths ascend strictly, so no path appears twice. The bounded
@@ -2836,7 +2841,8 @@ nothing and puts no input-sized array on the kernel stack:
    first page boundary at or after the last entry's data, is exactly the
    index run followed by the file runs, each byte in one run.
 7. The entries that carry `ERX_ENTRY_SYSTEM` form one contiguous run of the
-   table, and `root_entry` is an executable among them; the entries that
+   table, `root_entry` is an executable among them, and the system
+   configuration's path names a file among them; the entries that
    carry `ERX_ENTRY_SEAL` form one contiguous run, possibly empty, that
    shares no entry with the system run; and no other flag bit is set.
 
@@ -2892,8 +2898,10 @@ system release
 `erx_pack_file_check(view, entry)`, a pure function
 of `kernel/core/pack.c`, reads the entry's file run once: it computes the
 run's BLAKE3 hash and compares it with `file_hash`, checks that every
-byte of the run after `data_size` is zero, and for an executable image
-runs the manifest check of [Image manifests](#image-manifests). Its
+byte of the run after `data_size` is zero, for an executable image
+runs the manifest check of [Image manifests](#image-manifests), and for
+the system configuration opens it with the manifest reader and compares
+its development flag with the image's. Its
 verdict is good, or refused with the check that failed. Every file passes
 this one function before its first use, and its first user decides where:
 
@@ -2998,9 +3006,9 @@ reservation block:
 
 1. A locator whose magic, version or zero field is wrong stops the boot.
 2. With `archive_off` zero, the archive is the initrd; no initrd stops
-   the boot with `no boot image`.
+   the boot with `no_boot_image`.
 3. With `archive_off` nonzero, an initrd as well stops the boot with
-   `two boot images`, so the machine never boots an archive other than
+   `two_boot_images`, so the machine never boots an archive other than
    the one it was meant to; `archive_off` is a multiple of 4,096 at or
    after the first stage's linked end, so the archive overlaps none of
    the first stage's code, data or zero-initialised data; and
@@ -3082,18 +3090,18 @@ under test ran.
 
 | Case | Passes when | Seeded failure |
 | --- | --- | --- |
-| the index hash | an image the packer wrote validates, on the host and at boot | one flipped byte in the entry table, one in the string table and one in the index run's padding are each refused with `index hash` before any structural check; the same flipped entry with the hash recomputed is refused by the structural check it breaks, which shows the hash check is what refused first |
+| the index hash | an image the packer wrote validates, on the host and at boot | one flipped byte in the entry table, one in the string table and one in the index run's padding are each refused with `index_hash` before any structural check; the same flipped entry with the hash recomputed is refused by the structural check it breaks, which shows the hash check is what refused first |
 | a file's hash | a slice of every file of a packed image succeeds, and the root task starts | one flipped byte in a file's data passes the validator, which reads no file data, and fails the first slice that includes the file with `ERX_ECORRUPT`, naming its index; a slice of its neighbour succeeds; a second slice of the damaged file fails without hashing again, which the check counter shows |
 | a file checked at boot | the root task and, on the stopgap, the kernel start | one flipped byte in the root task's executable stops the boot at step 11 naming `root_entry`; one in the stopgap's kernel stops `bootstrap` before `erx_elf_plan` runs |
 | a file run's padding | every file run's padding is zero | a fixture with a nonzero padding byte and a hash recomputed over it is refused with `padding`, which the hash alone would accept |
 | concurrent checks | four threads on four CPUs slice the same unchecked file at once, each gets its slice, and the verdict is good | a checker seeded to store its verdict before it finishes hashing lets a concurrent slice of a damaged file succeed, which the test catches |
 | the version | an image of version 2 validates | an image of version 1's layout is refused with `version 1, expected 2`; a version-2 image with its version field set to 3 and its index hash recomputed is refused by the version check, not by the hash |
 | BLAKE3 | the kernel's portable build and the host tools' SIMD build both reproduce the official test vectors | one vector seeded with a wrong digest fails both builds |
-| the single file | the single file boots under QEMU with `-kernel` alone, under TCG and HVF, on the stopgap and on erXos's kernel, and the banner's index hash equals the packer's | the same single file booted with an `-initrd` as well stops with `two boot images`; a locator whose `archive_off` points into the first stage's zero-initialised data is refused; a file cut one page short is refused by the validator |
-| the two-file form | the first stage as built boots with the archive as `-initrd`, under TCG and HVF, with the same banner hash as the single file | the first stage booted without `-initrd` stops with `no boot image` |
+| the single file | the single file boots under QEMU with `-kernel` alone, under TCG and HVF, on the stopgap and on erXos's kernel, and the banner's index hash equals the packer's | the same single file booted with an `-initrd` as well stops with `two_boot_images`; a locator whose `archive_off` points into the first stage's zero-initialised data is refused; a file cut one page short is refused by the validator |
+| the two-file form | the first stage as built boots with the archive as `-initrd`, under TCG and HVF, with the same banner hash as the single file | the first stage booted without `-initrd` stops with `no_boot_image` |
 | reproducibility | both forms are byte-identical across two clean builds, and the single file's archive equals the two-file archive | a packer seeded to write the time into the locator's zero field fails `make check-reproducible` |
 | segment alignment | every executable the build packs passes the ELF planner, and each mapped segment's bytes equal the ELF's | an ELF fixture whose load segment's file offset is not page-aligned, and one whose offset and address disagree modulo the page size, are each refused by the packer with a diagnostic; with the planner's check removed the fixture packs, and the comparison of mapped bytes with the ELF's fails |
-| fuzzing | the validator's fuzz target runs its configured budget clean under ASan and UBSan | the target recomputes the index hash after each mutation, so mutations reach the structural checks, and also runs `erx_boot_locate` over arbitrary locators, declared sizes and memory maps and `erx_pack_file_check` over mutated file runs; a seeded off-by-one in the locator's overflow check is found within the budget |
+| fuzzing | the validator's fuzz target runs its configured budget clean under ASan and UBSan | the target recomputes the index hash after each mutation, so mutations reach the structural checks, and also runs `erx_boot_locate` over arbitrary locators, declared sizes and memory maps and `erx_pack_file_check` over mutated file runs; a seeded off-by-one in the locator's bound on the declared size makes the target abort within the budget |
 
 ### Image manifests
 

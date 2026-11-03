@@ -14,6 +14,14 @@ int
 LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 {
 	{
+		erx_arch_boot_header_t value;
+		(void)erx_arch_boot_header_decode(bytes, length, &value);
+	}
+	{
+		erx_boot_locator_t value;
+		(void)erx_boot_locator_decode(bytes, length, &value);
+	}
+	{
 		erx_boot_connection_t value;
 		(void)erx_boot_connection_decode(bytes, length, &value);
 	}

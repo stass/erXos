@@ -3,19 +3,53 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+/*
+ * The boot image's checks (design-kernel.md, The boot image, Checking a
+ * file and The bootable file). erx_boot_locate finds the archive,
+ * erx_pack_open checks its index run and erx_pack_file_check checks one
+ * file's run; each is a pure function of the bytes and values it is given.
+ * Every size and offset read from the archive or the locator is bounded
+ * with checked arithmetic before it is used.
+ */
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "blake3/blake3.h"
 #include "erx/abi_reader.h"
 #include "erx/pack.h"
 
+_Static_assert(ERX_PACK_HASH_SIZE == ERX_BLAKE3_OUT_LEN,
+    "the pack's hash is BLAKE3's output");
+_Static_assert(sizeof(((erx_pack_header_t *)0)->index_hash) ==
+    ERX_PACK_HASH_SIZE, "index hash width");
+_Static_assert(sizeof(((erx_pack_entry_t *)0)->file_hash) ==
+    ERX_PACK_HASH_SIZE, "file hash width");
+_Static_assert(ERX_PACK_HEADER_OFF_INDEX_HASH + ERX_PACK_HASH_SIZE ==
+    ERX_PACK_HEADER_SIZE, "the index hash ends the header");
+
+/* What check 7 has seen of the entries so far. */
+typedef struct erx_release {
+	unsigned	system_runs;
+	unsigned	seal_runs;
+	bool		in_system;
+	bool		in_seal;
+	bool		has_manifest;
+} erx_release_t;
+
 static bool erx_pack_fail(erx_pack_error_t *, uint32_t, const char *);
+static bool erx_pack_fail_found(erx_pack_error_t *, uint32_t, const char *,
+    uint64_t);
 static bool erx_extent(uint64_t, uint64_t, uint64_t);
 static bool erx_round_page(uint64_t, uint64_t *);
 static bool erx_zeroes(const uint8_t *, uint64_t, uint64_t, size_t);
+static bool erx_hash_equal(const uint8_t *, const uint8_t *);
+static void erx_index_digest(const uint8_t *, size_t, erx_blake3_ctx_t *,
+    uint8_t *);
 static int erx_path_compare(const uint8_t *, size_t, const uint8_t *, size_t);
 static bool erx_path_valid(const uint8_t *, size_t);
+static bool erx_is_manifest_path(const uint8_t *, size_t);
 static bool erx_image_valid(const uint8_t *, size_t, bool,
     erx_pack_error_t *, uint32_t);
 static bool erx_phdr_covered(const uint8_t *, size_t,
@@ -24,13 +58,33 @@ static bool erx_pack_manifest_valid(const uint8_t *, size_t, uint32_t,
     erx_pack_error_t *, uint32_t);
 static bool erx_entry_decode(const uint8_t *, size_t,
     const erx_pack_header_t *, uint32_t, erx_pack_entry_t *);
+static bool erx_index_check(const uint8_t *, size_t, erx_blake3_ctx_t *,
+    erx_pack_header_t *, uint64_t *, erx_pack_error_t *);
+static bool erx_prefix_step(const erx_pack_view_t *, erx_pack_scratch_t *,
+    size_t *, uint32_t, const uint8_t *, size_t, erx_pack_error_t *);
+static bool erx_entry_place(const erx_pack_entry_t *, uint64_t *, size_t);
+static const char *erx_release_step(erx_release_t *, const erx_pack_entry_t *,
+    bool, bool);
+static bool erx_ranges_clear(erx_boot_range_t, erx_boot_range_t);
+static bool erx_locator_range(const erx_boot_inputs_t *,
+    const erx_boot_locator_t *, erx_boot_range_t *);
+static bool erx_archive_place(const erx_boot_inputs_t *, erx_boot_range_t,
+    erx_pack_error_t *);
 
 static bool
 erx_pack_fail(erx_pack_error_t *error, uint32_t entry, const char *reason)
 {
+	return (erx_pack_fail_found(error, entry, reason, 0));
+}
+
+static bool
+erx_pack_fail_found(erx_pack_error_t *error, uint32_t entry,
+    const char *reason, uint64_t found)
+{
 	if (error != NULL) {
 		error->entry = entry;
 		error->reason = reason;
+		error->found = found;
 	}
 	return (false);
 }
@@ -64,6 +118,36 @@ erx_zeroes(const uint8_t *bytes, uint64_t start, uint64_t end, size_t length)
 			return (false);
 	}
 	return (true);
+}
+
+/* Integrity, not secrecy: the hashes are public, so no constant time. */
+static bool
+erx_hash_equal(const uint8_t *left, const uint8_t *right)
+{
+	for (size_t index = 0; index < ERX_PACK_HASH_SIZE; index++) {
+		if (left[index] != right[index])
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * The index run's hash: the bytes [0, index_end) with the header's own
+ * index_hash field read as zeros. index_end lies inside the archive and
+ * past the header, which the caller has checked.
+ */
+static void
+erx_index_digest(const uint8_t *bytes, size_t index_end,
+    erx_blake3_ctx_t *hasher, uint8_t *digest)
+{
+	static const uint8_t zero_hash[ERX_PACK_HASH_SIZE];
+
+	erx_blake3_init(hasher);
+	erx_blake3_update(hasher, bytes, ERX_PACK_HEADER_OFF_INDEX_HASH);
+	erx_blake3_update(hasher, zero_hash, sizeof(zero_hash));
+	erx_blake3_update(hasher, bytes + ERX_PACK_HEADER_SIZE,
+	    index_end - ERX_PACK_HEADER_SIZE);
+	erx_blake3_final(hasher, digest);
 }
 
 static int
@@ -279,139 +363,256 @@ erx_pack_manifest_valid(const uint8_t *bytes, size_t length,
 	return (true);
 }
 
-bool
-erx_pack_open(const uint8_t *bytes, size_t length, erx_pack_scratch_t *scratch,
-    erx_pack_view_t *result, erx_pack_error_t *error)
+static bool
+erx_is_manifest_path(const uint8_t *path, size_t length)
+{
+	static const uint8_t manifest_path[] = ERX_SYSTEM_MANIFEST_PATH_BYTES;
+
+	return (length == sizeof(manifest_path) &&
+	    erx_path_compare(path, length, manifest_path,
+	    sizeof(manifest_path)) == 0);
+}
+
+/*
+ * Checks 1 to 3 of the validator: the header's values and the extent of the
+ * index run, whose end it returns, then the index hash before any entry or
+ * path is read, then the padding after the strings.
+ */
+static bool
+erx_index_check(const uint8_t *bytes, size_t length, erx_blake3_ctx_t *hasher,
+    erx_pack_header_t *header, uint64_t *index_end, erx_pack_error_t *error)
 {
 	static const uint8_t magic[] = ERX_PACK_MAGIC_BYTES;
-	static const uint8_t manifest_path[] = ERX_SYSTEM_MANIFEST_PATH_BYTES;
-	erx_pack_header_t header;
-	erx_pack_entry_t entry, candidate, previous;
-	const uint8_t *path, *prior_path;
-	uint64_t table_bytes, strings_offset, index_end, cursor, end;
-	size_t depth;
-	unsigned system_run, seal_run;
-	bool was_system, was_seal, has_manifest;
+	uint8_t digest[ERX_PACK_HASH_SIZE];
+	uint64_t table_bytes, strings_offset, strings_end;
 
-	if (bytes == NULL || scratch == NULL || result == NULL ||
-	    !erx_pack_header_decode(bytes, length, &header))
+	if (!erx_pack_header_decode(bytes, length, header))
 		return (erx_pack_fail(error, UINT32_MAX, "header_extent"));
 	for (size_t index = 0; index < sizeof(magic); index++) {
-		if (header.magic[index] != magic[index])
+		if (header->magic[index] != magic[index])
 			return (erx_pack_fail(error, UINT32_MAX, "magic"));
 	}
-	if (header.version != ERX_PACK_VERSION || header.total_size != length ||
-	    header.total_size % ERX_PAGE_SIZE != 0 || header.nentries == 0 ||
-	    header.nentries > ERX_PACK_ENTRIES_MAX ||
-	    header.entry_size != ERX_PACK_ENTRY_SIZE ||
-	    header.entries_off != ERX_PACK_HEADER_SIZE ||
-	    header.strings_size > ERX_PACK_STRINGS_MAX ||
-	    header.root_entry >= header.nentries ||
-	    (header.flags & ~(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA)) != 0)
+	/* An archive of another version is refused before its layout is used. */
+	if (header->version != ERX_PACK_VERSION)
+		return (erx_pack_fail_found(error, UINT32_MAX,
+		    ERX_PACK_REASON_VERSION, header->version));
+	if (header->total_size != length ||
+	    header->total_size % ERX_PAGE_SIZE != 0 || header->nentries == 0 ||
+	    header->nentries > ERX_PACK_ENTRIES_MAX ||
+	    header->entry_size != ERX_PACK_ENTRY_SIZE ||
+	    header->entries_off != ERX_PACK_HEADER_SIZE ||
+	    header->strings_size > ERX_PACK_STRINGS_MAX ||
+	    header->root_entry >= header->nentries ||
+	    (header->flags & ~(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA)) != 0)
 		return (erx_pack_fail(error, UINT32_MAX, "header_values"));
-	if (__builtin_mul_overflow((uint64_t)header.nentries,
+	if (__builtin_mul_overflow((uint64_t)header->nentries,
 	    (uint64_t)ERX_PACK_ENTRY_SIZE, &table_bytes) ||
 	    __builtin_add_overflow((uint64_t)ERX_PACK_HEADER_SIZE,
-	    table_bytes, &strings_offset) || header.strings_off != strings_offset ||
-	    !erx_extent(header.strings_off, header.strings_size, length) ||
-	    __builtin_add_overflow(header.strings_off,
-	    (uint64_t)header.strings_size, &index_end) ||
-	    !erx_round_page(index_end, &cursor) ||
-	    !erx_zeroes(bytes, index_end, cursor, length))
+	    table_bytes, &strings_offset) ||
+	    header->strings_off != strings_offset ||
+	    !erx_extent(header->strings_off, header->strings_size, length) ||
+	    __builtin_add_overflow(header->strings_off,
+	    (uint64_t)header->strings_size, &strings_end) ||
+	    !erx_round_page(strings_end, index_end) || *index_end > length)
 		return (erx_pack_fail(error, UINT32_MAX, "index_extent"));
-	depth = 0;
-	system_run = 0;
-	seal_run = 0;
-	was_system = false;
-	was_seal = false;
-	has_manifest = false;
-	previous = (erx_pack_entry_t){0};
-	for (uint32_t index = 0; index < header.nentries; index++) {
-		if (!erx_entry_decode(bytes, length, &header, index, &entry) ||
-		    !erx_extent(entry.path_off, entry.path_len, header.strings_size))
-			return (erx_pack_fail(error, index, "path_extent"));
-		path = bytes + (size_t)header.strings_off + entry.path_off;
-		if (!erx_path_valid(path, entry.path_len))
-			return (erx_pack_fail(error, index, "path"));
-		if (index != 0) {
-			prior_path = bytes + (size_t)header.strings_off + previous.path_off;
-			if (erx_path_compare(prior_path, previous.path_len,
-			    path, entry.path_len) >= 0)
-				return (erx_pack_fail(error, index, "path_order"));
+	erx_index_digest(bytes, (size_t)*index_end, hasher, digest);
+	if (!erx_hash_equal(digest, header->index_hash))
+		return (erx_pack_fail(error, UINT32_MAX, "index_hash"));
+	if (!erx_zeroes(bytes, strings_end, *index_end, length))
+		return (erx_pack_fail(error, UINT32_MAX, "index_padding"));
+	return (true);
+}
+
+/*
+ * Check 5's file-prefix stack: no path begins with an earlier file's path
+ * followed by '/'. A pending file can still precede a later descendant when
+ * the next byte is below '/': a, a-foo, a/b. Retain that candidate; pop it
+ * only after lexical order has passed its descendant run. Pending candidates
+ * are strict prefixes, so depth is path-bounded.
+ */
+static bool
+erx_prefix_step(const erx_pack_view_t *view, erx_pack_scratch_t *scratch,
+    size_t *depth, uint32_t index, const uint8_t *path, size_t path_length,
+    erx_pack_error_t *error)
+{
+	const uint8_t *candidate;
+	size_t candidate_length;
+
+	while (*depth != 0) {
+		if (!erx_pack_path_at(view, scratch->pending[*depth - 1],
+		    &candidate, &candidate_length))
+			return (erx_pack_fail(error, index, "prefix_index"));
+		if (candidate_length < path_length &&
+		    erx_path_compare(candidate, candidate_length,
+		    path, candidate_length) == 0) {
+			if (path[candidate_length] == '/')
+				return (erx_pack_fail(error, index, "file_prefix"));
+			if (path[candidate_length] < '/')
+				break;
 		}
-		/*
-		 * A pending file can still precede a later descendant when the
-		 * next byte is below '/': a, a-foo, a/b. Retain that candidate;
-		 * pop it only after lexical order has passed its descendant run.
-		 * Pending candidates are strict prefixes, so depth is path-bounded.
-		 */
-		while (depth != 0) {
-			if (!erx_entry_decode(bytes, length, &header,
-			    scratch->pending[depth - 1], &candidate))
-				return (erx_pack_fail(error, index, "prefix_index"));
-			prior_path = bytes + (size_t)header.strings_off + candidate.path_off;
-			if (candidate.path_len < entry.path_len &&
-			    erx_path_compare(prior_path, candidate.path_len,
-			    path, candidate.path_len) == 0) {
-				if (path[candidate.path_len] == '/')
-					return (erx_pack_fail(error, index, "file_prefix"));
-				if (path[candidate.path_len] < '/')
-					break;
-			}
-			depth--;
-		}
-		if (depth >= ERX_PACK_PATH_MAX)
-			return (erx_pack_fail(error, index, "prefix_depth"));
-		scratch->pending[depth++] = index;
-		if ((entry.kind != ERX_ENTRY_FILE && entry.kind != ERX_ENTRY_IMAGE) ||
-		    (entry.flags & ~(ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) != 0 ||
-		    (entry.flags & (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) ==
-		    (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL) || entry.manifest_off != 0 ||
-		    entry.data_off != cursor ||
-		    !erx_extent(entry.data_off, entry.data_size, length) ||
-		    __builtin_add_overflow(entry.data_off, entry.data_size, &end))
-			return (erx_pack_fail(error, index, "entry_values"));
-		if ((entry.flags & ERX_ENTRY_SYSTEM) != 0) {
-			if (!was_system)
-				system_run++;
-			was_system = true;
-		} else {
-			was_system = false;
-		}
-		if ((entry.flags & ERX_ENTRY_SEAL) != 0) {
-			if (!was_seal)
-				seal_run++;
-			was_seal = true;
-		} else {
-			was_seal = false;
-		}
-		if (system_run > 1 || seal_run > 1 ||
-		    (index == header.root_entry &&
-		    (entry.kind != ERX_ENTRY_IMAGE || !was_system)))
-			return (erx_pack_fail(error, index, "release_run"));
-		if (entry.path_len == sizeof(manifest_path) &&
-		    erx_path_compare(path, entry.path_len,
-		    manifest_path, sizeof(manifest_path)) == 0) {
-			if (entry.kind != ERX_ENTRY_FILE || !was_system)
-				return (erx_pack_fail(error, index, "manifest_binding"));
-			if (!erx_pack_manifest_valid(bytes + (size_t)entry.data_off,
-			    (size_t)entry.data_size, header.flags, error, index))
-				return (false);
-			has_manifest = true;
-		}
-		if (entry.kind == ERX_ENTRY_IMAGE &&
-		    !erx_image_valid(bytes + (size_t)entry.data_off,
-		    (size_t)entry.data_size, index == header.root_entry, error, index))
-			return (false);
-		if (!erx_round_page(end, &cursor) ||
-		    !erx_zeroes(bytes, end, cursor, length))
-			return (erx_pack_fail(error, index, "data_padding"));
-		previous = entry;
+		(*depth)--;
 	}
-	if (cursor != length || system_run != 1 || !has_manifest)
+	if (*depth >= ERX_PACK_PATH_MAX)
+		return (erx_pack_fail(error, index, "prefix_depth"));
+	scratch->pending[(*depth)++] = index;
+	return (true);
+}
+
+/*
+ * Check 6: an entry's values and its place. Each file starts at the first
+ * page boundary after the previous run, the first right after the index run,
+ * so every byte of the archive lies in exactly one run. On success the cursor
+ * moves to where the next run starts.
+ */
+static bool
+erx_entry_place(const erx_pack_entry_t *entry, uint64_t *cursor, size_t length)
+{
+	uint64_t end, next;
+
+	if ((entry->kind != ERX_ENTRY_FILE && entry->kind != ERX_ENTRY_IMAGE) ||
+	    (entry->flags & ~(ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) != 0 ||
+	    (entry->flags & (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) ==
+	    (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL) || entry->manifest_off != 0 ||
+	    entry->data_off != *cursor ||
+	    !erx_extent(entry->data_off, entry->data_size, length) ||
+	    __builtin_add_overflow(entry->data_off, entry->data_size, &end) ||
+	    !erx_round_page(end, &next) || next > length)
+		return (false);
+	*cursor = next;
+	return (true);
+}
+
+/*
+ * Check 7, one entry at a time: at most one contiguous run of each mark, the
+ * root an image of the system run, the system configuration a file of it.
+ * Returns the reason for a refusal, or NULL.
+ */
+static const char *
+erx_release_step(erx_release_t *release, const erx_pack_entry_t *entry,
+    bool root, bool manifest)
+{
+	bool is_system, is_seal;
+
+	is_system = (entry->flags & ERX_ENTRY_SYSTEM) != 0;
+	is_seal = (entry->flags & ERX_ENTRY_SEAL) != 0;
+	if (is_system && !release->in_system)
+		release->system_runs++;
+	if (is_seal && !release->in_seal)
+		release->seal_runs++;
+	release->in_system = is_system;
+	release->in_seal = is_seal;
+	if (release->system_runs > 1 || release->seal_runs > 1 ||
+	    (root && (entry->kind != ERX_ENTRY_IMAGE || !is_system)))
+		return ("release_run");
+	if (manifest) {
+		if (entry->kind != ERX_ENTRY_FILE || !is_system)
+			return ("manifest_binding");
+		release->has_manifest = true;
+	}
+	return (NULL);
+}
+
+/*
+ * The index run, in the design's order: the header and the index hash, then
+ * each entry's path and place. File data is never read here;
+ * erx_pack_file_check reads it at each file's first use.
+ */
+bool
+erx_pack_open(const uint8_t *bytes, size_t length, erx_pack_scratch_t *scratch,
+    erx_blake3_ctx_t *hasher, erx_pack_view_t *result, erx_pack_error_t *error)
+{
+	erx_pack_view_t view;
+	erx_pack_entry_t entry;
+	erx_release_t release;
+	const uint8_t *path, *previous_path;
+	const char *reason;
+	uint64_t cursor, strings_cursor;
+	size_t depth, path_length, previous_length;
+
+	if (result != NULL)
+		*result = (erx_pack_view_t){0};
+	if (bytes == NULL || scratch == NULL || hasher == NULL || result == NULL)
+		return (erx_pack_fail(error, UINT32_MAX, "header_extent"));
+	view = (erx_pack_view_t){ .bytes = bytes, .length = length };
+	if (!erx_index_check(bytes, length, hasher, &view.header, &cursor, error))
+		return (false);
+	depth = 0;
+	strings_cursor = 0;
+	release = (erx_release_t){0};
+	previous_path = NULL;
+	previous_length = 0;
+	for (uint32_t index = 0; index < view.header.nentries; index++) {
+		/* The paths fill the string table in entry order, no slack. */
+		if (!erx_pack_entry_at(&view, index, &entry) ||
+		    entry.path_off != strings_cursor ||
+		    !erx_pack_path_at(&view, index, &path, &path_length))
+			return (erx_pack_fail(error, index, "path_extent"));
+		strings_cursor += path_length;
+		if (!erx_path_valid(path, path_length))
+			return (erx_pack_fail(error, index, "path"));
+		if (index != 0 && erx_path_compare(previous_path, previous_length,
+		    path, path_length) >= 0)
+			return (erx_pack_fail(error, index, "path_order"));
+		if (!erx_prefix_step(&view, scratch, &depth, index, path, path_length,
+		    error))
+			return (false);
+		if (!erx_entry_place(&entry, &cursor, length))
+			return (erx_pack_fail(error, index, "entry_values"));
+		reason = erx_release_step(&release, &entry,
+		    index == view.header.root_entry,
+		    erx_is_manifest_path(path, path_length));
+		if (reason != NULL)
+			return (erx_pack_fail(error, index, reason));
+		previous_path = path;
+		previous_length = path_length;
+	}
+	if (strings_cursor != view.header.strings_size)
+		return (erx_pack_fail(error, UINT32_MAX, "path_extent"));
+	if (cursor != length || release.system_runs != 1 || !release.has_manifest)
 		return (erx_pack_fail(error, UINT32_MAX, "archive_end"));
-	*result = (erx_pack_view_t){ .bytes = bytes, .length = length,
-	    .header = header };
+	*result = view;
+	return (true);
+}
+
+/*
+ * One file's run, against a view erx_pack_open accepted. The hash is compared
+ * first, so a damaged file is refused as damaged; then the padding, which the
+ * hash alone would accept nonzero; then the manifest the file carries, if it
+ * is an executable image or the system configuration.
+ */
+bool
+erx_pack_file_check(const erx_pack_view_t *view, uint32_t index,
+    erx_blake3_ctx_t *hasher, erx_pack_error_t *error)
+{
+	erx_pack_entry_t entry;
+	const uint8_t *data, *path;
+	uint8_t digest[ERX_PACK_HASH_SIZE];
+	uint64_t end, run_end;
+	size_t path_length;
+
+	if (view == NULL || hasher == NULL ||
+	    !erx_pack_entry_at(view, index, &entry) ||
+	    !erx_pack_path_at(view, index, &path, &path_length) ||
+	    !erx_extent(entry.data_off, entry.data_size, view->length) ||
+	    __builtin_add_overflow(entry.data_off, entry.data_size, &end) ||
+	    !erx_round_page(end, &run_end) || run_end > view->length)
+		return (erx_pack_fail(error, index, "file_extent"));
+	data = view->bytes + (size_t)entry.data_off;
+	erx_blake3_init(hasher);
+	erx_blake3_update(hasher, data, (size_t)(run_end - entry.data_off));
+	erx_blake3_final(hasher, digest);
+	if (!erx_hash_equal(digest, entry.file_hash))
+		return (erx_pack_fail(error, index, "file_hash"));
+	if (!erx_zeroes(view->bytes, end, run_end, view->length))
+		return (erx_pack_fail(error, index, "padding"));
+	if (entry.kind == ERX_ENTRY_IMAGE &&
+	    !erx_image_valid(data, (size_t)entry.data_size,
+	    index == view->header.root_entry, error, index))
+		return (false);
+	if (erx_is_manifest_path(path, path_length) &&
+	    !erx_pack_manifest_valid(data, (size_t)entry.data_size,
+	    view->header.flags, error, index))
+		return (false);
 	return (true);
 }
 
@@ -437,5 +638,119 @@ erx_pack_path_at(const erx_pack_view_t *view, uint32_t index,
 		return (false);
 	*path = view->bytes + (size_t)view->header.strings_off + entry.path_off;
 	*length = entry.path_len;
+	return (true);
+}
+
+/* Neither range wraps, and they share no byte. */
+static bool
+erx_ranges_clear(erx_boot_range_t left, erx_boot_range_t right)
+{
+	uint64_t left_end, right_end;
+
+	if (__builtin_add_overflow(left.start, left.size, &left_end) ||
+	    __builtin_add_overflow(right.start, right.size, &right_end))
+		return (false);
+	return (left.size == 0 || right.size == 0 ||
+	    left.start >= right_end || right.start >= left_end);
+}
+
+/* The archive a locator names, at or after the linked end, inside the file. */
+static bool
+erx_locator_range(const erx_boot_inputs_t *inputs,
+    const erx_boot_locator_t *locator, erx_boot_range_t *archive)
+{
+	uint64_t end, start;
+
+	if (locator->archive_off % ERX_PAGE_SIZE != 0 ||
+	    locator->archive_off < inputs->linked_end)
+		return (false);
+	if (__builtin_add_overflow(locator->archive_off, locator->archive_size,
+	    &end) || end > inputs->declared_size)
+		return (false);
+	if (__builtin_add_overflow(inputs->load, locator->archive_off, &start))
+		return (false);
+	*archive = (erx_boot_range_t){ .start = start,
+	    .size = locator->archive_size };
+	return (true);
+}
+
+/*
+ * The archive, wherever it came from, starts on a page, lies inside one
+ * memory range of the device tree, and meets neither the device tree, nor a
+ * reserved range, nor the first stage's extent.
+ */
+static bool
+erx_archive_place(const erx_boot_inputs_t *inputs, erx_boot_range_t archive,
+    erx_pack_error_t *error)
+{
+	erx_boot_range_t memory, stage;
+	uint64_t archive_end, memory_end;
+	bool inside;
+
+	if (archive.size == 0 || archive.start % ERX_PAGE_SIZE != 0 ||
+	    __builtin_add_overflow(archive.start, archive.size, &archive_end))
+		return (erx_pack_fail(error, UINT32_MAX, "archive_extent"));
+	inside = false;
+	for (size_t index = 0; index < inputs->nmemory; index++) {
+		memory = inputs->memory[index];
+		if (!__builtin_add_overflow(memory.start, memory.size, &memory_end) &&
+		    archive.start >= memory.start && archive_end <= memory_end)
+			inside = true;
+	}
+	if (!inside)
+		return (erx_pack_fail(error, UINT32_MAX, "archive_memory"));
+	stage = (erx_boot_range_t){ .start = inputs->load,
+	    .size = inputs->linked_end };
+	if (!erx_ranges_clear(archive, stage) ||
+	    !erx_ranges_clear(archive, inputs->device_tree))
+		return (erx_pack_fail(error, UINT32_MAX, "archive_overlap"));
+	for (size_t index = 0; index < inputs->nreserved; index++) {
+		if (!erx_ranges_clear(archive, inputs->reserved[index]))
+			return (erx_pack_fail(error, UINT32_MAX,
+			    "archive_overlap"));
+	}
+	return (true);
+}
+
+/*
+ * Where the archive is: inside the first stage's own file when its locator
+ * names it, else the initrd; never both. The locator's fields are read once,
+ * here, into locals.
+ */
+bool
+erx_boot_locate(const erx_boot_inputs_t *inputs, erx_boot_range_t *result,
+    erx_pack_error_t *error)
+{
+	static const uint8_t magic[] = ERX_BOOT_LOCATOR_MAGIC_BYTES;
+	erx_boot_locator_t locator;
+	erx_boot_range_t archive;
+
+	if (inputs == NULL || result == NULL || inputs->locator == NULL ||
+	    (inputs->memory == NULL && inputs->nmemory != 0) ||
+	    (inputs->reserved == NULL && inputs->nreserved != 0) ||
+	    !erx_boot_locator_decode(inputs->locator, ERX_BOOT_LOCATOR_SIZE,
+	    &locator))
+		return (erx_pack_fail(error, UINT32_MAX, "locator"));
+	for (size_t index = 0; index < sizeof(magic); index++) {
+		if (locator.magic[index] != magic[index])
+			return (erx_pack_fail(error, UINT32_MAX, "locator"));
+	}
+	if (locator.version != ERX_BOOT_LOCATOR_VERSION || locator.zero != 0 ||
+	    (locator.archive_off == 0) != (locator.archive_size == 0))
+		return (erx_pack_fail(error, UINT32_MAX, "locator"));
+	if (locator.archive_off == 0) {
+		if (!inputs->has_initrd)
+			return (erx_pack_fail(error, UINT32_MAX, "no_boot_image"));
+		archive = inputs->initrd;
+	} else {
+		if (inputs->has_initrd)
+			return (erx_pack_fail(error, UINT32_MAX,
+			    "two_boot_images"));
+		if (!erx_locator_range(inputs, &locator, &archive))
+			return (erx_pack_fail(error, UINT32_MAX, "locator_range"));
+	}
+	if (!erx_archive_place(inputs, archive, error))
+		return (false);
+	*result = archive;
 	return (true);
 }

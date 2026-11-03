@@ -149,8 +149,8 @@ class StackGraphTest < Minitest::Test
       graph = Erx::StackGraph.extract(inputs: inputs.values, tools: @tools, runner: @runner)
       # A sample of the entries. A new core needs none, since the graph's
       # every function is checked below.
-      %w[erx_pack_open erx_tlb_plan erx_watchdog_step erx_watchdog_parse erx_manifest_open erx_rng_read
-         erx_rng_mix erx_chacha20_xor erx_sha256_final
+      %w[erx_pack_open erx_pack_file_check erx_boot_locate erx_tlb_plan
+         erx_watchdog_step erx_watchdog_parse erx_manifest_open erx_rng_read erx_rng_mix erx_chacha20_xor erx_sha256_final
          erx_blake3_update erx_blake3_final erx_blake3_compress_in_place].each do |entry|
         function = graph.fetch_function(Name.new(name: entry, object: nil))
         assert_kind_of Integer, function.frame_bytes, "#{entry} #{level}"

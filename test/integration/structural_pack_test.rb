@@ -47,6 +47,8 @@ class StructuralPackTest < Minitest::Test
     right = second.fetch('report')
     assert_equal 'structural_test_fixture', left.fetch('kind')
     assert_equal File.binread(left.fetch('path')), File.binread(right.fetch('path'))
+    assert_equal File.binread(left.fetch('single_path')), File.binread(right.fetch('single_path'))
+    assert File.binread(left.fetch('single_path')).end_with?(File.binread(left.fetch('path')))
     assert_equal left.fetch('sha256'), right.fetch('sha256')
     assert_equal left.fetch('manifest_sha256'), right.fetch('manifest_sha256')
     assert_equal first.fetch('context').fingerprint, second.fetch('context').fingerprint
@@ -70,7 +72,8 @@ class StructuralPackTest < Minitest::Test
     planner = Erx::ElfPlanner.new(helper: @tools.fetch('planner'), runner: @runner, codec: @codec)
     resolver = Erx::PackProvenance.new(root: @root, catalog: native.fetch('catalog'), external: @external, runner: @runner)
     production = Erx::Pack.new(root: @root, output_root: @directory, codec: @codec, planner: planner,
-                               checker: @tools.fetch('checker'), runner: @runner, provenance: resolver)
+                               checker: @tools.fetch('checker'), hasher: @tools.fetch('hasher'), runner: @runner,
+                               provenance: resolver)
     entries = [{ 'path' => 'system/root', 'kind' => @codec.member('entry_kind', 'image'),
                  'flags' => @codec.member('entry_flags', 'system'), 'id' => 'root',
                  'artifact' => native.fetch('artifact'), 'receipt' => native.fetch('receipt') }]

@@ -3,10 +3,19 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+/*
+ * pack-check IMAGE: the boot validator over an archive, then the file check
+ * of every entry, as the boot and the first slices would run them. Prints
+ * "ok NENTRIES" or "error REASON ENTRY"; a refused version prints
+ * "error version FOUND, expected 2 ENTRY".
+ */
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "blake3/blake3.h"
 #include "erx/pack.h"
 #include "input.h"
 
@@ -15,6 +24,7 @@ main(int argc, char **argv)
 {
 	erx_pack_error_t error;
 	erx_pack_scratch_t *scratch;
+	erx_blake3_ctx_t hasher;
 	erx_pack_view_t view;
 	uint8_t *bytes;
 	size_t length;
@@ -32,9 +42,16 @@ main(int argc, char **argv)
 		fputs("cannot read image within host budget\n", stderr);
 		return (1);
 	}
-	accepted = erx_pack_open(bytes, length, scratch, &view, &error);
+	accepted = erx_pack_open(bytes, length, scratch, &hasher, &view, &error);
+	for (uint32_t index = 0; accepted && index < view.header.nentries;
+	    index++)
+		accepted = erx_pack_file_check(&view, index, &hasher, &error);
 	if (accepted) {
 		printf("ok %u\n", view.header.nentries);
+	} else if (strcmp(error.reason, ERX_PACK_REASON_VERSION) == 0) {
+		printf("error version %llu, expected %u %u\n",
+		    (unsigned long long)error.found, (unsigned)ERX_PACK_VERSION,
+		    error.entry);
 	} else {
 		printf("error %s %u\n", error.reason, error.entry);
 	}

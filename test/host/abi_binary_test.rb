@@ -15,15 +15,15 @@ class AbiBinaryTest < Minitest::Test
   end
 
   def header_values
-    { 'version' => 1, 'flags' => 1, 'total_size' => 4096,
-      'nentries' => 1, 'entry_size' => 32, 'entries_off' => 64,
-      'strings_off' => 96, 'strings_size' => 2, 'root_entry' => 0,
-      'build_id' => '12345678' }
+    { 'version' => 2, 'flags' => 1, 'total_size' => 4096,
+      'nentries' => 1, 'entry_size' => 64, 'entries_off' => 96,
+      'strings_off' => 160, 'strings_size' => 2, 'root_entry' => 0,
+      'build_id' => '12345678', 'index_hash' => 'h' * 32 }
   end
 
   def test_pack_header_encoder_matches_independent_bytes
-    expected = ["ERXPACK\0", 1, 1, 4096, 1, 32, 64, 96, 2, 0,
-                '12345678'].pack('a8VVQ<VVQ<Q<VVa8')
+    expected = ["ERXPACK\0", 2, 1, 4096, 1, 64, 96, 160, 2, 0,
+                '12345678', 'h' * 32].pack('a8VVQ<VVQ<Q<VVa8a32')
     original = header_values
     encoded = @codec.encode_layout('erx_pack_header', original)
     assert_equal expected, encoded

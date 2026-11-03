@@ -44,7 +44,8 @@ class PackResourceTest < Minitest::Test
       tools = Erx::PackTools.build(root: root, owner_root: directory,
                                    directory: File.join(directory, 'tools'), runner: runner)
       pack = Erx::Pack.new(root: root, output_root: directory, codec: codec, planner: TinyLoads.new,
-                           checker: tools.fetch('checker'), runner: runner, provenance: KnownProvenance.new)
+                           checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: runner,
+                           provenance: KnownProvenance.new)
       assert_raises(Erx::Error) do
         pack.send(:snapshot, entries, workspace: directory, budget: 32_768, build_kind: 'development')
       end

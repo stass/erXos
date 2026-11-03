@@ -11,6 +11,10 @@
 #include "erx/abi.h"
 
 /* Prefix decoders borrow immutable bytes; references remain untrusted. */
+bool erx_arch_boot_header_decode(const uint8_t *bytes, size_t length,
+    erx_arch_boot_header_t *result);
+bool erx_boot_locator_decode(const uint8_t *bytes, size_t length,
+    erx_boot_locator_t *result);
 bool erx_boot_connection_decode(const uint8_t *bytes, size_t length,
     erx_boot_connection_t *result);
 bool erx_boot_root_extension_decode(const uint8_t *bytes, size_t length,

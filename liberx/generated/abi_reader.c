@@ -46,6 +46,51 @@ erx_abi_load_u64(const uint8_t *bytes)
 }
 
 bool
+erx_arch_boot_header_decode(const uint8_t *bytes, size_t length,
+    erx_arch_boot_header_t *result)
+{
+	erx_arch_boot_header_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_ARCH_BOOT_HEADER_SIZE)
+		return (false);
+
+	value.code0 = erx_abi_load_u32(bytes + 0);
+	value.code1 = erx_abi_load_u32(bytes + 4);
+	value.text_offset = erx_abi_load_u64(bytes + 8);
+	value.image_size = erx_abi_load_u64(bytes + 16);
+	value.flags = erx_abi_load_u64(bytes + 24);
+	value.res2 = erx_abi_load_u64(bytes + 32);
+	value.res3 = erx_abi_load_u64(bytes + 40);
+	value.res4 = erx_abi_load_u64(bytes + 48);
+	for (size_t byte = 0; byte < 4; byte++)
+		value.magic[byte] = bytes[56 + byte];
+	value.res5 = erx_abi_load_u32(bytes + 60);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_boot_locator_decode(const uint8_t *bytes, size_t length,
+    erx_boot_locator_t *result)
+{
+	erx_boot_locator_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_BOOT_LOCATOR_SIZE)
+		return (false);
+
+	for (size_t byte = 0; byte < 8; byte++)
+		value.magic[byte] = bytes[0 + byte];
+	value.version = erx_abi_load_u32(bytes + 8);
+	value.zero = erx_abi_load_u32(bytes + 12);
+	value.archive_off = erx_abi_load_u64(bytes + 16);
+	value.archive_size = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_boot_connection_decode(const uint8_t *bytes, size_t length,
     erx_boot_connection_t *result)
 {
@@ -125,6 +170,9 @@ erx_pack_entry_decode(const uint8_t *bytes, size_t length,
 	value.data_off = erx_abi_load_u64(bytes + 8);
 	value.data_size = erx_abi_load_u64(bytes + 16);
 	value.manifest_off = erx_abi_load_u64(bytes + 24);
+	for (size_t index = 0; index < 32; index++) {
+		value.file_hash[index] = bytes[32 + index * 1];
+	}
 
 	*result = value;
 	return (true);
@@ -974,6 +1022,9 @@ erx_pack_header_decode(const uint8_t *bytes, size_t length,
 	value.root_entry = erx_abi_load_u32(bytes + 52);
 	for (size_t index = 0; index < 8; index++) {
 		value.build_id[index] = bytes[56 + index * 1];
+	}
+	for (size_t index = 0; index < 32; index++) {
+		value.index_hash[index] = bytes[64 + index * 1];
 	}
 
 	*result = value;

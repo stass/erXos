@@ -427,7 +427,9 @@ class AbiSchemaTest < Minitest::Test
   def test_shipped_sources_form_a_complete_valid_model
     root = File.expand_path('../..', __dir__)
     model = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
-    assert_equal 64, model.types.fetch('erx_pack_header').size
+    assert_equal 96, model.types.fetch('erx_pack_header').size
+    assert_equal 64, model.types.fetch('erx_pack_entry').size
+    assert_equal 32, model.types.fetch('erx_boot_locator').size
     assert_equal 368, model.types.fetch('erx_manifest').size
   end
 

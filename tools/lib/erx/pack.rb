@@ -16,7 +16,7 @@ module Erx
   class Pack
     DEFAULT_BUDGET = 256 * 1024 * 1024
 
-    def initialize(root:, output_root:, codec:, planner:, checker:, runner:, provenance:)
+    def initialize(root:, output_root:, codec:, planner:, checker:, hasher:, runner:, provenance:)
       @root = File.realpath(root)
       @output_root = File.realpath(output_root)
       @codec = codec
@@ -25,6 +25,10 @@ module Erx
         raise Error, 'pack checking requires a helper owned by PackTools.build'
       end
       @checker = checker
+      unless hasher.is_a?(PackTools::Helper) && hasher.tool == 'hasher'
+        raise Error, 'pack hashing requires a helper owned by PackTools.build'
+      end
+      @hasher = PackHasher.new(helper: hasher, runner: runner)
       @runner = runner
       @provenance = provenance
     end
@@ -77,7 +81,7 @@ module Erx
         temporary = File.join(workspace, 'image.pack')
         write(rows, root_entry: root_entry, build_kind: build_kind,
               path: temporary, budget: budget)
-        @checker.run([temporary], runner: @runner, name: 'pack-check', deadline: 30)
+        @checker.run([temporary], runner: @runner, name: 'pack-check', deadline: 300)
         hash = Digest::SHA256.file(temporary).hexdigest
         size = File.size(temporary)
         File.rename(temporary, destination)
@@ -181,9 +185,9 @@ module Erx
     end
 
     def write(rows, root_entry:, build_kind:, path:, budget:)
-      File.open(path, 'wb', 0o600) do |output|
-        PackWire.new(codec: @codec).write(rows: rows, root_entry: root_entry, build_kind: build_kind,
-                                        output: output, budget: budget)
+      File.open(path, 'w+b', 0o600) do |output|
+        PackWire.new(codec: @codec, hasher: @hasher).write(rows: rows, root_entry: root_entry, build_kind: build_kind,
+                                                         output: output, budget: budget)
         output.flush
         output.fsync
       end

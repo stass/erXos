@@ -4,8 +4,10 @@
 
 require_relative 'pack_root'
 require_relative 'manifest_context'
+require_relative 'first_stage_fixture'
 require_relative '../../tools/lib/erx/elf_plan'
 require_relative '../../tools/lib/erx/pack_wire'
+require_relative '../../tools/lib/erx/boot_file'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/pack_tools'
@@ -33,7 +35,13 @@ module StructuralPackFixture
             tools: tools, compiler: compiler, linker: linker, external: external)
     end
     left, right = [first, second].map { |fixture| fixture.fetch('report') }
-    identical = File.binread(left.fetch('path')) == File.binread(right.fetch('path'))
+    # Both forms: the archive of the two-file form and the single file,
+    # whose archive must equal the two-file archive.
+    archive = File.binread(left.fetch('path'))
+    single = File.binread(left.fetch('single_path'))
+    identical = archive == File.binread(right.fetch('path')) &&
+                single == File.binread(right.fetch('single_path')) &&
+                single.byteslice(-archive.bytesize, archive.bytesize) == archive
     report = { 'kind' => 'structural_fixture_reproducibility', 'state' => identical ? 'completed' : 'failed',
                'byte_identical' => identical, 'structure' => 'validated', 'executable' => 'validated',
                'provenance' => 'validated', 'root_startup' => 'unsupported',
@@ -54,7 +62,7 @@ module StructuralPackFixture
     resolver = Erx::PackProvenance.new(root: root, catalog: native.fetch('catalog'), external: external, runner: runner)
     provenance = resolver.resolve(receipt: native.fetch('receipt'), artifact: native.fetch('artifact'),
                                   build_kind: 'development', notice_budget: BUDGET)
-    writer = Erx::PackWire.new(codec: codec)
+    writer = Erx::PackWire.new(codec: codec, hasher: Erx::PackHasher.new(helper: tools.fetch('hasher'), runner: runner))
     system = codec.member('entry_flags', 'system')
     ordinary = codec.member('entry_kind', 'file')
     rows = [
@@ -99,7 +107,12 @@ module StructuralPackFixture
     unless File.binread(checked.fetch('log')) == "ok #{rows.size}\n"
       raise Erx::Error, 'structural checker did not report the expected entry count'
     end
-    report = { 'kind' => 'structural_test_fixture', 'path' => output_path,
+    first_stage_path = File.join(directory, 'first-stage')
+    single_path = File.join(directory, 'structural.boot')
+    File.binwrite(first_stage_path, FirstStageFixture.bytes)
+    Erx::BootFile.write(codec: codec, first_stage: first_stage_path, archive: output_path, output: single_path, output_root: root)
+    report = { 'kind' => 'structural_test_fixture', 'path' => output_path, 'single_path' => single_path,
+               'single_sha256' => Digest::SHA256.file(single_path).hexdigest,
                'sha256' => Digest::SHA256.file(output_path).hexdigest, 'size' => File.size(output_path),
                'structure' => 'validated', 'executable' => 'validated', 'provenance' => 'validated',
                'root_startup' => 'unsupported', 'policy_admission' => 'unsupported',

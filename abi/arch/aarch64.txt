@@ -47,3 +47,19 @@ layout erx_uframe 1 shared 8 272
   visibility sp development
   visibility pc development
   visibility state development
+# The boot protocol's header at the first stage's first byte (Linux v6.12,
+# Documentation/arch/arm64/booting.rst, section 4), with the boot locator
+# right after it (design-arch-aarch64.md, Boot entry).
+limit arch_boot_locator_offset u32 64
+bytes arch_boot_magic 4 value 41524d64
+layout erx_arch_boot_header 1 wire_le 8 64
+  field code0 u32 0
+  field code1 u32 4
+  field text_offset u64 8
+  field image_size u64 16
+  field flags u64 24
+  field res2 u64 32
+  field res3 u64 40
+  field res4 u64 48
+  field magic arch_boot_magic 56
+  field res5 u32 60
