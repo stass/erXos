@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../../tools/lib/erx/core_archive'
 require_relative '../../tools/lib/erx/stack_graph'
 
 # Extracts the stack graph from small C fixtures compiled for the target,
@@ -16,13 +17,20 @@ class StackGraphTest < Minitest::Test
   FIXTURES = File.expand_path('../fixtures/stack_graph', __dir__)
   TARGET_FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                     -mgeneral-regs-only -mno-outline-atomics -fstack-usage].freeze
-  # The cores, the imported SHA-256 and ChaCha20 the entropy generator
-  # calls, the imported BLAKE3, and the generated ABI reader the pack
-  # validator calls.
-  CORE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
+  # Sources that use no effect and call out only to memcpy and memset: the
+  # pure cores and primitives, and the generated ABI reader the pack
+  # validator calls. A floor: a new core needs no entry, since the graph of
+  # every core below holds it to the archive's own allowlist.
+  PURE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
                     kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                     kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                     liberx/generated/abi_reader.c].freeze
+
+  # The archive's sources, the bootstrap core it leaves out, and the reader.
+  def core_sources
+    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/generated/abi_reader.c']
+  end
+
   Name = Erx::StackGraph::Name
 
   def setup
@@ -135,10 +143,12 @@ class StackGraphTest < Minitest::Test
 
   def test_the_cores_yield_one_graph_at_each_level
     %w[-O0 -O2].each do |level|
-      inputs = CORE_SOURCES.map do |source|
-        compile(File.join(@root, source), "#{File.basename(source, '.c')}#{level}", level)
+      inputs = core_sources.to_h do |source|
+        [source, compile(File.join(@root, source), "#{File.basename(source, '.c')}#{level}", level)]
       end
-      graph = Erx::StackGraph.extract(inputs: inputs, tools: @tools, runner: @runner)
+      graph = Erx::StackGraph.extract(inputs: inputs.values, tools: @tools, runner: @runner)
+      # A sample of the entries. A new core needs none, since the graph's
+      # every function is checked below.
       %w[erx_pack_open erx_tlb_plan erx_watchdog_step erx_watchdog_parse erx_manifest_open erx_rng_read
          erx_rng_mix erx_chacha20_xor erx_sha256_final
          erx_blake3_update erx_blake3_final erx_blake3_compress_in_place].each do |entry|
@@ -146,8 +156,12 @@ class StackGraphTest < Minitest::Test
         assert_kind_of Integer, function.frame_bytes, "#{entry} #{level}"
       end
       refute graph.functions.each_key.all?(&:global?), "the cores' static functions appear at #{level}"
-      assert_empty graph.externals.map(&:name) - %w[memcpy memset], "the cores' calls outside themselves at #{level}"
+      assert_empty graph.externals.map(&:name).grep_v(Erx::CoreArchive::UNDEFINED),
+                   "the cores' calls outside themselves at #{level}"
+      pure = Erx::StackGraph.extract(inputs: inputs.fetch_values(*PURE_SOURCES), tools: @tools, runner: @runner)
+      assert_empty pure.externals.map(&:name) - %w[memcpy memset], "the pure cores' calls outside themselves at #{level}"
       graph.functions.each_value do |function|
+        assert_kind_of Integer, function.frame_bytes, "#{function.id} #{level}"
         assert_empty function.indirect_calls + function.indirect_branches, "#{function.id} #{level}"
       end
     end
@@ -195,7 +209,8 @@ class StackGraphTest < Minitest::Test
   def compile(source, stem, level, function_sections: true)
     object = File.join(@directory, "#{stem}.o")
     @runner.run([@compiler, *TARGET_FLAGS, level, *(function_sections ? ['-ffunction-sections'] : []),
-                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'), '-c', source,
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/generated'),
+                 '-I', File.join(@root, 'kernel/crypto'), '-c', source,
                  '-o', object],
                 name: 'compile-stack-graph', deadline: 60)
     Erx::StackGraph::Input.beside(object)

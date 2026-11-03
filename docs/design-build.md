@@ -414,3 +414,34 @@ archive, both forms booting under the harness, and the boot validator's
 configured sanitizer and fuzz budgets. `make check` is offline and runs
 ordinary host checks and generation drift. `make check-tla` remains a
 separate gate; a missing requested tool is an error rather than a skip.
+
+### What the gates run
+
+The gates run what the tree declares, so that adding a core, a test or a
+fuzz target is adding files and parallel work never edits a shared list.
+Each declaration lives with what it declares:
+
+| Gate | Declared by | Fails when |
+| --- | --- | --- |
+| Chokepoint checks | `tools/lib/erx/chokepoint_rules/NAME.rb`, one group of rules; a core's group is named after its source and states its rules or why it has none | a `kernel/core` or `kernel/sched` source has no group, or a group file declares nothing, twice, or an empty group |
+| `check-sanitizers` | the line `# erx-gate: sanitizers` in a test under `test/host` or `test/integration` | a comment resembles it but is not it, a test reads the sanitizer switch directly or through a helper without declaring, a core or `liberx` source is named by no declaring test, or nothing declares |
+| `check-fuzz`, native targets | `tools/fuzz/KIND_target.rb` beside `tools/fuzz/KIND_fuzz.c`, naming sources, include paths and seeds | either file lacks the other, or a declaration is empty or malformed |
+
+Discovery could otherwise make a security gate quietly run less, so
+`test/host/gate_baseline_test.rb` holds a floor: a table of what must stay
+in each gate, with each rule's and target's least seed count. Adding to a
+gate does not touch that file; taking something away does, which makes the
+removal a visible edit. `tools/erx gates` lists what each gate runs, one
+line each, for a reader or a diff. An integration test runs in `make check`
+unless `tools/erx` excuses it by name.
+
+`TODO.md` and `docs/todo-performance.md` merge by line union
+(`.gitattributes`), so concurrent additions to these lists never
+conflict; an entry edited on both sides can stay in both forms, which the
+next reader tidies. Generated ABI outputs are functions of their sources:
+`tools/land COMMIT` cherry-picks one commit, and when only those outputs
+conflict it removes them, runs `tools/gen_abi.rb`, proves the result with
+`--check` and continues. Any other conflict stops the pick with the files
+listed; `tools/land --continue` finishes it once they are resolved and added.
+A clean pick whose outputs are stale has them regenerated into it. Edits
+outside the index are refused, so what is generated from is what is committed.

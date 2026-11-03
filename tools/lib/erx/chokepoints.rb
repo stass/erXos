@@ -12,8 +12,8 @@ module Erx
   # (docs/design-kernel.md, "Chokepoint checks"; docs/design-stopgap.md,
   # "Verification and testing"). A rule names the files it reads, what it
   # forbids there and the sites allowed to do it anyway. The rules
-  # themselves are declared in chokepoint_rules.rb; this file is the
-  # machinery that evaluates them.
+  # themselves are declared in chokepoint_rules/, one file per group, loaded
+  # by chokepoint_rules.rb; this file is the machinery that evaluates them.
   #
   # The kinds form a closed set:
   # * Forbidden: a pattern that may match only at an allowed site, over the

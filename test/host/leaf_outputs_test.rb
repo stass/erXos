@@ -137,7 +137,7 @@ class LeafOutputsTest < Minitest::Test
       end
     end
     Erx::PackFuzz.run(root: @root, runner: recorder, runs: 1)
-    expected = Erx::PackFuzz::SOURCES.keys.flat_map { |kind| ["compile-#{kind}-fuzz", "#{kind}-fuzz"] }
+    expected = Erx::PackFuzz.targets.map(&:kind).flat_map { |kind| ["compile-#{kind}-fuzz", "#{kind}-fuzz"] }
     assert_equal expected, commands.map(&:first)
     lane = commands.to_h.fetch('compile-lane-fuzz')
     assert_includes lane, File.join(@root, 'liberx/erx_lane.c')

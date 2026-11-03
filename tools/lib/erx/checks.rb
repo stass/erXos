@@ -23,9 +23,20 @@ module Erx
   #
   # Diagnostics carry raw names; the CLI's sink escapes them (Terminal.puts).
   class Checks
-    IMPORTS = %w[otp musl fiasco/kernel fiasco/mk fiasco/l4re-core fiasco/bootstrap
-                 fiasco/libfdt fiasco/drivers-frst kernel/crypto/sha2 kernel/crypto/chacha20
-                 kernel/crypto/blake3 test/oracle/common_test].freeze
+    IMPORTS = %w[
+      fiasco/bootstrap
+      fiasco/drivers-frst
+      fiasco/kernel
+      fiasco/l4re-core
+      fiasco/libfdt
+      fiasco/mk
+      kernel/crypto/blake3
+      kernel/crypto/chacha20
+      kernel/crypto/sha2
+      musl
+      otp
+      test/oracle/common_test
+    ].freeze
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/

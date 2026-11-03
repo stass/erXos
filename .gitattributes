@@ -1,0 +1,7 @@
+# Bulleted work lists, added to by every branch. A union merge keeps both
+# sides' lines, so concurrent additions never conflict. Its cost: an entry
+# one side closes and the other edits comes back, one edited on both sides
+# stays in both forms, and two wrapped additions sharing a line can splice.
+# The next reader tidies those; no gate reads these files.
+/TODO.md merge=union
+/docs/todo-performance.md merge=union

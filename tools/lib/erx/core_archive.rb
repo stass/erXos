@@ -30,7 +30,10 @@ module Erx
     # The recipe is part of what the archive's bytes depend on, so a
     # change to it discards the kernel build as a source change does.
     IMPLEMENTATION_SHA256 = Digest::SHA256.file(__FILE__).hexdigest.freeze
-    PATTERNS = %w[kernel/core/*.c kernel/crypto/*/*.c kernel/sched/*.c kernel/generated/*.c].freeze
+    # The core directories: each C source here is a core, which the chokepoint
+    # rules and the sanitizer gate also hold to their own requirements.
+    CORE_PATTERNS = %w[kernel/core/*.c kernel/sched/*.c].freeze
+    PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'kernel/generated/*.c'].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
     BOOTSTRAP_SOURCES = %w[kernel/core/pack.c].freeze
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
@@ -62,6 +65,9 @@ module Erx
     Built = Data.define(:archive, :objects, :seam)
 
     module_function
+
+    # The core sources under root, the bootstrap ones included.
+    def core_files(root) = CORE_PATTERNS.flat_map { |pattern| Dir.glob(pattern, base: root) }.sort
 
     # Every kernel core under root, sorted so that the archive, the graph
     # and the report come out the same on every run.

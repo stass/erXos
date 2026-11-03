@@ -75,6 +75,8 @@ class TopLevelCliTest < Minitest::Test
     assert integration.first.any? { |argument| argument.end_with?('/terminal_tables_test.rb') }
     assert integration.first.any? { |argument| argument.end_with?('/structural_pack_test.rb') }
     assert integration.first.any? { |argument| argument.end_with?('/fiasco_config_test.rb') }
+    assert integration.first.any? { |argument| argument.end_with?('/pack_fixture_test.rb') }
+    assert integration.first.any? { |argument| argument.end_with?('/sanitizer_gate_test.rb') }
     assert_equal '/verified/erl', integration.last.fetch(:env).fetch('ERX_ERL')
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
   end
@@ -94,6 +96,29 @@ class TopLevelCliTest < Minitest::Test
                                                   host_environment: verified)
     assert_equal 1, status
     assert_includes output, '/evidence/failure.log'
+  end
+
+  # A new integration test runs without an entry; only excusing one takes an edit.
+  def test_integration_tests_run_unless_excused
+    Dir.mktmpdir('erx-cli-integration-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'test/integration'))
+      %w[new_test.rb fiasco_reproducible_test.rb oracle_reporter_test.rb helper.rb].each do |name|
+        File.write(File.join(root, 'test/integration', name), '')
+      end
+      assert_equal [File.join(root, 'test/integration/new_test.rb')], Erx::CLI.integration_tests(root)
+    end
+    Dir.mktmpdir('erx-cli-integration-') do |root|
+      assert_raises(Erx::Error) { Erx::CLI.integration_tests(root) }
+    end
+  end
+
+  def test_gates_lists_what_each_discovered_gate_runs
+    status, output = run_cli('gates')
+    assert_equal 0, status, output
+    assert_includes output, 'sanitizer test: test/host/cap_test.rb'
+    assert_includes output, 'native fuzz target: cap: 4 seeds; sources kernel/core/cap.c;'
+    assert_includes output, 'chokepoint rule: cap-table-private: Forbidden, 10 seeds'
+    assert_includes output, 'chokepoint rule: object-leg: Pending, 0 seeds'
   end
 
   def test_failed_renderer_integration_fails_the_aggregate_gate
@@ -127,7 +152,7 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_commands_refuse_unsupported_collaborators
-    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle --help -h].each do |command|
+    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle gates --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end
@@ -139,14 +164,9 @@ class TopLevelCliTest < Minitest::Test
       assert_equal 0, status, output
     end
     tests = commands.find { |_argv, options| options.fetch(:name) == 'sanitizer-tests' }
-    assert tests.first.any? { |argument| argument.end_with?('/pack_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/elf_plan_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/watchdog_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/crypto_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/rng_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/blake3_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/lane_test.rb') }
-    assert tests.first.any? { |argument| argument.end_with?('/tlb_plan_test.rb') }
+    expected = Erx::SanitizerTests.discover(root: Erx::ROOT).map { |path| File.join(Erx::ROOT, path) }
+    refute_empty expected
+    assert_equal expected, tests.first.last(expected.size)
     assert_equal 'address,undefined', tests.last.fetch(:env).fetch('ERX_SANITIZERS')
   end
 

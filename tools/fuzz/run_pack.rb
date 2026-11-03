@@ -4,8 +4,7 @@
 
 require 'fileutils'
 require 'tmpdir'
-require_relative '../../test/fixtures/pack_fixture'
-require_relative '../../test/fixtures/elf_fixture'
+require_relative '../lib/erx/declaration_files'
 require_relative '../lib/erx/runner'
 require_relative '../lib/erx/output_directory'
 
@@ -70,81 +69,74 @@ module Erx
     private_class_method :retain_crashes
   end
 
-  # The native kernel cores and liberx parsers, each built from its own
-  # sources with its libFuzzer entry in tools/fuzz/KIND_fuzz.c: the
-  # boot-path parsers of the ERXPACK boot image, ELF executable headers and
-  # the erx.watchdog= boot argument; the capability core, fed the values,
-  # masks and counts a domain controls; SHA-256, ChaCha20 and the entropy
-  # generator built on them; BLAKE3; and the lane reader over a hostile
-  # producer's side.
+  # The native fuzz targets: kernel cores and liberx parsers, fed what a
+  # domain, a device or the host link controls. Each is two files in this
+  # directory, its libFuzzer entry KIND_fuzz.c and its declaration
+  # KIND_target.rb (sources, include paths, seeds), which this module
+  # discovers in sorted order. A new target needs no entry here, and an entry
+  # without its declaration, a declaration without its entry, or a malformed
+  # declaration stops the run instead of shrinking it.
   module PackFuzz
     module_function
 
-    SHA256 = 'kernel/crypto/sha2/sha256c.c'
-    CHACHA20 = 'kernel/crypto/chacha20/chacha.c'
-    SOURCES = { 'pack' => ['kernel/core/pack.c'], 'elf' => ['liberx/elf_plan.c'],
-                'watchdog' => ['kernel/core/watchdog.c'], 'cap' => ['kernel/core/cap.c'],
-                'sha256' => [SHA256], 'chacha20' => [CHACHA20],
-                'rng' => ['kernel/core/rng.c', CHACHA20, SHA256],
-                'blake3' => ['kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
-                'lane' => ['liberx/erx_lane.c'] }.freeze
-    # Accepted values at the bounds and one of each refusal, so mutations
-    # start on both sides of every check.
-    WATCHDOG_SEEDS = %w[1,5,60 60,120,600 1,2,2 0,5,60 1,1,60 1,5,4 1,5 1,5,60,
-                        4294967296,5,60 1,,60 off].freeze
-    # Installs, then a lookup, a clear, a reservation and a pass of
-    # what was installed, so mutations start inside the tables.
-    CAP_SEEDS = ["\x00\x00\x07\xff\xff\xff\xff\x01\x00",
-                 "\x00\x00\x07\xff\xff\xff\xff\x01\x00\x00\x02\x01\x00\x00\x00\x00\x00\x00",
-                 "\x00\x00\x0b\xff\xff\xff\xff\x05\x00\x01\x03\x02\x00\x05\x00\x01\x01\x01\x01\x02\xff\xff\xff\xff\x00\x00",
-                 "\x00\x00\x06\xff\xff\xff\xff\x09\x00\x00\x01\x01\x01\x00\x07"].freeze
-    # A key, a nonce and a little-endian counter, then data: from counter 0
-    # and from the counter's last block, with data across block boundaries.
-    CHACHA20_HEADERS = { 'start' => ("\x01" * 44 + "\x00\x00\x00\x00").b,
-                         'last' => ("\x02" * 44 + "\xff\xff\xff\xff").b }.freeze
-    # Generator programs (op 0 read, 1 mix, 2 clear, 3 init): reads before
-    # any init, at and past the bound, mixes, and a clear with what follows.
-    RNG_SEEDS = { 'unseeded' => "\x00\x20\x00\x01\x01z", 'read-bound' => "\x03\x01s\x00\x00\x01",
-                  'read-past' => "\x03\x01s\x00\x01\x01", 'read-empty' => "\x03\x00\x00\x00\x00",
-                  'mix' => "\x03\x00\x01\x05abcde\x00\x20\x00",
-                  'reset' => "\x03\x01x\x02\x00\x08\x00\x01\x01y\x03\x00\x00\x08\x00" }.freeze
-    # Lane scripts in tools/fuzz/lane_fuzz.c's format: a record of 40
-    # bytes published whole and in parts, read with small and large
-    # buffers and an armed take, on each area size and start position;
-    # one longer than the area; and one refusal of each wpos check.
-    LANE_RECORD = [3, 40].pack('CV') + [1, 2].pack('Cv') + [5, 5].pack('Cv') + [1, 4].pack('Cv') +
-                  [5, 1000].pack('Cv') + [6, 1000].pack('Cv')
-    LANE_SEEDS = {
-      'record' => "\x00".b + LANE_RECORD, 'large' => "\x01".b + LANE_RECORD, 'top' => "\x02".b + LANE_RECORD,
-      'long' => "\x00".b + [3, 5000].pack('CV') + ([1, 256].pack('Cv') + [5, 4096].pack('Cv')) * 3,
-      'unaligned' => "\x00".b + [0, 8].pack('CQ<') + [5, 16].pack('Cv'),
-      'ahead' => "\x00".b + [0, 8192].pack('CQ<') + [5, 16].pack('Cv'),
-      'words' => "\x00".b + [2, 2, 40].pack('CvQ<') + [4, 32].pack('CQ<') + [3, 64].pack('CV') + [1, 6].pack('Cv') +
-                 [5, 100].pack('Cv'),
-      'too-long' => "\x00".b + [3, 0x1000001].pack('CV') + [1, 1].pack('Cv') + [5, 16].pack('Cv')
-    }.freeze
-
-    # Each kind's compile and run deadlines, in seconds, and the whole
-    # run's, which allows every kind both in full.
+    # The include paths of a target that declares none of its own.
+    INCLUDES = %w[include kernel/core kernel/generated kernel/crypto].freeze
+    # Each kind's compile and run deadlines, in seconds.
     COMPILE_DEADLINE = 90
     RUN_DEADLINE = 120
-    DEADLINE = SOURCES.size * (COMPILE_DEADLINE + RUN_DEADLINE)
+    # A seed's name becomes a file name in the target's corpus.
+    SEED_NAME = /\A[a-z0-9-]+\z/
+    Target = Data.define(:kind, :sources, :includes, :seeds)
+    TARGET_FILES = DeclarationFiles.new('native fuzz targets')
+    private_constant :TARGET_FILES
+
+    # Each tools/fuzz/KIND_target.rb calls this exactly once. seeds maps a
+    # name to the bytes of one corpus file.
+    def declare_target(sources:, seeds:, includes: INCLUDES)
+      unless relative_paths?(sources) && relative_paths?(includes)
+        raise Error, 'native fuzz targets: sources and includes are non-empty lists of relative paths'
+      end
+      unless seeds.is_a?(Hash) && !seeds.empty? &&
+             seeds.all? { |name, bytes| name.is_a?(String) && SEED_NAME.match?(name) && bytes.is_a?(String) }
+        raise Error, 'native fuzz targets: seeds are a non-empty map of plain names to bytes'
+      end
+
+      TARGET_FILES.declare({ sources: sources, includes: includes, seeds: seeds })
+    end
+
+    # The targets declared in directory, sorted by kind. Public so the tests
+    # can feed it malformed directories.
+    def load_targets(directory)
+      declared = TARGET_FILES.load_all(directory, suffix: '_target.rb')
+      entries = Dir.glob('*_fuzz.c', base: directory).map { |file| file.delete_suffix('_fuzz.c') }
+      unmatched = (entries - declared.keys) | (declared.keys - entries)
+      unless unmatched.empty?
+        raise Error, "native fuzz targets: #{unmatched.join(', ')} needs both KIND_fuzz.c and KIND_target.rb"
+      end
+
+      declared.map { |kind, declaration| Target.new(kind: kind, **declaration) }.freeze
+    end
+
+    def targets = (@targets ||= load_targets(__dir__))
+
+    # The whole run's deadline, which allows every kind both in full.
+    def deadline = targets.size * (COMPILE_DEADLINE + RUN_DEADLINE)
 
     def run(root:, runner:, compiler: 'clang', runs: 20_000)
       unless runs.is_a?(Integer) && runs.between?(1, 10_000_000)
         raise Error, 'invalid pack fuzz run bound'
       end
       FuzzWorkspace.run(root: root, name: 'pack', maximum_input: 32_768) do |directory, artifacts|
-        SOURCES.map do |kind, sources|
+        targets.map do |target|
+          kind = target.kind
           corpus = File.join(directory, "#{kind}-corpus")
           Dir.mkdir(corpus, 0o700)
-          seeds(kind).each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
+          target.seeds.each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
           program = File.join(directory, "#{kind}-fuzz")
           runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
-                      '-I', File.join(root, 'include'), '-I', File.join(root, 'kernel/core'),
-                      '-I', File.join(root, 'kernel/generated'), '-I', File.join(root, 'kernel/crypto'),
-                      *sources.map { |source| File.join(root, source) },
+                      *target.includes.flat_map { |path| ['-I', File.join(root, path)] },
+                      *target.sources.map { |source| File.join(root, source) },
                       File.join(root, 'liberx/generated/abi_reader.c'),
                       File.join(root, "tools/fuzz/#{kind}_fuzz.c"), '-o', program],
                      name: "compile-#{kind}-fuzz", deadline: COMPILE_DEADLINE)
@@ -155,52 +147,25 @@ module Erx
       end
     end
 
-    def seeds(kind)
-      return WATCHDOG_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value] } if kind == 'watchdog'
-      return CAP_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value.b] } if kind == 'cap'
-      return primitive_seeds(kind) if %w[sha256 chacha20 rng].include?(kind)
-      return blake3_seeds if kind == 'blake3'
-      return LANE_SEEDS if kind == 'lane'
-
-      bytes = case kind
-              when 'pack' then PackFixture.valid
-              when 'elf' then ElfFixture.valid
-              else raise Error, "no seeds for fuzz kind #{kind}"
-              end
-      # Every prefix of a valid wire header reaches a different truncation
-      # boundary; mutations then start from both accepted and rejected seeds.
+    # The whole of a valid wire format and every prefix of its header: each
+    # prefix reaches a different truncation boundary, so mutations start from
+    # both accepted and rejected seeds.
+    def prefix_seeds(bytes)
       prefixes = [0, 1, 7, 31, 55, 63, 127, 511, 4095].to_h do |length|
         ["prefix-#{length}", bytes.byteslice(0, length)]
       end
       { 'valid' => bytes }.merge(prefixes)
     end
-    private_class_method :seeds
 
-    # Messages across block and padding boundaries for SHA-256, streams
-    # across block boundaries for ChaCha20, and generator programs.
-    def primitive_seeds(kind)
-      lengths = [0, 1, 55, 56, 63, 64, 65, 200]
-      case kind
-      when 'sha256'
-        lengths.to_h { |length| ["length-#{length}", ([length % 7].pack('C') + 'a' * length).b] }
-      when 'chacha20'
-        CHACHA20_HEADERS.flat_map do |name, header|
-          lengths.map { |length| ["#{name}-#{length}", header + ("\x5a" * length).b] }
-        end.to_h
-      else
-        RNG_SEEDS.transform_values(&:b)
+    # Values named by their position.
+    def indexed_seeds(values) = values.each_with_index.to_h { |value, index| ["seed-#{index}", value.b] }
+
+    def relative_paths?(paths)
+      paths.is_a?(Array) && !paths.empty? && paths.all? do |path|
+        path.is_a?(String) && !path.empty? && !path.start_with?('/') && !path.split('/').include?('..')
       end
     end
-    private_class_method :primitive_seeds
-
-    # A cut seed byte, then messages ending at and around the block and
-    # chunk boundaries, up to a little over four chunks.
-    def blake3_seeds
-      [0, 1, 63, 64, 65, 1023, 1024, 1025, 2048, 4097].to_h do |length|
-        ["length-#{length}", ([length % 251].pack('C') + Array.new(length) { |index| index % 251 }.pack('C*')).b]
-      end
-    end
-    private_class_method :blake3_seeds
+    private_class_method :relative_paths?
   end
 end
 

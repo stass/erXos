@@ -45,15 +45,14 @@ class CoreArchiveTest < Minitest::Test
   end
 
   def test_the_kernel_cores_leave_out_the_bootstrap_ones
-    sources = Erx::CoreArchive.sources(File.expand_path('../..', __dir__))
-    refute_includes sources, 'kernel/core/pack.c'
-    assert_includes sources, 'kernel/core/watchdog.c'
-    # The generator's imported primitives and BLAKE3 link with the cores.
-    assert_includes sources, 'kernel/core/rng.c'
-    assert_includes sources, 'kernel/crypto/chacha20/chacha.c'
-    assert_includes sources, 'kernel/crypto/sha2/sha256c.c'
-    assert_includes sources, 'kernel/crypto/blake3/blake3.c'
-    assert_includes sources, 'kernel/crypto/blake3/blake3_portable.c'
+    root = File.expand_path('../..', __dir__)
+    sources = Erx::CoreArchive.sources(root)
+    assert_includes Erx::CoreArchive::BOOTSTRAP_SOURCES, 'kernel/core/pack.c'
+    assert_empty sources & Erx::CoreArchive::BOOTSTRAP_SOURCES
+    # Every other core and every imported primitive links with the cores.
+    # gate_baseline_test.rb pins the ones in the tree against deletion.
+    expected = Dir.glob('kernel/{core,sched,crypto/*}/*.c', base: root) - Erx::CoreArchive::BOOTSTRAP_SOURCES
+    assert_empty expected - sources
     assert_equal sources.sort, sources
   end
 

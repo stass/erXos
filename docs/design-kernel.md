@@ -8031,9 +8031,13 @@ and relocations in the kernel's objects and the linked image (`llvm-nm`,
 `llvm-readelf`), its disassembly (`llvm-objdump`), and the syntax trees of
 its C sources (clang's JSON syntax-tree dump).
 
-The rules are declared as data in one registry,
-`tools/lib/erx/chokepoint_rules.rb`, which `make check` evaluates over
-every file git lists. A rule names the files it reads, what it forbids
+The rules are declared as data in one registry, one file per group
+under `tools/lib/erx/chokepoint_rules/` loaded in sorted order, with
+what they share in `tools/lib/erx/chokepoint_rules.rb`, and `make check`
+evaluates them over every file git lists. Each core has a group named
+after its source, stating its rules or why it has none, and a core with
+no group stops the load, so a rule cannot vanish with its file. A rule
+names the files it reads, what it forbids
 there and the sites allowed to do it, and carries the seeded violation its
 host test requires it to catch; text rules read each source after line
 splicing and comment removal, with every include directive limited to a

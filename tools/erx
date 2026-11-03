@@ -16,6 +16,7 @@ require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
 require_relative 'lib/erx/oracle_container'
+require_relative 'lib/erx/sanitizer_tests'
 require_relative 'lib/erx/bench'
 require_relative 'lib/erx/toolchain_provenance'
 
@@ -40,6 +41,8 @@ module Erx
         check_sanitizers(command_arguments, **collaborators)
         Terminal.puts('unsupported: kernel UBSan boot requires erXos kernel implementation; host UBSan checks passed')
         1
+      when 'gates'
+        gates(command_arguments, **collaborators)
       when 'pack'
         pack(command_arguments, **collaborators)
       when 'status'
@@ -94,13 +97,22 @@ module Erx
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
         run_tests(tests, runner: runner, name: 'host-tests', environment: environment)
-        integration = %w[terminal_tables pack_fixture structural_pack sanitizer_gate fiasco_config].map do |name|
-          File.join(ROOT, "test/integration/#{name}_test.rb")
-        end
-        run_tests(integration, runner: runner, name: 'native-integration', environment: environment)
+        run_tests(integration_tests(ROOT), runner: runner, name: 'native-integration', environment: environment)
       end
       Terminal.puts('offline source, generation, host and native integration checks passed')
       0
+    end
+
+    # An integration test runs in `make check` unless it is excused here: these
+    # two rebuild the stopgap kernel or need the stock OTP suites' runtime.
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible oracle_reporter].freeze
+
+    def self.integration_tests(root)
+      excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }
+      tests = Dir.glob('*_test.rb', base: File.join(root, 'test/integration')).sort - excused
+      raise Error, 'no integration tests found' if tests.empty?
+
+      tests.map { |test| File.join(root, 'test/integration', test) }
     end
 
     def self.check_generated(arguments, runner_class: Runner)
@@ -185,21 +197,31 @@ module Erx
       no_arguments(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
+      tests = SanitizerTests.discover(root: ROOT)
       runtime.call(runner: runner) do |environment|
-        paths = %w[abi_calls manifest_reader elf_plan pack tlb_plan watchdog budget cap crypto rng blake3 lane].map do |name|
-          File.join(ROOT, "test/host/#{name}_test.rb")
-        end
-        paths.concat(%w[terminal_tables structural_pack sanitizer_gate].map do |name|
-          File.join(ROOT, "test/integration/#{name}_test.rb")
-        end)
-        run_tests(paths, runner: runner, name: 'sanitizer-tests',
+        run_tests(tests.map { |test| File.join(ROOT, test) }, runner: runner, name: 'sanitizer-tests',
                   environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
       end
-      Terminal.puts('implemented host C parsers, the invalidation planner, the watchdog, budget and capability cores, ' \
-                    'SHA-256, ChaCha20, the entropy generator, BLAKE3 and the lane reader passed ASan/UBSan; ' \
-                    'atomic accessor and capability lookup checks, the budget chain race and the lane race passed TSan')
+      Terminal.puts('these tests passed with ERX_SANITIZERS=address,undefined: ' \
+                    "#{tests.map { |test| File.basename(test, '_test.rb') }.join(' ')}")
       if RbConfig::CONFIG.fetch('host_os').include?('darwin')
         Terminal.puts('LeakSanitizer and ASan initialization-order checks: unsupported on macOS; Linux run required')
+      end
+      0
+    end
+
+    # What the discovered gates run, one line each, for a reader or a diff.
+    def self.gates(arguments)
+      no_arguments(arguments)
+      require_relative 'fuzz/run_pack'
+      SanitizerTests.discover(root: ROOT).each { |test| Terminal.puts("sanitizer test: #{test}") }
+      PackFuzz.targets.each do |target|
+        Terminal.puts("native fuzz target: #{target.kind}: #{target.seeds.size} seeds; " \
+                      "sources #{target.sources.join(' ')}; includes #{target.includes.join(' ')}")
+      end
+      ChokepointRules::ALL.sort_by(&:name).each do |rule|
+        seeds = rule.respond_to?(:seed) ? rule.seed.size : 0
+        Terminal.puts("chokepoint rule: #{rule.name}: #{rule.class.name.split('::').last}, #{seeds} seeds")
       end
       0
     end
@@ -226,11 +248,11 @@ module Erx
                     '--name', 'test_production_fuzz_entry_refuses_mutations_without_vm_exception'],
                    name: 'fuzz-erlang-manifest', deadline: 180, chdir: ROOT, env: environment)
       end
-      Terminal.puts('implemented ABI, manifest, ERXPACK, ELF, erx.watchdog=, capability core, lane reader and ' \
-                    'host metadata parser fuzz targets passed')
-      Terminal.puts('SHA-256, ChaCha20, entropy generator and BLAKE3 fuzz targets passed')
+      require_relative 'fuzz/run_pack'
+      Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')
+      Terminal.puts("native fuzz targets passed: #{PackFuzz.targets.map(&:kind).join(' ')}")
       Terminal.puts('pack/terminal/export Ruby targets: fixed 20000 iterations, seed 1; ' \
-                    'pack/ELF/watchdog/capability/SHA-256/ChaCha20/generator/BLAKE3/lane C seeds are recorded in logs')
+                    'native C seeds are recorded in logs')
       Terminal.puts('root-startup and target runtime/service parsers: unsupported until their implementations land')
       0
     end
@@ -255,7 +277,7 @@ module Erx
                    name: 'abi-fuzz', deadline: 180, chdir: ROOT, env: environment)
       end
       runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/run_pack.rb')],
-                 name: 'pack-elf-fuzz', deadline: PackFuzz::DEADLINE, chdir: ROOT,
+                 name: 'pack-elf-fuzz', deadline: PackFuzz.deadline, chdir: ROOT,
                  env: environment.merge('RUNS' => runs.to_s))
     end
 
@@ -311,7 +333,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
       0
     end
 

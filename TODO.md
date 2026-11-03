@@ -91,7 +91,7 @@ it; git history is the record of completed work.
   and the page core (`kernel/core/page.c`) land, embed them in the
   records, drop the lock effect, give `page.c` the pool chain (adding it
   to the `budget-records-private` chokepoint of
-  `tools/lib/erx/chokepoint_rules.rb`), and compose
+  `tools/lib/erx/chokepoint_rules/budget.rb`), and compose
   `erx_reserve_charge`, `erx_reserve_take` and `erx_page_release` there
   from `erx_reserve_admit`, `erx_reserve_fill`, `erx_reserve_cancel`,
   `erx_reserve_use` and `erx_reserve_refund`. The record cache, the lists
@@ -106,7 +106,7 @@ it; git history is the record of completed work.
   resize lowered. Two of K32's seeded failures are missing: a chain
   applied one level at a time, and a dead or doomed budget's `used`
   counted toward the machine. The counters' chokepoint is enforced by the
-  `budget-records-private` text rule of `tools/lib/erx/chokepoint_rules.rb`
+  `budget-records-private` text rule of `tools/lib/erx/chokepoint_rules/budget.rb`
   (the header included and the records defined nowhere else), not by the
   syntax-tree check the design's row names, which stays the pending
   `budget-counters` rule; a layout-compatible record under another name,
@@ -125,11 +125,11 @@ it; git history is the record of completed work.
   `erx_tlb_plan_t` is 1544 bytes, a fifth of an 8 KiB kernel stack. Keep
   it in the range call's plan storage rather than on the stack, or shrink
   `erx_tlb_inval_t` to 16 bytes (page number, log2 page count, reach).
-* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: the
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: the
   syntax-tree checks of K2 (`erx_rights_t` built only in
   `kernel/core/cap.c`) and the sequence-counted accessor rule do not
   exist yet, and neither is in the registry.
-* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: the
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: the
   text rules match whole names, so a name a macro pastes together
   (`erx_cap_slot_ ## clear`, `erx_ ## cap_slot`) gets past
   `cap-slot-clear-named`, `budget-records-private`, `cap-table-private`
@@ -148,7 +148,7 @@ it; git history is the record of completed work.
   core from writing their bytes; the space core should allocate them from
   memory nothing else maps, and the syntax-tree leg refuse a write
   through such a pointer.
-* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`:
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`:
   `cap-slot-clear-callers` reads only the cores' call graph, so
   `cap-slot-clear-named` keeps `erx_cap_slot_clear` out of the Fiasco glue
   altogether. When the glue (WP12) gives the close and the space's
@@ -166,7 +166,7 @@ it; git history is the record of completed work.
   effect, so no caller supplies a page pointer and both the scan and the
   aliasing go away
   ([design-kernel.md](docs/design-kernel.md#objects-and-capabilities)).
-* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: two
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules/`: two
   mechanisms keep a core's records private. Each private ABI layout's
   rule is built from the ABI file, while `budget-records-private`,
   `cap-table-private` and the core-to-header sites of
@@ -630,6 +630,9 @@ it; git history is the record of completed work.
   outside the project is likewise judged by name; checking it against the
   compiler's own roots (SDK path, resource directory) would also refuse
   credential files whose directory is not on the list.
+* [Low] Test runner, `tools/erx`, `run_tests`: on Apple Silicon `make check`'s
+  `host-tests` step runs for over 720 of its 900 seconds, so a few more slow
+  tests will time it out. It fails loudly; split the step or raise the deadline.
 
 ## Security residuals
 
@@ -643,7 +646,7 @@ it; git history is the record of completed work.
   `erx_rng_burn_stack` generalised) or an erasing compression, measured.
 
 * [Medium] Lane reader chokepoint, `lane-pages-reader` in
-  `tools/lib/erx/chokepoint_rules.rb`: a text rule over the names of a
+  `tools/lib/erx/chokepoint_rules/`: a text rule over the names of a
   lane's layouts, so untyped pointer arithmetic on a side's address (the
   public `peer_side` and `own_side` of `erx_lane_reader_t`, or the mapping
   a runtime made) escapes it, as does a name a macro pastes together
@@ -745,7 +748,7 @@ document's "residual risks accepted" paragraph.
   returner failing it, land with the dispatch and the IPC glue
   ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#the-wait-funnel)).
 * [High] chokepoints, the pending M1 rules of
-  `tools/lib/erx/chokepoint_rules.rb`: the object leg (no liberx target
+  `tools/lib/erx/chokepoint_rules/`: the object leg (no liberx target
   object outside the fiasco backend references an `l4_` symbol or holds a
   trap but the ABI's, read with `llvm-nm` and `llvm-objdump`; it also
   closes the include-path gap the text rules cannot see, an `-I` flag
