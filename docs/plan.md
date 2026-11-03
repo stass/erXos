@@ -88,7 +88,7 @@ of tracks S and P, adds everything else on erXos's kernel alone.
 | Milestone | Demo | New code (estimate) | Needs | Gate |
 | --- | --- | --- | --- | --- |
 | M0 The tree, the toolchain and the oracle | focused stock OTP 29.1.2 cases verify the offline Linux test runner; native Mac OTP supplies bootstrap tools; the frozen Fiasco set builds from the tree; every generated file regenerates unchanged | 4,000 lines of Ruby | | G0 |
-| M1 The stopgap speaks erXos's interface | the modified Fiasco prints erXos's banner and starts the root task under TCG and HVF; in a partial boot the root task builds two hostile programs that attack the interface for ten minutes on every CPU without effect; a stopped watchdog pet ends the machine with a crash record | 12,000 lines of C17, 2,000 of C++ glue | M0, G0 | G1 |
+| M1 The stopgap speaks erXos's interface | the modified Fiasco prints erXos's banner and starts the root task under TCG and HVF; in a partial boot the root task builds two hostile domains that attack the interface for ten minutes with threads pinned to every CPU; a stopped watchdog pet ends the machine with a crash record | 12,000 lines of C17, 2,000 of C++ glue | M0, G0 | G1 |
 | M2 The execution contract holds | a native test domain and a hostile domain share four CPUs by grants; no wakeup is lost; a blocking call from an executor is refused | 4,000 lines of C17 | M1 | G2 |
 | Track H Hosted mode | the runtime, with the domain library and connections between domains, runs as Mac processes under the sanitizers | 3,000 lines of C17 | M0 | |
 | M3 The shell is the operating system | `1>` on the serial console, from ERTS in the system domain in user mode, started by the root task | 8,000 lines of C, 1,000 of Erlang | M2, track H | G3 |
@@ -393,12 +393,15 @@ knows Fiasco; the kernel starts one task, the root task, and watches it.
 erXos's validator; the kernel prints erXos's banner, `development build:
 trusted code only`, and starts the root task with the root capabilities;
 booted with a development system manifest that names two hostile programs
-as its partial boot, `liberx`'s root-task entry builds them on every CPU
-through the domain library instead of starting ERTS, and for ten minutes
-they attack every call with malformed arguments, stale and wrong-rights
-capabilities, faults and floods, and the kernel and the root task carry
-on, the root-task entry petting the watchdog itself, since nothing else in
-a partial boot holds `POWER`; a
+as its partial boot, `liberx`'s root-task entry builds two native domains
+through the domain library instead of starting ERTS, each with threads
+pinned to every online CPU; in each of TCG and HVF with one and four CPUs,
+they attack every call for ten minutes with malformed arguments, stale and
+wrong-rights capabilities, faults and floods, each domain reporting
+per-CPU progress counters on the console; the harness checks that every
+CPU of every domain makes progress through the whole run and that the root
+task keeps petting the watchdog, since nothing else in a partial boot holds
+`POWER`; a
 boot whose pet is stopped through a test-build hook ends the machine at
 the deadline with a crash record on the console that names the watchdog.
 
@@ -411,14 +414,18 @@ as the stopgap's scope table lists
   object space, with copies, closes, `erx_cap_pass` in its creator's case
   and deletion, which frees an object after an RCU grace period, as
   Fiasco does; budgets as space banks, whose deletion deletes every
-  object charged to them;
+  object charged to them; capability transfer at an IPC rendezvous lands
+  in M5, with M1's IPC designed to add it without reshaping the rendezvous;
 * spaces, each with its parent, fault gate and label fixed at creation,
-  threads (executors and workers), memory objects (private, shared,
-  contiguous and physical) and sealed objects, filled whole before they
-  are sealed, ceilings and reserves, W^X, faults to fault gates,
+  threads (executors and workers), private and shared memory objects and
+  the physical objects the kernel makes: the boot image, its slices
+  (`erx_image_slice`), the time page and groups' shared areas; ceilings
+  and reserves, W^X, faults to fault gates,
   `erx_space_stop` and exit records that arrive only once no thread of the
   space can run (K18), a stopped thread finishing the call it is in, or
-  waking from its wait, before it dies, on the stopper's time;
+  waking from its wait, before it dies, on the stopper's time; sealed
+  paged objects, contiguous objects and physical objects created from device
+  resources arrive with their first consumers;
 * IPC gates bound to one thread each, with labels and timeouts, a server
   running on its own group's grant from its next scheduling decision; IRQ
   objects bound to threads, or to groups with labels and listed on the
@@ -437,7 +444,8 @@ as the stopgap's scope table lists
   the root task and its halt outside `erx_machine_end`
   ([design-kernel.md](design-kernel.md#the-watchdog));
 * groups in configuration C0: urgency levels, round robin within a level,
-  park and wake with epochs, the executor rule
+  park and wake with epochs, the executor rule; the quota pool's C17 core
+  built and tested on the host, with target enforcement in configuration C1
   ([design-scheduler.md](design-scheduler.md#park-and-wake)).
 
 Above the fork: `liberx` with its generated calls and its `fiasco` backend;
@@ -453,14 +461,18 @@ undone step by step
 production initial-root bootstrap plan and backend/ABI-bound charge
 evidence, which make full boot admission possible rather than substituting
 source-declared costs; the
-conformance suite for every call; the chokepoint checks that confine
+conformance suite for every call in scope; the chokepoint checks that confine
 kernel calls to `liberx` and Fiasco headers to its `fiasco` backend; the
 stack proof and chokepoint checks over the C17 cores; the fuzz targets of
 the crash record's reader and of the manifest's C reader.
 
 **Exit criteria.** The conformance suite passes under TCG and HVF on one
-and four CPUs; the hostile programs run ten minutes on every CPU with no
-kernel or root-task fault; the park protocol's exhaustive host model
+and four CPUs; in each of those four configurations, two hostile native
+domains run for ten minutes with threads pinned to every online CPU, each
+reports per-CPU progress counters on the console, and the harness checks
+that every CPU of every domain makes progress through the whole run and
+that the root task keeps petting the watchdog, with no kernel or root-task
+fault; the park protocol's exhaustive host model
 passes (S2); every call that may wait refuses an executor, umtx waits on
 private memory excepted (S3); a space stopped while its threads run, fault
 and call on every CPU posts exactly one exit record, after its last thread
@@ -477,8 +489,8 @@ whose cause names them, which the harness reads from the serial log (K31);
 the domain library's creation plan passes its host tests with a failure
 injected at each step and every object released; the call decoder's, the
 crash record's and the manifest's C reader's fuzz targets run their
-budgets clean; the park lock and
-the pool pass their ThreadSanitizer runs; the C17 cores pass their host
+budgets clean; the park lock and the quota pool's host core pass their
+ThreadSanitizer runs; the C17 cores pass their host
 tests under ASan and UBSan.
 
 **Gate G1.** Measures, under HVF and TCG: the null call, an IPC round trip
