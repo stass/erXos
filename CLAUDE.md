@@ -565,6 +565,12 @@ within about 20 percent of the length, write plain code.
   states host,
   accelerator (TCG, HVF or native), QEMU version, compiler, flags, workload
   and baseline. TCG numbers are never compared with HVF or native numbers.
+* **Suspected costs go on the watch list.** When a design, review or
+  change leaves a cost unmeasured that could matter (a slow path, a
+  portable fallback, a contended lock, a copy), add it to
+  [docs/todo-performance.md](docs/todo-performance.md) with the
+  measurement that settles it, and remove the item once a recorded
+  number does.
 * **Host builds of kernel and library code.** Code that does not touch
   hardware (allocators, capability tables, scheduling policy, validators,
   the C library seam) also builds for the host, so its unit tests, fuzz
