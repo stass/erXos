@@ -602,12 +602,21 @@ typedef struct erx_object {
 
 `ncaps` counts the capability slots that name the object. `refs` counts
 the object's own reference, held from its creation until its put, and
-the threads that keep it across a wait or a preemption point, such as a
-sender blocked on a gate or an operation that holds its existence lock,
-and, for a group, its member threads: a thread holds a counted reference
-on every group of its path, at most eight, from its creation until it
-dies, so a destroyed group's record lives until its killed members are
-dead. A killed member finishes its call on its own path's quota, and
+the references threads hold, which are of three kinds and never a
+call's across a wait (K33): the references a thread holds for its
+lifetime, on every group of its path, at most eight, from its creation
+until it dies, so a destroyed group's record lives until its killed
+members are dead, and on the groups that pay for its finishing from its
+kill until its last switch; the reference a call takes before it works
+through an object in parts across preemption points, a range call's or
+an existence lock's taker's, dropped before any wait; and the reference
+a posted delivery, an exit record's or an IRQ object's, holds on its
+object until the record is taken or withdrawn. A sender blocked on a
+gate holds none: it is linked on the gate's `att_blocked` list, which
+the gate's teardown empties, and starts its send over from its
+capability when it wakes ([Execution model and
+locking](#execution-model-and-locking)). A killed member finishes its
+call on its own path's quota, and
 when that quota is zero the call that destroyed the group runs it to its
 end on its own time, by the helping rule a stop follows ([Execution
 model and locking](#execution-model-and-locking),
@@ -2929,16 +2938,34 @@ stop, whoever makes it: a parent's stop walk, the stop a release makes
 and the stop a last thread's exit makes each finish their tree in the
 call that stopped it.
 
-*Helping.* `erx_space_stop`, once it has set the stopped words of the
-tree and sent its interrupts, runs each finishing thread of the tree to
-its return boundary on the stopper's own CPU, by the mechanism that runs a
-preempted lock holder in a helper's place (**Locks** below): it takes the
-thread's next bounded part in its place, passes a preemption point, and
-goes on until the tree's active count (K18) is zero, and only then
-returns. A finishing thread that is running on another CPU is in the
-middle of a bounded part and is waited for, as a running lock holder is;
-one that its own group's grant still schedules finishes on that grant,
-and the stopper takes over only what the grant leaves undone. Each
+*Helping.* `erx_space_stop` has two phases, both in the stopper's call.
+The **walk** sets the stopped words of the tree, sends its interrupts
+and wakes every waiting thread of the tree in bounded parts; when it
+is done, every thread of the tree is dead, finishing, or in user mode
+on a CPU whose interrupt is on its way. The **helping phase** then runs
+each finishing thread of the tree to its death on the stopper's own
+CPU, by the mechanism that runs a preempted lock holder in a helper's
+place (**Locks** below): at each of its preemption points the stopper
+reads the tree's word, and while it is not `EXITED` it takes the next
+bounded part of a finishing thread that is not running, the thread's
+death edge among those parts, in that thread's place, passes a
+preemption point, and goes on. A finishing thread that is running on
+another CPU is in the middle of a bounded part and is tried again at
+the next preemption point, as a running lock holder is; one that its
+own group's grant still schedules finishes on that grant, and the
+stopper takes over only what the grant leaves undone. The helping
+phase ends when the tree's last record has been posted, which the
+stopper reads as `EXITED`, or, for a stopper that has itself a kill
+posted, when it finds no finishing thread of the tree that is not
+running: every thread of the tree still alive is then running on its
+own grant, and the stopper's call ends so that the stopper can die.
+The stopper never sleeps in the helping phase: it holds a counted
+reference on the tree's root across its preemption points, as a range
+call does, and no wait, so K33 asks nothing of it and no wake has to
+find it. A helped part may itself be a step of a stopper's helping
+phase, when the finishing thread is a stopper of another tree: helping
+composes, one switch of context per link and no nested frame, and a
+chain of helpers is as long as the chain of stops. Each
 finishing thread keeps its original call stack, locks and completion
 path, and no second teardown protocol replays or takes over its effects;
 a helper never returns a borrowed thread to user mode, and the thread's
@@ -2946,6 +2973,26 @@ home CPU alone owns it again once the helper hands it back (K14). The
 destroy of a group helps the same way: a killed member finishes on its
 own path's quota, and the destroying call runs it to its boundary when
 that quota is zero ([Closing and deleting](#closing-and-deleting)).
+
+*Who owns unfinished work.* Finishing work has one owner at a time:
+the finishing thread's own path's grant while that grant schedules it,
+and the stopper's helping phase while the stopper's call lasts. A
+stopper dies only when its own space stops, and the stop that stops
+it helps the stopper's thread to its death as it helps any finishing
+thread, the stopper's helping phase included, so the finishing of a
+tree passes up the chain of stops to the one stopper whose space is
+not stopped. In a ring of stops, two spaces each stopping the other or
+any longer one, every stopper's space is stopped: each stopper helps
+while anything of its target is not running, ends its helping phase
+at its own kill once nothing is left to help, and dies; every thread
+of the ring still alive is then running on its own grant and finishes
+on it, each death takes its own space's count down, and every record
+of the ring is posted. The one way a finishing thread stays unfinished
+is a grant of zero that its parent sets after its last helper has
+died, which is the parent's own freeze of the thread, as of any thread
+of that group: the parent thaws the grant, or its stop or destroy of
+the group helps the thread to its end on the parent's time
+([design-scheduler.md](design-scheduler.md#charging-and-quota)).
 
 *Charging.* A finishing thread's remaining work that the stopper takes
 over is charged to the caller of the stop, as every kernel call is
@@ -3189,10 +3236,21 @@ and a CPU that idles or runs in user mode is quiescent at once: it
 publishes a per-CPU quiescent count at each of those points, and the CPU
 that waits for a period reads them and sends `ERX_IPI_REQUEST` only to a
 CPU that has not moved since. Reference counts are kept only for a thread
-that keeps an object across a wait or a preemption point, which takes a
-counted reference before it gets there, as a sender blocked on a gate
-does, and as every taker of an existence lock does first, a range call
-working through a space in parts among them; pointers between objects are
+that keeps an object across a preemption point, never across a wait
+(K33): every taker of an existence lock takes one first, a range call
+working through a space in parts among them, and a stopper holds its
+tree's root across the preemption points of its helping phase; the
+groups of a thread's path and of its finishing path are the thread's for
+its lifetime ([Objects and capabilities](#objects-and-capabilities)), and
+a posted delivery holds its object until it is taken or withdrawn. A
+sender blocked on a gate, a waiter on a umtx word and a parked executor
+hold none: each is linked on a list its owner's teardown empties, touches
+that list on waking only while it is still on it, and reaches the object
+again only through a fresh lookup. The stopgap's one exception is the
+requester of a waited cross-CPU request, which holds its target across
+the answer wait
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#differences-from-erxoss-kernel)).
+Pointers between objects are
 attachments, which the target's teardown removes, where Fiasco counts
 them ([L4 lineage](#l4-lineage)). Each put
 waits on the list of the CPU that queued it, with the grace period it
@@ -3493,23 +3551,27 @@ locking](#execution-model-and-locking)). The call can therefore take
 long: it finishes the calls of the tree's threads on the stopper's own
 time before it returns, so its caller makes it from a thread that nothing
 else waits on, never from one that serves others or holds what others
-wait for. The stopper's wait for the tree's last death is a wait like
-any other (K33): once its walk has set every `stopped` word and sent
-every kill, the stopper sleeps holding nothing, and the wait ends either
-by the death that posts the last record or by the stopper's own kill. A
-stopper whose own space is stopped while it waits, by another space or
-by the one it is stopping, is therefore killed like any thread of a
-stopped space: its wait ends, it never returns to user mode, and it dies
-at its own return check. Nothing of its target depends on it: the
-target's record is posted by the target's last death, which needs no
-stopper, and the target's threads still inside calls finish at the
-finishing priority, their remaining work taken over by whoever stopped
-the stopper, as that stop takes over every call of the stopper's tree
-(**Helping** under [Execution model and
-locking](#execution-model-and-locking)). So two spaces stopping each
-other, or any ring of stops, end: each stopper's wait ends at its own
-kill, each death takes its own space's count down, and no death waits
-on a death. A thread joins that list at its
+wait for. The stopper's call is busy until the tree's last record is
+posted: once its walk has set every `stopped` word, sent every
+interrupt and woken every waiter, it helps the tree's finishing
+threads to their deaths and returns when it reads `EXITED` (**Helping**
+under [Execution model and locking](#execution-model-and-locking)). It
+sleeps in no wait, so K33 asks nothing of it, and its own kill ends it:
+a stopper whose own space is stopped while it helps, by another space
+or by the one it is stopping, helps while anything of its target is
+not running, ends its call once every live thread of its target is
+running, never returns to user mode, and dies at its own return check.
+Nothing of its target depends on it: the target's record is posted by
+the target's last death, which needs no stopper, and what the target's
+threads have left to finish runs on their own grants or is helped by
+the stop that killed the stopper, which takes over the stopper's call
+as it takes over every call of the stopper's tree. So two spaces
+stopping each other, or any ring of stops, end: each stopper's helping
+ends at its own kill once nothing of its target is left to help, each
+remaining thread finishes on the grant that is running it, each death
+takes its own space's count down, and no death waits on a death (**Who
+owns unfinished work** under [Execution model and
+locking](#execution-model-and-locking)). A thread joins that list at its
 creation, under the space's lock, which also
 checks that the space has neither stopped nor been closed, and leaves it
 when it dies, so once the space has stopped the list only shrinks, and it
@@ -4733,8 +4795,8 @@ object is destroyed when its last mapping goes, or when it is deleted. A
 group lives on while it has member threads or child groups, and is
 destroyed when the last of them goes, so no executor is ever left in a
 group it can no longer park in. A counted reference, which only a thread
-holds, across a wait or a preemption point or, on the groups of its
-path, for its whole life, keeps the record but never delays the release, and an attachment keeps nothing. Who learns of a release is not the kernel's: the system domain
+holds, across a preemption point, never a wait (K33), or, on the groups
+of its path, for its whole life, keeps the record but never delays the release, and an attachment keeps nothing. Who learns of a release is not the kernel's: the system domain
 tells a domain that a connection is down, and a session knows every
 holder of its pipes and channels because it installed each of them
 ([design-domains.md](design-domains.md#connections),
@@ -8140,6 +8202,29 @@ Open questions:
   capability table with its slot lists and lookups, and budgets, which are
   host-built and exercised by every call, so the pilot calibrates the
   plan's estimates with tests and sanitizers.
+* **Whether a stopped tree finishes by the stopper's helping or on the
+  stopper's grant.** The stop above helps: the stopper's thread runs
+  each finishing thread's parts on its own CPU, is busy until the
+  record is posted, and ends its helping at its own kill, which leaves
+  a ring of stops to its members' own grants. The stopgap instead
+  charges each finishing thread, on its own CPU, to the path of the
+  call that killed it, held by counted references until the thread's
+  last switch, and lets the stopper sleep (K33) until the record or
+  its own kill
+  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit));
+  the shared scheduler core already charges a dying thread by that
+  path. Taking the stopgap's rule here too, with a finishing thread's
+  urgency resolved on the killer's path rather than the stopgap's fixed
+  priority, would remove the helping phase, the composition of
+  helpers, the busy stopper and the ring's residual at once: a zero
+  quota on the stopped group is covered by the killer's grant, a
+  killer's death changes nothing because its group's records outlive
+  it, and a later kill of an already dying thread can move its charge
+  to the later killer's path, so the next stop or destroy that reaches
+  a frozen thread pays for it. Recommended: adopt it, in this document
+  and in [design-scheduler.md](design-scheduler.md#charging-and-quota),
+  whose finishing rule would then read the same for both kernels;
+  helping stays for locks alone.
 * **Whether a record's cache page stays charged through the record's
   grace period.** Recommended: yes. A record is memory a call in
   progress may read, and releasing its page at the destroy would make a

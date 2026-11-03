@@ -1447,7 +1447,14 @@ wait at a gate bound to no thread, sleep through the scheduling
 binding's one wait funnel, `Erx::wait_sleep`, whose decision is the C17
 `erx_wait_step`, and are ended through `erx_wait_complete`, so a thread
 of a stopped space cannot sleep in an IPC wait, and the stop cancels no
-list of IPC wait kinds. Every cross-CPU
+list of IPC wait kinds. `Ipc_gate::invoke` reads the gate's binding
+once, before its block; a sender woken at a gate bound to no thread
+returns the dispatch's retry action and starts its send over from its
+capability, so a gate deleted between the wake and the resume is never
+read, and Fiasco's unblocked queue (`_unblocked_q`, `ipc_gate.cpp:154`)
+and its second read of `_thread` after the block (`ipc_gate.cpp:489`)
+are not built ([After the resume, a fresh
+lookup](design-stopgap-scheduling.md#the-wait-funnel)). Every cross-CPU
 request the glue sends, the handshake, the reply and the abort, is
 eager (`Context::drq` with `eager = true`), run in the inter-processor
 interrupt's handler on the receiver's CPU whatever runs there. Fiasco
@@ -1516,12 +1523,16 @@ scheduling binding meets them:
 * *Queued requests at a dying thread.* A request queued at a thread
   through `Erx::request` holds a reference on the object it names, not
   on the thread, whose own queue holds it. The kill continuation
-  therefore runs every request still queued at the thread, or cancels
-  it by dropping its reference, before the thread's dead mark, under
-  the CPU lock that Fiasco's `do_kill` already holds from the sender
-  drain to the mark, and `Erx::request` refuses a thread past that mark
-  and takes nothing. The queues that carry requests are drained in
-  bounded batches, as the scheduling binding specifies. A request that
+  therefore closes the thread's queue first, writing the dead mark
+  under the queue's lock, after which `Erx::request` refuses the thread
+  and takes nothing, and then runs every request the queue holds, or
+  cancels it by dropping its reference, in parts of at most
+  `ERX_REQUEST_BATCH` steps with a preemption point between them,
+  before `unbind()`; so the drain is of the cohort the mark closed and
+  no other CPU can lengthen it. A delivery refused at the mark stays
+  its sender's, who resolves the object's binding again. Every entry
+  that drains request queues has one budget for the whole entry, as
+  the scheduling binding specifies. A request that
   waits (`Erx::thread_request`,
   `Context::drq`) names only its waiting requester and its target and
   needs no such step.
