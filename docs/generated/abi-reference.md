@@ -188,6 +188,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_LABEL_SPLIT` | 2147483648 |
 | `ERX_LANE_MAX` | 16777216 |
 | `ERX_LANE_MIN` | 4096 |
+| `ERX_LANE_SIDE_DATA` | 8192 |
+| `ERX_LANE_SIDE_RPAGE` | 4096 |
 | `ERX_MANIFEST_BYTES_MAX` | 16777216 |
 | `ERX_MANIFEST_DEVELOPMENT` | 1 |
 | `ERX_MANIFEST_MAGIC` | 1297633861 |

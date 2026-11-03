@@ -126,6 +126,24 @@ class LeafOutputsTest < Minitest::Test
     assert_equal ['pack-corpus'], Dir.children(File.dirname(corpus)).sort
   end
 
+  # Every native kind is compiled from its sources and its entry and then
+  # run, the lane reader's among them.
+  def test_pack_fuzz_compiles_and_runs_every_kind
+    commands = []
+    recorder = Object.new.tap do |runner|
+      runner.define_singleton_method(:run) do |argv, **options|
+        commands << [options.fetch(:name), argv]
+        { 'state' => 'succeeded' }
+      end
+    end
+    Erx::PackFuzz.run(root: @root, runner: recorder, runs: 1)
+    expected = Erx::PackFuzz::SOURCES.keys.flat_map { |kind| ["compile-#{kind}-fuzz", "#{kind}-fuzz"] }
+    assert_equal expected, commands.map(&:first)
+    lane = commands.to_h.fetch('compile-lane-fuzz')
+    assert_includes lane, File.join(@root, 'liberx/erx_lane.c')
+    assert_includes lane, File.join(@root, 'tools/fuzz/lane_fuzz.c')
+  end
+
   def test_abi_fuzz_failure_keeps_only_bounded_crash_inputs
     in_project do
       error = assert_raises(Erx::CommandError) do

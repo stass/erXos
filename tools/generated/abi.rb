@@ -7718,6 +7718,18 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "lane_side_data".b => Constant.new(
+            name: "lane_side_data".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "lane_side_rpage".b => Constant.new(
+            name: "lane_side_rpage".b,
+            value: 4096,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "manifest_bytes_max".b => Constant.new(
             name: "manifest_bytes_max".b,
             value: 16777216,

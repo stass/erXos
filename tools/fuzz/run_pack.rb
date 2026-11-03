@@ -70,12 +70,13 @@ module Erx
     private_class_method :retain_crashes
   end
 
-  # The native kernel cores, each built from its own sources with its
-  # libFuzzer entry in tools/fuzz/KIND_fuzz.c: the boot-path parsers of the
-  # ERXPACK boot image, ELF executable headers and the erx.watchdog= boot
-  # argument; the capability core, fed the values, masks and counts a
-  # domain controls; SHA-256, ChaCha20 and the entropy generator built on
-  # them; and BLAKE3.
+  # The native kernel cores and liberx parsers, each built from its own
+  # sources with its libFuzzer entry in tools/fuzz/KIND_fuzz.c: the
+  # boot-path parsers of the ERXPACK boot image, ELF executable headers and
+  # the erx.watchdog= boot argument; the capability core, fed the values,
+  # masks and counts a domain controls; SHA-256, ChaCha20 and the entropy
+  # generator built on them; BLAKE3; and the lane reader over a hostile
+  # producer's side.
   module PackFuzz
     module_function
 
@@ -85,7 +86,8 @@ module Erx
                 'watchdog' => ['kernel/core/watchdog.c'], 'cap' => ['kernel/core/cap.c'],
                 'sha256' => [SHA256], 'chacha20' => [CHACHA20],
                 'rng' => ['kernel/core/rng.c', CHACHA20, SHA256],
-                'blake3' => ['kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'] }.freeze
+                'blake3' => ['kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'],
+                'lane' => ['liberx/erx_lane.c'] }.freeze
     # Accepted values at the bounds and one of each refusal, so mutations
     # start on both sides of every check.
     WATCHDOG_SEEDS = %w[1,5,60 60,120,600 1,2,2 0,5,60 1,1,60 1,5,4 1,5 1,5,60,
@@ -106,6 +108,27 @@ module Erx
                   'read-past' => "\x03\x01s\x00\x01\x01", 'read-empty' => "\x03\x00\x00\x00\x00",
                   'mix' => "\x03\x00\x01\x05abcde\x00\x20\x00",
                   'reset' => "\x03\x01x\x02\x00\x08\x00\x01\x01y\x03\x00\x00\x08\x00" }.freeze
+    # Lane scripts in tools/fuzz/lane_fuzz.c's format: a record of 40
+    # bytes published whole and in parts, read with small and large
+    # buffers and an armed take, on each area size and start position;
+    # one longer than the area; and one refusal of each wpos check.
+    LANE_RECORD = [3, 40].pack('CV') + [1, 2].pack('Cv') + [5, 5].pack('Cv') + [1, 4].pack('Cv') +
+                  [5, 1000].pack('Cv') + [6, 1000].pack('Cv')
+    LANE_SEEDS = {
+      'record' => "\x00".b + LANE_RECORD, 'large' => "\x01".b + LANE_RECORD, 'top' => "\x02".b + LANE_RECORD,
+      'long' => "\x00".b + [3, 5000].pack('CV') + ([1, 256].pack('Cv') + [5, 4096].pack('Cv')) * 3,
+      'unaligned' => "\x00".b + [0, 8].pack('CQ<') + [5, 16].pack('Cv'),
+      'ahead' => "\x00".b + [0, 8192].pack('CQ<') + [5, 16].pack('Cv'),
+      'words' => "\x00".b + [2, 2, 40].pack('CvQ<') + [4, 32].pack('CQ<') + [3, 64].pack('CV') + [1, 6].pack('Cv') +
+                 [5, 100].pack('Cv'),
+      'too-long' => "\x00".b + [3, 0x1000001].pack('CV') + [1, 1].pack('Cv') + [5, 16].pack('Cv')
+    }.freeze
+
+    # Each kind's compile and run deadlines, in seconds, and the whole
+    # run's, which allows every kind both in full.
+    COMPILE_DEADLINE = 90
+    RUN_DEADLINE = 120
+    DEADLINE = SOURCES.size * (COMPILE_DEADLINE + RUN_DEADLINE)
 
     def run(root:, runner:, compiler: 'clang', runs: 20_000)
       unless runs.is_a?(Integer) && runs.between?(1, 10_000_000)
@@ -124,10 +147,10 @@ module Erx
                       *sources.map { |source| File.join(root, source) },
                       File.join(root, 'liberx/generated/abi_reader.c'),
                       File.join(root, "tools/fuzz/#{kind}_fuzz.c"), '-o', program],
-                     name: "compile-#{kind}-fuzz", deadline: 90)
+                     name: "compile-#{kind}-fuzz", deadline: COMPILE_DEADLINE)
           runner.run([program, "-runs=#{runs}", '-max_len=32768', '-timeout=5',
                       "-artifact_prefix=#{artifacts}/", corpus],
-                     name: "#{kind}-fuzz", deadline: 120)
+                     name: "#{kind}-fuzz", deadline: RUN_DEADLINE)
         end
       end
     end
@@ -137,6 +160,7 @@ module Erx
       return CAP_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value.b] } if kind == 'cap'
       return primitive_seeds(kind) if %w[sha256 chacha20 rng].include?(kind)
       return blake3_seeds if kind == 'blake3'
+      return LANE_SEEDS if kind == 'lane'
 
       bytes = case kind
               when 'pack' then PackFixture.valid

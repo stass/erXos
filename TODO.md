@@ -62,6 +62,18 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] Lane reader, `liberx/erx_lane.c`: the record state machine
+  (open, copy, close) is inline in `erx_lane_take` rather than a pure
+  step the effect layer applies; `phase` and `fault` are a pair that must
+  agree; `erx_lane_reader_init` fixes the connection side layout, so a
+  pipe's or channel's reader and a read end that resumes at a position
+  need separate pointers and a start position. Settle with the pipe
+  server and the channel client.
+* [Low] Lane tests, `test/fixtures/lane_driver.c`: the armed take and the
+  producer's publication are each one step of the exploration, and the TSan
+  race polls instead of parking, so the handshakes' orderings rest on the
+  M5 herd7 litmus tests; add a threaded mode in which both parties park on
+  `need` and `wake` under a deadline.
 * [Low] stopgap bootstrap, overlapping RAM regions:
   `Region_list::optimize` (`fiasco/bootstrap/server/src/region.cc`)
   merges a region into its predecessor by setting the predecessor's end to
@@ -630,6 +642,20 @@ it; git history is the record of completed work.
   it one shared stack-burn function (the entropy generator's
   `erx_rng_burn_stack` generalised) or an erasing compression, measured.
 
+* [Medium] Lane reader chokepoint, `lane-pages-reader` in
+  `tools/lib/erx/chokepoint_rules.rb`: a text rule over the names of a
+  lane's layouts, so untyped pointer arithmetic on a side's address (the
+  public `peer_side` and `own_side` of `erx_lane_reader_t`, or the mapping
+  a runtime made) escapes it, as does a name a macro pastes together
+  (`erx_lane_ ## hdr`), and inside `liberx/erx_lane.c` that only
+  `erx_lane_take`'s path loads from the producer's side is held by review.
+  It reads a listed set of inherited trees (OTP, musl, the stopgap
+  kernel), so a new in-tree import that runs in a domain, such as toybox,
+  is outside it until listed; read every listed file less named
+  exclusions instead. Close it by construction once the mapping calls
+  exist: `erx_lane.c` maps a lane's sides itself, the reader record
+  becomes opaque with a test-only constructor for a start position, and
+  the syntax-tree leg checks loads.
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in
   [research-hardware-contracts.md](docs/research-hardware-contracts.md).
