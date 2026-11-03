@@ -244,7 +244,12 @@ scripts live in `~/erxos-scratch/tools/`.
       parent's, and an object dies with its budget: deleting a budget
       deletes everything charged to it at once, as EROS's space banks do,
       so what must outlive a party is charged to a budget that outlives
-      it, and no one spends beyond their own budget;
+      it; a budget's guarantee is never taken by another budget; beyond
+      its guarantee a budget spends only memory its ancestors have not
+      promised to anyone, up to its cap; and a domain's budgets are
+      walls, whose cap is fixed equal to their guarantee, so a domain is
+      admitted or refused at its own budget alone and takes nothing from
+      another's;
     * a mapping never allows more than the capability that made it: each
       mapping keeps a ceiling fixed from that capability's rights, and
       changing its protection moves only beneath the ceiling;

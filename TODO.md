@@ -309,6 +309,13 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [High] kernel memory, file-backed memory objects with evictable clean
+  pages, so that large-file `mmap` (LMDB, SQLite in mmap mode) and ML
+  weights larger than free RAM work; needs a revised K6 (a fault may wait
+  only on a party that already controls the faulting space) and a K6
+  wording that separates guaranteed anonymous memory from evictable file
+  memory ([design-kernel.md](docs/design-kernel.md#invariants),
+  [design-kernel.md](docs/design-kernel.md#virtual-memory)).
 * [Medium] vault, the TPM 2.0 client: choose between tpm2-tss as a NIF, a
   small C client, and a client of erXos's own with Erlang framing and the
   session cryptography in the vault's NIF; the design recommends the last,

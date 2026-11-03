@@ -230,7 +230,7 @@ then the domain's outer budget.
 | **A1.** Only a space's creator installs capabilities into its table: the system domain into domains, a domain into its sub-spaces; and no capability passes between two domains | `erx_cap_pass` installs into a space only with `CAPS` on it, and `CAPS` on a space comes only with its creation: the creating call puts the space's root capability into the creator's table, and a space's capability passes on with `INSPECT` alone, whoever passes it (K17, K24); the system domain creates every domain and passes no capability with `CAPS` on a domain's space to anyone, so `CAPS` on a space never leaves its creator's table, the system domain's for a domain and a domain's for its sub-spaces; a rendezvous needs a gate both parties hold, and no introduction carries a gate, so no domain holds a gate another domain serves ([design-kernel.md](design-kernel.md#invariants), K17, K24) | a space's capability passed with more than `INSPECT`; a capability with `CAPS` on a domain's space passed to anyone; an introduction that makes a gate between two domains | the domain library's grant table checked by a host test (A7); the kernel's test that a space's capability passed on carries `INSPECT` alone; domain tests that a domain's `erx_cap_pass` into another domain's space fails with `ERX_ERIGHTS`, that `erx_space_create` without `SPACES` fails with `ERX_ERIGHTS`, and that no pass moves a sub-space's capability with more than `INSPECT`; a source check that `erx_dom_connect` creates no gate, with a seeded violation |
 | **A2.** The system domain sees every domain's end | a space's fault gate is an argument of `erx_space_create` and never changes (K28); the kernel posts an exit record for every stop, and for a space whose last thread ends, however it ends, once no thread of it can return to user mode (K18), and a fault record for every fault; the domain library names its one fault gate for every domain it creates | a call that changes a fault gate; an exit record posted while a thread can still run; a space left with no thread and no record; a plan that names another gate | the call table has no such call; a host test that every plan names the library's fault gate; a test that a domain faulting in its first instruction is reported; a test that a domain's threads on every CPU, and threads it creates while stopping, are stopped before its exit record arrives; a native domain whose threads all exit |
 | **A3.** The domain library never waits on a domain | every entry does bounded work under the library's one lock and makes no kernel call that waits; the fault thread's one wait is its open wait on the fault gate, with a timeout from which it also checks the ending record's deadline; a domain's end is one destroy of its own budget, which waits on no party; a connection's child budgets are destroyed only when the domain service asks, once each party has unmapped the connection's objects or ended, never on a timer while a party lives, and the outer budget only once none of its children remains, so no entry waits for an answer: a survivor that never answers `connection_down` keeps that one connection's child budget, and with it the dead domain's outer budget, and the connection counts against its own `connections` quota until it unmaps or ends | an entry that calls a gate a domain serves; a creation step that waits for a runtime; a destroy that waits for a holder to let go; a connection deleted on a timer while a party still maps it | hostile-domain tests: a domain that never reads its lane from the system domain, never answers `connection_down`, or floods it; a runtime that stops reading its lanes; every library entry timed with the manifest's `max_domains` domains alive |
-| **A4.** A domain is built whole or not at all | a creation is validated into a plan by a pure function before any effect; step 1 carves the domain's two budgets, each with cap equal to guarantee, and every later object of the domain is charged to one of them, so the undo of a failure is destroying both; a domain whose runtime does not report ready is stopped and ended by the domain service, so `erx_domain:create/1` returns an error only when nothing of the domain remains | an effect before validation; an object of the domain charged to a budget other than its two | an exhaustive host test that injects a failure at every step of a creation and checks that every object is released and the principal's budget is back at its baseline; a QEMU test that injects one at each step through a test-build hook; a domain whose init process never reports ready, after which nothing of it remains |
+| **A4.** A domain is built whole or not at all | a creation is validated into a plan by a pure function before any effect; step 1 carves the domain's two budgets, each a wall, and every later object of the domain is charged to one of them, so the undo of a failure is destroying both; a domain whose runtime does not report ready is stopped and ended by the domain service, so `erx_domain:create/1` returns an error only when nothing of the domain remains | an effect before validation; an object of the domain charged to a budget other than its two | an exhaustive host test that injects a failure at every step of a creation and checks that every object is released and the principal's budget is back at its baseline; a QEMU test that injects one at each step through a test-build hook; a domain whose init process never reports ready, after which nothing of it remains |
 | **A5.** Ending a domain deletes everything only it used at once, and nothing another party still uses goes with it | every domain has an own budget and an outer budget, carved side by side from its principal's; the domain library charges to the own budget only what the domain alone maps or uses, and to the outer budget everything another party maps or reads after the domain is gone: on a child budget of it carved for each connection, the side of that connection the domain reads and the bell it waits on, or for its connection to the system domain both sides and both bells; and on the outer budget directly, its crash area, which no other party maps; the library has no entry that maps one domain's memory into another but `erx_dom_connect`, so an outer budget holds exactly its connections' child budgets and its crash area; only the system domain creates a mapping that crosses domains, and every one is a connection's, charged to the child budget of an outer budget for that connection, so the rule holds by construction; destroying a budget deletes every object charged to it and to the budgets carved from it ([design-kernel.md](design-kernel.md#budgets), K25, K26); the fault thread destroys the own budget at the exit record, through `erx_dom_destroy`; the system domain destroys a connection's child budgets through `erx_dom_disconnect` once each party has let go, and the outer budget through `erx_dom_retire` once no child remains and the crash area is read; the domain holds no capability to its outer budget or to any child of it; the system domain charges nothing of a domain's to its own budget, and maps nothing charged to a domain's own budget | a cross-domain mapping, or memory a device may address, charged to a domain's own budget; a library entry other than `erx_dom_connect` that maps one domain's memory into another; a domain holding its outer budget or a child of it; a second path that destroys a domain's budgets | a source check that the domain library destroys a budget only in `erx_dom_destroy`, `erx_dom_disconnect` and `erx_dom_retire`, and that `erx_dom_connect` is the one entry that creates an object another domain maps, and creates it from a child budget of an outer budget, each with a seeded violation; a host test that drives the library over the hosted kernel interface through random creations, introductions, device gives and ends, and checks after each destroy that no object a living party maps was deleted, and after each retire that the principal's budget is back at its baseline; a test that ends a domain while its peer still writes the side the dead domain read and reads the side it wrote, and finds the peer running until it answers `connection_down`; a test whose peer never answers, after which only that connection's child budget stays, with the dead domain's outer budget it is carved from, every other child of that outer budget is gone, and the connection counts against the peer's `connections`; a test that creates and ends domains under load, some with sub-spaces nested three deep, and checks that the principal's budget returns to its baseline |
 | **A6.** No domain outlives the system domain, and a system domain that cannot serve ends the machine | every domain's space is a child of the system domain's space, which the plan names as every domain's parent (K27); the first space has no fault gate, so a fault in it, a stop of it outside an ordered end, or a watchdog deadline missed goes to the kernel's end path, which writes the crash record and ends the machine by `erx.panic`; the watchdog process pets only after every service it lists has answered a liveness call within the period, so a system domain whose runtime runs but whose domain service or device service stops answering, even after its supervisor restarted it, misses the deadline too; no party outside the kernel and the system domain keeps a record of any domain, so there is nothing to reconcile and no protocol that could be wrong | a domain created under another parent; a system-domain fault handled by anything but the kernel's end path; a watchdog pet from anything but the system domain's runtime; a pet that does not wait for the listed services' answers | a host test that every plan names the system domain's space as parent; a QEMU test that kills the system domain under load and finds the machine ended with the crash record on the console and no domain running; a test that stops the pet and sees the machine end at the deadline; a test that deadlocks the domain service and sees it killed and restarted with the pets going on, and one that keeps it from answering after each restart and sees the machine end at the deadline; a test that a domain's `erx_watchdog_pet` fails with `ERX_ERIGHTS` |
 | **A7.** The system domain installs only what its grant table allows | every `erx_cap_pass` the domain library makes goes through one function, `erx_dom_install`, which takes a row of `erx_dom_grants`, the constant table of installs that [Authority](#authority) describes, and the recipient the validated plan names for the row's role; each install copies one of the library's own capabilities from the system domain's table, never from another domain's, and each mask lies within its recipient's row in the authority table | a pass outside `erx_dom_install`; a pass from another domain's table; a row that grants more than its recipient's row in [Authority](#authority); a recipient the plan did not check | a source check that `erx_cap_pass` is referenced only from `erx_dom_install`, and that its source table is always the system domain's own, with a seeded violation of each; host tests that every row of `erx_dom_grants` lies within the rights the authority table lists for its recipient, transcribed into the test; domain tests that a device's objects reach their domain without `GIVE`, and that a side of a connection reaches its reader with `READ` and `MAP` alone |
@@ -1011,11 +1011,11 @@ baseline remains the manifest's; runtime changes do not edit it.
    admitted grant set changes between their check and use.
 2. **Apply.** The steps, in order, each recording its undo:
    1. carve the domain's own budget and its outer budget, side by side,
-      from its principal's, each with a cap equal to its guarantee, so
-      that every charge of the domain's is admitted or refused at its
-      own budget, and nothing of the domain's is counted against
-      another domain's, or against its principal's room beyond what a
-      later shrink by this policy moves there (K32);
+      from its principal's, each a wall, so that every charge of the
+      domain's is admitted or refused at its own budget, and nothing of
+      the domain's is counted against another domain's, or against its
+      principal's room beyond what a later shrink by this policy moves
+      there (K32);
    2. create the domain's space with the library's fault gate, the domain
       id as the label of its records, `ERX_SPACE_JIT` exactly when the
       runtime image carries `ERX_IMAGE_JIT`
@@ -1754,8 +1754,9 @@ change only when a run moves, a capacity changes by more than a tenth, or
 100 ms have passed, so runtimes do not churn their schedulers.
 
 **Budgets.** Each principal's budget is carved from the root budget at the
-manifest's size, with cap equal to guarantee; each domain's two budgets
-from its principal's, side by side and each with cap equal to guarantee:
+manifest's size, as a wall, a budget whose cap is fixed equal to its
+guarantee ([design-kernel.md](design-kernel.md#budgets)); each domain's
+two budgets from its principal's, side by side and each a wall:
 its own budget at its spec's `memory`, and its outer
 budget at its spec's `outer`, which the policy sizes from the
 domain's admission: a child budget for its connection to the system
@@ -1767,29 +1768,32 @@ and its bell; each child's own records; and its crash area
 ([Ending a domain](#ending-a-domain)). An
 introduction carves a child from the reader's outer budget, which the
 policy sized for it, so an introduction fails with `ERX_ENOMEM` only
-beyond the domain's own quota. A cap equal to the guarantee makes each
-of these budgets a wall: the kernel admits or refuses every charge of a
-domain's at the domain's own budget, counts none of it against another
-domain's, no principal spends beyond its own, and a domain's memory
-depends on nothing outside it but the kernel (K32,
-[design-kernel.md](design-kernel.md#budgets)). The
-policy corrects the size of a domain it created at run time with
-`erx_budget_resize` through the domain library's `erx_dom_resize`, which
-moves the own budget's guarantee and cap together within the
-principal's, so a domain is resized without being restarted; a shrink
-beneath what the domain holds leaves the excess counted in the
-principal's room until the domain frees it, with every new charge of
-the domain's refused meanwhile, which is the one way a domain's charge
-is counted there, and the policy's own doing; a
-configured domain's budgets stay as the manifest says, as its grants do
-(A10, [Granting a running domain](#granting-a-running-domain)). A session
-carves from its own budget a **pool for its programs**, half of its
-budget by default and with cap equal to guarantee, and keeps the other
-half for its own services, the shell, the terminal relay, the handler and
-the pipe server, so that a loop of programs never starves them
+beyond the domain's own quota. Every budget the domain library carves,
+the connection children included, is a wall, so the kernel admits or
+refuses every charge of a domain's at the domain's own budget, counts
+none of it against another domain's, no principal spends beyond its own,
+and a domain's memory depends on nothing outside it but the kernel (K32,
+[design-kernel.md](design-kernel.md#budgets)); and the library's grant
+table passes no budget with `DESTROY`, so no domain resizes a budget of
+its own (A7). The policy corrects the size of a domain it created at run
+time with `erx_budget_resize` through the domain library's
+`erx_dom_resize`, which moves the own budget's guarantee and cap together
+within the principal's, so a domain is resized without being restarted;
+a shrink beneath what the domain holds leaves the excess counted in the
+principal's room until the domain frees it, with every charge that would
+raise the domain's spending refused meanwhile, which is the one way a
+domain's charge is counted there, and the policy's own doing; a shrink
+takes nothing back from a sub-space budget the domain carved within its
+own, whose charges within its guarantee go on, as the kernel's rule
+says; a configured domain's budgets stay as the manifest says, as its
+grants do (A10, [Granting a running domain](#granting-a-running-domain)).
+A session carves from its own budget a **pool for its programs**, half
+of its budget by default and a wall, and keeps the other half for its own
+services, the shell, the terminal relay, the handler and the pipe server,
+so that a loop of programs never starves them
 ([design-programs.md](design-programs.md#a-program-is-a-port),
 [design-shell.md](design-shell.md#invariants)). From the pool it carves
-each program's budget, as its creator, with a **floor** as its guarantee,
+each program's budget, as its creator, elastic, with a **floor** as its guarantee,
 what the smallest program needs to start and to end, from the measured
 cost of experiment E-P1 ([design-programs.md](design-programs.md#performance)),
 and with the cap its policy gives the program, the pool's whole size

@@ -2460,23 +2460,31 @@ define it.
   `erx_vm_reserve`, which costs its record and nothing else however
   large, so a program reserves what it may need; with any other
   protection it is a reserve and a commit, charged to the program's
-  budget in full at the call, so `mmap` fails with `ENOMEM` there and a
-  mapped page never faults for lack of memory (K6), as QNX charges an
-  anonymous mapping at `mmap`. `mprotect` moves memory among no access,
-  read-only and read-write with the kernel's `erx_space_protect`, which
-  changes the protection of the mappings in a range and keeps their
-  contents, beneath each mapping's ceiling: over reserved memory a
-  protection other than `PROT_NONE` commits it, charging the program's
-  budget at the `mprotect`, which fails with `ENOMEM` when the budget
-  cannot cover it and leaves the pages before the refusal accessible, as
-  POSIX allows of a failed `mprotect`; `mprotect(PROT_NONE)` over
-  committed memory keeps the pages, their contents and their charge,
-  which only `munmap` gives up; a protection above a ceiling is refused
-  before anything is committed, so `PROT_EXEC` over reserved private
-  memory commits nothing, and `mprotect` fails with `EACCES`, as POSIX
-  says for a protection the open does not allow. `MAP_NORESERVE` is
-  accepted and has no effect, as
-  on QNX. musl's own `malloc` relies on this: it maps its metadata areas
+  budget in full at the call, as QNX charges an anonymous mapping at
+  `mmap`: when the commit is refused, `liberx` releases the reservation
+  it just made, so nothing of the call remains, and `mmap` returns
+  `MAP_FAILED` with `ENOMEM`; a mapped page never faults for lack of
+  memory (K6). A shared anonymous `mmap` is charged whole at the call
+  whatever its protection, `PROT_NONE` included, since a shared object's
+  pages are its budget's from its creation, which is a documented
+  difference from QNX ([Compatibility and
+  migration](#compatibility-and-migration)). `mprotect` moves memory
+  among no access, read-only and read-write with the kernel's
+  `erx_space_protect`, which changes the protection of the mappings in a
+  range and keeps their contents, beneath each mapping's ceiling: over
+  reserved memory a protection other than `PROT_NONE` commits it,
+  charging the program's budget at the `mprotect`, which fails with
+  `ENOMEM` when the budget cannot cover it and leaves the pages before
+  the refusal accessible, as POSIX allows of a failed `mprotect`; a hole
+  in the range, which the kernel reports as `ERX_ERANGE` with the parts
+  before it applied, is `ENOMEM` too, as POSIX requires for an unmapped
+  page; `mprotect(PROT_NONE)` over committed memory keeps the pages,
+  their contents and their charge, which only `munmap` gives up.
+  `PROT_EXEC` never reaches the kernel from a program: `liberx` refuses
+  it in `mmap` and `mprotect` with `ENOTSUP` before any call, since only
+  the loader maps code (P10), so a ceiling check in the kernel meets no
+  execute protection from a program. `MAP_NORESERVE` is accepted and has
+  no effect, as on QNX. musl's own `malloc` relies on this: it maps its metadata areas
   with `PROT_NONE` and unprotects a page at a time with `mprotect`
   (`musl/src/malloc/mallocng/malloc.c`, `alloc_meta`)
   ([design-kernel.md](design-kernel.md#virtual-memory)). `mmap` of a
@@ -2628,6 +2636,7 @@ test:
 | in the first tier, `/dev/tty` is a line-mode terminal whose only `termios` change is `ECHO`; no `sigaltstack`, no `RUSAGE_CHILDREN` | pseudo-terminals and `termios` are the second tier's; no stack switching; no usage reports from children |
 | `PROT_EXEC` in `mmap` and `mprotect` fails with `ENOTSUP`, and a shared library with text relocations is refused | only the loader maps code, and code is never writable (P10) |
 | in the first tier, `MAP_SHARED` mappings of files fail with `ENOTSUP` | they need the session's mappers and the kernel's report of stored pages, the second tier's |
+| a shared anonymous `mmap` (`MAP_SHARED\|MAP_ANON`) is charged whole at the call, `PROT_NONE` included, and fails there with `ENOMEM`, where QNX reserves it and charges at the `mprotect`; a private anonymous `PROT_NONE` mapping is free until it is given access, as on QNX | a shared memory object's pages are charged to its budget at its creation, so that the forked children and the mappings that share it never fault for lack of memory (K6) and no mapping's commit can be refused by another's; a test maps a shared anonymous `PROT_NONE` range larger than the pool and expects `ENOMEM`, and the same range private and expects success |
 
 ## Failure handling, diagnostics and debuggability
 
@@ -2635,7 +2644,8 @@ test:
 | --- | --- | --- | --- | --- |
 | A spawn is refused: no right to start commands, an unknown command, a file without `rx`, a quota, a pipe's read ends, the session's budget | the starter's handler, from its own checks, the pipe server's or the port driver's answer | nothing: each step's undo ran ([Starting a program](#starting-a-program)) | the step that failed, and the steps before it in reverse | `posix_spawn` returns `EPERM`, `ENOENT`, `EACCES`, `EAGAIN`, `EMFILE` or `ENOMEM`; the shell prints the reason |
 | A program's startup message is malformed | its decoder, `liberx`'s or the command image's, before the program's own code runs | nothing | the program ends | status 127, the reason on its standard error when it has one |
-| A program's `mmap` or `mprotect` cannot be charged: its cap or its session's pool for programs is full | the kernel, at the commit the call makes, before anything of that part changes | the reservation, and the parts of the range given access before the refusal | nothing: a part is charged whole or not at all | `mmap` or `mprotect` returns -1 with `ENOMEM`, and `malloc` returns `NULL` |
+| A program's `mmap` with access cannot be charged: its cap or its session's pool for programs is full | the kernel, at the commit `liberx` makes after the reserve | nothing: `liberx` releases the reservation it made before it returns | `liberx`, in the failing `mmap` | `mmap` returns `MAP_FAILED` with `ENOMEM`, and `malloc` returns `NULL`; a test that fails a thousand such `mmap` calls finds the program's mapping count and address space where they were |
+| A program's `mprotect` that gives reserved memory access cannot be charged, or meets a hole | the kernel, at the commit the part makes, before anything of that part changes; at the hole | the parts of the range before the refusal, given access and charged, as POSIX allows of a failed `mprotect` | nothing: a part is charged whole or not at all, and the program keeps what it was given | `mprotect` returns -1 with `ENOMEM`, and `malloc` returns `NULL` |
 | A program writes a frame outside the protocol's grammar, a request on a busy slot and a notice that is not due among them | the handler's decoder; the port driver's count of the program's credit | nothing | the port driver or the handler ends the program as a fault ends it | its parent sees `SIGSYS`; the shell prints the frame's offset |
 | A frame from the handler is outside the grammar, which only a bug in the session can produce | `liberx`'s decoder | nothing | the program ends | status 127, a line on its standard error |
 | A shared mapping fails after its mapping open is made: the server's refusal, the mapping quota, a fill, the install or `erx_vm_map` | the mapper, the handler or `liberx` | the mapping open, until it closes | the mapper closes the mapping open on a failure of its own; `liberx` closes what arrived and the mapping open on a failure after the handler answered | `mmap` fails with its error; no open or quota remains |
