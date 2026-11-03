@@ -2417,13 +2417,19 @@ page carries all three, so the root task reads what it must do. The kernel
 seconds ahead: ERTS's boot, which takes seconds on a board and longer
 under TCG, races `B` alone, and a hang during it ends in a reset like any
 other hang. `erx_watchdog_pet(res)`, with `POWER` on the root resource,
-sets the deadline to the current time plus `D`; it never waits and
-allocates nothing, and since no carved resource carries `POWER`, only the
-root task can pet. A timer of the kernel's own checks the deadline once a
-second, and a deadline that has passed is `erx_panic` with the cause
-`ERX_CRASH_WATCHDOG` and the time since the last pet, or since the root
-task's start before the first, the crash record first, as for a fault of
-the root task ([The root task](#the-root-task)). A boot that does not
+sets the deadline to the current time plus `D` when it is on time, which
+it is up to and including the deadline instant; a later pet moves
+nothing, a pet before the root task starts is ignored, and a repeated
+start never re-arms, so nothing extends a deadline but an on-time pet.
+The call never waits and allocates nothing, and since no carved resource
+carries `POWER`, only the root task can pet. A deadline that would lie
+past the end of the clock's range saturates at that end and is never
+reached. A timer of the kernel's own checks the deadline once a second,
+and only that tick ends the machine: the first tick past a deadline that
+no pet moved is `erx_panic` with the cause `ERX_CRASH_CAUSE_WATCHDOG` and
+the time since the last on-time pet, or since the root task's start
+before the first, the crash record first, as for a fault of the root
+task ([The root task](#the-root-task)). A boot that does not
 reach its first pet within `B` is a hang like any other and ends the same
 way. The harness sets `B` and `D` larger for TCG runs, and the boot probe
 on each board checks that the time to the first pet fits `B`
@@ -2434,10 +2440,12 @@ service at least, has answered a liveness call within the period: a
 service that does not answer is killed and its supervisor restarts it,
 and a runtime that cannot run the process misses the deadline, which is
 this end. Under a development manifest's partial boot, where no ERTS
-runs, the root-task entry pets ([design-system.md](design-system.md#boot)). In deterministic
-mode the watchdog is **off**: a pet is accepted and sets no deadline, and
-the machine page says so, so the system release runs unchanged; release
-builds refuse deterministic mode.
+runs, the root-task entry pets ([design-system.md](design-system.md#boot)). `erx.watchdog`
+has no off value: the watchdog is **off** only in deterministic mode
+(`erx.det=1`), where the root task's start turns it off instead of
+arming it, a pet is accepted and sets no deadline, and the machine page
+says so, so the system release runs unchanged; release builds refuse
+deterministic mode.
 The decision is one pure function, `erx_watchdog_step`, over the states
 off, unarmed and armed with a deadline, and the events start of the root
 task, pet and tick, whose actions are arm, reload the board's watchdog,
@@ -2922,7 +2930,11 @@ what it protects:
   guards its attachment field, or, for a thread's senders, on the
   thread's home CPU, which alone touches them (K14), and fails with
   `ERX_ESTALE` on a closed object, as a Fiasco gate refuses new senders
-  once its existence lock is invalid (`ipc_gate.cpp`); a space's creation
+  once its existence lock is invalid (`ipc_gate.cpp`); an insert into a
+  dying thread's queues fails with `ERX_EDEAD` whether or not the thread
+  is closed, since the thread's own death drains its senders and nothing
+  may queue after the drain, as on the stopgap
+  ([design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)); a space's creation
   of a child or a thread checks the same under the space's lock. An
   insert therefore either comes before the teardown's walk of that field,
   which finds its item, or after the close, and sees the mark. So nothing
@@ -6414,7 +6426,7 @@ arithmetic.
 | `erx.cpus=N` | start at most `N` CPUs | every CPU in the device tree |
 | `erx.sched=` | the scheduler's configuration cap ([design-scheduler.md](design-scheduler.md#configuration)) | `c2` |
 | `erx.panic=halt`, `reset`, `off` | the end of a panic, and of the root task's fault, halt or missed watchdog deadline ([The root task](#the-root-task)); `reset` while a machine lease is held | `halt` in development builds, `reset` in release builds |
-| `erx.watchdog=P,D,B` | the watchdog's period, deadline and boot deadline in seconds, which the machine page carries: the root task pets every `P` seconds, a pet `D` seconds late ends the machine, and a root task that has not pet within `B` seconds of its start ends it the same way; `P` from 1 to 60, `D` from `2P` to 600 and `B` from `D` to 600 ([The watchdog](#the-watchdog)) | `1,5,60` |
+| `erx.watchdog=P,D,B` | the watchdog's period, deadline and boot deadline in seconds, which the machine page carries: the root task pets every `P` seconds, a deadline `D` seconds after a pet that passes without the next ends the machine, and a root task that has not pet within `B` seconds of its start ends it the same way; `P` from 1 to 60, `D` from `2P` to 600 and `B` from `D` to 600 ([The watchdog](#the-watchdog)) | `1,5,60` |
 
 The boot image carries the build's flags: `ERX_PACK_DEVELOPMENT`, which
 puts `development build: trusted code only` in the banner, and

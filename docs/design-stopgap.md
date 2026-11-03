@@ -226,8 +226,8 @@ since the one installer takes an `erx_object_t`.
 | erXos type | Fork object | Fiasco mechanism inside it |
 | --- | --- | --- |
 | budget | `Erx_budget`, added | a `Ram_quota` whose `alloc` and `free` are the budget core's page charge and release, with the counters, `att_charged` list and caches of [Budgets](design-kernel.md#budgets); Fiasco's factories are not built |
-| space | `Task`, modified | the task, its `Mem_space`, the capability table facade, the erXos space state: parent, fault gate, label, `stopped`, the active count, the thread list, the mapping records; constructed by the glue's installer, never through `Task::create`'s protocol form |
-| thread | `Thread_object`, modified | the thread, its kernel stack, its FP state inline and its one kernel-user page holding the `erx_kupage`; the class, group path, executor slot, `CONTROL` state, the admitted register record and the `Thread_erx_stop_wait` state bit added |
+| space | `Task`, modified | the task, its `Mem_space`, the capability table facade, the erXos space state: parent, fault gate, label, the run word holding its run state and live count, the thread list, the mapping records; constructed by the glue's installer, never through `Task::create`'s protocol form |
+| thread | `Thread_object`, modified | the thread, its kernel stack, its FP state inline and its one kernel-user page holding the `erx_kupage`; the class, group path, executor slot, `CONTROL` state, the admitted register record and the scheduling binding's record (the one wait record, the kill and dying flags and the finisher) added |
 | group | `Erx_group`, added | the scheduler core's group record, the park lock and FIFO, the shared areas as kernel-user memory |
 | memory | `Erx_memory`, added | pages from the funnel charged to its budget, the reverse map of mapping records, the ceiling, the reserve; the kernel-made physical kinds wrap pages the kernel owns: the boot image's archive, the time page, the machine page, the device-secret page, the previous crash record, a group's shared areas |
 | gate | `Ipc_gate`, modified | the gate with a 64-bit label; its bound thread is an attachment on the thread's `att_gates` list, not a counted reference |
@@ -1007,21 +1007,27 @@ a bug or an attack, never a page to fetch.
 The IPC core, `erx_ipc_step`, decides sends, receives, replies and
 deadlines; the glue carries them on Fiasco's paths: `Ipc_gate` binding
 with a 64-bit label in place of Fiasco's label with rights bits; the
-sender lists ordered by urgency and arrival (`prio_list.cpp`); the
-handshake that moves the receiver into `Thread_ipc_transfer`
-(`handshake_receiver`); the sender performing the transfer, by
-`erx_msg_copy`, and ending it with one request to the receiver's home
-CPU (`activate_ipc_partner`); the implicit reply capability as the
-caller; absolute deadlines as Fiasco timeouts armed from the decoded
-kernel-clock values; and the direct switch, as
+sender lists ordered by urgency and arrival (`prio_list.cpp`), whose
+insert on the thread's home CPU refuses a thread marked dying with
+`ERX_EDEAD`, as it refuses a closed one, so no sender queues after the
+thread's drain; the handshake that moves the receiver into
+`Thread_ipc_transfer` (`handshake_receiver`); the sender performing the
+transfer, by `erx_msg_copy`, and ending it with one request to the
+receiver's home CPU (`activate_ipc_partner`, which only makes the
+receiver ready and switches to nothing); the implicit reply capability
+as the caller; and absolute deadlines as Fiasco timeouts armed from the
+decoded kernel-clock values. There is no direct switch: the scheduler
+picks the receiver at the sender's next decision, as
 [design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)
 binds it.
 
-**Waits and cross-CPU requests.** The glue's two wait loops,
-`do_send_wait` and `do_receive_wait`, sleep through the stop binding's
-one wait funnel, `Erx::wait_sleep`, whose decision is the C17
-`erx_wait_step`, so a thread of a stopped space cannot sleep in an IPC
-wait, and the stop cancels no list of IPC wait kinds. Every cross-CPU
+**Waits and cross-CPU requests.** The glue's three sleeps,
+`do_send_wait`, `do_receive_wait` and `Ipc_gate::block`, the sender's
+wait at a gate bound to no thread, sleep through the scheduling
+binding's one wait funnel, `Erx::wait_sleep`, whose decision is the C17
+`erx_wait_step`, and are ended through `erx_wait_complete`, so a thread
+of a stopped space cannot sleep in an IPC wait, and the stop cancels no
+list of IPC wait kinds. Every cross-CPU
 request the glue sends, the handshake, the reply and the abort, is
 eager (`Context::drq` with `eager = true`), run in the inter-processor
 interrupt's handler on the receiver's CPU whatever runs there. Fiasco
@@ -1050,7 +1056,8 @@ changes nothing in the handshake, the transfer's ownership or the
 request that ends it.
 
 **Executors.** Every IPC call that may wait is refused to an executor
-by the generated dispatch with `ERX_EWOULDBLOCK`. `erx_ipc_reply` does
+by the generated dispatch with `ERX_EWOULDBLOCK`, as is `erx_space_stop`,
+marked `executor: refuse`. `erx_ipc_reply` does
 not wait and is not refused by class: an executor never receives, so it
 never has a caller, and its reply fails with `ERX_ENOCALLER` like any
 reply with no caller. The conformance suite checks both.
@@ -1058,9 +1065,9 @@ reply with no caller. The conformance suite checks both.
 ### Stop and exit: the binding
 
 [design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)
-binds K18 on the fork: the active count, the request to each thread, the
-return check in the common return path, the kill continuation, the
-adoption of a finishing thread and the exit record. This document fixes
+binds K18 on the fork: the run word with its live count, the one request
+to each thread, the return check in the common return path, the kill
+continuation, the finishing priority and the exit record. This document fixes
 what that binding can rely on: every wake out of a wait returns through
 the call's C++ frames (the IRQ shortcut is off), every thread's first
 entry and every call's return leave through Fiasco's common return path,
@@ -1068,10 +1075,12 @@ and the vCPU return (`__iret`) is not built until M5. `erx_thread_stop`,
 `erx_thread_start`, `erx_thread_read`, `erx_thread_write` and a thread's
 destroy reach the thread only through `Erx::thread_request`, the
 binding's one request to a thread's home CPU, so no call touches a
-thread's state or registers from another CPU. The fork adds one
-thread-state bit, `Thread_erx_stop_wait`, for the stopper's counted
-wait for `EXITED`, beside Fiasco's `Thread_drq_wait`; the two are the
-binding's `ERX_RUN_KERNEL_WAIT`, waits that end by themselves.
+thread's state or registers from another CPU. The stopper's wait for
+`EXITED` is a completion wait of the binding's wait funnel,
+`Erx::wait_sleep`, ended through `erx_wait_complete` by the death that
+publishes `EXITED`; nothing is counted, and the fork adds no
+thread-state bit for it. The exit record's cross-CPU delivery is an
+`Erx::request` naming the space.
 
 **What this binding requires of the scheduling binding.** Three
 interface constraints follow from the constructions above, and the
@@ -1084,7 +1093,9 @@ scheduling binding meets them:
   it by dropping its reference, before the thread's dead mark, under
   the CPU lock that Fiasco's `do_kill` already holds from the sender
   drain to the mark, and `Erx::request` refuses a thread past that mark
-  and takes nothing. A request that waits (`Erx::thread_request`,
+  and takes nothing. The queues that carry requests are drained in
+  bounded batches, as the scheduling binding specifies. A request that
+  waits (`Erx::thread_request`,
   `Context::drq`) names only its waiting requester and its target and
   needs no such step.
 * *Order between an eager abort and a queued delivery.* The abort may
@@ -1093,7 +1104,8 @@ scheduling binding meets them:
 * *No FP step at teardown.* The thread's FP state is inline in its
   block, so the kill continuation frees nothing for it and
   `release_fpu_if_owner` is the eager implementation's empty one; a
-  stop or an adoption moves no FP state between threads.
+  finishing thread runs on its own CPU, so a stop moves no FP state
+  between threads.
 
 ### Park and wake: the binding
 
@@ -1106,8 +1118,10 @@ through its frames like any other wake.
 ### Server urgency and charging: the binding
 
 [design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)
-binds configuration C0's urgency ceilings (S5), the direct switch and the
-tick's charging on the fork.
+binds configuration C0's urgency ceilings (S5), the absence of a direct
+switch (a send makes the receiver ready and switches to nothing, and the
+scheduler picks it with its own scheduling context) and the tick's
+charging on the fork.
 
 ### The watchdog, the crash record and the console
 
