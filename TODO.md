@@ -485,6 +485,16 @@ it; git history is the record of completed work.
   error-injection test on each board before drivers run on it. M12, which
   brings the boards, closes this or records the user's acceptance
   ([design-kernel.md](docs/design-kernel.md#interrupts-time-and-entropy)).
+* [Medium] stopgap kernel, finishing without a share: the modified Fiasco
+  runs a killed thread at the fixed finishing priority above every user
+  urgency on its own CPU, outside every quota, with no finishing share,
+  so a domain that creates threads homed on one CPU and kills them holds
+  that CPU's user threads back, the root task's petting thread among
+  them, for as long as the stream lasts; the bound is the stopped
+  spaces' remaining work, paid for by their budgets. Acceptable only
+  while development builds run trusted code; erXos's kernel bounds it
+  with the finishing share, and it goes with the stopgap at M7
+  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#security)).
 * [Low] platforms, QEMU `virt`'s fw-cfg device: check whether its node,
   `qemu,fw-cfg-mmio`, offers the DMA interface on the pinned QEMU. If it
   does, list it among the bus masters of the DMA contract; the system

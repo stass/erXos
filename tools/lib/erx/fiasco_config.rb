@@ -22,8 +22,9 @@ module Erx
 
     # The FP unit, the performance build, user-mode reads of the performance
     # counters for profiling (a difference the design records), and the
-    # synchronized clock that measures a stop's finishing share
-    # (Timer::system_clock(), design-stopgap-scheduling.md).
+    # synchronized clock: wait deadlines are times of the architecture's
+    # counter, which Timer::system_clock() reads only with it, a tick
+    # count in the information page without it (design-stopgap.md).
     REQUIRED = %w[CONFIG_FPU CONFIG_PERFORMANCE CONFIG_PERF_CNT_USER CONFIG_SYNC_CLOCK].freeze
     # The fork switches FP state eagerly and leaves SVE trapped ("FP and SIMD
     # state"); the thread region is a constant of the non-hypervisor layout.

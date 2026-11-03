@@ -517,9 +517,9 @@ typedef struct erx_group_stat {
 	_Atomic uint64_t	period_start_ns;
 	_Atomic uint64_t	used_ns;	/* this period over all CPUs, updated at each draw */
 	_Atomic uint64_t	total_ns;	/* since creation, updated at each draw */
-	_Atomic uint64_t	finishing_ns;	/* since creation, by killed threads whose
-						 * path this group is on; outside every
-						 * quota, added at their accounting points */
+	_Atomic uint64_t	finishing_ns;	/* mirror of the sum of the per-CPU
+						 * finishing_ns, while the group holds
+						 * this area */
 	_Atomic uint32_t	parked;		/* executors in erx_park */
 	_Atomic uint32_t	throttled;	/* CPUs on which the group waits for its next period */
 	_Atomic uint32_t	ready;		/* IRQ objects on the group's ready list */
@@ -576,7 +576,8 @@ struct erx_group {
 	struct erx_irq		*att_ready_tail; /* not yet taken (design-kernel.md) */
 	uint32_t		nready;		/* their number, mirrored in ready */
 	struct erx_thread	*slot[ERX_GROUP_EXECUTORS_MAX];
-	struct erx_mem		*ctl, *stat;	/* the shared areas */
+	struct erx_mem *_Atomic	ctl, *_Atomic stat; /* the shared areas; NULL
+						 * from the destroy's detach on */
 	struct erx_group_cpu	*cpu;		/* one per CPU, owned by that CPU */
 };
 
@@ -587,6 +588,9 @@ struct erx_group_cpu {
 	struct erx_tqueue	cohort;		/* threads of a period begun, being released */
 	erx_timer_t		refill;		/* armed while either queue holds threads */
 	uint64_t		used_ns;
+	uint64_t		finishing_ns;	/* since creation, by killed threads on this
+						 * CPU whose path this group is on; outside
+						 * every quota; the authoritative count */
 };
 
 struct erx_thread_sched {
@@ -618,8 +622,25 @@ preemption lands while one is held. Its grant is written only by
 read without that lock are atomic ([Charging and
 quota](#charging-and-quota)).
 
+**The counters live in the records.** A group's finishing time is
+counted in its per-CPU records, as its period usage is, which a member
+that still runs keeps until its last switch, and never only in the
+status area, which mirrors it for the runtime while the group holds the
+area. Every
+store the kernel makes into a shared area goes through one publish
+path, the accessors `erx_shared_store_u32` and `erx_shared_store_u64`,
+which find the area through the group's `stat` pointer, with
+interrupts masked, and store nothing when the pointer is `NULL`. A
+group's destroy clears both pointers before it releases the areas'
+pages, and a released page waits out a grace period before anything
+reuses it, which a store begun before the clear, inside one masked
+stretch, cannot outlast ([design-kernel.md](design-kernel.md#the-reaper)).
+So a killed member that charges a destroyed group goes on adding to the
+group's per-CPU records and publishes nothing, and no store reaches a
+page another budget may hold.
+
 **Memory.** At 64 CPUs a group costs about 30 KiB: the object, 64 per-CPU
-records of 80 bytes, and two shared areas of 12 KiB. A thread's scheduling
+records of 88 bytes, and two shared areas of 12 KiB. A thread's scheduling
 record is under 100 bytes inside its thread record. Nothing is allocated
 after creation.
 
@@ -640,8 +661,8 @@ it dies, and a child counts until it is destroyed.
 | --- | --- | --- |
 | live | `erx_group_create` returns | its capabilities reach it; threads are created in it and groups under it |
 | released | its last capability goes while it has a member or a child | no capability reaches it, so nothing joins it; its members run on under its grant, park in it and take deliveries from the IRQ objects already bound to it, since `erx_park` and `erx_group_take_ready` act on the caller's own group and need no capability, and its children keep their place under it |
-| destroyed | it is deleted, by `erx_object_destroy` with `DESTROY`, by the destruction of the budget that pays for it or by the destruction of its parent group; or, released, its last member and child go | it is closed: every capability to it fails and nothing joins it; its teardown destroys its child groups, kills its member threads, unbinds the IRQ objects bound to it and withdraws the deliveries on its ready list, each owed to that object's next binding unless it is a level-sensitive line ([design-kernel.md](design-kernel.md#irq-objects)) |
-| freed | its destruction's grace period has passed and its last counted reference has gone | its destroy released its shared areas, their charge ending there, and the reaper frees its record and its per-CPU records, whose cache pages are released when they hold no record ([design-kernel.md](design-kernel.md#the-reaper)) |
+| destroyed | it is deleted, by `erx_object_destroy` with `DESTROY`, by the destruction of the budget that pays for it or by the destruction of its parent group; or, released, its last member and child go | it is closed: every capability to it fails and nothing joins it; its teardown detaches and releases its shared areas, destroys its child groups, kills its member threads, unbinds the IRQ objects bound to it and withdraws the deliveries on its ready list, each owed to that object's next binding unless it is a level-sensitive line ([design-kernel.md](design-kernel.md#irq-objects)) |
+| freed | its destruction's grace period has passed and its last counted reference has gone | its destroy detached and released its shared areas, their charge ending there, and the reaper frees its record and its per-CPU records, whose cache pages are released when they hold no record ([design-kernel.md](design-kernel.md#the-reaper)) |
 
 Three facts follow by construction:
 
@@ -656,12 +677,14 @@ Three facts follow by construction:
   reference to each group on its path, from its creation until its last
   switch, and a thread is charged to nothing but that path (S6). A
   killed member finishes its call on its own stack, its time added for
-  the accounting to the `finishing_ns` of that same path, which it still
-  holds after its teardown has taken it off its group's member list; and
-  a destroyed group's records go on charging, throttling and releasing
-  whatever still holds them by the same rules until the last holder is
-  gone. So no decision checks for a destroyed group on the path it
-  charges.
+  the accounting to the `finishing_ns` of that same path's per-CPU
+  records, which it still holds after its teardown has taken it off its
+  group's member list; and a destroyed group's records go on charging,
+  throttling and releasing whatever still holds them by the same rules
+  until the last holder is gone, while its status area, detached at the
+  destroy, receives nothing (**The counters live in the records**). So
+  no decision checks for a destroyed group on the path it charges, and
+  no charge reaches a released page.
 * **A destroy never waits on a member nobody will run.** A killed
   member runs at the finishing level of its own CPU, within that CPU's
   finishing share and outside every quota, so a group with no quota
@@ -774,7 +797,8 @@ when the CPU's finishing share runs out or its period begins:
    has no path to check: no quota admits it and none holds it.
 4. Dispatch `t`: program the CPU's one-shot timer for the earliest of
    `t`'s slice end, the first exhaustion of local quota on its group path,
-   the instant the finishing share's answer next changes, and the CPU's
+   the instant the finishing share's answer next changes while the
+   finishing level holds a thread, and the CPU's
    next timer-wheel deadline; switch to `t`'s kernel stack
    and space, from which `t` continues the kernel call it waited in or
    returns to user mode; record `t` as running in its status slot when its
@@ -827,30 +851,51 @@ idle time for the rest, so a stream of deaths cannot take a CPU from its
 user threads, which keep at least the other half of every period, and a
 ready user thread waits for the level at most two shares at a stretch,
 where two periods meet. The measure is the pure
-`erx_sched_finishing_step` of
-[design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit),
-one C17 core for both kernels, which keeps per CPU the time the level
-has run in the current period, the instant the running context last
-changed, whether that context is a killed thread's, and the period's
-index, the clock divided by the period, and takes three events with the
-clock: `SWITCH`, from the dispatch, the one place the CPU's running
-thread changes, which already reads the clock there to charge the
-outgoing thread, so every stretch the level runs is measured, between
-two deadlines included; `PICK`, from step 1, which asks the answer; and
-`TICK`, which asks it again and reports whether it has changed. The
-step returns with every answer the instant that answer next changes,
-when the share is spent or the period ends; the dispatch arms that
-instant as one deadline of the CPU's one-shot timer, and the deadline's
-handler feeds `TICK` and picks when the answer has changed, where the
-stopgap asks at Fiasco's millisecond tick instead. So the bounds of the
-stopgap hold on erXos's kernel with the tick's slack removed: the level
-runs at most `T` ticks of every period and at most `2T` at a stretch, a
-killed thread with `W` ticks of work left and at most `k` others at its
-level meanwhile is done within `ceil(W * k / T) + 1` periods of its
-kill, and `tools/erx bench stop` reports the measured figures on both
-kernels. A killed thread's time is added to its own path's
-`finishing_ns` for the accounting ([Charging and
-quota](#charging-and-quota)).
+`erx_sched_finishing_step` of the scheduler's core, which keeps per CPU
+the time the level has run in the current period, the instant the
+running context last changed, whether that context is a killed
+thread's, and the period's index, the clock divided by the period, and
+takes three events with the clock: `SWITCH`, from the dispatch, which
+already reads the clock there to charge the outgoing thread, so every
+stretch the level runs is measured, between two deadlines included;
+`PICK`, from step 1, which asks the answer; and `DEADLINE`, which asks it
+again and reports whether it has changed. The step returns with every
+answer the instant that answer next changes, when the share is spent or
+the period ends; the dispatch arms that instant as one deadline of the
+CPU's one-shot timer, and the deadline's handler feeds `DEADLINE` and
+picks when the answer has changed. The stopgap has no share and does
+not call the step
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
+
+*A kill is a decision.* The kill of the thread running on the CPU, its
+own exit, a stop of its own space, or a kill that a cross-CPU request
+brings to its CPU, ends with a pick, as a block or a preemption does:
+the thread's time up to the kill is charged to its ordinary path, it
+joins the finishing level, and the CPU picks and dispatches, feeding
+`SWITCH` whether or not the pick takes the same thread again, since
+the running context's kind has changed. So a killed thread goes on
+running only while the share answers yes, and no kill, of however many
+running threads in turn, gives the level time beyond its share.
+
+*What the share bounds.* The level runs at most `T` ticks of every
+period and at most `2T` at a stretch, `T` being `ERX_FINISHING_TICKS`.
+Write `W` for the ticks of work a killed thread has left at its kill,
+counting only the time it runs, the interrupt work taken meanwhile
+included, and `k` for the most killed threads at the level of its CPU
+at any time from its kill until that work is done, the thread itself
+included. Within the level each gets one tick in every `k` of the
+level's time, and the level gets `T` ticks of every period in which it
+has work, so the work is done within `ceil(W * k / T) + 1` periods of
+the kill, the one period for a kill that lands after the current
+period's share is spent: a lone killed thread with 40 ticks of work
+left is done within 11 periods. A wait inside the finishing call, for
+a cross-CPU request's answer or another kernel-internal event, is not
+in `W`: it adds its own length, which the kernel's rule for that wait
+bounds ([design-kernel.md](design-kernel.md#execution-model-and-locking)),
+and the thread's death follows its work and those waits.
+`tools/erx bench stop` reports the measured figures. A killed thread's
+time is added to its own path's `finishing_ns` for the accounting
+([Charging and quota](#charging-and-quota)).
 
 ### Charging and quota
 
@@ -948,9 +993,10 @@ neither grant nor cpuset: what bounds its finishing is its CPU's share
 and the parts its call has left. So the finishing of a stopped party
 never waits for a grant, the party's own or the stopper's, and nothing
 is set aside for it. The accounting stays on the thread's own path:
-from the kill on `erx_sched_charge` adds the thread's time to
-`finishing_ns` of every group on that path, which `erx_group_info` and
-the status area report, and to no pool, slice, `used_ns` or `total_ns`.
+from the kill on `erx_sched_charge` adds the thread's time to the
+`finishing_ns` of the per-CPU record of every group on that path, which
+`erx_group_info` sums and the status area mirrors while the group holds
+it, and to no pool, slice, `used_ns` or `total_ns`.
 So the inspector shows a stopped domain's finishing time apart from its
 ordinary time, on the stopped domain's own groups, and S4 stays a
 statement about what a group's threads ran within its grant. A kill
@@ -967,9 +1013,10 @@ lifetime](#ownership-and-lifetime)). A thread that ends itself with
 own context are charged the same way. A stopped thread's remaining kernel work
 cannot start another user request, since it never returns to user mode
 ([design-kernel.md](design-kernel.md#threads-and-faults)). The stopgap
-runs its finishing threads the same way, at a fixed priority above
-every urgency within the same share, measured by the same step from
-Fiasco's switch and asked at its tick
+runs its finishing threads at a fixed priority above every urgency,
+outside every quota and charged the same way, with no finishing share:
+a stream of kills there holds a CPU's user threads back for as long as
+it lasts, a stopgap residual
 ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
 
 **Reclamation.** Emptying and destroying a stopped space run in the
@@ -1457,8 +1504,9 @@ erXos's kernel has no periodic tick. Each CPU keeps a timer wheel of
 deadlines (park deadlines, IPC timeouts, umtx deadlines, refill timers,
 grace timers) and programs its timer one-shot for the earliest of the
 wheel's next deadline, the running thread's slice end and quota
-exhaustion, and the next change of the finishing share's answer while a
-killed thread is on the CPU ([Pick and dispatch](#pick-and-dispatch)). A
+exhaustion, and the next change of the finishing share's answer while
+the CPU's finishing level holds a thread, running or queued behind a
+user thread ([Pick and dispatch](#pick-and-dispatch)). A
 CPU with nothing to do waits for an interrupt with only its wheel's next
 deadline armed.
 
@@ -1493,8 +1541,10 @@ deadlines are measured in the same virtual time.
   call.
 * **Shared areas**: the kernel writes the status area with release stores
   where a runtime pairs them with acquire loads (the epochs) and relaxed
-  stores elsewhere; the runtime writes the control area, which the kernel
-  reads with single loads.
+  stores elsewhere, all through the one publish function, which stores
+  nothing once the group's destroy has detached the area (**The counters
+  live in the records**); the runtime writes the control area, which the
+  kernel reads with single loads.
 * **Ordering guarantees.** A trigger's listing, and whatever its
   triggerer published before it, are visible to any executor that
   observes the epoch advance it made (S2). A runtime observes capacity
@@ -1706,7 +1756,9 @@ no direct switch, is
 [design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)'s;
 accounting runs at Fiasco's
 timer interrupts, a 1 ms periodic tick, so quota enforcement there is
-accurate to 1 ms per CPU per period instead of to the one-shot timer.
+accurate to 1 ms per CPU per period instead of to the one-shot timer;
+and killed threads finish at a fixed priority above every urgency with
+no finishing share, so the share's bounds are erXos's kernel's alone.
 C2's features are erXos's kernel's alone; the stopgap's scope table lists
 each difference
 ([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
@@ -1825,7 +1877,7 @@ reading that lane and tell the system domain, which takes the connection down
 | Pure core, host | unit and property tests of `erx_sched_resolve`, `_charge`, `_draw` and `_pick`: random trees, grants, charges and decisions | a reference model in Ruby over the same inputs; a seeded charge that skips a level, and one that charges a second thread's group, each fail |
 | Protocols, host | exhaustive exploration of the park protocol (two executors, two IRQ objects triggered repeatedly, a capacity change, deadlines, epochs to depth 12) and of `erx_defer_step` (every event in every state) | no lost wakeup; every request resolved; a seeded park that compares outside the lock loses one |
 | Concurrency, host | the park lock and pool under ThreadSanitizer with many threads | TSan |
-| Build | the chokepoint checks: the charge function is the one writer of a group's usage; the shared-area accessors are the one reader of the control area | a seeded second writer of usage and a seeded direct load from the control area each fail the build |
+| Build | the chokepoint checks: the charge function is the one writer of a group's usage; the shared-area accessors are the one reader of the control area and the one writer of the status area | a seeded second writer of usage, a seeded direct load from the control area and a seeded direct store into the status area each fail the build |
 | Kernel, QEMU | hostile runtimes: random control-area writes, executors calling every blocking call, gates and IRQ objects bound to executors, executors armed for upcalls, executors that never yield, groups that spin | invariants S1 to S7; no group but the runtime's own charged |
 | Kernel, QEMU | quota accuracy: one group spinning at 10% and 30% on one and four CPUs, measured per period | S4's bound |
 | Pure core, host | draws with quotas from 1 ns to the whole machine over cpusets of one to 64 CPUs, and slices returned across period boundaries in every order against refills by other CPUs | every positive quota draws a positive slice; no remainder is counted twice; every overrun is charged once |
@@ -1834,15 +1886,15 @@ reading that lane and tell the system domain, which takes the connection down
 | Kernel, QEMU | ceilings: a server whose group's ceiling is 15 serving a caller at 40, with a second caller queued; a runtime publishing 63 in every slot under a ceiling of 31 | the server never above 15; no raise for the queued caller; every executor clamped to 31 |
 | Kernel, QEMU | own-group charging: a native server serving callers of three groups through one gate and through a gate per caller; a service runtime serving clients of three domains over lanes; usage per group against a cycle-counter ground truth around each unit of work | every nanosecond of serving on the server's group, none on a caller's (S6); a seeded charge to the caller's group fails |
 | Kernel, QEMU | a flooding client: one client sends as fast as it can to a capped service while a second client sends one request per period | the service's usage within its quota per period (S9); the flooder's lane full and its senders blocked in its own runtime; the reductions spent on the flooder per period within its share plus the cost of the requests it had in flight when the share ran out, the overrun repaid in the next period, also when its requests grow costlier with state it built in the service; the second client's requests answered within the policy's bound while the service has quota, and every client waiting together once it has none; a seeded facet that skips its account failing the test |
-| Kernel, QEMU | finishing: a stopper whose group's quota is zero stops a space whose threads are in long range calls, in `erx_park`, throttled under their own spent quota and paused, on every CPU; a stopper whose cpuset excludes the CPU of a thread inside a long call; a spinner of a third group above every user urgency on that CPU; and the stopper's thread deleted after its walk, after which a second stopper stops the same space | every stopped thread finishes and the exit record comes within `ceil(W * k / T) + 1` periods of the last kill, for the longest call's `W` ticks and the `k` finishers on its CPU, whatever the stopper's quota or cpuset; the spinner is delayed at most `T` ticks in any period and `2T` at a stretch; `finishing_ns` grows on every group of the stopped threads' own path by the finishing time and nowhere else, no `used_ns`, `total_ns` or pool moves for it, and neither stopper's path gains anything; the stopped threads never return to user mode; both stoppers return after the record, the deleted one dying at its return check; with a seeded kill that throttles the finishing thread on its killer's zero grant, the record never comes and the case's deadline fails; with a seeded finishing level placed below the spinner's urgency, the same; with a seeded charge of the finishing time to the thread's own pool or to the first stopper's path, the counters fail the case |
-| Kernel, QEMU | deletion: `DESTROY` on a group whose executors run, park, sit throttled under a spent quota and serve calls, with a child group whose members do the same; the destruction of the budget that pays for such a group; a group whose last capability closes while its executors run and park and IRQ objects bound to it wait on its ready list; an IRQ object bound to a group fired while the group's teardown runs | every member of the group and of its child killed, none returning to user mode, each finishing its call at the finishing level of its own CPU, its time in the `finishing_ns` of its own path and none in the destroying call's, with a seeded teardown that frees the record while a killed member still runs, and a seeded drop of a member's references at its teardown rather than after its last switch, each failing the test; a group destroyed while its quota is zero and a member is inside a long range call, by a destroyer whose own quota is zero as well, whose member finishes within the share's bound after the destroy returns, the group's record outliving the destroy until then, with a seeded destroy that throttles the member on either zero grant failing the test; the released group's executors park and wake until the last one ends, then its waiting deliveries are owed to their objects' next bindings, or dropped for a level-sensitive line; the record freed after the grace period and the last member's death, and the creator's budget, or its parent once the budget is destroyed, back at its baseline |
+| Kernel, QEMU | finishing: a stopper whose group's quota is zero stops a space whose threads are in long range calls, in `erx_park`, throttled under their own spent quota and paused, on every CPU; a stopper whose cpuset excludes the CPU of a thread inside a long call; a spinner of a third group above every user urgency on that CPU; and the stopper's thread deleted after its walk, after which a second stopper stops the same space | every stopped thread finishes and the exit record comes within `ceil(W * k / T) + 1` periods of the last kill, for the longest call's `W` ticks and the most finishers `k` at its CPU's level meanwhile, itself included, whatever the stopper's quota or cpuset; a thread killed while it runs inside a long call after its CPU's share is spent, then each user thread that runs next on that CPU killed in turn while it runs, one of them by its own `erx_thread_exit`, leaves the level's time in every period within `T`; the spinner is delayed at most `T` ticks in any period and `2T` at a stretch; `finishing_ns` grows on every group of the stopped threads' own path by the finishing time and nowhere else, no `used_ns`, `total_ns` or pool moves for it, and neither stopper's path gains anything; the stopped threads never return to user mode; both stoppers return after the record, the deleted one dying at its return check; with a seeded kill that throttles the finishing thread on its killer's zero grant, the record never comes and the case's deadline fails; with a seeded finishing level placed below the spinner's urgency, the same; with a seeded kill of the running thread that moves it to the finishing level without a pick, each killed thread runs on past the spent share and the per-period counter fails the case; with a seeded charge of the finishing time to the thread's own pool or to the first stopper's path, the counters fail the case |
+| Kernel, QEMU | deletion: `DESTROY` on a group whose executors run, park, sit throttled under a spent quota and serve calls, with a child group whose members do the same; the destruction of the budget that pays for such a group; a group whose last capability closes while its executors run and park and IRQ objects bound to it wait on its ready list; an IRQ object bound to a group fired while the group's teardown runs | every member of the group and of its child killed, none returning to user mode, each finishing its call at the finishing level of its own CPU, its time in the `finishing_ns` of its own path and none in the destroying call's, with a seeded teardown that frees the record while a killed member still runs, and a seeded drop of a member's references at its teardown rather than after its last switch, each failing the test; a group destroyed while its quota is zero and a member is inside a long range call, by a destroyer whose own quota is zero as well, whose member finishes within the share's bound after the destroy returns, the group's record outliving the destroy until then, with a seeded destroy that throttles the member on either zero grant failing the test; the released group's executors park and wake until the last one ends, then its waiting deliveries are owed to their objects' next bindings, or dropped for a level-sensitive line; a group destroyed while a member finishes a long range call, its status area's pages taken by another budget's charge once their grace period has passed and filled with a marker, while the member goes on finishing and after it has left the member list: the marker stays whole, the member's time lands in the per-CPU records' `finishing_ns`, and `erx_group_info` on the group above it reports it, with a seeded publish that keeps the area's pointer after the destroy, which overwrites the marker and, on the hosted kernel with released pages poisoned, is reported by ASan; the record freed after the grace period and the last member's death, and the creator's budget, or its parent once the budget is destroyed, back at its baseline |
 | Kernel, QEMU | pause: a group's executors running, parked and serving calls while their space is paused and resumed, with triggers during the pause; an executor of another space created in the group; a worker that takes the ready list | none returns to user mode while paused, and slots read `ERX_EXEC_PAUSED`; every trigger is handled after the resume (S2); `ERX_EBUSY`; `ERX_ETYPE` |
 | Kernel, QEMU | a stopped space's executors parked in a group when a new space creates executors in it before the old ones have died, with triggers in between | the new executors created with free slots, every trigger delivered to one of them, each old executor dead once woken, and a slot taken over from an old executor that dies afterwards still held by its new executor, whose wakes by slot all arrive (S2) |
 | Kernel, QEMU | determinism: a fixed workload in `erx.det=1` twice | byte-identical traces |
 | Runtimes | ERTS's adapter and the test runtime against the contract: wakeups under storms, capacity changes, yield requests | the runtimes' own tests and OTP's suites |
 | Runtimes | runs: four ERTS domains on eight CPUs with the same cpuset and a capacity of two each, normal and dirty CPU schedulers busy, runs placed by the policy | each domain's executors only on its own run; no CPU shared by two domains' executors in steady state |
 | Runtimes | attribution: a service serving three clients with known work per request, its per-client report against a cycle-counter ground truth | the report within the budget E-S5 sets; shown as runtime-reported in the inspector, with a seeded misreport changing nothing outside the service: its group's usage stays within its quota |
-| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick and its stored priorities among them |
+| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick and its stored priorities among them, and its documented scheduling differences: finishing with no share, and Fiasco's placement of a woken thread at the head of its level |
 
 Every test runs under TCG and HVF; a test that passes under only one is a
 bug until explained. The host builds run under ASan and UBSan, and the
@@ -1983,9 +2035,10 @@ client's.**
   record](research-architecture.md#systems-and-mechanisms)).
   Deleting donation deletes the payer, the loan, the fallback, the
   reservation and the arithmetic at once, and leaves a scheduler whose
-  only path is the running thread's own group. The stopgap's Fiasco keeps
-  its direct switch, which lapses at the next scheduling decision and
-  needs no change ([Service work](#service-work)).
+  only path is the running thread's own group. The stopgap builds no
+  direct switch: a send makes the receiver ready and the scheduler picks
+  it with its own scheduling context
+  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)).
 
 **Scheduler activations and other upcall interfaces.**
 
