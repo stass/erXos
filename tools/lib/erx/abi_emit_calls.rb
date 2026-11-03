@@ -137,6 +137,7 @@ module Erx
                     'erx_status_t erx_sys_decode_shape(uint64_t number,',
                     '    const uint64_t registers[6], const erx_utcb_t *utcb, bool executor,',
                     '    erx_sys_shape_t *result);', ''])
+        out.concat(admission_declarations(schema)) if admission?(schema)
         schema.calls.each do |name, call|
           next if call.fetch(:results).empty?
           out.concat(["/* Store #{name}'s results in both result registers and the UTCB. */",
@@ -177,10 +178,96 @@ module Erx
         out.concat(WORD_HELPERS) if utcb_used || utcb_results
         out.concat(decode_function(schema, utcb_used: utcb_used, executor_used: executor_used,
                                            raw_local: integer_leaves?(calls, :arguments), span: span))
+        out.concat(plan_function(schema)) if admission?(schema)
         schema.calls.each do |name, call|
           out.concat(store_function(name, call)) unless call.fetch(:results).empty?
         end
         out.join("\n")
+      end
+
+      # Admission needs capability values, so a schema without the cap
+      # scalar, whose calls take no capability, has none.
+      def admission?(schema)
+        schema.types['cap'].is_a?(ScalarType)
+      end
+
+      # The capability arguments in the order the dispatch admits them:
+      # those whose existence lock the call holds, then the rest, each in
+      # declaration order (docs/design-kernel.md, "System-call dispatch").
+      def admission_order(call)
+        capabilities = call.fetch(:arguments).select { |argument| argument[:object] }
+        capabilities.select { |argument| argument.fetch(:exists) } +
+          capabilities.reject { |argument| argument.fetch(:exists) }
+      end
+
+      def admission_declarations(schema)
+        positions = [schema.calls.values.map { |call| admission_order(call).size }.max, 1].max
+        ['/*',
+         ' * A decoded shape\'s capability arguments in the one order the dispatch',
+         ' * admits them: first those whose existence lock the call holds, then',
+         ' * the rest, each in declaration order, with the object type and the',
+         ' * rights each lookup checks. A plan holds values, not authority: a value',
+         ' * reaches an object only through a lookup that checks the same type and',
+         ' * rights. Each ERX_SYS_POSITION_<CALL>_<ARGUMENT> names an argument\'s',
+         ' * position, under which the dispatch keeps what its lookup returned.',
+         ' */',
+         "#define ERX_SYS_ADMIT_CAPS_MAX #{positions}",
+         *position_constants(schema), '',
+         'typedef struct erx_sys_admit_plan erx_sys_admit_plan_t;',
+         'struct erx_sys_admit_plan {',
+         "\tuint32_t\tcount;\t\t/* capability arguments */",
+         "\tuint32_t\texists;\t\t/* the first ones existence-locked: 0 to 2 */",
+         "\terx_cap_t\tcaps[ERX_SYS_ADMIT_CAPS_MAX];",
+         "\tuint32_t\ttypes[ERX_SYS_ADMIT_CAPS_MAX];\t/* ERX_K_* */",
+         "\tuint32_t\trights[ERX_SYS_ADMIT_CAPS_MAX];\t/* the rights required */",
+         '};', '',
+         '/* The plan of a decoded shape; ERX_ENOTSUP for an unknown call. */',
+         'erx_status_t erx_sys_admit_plan(const erx_sys_shape_t *shape,',
+         '    erx_sys_admit_plan_t *result);', '']
+      end
+
+      def position_constants(schema)
+        names = schema.calls.flat_map do |name, call|
+          admission_order(call).each_with_index.map do |argument, position|
+            ["ERX_SYS_POSITION_#{name.upcase}_#{argument.fetch(:name).upcase}", position]
+          end
+        end
+        repeated = names.map(&:first).tally.find { |_name, count| count > 1 }
+        raise SchemaError, "position constant #{repeated.first} names two arguments" if repeated
+
+        names.map { |name, position| "#define #{name} #{position}" }
+      end
+
+      # The rights an argument's lookup requires, lowest bit first.
+      def rights_expression(schema, mask)
+        names = schema.rights.select { |_right, bit| (mask & bit) != 0 }
+                      .sort_by { |_right, bit| bit }
+                      .map { |right, _bit| CEmitter.constant("hr_#{right}") }
+        names.empty? ? 'UINT32_C(0)' : names.join(' | ')
+      end
+
+      def plan_function(schema)
+        out = ['erx_status_t', 'erx_sys_admit_plan(const erx_sys_shape_t *shape, erx_sys_admit_plan_t *result)',
+               '{', "\terx_sys_admit_plan_t plan = {0};", '',
+               "\tif (shape == NULL || result == NULL)", "\t\treturn (ERX_EINVAL);",
+               "\tswitch (shape->number) {"]
+        schema.calls.each do |name, call|
+          order = admission_order(call)
+          out << "\tcase ERX_CALL_#{name.upcase}:"
+          order.each_with_index do |argument, index|
+            lock = argument.fetch(:exists) ? ', existence-locked' : ''
+            out.concat(["\t\t/* #{argument.fetch(:name)}: #{argument.fetch(:object)}#{lock} */",
+                        "\t\tplan.caps[#{index}] = shape->arguments.#{name}.#{argument.fetch(:name)};",
+                        "\t\tplan.types[#{index}] = #{CEmitter.constant("k_#{argument.fetch(:object)}")};",
+                        "\t\tplan.rights[#{index}] = #{rights_expression(schema, argument.fetch(:rights))};"])
+          end
+          out << "\t\tplan.count = #{order.size};" unless order.empty?
+          exists = order.count { |argument| argument.fetch(:exists) }
+          out << "\t\tplan.exists = #{exists};" unless exists.zero?
+          out << "\t\tbreak;"
+        end
+        out.concat(["\tdefault:", "\t\treturn (ERX_ENOTSUP);", "\t}",
+                    "\t*result = plan;", "\treturn (ERX_OK);", '}', ''])
       end
 
       # Whether a UTCB parameter of the given direction has an integer leaf,

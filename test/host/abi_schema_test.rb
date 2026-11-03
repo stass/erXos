@@ -281,6 +281,112 @@ class AbiSchemaTest < Minitest::Test
                         waits: 'yes', executor: 'refuse')
   end
 
+  # The dispatch takes at most two existence locks, together; a result is
+  # never looked up, so it cannot hold one.
+  def test_a_call_holds_at_most_two_existence_locks
+    two = (0..1).map { |slot| "  arg s#{slot} cap space stop register #{slot} exists" }.join("\n")
+    call = call_model(two)
+    assert_equal [true, true], call.fetch(:arguments).map { |argument| argument.fetch(:exists) }
+    three = (0..2).map { |slot| "  arg s#{slot} cap space stop register #{slot} exists" }.join("\n")
+    assert_call_refused(three, /at most two existence locks/)
+    assert_call_refused('  result made cap space stop register 0 exists', /result cannot hold an existence lock/)
+  end
+
+  # A window's capability states the right its direction needs, so a holder
+  # of MAP alone cannot have the kernel read or write the object for it.
+  def test_a_window_capability_needs_the_right_of_its_direction
+    context = CALL_CONTEXT + <<~ABI
+      limit copy_max u32 1048576
+      right read 1 "read"
+      right write 2 "write"
+      right map 3 "map"
+      type memory 2
+        rights read,write,map
+        pass none
+    ABI
+    window = lambda do |rights, direction|
+      "  arg mem cap memory #{rights} register 0\n  arg off u64 register 1\n  arg len u32 register 2\n" \
+        "  window w mem off len #{direction} @copy_max"
+    end
+    reading = call_model(window.call('read,map', 'read'), context: context)
+    assert_equal 'read', reading.fetch(:windows).first.fetch(:direction)
+    assert_call_refused(window.call('map', 'read'), /window.*needs the read right/, context: context)
+    assert_call_refused(window.call('write', 'read'), /window.*needs the read right/, context: context)
+    written ="#{context}call probe 1\n  waits no\n  executor allow\n  effects reads\n  charges none\n  bound records 1\n"
+    refused = assert_raises(Erx::ABI::SchemaError) do
+      schema(written + window.call('map', 'write') + "\n", architecture: architecture)
+    end
+    assert_match(/window.*needs the write right/, refused.message)
+    locked = window.call('read,map', 'read').sub('register 0', 'register 0 exists')
+    assert_call_refused(locked, /window capability cannot hold an existence lock/, context: context)
+  end
+
+  # Each argument's position constant is one name with one value.
+  def test_position_constants_cannot_collide
+    context = CALL_CONTEXT + <<~ABI
+      status ok 0 "success"
+      status inval -1 "invalid"
+      status notsup -12 "unsupported"
+      status wouldblock -14 "executor"
+      right call 1 "call"
+      call a_b 1
+        waits no
+        executor allow
+        effects changes
+        charges none
+        bound records 1
+        arg c cap space stop register 0
+      call a 2
+        waits no
+        executor allow
+        effects changes
+        charges none
+        bound records 1
+        arg b_c cap space stop register 0
+    ABI
+    error = assert_raises(Erx::ABI::SchemaError) do
+      Erx::ABI::CallEmitter.outputs(schema(context, architecture: architecture))
+    end
+    assert_match(/position constant ERX_SYS_POSITION_A_B_C/, error.message)
+  end
+
+  # A capability inside an aggregate has no declared type or rights, so no
+  # lookup could check it; only a whole `cap` argument enters the plan.
+  def test_an_aggregate_argument_cannot_carry_a_capability
+    context = CALL_CONTEXT + "layout boxed 1 wire_le 8 8\n  field held cap 0\n" \
+                             "layout nested 1 wire_le 8 8\n  field inner boxed 0\n"
+    assert_call_refused('  arg box boxed utcb mr[0]', /aggregate argument cannot carry a capability/, context: context)
+    assert_call_refused('  arg box nested utcb mr[0]', /aggregate argument cannot carry a capability/, context: context)
+    returned = call_model('  result box boxed utcb mr[0]', context: context)
+    assert_equal 'boxed', returned.fetch(:results).first.fetch(:type).name
+  end
+
+  # A root capability names its slot and the creation kind that fixes its
+  # type and rights; it states no rights of its own.
+  def test_root_capabilities_take_their_type_and_rights_from_a_kind
+    context = <<~ABI
+      right stop 0 "stop a space"
+      type space 1
+        rights stop
+        pass none
+      kind new_space 1 space
+        default stop
+    ABI
+    caps = schema(context + "cap new_space 7 new_space\ncap spare 8 new_space optional\n").caps
+    assert_equal({ slot: 7, kind: 'new_space', type: 'space', optional: false }, caps.fetch('new_space'))
+    assert caps.fetch('spare').fetch(:optional)
+    { 'cap self 7 space stop' => /unknown root capability presence stop/,
+      'cap self 7 missing' => /undefined root capability kind/,
+      'cap self 7 new_space maybe' => /unknown root capability presence/,
+      'cap self 0 new_space' => /positive/,
+      "cap self 7 new_space\ncap other 7 new_space" => /duplicate root slot/,
+      "cap self 7 new_space\ncap self 8 new_space" => /duplicate root capability/,
+      'cap self 7' => /needs a slot, a kind/ }.each do |line, pattern|
+      error = assert_raises(Erx::ABI::SchemaError) { schema(context + line + "\n") }
+      assert_match(pattern, error.message)
+    end
+  end
+
   # A pinned answer, not one the generator derives: the waiting calls an
   # executor may make are erx_park and erx_umtx_wait on private memory
   # (design-scheduler.md, Executor class enforcement). A new waiting call

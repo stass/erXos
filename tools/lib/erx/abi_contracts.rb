@@ -357,6 +357,10 @@ module Erx
         end
         waits = properties.fetch('waits') == 'yes'
         [arguments, results].each { |parameters| validate_locations(parameters, declaration) }
+        # The dispatch takes at most two existence locks, together, and a
+        # result is returned to the caller, never looked up.
+        declaration.fail!('a call holds at most two existence locks') if arguments.count { |argument| argument.fetch(:exists) } > 2
+        declaration.fail!('a result cannot hold an existence lock') if results.any? { |result| result.fetch(:exists) }
         validate_executor(executor, arguments, waits: waits)
         if retry_lookup && !(waits && arguments.any? { |argument| argument[:object] })
           declaration.fail!('retry needs a waiting call with a capability argument to look up again')
@@ -364,7 +368,7 @@ module Erx
         declaration.fail!('waiting call cannot have windows') if waits && windows.any?
         charge = properties.fetch('charges')
         declaration.fail!('charged argument is not a capability') unless charge == 'none' || arguments.any? { |arg| arg.fetch(:name) == charge && arg[:object] }
-        windows.each { |window| validate_window(window, arguments, properties, constants, declaration) }
+        windows.each { |window| validate_window(window, arguments, properties, constants, rights, declaration) }
         { number: Model.positive(declaration.args[1], declaration.line, maximum: (1 << 32) - 1),
           properties: properties.freeze, executor: executor.except(:line).freeze,
           retry: retry_lookup, arguments: arguments.freeze, results: results.freeze,
@@ -402,9 +406,19 @@ module Erx
         end
       end
 
-      def validate_window(window, arguments, properties, constants, declaration)
+      # The dispatch looks a window's capability up with its declared rights
+      # alone, so those rights include the one the window's direction needs:
+      # a holder without it cannot have the kernel read or write the object.
+      def validate_window(window, arguments, properties, constants, rights, declaration)
         cap = arguments.find { |arg| arg.fetch(:name) == window.fetch(:cap) }
         declaration.fail!('window needs a memory capability') unless cap && cap[:object] == 'memory'
+        needed = window.fetch(:direction)
+        unless (cap.fetch(:rights) & rights.fetch(needed, 0)) != 0
+          declaration.fail!("window capability needs the #{needed} right")
+        end
+        # A window's size is checked at its lookup, which an existence lock
+        # would then pass a preemption point after.
+        declaration.fail!('window capability cannot hold an existence lock') if cap.fetch(:exists)
         %i[offset length].each do |field|
           argument = arguments.find { |arg| arg.fetch(:name) == window.fetch(field) }
           declaration.fail!('window offset/length is not an unsigned argument') unless argument && argument.fetch(:type).respond_to?(:integer) && !argument.fetch(:type).integer.signed
@@ -440,9 +454,19 @@ module Erx
           words = 1
         else
           slot, words = utcb_extent(slot, type, line, types: types)
+          line.fail!('an aggregate argument cannot carry a capability') if !result && !object && carries_capability?(type)
         end
         { name: name, type: type, object: object, rights: mask,
           location: location, slot: slot, words: words, exists: !!existence, line: line }.freeze
+      end
+
+      # A capability in an aggregate has no declared type or rights, so the
+      # admission plan could not list it and nothing here says what checks
+      # it. The declared scalar named cap is what makes a value a capability.
+      def carries_capability?(type)
+        return false unless type.is_a?(Layout)
+
+        type.fields.any? { |field| field.type.name == 'cap' || carries_capability?(field.type) }
       end
 
       # A UTCB parameter starts at message word INDEX of the declared UTCB

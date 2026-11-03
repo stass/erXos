@@ -714,6 +714,29 @@ document's "residual risks accepted" paragraph.
   also build the generated harness against that fixture, or land the
   first UTCB call with its fuzz run
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
+* [Medium] kernel dispatch, the effect loop: `erx_dispatch`, which decodes
+  the shape, performs the admission core's actions (`kernel/core/admit.c`)
+  with `erx_cap_lookup`, `erx_object_lock_existence`,
+  `erx_object_lock_existence2` and `erx_object_unlock_existence`, and
+  calls the handler, lands with the object store those functions belong
+  to, with the build check that only the dispatch takes admission's locks
+  and with `erx_object_lock_existence2`'s refusal of two references to one
+  object; `erx_cap_lookup`'s design signature takes an `erx_rights_t` where
+  the plan and `erx_cap_read` hold a mask, which the loop reconciles. Until
+  then the plan and the core are driven only by the host probe of
+  `test/fixtures/abi_call_marshal.txt`, since no shipped call takes a
+  capability ([design-kernel.md](docs/design-kernel.md#system-call-dispatch)).
+* [Medium] ABI call grammar, capability forms the design's call table needs
+  and the schema cannot declare yet, each of which the admission plan must
+  express rather than the dispatch working around its lookup: a nullable
+  argument (`erx_budget_watch`, `erx_irq_create`, since a lookup of
+  `ERX_CAP_NULL` is stale), either of two types (`erx_irq_bind`), any type
+  (`erx_cap_dup`, `erx_cap_close`, `erx_object_destroy`, `erx_object_info`),
+  rights that follow a flag (`erx_mem_create_paged`), and typed items in the
+  UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
+  `carries_capability?` refuses as a plain aggregate. `ERX_CAP_SELF` and
+  `ERX_CAP_SELF_THREAD` have no value in `abi/*.txt` either
+  ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
 * [Medium] kernel dispatch and stopgap send glue, the retry action: the
   generator gives only a call declared `retry` a handler that takes
   `erx_sys_action_t`. The generated dispatch loop that runs such a call

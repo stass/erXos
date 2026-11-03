@@ -156,7 +156,7 @@ module Erx
         unique_values(rights, label: 'right', line: abi.line)
         objects = validate_objects(by_kind.fetch('type', []), rights)
         kinds = validate_kinds(by_kind.fetch('kind', []), objects, rights)
-        caps = validate_caps(by_kind.fetch('cap', []), objects, rights)
+        caps = validate_caps(by_kind.fetch('cap', []), kinds)
         calls = validate_calls(by_kind.fetch('call', []), types, constants, objects, rights)
         abi.fail!('calls require a complete architecture binding') if calls.any? && !architecture
         readers = by_kind.fetch('reader', []).map { |item| validate_reader(item, types, constants) }
@@ -273,7 +273,7 @@ module Erx
       def unique_definitions(declarations)
         definitions = {}
         declarations.each do |declaration|
-          next if %w[abi arch trap reg].include?(declaration.kind)
+          next if %w[abi arch trap reg cap].include?(declaration.kind)
           name = Syntax.identifier(declaration.args.first, line: declaration.line)
           declaration.fail!("duplicate definition #{name}") if definitions.key?(name) || BASE_TYPES.key?(name)
           definitions[name] = declaration
@@ -832,17 +832,25 @@ module Erx
         kinds.sort.to_h.transform_values { |kind| kind.except(:line).freeze }
       end
 
-      def validate_caps(declarations, objects, rights)
+      # A root capability names its well-known slot in the root task's table
+      # and the creation kind the kernel installs it as, which fixes its
+      # object type and rights, so a root slot never states rights beside
+      # its kind's. `optional` marks a slot the boot may leave null. Root
+      # capabilities have their own namespace, as the root_slot_NAME
+      # constants they produce do, so a slot may share its kind's name.
+      def validate_caps(declarations, kinds)
         caps = {}
         declarations.each do |declaration|
-          arity(declaration.line, 5)
           no_members(declaration)
-          name, slot, type, required = declaration.args
-          object = objects[type] || declaration.fail!('undefined capability object type')
-          selected = list(required, declaration.line)
-          declaration.fail!('capability rights exceed its object type') unless (selected - object.fetch(:sets).fetch('rights')).empty?
+          name, slot, kind, presence, *surplus = declaration.args
+          declaration.fail!('root capability needs a slot, a kind and optionally optional') unless kind && surplus.empty?
+          declaration.fail!("unknown root capability presence #{presence}") unless presence.nil? || presence == 'optional'
+          Syntax.identifier(name, line: declaration.line)
+          declaration.fail!("duplicate root capability #{name}") if caps.key?(name)
+          declaration.fail!('undefined root capability kind') unless kinds.key?(kind)
           caps[name] = { slot: positive(slot, declaration.line, maximum: (1 << 24) - 1),
-                         type: type, rights: selected.reduce(0) { |mask, right| mask | rights.fetch(right) } }.freeze
+                         kind: kind, type: kinds.fetch(kind).fetch(:type),
+                         optional: presence == 'optional' }.freeze
         end
         if caps.any?
           unique_values(caps.transform_values { |cap| cap.fetch(:slot) }, label: 'root slot', line: declarations.first.line)

@@ -52,3 +52,13 @@ block a milestone's numbers.
   Measure lock hold and wait times under a page-churn workload at 4 CPUs
   before G1's numbers are taken; per-CPU lists belong to erXos's own kernel
   if the contention is real.
+* **[Low] kernel, admission as a step machine.** Every kernel call fills
+  its admission plan (`erx_sys_admit_plan`, 16 bytes per position plus 8,
+  for the positions of the ABI's largest call whatever this call's count)
+  and makes one out-of-line call of `erx_sys_admit_next` per lookup, lock,
+  run and release (`kernel/core/admit.c`), where an inlined, per-call
+  admission would make none. On the null call, one lookup, that is three
+  calls and a copy of the plan. Measure: the `null` workload of `tools/erx bench` once the
+  dispatch loop lands, against the same call with the admission inlined.
+  Fixes: let the dispatch loop and the core share a translation unit at
+  -O2, or emit the per-call steps from the plan as straight-line code.

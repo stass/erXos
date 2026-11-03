@@ -6764,6 +6764,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "cap_null".b => Constant.new(
+            name: "cap_null".b,
+            value: 0,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
           "cap_page_slots".b => Constant.new(
             name: "cap_page_slots".b,
             value: 64,
@@ -8132,68 +8138,68 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_boot_image".b => Constant.new(
-            name: "root_slot_boot_image".b,
+          "root_slot_boot_image" => Constant.new(
+            name: "root_slot_boot_image",
             value: 5,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_device_secret".b => Constant.new(
-            name: "root_slot_device_secret".b,
+          "root_slot_device_secret" => Constant.new(
+            name: "root_slot_device_secret",
             value: 9,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_machine_page".b => Constant.new(
-            name: "root_slot_machine_page".b,
+          "root_slot_machine_page" => Constant.new(
+            name: "root_slot_machine_page",
             value: 10,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_previous_crash".b => Constant.new(
-            name: "root_slot_previous_crash".b,
+          "root_slot_previous_crash" => Constant.new(
+            name: "root_slot_previous_crash",
             value: 11,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_root_budget".b => Constant.new(
-            name: "root_slot_root_budget".b,
+          "root_slot_root_budget" => Constant.new(
+            name: "root_slot_root_budget",
             value: 1,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_root_group".b => Constant.new(
-            name: "root_slot_root_group".b,
+          "root_slot_root_group" => Constant.new(
+            name: "root_slot_root_group",
             value: 2,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_root_resource".b => Constant.new(
-            name: "root_slot_root_resource".b,
+          "root_slot_root_resource" => Constant.new(
+            name: "root_slot_root_resource",
             value: 4,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_self_space".b => Constant.new(
-            name: "root_slot_self_space".b,
+          "root_slot_self_space" => Constant.new(
+            name: "root_slot_self_space",
             value: 7,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_self_thread".b => Constant.new(
-            name: "root_slot_self_thread".b,
+          "root_slot_self_thread" => Constant.new(
+            name: "root_slot_self_thread",
             value: 8,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_system_group".b => Constant.new(
-            name: "root_slot_system_group".b,
+          "root_slot_system_group" => Constant.new(
+            name: "root_slot_system_group",
             value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "root_slot_time_page".b => Constant.new(
-            name: "root_slot_time_page".b,
+          "root_slot_time_page" => Constant.new(
+            name: "root_slot_time_page",
             value: 6,
             type: types.fetch("u32"),
             description: nil
@@ -8810,7 +8816,74 @@ module Erx
             :carves => nil
           }.freeze
         }.freeze,
-        caps: {}.freeze,
+        caps: {
+          "boot_image".b => {
+            :slot => 5,
+            :kind => "boot_image".b,
+            :type => "memory".b,
+            :optional => false
+          }.freeze,
+          "device_secret".b => {
+            :slot => 9,
+            :kind => "device_secret".b,
+            :type => "memory".b,
+            :optional => false
+          }.freeze,
+          "machine_page".b => {
+            :slot => 10,
+            :kind => "machine_page".b,
+            :type => "memory".b,
+            :optional => false
+          }.freeze,
+          "previous_crash".b => {
+            :slot => 11,
+            :kind => "previous_crash".b,
+            :type => "memory".b,
+            :optional => true
+          }.freeze,
+          "root_budget".b => {
+            :slot => 1,
+            :kind => "root_budget".b,
+            :type => "budget".b,
+            :optional => false
+          }.freeze,
+          "root_group".b => {
+            :slot => 2,
+            :kind => "new_group".b,
+            :type => "group".b,
+            :optional => false
+          }.freeze,
+          "root_resource".b => {
+            :slot => 4,
+            :kind => "root_resource".b,
+            :type => "resource".b,
+            :optional => false
+          }.freeze,
+          "self_space".b => {
+            :slot => 7,
+            :kind => "new_space".b,
+            :type => "space".b,
+            :optional => false
+          }.freeze,
+          "self_thread".b => {
+            :slot => 8,
+            :kind => "new_thread".b,
+            :type => "thread".b,
+            :optional => false
+          }.freeze,
+          "system_group".b => {
+            :slot => 3,
+            :kind => "new_group".b,
+            :type => "group".b,
+            :optional => false
+          }.freeze,
+          "time_page".b => {
+            :slot => 6,
+            :kind => "time_page".b,
+            :type => "memory".b,
+            :optional => false
+          }.freeze
+        }.freeze,
         calls: {
           "debug_log".b => {
             :number => 1,

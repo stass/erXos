@@ -140,7 +140,23 @@ module Erx
                       kinds.map { |label, kind| [label, constant("k_#{kind.fetch(:type)}")] }),
          '/* The rights a creation of the kind returns. */',
          *lookup.call('UINT32_C(0)', 'erx_kind_default_mask', 'erx_create_kind_t kind',
-                      kinds.map { |label, kind| [label, mask.call(kind.fetch(:default))] })]
+                      kinds.map { |label, kind| [label, mask.call(kind.fetch(:default))] }),
+         *root_slot_tables(schema, lookup)]
+      end
+
+      # The root task's well-known slots: the kind each is installed as,
+      # 0 for a slot the ABI file does not name, and whether the boot may
+      # leave it null.
+      def root_slot_tables(schema, lookup)
+        return [] if schema.caps.empty?
+
+        slots = schema.caps.map { |name, cap| [constant("root_slot_#{name}"), cap] }
+        ['/* The creation kind a root slot holds; 0: no root capability. */',
+         *lookup.call('UINT32_C(0)', 'erx_root_slot_kind', 'uint32_t slot',
+                      slots.map { |label, cap| [label, constant("kind_#{cap.fetch(:kind)}")] }),
+         '/* 1 when the boot may leave the root slot ERX_CAP_NULL, else 0. */',
+         *lookup.call('UINT32_C(0)', 'erx_root_slot_optional', 'uint32_t slot',
+                      slots.map { |label, cap| [label, cap.fetch(:optional) ? 'UINT32_C(1)' : 'UINT32_C(0)'] })]
       end
 
       def sequence_accessors(layout, schema)

@@ -21,6 +21,7 @@
 -define(ERX_BUDGET_WALL, 1).
 -define(ERX_CALL_DEBUG_LOG, 1).
 -define(ERX_CAP_GENERATION_BITS, 40).
+-define(ERX_CAP_NULL, 0).
 -define(ERX_CAP_PAGE_SLOTS, 64).
 -define(ERX_CAP_SLOT_BITS, 24).
 -define(ERX_CAP_SLOT_STATE_FREE, 0).

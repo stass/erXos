@@ -149,6 +149,32 @@ class AbiCallsTest < Minitest::Test
     assert_equal "call marshalling checks passed\n", File.binread(record.fetch('log'))
   end
 
+  # The admission core over the fixture's generated plans: lookups and
+  # existence locks in the design's order, and every failure path ending
+  # with no lock held.
+  def test_admission_order_and_release_under_sanitizers
+    marshal_outputs
+    output = File.join(@directory, 'admit-probe')
+    run_command([@compiler, *marshal_flags, '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+                 '-fno-omit-frame-pointer', '-I', File.join(@directory, 'kernel/generated'),
+                 File.join(@directory, 'kernel/generated/abi_decode.c'),
+                 File.join(@root, 'kernel/core/admit.c'),
+                 File.join(@root, 'test/fixtures/abi_admit_probe.c'), '-o', output], name: 'compile-admit-probe')
+    record = run_command([output], name: 'admit-probe')
+    assert_equal "admission checks passed\n", File.binread(record.fetch('log'))
+  end
+
+  # The root slots and their kinds' rights, as docs/design-abi.md
+  # ("Numeric assignment and versions") and docs/design-kernel.md
+  # ("Rights") give them, against the shipped generated header.
+  def test_root_capabilities_match_the_design_tables
+    output = File.join(@directory, 'root-probe')
+    run_command([@compiler, *@flags, '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+                 File.join(@root, 'test/fixtures/abi_root_probe.c'), '-o', output], name: 'compile-root-probe')
+    record = run_command([output], name: 'root-probe')
+    assert_equal "root capability checks passed\n", File.binread(record.fetch('log'))
+  end
+
   def test_marshalled_wrappers_compile_for_every_backend
     marshal_outputs
     run_command([@compiler, *marshal_flags, '--target=aarch64-none-elf', '-ffreestanding', '-c',
@@ -167,8 +193,12 @@ class AbiCallsTest < Minitest::Test
     decoder = marshal_outputs.fetch('kernel/generated/abi_decode.c')
     body = decoder[/^erx_sys_decode_shape\(.*?^\{\n(.*?)^\}\n/m, 1]
     uses = body.lines.map(&:strip).grep(/\butcb\b/)
-    assert_equal ['if (utcb == NULL)', 'if (!erx_utcb_mr_load(utcb, 2 + index, &words[index]))',
+    assert_equal ['if (utcb == NULL)', 'if (!erx_utcb_mr_load(utcb, 0, &words[0]))',
+                  'if (utcb == NULL)', 'if (!erx_utcb_mr_load(utcb, 2 + index, &words[index]))',
                   'if (!erx_utcb_mr_load(utcb, 6, &words[4]))'], uses
+    # The plan copies capability values from the decoded shape alone.
+    plan = decoder[/^erx_sys_admit_plan\(.*?^\{\n(.*?)^\}\n/m, 1]
+    assert_empty plan.lines.grep(/\butcb\b|\bregisters\b/)
   end
 
   def test_fixed_byte_strings_do_not_form_c_trigraphs

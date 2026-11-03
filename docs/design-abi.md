@@ -91,8 +91,9 @@ The declaration forms are:
 | `variant NAME PREFIX TAG_FIELD TAG_ENUM MAX_BYTES` | a fixed prefix containing the tag and indented `case TAG BODY_LAYOUT` members; each body begins after the prefix |
 | `status NAME INTEGER DESCRIPTION` | a signed 32-bit result; zero is success and every error is negative |
 | `right NAME POSITION DESCRIPTION` | a distinct position 0 through 31 within the kernel's 32-bit `erx_rights_t` word |
-| `type NAME INTEGER` | explicit `rights`, `default` and `pass` lists, including an explicit empty pass list |
-| `cap NAME SLOT TYPE RIGHTS` | a well-known root slot, its object type and initial rights |
+| `type NAME INTEGER` | explicit `rights` and `pass` lists, including an explicit empty pass list |
+| `kind NAME INTEGER TYPE` | a creation kind of an object type: its `default` list, within the type's rights, and for a carved kind `carves KIND`, the kind it is carved from, whose default it does not exceed but by `destroy` |
+| `cap NAME SLOT KIND [optional]` | a well-known root slot and the creation kind its capability is installed as, which fixes its object type and rights; `optional` when the boot may leave the slot null |
 | `call NAME NUMBER` | the call metadata and members described below |
 | `reader NAME ROOT_LAYOUT MAX_BYTES` | bounded tables and references described below |
 | `translation NAME SOURCE TARGET` | a complete directed mapping for one named consumer context |
@@ -276,10 +277,20 @@ and the action is never a status or a result register. Only a call that
 may wait and takes a capability can be marked `retry`.
 
 A capability argument names an object type and its required rights. The
-`exists` property names the argument whose existence lock the call holds.
-A memory-window argument names its memory capability, offset, length,
-maximum and read/write direction. A call that may wait has no memory
-window. Only a call marked `effects reads` may write a window; that mark
+`exists` property names the argument whose existence lock the call holds;
+a call holds at most two, and a result none. The generated admission
+plan lists a call's capability arguments in the order the dispatch takes
+them, the existence-locked ones first, then the rest, each in declaration
+order, with each one's object type and required rights; the admission
+core, `kernel/core/admit.c`, turns the plan into lookups and locks
+([System-call dispatch](design-kernel.md#system-call-dispatch)), and
+`ERX_SYS_POSITION_CALL_ARGUMENT` names each argument's place in that
+order. A capability is an argument of its own: an aggregate argument
+cannot carry one, since the plan could not list it. A memory-window
+argument names its memory capability, offset, length, maximum and
+read/write direction; its capability carries the right of that direction
+and holds no existence lock, since the window's checks run at its lookup.
+A call that may wait has no memory window. Only a call marked `effects reads` may write a window; that mark
 permits its output window and its caller's UTCB/register results, and no
 other state change. A raw user pointer is not a type. Address-valued
 types such as a mapping address or a umtx word retain their distinct
@@ -329,8 +340,10 @@ with `cap OBJECT_TYPE RIGHTS`, where rights are a comma-separated list
 of declared rights or `none`; optional `exists` follows its location.
 `window NAME CAP_ARG OFFSET_ARG LENGTH_ARG DIRECTION MAXIMUM` relates
 already declared argument values. Bound units are unique within a call.
-`type` declarations use one `rights LIST`, one `default LIST` and one
-`pass LIST` member with the same list syntax. A translation has one
+`type` declarations use one `rights LIST` and one `pass LIST` member,
+and `kind` declarations one `default LIST` member, with the same list
+syntax. Root capabilities have a namespace of their own, as the
+`root_slot_NAME` constants they produce do. A translation has one
 `map SOURCE_VALUE TARGET_VALUE` or `omit SOURCE_VALUE REASON` member per
 source value; the reason is a quoted diagnostic and the context decides
 whether omission is legal. An unlisted exposed source value fails.
@@ -1217,7 +1230,7 @@ The output families have explicit locations:
 | --- | --- |
 | `include/erx/abi.h` | constants, strong scalar wrappers, typed layouts, size/offset assertions and field operations |
 | `include/erx/abi_reader.h`, `liberx/generated/abi_reader.c` | bounded structural readers and diagnostic types |
-| `kernel/generated/abi_calls.h`, `kernel/generated/abi_decode.c` | typed handler declarations, argument validation and closed dispatch/executor metadata |
+| `kernel/generated/abi_calls.h`, `kernel/generated/abi_decode.c` | typed handler declarations, argument validation, closed dispatch/executor metadata and each call's admission plan |
 | `kernel/generated/NAME_impl.h` | a private layout's offsets, record and operations |
 | `liberx/generated/calls.h` | backend-independent call signatures |
 | `liberx/backend/<backend>/generated/` | the backend's declarations or native trap wrappers, with architecture-specific files inside its architecture directory |

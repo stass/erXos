@@ -35,6 +35,7 @@ struct erx_rights {
 #define ERX_BUDGET_WALL UINT32_C(1)
 #define ERX_CALL_DEBUG_LOG UINT32_C(1)
 #define ERX_CAP_GENERATION_BITS UINT32_C(40)
+#define ERX_CAP_NULL UINT64_C(0)
 #define ERX_CAP_PAGE_SLOTS UINT32_C(64)
 #define ERX_CAP_SLOT_BITS UINT32_C(24)
 #define ERX_CAP_SLOT_STATE_FREE UINT32_C(0)
@@ -3251,6 +3252,52 @@ erx_kind_default_mask(erx_create_kind_t kind)
 	if (kind >= sizeof(table) / sizeof(table[0]))
 		return (UINT32_C(0));
 	return (table[kind]);
+}
+
+/* The creation kind a root slot holds; 0: no root capability. */
+static inline uint32_t
+erx_root_slot_kind(uint32_t slot)
+{
+	static const uint32_t table[] = {
+		[ERX_ROOT_SLOT_BOOT_IMAGE] = ERX_KIND_BOOT_IMAGE,
+		[ERX_ROOT_SLOT_DEVICE_SECRET] = ERX_KIND_DEVICE_SECRET,
+		[ERX_ROOT_SLOT_MACHINE_PAGE] = ERX_KIND_MACHINE_PAGE,
+		[ERX_ROOT_SLOT_PREVIOUS_CRASH] = ERX_KIND_PREVIOUS_CRASH,
+		[ERX_ROOT_SLOT_ROOT_BUDGET] = ERX_KIND_ROOT_BUDGET,
+		[ERX_ROOT_SLOT_ROOT_GROUP] = ERX_KIND_NEW_GROUP,
+		[ERX_ROOT_SLOT_ROOT_RESOURCE] = ERX_KIND_ROOT_RESOURCE,
+		[ERX_ROOT_SLOT_SELF_SPACE] = ERX_KIND_NEW_SPACE,
+		[ERX_ROOT_SLOT_SELF_THREAD] = ERX_KIND_NEW_THREAD,
+		[ERX_ROOT_SLOT_SYSTEM_GROUP] = ERX_KIND_NEW_GROUP,
+		[ERX_ROOT_SLOT_TIME_PAGE] = ERX_KIND_TIME_PAGE,
+	};
+
+	if (slot >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[slot]);
+}
+
+/* 1 when the boot may leave the root slot ERX_CAP_NULL, else 0. */
+static inline uint32_t
+erx_root_slot_optional(uint32_t slot)
+{
+	static const uint32_t table[] = {
+		[ERX_ROOT_SLOT_BOOT_IMAGE] = UINT32_C(0),
+		[ERX_ROOT_SLOT_DEVICE_SECRET] = UINT32_C(0),
+		[ERX_ROOT_SLOT_MACHINE_PAGE] = UINT32_C(0),
+		[ERX_ROOT_SLOT_PREVIOUS_CRASH] = UINT32_C(1),
+		[ERX_ROOT_SLOT_ROOT_BUDGET] = UINT32_C(0),
+		[ERX_ROOT_SLOT_ROOT_GROUP] = UINT32_C(0),
+		[ERX_ROOT_SLOT_ROOT_RESOURCE] = UINT32_C(0),
+		[ERX_ROOT_SLOT_SELF_SPACE] = UINT32_C(0),
+		[ERX_ROOT_SLOT_SELF_THREAD] = UINT32_C(0),
+		[ERX_ROOT_SLOT_SYSTEM_GROUP] = UINT32_C(0),
+		[ERX_ROOT_SLOT_TIME_PAGE] = UINT32_C(0),
+	};
+
+	if (slot >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[slot]);
 }
 
 #endif /* ERX_ABI_H */

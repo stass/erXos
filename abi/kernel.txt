@@ -34,18 +34,6 @@ right power 29 "end the machine or pet its watchdog"
 right trace 30 "read authorized trace and log records"
 right entropy 31 "credit entropy from an authorized source"
 
-limit root_slot_root_budget u32 1
-limit root_slot_root_group u32 2
-limit root_slot_system_group u32 3
-limit root_slot_root_resource u32 4
-limit root_slot_boot_image u32 5
-limit root_slot_time_page u32 6
-limit root_slot_self_space u32 7
-limit root_slot_self_thread u32 8
-limit root_slot_device_secret u32 9
-limit root_slot_machine_page u32 10
-limit root_slot_previous_crash u32 11
-
 # erx.watchdog=P,D,B, in seconds: P from 1 to 60, D from 2P to 600, B from D
 # to 600, and 1,5,60 when the key is absent or malformed.
 limit watchdog_period_min u32 1
@@ -228,8 +216,10 @@ layout erx_time_page 1 shared 8 48
 # Capability values and tables (docs/design-kernel.md, "Objects and
 # capabilities"). A value holds its slot's index in bits 0-23 and the
 # slot's generation in bits 24-63; slot 0 is never issued, so value 0 names
-# nothing. A table grows a page of cap_page_slots slots at a time up to its
-# space's limit, at most caps_max slots, slot 0 included.
+# nothing, and cap_null spells it. A table grows a page of cap_page_slots
+# slots at a time up to its space's limit, at most caps_max slots, slot 0
+# included.
+limit cap_null u64 0
 limit cap_slot_bits u32 24
 limit cap_generation_bits u32 40
 limit caps_max u32 1048576
@@ -323,6 +313,24 @@ kind carved_resource 24 resource
   carves root_resource
 kind dma_window 25 dma
   default map,bind,inspect,dup,give,destroy
+
+# The root capabilities, at the well-known slots of the root task's table
+# ("The root task"): each slot's creation kind fixes its object type and
+# the rights the kernel installs it with. The boot information page
+# supplies each value with its generation. A slot marked optional holds
+# ERX_CAP_NULL when the boot has nothing for it: the previous crash
+# record, when the boot found none.
+cap root_budget 1 root_budget
+cap root_group 2 new_group
+cap system_group 3 new_group
+cap root_resource 4 root_resource
+cap boot_image 5 boot_image
+cap time_page 6 time_page
+cap self_space 7 new_space
+cap self_thread 8 new_thread
+cap device_secret 9 device_secret
+cap machine_page 10 machine_page
+cap previous_crash 11 previous_crash optional
 
 # A capability slot, a sequence-counted record that lookups read without a
 # lock while its table's writer changes it ("Reading a slot without a

@@ -34,6 +34,30 @@ erx_status_t erx_sys_decode_shape(uint64_t number,
     const uint64_t registers[6], const erx_utcb_t *utcb, bool executor,
     erx_sys_shape_t *result);
 
+/*
+ * A decoded shape's capability arguments in the one order the dispatch
+ * admits them: first those whose existence lock the call holds, then
+ * the rest, each in declaration order, with the object type and the
+ * rights each lookup checks. A plan holds values, not authority: a value
+ * reaches an object only through a lookup that checks the same type and
+ * rights. Each ERX_SYS_POSITION_<CALL>_<ARGUMENT> names an argument's
+ * position, under which the dispatch keeps what its lookup returned.
+ */
+#define ERX_SYS_ADMIT_CAPS_MAX 1
+
+typedef struct erx_sys_admit_plan erx_sys_admit_plan_t;
+struct erx_sys_admit_plan {
+	uint32_t	count;		/* capability arguments */
+	uint32_t	exists;		/* the first ones existence-locked: 0 to 2 */
+	erx_cap_t	caps[ERX_SYS_ADMIT_CAPS_MAX];
+	uint32_t	types[ERX_SYS_ADMIT_CAPS_MAX];	/* ERX_K_* */
+	uint32_t	rights[ERX_SYS_ADMIT_CAPS_MAX];	/* the rights required */
+};
+
+/* The plan of a decoded shape; ERX_ENOTSUP for an unknown call. */
+erx_status_t erx_sys_admit_plan(const erx_sys_shape_t *shape,
+    erx_sys_admit_plan_t *result);
+
 /* Only the kernel admission funnel creates this opaque context. */
 typedef struct erx_sys_context erx_sys_context_t;
 erx_status_t erx_sys_debug_log(erx_sys_context_t *context,

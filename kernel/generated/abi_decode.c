@@ -32,3 +32,20 @@ erx_sys_decode_shape(uint64_t number, const uint64_t registers[6],
 	*result = shape;
 	return (ERX_OK);
 }
+
+erx_status_t
+erx_sys_admit_plan(const erx_sys_shape_t *shape, erx_sys_admit_plan_t *result)
+{
+	erx_sys_admit_plan_t plan = {0};
+
+	if (shape == NULL || result == NULL)
+		return (ERX_EINVAL);
+	switch (shape->number) {
+	case ERX_CALL_DEBUG_LOG:
+		break;
+	default:
+		return (ERX_ENOTSUP);
+	}
+	*result = plan;
+	return (ERX_OK);
+}
