@@ -291,6 +291,37 @@ it; git history is the record of completed work.
 * [Low] build, stack proof: confirm that lld's `--emit-relocs` keeps the
   call and jump relocations that the stack proof decodes
   ([design-arch-aarch64.md](docs/design-arch-aarch64.md)).
+* [Medium] build, stack proof: LLVM 23 resolves a `bl` to a static
+  function in the same section without a relocation, which the proof
+  refuses, so the proven C must be compiled with `-ffunction-sections`
+  (and no shared `section` attribute). The stack-proof passages of
+  [design-kernel.md](docs/design-kernel.md#stack-proof),
+  [design-arch-aarch64.md](docs/design-arch-aarch64.md#stack-proof) and
+  the cores' build flags in [design-stopgap.md](docs/design-stopgap.md)
+  name neither the flag nor that `tools/lib/erx/stack_graph.rb` reads
+  relocations from `llvm-readobj`'s JSON listing of each object; the owner
+  decides between requiring the flag and accepting a relocation-less
+  in-section call whose decoded target is a function start.
+* [Medium] build, stack proof: `tools/lib/erx/stack_graph.rb` pairs each
+  object with its `.su` file by name, so a stale `.su` left by an earlier
+  build gives wrong frames silently. Read frames from the object itself
+  (`-fstack-size-section`'s `.stack_sizes`, bound to symbols by
+  relocations), or have the build delete the `.su` before each compile.
+* [Medium] build, stack proof: the graph does not record which functions
+  have their address taken (non-branch relocations naming a function), so
+  `kernel/stack_targets.txt` cannot be checked against the functions an
+  indirect call may reach. Add it before the analysis consumes the list.
+* [Medium] build, stack proof: frames and tail jumps are taken as the
+  compiler made them; inline assembly that writes the stack pointer or the
+  link register is not accounted for. The inline-assembly chokepoint must
+  also refuse either write in its listed functions.
+* [Low] build, stack proof: refusal paths of `stack_graph.rb` with no test
+  of their own: an instruction outside every function, overlapping or
+  weak function symbols, a relocation into a section where no function
+  starts, a section symbol plus addend into a function's middle, SHT_REL
+  sections, two relocations at one offset, and duplicate executable
+  section names. Most need only hand-made tool output fed to
+  `StackGraph.build`.
 * [Low] docs/research-baselines.md: the experiments behind the record (the
   boot and exception probe and its generators, the ERTS round-trip
   benchmark, the restricted decoder, the decompiled device trees) live
