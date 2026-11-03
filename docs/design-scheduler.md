@@ -888,8 +888,9 @@ when that quota is zero the call that destroyed the group runs it to its
 end on its own time, by helping, as a stopper runs a finishing thread
 ([design-kernel.md](design-kernel.md#closing-and-deleting)). So a
 destroy never waits on a member nobody will run. The reaper's steps,
-which free what the stop and the destroys leave, run on idle time or in
-the page allocation that needs the pages
+which free what the stop and the destroys leave, run on idle time and
+at each CPU's reap deadline, and the backing of a charge takes released
+pages for itself when none is free
 ([design-kernel.md](design-kernel.md#the-reaper)).
 
 **Replenishment** is lazy: no timer refills a pool. The first draw of a new
