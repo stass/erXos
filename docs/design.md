@@ -12,8 +12,8 @@ register inputs, terminal tables and their generation checks.
 > inspection span every runtime, and one CPU authority gives each runtime
 > the time its grant allows.
 
-erXos is an operating system built around running Erlang applications, on
-AArch64 first. Its kernel is a capability microkernel of its own, written
+erXos is a cross-platform operating system built around running Erlang
+applications, on AArch64 first. Its kernel is a capability microkernel of its own, written
 in C17 on the design and know-how of L4Re's Fiasco. The kernel knows
 threads, groups of threads, memory, capabilities and interrupts, and
 nothing of Erlang. It allocates CPU time to native threads and to

@@ -1,6 +1,7 @@
 # Working agreement
 
-erXos is an Erlang-native operating system, targeting AArch64 first. Its kernel
+erXos is an Erlang-native, cross-platform operating system, targeting
+AArch64 first. Its kernel
 is a capability microkernel of its own, written in C on the design and know-how
 of L4Re's Fiasco, with a process model built around lightweight runtime
 processes; until it is written, a modified Fiasco stands in for it behind
@@ -403,8 +404,10 @@ scripts live in `~/erxos-scratch/tools/`.
   outside the documented build steps without review. Fixtures in the
   repository must be legally redistributable.
 * **Portability.** Apple Silicon macOS is the primary host, then Linux
-  (AArch64, x86-64). QEMU `virt` is the first target, under both TCG and
-  HVF; the Raspberry Pi 4 and then the Raspberry Pi 5 follow. Keep
+  (AArch64, x86-64). erXos is cross-platform: AArch64 is the first
+  architecture, QEMU `virt` the first target, under both TCG and HVF, and
+  the Raspberry Pi 4 and then the Raspberry Pi 5 follow; other
+  architectures and platforms are ports, not redesigns. Keep
   architecture- and board-specific code behind the architecture and
   platform layers so ports stay mechanical. Generic designs, interfaces and
   names are architecture-neutral: they say kernel mode and user mode. An

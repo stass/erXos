@@ -135,8 +135,10 @@ channels. The design treats these as constraints to test and account for.
 
 ## Getting to a working machine
 
-The first target is 64-bit Arm, initially in the QEMU emulator and then
-on the Raspberry Pi 4 and 5. Development starts on Apple Silicon macOS,
+erXos is meant to run on more than one architecture and platform. The
+first target is 64-bit Arm, initially in the QEMU emulator and then on
+the Raspberry Pi 4 and 5; other architectures and platforms follow as
+ports behind the same kernel interface. Development starts on Apple Silicon macOS,
 with Linux also supported as a host.
 
 The build path uses established components to reach a usable system:

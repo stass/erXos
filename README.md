@@ -1,7 +1,8 @@
 # erXos
 
-erXos is an Erlang-native operating system for AArch64, using a modified
-Fiasco kernel until its C17 kernel replaces it. The
+erXos is an Erlang-native, cross-platform operating system. AArch64 is
+its first architecture, and it uses a modified Fiasco kernel until its
+C17 kernel replaces it. The
 [architecture](docs/design.md), [roadmap](docs/plan.md) and
 [working agreement](CLAUDE.md) define the project.
 
