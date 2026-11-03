@@ -1274,8 +1274,9 @@ a program that catches `SIGCONT` runs its handler. Each pause has a
 `job` cause, at `Ctrl-Z`, `fg` and `bg`, and the program's handler the
 `signal` cause, at the stop and continue signals of the second tier ([The
 terminal](#the-terminal)); the port driver pauses the image once for each
-cause present and resumes it once for each cause lifted, so the kernel's
-count composes them and the image runs only when no cause remains. A
+cause present, keeping the ticket each pause returns, and resumes each
+cause's hold by its ticket when the cause is lifted, so the kernel
+composes them and the image runs only when no cause remains. A
 continue lifts both from its target, as POSIX's `SIGCONT` continues a
 process however it was stopped: an authorized `SIGCONT` makes the
 program's handler lift the `signal` cause and tells the job table, which
@@ -1284,7 +1285,7 @@ one of a stopped job's processes runs; `fg` and `bg` lift the `job` cause
 from every program of the job and send each `SIGCONT`. Each reaches only
 its target, so an outer job's `fg` continues no program of another job,
 and no continue lifts a hold that is not job control's, such as a `fork`'s
-copy's, which the kernel counts apart. The causes belong to the program,
+copy's, which is a hold of its own. The causes belong to the program,
 so an `exec` of a paused program pauses its new image before the image's
 first thread can run. Job control never changes a CPU grant. A program's
 children belong to its job, which the command server records at each spawn
@@ -1829,17 +1830,19 @@ is recorded and decided as at any other time.
 3. **Copy.** The child's handler has the port driver carve the child's
    budget, create its group, its anchor below the parent's anchor and its
    image, empty; pauses the parent's image with `erx_space_pause`,
-   recording the hold against the request; and then starts a
+   recording the hold's ticket against the request; and then starts a
    **copier**, a worker thread of the session's space in the parent's
-   group, which waits with `erx_space_quiesce` until the parent's
-   threads have finished the calls they were in and copies the image
-   into the child's with `erx_space_copy`, so the copy is charged to the
-   parent's CPU grant and runs at its urgency. The handler owns the
-   hold: it lifts it with `erx_space_resume` when the copier reports,
-   whatever the outcome, and lifts it early to give the fork up, which
-   ends the copier's quiesce, or its copy at the next part, with
-   `ERX_EBUSY`; so no outcome leaves the parent held, and the copier
-   never resumes. The
+   group, which waits with `erx_space_quiesce` under that hold until
+   the parent's threads have finished the calls they were in and copies
+   the image into the child's with `erx_space_copy` under the same
+   hold, so the copy is charged to the parent's CPU grant and runs at
+   its urgency. The handler owns the hold: it resumes it by its ticket
+   with `erx_space_resume` when the copier reports, whatever the
+   outcome, and resumes it early to give the fork up, which ends the
+   copier's quiesce, or its copy at the next part, with `ERX_EBUSY`,
+   whatever other holds the session keeps on the parent, a job's or a
+   signal's among them, which stay as they were; so no outcome leaves
+   the parent held for the fork, and the copier never resumes. The
    pause holds the parent while it is copied, so the copy is one moment
    of the parent, and the copy charges the child's budget for the
    child's memory as it goes; one parent has one copy at a time
@@ -1878,9 +1881,10 @@ is recorded and decided as at any other time.
      copy, no `fork` is left to answer, the child having been undone;
      when the session stopped the child while the parent lives, `fork`
      returns -1 with `EAGAIN`;
-   * `ERX_EBUSY`: the handler lifted its hold before the copier
+   * `ERX_EBUSY`: the handler resumed the copy's hold before the copier
      reported, the one way to give a fork up without stopping the
-     parent; the child is undone, and `fork` returns -1 with `EAGAIN`;
+     parent, which leaves the parent's other holds as they were; the
+     child is undone, and `fork` returns -1 with `EAGAIN`;
    * any other status: `fork` returns -1 with `EAGAIN`.
 5. **Parent and child.** In the parent, `liberx` releases the kept locks
    in reverse order and ends the deferral, so the deferred signals arrive,

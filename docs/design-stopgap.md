@@ -1148,18 +1148,25 @@ alone.
   with its stacks, which live in a slot region page by page
   ([Threads](design-kernel.md#threads)): a thread block is two single
   pages, which `erx_thread_create` charges and backs through
-  `erx_reserve_charge` into a reserve on its own frames, the
-  construction case of the kernel design, because the thread's record,
-  which holds the thread's reserve, is the block itself and exists only
-  once its pages do: `Thread_object::create` allocates the storage and
-  then constructs the object in it (`thread_object.cpp`). Once the
-  block is mapped and the object constructed, the object takes the
-  reserve over, and the creation publishes the thread by its inserts,
-  onto its budget's `att_charged`, into its task's thread list under
-  the task's lock, and into the creator's table; a refused insert destroys
-  the unpublished thread through the ordinary deletion walk, which
-  releases the block (**Construction** in [The
-  reaper](design-kernel.md#the-reaper)). The two pages are mapped
+  `erx_reserve_charge` into the reserve of a construction record, a
+  cache record on the budget's `att_charged` whose existence lock the
+  creator holds, the construction case of the kernel design, because
+  the thread's record, which holds the thread's reserve once it exists,
+  is the block itself and exists only once its pages do:
+  `Thread_object::create` allocates the storage and then constructs the
+  object in it (`thread_object.cpp`). Once the block is mapped and the
+  object constructed, the creation publishes the thread under the
+  thread's own existence lock: it replaces the construction record by
+  the thread on `att_charged` under the budget's lock, moving the
+  reserve into the thread, inserts the thread into its task's thread
+  list under the task's lock, and releases the lock, after which the
+  dispatch installs the capability in the creator's table; a refused
+  insert destroys the unpublished thread through the ordinary deletion
+  walk, which releases the block, and a budget destroyed meanwhile
+  closes and drains the construction record, which cancels the backing
+  at its next part and helps the creator through that teardown
+  (**Construction** in [The reaper](design-kernel.md#the-reaper)). The
+  two pages are mapped
   into an 8 KiB-aligned
   slot of the **thread region**, a range of the fork's kernel virtual
   layout, with page entries in the kernel directory written as

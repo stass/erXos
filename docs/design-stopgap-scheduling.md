@@ -819,9 +819,10 @@ delay a finishing thread imposes on every other thread of its CPU while
 it finishes its call: at most the remaining parts of that call, each
 within the bound the ABI file declares for the call and separated by a
 preemption point where interrupts are taken, their number bounded by the
-records the stopped space's budgets paid for; on erXos's kernel the same
-parts run on the stopper's CPU at the stopper's urgency, so the fork
-moves that work to the finishing thread's CPU and above every urgency.
+records the stopped space's budgets paid for. erXos's kernel also runs
+these parts on the finishing thread's own CPU and charges them to the
+killer's finisher path, but resolves their urgency on that path; the fork
+runs them above every urgency instead, within the finishing share.
 
 **The finishing share.** One finishing call is bounded; a stream of
 them is not. A domain whose threads on other CPUs create threads homed
@@ -1637,7 +1638,7 @@ Each documented, tested, and gone with the stopgap:
 | Difference | On the fork | On erXos's kernel |
 | --- | --- | --- |
 | the count that gates the exit record | the live count: every thread from its creation to its death edge, with no pauses or copies to serve | the active count: every thread running or preempted inside a call, which pauses and copies also wait on; both are zero exactly when no thread of the space can act |
-| finishing threads | at the fixed finishing priority, above every urgency, on their own CPUs, charged to the killing call's group and throttled with its grant in C1 | run on the stopper's CPU by helping, at the stopper's urgency, charged to the stopper |
+| finishing threads | at the fixed finishing priority, above every urgency, on their own CPUs, charged to the killing call's group and throttled with its grant in C1 | on their own CPUs, charged to the killer's finisher path and throttled with its grant, at the urgency resolved on that path, with no finishing share ([design-scheduler.md](design-scheduler.md#finishing-and-reclamation)) |
 | a thread of a stopped space at its return boundary before its kill | holds in a boundary wait until the stop's kill reaches it | dies there at once |
 | the stopper's call | sleeps until `EXITED` or its own kill, whichever comes first | busy until the record is posted |
 | urgency resolution | stored and refreshed by every change before that call returns | derived at every decision |

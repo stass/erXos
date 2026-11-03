@@ -594,6 +594,12 @@ struct erx_thread_sched {
 	uint16_t		cpu;		/* the CPU whose queues hold it */
 	struct erx_group	*group;		/* member of, and charged to; on its
 						 * att_members; written at creation only */
+	struct erx_group	*finisher[ERX_GROUP_DEPTH_MAX]; /* once killed, the
+						 * killer's path: charged, throttled and
+						 * resolved here instead of its own, each
+						 * group held until the last switch;
+						 * replaced by a later kill; written on
+						 * the home CPU by the kill's request */
 	struct erx_decision	last;		/* urgency at the last decision */
 	uint64_t		charged_to_ns;	/* time up to which it has been charged */
 	uint64_t		slice_left_ns;
@@ -650,16 +656,18 @@ Three facts follow by construction:
   mode. A runtime never has to spin.
 * **No charge reaches a freed group.** Every member thread holds a counted
   reference to each group on its path, from its creation until it dies,
-  and a thread is charged to nothing but that path (S6). A killed member
-  finishes its call on its own stack and on its own path's quota, charged
-  to its path as before, and a destroyed group's records go on charging,
-  throttling and releasing it by the same rules until its last member is
-  gone. So no decision checks for a destroyed group on the path it
-  charges.
-* **A destroy never waits on a member nobody will run.** When a killed
-  member's path has no quota left, the call that destroyed the group
-  runs it to its end on its own time, by the helping rule a stop follows
-  (Finishing and reclamation, in [Charging and
+  and a thread is charged to nothing but that path (S6), or, once
+  killed, nothing but its finisher path. A killed member finishes its
+  call on its own stack, charged to the path of the call that killed
+  it, the destroying call's, every group of which it holds from the
+  kill until its last switch; and a destroyed group's records go on
+  charging, throttling and releasing whatever still holds them by the
+  same rules until the last holder is gone. So no decision checks for a
+  destroyed group on the path it charges.
+* **A destroy never waits on a member nobody will run.** A killed
+  member runs on the destroying call's grant, not on the destroyed
+  group's, so a group with no quota left is destroyed as fast as its
+  destroyer's grant allows (Finishing and reclamation, in [Charging and
   quota](#charging-and-quota)).
 
 Counted references keep a group's record, never its state:
@@ -668,13 +676,15 @@ Counted references keep a group's record, never its state:
 | --- | --- | --- |
 | the group itself | at creation | after its destruction's grace period |
 | each member thread, on every group of its path | when it is created in the group | when it dies |
+| each killed thread, on every group of its finisher path | at its kill, taken by the killing call | at its last switch, or at a later kill, which replaces the path |
 
 Only threads count references, as everywhere in the kernel: a child group
 and an IRQ object bound to a group are on the group's attachment lists,
 which its teardown empties
 ([design-kernel.md](design-kernel.md#objects-and-capabilities)). So a
-destroyed group's record waits only for its grace period and for its
-killed members, each of which finishes one call.
+destroyed group's record waits only for its grace period and for the
+threads that hold it, its killed members and the finishing threads
+whose finisher path it is on, each of which finishes one call.
 
 ## Algorithms and behavior
 
@@ -870,24 +880,45 @@ they are, and releasing a large cohort is paid for from the quota of the
 group it serves.
 
 **Finishing and reclamation.** Stopping a space is a kernel call like any
-other and is charged to its caller: what the stopped threads' own grants
-leave undone of finishing their calls, the stopper's thread takes over,
-on the stopper's group's grant, and emptying and destroying the stopped
-space run in the calls that ask for them
+other and is charged to its caller: the stop's walk posts a kill to
+every thread of the tree, and a kill gives the thread its **finisher
+path**, the killing thread's own group path as of the kill, on each
+group of which the kill takes a counted reference that the thread holds
+until its last switch. From the kill on the thread is charged to its
+finisher path and not to its own: `erx_sched_charge` adds its charges
+to every group of the finisher path, `erx_sched_draw` and the throttle
+apply there, its base becomes the killer's resolved urgency as of the
+kill, and `erx_sched_resolve` clamps it by the finisher path's
+ceilings, so the thread runs on its own CPU with the standing of the
+thread that killed it. A later kill of a thread already dying, by a
+stop of its space or of an ancestor of it, a destroy of its group or
+its deletion, replaces the path with the later killer's, dropping the
+old path's references. Emptying and destroying the stopped space run in
+the calls that ask for them
 ([design-kernel.md](design-kernel.md#execution-model-and-locking)). The
 system domain stops domains and a session stops its programs, each with
 quota of its own, so the finishing of a stopped party never waits for
 the renewal of that party's grant, and nothing is set aside for it: a
 stopper that has spent its own quota waits for its own next period, as
-it does for any of its calls. A stopped thread's remaining kernel work
-cannot start another user request, since it never returns to user mode
+it does for any of its calls, and its finishers wait with it. The
+killer's own fate changes nothing: a stopper deleted, descheduled or
+killed in turn leaves its finishers on a path whose records they hold,
+and a finisher path whose grant is set to zero holds its finishers as
+it holds any thread charged there, until its owner thaws it or the next
+kill moves them. A stopped thread's remaining kernel work cannot start
+another user request, since it never returns to user mode
 ([design-kernel.md](design-kernel.md#threads-and-faults)). Destroying a
-group follows the same rule: destroying it kills its members, a killed
-member finishes its current kernel call on its own path's quota, and
-when that quota is zero the call that destroyed the group runs it to its
-end on its own time, by helping, as a stopper runs a finishing thread
-([design-kernel.md](design-kernel.md#closing-and-deleting)). So a
-destroy never waits on a member nobody will run. The reaper's steps,
+group follows the same rule: destroying it kills its members, each with
+the destroying call's path as its finisher path, so a killed member
+finishes its current kernel call on the destroyer's grant however
+little the destroyed group has left
+([design-kernel.md](design-kernel.md#closing-and-deleting)), and a
+destroy never waits on a member nobody will run. The stopgap charges
+its finishing threads the same way and runs them at a fixed priority
+within a share, where erXos's kernel resolves their urgency on the
+finisher path
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
+The reaper's steps,
 which free what the stop and the destroys leave, run on idle time and
 at each CPU's reap deadline, and the backing of a charge takes released
 pages for itself when none is free
@@ -1634,7 +1665,7 @@ each difference
 | A caller's reply deadline passes while a server serves it | the IPC state machine | the server's reply finds no caller | the kernel | the caller's `ERX_ETIMEDOUT`; the server's `ERX_ENOCALLER` ([design-kernel.md](design-kernel.md#ipc-gates)) |
 | A gate or an IRQ object is bound to an executor, or an executor is armed for upcalls | the binding call's class check | nothing bound or armed | the caller | `ERX_ETYPE` |
 | A group's budget cannot pay for creation | the charging funnel | nothing created | the caller | `ERX_ENOMEM` |
-| A group is deleted while it has member threads or child groups | `erx_object_destroy`, or the destruction of the budget that pays for it | its child groups destroyed and its member threads killed, each finishing its call on its own path's quota, or on the destroying call's time when that quota is zero, and dying before it returns to user mode; its record kept until the last of them is dead ([Ownership and lifetime](#ownership-and-lifetime)) | the kernel | the group gone from the inspector, with its members' deaths |
+| A group is deleted while it has member threads or child groups | `erx_object_destroy`, or the destruction of the budget that pays for it | its child groups destroyed and its member threads killed, each finishing its call on the destroying call's path, its finisher path from the kill, and dying before it returns to user mode; its record kept until the last of them is dead ([Ownership and lifetime](#ownership-and-lifetime)) | the kernel | the group gone from the inspector, with its members' deaths |
 | A park deadline passes | the timer wheel | the executor is removed from the parked FIFO | the kernel | `ERX_ETIMEDOUT` |
 | An executor dies parked or queued | its space's stop, its deletion or its group's destruction | its references dropped; its slot freed by its own teardown if it still holds it, or already taken over by a new executor ([Park and wake](#park-and-wake)) | the thread's own teardown, then the reaper for its record | the slot reads `ERX_EXEC_NONE`, or the state of the executor that took it over |
 | An internal inconsistency in the scheduler's records | assertions in debug builds; the core's model tests | a debug build stops with the record dumped | developers | a panic report in debug builds only |
@@ -1729,7 +1760,7 @@ reading that lane and tell the system domain, which takes the connection down
 | Kernel, QEMU | ceilings: a server whose group's ceiling is 15 serving a caller at 40, with a second caller queued; a runtime publishing 63 in every slot under a ceiling of 31 | the server never above 15; no raise for the queued caller; every executor clamped to 31 |
 | Kernel, QEMU | own-group charging: a native server serving callers of three groups through one gate and through a gate per caller; a service runtime serving clients of three domains over lanes; usage per group against a cycle-counter ground truth around each unit of work | every nanosecond of serving on the server's group, none on a caller's (S6); a seeded charge to the caller's group fails |
 | Kernel, QEMU | a flooding client: one client sends as fast as it can to a capped service while a second client sends one request per period | the service's usage within its quota per period (S9); the flooder's lane full and its senders blocked in its own runtime; the reductions spent on the flooder per period within its share plus the cost of the requests it had in flight when the share ran out, the overrun repaid in the next period, also when its requests grow costlier with state it built in the service; the second client's requests answered within the policy's bound while the service has quota, and every client waiting together once it has none; a seeded facet that skips its account failing the test |
-| Kernel, QEMU | finishing: a stopper with a capped group stops a space whose threads are in calls, in `erx_park`, throttled and paused, and a stopper whose quota is spent stops one | the finishing work charged to the stopper's group and to no other; the stopped threads never return to user mode; the spent stopper's stop completes at its next period and nothing else waits for it |
+| Kernel, QEMU | finishing: a stopper with a capped group stops a space whose threads are in calls, in `erx_park`, throttled and paused; a stopper whose quota is spent stops one; a stopper's thread is deleted after its walk while its target is preempted behind a spinner of higher urgency; and a stopper's grant is set to zero after its walk, after which a second stop of the same space comes from a group with quota | the finishing work charged to the stopper's group and to no other, and after the second stop to the second stopper's; the stopped threads never return to user mode; the spent stopper's stop completes at its next period and nothing else waits for it; the deleted stopper's target finishes and its record comes; with a seeded kill that leaves a thread charged to its own path, the target of the zero-grant stopper never finishes before the second stop, and the case fails |
 | Kernel, QEMU | deletion: `DESTROY` on a group whose executors run, park, sit throttled under a spent quota and serve calls, with a child group whose members do the same; the destruction of the budget that pays for such a group; a group whose last capability closes while its executors run and park and IRQ objects bound to it wait on its ready list; an IRQ object bound to a group fired while the group's teardown runs | every member of the group and of its child killed, none returning to user mode, each finishing its call charged to its own path, with a seeded teardown that frees the record while a killed member still runs failing the test; a group destroyed while its quota is zero and a member is inside a long range call, whose member the destroying call runs to its end, so that the member is dead when the destroy returns, with a seeded destroy that leaves the member to its own spent grant failing the test; the released group's executors park and wake until the last one ends, then its waiting deliveries are owed to their objects' next bindings, or dropped for a level-sensitive line; the record freed after the grace period and the last member's death, and the creator's budget, or its parent once the budget is destroyed, back at its baseline |
 | Kernel, QEMU | pause: a group's executors running, parked and serving calls while their space is paused and resumed, with triggers during the pause; an executor of another space created in the group; a worker that takes the ready list | none returns to user mode while paused, and slots read `ERX_EXEC_PAUSED`; every trigger is handled after the resume (S2); `ERX_EBUSY`; `ERX_ETYPE` |
 | Kernel, QEMU | a stopped space's executors parked in a group when a new space creates executors in it before the old ones have died, with triggers in between | the new executors created with free slots, every trigger delivered to one of them, each old executor dead once woken, and a slot taken over from an old executor that dies afterwards still held by its new executor, whose wakes by slot all arrive (S2) |

@@ -33,7 +33,7 @@ Decisions every reader of this document needs:
   `within`, and a program's own when a program starts it. A command with
   fewer than the session's runs in a domain of its own, so its
   confinement rests on the kernel (SH1).
-* **Job control by pauses.** Stopping a job pauses its programs, a count
+* **Job control by pauses.** Stopping a job pauses its programs, a hold
   the kernel keeps on each program's space, and suspends its Erlang
   processes; the terminal relay never waits on a program.
 
