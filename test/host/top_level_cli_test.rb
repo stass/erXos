@@ -119,6 +119,7 @@ class TopLevelCliTest < Minitest::Test
     tests = commands.find { |_argv, options| options.fetch(:name) == 'sanitizer-tests' }
     assert tests.first.any? { |argument| argument.end_with?('/pack_test.rb') }
     assert tests.first.any? { |argument| argument.end_with?('/elf_plan_test.rb') }
+    assert tests.first.any? { |argument| argument.end_with?('/watchdog_test.rb') }
     assert_equal 'address,undefined', tests.last.fetch(:env).fetch('ERX_SANITIZERS')
   end
 

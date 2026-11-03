@@ -11,5 +11,6 @@
 #endif
 
 #define ERX_UNUSED __attribute__((__unused__))
+#define ERX_WARN_UNUSED_RESULT __attribute__((__warn_unused_result__))
 
 #endif /* ERX_CDEFS_H */

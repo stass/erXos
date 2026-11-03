@@ -7740,6 +7740,54 @@ module Erx
             value: 504,
             type: types.fetch("u32"),
             description: nil
+          ).freeze,
+          "watchdog_boot_default".b => Constant.new(
+            name: "watchdog_boot_default".b,
+            value: 60,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_boot_max".b => Constant.new(
+            name: "watchdog_boot_max".b,
+            value: 600,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_deadline_default".b => Constant.new(
+            name: "watchdog_deadline_default".b,
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_deadline_max".b => Constant.new(
+            name: "watchdog_deadline_max".b,
+            value: 600,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_deadline_periods_min".b => Constant.new(
+            name: "watchdog_deadline_periods_min".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_period_default".b => Constant.new(
+            name: "watchdog_period_default".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_period_max".b => Constant.new(
+            name: "watchdog_period_max".b,
+            value: 60,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "watchdog_period_min".b => Constant.new(
+            name: "watchdog_period_min".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
           ).freeze
         }.freeze,
         rights: {

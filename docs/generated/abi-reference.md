@@ -230,6 +230,14 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
 | `ERX_UTCB_BYTES_MAX` | 504 |
+| `ERX_WATCHDOG_BOOT_DEFAULT` | 60 |
+| `ERX_WATCHDOG_BOOT_MAX` | 600 |
+| `ERX_WATCHDOG_DEADLINE_DEFAULT` | 5 |
+| `ERX_WATCHDOG_DEADLINE_MAX` | 600 |
+| `ERX_WATCHDOG_DEADLINE_PERIODS_MIN` | 2 |
+| `ERX_WATCHDOG_PERIOD_DEFAULT` | 1 |
+| `ERX_WATCHDOG_PERIOD_MAX` | 60 |
+| `ERX_WATCHDOG_PERIOD_MIN` | 1 |
 
 ## Layouts
 

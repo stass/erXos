@@ -180,7 +180,7 @@ module Erx
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
       runtime.call(runner: runner) do |environment|
-        paths = %w[abi_calls manifest_reader elf_plan pack].map do |name|
+        paths = %w[abi_calls manifest_reader elf_plan pack watchdog].map do |name|
           File.join(ROOT, "test/host/#{name}_test.rb")
         end
         paths.concat(%w[terminal_tables structural_pack sanitizer_gate].map do |name|
@@ -189,7 +189,7 @@ module Erx
         run_tests(paths, runner: runner, name: 'sanitizer-tests',
                   environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
       end
-      Terminal.puts('implemented host C parsers passed ASan/UBSan; atomic accessor checks passed TSan')
+      Terminal.puts('implemented host C parsers and the watchdog core passed ASan/UBSan; atomic accessor checks passed TSan')
       if RbConfig::CONFIG.fetch('host_os').include?('darwin')
         Terminal.puts('LeakSanitizer and ASan initialization-order checks: unsupported on macOS; Linux run required')
       end
@@ -218,8 +218,8 @@ module Erx
                     '--name', 'test_production_fuzz_entry_refuses_mutations_without_vm_exception'],
                    name: 'fuzz-erlang-manifest', deadline: 180, chdir: ROOT, env: environment)
       end
-      Terminal.puts('implemented ABI, manifest, ERXPACK, ELF and host metadata parser fuzz targets passed')
-      Terminal.puts('pack/terminal/export Ruby targets: fixed 20000 iterations, seed 1; pack/ELF C seeds are recorded in logs')
+      Terminal.puts('implemented ABI, manifest, ERXPACK, ELF, erx.watchdog= and host metadata parser fuzz targets passed')
+      Terminal.puts('pack/terminal/export Ruby targets: fixed 20000 iterations, seed 1; pack/ELF/watchdog C seeds are recorded in logs')
       Terminal.puts('root-startup and target runtime/service parsers: unsupported until their implementations land')
       0
     end
