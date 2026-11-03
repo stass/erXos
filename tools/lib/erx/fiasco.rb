@@ -7,6 +7,8 @@ require 'fileutils'
 require 'json'
 require 'tmpdir'
 require_relative 'runner'
+require_relative 'bounded_file'
+require_relative 'json_input'
 require_relative 'sources'
 require_relative 'fiasco_inputs'
 require_relative 'output_directory'
@@ -56,6 +58,8 @@ module Erx
       uart/include/device.h uart/include/uart_base.h uart/include/uart_pl011.h
       uart/src/Makefile uart/src/uart_pl011.cc
     ].freeze
+    # Upper bound of a record this tool writes into the build tree.
+    BUILD_RECORD_BYTES = 65_536
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')))
       @root = File.expand_path(root)
@@ -139,7 +143,10 @@ module Erx
         'users' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'users'))
       }
       marker = File.join(@build, '.erx-inputs.json')
-      previous = File.file?(marker) ? JSON.parse(File.read(marker)) : {}
+      previous = {}
+      if File.file?(marker)
+        previous = read_build_record(marker, label: 'Fiasco source record', remedy: 'recreate the build directory')
+      end
       valid = previous.is_a?(Hash) &&
               (previous.empty? || (previous.keys.sort == expected.keys.sort &&
                 previous.values.all? { |value| value.is_a?(String) && /\A[0-9a-f]{64}\z/.match?(value) }))
@@ -159,8 +166,6 @@ module Erx
         FileUtils.remove_entry(File.join(@build, 'images'))
       end
       File.write(marker, JSON.pretty_generate(expected) + "\n")
-    rescue JSON::ParserError
-      raise Error, 'invalid Fiasco source record; recreate the build directory'
     end
 
     def import_git(repository, commit:, sha256:, name:, temporary:, stage:)
@@ -253,15 +258,16 @@ module Erx
         end
       end
       directory
-    rescue JSON::ParserError
-      raise Error, 'invalid Fiasco source assembly record'
     end
 
     def validate_user_source(directory)
       return unless File.exist?(directory) || File.symlink?(directory)
       marker = File.join(directory, '.erx-source.json')
       unless File.directory?(directory) && !File.symlink?(directory) &&
-             File.file?(marker) && JSON.parse(File.read(marker)) == { 'owner' => 'erx-fiasco', 'source' => @source }
+             File.file?(marker) &&
+             read_build_record(marker, label: 'Fiasco source assembly record',
+                                       remedy: 'recreate build/fiasco/source') ==
+               { 'owner' => 'erx-fiasco', 'source' => @source }
         raise Error, 'incomplete or stale Fiasco source assembly; recreate build/fiasco/source'
       end
     end
@@ -289,7 +295,8 @@ module Erx
       resolved = File.join(directory, output)
       expected = { 'source' => source, 'input_sha256' => Digest::SHA256.file(input).hexdigest }
       if File.file?(marker) && File.file?(resolved)
-        recorded = JSON.parse(File.read(marker))
+        recorded = read_build_record(marker, label: 'Fiasco configuration record',
+                                     remedy: 'recreate the build directory')
         current = expected.merge('resolved_sha256' => Digest::SHA256.file(resolved).hexdigest)
         return if current == recorded
       end
@@ -305,8 +312,19 @@ module Erx
       end
       raise Error, "configuration did not produce #{output}" unless File.file?(resolved)
       File.write(marker, JSON.pretty_generate(expected.merge('resolved_sha256' => Digest::SHA256.file(resolved).hexdigest)) + "\n")
-    rescue JSON::ParserError
-      raise Error, 'invalid Fiasco configuration record; recreate the build directory'
+    end
+
+    # A record this tool wrote into the build tree. One that is unreadable,
+    # oversized or not valid JSON is damaged or foreign state, which only
+    # recreating its directory (the caller's remedy) replaces. A json that
+    # cannot read any record is a fault of the host, so it has no remedy here.
+    def read_build_record(path, label:, remedy:)
+      bytes = BoundedFile.read(path, maximum: BUILD_RECORD_BYTES)
+      JsonInput.parse(bytes, max_bytes: BUILD_RECORD_BYTES, label: label)
+    rescue JsonInput::Unsupported
+      raise
+    rescue Error => error
+      raise Error, "#{error.message}; #{remedy}"
     end
 
     # Inherited configuration appends cached tool settings to its copied

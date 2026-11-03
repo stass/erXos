@@ -119,8 +119,6 @@ module Erx
           raise
         end
       end
-    rescue JSON::ParserError => error
-      raise Error, "invalid Fiasco import identities: #{error.message}"
     end
 
     def prepare_origin(directory, fact:, exclusions:)

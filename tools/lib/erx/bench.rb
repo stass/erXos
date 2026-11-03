@@ -54,8 +54,6 @@ module Erx
         File.write(path, JSON.pretty_generate(report) + "\n")
         report.merge('report' => path)
       end
-    rescue JSON::ParserError => error
-      raise Error, "invalid benchmark result JSON: #{error.message}"
     end
 
     private
