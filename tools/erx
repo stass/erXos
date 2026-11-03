@@ -49,6 +49,8 @@ module Erx
         check_tla(command_arguments, **collaborators)
       when 'check-sources'
         check_sources(command_arguments, **collaborators)
+      when 'check-stack-proof'
+        check_stack_proof(command_arguments, **collaborators)
       when 'check-arch-terms'
         check_arch_terms(command_arguments, **collaborators)
       when 'build'
@@ -85,6 +87,7 @@ module Erx
       arch_terms.check(root: ROOT)
       generated(runner: runner)
       runtime.call(runner: runner) do |environment|
+        stack_proof(runner: runner, environment: environment)
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
         run_tests(tests, runner: runner, name: 'host-tests', environment: environment)
@@ -272,6 +275,20 @@ module Erx
       1
     end
 
+    # The stack proof alone, with the toolchain make check verifies.
+    def self.check_stack_proof(arguments, runner_class: Runner, host_environment: method(:host_environment))
+      no_arguments(arguments)
+      runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      stack_proof(runner: runner, environment: host_environment.call(runner: runner))
+      Terminal.puts('stack proof passed; report: build/stack-proof/report.txt')
+      0
+    end
+
+    def self.stack_proof(runner:, environment:)
+      runner.run([RbConfig.ruby, File.join(ROOT, 'tools/stack_proof.rb')], name: 'stack-proof', deadline: 600,
+                 chdir: ROOT, env: environment)
+    end
+
     def self.check_arch_terms(arguments)
       no_arguments(arguments)
       ArchTerms.check(root: ROOT)
@@ -286,7 +303,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-oracle | check-tla | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | status')
       0
     end
 

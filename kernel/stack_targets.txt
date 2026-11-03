@@ -1,0 +1,14 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The functions each indirect call or branch of the proven C may reach,
+# read by the stack proof (tools/lib/erx/stack_proof_input.rb,
+# docs/design-kernel.md#stack-proof). A function that holds an indirect
+# call or branch and is reached from an entry needs a line here,
+# or the proof fails:
+#
+#   indirect FUNCTION TARGET...
+#
+# Each name is one function of the graph, or a declared leaf of
+# kernel/stack_fiasco.txt; a name two static functions share is refused.
+# The C17 cores make no indirect call.

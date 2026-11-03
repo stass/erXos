@@ -64,6 +64,10 @@ class TopLevelCliTest < Minitest::Test
     scripts = generated.map { |argv, _options| File.basename(argv[1]) }.sort
     assert_equal %w[gen_abi.rb gen_hw.rb gen_terminal.rb sysreg_extract.rb], scripts
     assert generated.all? { |argv, _options| argv.last == '--check' }
+    proof = commands.find { |_argv, options| options.fetch(:name) == 'stack-proof' }
+    assert proof, 'check runs the stack proof'
+    assert proof.first[1].end_with?('/tools/stack_proof.rb')
+    assert_equal '/verified/erl', proof.last.fetch(:env).fetch('ERX_ERL')
     host = commands.find { |_argv, options| options.fetch(:name) == 'host-tests' }
     assert host
     assert_operator host.last.fetch(:deadline), :>, 180
@@ -72,6 +76,23 @@ class TopLevelCliTest < Minitest::Test
     assert integration.first.any? { |argument| argument.end_with?('/structural_pack_test.rb') }
     assert_equal '/verified/erl', integration.last.fetch(:env).fetch('ERX_ERL')
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
+  end
+
+  def test_check_stack_proof_runs_the_proof_with_the_verified_toolchain
+    commands = []
+    verified = ->(runner:) { runner && { 'ERX_CLANG' => '/verified/clang' } }
+    status, output = run_cli('check-stack-proof', runner_class: Factory.new(recording_runner(commands)),
+                                                  host_environment: verified)
+    assert_equal 0, status, output
+    assert_equal ['stack-proof'], commands.map { |_argv, options| options.fetch(:name) }
+    assert commands.first.first[1].end_with?('/tools/stack_proof.rb')
+    assert_equal '/verified/clang', commands.first.last.fetch(:env).fetch('ERX_CLANG')
+
+    commands.clear
+    status, output = run_cli('check-stack-proof', runner_class: Factory.new(recording_runner(commands, fail_name: 'stack-proof')),
+                                                  host_environment: verified)
+    assert_equal 1, status
+    assert_includes output, '/evidence/failure.log'
   end
 
   def test_failed_renderer_integration_fails_the_aggregate_gate
@@ -105,7 +126,7 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_commands_refuse_unsupported_collaborators
-    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle --help -h].each do |command|
+    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end

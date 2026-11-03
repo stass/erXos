@@ -1,0 +1,34 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The C17 cores' share of Fiasco's thread block on the stopgap, read by the
+# stack proof (tools/lib/erx/stack_proof_input.rb, docs/design-stopgap.md,
+# "The stack proof"). The proof bounds the cores' depth from each of their
+# exported functions against the allowance of its role; Fiasco's and the
+# glue's use of the rest of the block is measured by the conformance
+# suite's watermark, never proven.
+#
+#   block BYTES             the thread block (THREAD_BLOCK_SIZE, 8 KiB under
+#                           CONFIG_CONTEXT_8K)
+#   allowance ROLE BYTES    the cores' share for entries of ROLE: call, for
+#                           every exported function called on a thread's
+#                           kernel path; tick, for those the tick hook calls
+#   tick NAME               an entry the tick hook calls
+#   leaf NAME BYTES         a function outside the cores that a core calls,
+#                           counted as a leaf of this declared cost
+
+block 8192
+
+allowance call 2048
+allowance tick 1024
+
+tick erx_watchdog_step
+
+# Fiasco's own memcpy and memset (fiasco/kernel/src/lib/libc/src/string/),
+# which the cores' archive may leave undefined. Both are leaves with no
+# frame under GCC 16.2.0 for aarch64-elf at -O2 -ffreestanding
+# -fstack-usage (measured 2026-11-03 on the macOS development host); the
+# declared cost leaves room for Fiasco's own flags, and the watermark run
+# catches a cost declared too low.
+leaf memcpy 64
+leaf memset 64

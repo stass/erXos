@@ -307,10 +307,67 @@ it; git history is the record of completed work.
   build gives wrong frames silently. Read frames from the object itself
   (`-fstack-size-section`'s `.stack_sizes`, bound to symbols by
   relocations), or have the build delete the `.su` before each compile.
+  The build's own proof (`tools/lib/erx/stack_proof_run.rb`) compiles into
+  a fresh directory on every run; other callers are exposed.
 * [Medium] build, stack proof: the graph does not record which functions
   have their address taken (non-branch relocations naming a function), so
   `kernel/stack_targets.txt` cannot be checked against the functions an
-  indirect call may reach. Add it before the analysis consumes the list.
+  indirect call may reach: `tools/lib/erx/stack_proof.rb` takes the listed
+  targets as given. Record them, and refuse an address-taken function that
+  a listed indirect call could reach but the list omits. The same record
+  must make every function whose address leaves the cores (a callback
+  handed to Fiasco) an entry: today the proof judges only what the
+  exported functions reach, so such a callback's frame and callees go
+  unchecked.
+* [Medium] build, stack proof: a `switch` that clang lowers to a jump
+  table ends in an indirect branch that stays inside its function, which
+  `kernel/stack_targets.txt` cannot declare (it lists functions, taken as
+  tail jumps), so the first such switch in a core fails the proof or
+  invites a wrong declaration. The owner decides between
+  `-fno-jump-tables` for every proven object (the proof's flags in
+  `tools/lib/erx/stack_proof_run.rb`, the archive's in
+  [design-stopgap.md](docs/design-stopgap.md) and
+  [design-arch-aarch64.md](docs/design-arch-aarch64.md#stack-proof)) and
+  teaching `stack_graph.rb` to recognize a jump table's branch whose
+  targets lie in its own function.
+* [Low] build, stack proof: declarations that nothing uses are accepted
+  silently: a `kernel/stack_targets.txt` line whose function holds no
+  indirect site at either level, and a `leaf` of `kernel/stack_fiasco.txt`
+  that a core defines itself. Report them after both levels have run.
+* [Low] docs/design-stopgap.md, the stack proof: the bullet names only the
+  `erx_effect_*` calls as leaves of declared cost; the proof also counts
+  Fiasco's `memcpy` and `memset`, the archive's two other allowed
+  undefined symbols, that way. The owner confirms the reading and the
+  bullet says so.
+* [Medium] build, stack proof: the stopgap proof's entries are every
+  exported function of `kernel/core/`, `kernel/sched/` and
+  `kernel/generated/`, a superset of the ones the kernel image references
+  ([design-stopgap.md](docs/design-stopgap.md)), with `kernel/core/pack.c`
+  left out by the constant `BOOTSTRAP_SOURCES` of
+  `tools/lib/erx/stack_proof_run.rb` because the stopgap links it into
+  `bootstrap`. Once `tools/erx build fiasco` links the core archive, read
+  the entries from the image's references and run the proof on the
+  archive's own objects at the level they are built with, besides the
+  -O0 build.
+* [Medium] build, stack proof: `kernel/stack_targets.txt` declares no stack
+  use of assembly routines, and the proof checks no declared use against
+  the routine's stack-pointer adjustments
+  ([design-kernel.md](docs/design-kernel.md#stack-proof)). The cores have no
+  assembly; erXos's kernel needs both.
+* [Medium] liberx, generated ABI reader: `erx_manifest_open`
+  (`liberx/generated/abi_reader.c`) has a 2048-byte frame at -O0 and a
+  992-byte one at -O2, and `erx_crash_record_decode` a 976-byte one at -O0
+  (clang 23.1.3, `aarch64-none-elf`, measured 2026-11-03). The boot
+  validator calls the first, so wherever it runs on a proven stack the
+  1 KiB frame cap refuses it. Decode into caller-supplied scratch instead
+  of stack locals.
+* [Low] build, stack proof: the allowances in `kernel/stack_fiasco.txt`
+  (2048 bytes for call entries, 1024 for the tick hook) and the declared
+  costs of Fiasco's `memcpy` and `memset` (64 bytes each; GCC 16.2.0
+  measures 0 at -O2) are proposals awaiting the owner's numbers. The glue's
+  `static_assert` and the conformance suite's watermark check read them
+  from that file once they are built. Its `tick` entries are listed by
+  hand; derive them from the glue's tick hook once the glue exists.
 * [Medium] build, stack proof: frames and tail jumps are taken as the
   compiler made them; inline assembly that writes the stack pointer or the
   link register is not accounted for. The inline-assembly chokepoint must
