@@ -6457,6 +6457,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "arch_asid_bits".b => Constant.new(
+            name: "arch_asid_bits".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "arch_elf_machine".b => Constant.new(
             name: "arch_elf_machine".b,
             value: 183,
@@ -7714,6 +7720,12 @@ module Erx
           "slice_min_us".b => Constant.new(
             name: "slice_min_us".b,
             value: 500,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "tlb_by_address_max".b => Constant.new(
+            name: "tlb_by_address_max".b,
+            value: 64,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

@@ -344,7 +344,20 @@ the current CPU must see the change. The plan chooses by what was cleared
 | --- | --- |
 | a level 3 page descriptor whose table stays | `TLBI VALE1IS` for the page, which drops last-level entries only |
 | a table descriptor, its table detached whole or freed once empty | `TLBI VAE1IS` for every page of the table's span, which drops cached entries of every level used for the address, walk caches included; with `FEAT_TLBIRANGE`, `TLBI RVAE1IS` over the span |
-| more than 64 addresses' worth in one plan | `TLBI ASIDE1IS` |
+| more than 64 invalidations by address in one plan | `TLBI ASIDE1IS` |
+
+The plan counts each `TLBI` by address as one invalidation, and the binding
+tells it the most pages one may cover. `RVAE1IS` covers
+(NUM+1) * 2^(5*SCALE+1) pages, NUM up to 31 and SCALE up to 3, so at the
+4 KiB granule:
+
+| CPU | Pages per invalidation | A cleared table entry takes |
+| --- | --- | --- |
+| without `FEAT_TLBIRANGE` | 1 | `ASIDE1IS`, since every table spans at least 512 pages |
+| with `FEAT_TLBIRANGE` | 2^21 | one `RVAE1IS` for a level-1 or level-2 entry; 64 for a level-0 entry's 2^27 pages |
+
+The plan's ASID width, `ERX_ARCH_ASID_BITS`, comes from this binding's ABI
+file.
 
 `VALE1IS` never serves a cleared table descriptor: a CPU may hold that
 descriptor in a walk cache and walk the freed table after it has been
@@ -550,8 +563,10 @@ model, never the stall model; no faulty DMA waits on a user-mode response.
 Unmapping issues `CMD_TLBI_NH_VA` with `Leaf` set for a cleared page
 descriptor and with `Leaf` clear, which reaches every level, for a cleared
 table descriptor, over the table's span, or `CMD_TLBI_NH_ASID` for the
-window's ASID beyond 64 addresses, then `CMD_SYNC`, and detaches the
-mapping record from the object only after the sync completes (K9). Destroying a window writes
+window's ASID beyond 64 invalidations by address, as the plan of
+[TLB maintenance](#tlb-maintenance) chooses with the SMMU's own range
+limit, then `CMD_SYNC`, and detaches the mapping record from the object
+only after the sync completes (K9). Destroying a window writes
 its stream table entry back to abort with `CMD_CFGI_STE` and `CMD_SYNC`
 before unmapping. The event queue's records are decoded by a pure function
 with a host fuzz target

@@ -3,6 +3,7 @@
 arch aarch64
 limit arch_user_limit u64 0x1000000000000
 limit arch_elf_machine u16 183
+limit arch_asid_bits u32 16
 trap svc 0x4552
 reg number x8
 reg args x0,x1,x2,x3,x4,x5

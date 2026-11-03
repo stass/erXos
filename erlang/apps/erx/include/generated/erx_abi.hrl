@@ -8,6 +8,7 @@
 
 -define(ERX_ABI_NOTE_TYPE, 1).
 -define(ERX_ABI_VERSION, 1).
+-define(ERX_ARCH_ASID_BITS, 16).
 -define(ERX_ARCH_ELF_MACHINE, 183).
 -define(ERX_ARCH_USER_LIMIT, 281474976710656).
 -define(ERX_BOOT_DET, 1).
@@ -218,6 +219,7 @@
 -define(ERX_SEG_GUARDED, 1).
 -define(ERX_SLICE_MAX_US, 50000).
 -define(ERX_SLICE_MIN_US, 500).
+-define(ERX_TLB_BY_ADDRESS_MAX, 64).
 -define(ERX_URGENCY_MAX, 63).
 -define(ERX_USER_BASE_MIN, 65536).
 -define(ERX_UTCB_BRS, 58).

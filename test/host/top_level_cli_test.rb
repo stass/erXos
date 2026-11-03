@@ -120,6 +120,7 @@ class TopLevelCliTest < Minitest::Test
     assert tests.first.any? { |argument| argument.end_with?('/pack_test.rb') }
     assert tests.first.any? { |argument| argument.end_with?('/elf_plan_test.rb') }
     assert tests.first.any? { |argument| argument.end_with?('/watchdog_test.rb') }
+    assert tests.first.any? { |argument| argument.end_with?('/tlb_plan_test.rb') }
     assert_equal 'address,undefined', tests.last.fetch(:env).fetch('ERX_SANITIZERS')
   end
 

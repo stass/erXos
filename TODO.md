@@ -64,6 +64,21 @@ it; git history is the record of completed work.
   overlaps allowed (`efi-support.cc`, `ram->add(..., true)`), so QEMU
   `virt` booted from a device tree is unaffected. Found by reading, not
   reproduced; fix with a regression test before any EFI boot path is used.
+* [Medium] Kernel invalidation planner, `kernel/core/tlb_plan.c`: a
+  cleared table entry carries its span in bytes, and the planner accepts
+  any aligned power of two of at least two pages, so a range call that
+  reports a level-2 table entry with too small a span gets a valid plan
+  that leaves walk-cache copies in the rest of the span (K9). When the
+  range call's plan is written, have each entry carry its table depth and
+  the removal the table geometry, so the planner derives the span, and use
+  the page-number and IOVA types of the data model instead of bare
+  `uint64_t` bytes; let the removal also carry the target's ASID width and
+  address limit, since an IOMMU's may differ from the CPU's.
+* [Medium] Kernel invalidation planner, `include/erx/tlb_plan.h`:
+  `erx_tlb_plan_t` is 1544 bytes, a fifth of an 8 KiB kernel stack. Keep
+  it in the range call's plan storage rather than on the stack, or shrink
+  `erx_tlb_inval_t` to 16 bytes (page number, log2 page count, reach).
+
 
 * [High] storage and platforms, the Pi 4's boot image: the Pi 4's secure
   boot checks `boot.img` at about 2.6 MB/s under a firmware watchdog fixed

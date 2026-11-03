@@ -16,6 +16,7 @@ their declared structural constraints; policy admission is a separate contract.
 | --- | ---: |
 | `ERX_ABI_NOTE_TYPE` | 1 |
 | `ERX_ABI_VERSION` | 1 |
+| `ERX_ARCH_ASID_BITS` | 16 |
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
@@ -226,6 +227,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SEG_GUARDED` | 1 |
 | `ERX_SLICE_MAX_US` | 50000 |
 | `ERX_SLICE_MIN_US` | 500 |
+| `ERX_TLB_BY_ADDRESS_MAX` | 64 |
 | `ERX_URGENCY_MAX` | 63 |
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
