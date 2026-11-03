@@ -423,11 +423,12 @@ as the stopgap's scope table lists
   and reserves, W^X, faults to fault gates,
   `erx_space_stop` and exit records that arrive only once no thread of the
   space can run (K18), a stopped thread finishing the call it is in, or
-  waking from its wait, before it dies, on the stopper's time; sealed
+  waking from its wait, before it dies; sealed
   paged objects, contiguous objects and physical objects created from device
   resources arrive with their first consumers;
 * IPC gates bound to one thread each, with labels and timeouts, a server
-  running on its own group's grant from its next scheduling decision; IRQ
+  running at its own urgency and on its own group's grant from its first
+  instruction; IRQ
   objects bound to threads, or to groups with labels and listed on the
   groups' ready lists, passing with `TRIGGER` and never with `BIND`, so a
   holder can ring one and never take its deliveries; umtx; the early
@@ -478,7 +479,7 @@ private memory excepted (S3); a space stopped while its threads run, fault
 and call on every CPU posts exactly one exit record, after its last thread
 has finished its call or left its wait and died (K18); a server whose
 group's ceiling is 15 runs at most at 15 while serving a caller at 40, and
-runs on its own group's grant from its next scheduling decision (S5); the
+runs on its own group's grant from its first instruction (S5); the
 host test of
 `erx_tlb_plan` finds every removal invalidating what it made stale, each
 cleared table entry over its span in the walk caches and with the IOMMU's
@@ -495,7 +496,9 @@ tests under ASan and UBSan.
 
 **Gate G1.** Measures, under HVF and TCG: the null call, an IPC round trip
 through a gate within and across spaces, park and wake on one CPU and
-across CPUs, interrupt latency, boot time to the root task's start, and
+across CPUs, deadline-to-resume latency (`tools/erx bench timer`, the
+return from a deadline wait against its deadline, since M1 has no device
+line to program), boot time to the root task's start, and
 `tools/erx bench stop`, the stop of a space with threads in calls and
 waits on every CPU. Decides: the timer slack and default time slice;
 whether the stopgap's 1 ms tick accounting suffices until M7.
@@ -1669,7 +1672,7 @@ replacement of lwIP.
 | Gate | Milestone | Measures or asks | Decides |
 | --- | --- | --- | --- |
 | G0 | M0 | the Fiasco set's licence scan and link closure; `lld` installed | what enters the tree, and the GPL-headed files the stopgap keeps |
-| G1 | M1 | null call, IPC round trips through a gate, park and wake, interrupt latency, boot time to the root task, `tools/erx bench stop`, under HVF and TCG | timer slack, default time slice; whether the stopgap's tick accounting suffices until M7 |
+| G1 | M1 | null call, IPC round trips through a gate, park and wake, deadline-to-resume latency, boot time to the root task, `tools/erx bench stop`, under HVF and TCG | timer slack, default time slice; whether the stopgap's tick accounting suffices until M7 |
 | G2 | M2 | early E-S2 (kernel thread switch, IPC round trip through a gate, park and wake); E-S4 FIFO wake latency | whether the two-level model proceeds onto ERTS |
 | GK1 | after M2 | the pilot's time and defect rate | the pace of the rest of track K and of the plan |
 | G3 | M3 | W1 against stock OTP; footprint; boot time to the shell and to the first pet; E-S10 | default table sizes; the baseline; NIFs that move to dirty schedulers |
@@ -1690,7 +1693,8 @@ A numbered gate takes its milestone's number: M7's gate is GK3, and M4,
 M10 and M11 have none. The research records are point-in-time reports and
 use the gate names of the plan they were written against. The gates that
 [research-baselines.md](research-baselines.md) names map here as follows:
-its G2 to G1 (interrupt latency), its G0 to M0 (repeating the ERTS
+its G2 to G1 (latency, measured there as interrupt latency and here as
+deadline-to-resume latency), its G0 to M0 (repeating the ERTS
 baselines with OTP 29.1.2), its G4 and G5 to G3 and G5 (the measurements
 on erXos), and its G6 to G6 (the restricted decoder's cost under the
 interpreter, within a frame's cost across a connection).

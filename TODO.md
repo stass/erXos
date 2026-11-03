@@ -43,17 +43,18 @@ it; git history is the record of completed work.
   sockets with several holders; an early prototype of its packet path,
   measured on QEMU and on a Pi, decides whether TCP's fast path needs
   native code ([plan.md](docs/plan.md)).
+* [Medium] kernel, performance counters on the stopgap: the modified
+  Fiasco builds with `CONFIG_PERF_CNT_USER=y`
+  (`config/fiasco/kernel.defconfig`), so user mode reads the CPU's
+  performance counters directly, and they count every thread and kernel
+  mode too: one domain can observe another's activity. erXos's kernel
+  leaves user-mode counters disabled
+  ([design-kernel.md](docs/design-kernel.md#security)). The stopgap keeps
+  them for profiling while development builds run trusted code only; they
+  go with the stopgap at M7, or earlier once the profiling feature under
+  Planned features gives a confined way to count.
 
 ## Bugs by subsystem
-
-* [Medium] Kernel capability defaults: refine the rights-constructor
-  input in [the rights contract](docs/design-kernel.md#rights). The
-  declared `erx_rights_default(erx_ktype_t)` cannot distinguish memory
-  kinds, hardware IRQs and root-resource creation, although their
-  default sets differ. Bind the constructor to the validated creation
-  kind before M1 capability admission; no generic constructor may grant
-  the union of those sets.
-
 
 * [High] storage and platforms, the Pi 4's boot image: the Pi 4's secure
   boot checks `boot.img` at about 2.6 MB/s under a firmware watchdog fixed
@@ -387,3 +388,17 @@ document's "residual risks accepted" paragraph.
 * [Low] kernel and platforms, isolation groups: confine a board whose
   fabric keeps requester identities only within a bus by isolation groups
   that span several streams ([design-kernel.md](docs/design-kernel.md)).
+* [Medium] kernel, profiling with hardware performance counters: give a
+  thread confined access to the CPU's counters through a capability, so
+  programs and runtimes can count cache misses, branch mispredictions and
+  cycles without seeing anyone else. Design first: a counter object
+  granted by whoever holds the profiled space's authority; the kernel
+  counts only the holder's user-mode execution, saving and restoring the
+  counters on every switch so nothing leaks between threads or domains;
+  sampling by overflow interrupt delivered as an IRQ object to the
+  profiler; the events and counter widths from the architecture's
+  specification, generated like other system registers; what the
+  inspector shows; the cost on the switch path, measured with
+  `tools/erx bench`. Decide whether ERTS's `perf` support and
+  `erlang:statistics` use it. Replaces the stopgap's direct user access
+  (Stopgap replacements above).

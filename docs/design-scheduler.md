@@ -1319,11 +1319,13 @@ scheduling decision, where the donation lapses
 execution context alone; `Context::schedule_switch_to_locked` switches
 both). erXos's own kernel charges every interval to the running thread's
 group, so a server never runs on its caller's time at all. The stopgap
-keeps Fiasco's direct switch: there a server may finish the remainder of
-its caller's timeslice on the caller's grant, a difference of at most one
-slice per call that the stopgap's scope table lists
-([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)),
-and nothing in the stopgap is changed for it. Neither kernel carries a
+does not take the direct switch: a send makes the server ready, and the
+scheduler picks it at the sender's next decision through
+`schedule_switch_to_locked`, which switches both contexts, so there too
+the server runs at its own urgency and on its own grant from its first
+instruction
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)).
+Neither kernel carries a
 donation across a preemption or down a chain of calls, and neither
 resolves anything at a decision but the running thread's own group
 ([design-kernel.md](design-kernel.md#l4-lineage)).
@@ -1607,9 +1609,12 @@ slice uses on the modified Fiasco, configurations C0 and C1: groups,
 shared areas, park and wake and urgency resolution are a Fiasco kernel
 object around the same C17 core; an IRQ object bound to a group is
 Fiasco's IRQ object with the group in place of a thread as its target;
-Fiasco's IPC path is untouched, so a server may finish its caller's
-remaining timeslice on the caller's grant until its next scheduling
-decision, at most one slice per call; and accounting runs at Fiasco's
+Fiasco's IPC rendezvous carries erXos's IPC calls as
+[design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)
+binds them, and what a server runs on from its first instruction, with
+no direct switch, is
+[design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)'s;
+accounting runs at Fiasco's
 timer interrupts, a 1 ms periodic tick, so quota enforcement there is
 accurate to 1 ms per CPU per period instead of to the one-shot timer.
 C2's features are erXos's kernel's alone; the stopgap's scope table lists
@@ -1731,7 +1736,7 @@ reading that lane and tell the system domain, which takes the connection down
 | Runtimes | ERTS's adapter and the test runtime against the contract: wakeups under storms, capacity changes, yield requests | the runtimes' own tests and OTP's suites |
 | Runtimes | runs: four ERTS domains on eight CPUs with the same cpuset and a capacity of two each, normal and dirty CPU schedulers busy, runs placed by the policy | each domain's executors only on its own run; no CPU shared by two domains' executors in steady state |
 | Runtimes | attribution: a service serving three clients with known work per request, its per-client report against a cycle-counter ground truth | the report within the budget E-S5 sets; shown as runtime-reported in the inspector, with a seeded misreport changing nothing outside the service: its group's usage stays within its quota |
-| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick and its direct switch among them |
+| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick and its stored priorities among them |
 
 Every test runs under TCG and HVF; a test that passes under only one is a
 bug until explained. The host builds run under ASan and UBSan, and the
@@ -2037,7 +2042,7 @@ client's.**
 | cross-CPU wakes under HVF are slow | unknown | wake latency above budget, felt as messaging latency | E-S4; executors stay pinned and a busy runtime finds work without wakes |
 | quotas at 10 ms periods make a throttled domain's latency jumpy | medium | p99 latency for capped domains | E-S7 tunes periods and draw quanta; policy prefers capacity over tight caps |
 | refill once per period lets a burst that straddles a boundary use up to twice the quota in one period's span, and local slices strand quota on CPUs a group left | medium | short-term isolation between groups | E-S7 measures both and decides whether a CPU that goes idle returns its local quota to the pool; sporadic replenishment, as in seL4's scheduling contexts, is the fallback |
-| accounting at the stopgap's 1 ms tick misattributes short runs, and its direct switch runs a server on its caller's slice | high on the stopgap | coarse statistics there; a caller pays for at most one slice of its server per call | documented accuracy differences; erXos's kernel uses one-shot timers and charges each interval to the running thread's group |
+| accounting at the stopgap's 1 ms tick misattributes short runs | high on the stopgap | coarse statistics there | documented accuracy differences; erXos's kernel uses one-shot timers ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)) |
 | two runtimes in one space share a group | low | contention and taken wake-ups inside one space | the kernel keeps a group's executors in one space and its ready list to executors; a space that runs two runtimes gives each a group of its own |
 
 Open questions:
