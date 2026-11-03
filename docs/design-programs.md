@@ -1828,12 +1828,18 @@ is recorded and decided as at any other time.
    ([design-pipes.md](design-pipes.md#inherited-ends)).
 3. **Copy.** The child's handler has the port driver carve the child's
    budget, create its group, its anchor below the parent's anchor and its
-   image, empty, and then a **copier**, a worker thread of the session's
-   space in the parent's group, which pauses the parent's image with
-   `erx_space_pause`, waits with `erx_space_quiesce` until its threads
-   have finished the calls they were in, copies it into the child's with
-   `erx_space_copy` and resumes it with `erx_space_resume`, so the copy
-   is charged to the parent's CPU grant and runs at its urgency. The
+   image, empty; pauses the parent's image with `erx_space_pause`,
+   recording the hold against the request; and then starts a
+   **copier**, a worker thread of the session's space in the parent's
+   group, which waits with `erx_space_quiesce` until the parent's
+   threads have finished the calls they were in and copies the image
+   into the child's with `erx_space_copy`, so the copy is charged to the
+   parent's CPU grant and runs at its urgency. The handler owns the
+   hold: it lifts it with `erx_space_resume` when the copier reports,
+   whatever the outcome, and lifts it early to give the fork up, which
+   ends the copier's quiesce, or its copy at the next part, with
+   `ERX_EBUSY`; so no outcome leaves the parent held, and the copier
+   never resumes. The
    pause holds the parent while it is copied, so the copy is one moment
    of the parent, and the copy charges the child's budget for the
    child's memory as it goes; one parent has one copy at a time
@@ -1868,10 +1874,13 @@ is recorded and decided as at any other time.
    * `ERX_ENOMEM`, a session or a child budget that cannot cover the copy
      or a step after it: `fork` returns -1 with `ENOMEM`, never later at a
      random write;
-   * `ERX_EDEAD`: when the parent stopped during the copy, no `fork` is
-     left to answer, the child having been undone; when the session
-     stopped the child while the parent lives, `fork` returns -1 with
-     `EAGAIN`;
+   * `ERX_EDEAD`: when the parent stopped during the quiesce or the
+     copy, no `fork` is left to answer, the child having been undone;
+     when the session stopped the child while the parent lives, `fork`
+     returns -1 with `EAGAIN`;
+   * `ERX_EBUSY`: the handler lifted its hold before the copier
+     reported, the one way to give a fork up without stopping the
+     parent; the child is undone, and `fork` returns -1 with `EAGAIN`;
    * any other status: `fork` returns -1 with `EAGAIN`.
 5. **Parent and child.** In the parent, `liberx` releases the kept locks
    in reverse order and ends the deferral, so the deferred signals arrive,
@@ -3176,7 +3185,10 @@ committed private memory, at an estimated 5 to 10 GB/s on one CPU, about 10
 to 20 ms for 100 MiB, during which the parent is held; `tools/erx bench
 fork` measures it against `fork` on Linux in a guest. A shared library
 costs its file object's first filling once per session, and then a mapping;
-its data costs a page copy at each first write. A shared mapping of a file
+its data costs the mapping's size at the `mmap`, charged and backed up
+front, and a page copy at the first touch of each page, read or write
+([design-kernel.md](design-kernel.md#copy-on-write-children-and-copies-of-spaces)).
+A shared mapping of a file
 costs the filling of its range once per session, at the file object's
 rate above, and each write-back an `erx_mem_dirty` call and one write for
 each run of stored pages, so a program that stores to a few pages of a

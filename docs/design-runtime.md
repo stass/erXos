@@ -1173,10 +1173,13 @@ dispositions ([design-programs.md](design-programs.md#job-control)).
 
 **Fork.** `erx_program:fork(Port, Spec)` makes a child of the program:
 its budget, its group and its anchor below the parent's anchor, as step
-2 does, and its image, empty; copies the parent's image into the child's
-with `erx_space_copy`, which a sub-space's creator may call, on a
-**copier**, a worker of the session's space in the parent's group, so
-the copy runs on the parent's grant; and completes the child as steps 4
+2 does, and its image, empty; pauses the parent's image with
+`erx_space_pause` and has a **copier**, a worker of the session's space
+in the parent's group, wait for its threads to finish their calls with
+`erx_space_quiesce` and copy it into the child's with `erx_space_copy`,
+calls a sub-space's creator may make, so the copy runs on the parent's
+grant, and lifts the pause with `erx_space_resume` when the copier
+reports, or earlier to give the fork up; and completes the child as steps 4
 to 7 do, with the fork message as its startup message and its first
 thread at `liberx`'s fork entry. It returns the child's port, owned by
 the caller, the child's handler

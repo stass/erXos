@@ -493,7 +493,7 @@ machine's action list names them, and one function applies them.
 | --- | --- | --- | --- |
 | **K1.** A stale capability never names a fresh object | every call reaches an object only through `erx_cap_lookup`, which checks the slot's generation, type and rights and refuses a deleted object and an object whose budget is destroyed, a slot retires before its generation wraps, and the object a lookup returns is freed only after a grace period that begins after its deletion, so it stays valid until the call's next preemption point ([Objects and capabilities](#objects-and-capabilities)) | a call that accepts an object pointer, a raw object identifier or another table's value; a narrower generation; reuse of a retired slot; a lookup's pointer used after a preemption point | `tools/gen_abi.rb` refuses a capability argument without a type and rights, and emits every call's plain lookups after its other arguments; the epoch of each `erx_uref_t`, checked in debug and host builds; a host test drives one slot through retirement; a domain test uses a closed capability and expects `ERX_ESTALE` |
 | **K2.** Rights only shrink | a rights value is built only by `erx_rights_create`, which returns the validated creation kind's default set from the ABI file, and by `erx_rights_shrink`, which intersects with a mask; copying, passing and carving use the second, carving with the parent capability's rights and `DESTROY` as the mask, so the carver may delete what it carved and nothing more; nothing combines rights by OR | a third constructor, or an expression that ORs into a slot's rights | a source check that `erx_rights_t` is constructed only in `kernel/core/cap.c`; a host property test that every copied or passed capability's rights are a subset of its source's, and every carved one's a subset of its parent capability's and `DESTROY`; the generator's check that each carved kind's created rights lie within its parent's created rights and `DESTROY` ([Rights](#rights)) |
-| **K3.** Every kernel allocation is charged to a budget, an object dies with its budget, and no budget's tree spends beyond its cap | `erx_kalloc` and `erx_reserve_charge`, the one source of pages, take a budget or a reserve that names one, and have no other variant once the root budget exists; a thread's kernel stack and kernel-user page are charged with the thread; carving a child charges its guarantee to the parent; every object joins its budget's list of charged objects through that list's insert function, which refuses a destroyed budget, and a budget's destroy deletes every object on the list, child budgets included; objects point at each other only through attachments, which each teardown removes, so nothing outside a budget keeps what it paid for; a destroyed budget's record stays as a tombstone, its counters excluded from the aggregate and the cache page it sits in charged to its parent, until the last object charged to it is freed; every change of a budget's counters goes through `erx_budget_adjust`, which refuses a charge that would take any budget's spending above its cap ([Budgets](#budgets)) | an allocation path without a budget; a cache shared between budgets; a boot-time allocator reachable after the root exists; an object that is on no budget's list; a pointer between objects that is not an attachment; a budget record freed while an object charged to it lives; a counter written outside `erx_budget_adjust` | a link check that no budget-free allocation symbol is referenced outside boot code; the source check that every pointer between object records is an attachment field; the chokepoint check that the budget counters are written only in `erx_budget_adjust`, with a seeded violation; exhaustion tests through every object type; a domain test that destroys a budget whose objects other domains hold and map, and finds every capability to them failing with `ERX_ESTALE`, every mapping of them faulting with `ERX_FAULT_DELETED`, and the parent's room and unspent guarantee whole again when the destroy returns, but for the cache pages of the destroyed records, and whole once their grace period and the reaper's steps for them have run, which the test waits for by draining the reaper; a test that parks a thread of another budget inside `erx_mem_copy` across the destroy of its source's budget and finds the copy failing with `ERX_ESTALE` at its next part and the tombstone freed after it, under ASan on the hosted kernel |
+| **K3.** Every kernel allocation is charged to a budget, an object dies with its budget, and no budget's tree spends beyond its cap | `erx_kalloc` and `erx_reserve_charge`, the one source of pages, take a budget or a reserve that names one, and have no other variant once the root budget exists; a thread's kernel stack and kernel-user page are charged with the thread; carving a child charges its guarantee to the parent; every object joins its budget's list of charged objects through that list's insert function, which refuses a destroyed budget, and a budget's destroy deletes every object on the list, child budgets included; objects point at each other only through attachments, which each teardown removes, so nothing outside a budget keeps what it paid for; a destroyed budget's record stays as a tombstone, its counters excluded from the aggregate and the cache page it sits in charged to its parent, until the last object charged to it is freed; every change of a budget's counters goes through `erx_budget_adjust`, which refuses a charge that would take any budget's spending above its cap ([Budgets](#budgets)) | an allocation path without a budget; a cache shared between budgets; a boot-time allocator reachable after the root exists; an object that is on no budget's list; a pointer between objects that is not an attachment; a budget record freed while an object charged to it lives; a counter written outside `erx_budget_adjust` | a link check that no budget-free allocation symbol is referenced outside boot code; the source check that every pointer between object records is an attachment field; the chokepoint check that the budget counters are written only in `erx_budget_adjust`, with a seeded violation; exhaustion tests through every object type; a domain test that destroys a budget whose objects other domains hold and map, and finds every capability to them failing with `ERX_ESTALE`, every mapping of them faulting with `ERX_FAULT_DELETED`, and the parent's room and unspent guarantee whole again when the destroy returns, but for the cache pages of the destroyed records, and whole once their grace period and the reaper's steps for them have run, which the test waits for by draining the reaper; a test that parks a thread of another budget inside `erx_mem_copy` across the destroy of its source's budget and finds the copy failing with `ERX_ESTALE` at its next part and the tombstone freed after it, under ASan on the hosted kernel; a test that destroys a budget at each step of a thread's, a child's and a space's construction on the hosted kernel and finds the creation returning `ERX_ESTALE`, every page it backed refunded at the dead budget and the tombstone freed, with a seeded construction that attaches its object to the budget before its backing, which the release core's model catches as a teardown that finds `charged` above `backed` |
 | **K4.** A mapping never allows more than the capability that made it | `erx_vm_map`, `erx_image_map` and `erx_dma_map` fix each mapping's ceiling as the capability's rights intersected with the object's ceiling and refuse a protection above it; `erx_space_copy` copies a mapping with its ceiling; no call raises a mapping's protection above its ceiling: `erx_space_protect` moves a mapping's protection only beneath it, committing a reservation it gives access to, and commit and decommit move private memory between no access and read-write, beneath private memory's fixed ceiling | a protection computed from anything but the ceiling; a protection-changing call that ignores it | host tests of the ceiling arithmetic; a domain test maps an object read-only and tries every call that could make it writable, `erx_space_protect` failing with `ERX_ERIGHTS`; a domain test that protects committed private memory to no access and back and reads its contents unchanged |
 | **K5.** Trimming never meets sharing | only private memory is ever freed by range; private memory has no capability, so no call can map it twice, and its mapping records partition its offsets, so each of its pages has exactly one address; every other kind keeps its pages until the object is destroyed | a call that maps private memory a second time, or a range call that frees a shared object's pages | a domain test maps a shared object at two addresses, decommits and releases one view, and reads the other |
 | **K6.** Committed memory never faults for lack of memory, and no fault waits | making memory accessible first reserves and charges every page its population can need, translation tables included, whether `erx_vm_commit` or an `erx_space_protect` that gives a reservation access makes it accessible, and backs the reserve with pages in the same call: a charge borrows through the budget chain at that moment, never at a fault, and takes its pages from the allocator then, taking released pages off the released list and waiting their grace period when none is free, which is bounded and waits on no party, so between calls a reserve's pool holds a page for every promise not in use; a fault populates from that pool, copies on write from one, or stops the thread with a fault record, under the owner's lock, and touches neither the allocator nor a budget; a translation table goes only with the promise that reserved it, so a rebuild needs only the pool; the fault decision has no result that sends a message or waits ([Virtual memory](#virtual-memory), [The reaper](#the-reaper)) | a take beyond a reserve's pool; a charge that promises more than it backs; a protect that gives a reservation access without the reserve; a fault path that reaches the allocator or waits; a table detached while a committed mapping touches its span; a page released without its refund, which would leave a charge with no page behind it | a host model of the accounting checked after every random operation, which finds every reserve's pool holding a page for every promise not in use between calls; the fault decision's exhaustive host model over every mapping kind, page state and access, in which every result populates from a pool, copies on write from one or stops the thread; a domain test commits a whole budget sparsely and touches every page while every other page of the machine is held, the free lists and the released list empty throughout, every touch succeeding and the allocator's take counter unchanged by them; a domain test that reserves beyond its cap, gives parts access by `erx_space_protect` up to the cap, protects them to no access and back, and touches every page of them, with a seeded protect that skips the charge and a seeded protect that detaches a table, which the model catches; a domain test in which one domain releases and commits without pause on three CPUs while another commits and touches a fresh range on the fourth, every commit backed within two grace periods per part of 64 pages and every touch succeeding, with a seeded backing that takes nothing off the released list, under which the commit waits past its bound, which the test catches; the host model that closes a backing's owner at every part boundary of a charge of 129 pages, after which the reserve's `charged` equals its `backed`, every page of the backing is on the released list exactly once and the budget is back at its baseline, with a seeded backing that releases its hand itself, which the model's once-only check catches, and a seeded one that skips the cancellation, under which `used` stays high |
@@ -512,7 +512,7 @@ machine's action list names them, and one function applies them.
 | **K19.** While a machine lease is held, the machine ends only in a reset | one funnel, `erx_machine_end_effect`, performs every end, the panic path's included, and maps every end to a reset while the lease word is set; the deadline is checked from the kernel's own timer, and the board's watchdog covers a kernel that stops taking interrupts | an end path that bypasses the funnel; a watchdog stopped while a lease is held | the funnel's host tests over every end and lease state; a QEMU test of each end with and without a lease; on each board, a trial that panics, hangs in the kernel with interrupts masked, or calls `halt/0`, each booting the committed slot |
 | **K20.** Preemption never runs runtime code: no executor receives an upcall | `erx_vcpu_control` refuses an executor, a thread's class is fixed when it is created, and only an armed thread receives upcalls ([vCPU upcalls](#vcpu-upcalls)) | an arming path without the class check, or a call that changes a thread's class | host tests of the arming rules over every class; a domain test that arming an executor fails with `ERX_ETYPE` |
 | **K21.** An object's release happens once, and only once, after the last capability to it has gone | every slot is cleared by `erx_cap_slot_clear` under the object's capability lock, a move hands its count from slot to slot without passing through zero, and the decrement to zero closes the slot list to inserts, so nothing makes a capability after the release ([Objects and capabilities](#objects-and-capabilities)) | a slot cleared without the decrement or outside the object's capability lock; a move split across two operations; a copy inserted after the release; a call that names an object by anything but a capability | the release core's exhaustive host model over closes, moves, deletions and table emptying, with copies and moves whose lookups raced the last close, which checks that every slot is freed once, that no copy follows a release, and that the last close of a deleted object leaves it deleted; a domain test in which a domain passes a gate to its sub-space at a rendezvous, closes its own capability, and sees the gate released only when the sub-space closes it; a test that stops the sub-space and empties its table and sees the release then |
-| **K22.** A copy-on-write child never writes a page it does not own, and no device writes a shared page | every user translation comes from `erx_pte_make`, which grants write only for a page its mapping's object owns exclusively, and a child's mapping is populated only with pages the child owns, so no translation anywhere names a page shared by copy-on-write; every fault in a child's mapping, whether the CPU reports a missing translation or a permission fault, goes through the fault decision to `erx_cow_decide`, and only `erx_cow_install` makes a page the child's own, under the child's lock, touching no translation table; the kernel writes a memory object's pages only through `erx_window_write`, which makes a child's page its own through `erx_cow_install` before it writes it; `erx_dma_map` takes only pages its object owns exclusively | a translation built elsewhere; a translation in a child's mapping that names a parent's page; a kernel write into a child's page that skips `erx_cow_install`; a DMA mapping of a parent's page | the funnel's exhaustive host model over every fault, window write, page state and concurrent `erx_mem_own`, and the fault decision's over every mapping kind, page state and access; a hostile test that writes a child's page from two threads while a third reads the parent, and one that maps a child at a thousand addresses in two spaces and writes one page through each, each write taking one bounded part and every alias reading the written page afterwards, with a seeded populate that maps the parent's page for a read, which the host model's check that no translation names a parent's page catches; a test that a child range with an unowned page cannot be DMA-mapped; the build checks on `erx_pte_make` and `erx_cow_install` |
+| **K22.** A copy-on-write child never writes a page it does not own, and no device writes a shared page | every user translation comes from `erx_pte_make`, which grants write only for a page its mapping's object owns exclusively, and a child's mapping is populated only with pages the child owns, so no translation anywhere names a page shared by copy-on-write; every fault in a child's mapping, whether the CPU reports a missing translation or a permission fault, goes through the fault decision to `erx_cow_decide`, and only `erx_cow_install` makes a page the child's own, under the child's lock, touching no translation table; the kernel writes a memory object's pages only through `erx_window_write`, which makes a child's page its own through `erx_cow_install` before it writes it; `erx_dma_map` takes only pages its object owns exclusively | a translation built elsewhere; a translation in a child's mapping that names a parent's page; a kernel write into a child's page that skips `erx_cow_install`; a DMA mapping of a parent's page | the funnel's exhaustive host model over every fault, window write, page state and concurrent `erx_mem_own`, and over deletions of the child and unmaps of its mapping racing faults on it, with a seeded fault that releases its space's lock between the copy and the write of the translation, which the model catches as a translation naming a page it has released; the fault decision's model over every mapping kind, page state and access; a hostile test that writes a child's page from two threads while a third reads the parent, and one that maps a child at a thousand addresses in two spaces and writes one page through each, each write taking one bounded part and every alias reading the written page afterwards, with a seeded populate that maps the parent's page for a read, which the host model's check that no translation names a parent's page catches; a test that a child range with an unowned page cannot be DMA-mapped; the build checks on `erx_pte_make` and `erx_cow_install` |
 | **K23.** Copy-on-write is one level deep, its parents never change, and every page it can need is reserved at creation | `erx_mem_child` takes only an immutable parent with `CHILD`, which no child carries, and reserves, charges and backs the child's full size; `erx_space_copy` copies a child as a fresh child of the same parent, reserved, charged and backed at its full size; a paged object reserves and backs its whole size at creation, and nothing is evicted | a child of a writable object; a child created with `CHILD`; a copy that makes a child of a child; a write fault that allocates outside a reserve | a host model of the accounting with children; domain tests that a child of a child or of a writable object fails with `ERX_ETYPE`; a domain test that writes every page of a child created at the edge of its budget |
 | **K24.** No capability that leaves its table for another space's carries code, device or structural authority, unless that space's creator passes it there | every pass at a rendezvous, every `erx_cap_pass` into a space other than one the caller created, and every copy `erx_space_copy` makes intersects rights with the type's pass set, which the generator requires every type to declare ([Passing capabilities](#passing-capabilities)); the structural types declare none, memory's holds no right to execute, make code, reach a device or fill an object others read, and a JIT object has no `DUP` or `GIVE`; only a space's creator conveys the rest, by `erx_cap_pass` into that space; a fork maps in the child only what its parent had mapped | a pass set that grows; a type without one; a JIT object created with `DUP` or `GIVE`; a copy path that skips the pass set; a pass past the pass set into a space the caller did not create | the generator's checks; a host property test that every planned pass's rights lie within its type's pass set unless its target is a space the caller created; domain tests that try to pass every type with every right, at a rendezvous and into a peer's space; fork tests that the child holds no budget, space, thread, group or JIT object of its parent's and no capability to its parent's copy-on-write children, and that a library its parent mapped stays executable in it |
 | **K25.** A capability leaves a table only by its holder's close or move, its space's emptying, or its object's deletion | capabilities are flat: every slot naming an object is an equal entry in the object's slot list, and none depends on another; `erx_cap_slot_clear`, the one function that clears a slot, is called only by `erx_cap_close` on the caller's own slot, by a move at a pass, by `erx_space_clear_caps`, which needs `CAPS` on the space, and by the deletion walk, which needs `DESTROY` on the object or on its budget ([Closing and deleting](#closing-and-deleting)) | a call that clears a slot of another table without `CAPS` or `DESTROY`; a close that removes more than its own slot | the chokepoint check on `erx_cap_slot_clear`'s callers; the deletion core's exhaustive host model over copies, moves, closes, deletions and table emptying, which checks that a close removes exactly one slot; a domain test that copies a memory object into three domains and closes the giver's capability, after which the other two still map and read it |
@@ -520,7 +520,7 @@ machine's action list names them, and one function applies them.
 | **K27.** A space never outlives its parent | every space but the first names its parent at creation, and nothing changes it; every stop of a space is made by, or starts, one of the two walks, which keep the children not yet stopped first in each parent's list, so every space below a stopped one stops; a stopped space refuses new children, under the parent's lock; a space's exit record waits until every child's has been posted ([Creating spaces](#creating-spaces)) | a creation that skips the parent's stopped check; a stop path that does not walk the children; an emptying walk that passes a running child; an exit record posted while a child can still run | the stop core's exhaustive host model over creations racing stop walks and emptying walks, which checks that a stop moves a child in the critical section that sets its word and that a child leaves its list exactly when the emptying of its table begins; a host test in which a child is stopped and emptied, which takes it off its parent's list, a sibling is then stopped, and the parent is then stopped and emptied, which must empty the sibling; a host test that releases a sub-space of a live parent and then stops the parent; a domain test that stops a domain with three levels of sub-spaces running on every CPU and receives every sub-space's exit record before the domain's |
 | **K28.** Every fault reaches the fault gate fixed at its space's creation | a space's fault gate and label are arguments of `erx_space_create` and no call changes them; the upcall state has no flag that diverts a fault, so an armed thread's faults go the same way; a fault record stops the thread and queues at the gate's thread, at most one per thread | a call that changes a fault gate; an upcall for a fault | the call table has no such call; a domain test that arms a thread, sets every bit of its upcall state word, faults it in every exception class, and finds each fault record at the fault gate |
 | **K29.** No upcall event is lost | an event for an armed thread that cannot take it at once stays queued at the thread with the pending flag set; `erx_vcpu_step` runs at every trigger, every return to user mode, every wait entry, every start after a stop, every resume, every arming and every disarm, and with events enabled and a delivery queued it enters the upcall at a return, ends a umtx wait with `ERX_EINTR` at its entry, and has a resume enter the upcall again instead of resuming, in one step | a return to user mode, a wait entry, an arming or a resume that leaves events enabled with an event queued | `erx_vcpu_step`'s exhaustive host model over every order of trigger, upcall, resume, wait entry, return from a call, stop, start, arming and disarm; a domain test that triggers between the handler's last check and its resume; a test that triggers during a call's reply phase and sees the upcall at the call's return; a test that queues a delivery before arming and sees the upcall at the arming's return |
-| **K30.** No thread of a held space returns to user mode, holds never keep a thread from finishing kernel work, holds compose, and no hold waits for a peer | `erx_return_check` is the only code that acts on a space's two hold counts, which only the space core's pause, resume and copy functions change, and it decides a death or a stop before a hold, so everything else runs a held space's threads to the boundary, and public pauses and a copy's hold are counted apart; a pause returns once the interrupts it sent have been taken, and a copy's quiescence waits only for the space's own threads inside calls, since a thread asleep in a wait is not active and what the rest of its call writes is either never read by a copy or a slot, which the copy takes whole, before or after ([Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a second reader of the holds, such as a ready path that keeps a held thread off the CPU; a resume that lifts a copy's hold; a pause that returns before its interrupts are taken, or on a kernel entry its baseline counted; a sleeping thread counted as active; a call that may wait and writes a memory window | the space core's exhaustive host model over pauses, resumes, copies, stops, kills, `CONTROL` stops, wakes, preemption and helping; a test that deletes a thread of a paused space and finds its senders woken with `ERX_EDEAD` before the resume; a test that pauses a space while one of its threads is preempted holding its space's lock and another waits for that lock; a domain test that forks a program whose threads write memory on four CPUs and finds one consistent snapshot in the child; a test that lifts every public pause during a copy and finds the source held until the copy ends; a test that replies to a waiting thread of a paused space and finds the reply in its registers when it next runs in user mode; a test that pauses a space whose threads spin in user mode on four CPUs and finds none of them running user code once the pause has returned; a test that pauses a space whose thread waits in a call to a server that never replies, and finds the pause returning at once and a copy of the space completing while the call still waits; a test that stops a copy's target while the copy waits for a source thread whose group has no quota left, and finds the copy returning `ERX_EDEAD` to its copier and the source's hold lifted |
+| **K30.** No thread of a held space returns to user mode, holds never keep a thread from finishing kernel work, holds compose, and no hold waits for a peer | `erx_return_check` is the only code that acts on a space's hold count, which only the space core's pause and resume change, and it decides a death or a stop before a hold, so everything else runs a held space's threads to the boundary; holds are one count, so a session's pauses for its causes, the one it copies under among them, compose, and each resume lifts one; a pause returns once the interrupts it sent have been taken, and a quiesce waits only for the space's own threads inside calls, since a thread asleep in a wait is not active and what the rest of its call writes is either never read by a copy or a slot, which the copy takes whole, before or after; a quiesce wait ends whenever its condition holds or can no longer hold, at the mark, at the resume that lifts the last hold or at the space's stop ([Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a second reader of the holds, such as a ready path that keeps a held thread off the CPU; a copy that takes a hold of its own, or runs without the mark; a pause that returns before its interrupts are taken, or on a kernel entry its baseline counted; a sleeping thread counted as active; a quiesce wait that a resume or a stop leaves asleep; a call that may wait and writes a memory window | the space core's exhaustive host model over pauses, resumes, quiesces, copies, stops, kills, `CONTROL` stops, wakes, preemption and helping, with a seeded resume that leaves the quiescers queued, which the model catches as a wait outliving its space's last hold; a test that deletes a thread of a paused space and finds its senders woken with `ERX_EDEAD` before the resume; a test that pauses a space while one of its threads is preempted holding its space's lock and another waits for that lock; a domain test that forks a program whose threads write memory on four CPUs and finds one consistent snapshot in the child; a test that resumes the source during a copy and finds the copy ending with `ERX_EBUSY` at its next part, nothing of the source changed and its threads back in user mode; a test that replies to a waiting thread of a paused space and finds the reply in its registers when it next runs in user mode; a test that pauses a space whose threads spin in user mode on four CPUs and finds none of them running user code once the pause has returned; a test that pauses a space whose thread waits in a call to a server that never replies, and finds the pause returning at once, the quiesce completing and a copy of the space completing while the call still waits; a test that resumes a paused space while a quiesce waits for a thread of it whose group has no quota left, and finds the quiesce returning `ERX_EBUSY` and the thread back in user mode once its group has time, and one that stops that space instead and finds the quiesce returning `ERX_EDEAD` |
 | **K31.** The machine runs only while the root task runs: a fault of the root task, its halt outside an ordered shutdown, and a watchdog deadline it misses each end the machine, after a crash record | the first space has no fault gate, so its faults reach `erx_panic`, which writes the crash record and ends through `erx_machine_end_effect`; its exit record has no gate to go to, so a stop of the first space by anything but `erx_machine_end` takes the same path; the watchdog's deadline is checked from the kernel's own timer, which also reloads the board's watchdog for as long as the kernel runs, so a kernel that stops running resets too; only `POWER` on the root resource, which no carved resource carries, pets it; deterministic mode alone turns it off, and release builds refuse deterministic mode ([The root task](#the-root-task), [The watchdog](#the-watchdog)) | an end path that bypasses the funnel; a pet accepted without `POWER`; a deadline the pet of a thread outside the root task could extend; a first space that stops without a record | the watchdog machine's exhaustive host model over pets, ticks, arming and the mode; a QEMU test whose root task stops petting, and one whose root task faults, each finding the crash record on the console and the end the configuration names; the crash record's checks fuzzed on the host; on each board, a root task that stops petting, which boots again with the record handed to the new root task |
 | **K32.** A guarantee is never taken from the budget it was carved for, a budget borrows only its ancestors' room, and a domain's memory is walled from every other's | a charge beyond a budget's guarantee is counted, through `erx_budget_adjust`, as `lent` at every ancestor it passes until one's guarantee absorbs it, and every ancestor's `carved`, the sum of its children's guarantees, is part of the spending its cap and guarantee are checked against, so lending never reaches what a parent guarantees to another child, and a parent's shrink revokes no child's guarantee, since a child's charge within it raises nothing the parent counts; the chain is held under the budgets' locks, descendant first, and applied whole, so no interleaving sees borrowed memory uncounted; a wall, a budget carved with cap fixed equal to its guarantee, takes no new charge beyond its guarantee, so every charge's chain ends at the first wall, admitted within the guarantee or refused, and a wall borrows only the excess its carver's own shrink left above the guarantee, which falls as its tree frees; the domain library carves every domain's budget as a wall, so a domain's charge is admitted or refused at its own budget alone, nothing of a domain's is ever counted against another domain's, and against its principal's room only what the principal's policy moved there by a shrink; a dead budget's spending is counted in its nearest live ancestor's `used` from its close, and every refund of what it held passes there, so what is charged to the machine is the sum of `used` over the budgets that are live and whose every ancestor is live; a charge ends when memory is released, not when it is freed, so no refusal depends on the reaper's timing or on what is carved or destroyed meanwhile, and a refusal says only that the tree's charges reach the cap; resizing needs `DESTROY`, which carving places in the carver's slot (K2) and which reaches another space only by the carver's own pass, and the domain library's grant table passes no budget with it ([Budgets](#budgets)) | a counter changed outside the chain; a chain applied one level at a time; a check of the cap or the guarantee that leaves `carved` or `lent` out; a domain budget carved elastic; a wall whose cap a resize moves away from its guarantee; a refund of a dead budget's applied at the dead budget alone, or a close that moves less than its spending; a page freed without its refund, or a refund that waits for the free; a grant-table row that passes a budget with `DESTROY` to a domain | the host model of the accounting over random carves of both kinds, charges, refunds, resizes, destroys, reaper steps and watches on trees `ERX_BUDGET_DEPTH_MAX` levels deep, which checks after every operation that no charge took a live budget's spending above its cap, that a budget whose cap a resize set beneath its spending is refused every charge that would raise its spending while a child's charge within its own guarantee is admitted, that a wall's cap equals its guarantee and it borrows exactly what a shrink left above the guarantee and nothing after its spending falls beneath it, that every `lent` is the sum of its live children's borrowing and every `carved` the sum of their guarantees, that the sum of `used` over the budgets that are live and whose every ancestor is live is what is charged, between every two close steps of nested destroys, that pages held by reserves plus pages in backings' hands plus released plus free is the root's guarantee after every operation, that every reserve's pool holds a page for every promise not in use between calls, and that a charge is refused only when the tree's charges reach the cap, whatever is released and not yet freed, with seeded failures that apply a chain one level at a time, forget `lent` at a close, leave `carved` out of the cap check, refund a dead budget's page at the dead budget alone, count a dead or doomed budget's `used` toward the machine, refund a page only at its free, and free a page without its refund, each of which the model catches; the same model under TSan with charges, releases, backings, resizes, destroys, carves of child budgets and reaper steps racing on four threads, one of which releases and charges without pause while another carves and destroys budgets, and finds every admitted charge backed, no part of a backing waiting longer than two grace periods, with a seeded release that refunds before it appends, under which a backing finds neither a free nor a released page; the domain library's host test that every budget it carves is a wall and that no row of its grant table passes a budget with `DESTROY`, with a seeded plan that carves one elastic and a seeded row that keeps the right; a domain test in which a program borrows until its session's pool is full, is refused with `ERX_ENOMEM`, and its sibling then commits all of its own guarantee and the session all of its own half, both succeeding, with a seeded chain that skips `carved`, under which the sibling's commit fails; a domain test in which two programs borrow from a full pool, one releases a gigabyte and the other commits a gigabyte at once and touches every page of it, which succeeds with no idle reaper running, the commit taking the released pages off the list at most 64 per part and its touches taking nothing from the allocator, with a seeded release that refunds only at the free, under which the commit fails with `ERX_ENOMEM`; a domain test in which one program of a full pool ends, its budget destroyed with its records still in their grace periods, and a sibling at once commits what the first held, which succeeds with no idle reaper running, with a seeded teardown that releases its pages only at its put, under which the commit fails with `ERX_ENOMEM`; a domain test in which a sub-space budget is destroyed while its sibling's charge is refused, and the sibling's retry succeeds as the destroy's walk releases, before the destroy returns and with no idle reaper running; a domain test in which a program at its cap destroys a thousand gates and creates a thousand at once, which is refused with `ERX_ENOMEM` while the destroyed records wait and admitted once their grace period and the reap deadlines their backlog needs, one per 64 records queued on a CPU, have passed with every CPU busy in user mode, and which, with a call of another domain parked holding one of the gates counted across the destroys, is admitted for all but the records of one cache page until that call runs, with a seeded cache that releases a page while a record in it waits out its grace period, which ASan on the hosted kernel catches, a seeded reap deadline that is never armed, under which the creation stays refused on the busy CPUs, and a seeded deadline that runs one step and does not re-arm, under which it stays refused past the bound, each of which the test catches; a test that destroys a watched budget while passes holding the IRQ object's capability lock run on the other CPUs, under the debug lock-order check, with a seeded teardown that detaches the watch under the budget's capability lock, which the check catches; a domain test that a holder's `erx_budget_resize` on its own budget fails with `ERX_ERIGHTS`, that a carver grows and shrinks a child's guarantee and cap, the parent's counters following, that a shrink below the spending leaves the child refused until it frees while a grandchild's charge within its guarantee is admitted, and that a wall resized to a cap above its guarantee fails with `ERX_EINVAL`; a test that a watch triggers once at its threshold and not again until re-armed, that arming at or above the threshold triggers at once, that arming a second budget with the same IRQ object fails with `ERX_EBUSY`, and that destroying the IRQ object leaves the budget unarmed, with a seeded watch that fires on every adjustment, which the test catches; a test that destroys a borrowing budget and finds the parent's `lent` and `carved` back at their baselines when the destroy returns, with no idle reaper running |
 | **K33.** A waiting thread holds nothing across its sleep, and one function completes every wait | a call sleeps only through the wait funnel, which the generated dispatch reaches after the handler has returned every lock and every counted reference and stored the wait's inputs in the wait record; the waker calls `erx_wait_complete`, the one function that turns a wait's outcome into result registers and runs the return check, so the woken thread's frames carry no work, and a wake path may resume it straight to user mode ([Execution model and locking](#execution-model-and-locking)) | a lock or counted reference held into the sleep; a result translated after the wake on the thread's own frames; a wake path that readies a thread without the completion | debug and host builds count each thread's held locks and counted references and assert both zero at the funnel's sleep, with a seeded wait that keeps a reference failing the hosted suite; `erx_wait_complete` referenced from every wake path and nowhere else, by relocation, with a seeded wake that readies the thread directly failing the check; the exhaustive model of the wait funnel over every order of sleep, wake, deadline and stop |
@@ -1280,7 +1280,10 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   borrowing, and what a destroy of the budget would give back to its
   parent, the guarantee plus the borrowing less `pinned`, which never
   wraps, since `pinned` counts pages the tree holds and the tree holds no
-  more than the guarantee and the borrowing cover; `abi/inspection.txt`
+  more than the guarantee and the borrowing cover, and which is exact,
+  since a pin counts at once the cache pages of every record it keeps
+  for the boot, so a destroy moves nothing into `pinned` (**Pinning**
+  in [DMA and the IOMMU](#dma-and-the-iommu)); `abi/inspection.txt`
   declares them under `budget`, and the inspector shows a budget's
   borrowing beside its guarantee so that a program's draw on its
   session's pool is visible as such ([design-live.md](design-live.md)).
@@ -1472,8 +1475,9 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   which is the one budget that counts the memory. So what a dead budget
   still holds is counted exactly once, in the `used` of its nearest live
   ancestor, from the close until it is released; the dead budget's own
-  `used` is the count of what still names it and no charge, and the
-  inspector shows it as such. The refund that leaves a dead budget with
+  `used` is the count of what still names it and no charge, a count
+  nobody inspects, since the dead budget's capabilities fail the lookup
+  (**Inspecting** above). The refund that leaves a dead budget with
   `used` zero, or the close itself when nothing was charged to it,
   queues the put of the budget's own record behind a grace period, and
   the record is freed last, from its parent's cache, whose page stays
@@ -2905,7 +2909,7 @@ stops only at its return to user mode, as Fiasco's dying thread does:
 `Thread::prepare_kill` (`thread.cpp`) cancels the thread's waits and
 diverts it on its way back to user mode. Only waits are cut short, since a
 wait holds no work in progress: a thread waiting in a call (an IPC wait, a
-umtx wait, a park, a copy's wait for its source's threads) is woken, and
+umtx wait, a park, a quiesce wait for a paused space's threads) is woken, and
 it dies with its space or its call returns `ERX_EINTR` to a `CONTROL`
 stop; a thread held at its return to user mode is in no call, and a stop
 leaves its registers as they are ([Threads and
@@ -2992,7 +2996,9 @@ what it protects:
   object's destroy invalidates and then waits to be free. A space's lock
   is a helping lock too. Helping passes preemption points, on the helper's
   CPU, so it ends the helper's protection of every object it looked up
-  without counting, as any preemption point does.
+  without counting, as any preemption point does; which is why a fault
+  takes its space's lock first and looks its mapping up only under it
+  (**One hold**, [Virtual memory](#virtual-memory)).
 * **Taking a capability lock.** `erx_object_lock_cap` takes it as
   Fiasco's `Kobject_mapdb::lock_obj` does (`kobject_mapdb.cpp`), without
   a counted reference: with interrupts masked it checks that the
@@ -3029,8 +3035,10 @@ what it protects:
   call declaring them in the ABI file and the generated dispatch taking
   them before its handler runs ([System-call
   dispatch](#system-call-dispatch)); a copy of a space takes both spaces'
-  itself at its start, and a creation takes the new object's before it
-  backs the object's reserve ([The reaper](#the-reaper)). No thread waits, in
+  itself at its start. A creation takes none: an object under
+  construction is reachable by nobody but its creator until the creator
+  publishes it, after its backing, so nothing can destroy it meanwhile
+  (**Construction** in [The reaper](#the-reaper)). No thread waits, in
   the sense of a wait record, while it holds one, and none destroys an
   object whose existence lock it holds, since every destroy runs from a
   release list or in the deleting call, neither of which holds one.
@@ -3108,7 +3116,15 @@ total and written in one place, `kernel/core/lock_order.h`:
    step or the backing of a charge takes before the allocator's, so
    that what it finds on the list and on the free lists is one
    observation ([The reaper](#the-reaper));
-8. the physical page allocator.
+8. the physical page allocator;
+9. the grace tracker's lock, which guards the period counts and the set
+   of CPUs a period waits for: `erx_grace_retire` takes it inside the
+   released list's lock for a release, and alone for a put or a record
+   free, which its CPU queues with interrupts masked and no lock; a
+   CPU's quiescent-state report and a period's start take it alone. On
+   the stopgap it is Fiasco's `Rcu_glbl::_lock`, rebuilt as a ticket
+   lock
+   ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)).
 
 The other locks are leaves, taken holding none while held: a gate's
 binding, a umtx bucket, a group's park lock and pool lock, the kernel
@@ -3420,7 +3436,7 @@ task](#the-root-task)).
 end of a call, after a wake or a start, after an interrupt taken in user
 mode, and from `erx_vcpu_resume`, passes one function, `erx_return_check`
 ([Chokepoint checks](#chokepoint-checks)). It is a pure decision over
-what it loads once: its space's `stopped` word and two hold counts, the
+what it loads once: its space's `stopped` word and hold count, the
 kill or `CONTROL` stop posted to the thread, and the thread's upcall
 state. The first row that holds decides:
 
@@ -3541,9 +3557,23 @@ kernel code, but none returns to user mode.
   are both woken; a pause that finds the count at zero once its
   interrupts are acknowledged sets the mark itself. The wait holds
   nothing (K33): the thread queues itself, releases every lock and
-  reference, and sleeps in an `ERX_WAIT_QUIESCE` wait whose completion,
-  `erx_wait_complete`, returns `ERX_OK`; the thread's death cuts the
-  wait short as it cuts any wait. The mark holds until the resume that
+  reference, and sleeps in an `ERX_WAIT_QUIESCE` wait, which ends in
+  exactly one of these ways, each through `erx_wait_complete`: the mark
+  is set, with `ERX_OK`; a resume lifts the space's last hold while it
+  waits, with `ERX_EBUSY`, the result the call gives an unpaused space,
+  since the condition can no longer come to hold; the space stops or is
+  closed, with `ERX_EDEAD`, the stop waking the quiescers as it wakes
+  the space's waiting threads and the teardown's walk of
+  `att_quiescers` waking any left, as it wakes a gate's senders; a
+  `CONTROL` stop of the waiter, with `ERX_EINTR`; or the waiter's own
+  death, which cuts the wait short as it cuts any wait. So the wait ends
+  whenever its condition holds or can no longer hold, and whoever holds
+  `STOP` on the space ends it at will by resuming: giving up a `fork`
+  while its quiesce waits, because a thread of the source cannot finish
+  its call for want of its group's time, is the resume that lifts the
+  copy's hold, which the request's owner makes
+  ([design-programs.md](design-programs.md#the-second-tier)). The mark
+  holds until the resume that
   lifts the last hold clears it, because a thread of a paused space that
   wakes from a wait does nothing but complete that wait, which writes
   its registers and UTCB (K33), and go to the boundary; the mark is read
@@ -3631,15 +3661,18 @@ itself:
 | --- | --- | --- | --- |
 | running in user mode | yes | the hold's interrupt, which sends it to the boundary | nothing once it is there |
 | running or preempted inside a call, or run by a helper | yes | the end of the call, a bounded part at a time (K13) | what its call changes, before the space is quiescent |
-| asleep in an IPC wait, a umtx wait, a park or a copy's wait | no | its message, reply, wake or delivery; its deadline; its peer's death; the space's stop; its own death; a `CONTROL` stop, with `ERX_EINTR`; for a copy's wait, a stop or a close of the space it fills, with `ERX_EDEAD` | its registers, its kernel-user page, the slots its receive reserved, which a sender fills, and, for a copy it makes, the space that copy fills: no call that may wait takes a memory window ([The ABI file](#the-abi-file)), and a copy copies a reserved slot as free |
+| asleep in an IPC wait, a umtx wait, a park or a quiesce wait on another space | no | its message, reply, wake or delivery; its deadline; its peer's death; the space's stop; its own death; a `CONTROL` stop, with `ERX_EINTR`; for a quiesce wait, the other space's mark, with `ERX_OK`, a resume that lifts that space's last hold, with `ERX_EBUSY`, or that space's stop or close, with `ERX_EDEAD` | its registers, its kernel-user page and the slots its receive reserved, which a sender fills: no call that may wait takes a memory window ([The ABI file](#the-abi-file)), a quiesce changes nothing of the space it waits on, and a copy copies a reserved slot as free |
 | waiting at the boundary | no | the last hold's release, the space's stop, its own death or a `CONTROL` stop | nothing |
 
 So user execution stops once the interrupts are taken, quiescence waits
 only for kernel work the space's own threads started, and neither waits
-for a reply or anyone outside the space. A copy that must be
+for a reply or anyone outside the space. A quiesce that must be
 given up all the same, because the source's groups have no time left to
-finish that work, is ended by a stop of its target, which wakes it with
-`ERX_EDEAD` (**Copying a space**, [Copy-on-write children and copies of spaces](#copy-on-write-children-and-copies-of-spaces)).
+finish that work, is ended by the resume that lifts the source's last
+hold, which wakes it with `ERX_EBUSY`, or by the source's stop, with
+`ERX_EDEAD` (**Pausing a space** above); a copy under way ends the same
+way at its next part, or at a stop of its target (**Copying a space**,
+[Copy-on-write children and copies of spaces](#copy-on-write-children-and-copies-of-spaces)).
 
 **Emptying a stopped space's table.** `erx_space_clear_caps(space)`, with
 `CAPS`, refuses a space that is not stopped with `ERX_EINVAL`, and closes
@@ -3825,9 +3858,16 @@ the space's mapping records and detaches each from its object as
 `erx_vm_release` does, so a released memory object whose last mapping
 this was is destroyed in the same call. The detached records go to the
 reaper, the tables and the pages they held are released as
-`erx_vm_release` releases them, and the space's own record is freed once
+`erx_vm_release` releases them, which no CPU can load again, since the
+stop ran every thread of the space to its boundary, where a thread of
+a stopped space dies, before the teardown began; and the space's own
+record is freed once
 its exit record has been delivered or dropped and its last reference
-has gone. A deletion of the space destroys it the same way.
+has gone. A deletion of the space destroys it the same way. The
+stopgap, whose finishing threads run on their own CPUs and can still
+be switched to while the teardown runs, keeps the root directory, its
+entries cleared, until the record is freed
+([design-stopgap.md](design-stopgap.md#deletion)).
 
 **Containment.** A space's capabilities never pass to another space,
 since the type has no pass set (K24), and a creator's `erx_cap_pass` into
@@ -4968,9 +5008,10 @@ completes, and that no record is freed before its grace period has ended.
   reaper](#the-reaper)). Faults rebuild whatever was cleared, with the
   mapping's protection, from the space's pool.
 * **The fault decision.** Every memory fault goes through one pure
-  decision, `erx_fault_decide`, over what the fault path loads under the
-  mapping's object lock: the mapping that covers the address, with its
-  kind and protection, the page's state, and the access (read, write or
+  decision, `erx_fault_decide`, over what the fault path loads under its
+  space's lock: the mapping that covers the address, with its
+  kind and protection, the page's state, read under the mapping's
+  object's lock, and the access (read, write or
   fetch). Whether the CPU reported a missing translation or a permission
   fault does not enter it, so a store to a page mapped read-only for copy
   on write or for store tracking takes the same path as a first touch.
@@ -4998,6 +5039,28 @@ completes, and that no record is freed before its grace period has ended.
   There is no pager: a page that a mapping reaches either comes from its
   object or the access ends the thread. The decision's exhaustive host
   model covers every mapping kind, page state and access.
+* **One hold.** A fault holds its space's lock from the lookup of the
+  mapping to the write of the translation, one bounded part, and
+  selects and publishes under that one hold: the mapping it found, the
+  object the mapping names and the page it chooses, from the object's
+  pool or the space's, are the ones its translation names. Nothing it
+  looked up can change meanwhile, since every change to the space's
+  mapping records, every removal of a translation and every detachment
+  of a mapping from its object takes that lock, and an object's pages
+  are released only after every mapping of it is detached
+  ([Closing and deleting](#closing-and-deleting)); so a deletion of the
+  object or an unmap of the range either came before the fault's hold,
+  and the fault finds no mapping, or a deleted one, and stops the
+  thread, or comes after it, and removes the translation the fault
+  wrote. The lock is a helping lock, taken before the lookup, so
+  helping its holder, which passes preemption points, ends no
+  protection the fault relies on ([Execution model and
+  locking](#execution-model-and-locking)); the spinlocks the fault
+  takes inside the hold, the object's lock for a page's state and a
+  child's lock for a copy, come after the space's lock in the lock
+  order and are released before the translation is written. Two
+  faults at one address of one space serialise on the space's lock,
+  and the second finds the translation written.
 * **Store tracking.** `erx_mem_dirty(mem (SUPPLY), offset, npages)`
   reports, in the caller's UTCB, one bit for each page of the range that
   was stored to since the last report on it, or since the object was
@@ -5143,7 +5206,9 @@ reads as zeros. A supplier holds `SUPPLY`, and may also hold `READ` and
 `erx_mem_child(parent (READ, CHILD), budget (ALLOC), offset, size)` makes
 a child of a range of an immutable object; any other parent is refused
 with `ERX_ETYPE`. It is reserved, charged and backed at its full size,
-in parts of at most 64 pages, so a copy on write takes a page of the
+in parts of at most 64 pages, as an object under construction, attached
+to its parent and its budget only once backed in full (**Construction**,
+[The reaper](#the-reaper)), so a copy on write takes a page of the
 child's pool and never fails or waits at a random instruction; failures
 happen at calls, as for every other kind. The child is a new
 object with a slot list of its own, attached to its parent object on the
@@ -5179,7 +5244,8 @@ typedef enum erx_cow_action {
 erx_cow_action_t	erx_cow_decide(bool owned);
 
 /* Applies ERX_COW_COPY under the child's lock, from the child's pool; the
- * only code that makes a child's page its own. */
+ * only code that makes a child's page its own. A fault calls it inside
+ * the hold of its space's lock under which it writes the translation. */
 erx_status_t	erx_cow_install(erx_memobj_t *child, erx_npages_t page);
 ```
 
@@ -5189,11 +5255,17 @@ under the child's lock, a spinlock: it takes a page from the child's
 pool through `erx_reserve_take`, which never allocates and never waits,
 copies the parent's page into it through the direct map, as a memory
 window reads the parent, and records it as owned. It touches no
-translation table, so it holds no space's lock and does one page's work
-however many addresses and spaces map the child. The fault then
-populates its own translation with the child's page, under its space's
-lock, as any populate does; two faults on one page of the child
-serialise on the child's lock, and the second finds the page owned.
+translation table and walks no mapping of the child, so it does one
+page's work however many addresses and spaces map the child. A fault
+calls it inside the one hold of its space's lock under which it looked
+the mapping up and writes the translation (**One hold**, [Virtual
+memory](#virtual-memory)), the child's lock inside the space's as the
+lock order has them; so the page it records as owned is the page the
+translation names, and the child is alive and holds that page from the
+lookup to the write, since no detachment of the mapping and no release
+of the child's pages can pass the space's lock meanwhile. Two faults on
+one page of the child, in one space or two, serialise on the child's
+lock, and the second finds the page owned and populates with it.
 Every user translation is built by one function, `erx_pte_make`, which
 grants write only for a page that its mapping's object owns exclusively
 (a private page, a shared object's page, a child's own page). The kernel
@@ -5262,7 +5334,9 @@ until its copy has ended
 ([design-programs.md](design-programs.md#the-second-tier)). The call
 takes both spaces' existence locks at its start, with
 `erx_object_lock_existence2`, in address order, as Fiasco's map holds
-both tasks' (`task.cpp`), and holds them to its end.
+both tasks' (`task.cpp`), and holds them to its end; they are the only
+existence locks it takes, since each fresh child it makes is an object
+under construction until the copy attaches it (**Copying** below).
 
 **Why the copy reads one moment.** `from`'s private memory and mapping
 records change only through calls and faults that its threads make from
@@ -5278,10 +5352,12 @@ own threads left them, without any other party having to stop them.
 **Copying.** It copies in parts of at most 64 pages, with a preemption
 point after each, and charges `to`'s budget for each thing when it
 makes it, through the one charging funnel (K3): each committed private
-page it copies, each fresh copy-on-write child at its full size, as
-creating a child reserves it (K23), the translation tables and the
-table's pages, each backed under `to`'s existence lock, which the copy
-holds ([The reaper](#the-reaper)). A charge the budget refuses ends the
+page it copies and the translation tables with their pages, backed into
+`to`'s reserve under `to`'s existence lock, which the copy holds; and
+each fresh copy-on-write child at its full size, as creating a child
+reserves it (K23), backed as an object under construction and then
+attached to its parent object and to `to`'s budget and named in `to`'s
+table (**Construction**, [The reaper](#the-reaper)). A charge the budget refuses ends the
 copy with `ERX_ENOMEM`, leaving `to` partly filled for its creator to
 destroy, as a session does at once, so a `fork` fails at the call and
 never later at a write. Between parts it checks that `from` is still
@@ -5312,8 +5388,11 @@ thread that calls it, funded by whoever asks for it:
   `to`, which `to`'s creator can make at any time, and a stop or a close
   of `from` end the copying at the next part, and the copy returns
   `ERX_EDEAD` to its own thread, which goes on to report the outcome as
-  it reports a success. So a creator that gives up a copy stops `to` and
-  then hears the copy's end from its copier, as a session does
+  it reports a success; the resume that lifts `from`'s last hold ends
+  it at the next part with `ERX_EBUSY`, as it ends a quiesce (**Pausing
+  a space**, [Threads and faults](#threads-and-faults)). So a creator
+  that gives up a `fork` resumes `from`, at either phase, or stops
+  `to`, and then hears the end from its copier, as a session does
   ([design-programs.md](design-programs.md#the-second-tier)); a `CONTROL`
   stop of the copier, which would leave it stopped at its return to user
   mode with the outcome in its registers and nothing reported, is not how
@@ -5740,14 +5819,21 @@ reset reaches it, and which error reports the platform gives
   nothing: `pinned` at a budget is thus the pinned pages anywhere in its
   tree, a close moves none of it, and what a destroy of the budget would
   give its parent back is its guarantee and borrowing less `pinned`
-  ([Budgets](#budgets)). A record kept for the boot pins the cache page
-  it sits in, once: the record of an object with a pinned page, and the
-  tombstone of a dead budget whose `pinned` is not zero, which its
-  parent's cache holds and which the close, or a pin passing through the
-  dead budget, marks, whichever first finds both to hold. The first such
-  record on a page marks the page's header and pins the page at the
-  cache's budget by the same adjustment, and a later one finds the mark
-  and adds nothing, so the count is exact and a pin is idempotent. So
+  ([Budgets](#budgets)). A pin also pins, at once, the cache page of
+  every record it keeps for the boot: the record of the page's object,
+  and the record of each budget, live or dead, whose `pinned` the
+  adjustment raises from zero, since that record is kept whenever its
+  budget dies. Each such page is pinned at its cache's budget by the
+  same adjustment, from which the pin passes up in turn. The first
+  kept record on a page marks the page's header and pins the page, and
+  a later one finds the mark and adds nothing, so the count is exact
+  and a pin is idempotent; a close marks nothing, since every record a
+  close would keep was marked when its pin was made. So `pinned` at a
+  budget counts, at every instant, every page of its tree that no
+  destroy will give back, the cache pages of the records a destroy
+  keeps included, and the inspector's figure for a destroy, the
+  guarantee plus the borrowing less `pinned`, is what the destroy gives
+  back. So
   DMA that a stuck IOMMU still lets through
   never lands in memory the kernel has reused. Its invalidations follow
   from what it cleared, as the CPU's do
@@ -5910,9 +5996,11 @@ data; and the device's IRQ objects, acknowledged as their kind requires
 ### The reaper
 
 Freeing never happens inside the call that drops the last reference, and
-no charge ever waits for it: a charge ends when memory is released, and
-the reaper only turns released memory into free memory. It does three
-kinds of work:
+no admission ever waits for it: a charge ends when memory is released,
+the reaper only turns released memory into free memory, and what a
+backing may wait for is the grace period of pages it took off the
+released list itself, never a reaper step (**Backing a charge** below).
+It does three kinds of work:
 
 1. the **puts** of destroyed objects, each the drop of an object's own
    reference, which wait until the grace period that began after the
@@ -5942,8 +6030,8 @@ list already. The list is in append order and stamps never decrease
 along it, so the head's period ends first. A released page belongs to
 no reserve and no budget: `used` counts what is charged and not
 released. Puts and record frees are not pages: each is retired the same
-way and waits on the list of the CPU that queued it, in the order
-queued, as Fiasco's callbacks do, since no charge depends on when it
+way, stamped at its retirement, and waits on the list of the CPU that
+queued it, in the order queued, since no charge depends on when it
 runs. Retiring ASIDs, which no budget pays for, wait on their CPU's own
 list.
 
@@ -5951,7 +6039,8 @@ list.
 the last completed one, as Fiasco's `Rcu_glbl` keeps its batch numbers;
 the current count is at most one above the completed one, and a period
 is in progress exactly while it is. A release, a put or a record free is
-**retired** through one function, `erx_grace_retire`, which returns the
+**retired** through one function, `erx_grace_retire`, which, under the
+tracker's lock, a ticket lock at level 9 of the order (K13), returns the
 item's stamp, the current count plus one, and requests that period: if
 none is in progress it starts it there, taking the set of active CPUs it
 must hear from, as Fiasco's `start_batch` does, and otherwise marks it
@@ -6005,18 +6094,18 @@ counted in `C`, which the cancellation rule below keeps true.
 **Backing a charge.** `erx_reserve_charge(reserve, n)` is the one source
 of pages. It admits `n` pages through `erx_budget_adjust`, and takes
 nothing when the charge is refused; then it backs them, in parts of at
-most 64 pages with a preemption point after each. The caller holds the
-owner's existence lock from before the admission until after the last
-part: a range call holds its space's for its length, a map holds its
-space's, a copy of a space holds `to`'s, and a creation takes the new
-object's with `erx_object_lock_counted_existence` before its first
-backing and releases it after its last, installing the object's
-capability only then, so the one party that can reach an object under
-creation is its budget's destroy. The owner's destroy drains that lock,
-helping the backing through its remaining parts ([Execution model and
+most 64 pages with a preemption point after each. The owner is one of
+two kinds. A **published** owner, one a destroy can reach: the caller
+holds its existence lock from before the admission until after the
+last part, a range call its space's for its length, a map its space's,
+a copy of a space `to`'s for the private memory and tables it makes in
+`to`. The owner's destroy drains that lock, helping the backing through
+its remaining parts ([Execution model and
 locking](#execution-model-and-locking)), so no teardown ever begins
 while a backing of the owner's reserve is under way, and a teardown
-finds `charged` equal to `backed`, which debug builds assert. A part
+finds `charged` equal to `backed`, which debug builds assert. An owner
+**under construction**, which no destroy can reach, needs no lock, and
+its creator holds none (**Construction** below). A part
 takes the list's lock and then the allocator's, both ticket locks
 (K13), and takes what it still needs: free pages first, then pages off
 the head of the released list, oldest first, and no more than it needs;
@@ -6037,13 +6126,15 @@ lock is released, releases everything the reserve holds, pool included,
 exactly once. So an admission ends in exactly one of two ways, backed in
 full or cancelled by the backing that made it; a page leaves a reserve
 only by the owner's own paths, its teardown and its range calls, never
-by a backing; and `C` counts every admission until then. The one backing
-under no existence lock is a budget's cache page: `erx_kalloc` admits
-one page at the budget, which refuses a dead budget, takes and waits as
-above, and under the budget's lock carves the record it needs from the
-page; a budget that died meanwhile has no record to carve, so the page
-holds none and is released there, by the cache's own rule that a page
-holding no record is released, whose refund lowers `charged` with it. A
+by a backing; and `C` counts every admission until then. The backings
+under no existence lock are those of an object under construction, and
+a budget's cache page, which is the same case without an object:
+`erx_kalloc` admits one page at the budget, which refuses a dead budget,
+takes and waits as above, and under the budget's lock carves the record
+it needs from the page; a budget that died meanwhile has no record to
+carve, so the page holds none and is released there, by the cache's own
+rule that a page holding no record is released, whose refund lowers
+`charged` with it. A
 backing never finds the free lists and the released list both empty
 while it needs a page, by the identity's inequality: the unselected
 pages are at most `free + released`, and the page this backing needs is
@@ -6052,7 +6143,10 @@ two grace periods, whatever other CPUs do, and a backing never loses a
 page it took, since nothing takes a page out of a hand: an admitted
 charge of `n` pages is backed within one part per 64 pages, each
 bounded by two grace periods and by `ncpus - 1` critical sections of
-each of its two locks, and no backing waits on another party (K6, K13).
+each of its two locks, and no backing waits on another party (K6, K13);
+a release's part is bounded the same way by the list's lock and the
+tracker's, which it takes inside it, and a put's or a record free's by
+the tracker's alone.
 Those bounds are the machine's time; the backing's own parts run on its
 thread's group's grant, so what its caller sees elapse is that plus
 whatever its own group leaves it unscheduled, which is its own party's
@@ -6061,6 +6155,61 @@ takes from its reserve's pool, through `erx_reserve_take`, under the
 owner's lock, which zeroes the page and hands it out, and the pool holds
 a page for every promise not in use, so a fault never waits and never
 fails ([Virtual memory](#virtual-memory)).
+
+**Construction.** An object comes into being in four steps, and its
+existence lock takes no part in them, because until the third step
+nothing but its creator's frames can reach it.
+
+1. *Allocation.* The creator takes the record from its budget's cache
+   through `erx_kalloc`, which refuses a dead budget. On the stopgap a
+   thread's record is its block, which exists only once its pages do,
+   so there the thread's backing comes first and the record is made in
+   what it backed
+   ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)).
+2. *Backing.* The creator admits and backs the object's pages through
+   `erx_reserve_charge`, in parts as above, into a reserve that only it
+   reaches: the record's own, or one on its frames, two counts and an
+   empty pool, which the object takes over when it is initialised. It
+   holds no lock, and needs none: the object is on no budget's list,
+   attached to nothing and named by no capability, so no destroy can
+   find it, and its budget's destroy, which deletes what is charged to
+   the budget, deletes it only once it is published. A backing under
+   construction is never cut short: it runs to its last part, bounded
+   by its own admission, whatever happens to the budget meanwhile.
+3. *Publication.* The creator attaches the object through the insert
+   functions of `kernel/core/attach.c`, in one order: to its budget's
+   `att_charged`, to its container (a thread to its space's threads, a
+   child to its parent object's `att_children`, a space to its parent's
+   children), and last its capability, which the generated dispatch
+   installs in the creator's table when the handler returns. Each
+   insert reads the target's state under the target's lock and refuses
+   a closed budget or container with `ERX_ESTALE` ([Execution model and
+   locking](#execution-model-and-locking)). From its first insert on the
+   object is one a destroy can reach, and its backing is over.
+4. *Cancellation.* A charge refused, an insert refused, a table with no
+   slot, or any later failure of the creation destroys what the creator
+   made through the same close, drain and teardown as a deletion's
+   ([Closing and deleting](#closing-and-deleting)), which finds attached
+   exactly what the creator had attached, releases every page the
+   reserve holds through `erx_page_release`, refunding at the budget,
+   live or dead, and queues the record's free: a creation has no undo
+   path of its own.
+
+So a construction ends in exactly one of two ways, published or torn
+down by the one teardown; its admission is counted in `C` until its
+pages are backed, and the pages are held until that teardown releases
+them, so the identity holds through it. A budget destroyed during a
+construction finds nothing of it to delete and refunds nothing for it;
+the creation's publication then fails at its first insert, its teardown
+refunds the pages at the dead budget, and the budget's tombstone waits
+for that refund as it waits for any record charged to it, a wait
+bounded by the creation's own parts ([Budgets](#budgets)). A copy of a
+space, which holds two existence locks, `from`'s and `to`'s, makes each
+fresh copy-on-write child this way, so it takes no third lock
+(**Copying**, [Copy-on-write children and copies of
+spaces](#copy-on-write-children-and-copies-of-spaces)); the stopgap's
+thread block is step 1's case
+([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)).
 
 **Steps.** The reaper works in bounded steps: one step runs up to 64
 puts and record frees of its CPU's list whose grace period has ended, in
@@ -6157,7 +6306,8 @@ serves the free step, which puts mature pages on the free lists through
 `erx_page_free`, the sink, and the backing, which keeps what it takes;
 and the boot allocator exists only before the root budget does. Beneath
 them the tracker's one retire, `erx_grace_retire`, stamps every release,
-put and record free, and the list's and the allocator's locks are the
+put and record free at its retirement, and the list's, the allocator's
+and the tracker's locks are the
 core's ticket locks. The allocator's own take and put are referenced
 only from the backing and the free step, in `kernel/core/page.c`; the
 stopgap's `erx_page_free` is that put. A page is in exactly one of the
@@ -6431,8 +6581,8 @@ same property on the other:
 | capabilities: generations and per-type rights, the one lookup, copies, closes, and passing at a rendezvous and by `erx_cap_pass` | in full | modified: Fiasco's object space reduced to a facade over the C17 capability table, whose slots carry the generation and the erXos rights word and which `kernel/core/cap.c` alone reads and writes; every lookup is `erx_cap_lookup`; a copy appends a slot to the object's list and a close clears one through `erx_cap_slot_clear`; passing at a rendezvous as `erx_pass_plan` and `erx_pass_apply` at the one install point of Fiasco's IPC transfer, into the slots the receiver reserved, at most four items a message, once M5's design has fixed who owns a transfer with items so that the step holding the receiver stays one bounded step ([Transfer ownership](design-stopgap-scheduling.md#stop-and-exit)); `erx_cap_pass` as the same plan and apply from one task's table into another's under both tasks' existence locks, as `Task::sys_map` takes them; Fiasco's object mapping database is not built ([design-stopgap.md](design-stopgap.md#capabilities-in-fiascos-object-space)) | | M1 (copies, closes and `erx_cap_pass` in its creator's case), M5 (rendezvous transfer and the other cases of `erx_cap_pass`) |
 | the capability lock and the existence lock | in full | existing: Fiasco's own, the object's lock over its slot list and its `existence_lock`; the generated decoder takes the existence locks of the arguments the ABI file marks `exists` through `erx_object_lock_existence`, in address order, as `Task::sys_map` takes both tasks' (`task.cpp`), and the capability core takes the object's lock for every change of a slot ([design-stopgap.md](design-stopgap.md#capabilities-in-fiascos-object-space)) | | M1; K26's container test runs on the stopgap from M5 |
 | deletion (K26) | in full | modified: the C17 deletion walk closes the object first, by Fiasco's existence-lock invalidation changed to return the lock word's old value, so one destroy wins; waits for the lock's holder; empties its slots in bounded parts through `erx_cap_slot_clear`; runs the type's attachment teardown, which removes both ends of every attachment of the record; and hands the record to the reaper through the header's one link, which after the grace period drops the creation's reference, the fork's `Kobject::put` being that one drop and never a free, with the header's `refs` as the only count, held by the creation, by threads across waits and by queued cross-CPU requests; Fiasco's per-type `destroy` and `put` overrides, `Ref_cnt_obj` and `initiate_deletion` are deleted ([design-stopgap.md](design-stopgap.md#deletion)) | | M1, M5 |
-| budgets as space banks: destroying a budget deletes every object charged to it and every budget carved from it; guarantees, caps, the borrowing chain, `erx_budget_resize` and `erx_budget_watch` | in full | modified: Fiasco's `Ram_quota` hierarchy, with each quota keeping a list of the kernel objects charged to it and its destruction deleting each of them, its child quotas included, and the charges that remain moving to its parent; its `limit` and `used` replaced by erXos's kind, guarantee, cap and counters, every change of which goes through the C17 `erx_budget_adjust` shared with erXos's kernel, so the chain, the walls, the caps, the close of a destroyed budget and the watch's crossing are the same code on both; a quota's `alloc` is the funnel's charge and backing and its `free` is `erx_page_release`, so a reserve is backed when it is charged and a charge ends at the release, before the page is freed, on the fork as on erXos's kernel; deleting a Fiasco factory leaves the objects it made, and a Fiasco quota is fixed at its creation | | M1, M5 |
-| kernel memory | in full | modified: memory objects' pages come from Fiasco's kernel allocator through the budget-charging funnel, which charges a reserve and backs it with whole single pages in the same call; a page comes into use only from its reserve's pool, leaves its reserve only through `erx_page_release`, onto the machine-wide released list, retired to the batch after Fiasco's current one and chained through page records the fork adds for the heap, and reaches Fiasco's free lists only through the reaper's free step once that batch has completed, unless the backing of a charge takes it off the list and waits for the batch itself, as [The reaper](#the-reaper) says, so an admitted charge is always backed and a fault never allocates; a thread block is two single pages mapped into an 8 KiB-aligned slot of a thread region the fork adds, as this kernel's stacks are, so no allocation on the fork is above order zero; `bootstrap` passes Fiasco's `kmemsize` option, computed by the pool plan that the kernel recomputes at boot, to give that allocator all of RAM but the regions `bootstrap` placed and the boot image, within the kernel's 1 GiB physical-memory window, where Fiasco's default is 6 per cent of RAM on 64-bit builds (`config.cpp`, `kmem_alloc.cpp`); the root budget, at the root of the `Ram_quota` hierarchy, is a wall whose guarantee and cap are that pool ([design-stopgap.md](design-stopgap.md#kernel-memory-and-the-root-budget)) | the root budget is what Fiasco's allocator holds once Fiasco's own boot is done, less the page records and the thread region's tables, not every page left, and RAM beyond the window is unusable | M5, G6's many domains |
+| budgets as space banks: destroying a budget deletes every object charged to it and every budget carved from it; guarantees, caps, the borrowing chain, `erx_budget_resize` and `erx_budget_watch` | in full | replaced: Fiasco's `Ram_quota`, which accounts bytes at each allocation, and its allocation adapters are not built; an `Erx_budget` is the C17 core's `erx_budget_t` behind the glue's opaque header, with its kind, guarantee, cap, counters, watch and `att_charged` list, whose destroy deletes every object on the list, child budgets included, through the C17 deletion walk, and the charges that remain pass to its nearest live ancestor; every change of its counters is the C17 `erx_budget_adjust` shared with erXos's kernel, so the chain, the walls, the caps, the close of a destroyed budget and the watch's crossing are the same code on both; the only thing the fork charges is a whole page, through `erx_reserve_charge`, which backs what it admits, and `erx_page_release`, at which a charge ends, before the page is freed; tables come through `Erx_table_alloc` over the space's reserve and records from the budget's caches, so no allocation of the fork is accounted outside the funnel ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)); deleting a Fiasco factory leaves the objects it made, and a Fiasco quota is fixed at its creation | | M1, M5 |
+| kernel memory | in full | modified: memory objects' pages come from Fiasco's kernel allocator through the budget-charging funnel, which charges a reserve and backs it with whole single pages in the same call; a page comes into use only from its reserve's pool, leaves its reserve only through `erx_page_release`, onto the machine-wide released list, retired to the batch after Fiasco's current one and chained through page records the fork adds for the heap, and reaches Fiasco's free lists only through the reaper's free step once that batch has completed, unless the backing of a charge takes it off the list and waits for the batch itself, as [The reaper](#the-reaper) says, so an admitted charge is always backed and a fault never allocates; a thread block is two single pages mapped into an 8 KiB-aligned slot of a thread region the fork adds, as this kernel's stacks are, so no allocation on the fork is above order zero; `bootstrap` passes Fiasco's `kmemsize` option, computed by the pool plan that the kernel recomputes at boot, to give that allocator all of RAM but the regions `bootstrap` placed and the boot image, within the kernel's 1 GiB physical-memory window, where Fiasco's default is 6 per cent of RAM on 64-bit builds (`config.cpp`, `kmem_alloc.cpp`); the root budget, from which every other budget is carved, is a wall whose guarantee and cap are that pool ([design-stopgap.md](design-stopgap.md#kernel-memory-and-the-root-budget)) | the root budget is what Fiasco's allocator holds once Fiasco's own boot is done, less the page records and the thread region's tables, not every page left, and RAM beyond the window is unusable | M5, G6's many domains |
 | spaces with their parents, created by any holder of `SPACES`, and sub-spaces | in full | modified: Fiasco tasks, constructed by the glue's installer from `erx_space_create`'s validated plan and never through Fiasco's factory, which is not built, with the parent and the wait for children's exit records from the C17 stop core shared with erXos's kernel | | M1, M5 (K27) |
 | stops of spaces and threads, `CONTROL` stops, and exit records (K18) | in full | added: a list of each task's threads, which Fiasco's tasks lack, joined at a thread's creation under the task's lock; one run word per task holding the stop state and the count of its live threads, written only under the task's lock by the C17 stop core, which a thread enters at its creation and leaves at its death edge, before Fiasco's `unbind()`; one kill request per thread, carried by Fiasco's eager cross-CPU request, which ends its wait, marks it dying and raises it to the finishing priority; every return to user mode passes `erx_return_check` in Fiasco's common return path, where a killed thread dies through `Thread::do_kill` and a thread of a stopped task holds until its kill; the IRQ shortcut is off; a `CONTROL` stop sleeps the thread at that check, its registers kept, until `erx_thread_start`; the death edge that takes the count to zero posts the exit record to the fault gate, publishes `EXITED` and wakes every waiting stopper, once every child's record has been posted ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)) | the count is of live threads, created to dead, where erXos's kernel counts the threads active inside calls, both zero exactly when no thread can act; finishing threads run on their own CPUs at a fixed priority above every urgency, charged to the killing call's group, where erXos's kernel runs them on the stopper's CPU by helping; a thread of a stopped space that reaches its return boundary before its kill holds there rather than dying at once, with the same observable contract | M1 (K18), M5 (K27) |
 | emptying a stopped space's table | in full | added: the emptying walk of a stopped task's table and of every task below it, in bounded parts, each slot cleared through the C17 capability core's `erx_cap_slot_clear`, shared with erXos's kernel ([design-stopgap.md](design-stopgap.md#deletion)) | | M1 (the walk, run by a space's destroy), M5 (`erx_space_clear_caps`) |
@@ -7060,7 +7210,8 @@ ancestor after a destroy, until its call next runs, and a call that is
 not scheduled holds it indefinitely. It can do so only for an object it
 holds a capability to, which the budget's owner or its carver gave it.
 What one such object keeps is its record's cache page, two pages for a
-thread on the stopgap, whose record is its block, and, since a dead
+thread on the stopgap, whose record is its block, one more for a space
+there, its root directory, kept until its record is freed, and, since a dead
 budget's tombstone waits for the last record charged to it, one cache
 page for the tombstone of each dead budget between the object's budget
 and its nearest live ancestor, fewer than `ERX_BUDGET_DEPTH_MAX`; so
@@ -7149,7 +7300,7 @@ the host exploration and conformance requirements below.
 
 | Layer | What | Where |
 | --- | --- | --- |
-| Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner is closed at every part boundary, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the wait for children's records and the holds, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
+| Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner is closed at every part boundary and a construction whose budget is destroyed at every step, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, with the inspector's figure for a destroy compared against what each destroy gives back, after pins at every depth, and a seeded pin that marks a tombstone's cache page at the close instead, which the comparison catches at the first destroy after a pin, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the wait for children's records and the holds, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
 | Fuzzing | the device tree, the boot image and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
 | Conformance | every kernel call's contract, from test domains: arguments at and beyond their limits, every error, every right missing, every outcome; run identically on erXos's kernel and the stopgap, among them a stop of a space whose thread waits on an IRQ object while the IRQ fires, and of one whose thread is inside a vCPU resume, each posting its exit record only after the thread has died and running none of its user code after it, and a memory-object map and the range calls racing the destroy of their space, which add no record to it (K26's container test); a store to a shared object's page followed by an unmap of the mapping, or by a stop and destroy of the storing space, and then `erx_mem_dirty`, which reports the page stored; umtx waits on a word of a boot-image slice and of a device's register window, each refused with `ERX_EFAULT` before any load; `erx_mem_copy` from a child of a sealed paged object, which returns the parent's bytes for every page the child does not own and the child's for the pages it owns, against the same copy with the child's pages seeded with a marker; a thread parked inside `erx_mem_copy` between two parts while the source's budget is destroyed, whose next part fails with `ERX_ESTALE`, after which the reaper frees the budget's tombstone last and the parent's free capacity is whole again, under ASan on the hosted kernel | QEMU, TCG and HVF |
 | Hostile domains | random calls, closed and foreign capabilities, rights probing, passes of stale, duplicated, unpassable and surplus capabilities, of two copies of one object, and receivers that end mid-pass, writes racing a seal, stores racing a store report, windows whose objects are deleted mid-copy, umtx waits on words unmapped, remapped and freed by other threads during the wait, budgets destroyed while other spaces map their objects, deletions racing lookups, copies, moves and mappings, accesses to deleted memory, mapping probes, threads that fault in every exception class, executors calling every blocking call, groups that spin, servers that never reply or drop their callers, doorbells and gates deleted under their waiters, UTCBs, vCPU frames and windows rewritten while the kernel reads them, calls that pass kernel addresses wherever an argument is an integer, sub-spaces created to the depth limit and churned, devices that flood interrupts and devices that fault through the IOMMU without pause | QEMU |
@@ -7192,7 +7343,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written only by `erx_cap_slot_clear` in `kernel/core/cap.c`, which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`; the invalidation of an existence lock, one atomic operation whose result decides which destroy goes on, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
 | a sealed object is never written (K23) | a memory object's writer count changed only by `erx_mem_writer_enter` and `erx_mem_writer_leave`, which the writable-mapping insert, `erx_dma_map`, `erx_window_write` and `erx_mem_supply` call around every write path, and read by `erx_mem_seal`; the copy into an object's pages referenced only from those paths | syntax trees, relocations |
 | only the root task pets the watchdog, and every end of the machine passes one funnel (K19, K31) | `erx_watchdog_pet`'s handler requires `POWER` on the root resource, which no carved resource carries, by its generated decoder; the watchdog's deadline written only in the watchdog core, `kernel/core/watchdog.c`; the firmware's end calls referenced only from `erx_machine_end_effect`, which `erx_panic`, `erx_machine_end`, the lease's deadline and the watchdog's reach, and the crash record's writer referenced only from `erx_panic` | relocations, syntax trees |
-| every return to user mode passes the one decision of deaths, stops, holds and upcalls (K18, K29, K30) | the exit path, which alone holds exception-return instructions besides the boot entry's drop, calls `erx_return_check` before it restores the user registers; a space's hold count and its `quiesced` mark are read only there and in the space core's pause, resume, quiesce and copy functions, and changed only by them: `pauses` in `erx_space_pause` and `erx_space_resume`, and `quiesced` where the active count falls to zero, in `erx_space_pause` and in `erx_space_resume` | disassembly, syntax trees |
+| every return to user mode passes the one decision of deaths, stops, holds and upcalls (K18, K29, K30) | the exit path, which alone holds exception-return instructions besides the boot entry's drop, calls `erx_return_check` before it restores the user registers; a space's hold count and its `quiesced` mark are read only there and in the space core's pause, resume, quiesce and copy functions, and changed only by them: `pauses` in `erx_space_pause` and `erx_space_resume`, `quiesced` set where the active count falls to zero under a hold, in the call boundary's decrement and in `erx_space_pause`, and cleared in `erx_space_resume`; `att_quiescers` woken only by the space core's one quiesce completion, called where the mark is set, in `erx_space_resume` when it lifts the last hold, in `erx_space_stop` and in the space's teardown | disassembly, syntax trees |
 | only `erx_vcpu_control` arms a thread for upcalls (K20) | the thread's armed flag written only in `erx_vcpu_control`, which checks the class, and in the thread's teardown | syntax trees |
 | kernel memory is allocated only through the budget-charging funnel (K3) | the page allocator's take and put referenced only from the backing of `erx_reserve_charge` and the free step, in `kernel/core/page.c`, and the boot allocator only from boot code | relocations |
 | a page enters a reserve only by the backing of a charge, comes into use only through `erx_reserve_take`, is released only through `erx_page_release`, which retires it and appends it to the released list before it refunds its charge, and leaves the list only through `erx_released_take`, after its grace period unless a backing takes it and waits that period itself; an admission not backed is cancelled only by its own backing, and every stamp comes from the tracker's retire (K6, K9, K32) | a reserve's `charged` and `backed` and its pool's insert written only in `erx_reserve_charge`, `erx_reserve_cancel`, `erx_page_release` and the backing's install in `kernel/core/page.c`, `erx_reserve_cancel` referenced only from the backing, the pool's remove only in `erx_reserve_take`, the released list's append only in `erx_page_release`, a page's refund only there, the list's unlink only in `erx_released_take`, which the free step in `kernel/core/reaper.c` and the backing alone call, and the tracker's current and completed counts written only in `kernel/core/grace.c` and read for a stamp only by `erx_grace_retire`, with a seeded release that refunds first, a seeded fault that takes a page from the allocator, a seeded backing that releases its own hand and a seeded append that stamps the current count | relocations, syntax trees |
@@ -7453,7 +7604,7 @@ the user*. No departure rests on taste alone.
 | Faults | each thread has a pager and an exception handler, set through thread control by any holder of the thread's capability; a vCPU may take its page faults and exceptions as upcalls when its state word asks | each space has one fault gate and label, fixed when its creator creates it and served by the system domain for domains, by the creator or its designee for sub-spaces; the vCPU fault flags read as zero | a space's creator sees every fault and every end in one place (A2), and no code in a space can redirect them | a space could steer its faults away from its creator, and ends would be reported only by each space's own handler | needed by erXos |
 | Ending a space | a task ends when its last counted capability goes or it is deleted; the kernel tells no one, and L4Re's parent protocol reports a program's exit at user level | stopping a space stops all its threads, and the kernel posts one exit record to the fault gate once no thread can return to user mode (K18) and every child's record is posted, as it does when the last thread exits; a space whose last capability goes stops | crashes, halts and stops all arrive as records in one place, which supervision and the system domain's cleanup rely on (A2, A8) | a crashed program could not report its end, and supervision would depend on each domain's cooperation | needed by erXos |
 | Space parents | tasks have no parent: a task lives while a counted capability names it | every space but the first has a parent, fixed at creation, stops when its parent stops, and reports its end only after its children; a space's capability leaves its creator's table with `INSPECT` alone | a program never outlives the session that started it, and no domain outlives the system domain, by construction (A8), whatever capabilities are held where; a sub-space stops with its creator at once, and every domain with the root task | a sub-space would run until its creator's table is emptied, A8 would rest on the system domain's records, and a domain could outlive the root task | decided by the user |
-| Pausing a space | no pause of a whole task: a task's manager acts on its threads one at a time through their thread capabilities, and threads it does not know of keep running | holds on a space, honoured only at the return to user mode, where a stopped space's threads die, so every call and every kernel continuation runs to its end first; four states, each a fact the kernel establishes: user execution prohibited, at which a pause returns once its interrupts are taken; kernel mutation quiesced, which a copy waits for; outside writes resolved, by construction; and terminating, which a stop makes final; public pauses and the holds of copies are counted apart; the copy for `fork` holds its source, and a session pauses its programs' sub-spaces for job control once per cause | a consistent snapshot for `fork` and a job stop that no thread escapes, without any party having to know every thread or to zero a group's grant, so the policy stays the one writer of grants; the boundary is where Fiasco already diverts a dying thread (`Thread::prepare_kill`), and no state waits for a party outside the space | `fork` would copy memory other threads are still writing; job control by grants lets a thread run to its next accounting point, and two writers of one grant undo each other | needed by erXos |
+| Pausing a space | no pause of a whole task: a task's manager acts on its threads one at a time through their thread capabilities, and threads it does not know of keep running | holds on a space, honoured only at the return to user mode, where a stopped space's threads die, so every call and every kernel continuation runs to its end first; four states, each a fact the kernel establishes: user execution prohibited, at which a pause returns once its interrupts are taken; kernel mutation quiesced, which `erx_space_quiesce` waits for and a copy requires; outside writes resolved, by construction; and terminating, which a stop makes final; holds are one count, so a session pauses a program's sub-space once per cause, the copy for `fork` among them, and resumes once per cause | a consistent snapshot for `fork` and a job stop that no thread escapes, without any party having to know every thread or to zero a group's grant, so the policy stays the one writer of grants; the boundary is where Fiasco already diverts a dying thread (`Thread::prepare_kill`), and no state waits for a party outside the space | `fork` would copy memory other threads are still writing; job control by grants lets a thread run to its next accounting point, and two writers of one grant undo each other | needed by erXos |
 | vCPU | the vCPU interface: a state area per thread with the saved frame, an events-enabled flag, a sticky pending flag and an entry; incoming events delivered as upcalls while events are enabled and the thread is in no IPC; page faults and exceptions as upcalls on request; vCPU user mode running another task's address space | the subset `liberx` needs for signals: IRQ objects bound to an armed worker upcall into it, an armed umtx wait ends with `ERX_EINTR`, and a resume takes a pending event and re-enters the upcall in one step; faults never upcall, messages never upcall, executors are never armed, there is no user mode, and the kernel reaches the state area only through its accessors | POSIX signals through the L4 interface, while every fault still reaches the fault gate (A2), preemption never runs runtime code (K20), and an upcall never overwrites the message registers it interrupts; umtx is erXos's own | nothing for the subset; with Fiasco's fault flags, a thread could divert its own faults from its creator at any moment | follows Fiasco for the subset; needed by erXos for faults and executors |
 | Scheduling | a scheduling context per thread: a fixed priority from 1 to 255 and a quantum, round robin within a level, and donation through an IPC that lapses at the next scheduling decision; senders queue at a receiver by priority, and nothing raises the receiver for them, so a server of clients at several priorities runs at the priority it was given | a tree of CPU groups with grants and quotas, 64 urgency levels, executors that park on their group, and no donation at all: every thread is charged to its own group, and a server runs on its own group's grant whoever called it; nothing raises a server for the callers queued at it, and one that serves clients of several urgencies is given a base urgency at their highest, beneath its group's ceiling ([design-scheduler.md](design-scheduler.md#service-work)) | the kernel allocates CPU time to runtime groups, and each runtime schedules its processes within its grants; a service's cost is its own group's, capped by policy, so no client can spend another group's time and no call carries a payer | the kernel could not enforce a runtime's grant, and a donation, even one that lapses, lets a client's time be spent in a server's group | needed by erXos; follows Fiasco for queued callers; decided by the user for no donation |
 | Executors | every thread may block in any call | a thread's class is fixed at creation; an executor blocks only by parking on its group or in a umtx wait on a word in its own space's private memory, which only its own runtime's threads can wake, and the dispatch refuses it every other call that would wait, an IPC and a umtx wait on a shared object included ([design-scheduler.md](design-scheduler.md#executor-class-enforcement)) | a runtime's scheduler threads never wait on another domain in the kernel, while the runtime's own locks keep working, so its processes keep running | one waiting call by a scheduler thread on another party would stall every process it runs | needed by erXos |
