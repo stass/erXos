@@ -180,8 +180,11 @@ and supplies no root module. The pinned bootstrap supports an absent root
 module, and Fiasco starts `sigma0` and returns without creating a root
 task when its root entry is zero. The harness ends this guest at its named
 banner checkpoint. This exercises the frozen boot set without introducing
-a throwaway native root task. M1 replaces the recipe's module input with
-the validated erXos image and starts `liberx`'s root-task entry.
+a throwaway native root task. M1 replaces the recipe's modules with
+erXos's bootable file: `bootstrap` alone, built as a flat image, with
+the archive that erXos's packer appends
+([design-stopgap.md](design-stopgap.md#boot-handoff)), and starts
+`liberx`'s root-task entry.
 
 ## Generation
 
@@ -207,8 +210,21 @@ their consumers, under [Generated interfaces and representations](design-generat
 
 The packer constructs ERXPACK from a validated whole-image plan. Paths,
 release marks, executable manifests and provenance are checked before any
-image is published. Sorted paths, page padding and a content-derived build
-identifier make equal inputs produce identical bytes. The freestanding C17
+image is published, and every executable's load segments pass the ELF
+planner, which refuses a segment whose address or file offset is not
+page-aligned. Sorted paths, page padding and a content-derived build
+identifier make equal inputs produce identical bytes. The packer computes
+each file's BLAKE3 hash and then the index's through one host program
+built from erXos's copy of BLAKE3's C implementation, with its SIMD paths,
+run as a subprocess, since Ruby's standard library has no BLAKE3; the
+same sources, built portable, are the kernel's. It then writes the
+bootable file
+([design-kernel.md](design-kernel.md#the-bootable-file)): by default the
+single file, the first stage with its locator and declared size written
+and the archive appended; with `--two-file`, the first stage unchanged
+and the archive beside it, for the QEMU harness alone. The single file
+is a pure function of the first stage's bytes and the archive's, so both
+forms are as reproducible as the archive. The freestanding C17
 validator checks the same format independently and runs on the host under
 sanitizers and a fuzzer.
 
@@ -392,7 +408,9 @@ incomplete searches, cache invalidation and empty filters.
 
 Acceptance also uses the real tools: both stock OTP flavours and their
 required suites, the frozen stopgap banner under TCG and HVF, clean
-rebuilds with identical packed image bytes, and the boot validator's
+rebuilds with identical bytes for the archive, the single bootable file
+and the two-file form, the single file's archive equal to the two-file
+archive, both forms booting under the harness, and the boot validator's
 configured sanitizer and fuzz budgets. `make check` is offline and runs
 ordinary host checks and generation drift. `make check-tla` remains a
 separate gate; a missing requested tool is an error rather than a skip.

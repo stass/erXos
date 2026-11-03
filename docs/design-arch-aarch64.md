@@ -182,9 +182,18 @@ enters at EL1.
 
 The kernel image is a flat binary that starts with the 64-byte arm64 Image
 header: `text_offset` 0, `image_size` covering `.bss`, and flags `0xa`
-(little-endian, 4 KiB pages, placement anywhere). The loader passes the
-device tree's physical address in `x0` and the boot image as the initrd;
-the platform binding records where each loader puts them
+(little-endian, 4 KiB pages, placement anywhere). The header's first
+instruction branches over the header and the 32-byte **boot locator**,
+which follows the header at offset 64
+([The bootable file](design-kernel.md#the-bootable-file)), so the entry's
+code starts at offset 96. In the single file the packer writes the
+locator's archive offset and size and sets `image_size` to the whole
+file's length, archive included, so the file is the Image and
+`image_size` its exact length; as built, the locator is zero and
+`image_size` covers `.bss`. Stopgap `bootstrap`'s flat image takes the
+same header and locator. The loader passes the device tree's physical
+address in `x0` and, in the two-file form alone, the boot image as the
+initrd; the platform binding records where each loader puts them
 ([design-platforms.md](design-platforms.md#boot)). The protocol also
 requires the loader to quiesce every DMA-capable device before entry
 (Linux v6.12, `Documentation/arch/arm64/booting.rst`, section 4). erXos's

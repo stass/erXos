@@ -137,7 +137,7 @@ belong to the driver table of
 | | QEMU `virt` | Raspberry Pi 4 Model B | Raspberry Pi 5 |
 | --- | --- | --- | --- |
 | SoC and cores | QEMU's `virt-11.1`, `-cpu host` under HVF | BCM2711, Cortex-A72 | BCM2712, Cortex-A76, with RP1 behind PCIe |
-| Loader | QEMU's `-kernel` and `-initrd`, or U-Boot's `booti` | the Raspberry Pi firmware, `kernel8.img` | the Raspberry Pi firmware, `kernel_2712.img` |
+| Loader | QEMU's `-kernel` with the single bootable file, or with `-initrd` in the two-file form; U-Boot's `booti` | the Raspberry Pi firmware, the single file as `kernel8.img` | the Raspberry Pi firmware, the single file as `kernel_2712.img` |
 | Interrupt controller | GICv3 | GIC-400, a GICv2 | GIC-400, a GICv2 |
 | MSI frame | GICv2m | none used | MIP (`brcm,bcm2712-mip`) |
 | Early console, also the console | PL011 | mini UART | debug PL011 |
@@ -287,18 +287,32 @@ instructions.
 
 ### Boot
 
-QEMU's `-kernel` loads the kernel at `0x40200000` and passes the device
-tree's physical address in `x0`; `-initrd` places the boot image at
-`0x48000000` with the device tree directly after it, so the kernel reads
-both addresses and assumes neither
-([measured](research-baselines.md#boot-conventions)). U-Boot's `booti`
-implements the same protocol. The Raspberry Pi firmware loads the kernel
-by the same protocol (`kernel8.img` on the Pi 4, `kernel_2712.img` on the
-Pi 5) and enters it at EL2 with the device tree in `x0`. Where the
-firmware places the boot image and how `/chosen` describes it, the CPU's
-state at entry and the memory map are confirmed on each board by the boot
-probe at its port's first boot, and recorded in a research record as they
-were for QEMU, before anything depends on them. The early console's kind
+Every platform boots the single bootable file, the first stage with the
+archive inside it ([design-kernel.md](design-kernel.md#the-bootable-file)),
+and the first stage finds the archive from its own boot locator.
+QEMU's `-kernel` loads a file with an arm64 Image header whose
+`text_offset` is 0 at `0x40200000` and passes the device tree's physical
+address in `x0`; with no `-initrd`, the device tree sits at RAM base
+plus the smaller of half the RAM and 128 MiB, `0x48000000` from 256 MiB
+of RAM up ([measured](research-baselines.md#boot-conventions)), so a
+single file up to 126 MiB long lies below it at those sizes. Where QEMU
+puts the device tree for a longer file was not measured, so the harness
+refuses a single file that does not end below the device tree's measured
+place for the RAM it gives the guest. In the
+two-file form, for debugging, `-initrd` places the boot image at
+`0x48000000` with the device tree directly after it. Either way the
+kernel reads every address and assumes none. U-Boot's `booti`
+implements the same protocol. The Raspberry Pi firmware loads the single
+file by the same protocol (`kernel8.img` on the Pi 4, `kernel_2712.img`
+on the Pi 5), with no `initramfs` line in `config.txt`, and enters it at
+EL2 with the device tree in `x0`. Whether the firmware honours
+`image_size`, where it places the device tree relative to a file tens of
+MiB long, the largest kernel file it loads, the CPU's state at entry and
+the memory map are confirmed on each board by the boot probe at its
+port's first boot, with a single file of the size the port's release
+needs, and recorded in a research record as they were for QEMU, before
+anything depends on them; the locator's overlap check stops a boot whose
+device tree landed on the archive. The early console's kind
 and address, the only difference between the platforms' kernel builds,
 are on QEMU `virt` the PL011 at `0x09000000`, the one its `stdout-path`
 names; each board port fixes its own ([UARTs](#uarts)). The kernel starts one user-mode task, the system
@@ -787,7 +801,8 @@ request its one-shot `tryboot` flag
   firmware boots the slot the `[tryboot]` section names, S; and a commit
   writes the other encoding, which names S.
 * Each slot is a boot partition the firmware reads, a FAT partition
-  holding the firmware's files, the kernel and the boot image, followed in
+  holding the firmware's files and the single bootable file as the
+  kernel file, which carries the boot image inside it, followed in
   the same partition by the EROFS images, so no domain on the target
   parses that FAT. The packer refuses a slot image whose firmware predates
   the version that the board's port records as reporting the boot value
@@ -814,16 +829,17 @@ request its one-shot `tryboot` flag
   makes at every boot, never leaves the firmware a record it cannot read.
 
 **On QEMU** the harness plays the firmware on the same medium layout: it
-keeps the one-shot flag, reads the record, boots the chosen slot's kernel
-and boot image, and writes the same `/chosen/bootloader` properties into
+keeps the one-shot flag, reads the record, boots the chosen slot's
+single bootable file with `-kernel` alone, and writes the same
+`/chosen/bootloader` properties into
 the device tree it passes. The reset count lies in its own sector beside
 the record, as on the boards, and the harness never reads it; since every
 end exits the emulator under `-no-reboot`, the harness, which starts the
 guest again as the firmware would, also counts the consecutive ends whose
 final line follows a crash record and stops a run that passes the
 configured number as a reset loop, so a test never loops however the
-guest's count behaves. The packer places the kernel and the boot image of
-every slot at offsets the medium layout fixes, inside the FAT's files, so
+guest's count behaves. The packer places the bootable file of
+every slot at an offset the medium layout fixes, inside the FAT's file, so
 the harness finds them without parsing FAT; it checks every size it reads
 against the slot's bounds, in one parser with a fuzz target, since a guest
 may have written the slot. It learns that a trial was asked for from the
@@ -876,6 +892,13 @@ the checking rate it measures and the firmware watchdog's timeout, less a
 margin, so a signed slot's check never runs the watchdog out before the
 kernel takes it over; the port also records the bootloader version whose
 trial path it has checked to load `boot.img` from the trial's partition.
+The boot image's own hashes, the BLAKE3 hash of its index and of each
+file ([design-kernel.md](design-kernel.md#the-boot-image)), are
+integrity alone: they catch a damaged slot or a file cut short, never a
+file someone wrote on purpose, since whoever writes the medium writes
+matching hashes. Authenticity comes only from the trust root in the
+table above, which with secure boot covers the whole bootable file, the
+index hash with it.
 Secure boot is an installation's choice: turning it on writes the hash of
 the board's key into OTP, cannot be undone, and needs the board's owner to
 sign each slot's `boot.img`, which the packer does with a key it is given
@@ -993,8 +1016,9 @@ in [Trust in the boot](#trust-in-the-boot).
 ## Verification and testing
 
 * **Boot probe.** At each board port's first boot, a probe confirms where
-  the firmware places the boot image, `/chosen`, the CPU's entry state and
-  the memory map, that the boot reaches the kernel's timer well inside
+  the firmware places a single bootable file of the release's size and
+  the device tree beside it, whether it honours `image_size`, `/chosen`,
+  the CPU's entry state and the memory map, that the boot reaches the kernel's timer well inside
   the hardware watchdog's timeout, how long the system runtime takes to
   its first pet, which `B` must cover, and whether the crash region
   survives `SYSTEM_RESET`; the results go into a research record.
@@ -1182,7 +1206,7 @@ running (PL4).
 | --- | --- | --- | --- |
 | The first Pi 4 revisions take longer than 1 s to store the trial flag | low | a trial request lost, the committed slot boots | the board port checks the timing; the watchdog resets anyway |
 | QEMU's `raspi4b` model does not run BL31 | medium | bring-up under QEMU stops at the PSCI check | the boards are the authority |
-| The firmware places the boot image or describes `/chosen` differently than expected | low | the kernel's boot stops with a message | the boot probe confirms each board before anything depends on it |
+| The firmware places the device tree over the single file, refuses a kernel file that long, or describes `/chosen` differently than expected | low | the kernel's boot stops with a message | the boot probe confirms each board before anything depends on it |
 | The BCM2712's link drops between the PCIe enumerator's check and a configuration access | low | the PCIe domain ends and is restarted, or an asynchronous abort stops an unrelated thread | the enumerator checks the link before each access; the board port measures whether the abort is synchronous; a restart of the PCIe domain re-reads configuration space and changes no running function |
 | The crash region does not survive `SYSTEM_RESET` on a board, or the firmware clears it | medium | no crash record after a reset on that board; the early console alone | the boot probe checks it; the record's check rejects what the firmware left; the early console carries every record |
 | A reset through the power-management watchdog boots `kernel_watchdog_partition` rather than `autoboot.txt`'s slot | low | a reset boots the wrong slot | each slot's `config.txt` leaves the setting unset; the board port checks which slot a watchdog reset boots |

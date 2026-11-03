@@ -433,8 +433,10 @@ The boot formats use these assignments:
 
 | Declaration | Value |
 | --- | --- |
-| ABI version; pack, image and manifest versions | `1` |
+| ABI version; image and manifest versions; boot-locator version | `1` |
+| pack version | `2`, which names BLAKE3 with a 32-byte output as the index and file hash |
 | pack magic | bytes `45 52 58 50 41 43 4b 00` (`ERXPACK` and NUL) |
+| boot-locator magic | bytes `45 52 58 42 4f 4f 54 00` (`ERXBOOT` and NUL) |
 | image magic | `0x49585245`, bytes `ERXI` |
 | system-manifest magic | `0x4d585245`, bytes `ERXM` |
 | pack flags | development bit 0; unconfined-DMA bit 1 |
@@ -461,22 +463,35 @@ optional previous-crash capability is null when no record exists.
 
 ## Boot-image representations
 
-The pack header is 64 bytes, aligned to 8. Its field offsets are magic 0,
+The pack header is 96 bytes, aligned to 8. Its field offsets are magic 0,
 version 8, flags 12, total size 16, entry count 24, entry size 28, entry
-offset 32, string offset 40, string size 48, root entry 52 and build id
-56. An entry is 32 bytes, aligned to 8: path offset 0, path length 4,
-kind 6, flags 7, data offset 8, data size 16 and image-manifest offset
-24. The field widths and limits are those of
-[the boot-image contract](design-kernel.md#the-boot-image).
+offset 32, string offset 40, string size 48, root entry 52, build id 56
+and index hash 64, 32 bytes. An entry is 64 bytes, aligned to 8: path
+offset 0, path length 4, kind 6, flags 7, data offset 8, data size 16,
+image-manifest offset 24 and file hash 32, 32 bytes. The field widths and
+limits are those of
+[the boot-image contract](design-kernel.md#the-boot-image). A hash field
+is a byte array holding BLAKE3's output in its own byte order, never an
+integer.
 
-The canonical index is the header, the entry array starting at byte 64,
+The canonical index is the header, the entry array starting at byte 96,
 then the string table starting immediately after that array. File data
-starts at the first 4,096-byte boundary after the strings. The entry
+starts at the first 4,096-byte boundary after the strings, where the
+index run ends, which the index hash covers with its own field read as
+zeros. Each file run, which its entry's file hash covers, is the file's
+data followed by zeros to the next page boundary. The entry
 count determines the entry array's size; the offsets must equal these
 derived values. Thus no legal data offset can overlap either index
 table. The archive ends at the first page boundary at or after the last
 entry's data. Padding bytes are zero, and the writer orders paths by their
 unsigned bytes without locale or Unicode normalization.
+
+The boot locator is 32 bytes, aligned to 8: magic 0, version 8, a zero
+word 12, archive offset 16 and archive size 24. Its place in the first
+stage is the architecture binding's
+([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)), and its
+rules are those of
+[the bootable file](design-kernel.md#the-bootable-file).
 
 An image-manifest fixed prefix is 56 bytes, aligned to 8: magic 0,
 version 4, segment count 6, ABI version 8, flags 12, span 16, fixed base

@@ -202,7 +202,7 @@ Three layers carry them:
 | **B3.** The UTCB a thread sees is the ABI file's `erx_utcb`, byte for byte, and the kernel decides on each of its values from one load | Fiasco's `Utcb` (`abi/l4_types.cpp`) and `erx_utcb` have the same layout; the glue reaches it only through the generated accessors; every value a decision needs is in a kernel-owned argument record before any Fiasco internal runs, and no glue function takes a `Utcb *` | a field added to either; a Fiasco internal that re-reads a buffer word | `static_assert`s over every field; the glue's signature check; a conformance case that rewrites a deadline from another thread after the call entered |
 | **B4.** The glue decides nothing a core decides | the cores' record types are opaque to the glue, their definitions in `kernel/core/*_impl.h`, which only `kernel/core/*.c` includes; `erx_object_t` is embedded as opaque storage whose fields only the cores name | an `_impl.h` included from the glue; a glue function that branches on a core's result beyond translating it | the include check; the header's opaque storage, which has no field to write; review of each `erx_effect_*` function, which is one translation and one Fiasco call |
 | **B5.** The root task starts only as its plans say | the kernel applies `erx_root_plan`'s steps through the funnel and compares the root budget's counters with the plan, after it has compared the pool with `erx_pool_plan`, before it starts the first thread | an allocation outside the plan; a model constant that drifts from Fiasco's sizes; a reservation the pool plan does not know | `static_assert`s of every model constant against Fiasco's types; the two boot refusals; a seeded extra allocation makes the conformance boot refuse |
-| **B6.** No byte of a boot image is copied or run before the validator accepted the image, and no inherited code reads an ELF | `bootstrap` opens the image with `erx_pack_open` before it reads any entry, plans the kernel's placement with `erx_elf_plan` and `erx_boot_place`, and copies only what the plan names | an entry read before the open; a call of Fiasco's `exec_load_elf` | the order in `bootstrap`'s one erXos function; `exec_load_elf`, `load_elf_module` and `find_kip` are not built; a malformed image stops in `bootstrap` with the validator's reason; the fuzz targets of both planners |
+| **B6.** No byte of a boot image is copied or run before the validator accepted the image and the file it belongs to passed its check, and no inherited code reads an ELF | `bootstrap` finds the archive with `erx_boot_locate` and opens it with `erx_pack_open` before it reads any entry, checks the kernel's file with `erx_pack_file_check` before it reads it, plans the kernel's placement with `erx_elf_plan` and `erx_boot_place`, and copies only what the plan names; it never relocates itself | an entry read before the open; a call of Fiasco's `exec_load_elf` | the order in `bootstrap`'s one erXos function; `exec_load_elf`, `load_elf_module` and `find_kip` are not built; a malformed image stops in `bootstrap` with the validator's reason; the fuzz targets of both planners |
 | **B7.** A crash record read from the console is valid or reported as truncated or corrupt | the frame's header fixes the form and the exact length, the reader reads exactly that many lines and no more, and accepts only a record whose fields check against its form | a reader that accepts a prefix, a length outside the form, or a record whose form differs from the frame's | the reader's fuzz target and its truncated and corrupt fixtures |
 | **B8.** The stack proof's claim covers the C17 cores only | the proof's entry list is the cores' exported functions, its allowance is a declared share of Fiasco's thread block, and its report names that scope | a report line that names the kernel stack | the report's wording test |
 | **B9.** A page is in exactly one of a live reserve, a backing's hand, the released list or the allocator's free lists, and only the funnel moves it | the funnel charges a reserve and backs it, in the same call, with whole single pages from Fiasco's page allocator, and from the released list when the allocator is empty; a held page is reachable from exactly one reserve (a budget's cache, a thread, a space, a memory object), comes into use only through `erx_reserve_take`, and leaves its reserve only through `erx_page_release`, which appends it to the released list and then refunds its charge; `erx_released_take` alone takes a page off the list, for the reaper's free step, which returns mature pages to the allocator, or for a backing, which waits their grace period itself; so pages held plus pages in backings' hands plus pages released plus pages free is the root budget's guarantee at every instant between parts; Fiasco's slab caches and byte-granular quota are not built, so an inherited callee that still names them fails the link, and the raw page allocator's call sites in the linked kernel are the funnel, the free step and boot-time code | a glue call of the raw allocator; an inherited callee that allocates below the glue; a fault path that reaches the raw allocator; a record that keeps a page after its release; a page returned to the allocator by anything but the free step; a release that refunds before it appends | the glue's import allowlist; the raw allocator's call-site check over the linked kernel's disassembly, with a seeded inherited caller and a seeded fault-path caller failing the build; the released list's append referenced only from `erx_page_release` and its unlink only from `erx_released_take`, with a seeded release that refunds first; the accounting check at the end of the conformance run, which finds the funnel's count of held pages plus the pages in backings' hands plus the released list's length plus the allocator's free count equal to the root budget's guarantee, with a seeded uncharged page failing it, and the kernel design's host model of the accounting for the budget side (K32) |
@@ -274,9 +274,10 @@ and planned in one record, `erx_boot_handoff`, a layout of
 
 ```text
 erx_boot_handoff
-  u32     version        1
+  u32     version        2
   u32     flags          the image's pack_flags
   u8[8]   build_id       the image's
+u8[32]  index_hash     the image's header hash
   u64     image_start    physical address of the archive, page-aligned
   u64     image_size     the archive's total_size
   u64     pool_usable    the pool plan's usable bytes, the free map after
@@ -1306,20 +1307,44 @@ ERX_HR_DESTROY)`.
 
 ### Boot handoff
 
-The production module recipe lists `bootstrap` and one module, the boot
-image. `bootstrap`'s one erXos function, called before any inherited
-module handling, and the only module handling the fork's `bootstrap`
-builds:
+On the stopgap `bootstrap` is the first stage of the bootable file
+([design-kernel.md](design-kernel.md#the-bootable-file)): erXos's packer,
+not Fiasco's image post-processing, appends the archive to `bootstrap`'s
+flat image and writes its locator, and QEMU boots the result with
+`-kernel` alone, or `bootstrap` as built with the archive as `-initrd`
+in the two-file form. `bootstrap` carries no Fiasco modules: the
+inherited image information, module header and module list
+(`Image_info`, `Mod_header`, `Boot_modules` and the recipe's modules)
+are not built, and the recipe names `bootstrap` alone. Three inherited
+places change for this. The boot protocol's header in `bootstrap`'s entry code takes
+erXos's form, with the boot locator after it
+([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)), and
+`bootstrap` is linked at the address QEMU places such a file; its
+self-relocation, which would copy its image to its link address before
+the archive is validated and could copy it over the archive, is
+replaced by a stop when it does not run at its link address. Its QEMU
+platform code takes the device tree from the boot protocol's argument
+register alone, never from a probe of the RAM base, which only QEMU's
+ELF path fills. `bootstrap`'s
+one erXos function, called before any inherited code reads memory it
+was not linked with, and the only archive handling the fork's
+`bootstrap` builds:
 
-1. opens the module's bytes with `erx_pack_open`, the C17 validator of
-   `kernel/core/pack.c` linked into `bootstrap`, with its scratch in
-   `bootstrap`'s own data, and stops with the validator's reason on a
-   failure, so no byte of a refused image is ever copied or run;
+1. finds the archive with `erx_boot_locate`, from its own locator, its
+   linked extent and the device tree, then opens the archive's bytes
+   with `erx_pack_open`, the C17 validator of `kernel/core/pack.c`
+   linked into `bootstrap` with BLAKE3's portable C alone, its scratch
+   in `bootstrap`'s own data, and stops with the locator's or the
+   validator's reason on a failure, so no byte of a refused image is
+   ever copied or run;
 2. finds the kernel by the one path the ABI file fixes
    (`boot_kernel_path`, under `boot/`, which the root task never names),
-   an entry of kind `file`, and the root task by the header's
-   `root_entry`, which the validator has already checked to be an
-   executable image;
+   an entry of kind `file`, and checks that entry with
+   `erx_pack_file_check`, stopping with the check's reason if its hash
+   or padding fails, before anything else reads it; and finds the root
+   task by the header's `root_entry`, which the validator has already
+   checked to be an executable image of the system run and which the
+   kernel checks at its first slice, as on erXos's kernel;
 3. plans the kernel's placement with `erx_elf_plan` in its kernel
    profile over the entry's bytes, which yields the loadable segments
    and the two metadata views, and `erx_boot_place` over the memory
@@ -1340,15 +1365,17 @@ builds:
    `heap` and `regions` into the handoff record;
 6. copies `/chosen/bootargs` from the device tree, cut at the last whole
    word within `boot_strings_max`, and fills the handoff record with the
-   image's flags and build identifier, the archive's address and size,
+   image's flags, build identifier and index hash, the archive's address
+and size,
    and the arguments; checks that the information-page view, now
    copied, starts with Fiasco's page magic, and writes the kernel's
    memory descriptors into that view and the options block into the
    options view, each within the view's size; and jumps to the plan's
    entry.
 
-Fiasco's `exec_load_elf`, `load_elf_module`, `find_kip` and the module
-region subtraction are not built into the fork's `bootstrap`.
+Fiasco's `exec_load_elf`, `load_elf_module`, `find_kip`, its module
+handling and the module region subtraction are not built into the
+fork's `bootstrap`.
 
 The kernel reads the record at its start, checks the version, checks
 that a bootloader descriptor covers the archive, checks the device
@@ -1356,8 +1383,13 @@ tree's memory against the manifest's `memory_min`, parses the `erx.`
 keys of `bootargs` as [Configuration](design-kernel.md#configuration)
 says, and keeps the rest for the machine page. Fiasco's own options stay
 on the kernel's module line in the recipe. The banner prints the build
-identifier and `development build: trusted code only` when the flags say
-so, after Fiasco's start-up lines and before the root task starts.
+identifier, the index hash and `development build: trusted code only`
+when the flags say so, after Fiasco's start-up lines and before the root
+task starts. The kernel keeps the verdict table of
+[Checking a file](design-kernel.md#checking-a-file) beside the boot
+image's object and checks every file at its first slice through the
+same C17 function, so `erx_image_slice` refuses a damaged file with
+`ERX_ECORRUPT` as on erXos's kernel.
 
 ### Kernel memory and the root budget
 
@@ -2011,6 +2043,7 @@ ran.
 | the archive's alias | the root planner reads the manifest and `erx_image_map` copies the writable segments | the alias removed makes the kernel's read fault and the boot fails before the root task |
 | `memory_min` | a boot at `memory_min` starts; a boot below it refuses, naming both figures | the check removed lets the smaller boot start and fail at the pool bound instead |
 | the placement plan (B6) | each validator fixture stops in `bootstrap` with its reason; a kernel whose segments the plan places boots; the planner's kernel profile and `erx_boot_place` are fuzzed with ASan on the host | a boot with the validator call removed starts the kernel and fails the test; a fixture whose segment would land on the archive is placed by a plan with the overlap check removed and fails the fuzz run |
+| the bootable file (B6) | the single file, `bootstrap` with the archive inside it, boots with `-kernel` alone, and `bootstrap` as built boots with the archive as `-initrd`, under TCG and HVF, each printing the packer's index hash | one flipped byte in the kernel's file stops `bootstrap` with the file check's reason before `erx_elf_plan` runs; a single file whose header asks QEMU to place it away from `bootstrap`'s link address stops at entry, which the harness's deadline reports, instead of relocating over the archive; a single file booted with an `-initrd` as well stops with `two boot images` |
 | the metadata views | the fork's kernel, whose views lie inside loadable segments, plans; the host test accepts a view at the end of its segment and refuses a second view of a type, a view one byte short of `kip_size` or `koptions_size`, a view straddling two segments, and a view whose file offset does not match its segment's | a reader that treats the views as placements refuses the fork's own kernel for overlap; a reader without the containment check accepts the straddling fixture, and `bootstrap`'s descriptor write lands outside the copied bytes, which the fuzz run's bounds check catches |
 | the archive preserved | the manifest read at boot equals the packed one, byte for byte, after the kernel was placed | a kernel fixture whose segment overlaps the archive, with the plan's reservation order reversed, corrupts the manifest and fails |
 | the first entry | the root task's first instruction sees the boot information page's address in its argument register and zeros in every other register the plan did not set; a created thread sees the registers its creator wrote | a `user_invoke` that loads Fiasco's information-page word into a register fails the register test |

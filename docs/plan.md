@@ -1783,7 +1783,7 @@ Each is small, adds its tests, and leaves `make check` green.
 7. **Hardware sources.** The SVD generator and the system-register
    extractor with golden tests, the drift check, and the SVD file of QEMU
    `virt`'s console UART as the first input.
-8. **Boot image.** `tools/erx pack` writing `ERXPACK` version 1
+8. **Boot image.** `tools/erx pack` writing `ERXPACK`
    deterministically, with its `NOTICES` file, the C17 validator built for
    the host, and its fuzz target, landing together.
 9. **Benchmark harness.** `tools/erx bench` recording every condition, and

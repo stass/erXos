@@ -202,7 +202,7 @@ The kernel serves five parties:
 | Runtimes (ERTS) on executors | kernel calls through `liberx` | memory, groups, park and wake, umtx waits, time, entropy |
 | Workers: the runtimes' own, native programs and device shims in sub-spaces | kernel calls through `liberx` | all of the above, plus IPC gates, IRQ objects, upcalls for signals, MMIO, DMA windows, spaces and threads |
 | The system domain, as the root task | the root capabilities, the watchdog | authority over everything, to build the system ([The root task](#the-root-task), [design-system.md](design-system.md#the-root-task)) |
-| The boot loader | the architecture's boot protocol ([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)) | a header, an entry in kernel mode or a more privileged mode, the device tree's address, the boot image as the initrd |
+| The boot loader | the architecture's boot protocol ([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)) | a header, an entry in kernel mode or a more privileged mode, the device tree's address, the boot image inside the first stage's file or as the initrd |
 | The operator | the early console, the panic path | the kernel's own log during boot, and a panic report that works when everything else is broken |
 
 **Fiasco as the source of the design.** Fiasco has run as an L4 capability
@@ -506,7 +506,7 @@ machine's action list names them, and one function applies them.
 | **K13.** Every kernel path is bounded between preemption points | a handler does at most one bounded part of its work between preemption points, where pending interrupts are taken and its thread may be preempted, and holds no spinlock across one; every spinlock is a ticket lock, served in the order of arrival, so a part that takes one is behind at most `ncpus - 1` holders, each inside a bounded part with interrupts masked, and a part's bound counts those holders' critical sections for each lock it takes; every stretch with interrupts masked is bounded by the ABI file's limits; the generator rejects a call without a declared bound per part; a wait holds no spinlock and no helping lock | a loop over input-sized state without a preemption point; a spinlock held across a preemption point or a wait; a spinlock without a queue, under which one CPU can be passed over without bound | the per-call bound in the ABI file; a timing test of every call at its limits under HVF that measures its longest stretch with interrupts masked; hostile tests that block threads on objects nobody signals; a host test of the ticket lock under TSan with `ncpus` threads contending without pause, which finds every acquisition served within `ncpus - 1` releases, with a seeded unqueued lock, under which one thread is passed over past that bound |
 | **K14.** A thread runs on at most one CPU, and a thread that is woken never runs before its switch out has completed | a thread's state and its kernel stack belong to its home CPU; other CPUs change them only by posting requests to that CPU; the one exception is helping, as in Fiasco: while a thread holds a helping lock and is preempted, a helper may run it on the helper's CPU until it releases the lock, and that CPU then owns its state until the switch back, which the thread's running-under-lock flag serialises; a thread that sleeps is switched out before the kernel releases its CPU's state; wakes from other CPUs are requests applied in order | a remote CPU writing a thread's state directly outside helping; a thread run by two CPUs at once | a host model checker over the thread state machine with requests and helping; a stress test that races wakes, waits and helping on four CPUs |
 | **K15.** Every piece of processor state user mode can read or write is saved per thread or trapped | each kernel-mode control register is written from zero plus the enables the architecture binding lists, so a feature whose user-mode access an enable bit controls stays trapped; a thread record saves exactly the enabled state, which the binding lists: the general registers, the user stack pointer, the FP and SIMD registers with their control and status, and the thread-pointer registers, one of which holds the address of the thread's kernel-user page and is read-only in user mode ([Port contract](#port-contract)) | a control register written by read-modify-write; a feature whose user-mode state needs no enable bit | the boot code's audit of the CPU's feature registers; a test domain that writes every register user mode can write and another that checks it never sees the values |
-| **K16.** The boot image never changes after validation, and no user mapping reaches its index; only a `SYSTEM` holder slices a system file | its pages are excluded from the direct map and mapped read-only in the kernel; no call writes them, and its capability carries no `WRITE`; the whole image's object has an empty ceiling, so no mapping of it can be made whatever its capability carries (K4), and it is not one of the immutable objects that parent copy-on-write children; `erx_image_slice` covers only whole pages of a run of entries, and refuses a run with a system file unless the capability carries `SYSTEM` | a direct map that covers the initrd range; a writable mapping; a slice that covers the index; any access in the whole image's ceiling | the kernel-table walk also checks the boot image's range; host tests of the slice arithmetic; a domain test that tries to map the whole image, to make a child of it, to slice a system file without the right, and to map the index |
+| **K16.** The boot image never changes after validation, and no user mapping reaches its index; only a `SYSTEM` holder slices a system file; no file is read or mapped before its check | its pages are excluded from the direct map and mapped read-only in the kernel; no call writes them, and its capability carries no `WRITE`; the whole image's object has an empty ceiling, so no mapping of it can be made whatever its capability carries (K4), and it is not one of the immutable objects that parent copy-on-write children; `erx_image_slice` covers only whole pages of a run of entries, and refuses a run with a system file unless the capability carries `SYSTEM`, and a slice covers only files whose check passed, every mapping of a file being made from a slice | a direct map that covers the boot image's range; a slice made before its files are checked; a writable mapping; a slice that covers the index; any access in the whole image's ceiling | the kernel-table walk also checks the boot image's range; the flipped-byte cases of [Tests of the boot image](#tests-of-the-boot-image); host tests of the slice arithmetic; a domain test that tries to map the whole image, to make a child of it, to slice a system file without the right, and to map the index |
 | **K17.** Every capability is in a table, and enters a table only by that space's own call or its creator's | a message's capabilities move only at the rendezvous, into slots its receiver reserved in its own call, and every other install needs the caller's own table or `CAPS` on the target, which only the space itself and its creator hold, since a space's capability leaves its creator's table with `INSPECT` alone ([Passing capabilities](#passing-capabilities)) | a message or ring format that carries a capability; a pass that fills a slot its receiver did not reserve; a pass split across two operations; an installer that ignores the emptied flag; a pass of a space's capability with more than `INSPECT` | a source check that the table's fill is referenced only from the creation calls, `erx_cap_dup`, `erx_pass_apply` and `erx_space_copy`; the pass core's exhaustive host model with timeouts, deaths, closes and emptying; domain tests that a receive with no room receives nothing, that a pass to a space that has just ended drops what it carried, and that a space's capability passed into a sub-space carries `INSPECT` alone |
 | **K18.** A stopped space's threads never return to user mode, and its exit record arrives only when none of them can act | every path to user mode passes `erx_return_check`, where a thread of a stopped space dies once its call is finished, no thread is created or started in a stopped space, and the exit record waits until the space's active count, which holds every thread that runs or is preempted inside a call, reaches zero, which each finishing thread reaches on its own CPU, finishing its call at the finishing level above every urgency, within that CPU's finishing share and outside every quota ([Execution model and locking](#execution-model-and-locking), [Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a thread that runs without entering the count; a call abandoned at a preemption point; a finishing thread throttled by any grant, its own group's or its killer's; a finishing thread below a user urgency, or held past its share; a group of the thread's own path dropped before its last switch, which the accounting still charges | a test that stops a domain whose threads run on every CPU, some inside long calls and deletions, and creates and starts threads while it is stopped, and checks that the exit record comes only after the last of them is dead or asleep and that every deletion it started completed; a test that sets a group's quota to zero while its thread is preempted inside a long range call, then stops the thread's space from a group whose quota is zero as well, and sees the call complete within the share's bound and the exit record come; a test that stops such a space from a thread whose cpuset excludes the dying thread's CPU, then deletes the stopper's thread while the target is preempted inside its call behind a spinner above every user urgency on its CPU, and sees the call complete and the record come; the exhaustive model of the count against concurrent switches; a seeded kill that throttles the thread on its killer's grant, which the finishing model catches as a thread never dying while that grant is zero, and a seeded finishing level placed below a user urgency, which the spinner case catches as a record that never comes |
 | **K19.** While a machine lease is held, the machine ends only in a reset | one funnel, `erx_machine_end_effect`, performs every end, the panic path's included, and maps every end to a reset while the lease word is set; the deadline is checked from the kernel's own timer, and the board's watchdog covers a kernel that stops taking interrupts | an end path that bypasses the funnel; a watchdog stopped while a lease is held | the funnel's host tests over every end and lease state; a QEMU test of each end with and without a lease; on each board, a trial that panics, hangs in the kernel with interrupts masked, or calls `halt/0`, each booting the committed slot |
@@ -2174,10 +2174,11 @@ The kernel image follows its architecture's boot protocol
 ([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)): a header
 the loader reads, an entry in kernel mode or a more privileged mode with
 the device tree's physical address in an argument register, and the boot
-image as the initrd, both placed where the loader chooses, so the kernel
-reads every address it is given and assumes none
-([measured](research-baselines.md#boot-conventions)). Every loader erXos
-boots from (QEMU's `-kernel` and `-initrd`, U-Boot, a board's firmware)
+image inside the kernel's own file or, in the two-file form, as the
+initrd ([The bootable file](#the-bootable-file)), all placed where the
+loader chooses, so the kernel reads every address it is given and assumes
+none ([measured](research-baselines.md#boot-conventions)). Every loader
+erXos boots from (QEMU's `-kernel`, U-Boot, a board's firmware)
 implements the same protocol, so no step is specific to one loader
 ([design-platforms.md](design-platforms.md#boot)).
 
@@ -2318,10 +2319,12 @@ implements the same protocol, so no step is specific to one loader
    starts the root task, and a relocation check fails the build on any
    other reference to it ([Chokepoint checks](#chokepoint-checks)), so no
    path after boot reaches the board's key again.
-7. **Boot image.** Validate it ([The boot image](#the-boot-image)), map it
-   read-only into the kernel's half, perform the cache maintenance the
-   architecture requires before code in it may be executed, and wrap its
-   range in a physical memory object.
+7. **Boot image.** Find it with `erx_boot_locate`
+   ([The bootable file](#the-bootable-file)), validate its index
+   ([The boot image](#the-boot-image)), map it read-only into the
+   kernel's half, perform the cache maintenance the architecture requires
+   before code in it may be executed, wrap its range in a physical memory
+   object, and carve its table of file verdicts, every entry unchecked.
 8. **Objects.** Create the root budget from every page left, the root
    group with every CPU in its cpuset and no quota, the root resource, the
    time page, and the previous crash
@@ -2335,7 +2338,8 @@ implements the same protocol, so no step is specific to one loader
    mode as in step 1, enables translation with the same tables,
    initialises its interface to the interrupt controller, its timer and
    its per-CPU record, and enters its idle thread.
-10. **Banner.** Print the build identifier, `development build: trusted
+10. **Banner.** Print the build identifier, the boot image's index hash
+    in hexadecimal, `development build: trusted
     code only` when the boot image says so, the DMA profiles the boot
     image allows, the entropy quality, whether the platform holds a
     device secret (present, none, or a read that failed), deterministic
@@ -2345,7 +2349,10 @@ implements the same protocol, so no step is specific to one loader
     `system`, uncapped until the root task gives it its grant
     ([The root task](#the-root-task)); map
     the root task's executable, the entry the boot image's `root_entry`
-    names, from a slice of its own file with `erx_image_map`; install the
+    names, from a slice of its own file with `erx_image_map`, the slice
+    having checked the file's hash and manifest first and the boot
+    stopping if the file fails or its manifest carries `ERX_IMAGE_JIT`
+    ([Checking a file](#checking-a-file)); install the
     root capabilities; create its first thread, a worker in `system`, and
     start it ([The root task](#the-root-task)).
 
@@ -2644,10 +2651,12 @@ record, and would make ERTS's boot race the board's timeout.
 ### The boot image
 
 The boot image is an indexed archive of every file and executable image
-the machine starts with, in erXos's own format `ERXPACK` version 1. The
-host packer (`tools/erx pack`, Ruby) writes it; the boot validator checks it
-once and the kernel never trusts it unchecked. All integers are
-little-endian. Every file starts on a page of its own, so each page of file
+the machine starts with, in erXos's own format `ERXPACK` version 2. The
+host packer (`tools/erx pack`, Ruby) writes it, and the kernel never
+trusts it unchecked: the boot validator checks its index once, at boot,
+and each file is checked before its first use
+([Checking a file](#checking-a-file)). All integers are little-endian.
+Every file starts on a page of its own, so each page of file
 data belongs to exactly one file and any run of files can be handed out as
 whole pages; and every file carries the system mark or not, which the
 packer sets exactly on the files of the system release: the root task's
@@ -2662,20 +2671,35 @@ one file in the ABI file's record format; the root-task entry reads it
 through that format's generated reader before ERTS starts, and the system
 services read the same file ([design-system.md](design-system.md#boot)).
 
+**A two-level hash.** Every byte of the archive belongs to exactly one
+**run**: the **index run**, from offset 0 to the first page boundary
+after the string table, which holds the header, the entry table and the
+string table; or one entry's **file run**, its data and the zero padding
+up to the next page boundary. Each entry records the hash of its file
+run, and the header records the hash of the index run, computed with the
+header's own hash field read as zeros. The header's hash therefore
+commits to every byte of the archive: it is the image's one identity,
+which the banner prints, the host tool compares with the image it packed,
+and a later signature can cover. The format version names the algorithm:
+version 2 hashes with BLAKE3 in its default, unkeyed mode with a 32-byte
+output, so a change of algorithm is a change of version.
+
 ```text
-header, 64 bytes, at offset 0
+header, 96 bytes, at offset 0
   u8[8]   magic          "ERXPACK\0"
-  u32     version        1
+  u32     version        2: this layout, hashed with BLAKE3
   u32     flags          ERX_PACK_DEVELOPMENT, ERX_PACK_UNCONFINED_DMA; others zero
   u64     total_size     bytes of the archive, a multiple of 4,096
   u32     nentries       1 .. 65,536
-  u32     entry_size     32
-  u64     entries_off    64: entry table immediately after the header
-  u64     strings_off    64 + nentries * entry_size: after the entry table
+  u32     entry_size     64
+  u64     entries_off    96: entry table immediately after the header
+  u64     strings_off    96 + nentries * entry_size: after the entry table
   u32     strings_size   at most 4 MiB
   u32     root_entry     index of the root task's executable
   u8[8]   build_id       identifies the build; the host tool compares it
-entry, 32 bytes, sorted by path, strictly ascending as byte strings
+  u8[32]  index_hash     BLAKE3 of the index run, with these 32 bytes read
+                         as zeros
+entry, 64 bytes, sorted by path, strictly ascending as byte strings
   u32     path_off       into the string table
   u16     path_len       1 .. 4,096
   u8      kind           1 file, 2 executable image
@@ -2684,52 +2708,74 @@ entry, 32 bytes, sorted by path, strictly ascending as byte strings
   u64     data_off       a multiple of 4,096
   u64     data_size
   u64     manifest_off   image: the manifest's offset from data_off; file: 0
+  u8[32]  file_hash      BLAKE3 of the entry's file run: data_size bytes
+                         from data_off, then zeros to the next page boundary
 ```
 
-The validator (`kernel/core/pack.c`) is one pass with no recursion,
-bounded by `nentries` and the total path bytes. Its caller supplies
-16 KiB of scratch for the bounded path-prefix stack described in
+**Integrity, not authenticity.** The hashes detect a damaged medium, a
+torn or cut-short write, a loader that placed less than the whole image,
+and an archive paired with a first stage it was not packed with. Whoever
+can write the medium can also write matching hashes, so they authenticate
+nothing. Authenticity comes only from the platform's trust root: on a
+board with secure boot on, the boot ROM's check of the signed slot, which
+holds the bootable file and with it the header's hash
+([design-platforms.md](design-platforms.md#trust-in-the-boot)); on QEMU,
+the host that chooses the file; elsewhere, nothing. Because the header's
+hash commits to every file, a signature over it alone would extend a
+platform's trust to every file without rechecking the whole image at
+boot; such a signature is not part of this design.
+
+The validator (`kernel/core/pack.c`) reads only the index run, in one
+pass with no recursion, bounded by `nentries` and the total path bytes.
+Its caller supplies 16 KiB of scratch for the bounded path-prefix stack
+described in
 [File-prefix exclusion](design-abi.md#file-prefix-exclusion); it allocates
 nothing and puts no input-sized array on the kernel stack:
 
-1. The archive's length is the initrd's length; `total_size` equals it.
-2. The header's fields hold their stated values and ranges. The entry
+1. The archive's length is the length the locator found
+   ([The bootable file](#the-bootable-file)); `total_size` equals it.
+2. The header's fields hold their stated values and ranges; a version
+   other than 2 is refused with a diagnostic naming the version found and
+   the one expected, and nothing after the version is read. The entry
    table starts immediately after the header and the string table
    immediately after the entry table; their declared offsets equal those
-   derived positions. Both tables lie inside the archive, with every
-   product and offset-plus-size computed with overflow checks. The
-   index therefore ends with the string table, before any file data.
-3. Each entry's path lies inside the string table and is valid: UTF-8 with
+   derived positions. The index run, which ends at the first page boundary
+   at or after the string table's end, lies inside the archive, with every
+   product and offset-plus-size computed with overflow checks.
+3. **The index hash.** The BLAKE3 hash of the index run, with
+   `index_hash` read as zeros, equals `index_hash`. No entry or path is
+   read before this check passes, so a damaged index is refused as
+   damaged, not by whichever structural check its damage happens to trip.
+   Every byte of the index run after the string table is zero.
+4. Each entry's path lies inside the string table and is valid: UTF-8 with
    no byte below `0x20` and no `0x7f`, components separated by `/`, no
    leading or trailing `/`, no empty component, no `.` or `..`.
-4. Paths ascend strictly, so no path appears twice. The bounded
+5. Paths ascend strictly, so no path appears twice. The bounded
    file-prefix stack rejects a path that begins with any earlier file's
    path followed by `/`, so no file is also a directory. The comparison
    includes nonadjacent entries: byte order can place `a-foo` between
    `a` and `a/b`.
-5. Each entry's data lies inside the archive, and the entries' data appear
+6. Each entry's data lies inside the archive, and the entries' data appear
    in entry order with nothing between them but padding to a page: the
-   first starts at the first page boundary after the string table, and each
-   other at the first page boundary at or after the end of the previous
-   one's data. So no two files share a page, no file shares a page with the
-   index, and a run of entries is exactly a run of pages. The archive
-   ends at the first page boundary at or after the last entry's data;
-   every padding byte, after the index and between or after files, is
-   zero.
-6. The entries that carry `ERX_ENTRY_SYSTEM` form one contiguous run of the
-   table, `root_entry` is an executable among them whose manifest does not
-   carry `ERX_IMAGE_JIT`; the entries that carry `ERX_ENTRY_SEAL` form one
-   contiguous run, possibly empty, that shares no entry with the system
-   run; and no other flag bit is set.
-7. An image's manifest lies inside its entry's data and passes the manifest
-   check of [Image manifests](#image-manifests).
+   first starts where the index run ends, and each other at the first page
+   boundary at or after the end of the previous one's data. So no two
+   files share a page, no file shares a page with the index, a run of
+   entries is exactly a run of pages, and the archive, which ends at the
+   first page boundary at or after the last entry's data, is exactly the
+   index run followed by the file runs, each byte in one run.
+7. The entries that carry `ERX_ENTRY_SYSTEM` form one contiguous run of the
+   table, and `root_entry` is an executable among them; the entries that
+   carry `ERX_ENTRY_SEAL` form one contiguous run, possibly empty, that
+   shares no entry with the system run; and no other flag bit is set.
 
 A failure stops the boot with the check that failed and the entry's index.
-Once validated, the boot image never changes (K16). Files are stored
-uncompressed, so runtimes map and load them in place. Starting every file
-on a page costs about 2 KiB of padding per file on average, a few MiB for
-an image of a few thousand files (an estimate). The validator builds for
-the host and has a fuzz target.
+The validator reads no file data, so its cost follows the index's size,
+not the image's. Once validated, the boot image never changes (K16).
+Files are stored uncompressed, so runtimes map and load them in place.
+Starting every file on a page costs about 2 KiB of padding per file on
+average, a few MiB for an image of a few thousand files (an estimate).
+The validator builds for the host and has a fuzz target
+([Tests of the boot image](#tests-of-the-boot-image)).
 
 **What a domain can map.** No space can map the boot image whole: its
 object's ceiling is empty, so a mapping of it is refused whatever its
@@ -2740,9 +2786,11 @@ rights are the intersection with it ([Rights](#rights)); a copy passed
 at a rendezvous keeps only the pass set, without `CARVE` or `SYSTEM`,
 and so slices nothing (K24).
 Domains get **slices**: `erx_image_slice(budget, image, first, count)`
-makes a physical memory object over the pages of a run of entries, its
-record charged to `budget`, and refuses a run that includes a system file
-unless the image capability carries `SYSTEM`. The system domain keeps the
+checks every unchecked file of a run of entries, then makes a physical
+memory object over the run's pages, its record charged to `budget`; it
+refuses a run that includes a system file unless the image capability
+carries `SYSTEM`, and a run that includes a refused file with
+`ERX_ECORRUPT`. The system domain keeps the
 image capability and makes every slice itself, using `SYSTEM` only for its
 own release, so other domains receive slices of their own releases only,
 and no user mapping ever reaches the index.
@@ -2751,8 +2799,9 @@ and no user mapping ever reaches the index.
 `erx_object_info(image (INSPECT), ERX_INFO_IMAGE_ENTRY, index, window)`,
 on the image or on a slice, writes one validated entry into the caller's
 memory window ([Arguments and results](#arguments-and-results)): its path,
-kind, size, system mark, and its offset within the slice; on a slice,
-`index` counts from the slice's first entry. The system domain finds the
+kind, size, system mark, file hash, and its offset within the slice; on a
+slice, `index` counts from the slice's first entry. The system domain
+finds the
 runtime images and each domain's release this way, and a runtime lists
 its release's files from its own slice, so the index is read only
 through the validator's results and never mapped. The boot image is not
@@ -2765,6 +2814,214 @@ which checks update manifests
 ([design-storage.md](design-storage.md#system-updates)), in files of the
 system release
 ([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+
+### Checking a file
+
+`erx_pack_file_check(view, entry)`, a pure function
+of `kernel/core/pack.c`, reads the entry's file run once: it computes the
+run's BLAKE3 hash and compares it with `file_hash`, checks that every
+byte of the run after `data_size` is zero, and for an executable image
+runs the manifest check of [Image manifests](#image-manifests). Its
+verdict is good, or refused with the check that failed. Every file passes
+this one function before its first use, and its first user decides where:
+
+| File | Checked by | When |
+| --- | --- | --- |
+| the stopgap's kernel, the entry at `boot_kernel_path` | `bootstrap` | after the validator, before `erx_elf_plan` reads the entry ([design-stopgap.md](design-stopgap.md#boot-handoff)) |
+| the root task's executable, `root_entry` | the kernel | at boot step 11, by the slice of its file, before `erx_image_map` reads its manifest; the boot also refuses a root image whose manifest carries `ERX_IMAGE_JIT` here |
+| every other file | the kernel | at the first `erx_image_slice` whose run includes it |
+
+So no file is read or mapped before its check, by construction rather
+than by a list of callers: no space can map the image whole (K16), every
+mapping of a file's pages is made from a slice, the kernel reads file
+data only through a slice, `bootstrap` reads only the one entry it
+checked, and `erx_image_slice` makes a slice only over entries whose
+verdict is good. A file that fails its check is refused and never
+mapped: the slice fails with `ERX_ECORRUPT`, a status of its own in the
+ABI file's list, the kernel log names the entry's index, its path through
+the log's escaping function and the check that failed, and every later
+slice that includes the entry fails at once with the same status. At
+boot, a failure of the root task's executable or the stopgap's kernel
+stops the boot the same way. The system domain treats `ERX_ECORRUPT` as
+the failed start of the domain or program that needed the file and never
+retries it, since the image does not change.
+
+**The kernel hashes with portable code.** The kernel executes no FP or
+SIMD instruction, so the kernel and `bootstrap` build BLAKE3's portable C
+implementation alone; its SIMD paths are not built into either, and the
+kernel's build check for FP and SIMD instructions would refuse them. On
+the target no user-mode code checks the boot image, since a check made
+after a mapping could not keep a damaged file unmapped; the host tools,
+which run in user mode, build the SIMD paths. Scalar BLAKE3 runs roughly
+two to three times as fast as scalar SHA-256 (an estimate, which the boot
+benchmark measures on each platform).
+
+**Verdicts.** The kernel keeps one verdict byte per entry, unchecked,
+good or refused, in a table it carves with the boot image's object at
+boot step 7, before any budget exists: `nentries` bytes, at most 64 KiB.
+A verdict moves only from unchecked to final, and since the image never
+changes every check of one entry reaches the same verdict, so the table
+needs no lock: two slices that check the same unchecked entry at once
+each hash it and store the same value, at the cost of hashing it twice,
+and only the system domain, the one holder of the right to slice, can
+cause that. A slice checks the unchecked entries of its run in entry
+order, in parts of at most 64 KiB between preemption points (K13),
+holding a reference to the image object as a range call does. The
+hasher's state, about 1.9 KiB in the official implementation, lives in
+one page that the call charges to `budget` and releases before it
+returns, so no kernel stack holds it. A file is hashed once per boot,
+when it is first sliced, and a file that is never used is never read.
+
+### The bootable file
+
+The packer emits the boot image in one of two forms. The **first stage**
+is the code the loader enters: erXos's kernel, or on the stopgap
+`bootstrap`.
+
+* **The single file**, the default and the only form a slot or a board
+  carries: the first stage's image, which starts with the header of the
+  architecture's boot protocol, then zeros up to a page boundary, then the
+  archive, unchanged, to the end of the file. QEMU boots it with `-kernel`
+  alone, and the Raspberry Pi firmware loads it as the slot's kernel file
+  alone ([design-platforms.md](design-platforms.md#boot)).
+* **The two-file form**, for debugging under QEMU: the first stage as
+  built, booted with `-kernel`, and the archive as `-initrd`, so one
+  kernel build can be run against archives packed after it and the file
+  QEMU runs is the build's own output, byte for byte.
+
+The archive is byte-identical in both forms, so its header's hash is the
+same.
+
+**The locator.** The first stage carries a 32-byte **boot locator** at
+the offset its architecture's binding fixes, inside the part of the image
+that the boot protocol's header leads
+([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)):
+
+```text
+boot locator, 32 bytes, aligned to 8
+  u8[8]   magic          "ERXBOOT\0"
+  u32     version        1
+  u32     zero
+  u64     archive_off    from the first stage's first byte; 0: no archive
+                         in this file
+  u64     archive_size   bytes of the archive; 0 exactly when archive_off is 0
+```
+
+As built, both fields are zero. Making the single file, the packer writes
+exactly two things into the first stage's bytes: the locator's two
+fields, and the image size the boot protocol's header declares, which it
+sets to the whole file's length. A loader that honours that size keeps
+the archive clear of everything it places, and one that ignores it still
+places nothing over the archive, since the archive lies inside the file,
+as the kernel file's padding does for its zero-initialised data
+([Boot](#boot)).
+
+`erx_boot_locate`, a pure function of `kernel/core/pack.c` that both
+first stages call before anything reads the archive, decides where the
+archive is from the locator, the first stage's load address and linked
+end (a constant of its build that includes its zero-initialised data),
+the image size its header declares, the initrd range that `/chosen`
+names, and the device tree's memory ranges, its own extent and the memory
+reservation block:
+
+1. A locator whose magic, version or zero field is wrong stops the boot.
+2. With `archive_off` zero, the archive is the initrd; no initrd stops
+   the boot with `no boot image`.
+3. With `archive_off` nonzero, an initrd as well stops the boot with
+   `two boot images`, so the machine never boots an archive other than
+   the one it was meant to; `archive_off` is a multiple of 4,096 at or
+   after the first stage's linked end, so the archive overlaps none of
+   the first stage's code, data or zero-initialised data; and
+   `archive_off + archive_size`, computed with an overflow check, is at
+   most the declared image size.
+4. In either form the archive starts at a page-aligned physical address
+   and its range lies inside one memory range of
+   the device tree and overlaps neither the device tree, nor the
+   reservation block, nor the first stage's extent.
+
+The locator lies in the first stage's own image, which nothing writes
+after the loader placed it, and is read once into local values while only
+the boot CPU runs. The validator then runs over the range found, with its
+length: a single file that its loader or its medium cut short fails the
+validator's length or index check, or the file check of a file the cut
+reached.
+
+**Choosing the form.** `tools/erx pack` writes the single file;
+`tools/erx pack --two-file` writes the first stage and the archive as two
+files, and the QEMU harness boots either form. The medium layout, the
+slot writer and every board take only the single file, and the packer
+refuses the two-file form for a slot image.
+
+**Reproducibility.** The single file is a pure function of the first
+stage's bytes and the archive's: the first stage as built with its two
+locator fields and its declared size written, zeros up to `archive_off`,
+and the archive. Both forms are byte-identical across two builds from the
+same inputs (`make check-reproducible`), and the archive inside the
+single file is byte-identical to the two-file form's archive.
+
+**Execute in place.** The phrase has two meanings, and the format is
+ready for the first:
+
+* *User code run from the image's own pages.* `erx_image_map` already
+  maps read-only and executable segments from the slice
+  ([Image manifests](#image-manifests)), so a boot image's code runs from
+  the image's pages with no copy, wherever those pages are, and only
+  writable segments become private memory, filled from the slice at first
+  touch. The canonical storage is what allows this: each segment's
+  payload starts on a page of its own and its `mem_offset` is
+  page-aligned, which the manifest check verifies, so a payload's offset
+  in the archive and its virtual address agree modulo the page size; the
+  ELF planner that the packer runs refuses a load segment whose address
+  or file offset is not page-aligned, or whose file offset and address
+  disagree modulo its alignment, with a diagnostic, and never rounds an
+  unaligned start. The image's pages are immutable once validated (K16)
+  and stay resident for the machine's life, since the image's object is
+  never destroyed. What no loader does yet is leave the image on its
+  medium: every loader erXos boots from copies the bootable file into
+  RAM. The future option is a platform with memory-mapped flash or ROM
+  holding the bootable file: the kernel would wrap the image's object over
+  the medium's physical range, mapped read-only as normal cacheable
+  memory, and slices, the file check and `erx_image_map` would work
+  unchanged above it; `erx_exec`, which maps an executable file's code
+  from its file object, read-only and executable
+  ([design-programs.md](design-programs.md#what-a-program-can-start)), would
+  serve a file system on such a medium the same way. No mapping changes
+  form, so no mapping becomes writable and executable at once, and no new
+  site maps code: `erx_image_map` and `liberx`'s loader stay the only
+  ones. It would save the RAM the archive occupies, tens of MiB for a
+  full image (an estimate), and the loader's copy at every boot. It would
+  cost slower instruction fetch and first-touch fills on every cache miss
+  to the medium, a check of each file that reads the medium, and a rule
+  that nothing writes the booted slot's medium while it runs, since a
+  flash part being programmed does not read back its data; the slot
+  writer already writes only the spare. The Raspberry Pis have no
+  memory-mapped boot medium, so the option applies only where a platform
+  has one, as QEMU `virt`'s flash devices are.
+* *First-stage code run from ROM or flash before memory is set up.* Only
+  the first stage would need to be linked at a physical address, with its
+  writable data in RAM; the single file is already the shape it would
+  take, the archive following the first stage on the same medium. It is
+  not designed further.
+
+### Tests of the boot image
+
+Each passing case is paired with a seeded failure that proves the code
+under test ran.
+
+| Case | Passes when | Seeded failure |
+| --- | --- | --- |
+| the index hash | an image the packer wrote validates, on the host and at boot | one flipped byte in the entry table, one in the string table and one in the index run's padding are each refused with `index hash` before any structural check; the same flipped entry with the hash recomputed is refused by the structural check it breaks, which shows the hash check is what refused first |
+| a file's hash | a slice of every file of a packed image succeeds, and the root task starts | one flipped byte in a file's data passes the validator, which reads no file data, and fails the first slice that includes the file with `ERX_ECORRUPT`, naming its index; a slice of its neighbour succeeds; a second slice of the damaged file fails without hashing again, which the check counter shows |
+| a file checked at boot | the root task and, on the stopgap, the kernel start | one flipped byte in the root task's executable stops the boot at step 11 naming `root_entry`; one in the stopgap's kernel stops `bootstrap` before `erx_elf_plan` runs |
+| a file run's padding | every file run's padding is zero | a fixture with a nonzero padding byte and a hash recomputed over it is refused with `padding`, which the hash alone would accept |
+| concurrent checks | four threads on four CPUs slice the same unchecked file at once, each gets its slice, and the verdict is good | a checker seeded to store its verdict before it finishes hashing lets a concurrent slice of a damaged file succeed, which the test catches |
+| the version | an image of version 2 validates | an image of version 1's layout is refused with `version 1, expected 2`; a version-2 image with its version field set to 3 and its index hash recomputed is refused by the version check, not by the hash |
+| BLAKE3 | the kernel's portable build and the host tools' SIMD build both reproduce the official test vectors | one vector seeded with a wrong digest fails both builds |
+| the single file | the single file boots under QEMU with `-kernel` alone, under TCG and HVF, on the stopgap and on erXos's kernel, and the banner's index hash equals the packer's | the same single file booted with an `-initrd` as well stops with `two boot images`; a locator whose `archive_off` points into the first stage's zero-initialised data is refused; a file cut one page short is refused by the validator |
+| the two-file form | the first stage as built boots with the archive as `-initrd`, under TCG and HVF, with the same banner hash as the single file | the first stage booted without `-initrd` stops with `no boot image` |
+| reproducibility | both forms are byte-identical across two clean builds, and the single file's archive equals the two-file archive | a packer seeded to write the time into the locator's zero field fails `make check-reproducible` |
+| segment alignment | every executable the build packs passes the ELF planner, and each mapped segment's bytes equal the ELF's | an ELF fixture whose load segment's file offset is not page-aligned, and one whose offset and address disagree modulo the page size, are each refused by the packer with a diagnostic; with the planner's check removed the fixture packs, and the comparison of mapped bytes with the ELF's fails |
+| fuzzing | the validator's fuzz target runs its configured budget clean under ASan and UBSan | the target recomputes the index hash after each mutation, so mutations reach the structural checks, and also runs `erx_boot_locate` over arbitrary locators, declared sizes and memory maps and `erx_pack_file_check` over mutated file runs; a seeded off-by-one in the locator's overflow check is found within the budget |
 
 ### Image manifests
 
@@ -2818,7 +3075,8 @@ is not a JIT image.** For a full boot the root task's executable carries
 the interpreter runtime, without BeamAsm, asmjit or any C++; a development
 partial boot may use the native C17 root-entry image
 ([design-runtime.md](design-runtime.md#the-root-task-entry)); the boot
-validator refuses an image whose `root_entry` carries `ERX_IMAGE_JIT`, and
+stops when the root task's executable carries `ERX_IMAGE_JIT`, which it
+checks with the file before mapping it ([Checking a file](#checking-a-file)), and
 the kernel creates the first space without `ERX_SPACE_JIT`, so no thread of
 the system domain can create a JIT object (K8), and no view of code that
 was written exists in the trusted base.
@@ -2845,8 +3103,9 @@ read-only tails and total output with checked arithmetic and rejects an
 output beyond the caller's declared packing budget before allocation or
 publication. This host resource budget is not another wire-format version.
 
-**The manifest check**, which the boot validator runs on every user-mode
-executable, verifies:
+**The manifest check**, which the file check runs on every user-mode
+executable after its hash matched ([Checking a file](#checking-a-file)),
+verifies:
 
 * magic, version, ABI version, segment count, reserved zeroes and exactly
   the declared image, segment and protection flags;
@@ -6981,7 +7240,7 @@ same property on the other:
 | entropy | in full | added: the C17 ChaCha20 core behind a kernel object | | M1 |
 | the trace ring and `erx_object_info` | in full | added: erXos's trace ring and inspection topics as kernel objects beside Fiasco's objects, recording the ABI file's trace event types | Fiasco's own trace buffer stays in its kernel debugger | M4 |
 | deterministic mode | in full | added: with `erx.det=1` the stopgap starts no secondary CPU, seeds the generator with the fixed value, fixes the placement bases of the objects it adds, reads time only from the instruction-counted virtual counter and fixes the wall clock, as erXos's kernel does ([Deterministic mode](#deterministic-mode)) | Fiasco's own start-up lines are part of the transcript | M3 |
-| the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` runs erXos's C17 `ERXPACK` validator and finds the kernel and the root task in the image, there being no `sigma0` executable; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |
+| the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` is the first stage of the bootable file, finds the archive with `erx_boot_locate`, runs erXos's C17 `ERXPACK` validator, checks the kernel's file and finds the kernel and the root task in the image, there being no `sigma0` executable; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |
 | the machine page and its boot value | in full | added: the page, in the ABI file's layout, written by the kernel from the boot arguments `bootstrap` passes and from the two `/chosen` properties that name the boot slot, which the QEMU harness writes | | M6 |
 | the device-secret page | in full | added: the page, in the ABI file's layout, carrying the encoding of none, since the stopgap runs only on QEMU, where the platform has no key | no boot-only section: the key read is erXos's kernel's alone | M1, so the root task's root capabilities are the same on both kernels |
 | ending the machine | in full | added: `erx_machine_end` as an invocation on an erXos platform object that calls Fiasco's firmware calls for power-off and reset; `ERX_END_TRIAL` fails with `ERX_ENOTSUP` | | M1 |
@@ -7210,7 +7469,7 @@ limit copy_max u32 1048576
 limit group_executors u32 64
 status wouldblock -14 "an executor made a call that would wait"
 bytes erx_pack_magic 8 value 4552585041434b00
-layout erx_pack_header 1 wire_le 8 64
+layout erx_pack_header 2 wire_le 8 96
   field magic erx_pack_magic 0
   field version u32 8
   field flags u32 12
@@ -7222,6 +7481,7 @@ layout erx_pack_header 1 wire_le 8 64
   field strings_size u32 48
   field root_entry u32 52
   field build_id u8 56 count 8
+  field index_hash u8 64 count 32
 ```
 
 The [declaration grammar](design-abi.md#source-grammar) defines every
@@ -7708,7 +7968,7 @@ the host exploration and conformance requirements below.
 | Layer | What | Where |
 | --- | --- | --- |
 | Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner, or an enclosing lock its thread holds, is closed at every part boundary, and a construction whose budget is destroyed at every step and between every insert of its publication, which must leave the object wholly attached and then wholly detached, or never attached, with a seeded publication that inserts without the object's existence lock, which the model catches as a child attached to its parent after the parent's budget tore it down, and a seeded backing that reads only its owner's lock, which the model catches as a child backed to its full size after its copy's target was destroyed, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, with the inspector's figure for a destroy compared against what each destroy gives back, after pins at every depth, and a seeded pin that marks a tombstone's cache page at the close instead, which the comparison catches at the first destroy after a pin, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the kills over a stopper deleted, descheduled behind a spinner and killed in turn, a killed thread whose own path is at zero grant and a second stop of the stopped space, with a seeded kill that throttles the thread on its own zero-grant path, which the model catches as a finishing thread that never dies, and a seeded charge of the finishing time to the stopper's path, which the model's `finishing_ns` counters catch, the stopper's wait, the wait for children's records and the holds, with two holds on one space and a resume of either while a quiesce and a copy run under the other, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
-| Fuzzing | the device tree, the boot image and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
+| Fuzzing | the device tree, the boot image's index, locator and file check, and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
 | Conformance | every kernel call's contract, from test domains: arguments at and beyond their limits, every error, every right missing, every outcome; run identically on erXos's kernel and the stopgap, among them a stop of a space whose thread waits on an IRQ object while the IRQ fires, and of one whose thread is inside a vCPU resume, each posting its exit record only after the thread has died and running none of its user code after it, and a memory-object map and the range calls racing the destroy of their space, which add no record to it (K26's container test); a store to a shared object's page followed by an unmap of the mapping, or by a stop and destroy of the storing space, and then `erx_mem_dirty`, which reports the page stored; umtx waits on a word of a boot-image slice and of a device's register window, each refused with `ERX_EFAULT` before any load; `erx_mem_copy` from a child of a sealed paged object, which returns the parent's bytes for every page the child does not own and the child's for the pages it owns, against the same copy with the child's pages seeded with a marker; a thread parked inside `erx_mem_copy` between two parts while the source's budget is destroyed, whose next part fails with `ERX_ESTALE`, after which the reaper frees the budget's tombstone last and the parent's free capacity is whole again, under ASan on the hosted kernel; a stop of a three-level tree from a thread whose group's grant is set to zero right after the word is stopped, then between two parts of kills, then between two levels of the walk, each followed by a stop of the same tree, and of its parent, from a thread with quota, whose own walk posts the missing kills and after which the record comes, with a seeded second stop that only waits never receiving it and failing the case's deadline; a killed thread holding a space's lock across a long range call while a waiter on another CPU and one on its own CPU take that lock, and the same holder killed while a waiter runs it by helping, in which the holder's time after the help's current part lands in its own path's `finishing_ns`, the waiters' paths gain only their own waiting, and the holder's finishing stays within its CPU's share, with a seeded help of a dying holder moving its time to the waiter's group, which the counters catch; a fork given up by resuming the copy's hold while the job's hold remains, which leaves the parent held and the copier reporting `ERX_EBUSY`, and the same fork given up while the copier is between two parts of a child's backing, which leaves nothing charged to the child's budget once the child is destroyed | QEMU, TCG and HVF |
 | Hostile domains | random calls, closed and foreign capabilities, rights probing, passes of stale, duplicated, unpassable and surplus capabilities, of two copies of one object, and receivers that end mid-pass, writes racing a seal, stores racing a store report, windows whose objects are deleted mid-copy, umtx waits on words unmapped, remapped and freed by other threads during the wait, budgets destroyed while other spaces map their objects, deletions racing lookups, copies, moves and mappings, accesses to deleted memory, mapping probes, threads that fault in every exception class, executors calling every blocking call, groups that spin, servers that never reply or drop their callers, doorbells and gates deleted under their waiters, UTCBs, vCPU frames and windows rewritten while the kernel reads them, calls that pass kernel addresses wherever an argument is an integer, sub-spaces created to the depth limit and churned, devices that flood interrupts and devices that fault through the IOMMU without pause | QEMU |
 | Isolation | freed pages handed between domains on four CPUs; TLB maintenance under concurrency; one domain reading another's memory through every path; a sub-space reaching beyond what its creator gave it | QEMU |
@@ -7938,7 +8198,7 @@ item, its files exist and the conformance suite passes on it.
 | Item | What the architecture provides | What depends on it |
 | --- | --- | --- |
 | Modes | a privileged mode for the kernel and an unprivileged mode for every thread; any more privileged mode the CPU boots in is configured to trap nothing the lower modes need, and left for good | every isolation property; K12, K15 |
-| Boot entry | a boot protocol: a header the loader reads, an entry with translation off and the device tree's physical address in a register, the boot image as the initrd | [Boot](#boot) |
+| Boot entry | a boot protocol: a header the loader reads, an entry with translation off and the device tree's physical address in a register, the boot image inside the first stage's file or as the initrd | [Boot](#boot) |
 | Exception and interrupt entry | entries for a synchronous exception from user mode or kernel mode, an interrupt and an asynchronous error, on the running thread's kernel stack with interrupts masked, an entry from kernel mode saving its frame on that stack apart from the user registers; an exception return; the decode of a synchronous exception into a class, a cause and an address | dispatch, `erx_fault_classify`, the stack proof; K12 |
 | Kernel stacks and the switch | a kernel stack pointer per thread, switched with the thread's callee-saved kernel registers at every switch; unmapped guard pages below each stack | [Execution model and locking](#execution-model-and-locking), the stack proof |
 | System-call trap | one trap user code executes to call the kernel, distinguishable from another system's; registers for the call number, six arguments, the status and two results | [System-call dispatch](#system-call-dispatch); K13 |
@@ -7967,6 +8227,7 @@ and its binding document; nothing above the architecture layer changes.
 | --- | --- | --- | --- |
 | Fiasco kernel `50bbe8a9`, with `bootstrap` `a4f4ad18`, `sigma0` and `l4sys` from `l4re-core` `e2e2d5af`, `libfdt` `5756062b` and `mk` `22cc26e5` | the stopgap kernel behind this interface | MIT (each package's `LICENSE.spdx`), with the GPL and LGPL parts listed above excluded, except the GPL-2.0 `kobject_rpc.h` and `jdb_object.cpp`, which the kernel needs, so no stopgap build is distributed outside the project; capstone in the kernel debugger is BSD-3-Clause-Attribution; the link closure of `bootstrap` and `sigma0` recorded at import | stopgap, replaced by erXos's kernel |
 | libfdt | device-tree parsing in erXos's kernel | BSD-2-Clause (dual GPL-2.0-or-later) | permanent |
+| BLAKE3's official C implementation | the boot image's index and file hashes, in its portable form in the kernel and `bootstrap` ([The boot image](#the-boot-image)) | CC0-1.0 or Apache-2.0, used under Apache-2.0 | permanent |
 | Arm's machine-readable A-profile architecture specification | the source of the AArch64 port's `hw/sysreg/aarch64.json` ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)) | BSD-3-Clause | permanent, as a pinned generator input |
 
 erXos's kernel carries code derived from Fiasco under Fiasco's MIT notice,
@@ -8539,10 +8800,127 @@ Fiasco's scheduling:
   memory windows carry every argument erXos has, with no kernel access
   that can fault ([Arguments and results](#arguments-and-results)).
 
+**An existing archive format for the boot image.**
+
+* *How it works.* The packer writes, and the boot validator reads, a
+  format that already exists, so its tools can list and unpack images.
+* *Its merit.* Existing tools, and no format of erXos's own to specify.
+* *Why it lost.* The boot image needs an index read without scanning the
+  data, every file on a page of its own so runtimes map it in place,
+  64-bit sizes, the system and seal marks, image manifests, a hash per
+  file and one over the index, and a reader small enough to check whole in
+  a few hundred lines with no recursion. Each candidate misses some of
+  this:
+  * *cpio `newc`* and *tar* have no index, so finding a file scans every
+    header before it; they align data to 4 and 512 bytes, carry POSIX
+    owners, modes and times that erXos does not use, allow a name to
+    appear twice with the later copy winning, and `newc`'s sizes are 32
+    bits; the `crc` variant of `newc` sums bytes and detects little.
+  * *ZIP* keeps its directory at the end and repeats each entry's name and
+    sizes in a local header, which a reader must reconcile; its data may
+    overlap and is compressed by default; 64-bit sizes need the ZIP64
+    extension; alignment needs padding in an extra field, as Android's
+    `zipalign` adds; and its CRC-32 is per file only.
+  * *squashfs* is compressed in blocks, so nothing maps in place, and is a
+    file system with inodes, directory tables and fragment tables: a
+    parser far larger than the boot validator.
+  * *ISO 9660* stores data in 2,048-byte sectors, needs Rock Ridge or
+    Joliet for usable names, and records sizes in 32 bits, with
+    multi-extent files beyond that.
+  * *UBIFS* is a writable, journalled flash file system over UBI, with
+    compression: the opposite of an image that never changes.
+  * *EROFS*, uncompressed with 4 KiB blocks, maps in place and is what
+    the system release uses from M6, inside a minimal `ERXPACK` whose
+    files carry the EROFS images' root hashes
+    ([design-storage.md](design-storage.md#system-updates)). As the boot
+    image itself it would put a file system's inodes, directories and
+    extended attributes into the kernel's boot validator, and it has no
+    place for the marks or manifests.
+  * *U-Boot's FIT* is a device tree whose nodes hold the images, with a
+    hash per image and signatures over configurations. It would reuse the
+    kernel's `libfdt`, but its data is not page-aligned unless stored
+    outside the tree, its node names are not paths, erXos's marks and
+    manifests would be properties of its own anyway, and its signature
+    rules are U-Boot's, made for a loader rather than a kernel.
+  * *QNX's IFS* is the closest in design: a flat table of records, page
+    alignment as an option, a startup header that names the boot program
+    and a script, POSIX metadata, 32-bit sizes, an additive checksum over
+    words, and data ranges that may overlap, with a later record of the
+    same name shadowing an earlier one
+    ([the owner's IFS reader and writer](https://github.com/stass/fsimg),
+    whose `specs/design-ifs.md` describes the format, BSD-2-Clause).
+    erXos keeps the flat table and changes the rest: every file starts on
+    a page; a BLAKE3 hash per file and one over the index replace the
+    additive sum, which a two-bit change can cancel; one `root_entry`
+    index and one fixed kernel path replace the boot and script
+    references, and the system configuration, a file in the ABI file's
+    record format, replaces the script; entries carry a kind and marks and
+    no owners, modes or times, since authority comes from grants; sizes
+    and offsets are 64 bits; and data ranges tile the archive in entry
+    order and paths ascend strictly, so no range overlaps another and no
+    name shadows another.
+  * *Fuchsia's BOOTFS* is flat and page-aligned, a directory of names,
+    offsets and sizes, and the closest to `ERXPACK`'s shape; it carries no
+    marks, no manifests and no hashes, which `ERXPACK`'s entries add.
+
+**One hash over the whole archive.**
+
+* *How it works.* The header holds one hash over every byte, with that
+  field read as zeros, and the validator checks it in its pass at boot.
+* *Its merit.* One field and one check, and an identity for the host
+  tool.
+* *Why it lost.* The boot would read and hash the whole image before
+  anything runs, tens of MiB at boot for files most boots use only in
+  part, and a later image left on a memory-mapped medium would be read
+  whole at every boot. The two-level hash keeps the one identity, since
+  the index's hash commits to every file's, and moves each file's cost
+  to its first use, where a damaged file is refused without stopping the
+  boot.
+
+**SHA-256 for the boot image's hashes.**
+
+* *How it works.* The index and file hashes are SHA-256, which the
+  kernel also has for the device secret's HMAC.
+* *Its merit.* A standard that every tool computes, and one hash
+  function fewer in the kernel.
+* *Why it lost.* erXos's own validator and host tools are the only
+  consumers of these hashes, so no outside tool needs to recompute them,
+  and in scalar code, which is all the kernel may run, BLAKE3 is roughly
+  two to three times as fast (an estimate), which matters for every file
+  the boot checks. A platform's trust root that checks the slot with
+  SHA-256 checks the whole file in any case.
+
+**Files checked in user mode.**
+
+* *How it works.* The system domain, or a checker domain, hashes each
+  file with the architecture's SIMD instructions before it hands the
+  file's slice on.
+* *Its merit.* SIMD hashing is several times faster than the kernel's
+  portable code.
+* *Why it lost.* A user-mode checker must map the file to read it, so a
+  damaged file would be mapped before its check, and the property that no
+  file is mapped before its check would rest on every slice's holder
+  checking first, a list of callers, rather than on the one call that
+  makes slices.
+
+**The boot image only as the loader's initrd.**
+
+* *How it works.* Every platform boots two files, the kernel and the
+  archive, and the loader places the archive and names it in `/chosen`.
+* *Its merit.* No locator, and the kernel file never changes once built.
+* *Why it lost.* Each slot would carry two files that must be paired, the
+  Raspberry Pi firmware would need a configuration line naming the
+  archive, and where a loader places an initrd differs between loaders
+  and is confirmed board by board. The single file needs only the one
+  file every loader already loads, and the two-file form stays for
+  debugging under QEMU, where pairing is the point.
+
 ## Risks and open questions
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
+| hashing each file with portable code at its first slice lengthens the boot and each domain's first start | medium | boot time, in proportion to the bytes the boot uses | each file is hashed once per boot and only when used; the boot benchmark reports the hashing time per platform, and the boot image stays small, with the system release in EROFS images from M6 |
+| a loader places the device tree or another payload inside a large single file, because it ignores the declared image size | low | the boot stops with the locator's overlap check | the file's own extent covers the archive whatever the header says; the boot probe confirms each board's placement before anything depends on it ([design-platforms.md](design-platforms.md#boot)) |
 | the stopgap's modifications grow large (memory objects, sealed paged objects, groups, the stop core in Fiasco's C++) | medium | the stopgap takes longer than expected | the stopgap carries only the part of the interface that the plan's vertical slice uses, and every mechanism beyond it lands on erXos's kernel alone ([The current implementation](#the-current-implementation-the-modified-fiasco)); the C17 cores are shared, so work done for the stopgap is work done for erXos's kernel; the plan's pilot calibrates the effort |
 | the stopgap carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | nothing built on the stopgap is distributed outside the project | recorded at import; erXos's kernel takes code only from files whose effective licence is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
 | 8 KiB kernel stacks do not hold the proven worst case with an interrupt on top | low | larger stacks, about 4 KiB more per thread | the stack proof fails the build first; Fiasco runs in 8 KiB with its thread record in the same block |
