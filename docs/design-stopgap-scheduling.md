@@ -281,7 +281,7 @@ worth adding later.
 | **ST4.** No wakeup of an executor is lost (S2 on the fork) | the park core compares and lists under the group's park lock, a Fiasco spin lock taken under the CPU lock; the parker clears its ready bit under the CPU lock before the lock is dropped, and every wake completes the record under the park lock and sets the ready bit through the home CPU's serialized state writers, so a wake after the parker's listing always finds a sleeper to wake ([Park and wake](#park-and-wake)) | a compare outside the lock; a wake that writes thread state from another CPU directly | the park protocol's exhaustive host model (S2); the park lock under ThreadSanitizer; a seeded compare outside the lock, which the model finds as a lost wakeup |
 | **ST5.** A thread runs at its resolved urgency and never above its path's ceiling, a finishing thread at the finishing priority, and every tick is charged to the group of the thread owning the CPU's current scheduling context | a thread's Fiasco priority is `erx_sched_resolve`'s result plus one, refreshed by every call that changes a base or a grant before that call returns, or the finishing priority once it is dying; the only switch that does not set the CPU's scheduling context is a lock holder's help; the tick's charge is one function reading the current scheduling context ([Server urgency and charging](#server-urgency-and-charging)) | a switch of execution context alone outside helping; a second charge site; a priority written outside the refresh | the S5 conformance case with a third thread at 25; the source check that `Not_Helping` switches happen only in `schedule_switch_to_locked`; the charge function's chokepoint check; a seeded donating switch in `activate_ipc_partner`, which lets the server run ahead of the thread at 25 and fails |
 | **ST6.** No request of this binding, and no kernel-internal wait of a finishing thread, waits for another thread's turn on a CPU | every cross-CPU request this binding sends is eager, taken at the target CPU's next interrupt; the IPC glue's cross-CPU handshake, reply and abort are eager too; both request queues are drained in batches with a continuation, so a request is run within a bounded number of interrupts of its CPU; the answer makes the requester runnable at its own CPU's next interrupt, at its own priority | a request sent with `eager = false`; a `Drq::Wait` whose handler needs the target to be scheduled; a lock held across a `Drq::Wait` | a source check that every `drq` call in the glue and in the IPC path passes `eager = true`; the flood case and the starved-receiver case of the conformance suite |
-| **ST7.** Every wait of the funnel ends at the waiter's kill, so no death waits on a death | the kill request kicks whatever funnel wait it finds its target in, a stopper's wait included, and the funnel refuses every wait to a thread with a kill posted; the three sleeps outside the funnel end within a bound by construction and depend on no thread; a stopped space's record is posted by its own last death edge, which needs nothing of any stopper; so in a cycle of stops each stopper's wait ends at its own kill, each death takes its own space's count down, and every space of the cycle exits | a wait the kill does not end; a post that waits for a stopper; a stopper's wait that outlives its walk's kill | the mutual-stop host model, two spaces each stopping the other, over every interleaving; the QEMU case of two domains stopping each other on four CPUs; a seeded stopper's wait the kill leaves alone, which the model finds as a trace where both words stay `STOPPED` forever and the QEMU case as a missed deadline |
+| **ST7.** Every wait of the funnel ends at the waiter's kill, so no death waits on a death | the kill request kicks whatever funnel wait it finds its target in, a stopper's wait included, and the funnel refuses every wait to a thread with a kill posted; the three sleeps outside the funnel end within a bound by construction and depend on no thread; a stopped space's record is posted by its own last death edge, which needs nothing of any stopper; so in a cycle of stops each stopper's wait ends at its own kill, each death takes its own space's count down, and every space of the cycle exits; erXos's kernel has the same rule, a stopper's call ending at its own kill once its walk is done ([Threads and faults](design-kernel.md#threads-and-faults)) | a wait the kill does not end; a post that waits for a stopper; a stopper's wait that outlives its walk's kill | the mutual-stop host model, two spaces each stopping the other, over every interleaving; the QEMU case of two domains stopping each other on four CPUs; a seeded stopper's wait the kill leaves alone, which the model finds as a trace where both words stay `STOPPED` forever and the QEMU case as a missed deadline |
 | **ST8.** Nothing a stop or a wait leaves linked outlives what it is linked to or into | a delivery, an exit record's or an IRQ object's, holds `erx_object_ref` on its object from its post until the one step that takes or withdraws it, through every queue it sits in; a waiter's record names its list, the list's owner clears that name when it detaches the waiter at its own teardown, and the waiter reads it under the CPU lock before it touches the list, so it reaches the owner only while the owner's teardown has not run, which is before the owner's grace period and its free; a dying thread holds a counted reference on every group of its finishing path until its last switch, as a member holds its own path | a delivery's reference dropped when its handler returns rather than when it is taken; a resume that unlinks without the membership check; a finisher that holds its innermost group alone | the hosted suite under ASan: a space's record kept under a queued exit record until the record is taken, a sender killed as its gate is destroyed, and a stopper's group destroyed with its budget while finishers charge it; each with the seeded failure of the middle column, which ASan reports as a use after free |
 
 ## Data model
@@ -1049,7 +1049,13 @@ changes the request, the funnel, the share or the run word.
 * **Locks.** The order is the kernel's one order,
   `kernel/core/lock_order.h` ([Execution model and
   locking](design-kernel.md#execution-model-and-locking)), and this
-  binding adds no level to it. The space's lock, a `Helping_lock` at
+  binding adds no level to that file: the one level it needs beyond
+  the kernel's, for the fork's own queue locks, is a stopgap addition
+  recorded here and in the fork's lock-order check alone, since erXos's
+  kernel has no such locks: its ready queues are written by their CPU
+  alone and its request queue is appended with release stores
+  ([Cross-CPU requests](design-kernel.md#execution-model-and-locking)).
+  The space's lock, a `Helping_lock` at
   the order's third position, orders every write of the run word, the
   thread list, creation and start, and the stop walk's marking; it is
   never held with a leaf, across a request or across a wait: the walk
@@ -1065,9 +1071,14 @@ changes the request, the funnel, the share or the run word.
   kernel's order allows, an IRQ object's lock around the park lock and
   a memory object's lock around a umtx bucket's, are the only ones
   here. Below every leaf lie the fork's own queue locks, the request
-  queues' and the ready queue's, taken under the CPU lock for one edit
-  of their queue and never across anything else; the fork's lock-order
-  check places them under the leaves.
+  queues' and the ready queue's, which Fiasco takes inside a leaf (an
+  IRQ delivery readies its target, a queue edit, under the IRQ object's
+  lock) and only for one edit of their queue, never across anything
+  else.
+  They are the one level the fork's lock-order check has that
+  `kernel/core/lock_order.h` does not: the check places them beneath
+  every leaf as the stopgap's own addition, and the kernel's order
+  stays free of them.
 * **Home CPUs (K14).** A thread's state word, flags, wait kind, deadline
   and scheduling context are written only on its home CPU: by the thread
   itself, by the request's handler, by a timeout's expiry on that CPU's
@@ -1441,15 +1452,6 @@ Decisions that are the owner's, each with a recommendation:
    Recommendation: accept on the stopgap, measure in the flood case, and
    let erXos's kernel charge request handling to the requester's group
    if G1 shows the loss matters.
-5. **The stopper's call on erXos's kernel.** The kernel design runs a
-   stopped space's finishing threads on the stopper's time and says
-   nothing of a stopper that is itself stopped: two spaces stopping each
-   other would wait on each other there as they would have here.
-   Recommendation: adopt ST7 in the kernel design, the stopper's call
-   ending at its own kill once its walk is done, with the record posted
-   by the last death and the finishing work of a dead stopper's target
-   carried by whoever stopped the stopper, which is what the fork's
-   finisher path already charges.
 
 Risks: the one-tick slack on every deadline and slice is a measured
 difference, not a correctness one, until a runtime depends on sub-ms

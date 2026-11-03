@@ -3125,7 +3125,14 @@ group it is bound to, so a trigger and an unbinding agree on where a
 delivery goes; and a umtx bucket's lock may be taken inside the lock of
 the memory object whose word it queues, so a wait compares its word,
 queues itself and links the word's queue into the object's `att_words`
-under that object's lock ([Umtx](#umtx)). Debug builds check the order
+under that object's lock ([Umtx](#umtx)). The order has no level for
+scheduler or request queues: a CPU's ready queues are written by that
+CPU alone and its request queue is appended with release stores
+(**Cross-CPU requests** below), so no lock guards them. The stopgap's
+Fiasco does lock its queues and takes those locks inside leaves; that
+level belongs to the fork's own lock-order check, recorded in
+[design-stopgap-scheduling.md](design-stopgap-scheduling.md#concurrency-and-failure-behavior),
+and not to this order. Debug builds check the order
 on every acquisition and time every hold.
 
 **Releases run unlocked.** When the last capability to an object goes,
@@ -3470,7 +3477,23 @@ locking](#execution-model-and-locking)). The call can therefore take
 long: it finishes the calls of the tree's threads on the stopper's own
 time before it returns, so its caller makes it from a thread that nothing
 else waits on, never from one that serves others or holds what others
-wait for. A thread joins that list at its
+wait for. The stopper's wait for the tree's last death is a wait like
+any other (K33): once its walk has set every `stopped` word and sent
+every kill, the stopper sleeps holding nothing, and the wait ends either
+by the death that posts the last record or by the stopper's own kill. A
+stopper whose own space is stopped while it waits, by another space or
+by the one it is stopping, is therefore killed like any thread of a
+stopped space: its wait ends, it never returns to user mode, and it dies
+at its own return check. Nothing of its target depends on it: the
+target's record is posted by the target's last death, which needs no
+stopper, and the target's threads still inside calls finish at the
+finishing priority, their remaining work taken over by whoever stopped
+the stopper, as that stop takes over every call of the stopper's tree
+(**Helping** under [Execution model and
+locking](#execution-model-and-locking)). So two spaces stopping each
+other, or any ring of stops, end: each stopper's wait ends at its own
+kill, each death takes its own space's count down, and no death waits
+on a death. A thread joins that list at its
 creation, under the space's lock, which also
 checks that the space has neither stopped nor been closed, and leaves it
 when it dies, so once the space has stopped the list only shrinks, and it
@@ -6442,7 +6465,7 @@ same property on the other:
 | entropy | in full | added: the C17 ChaCha20 core behind a kernel object | | M1 |
 | the trace ring and `erx_object_info` | in full | added: erXos's trace ring and inspection topics as kernel objects beside Fiasco's objects, recording the ABI file's trace event types | Fiasco's own trace buffer stays in its kernel debugger | M4 |
 | deterministic mode | in full | added: with `erx.det=1` the stopgap starts no secondary CPU, seeds the generator with the fixed value, fixes the placement bases of the objects it adds, reads time only from the instruction-counted virtual counter and fixes the wall clock, as erXos's kernel does ([Deterministic mode](#deterministic-mode)) | Fiasco's own start-up lines are part of the transcript | M3 |
-| the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` runs erXos's C17 `ERXPACK` validator and finds the kernel, `sigma0` and the root task in the image; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |
+| the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` runs erXos's C17 `ERXPACK` validator and finds the kernel and the root task in the image, there being no `sigma0` executable; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |
 | the machine page and its boot value | in full | added: the page, in the ABI file's layout, written by the kernel from the boot arguments `bootstrap` passes and from the two `/chosen` properties that name the boot slot, which the QEMU harness writes | | M6 |
 | the device-secret page | in full | added: the page, in the ABI file's layout, carrying the encoding of none, since the stopgap runs only on QEMU, where the platform has no key | no boot-only section: the key read is erXos's kernel's alone | M1, so the root task's root capabilities are the same on both kernels |
 | ending the machine | in full | added: `erx_machine_end` as an invocation on an erXos platform object that calls Fiasco's firmware calls for power-off and reset; `ERX_END_TRIAL` fails with `ERX_ENOTSUP` | | M1 |
@@ -6494,10 +6517,12 @@ stopgap:
   run trusted code only, and a confined profiling interface replaces
   this access (`TODO.md`).
 
-* `sigma0`'s task remains, at the root of Fiasco's mapping database,
-  holding the identity mapping of device memory and the boot modules; no
-  thread runs in it, nothing can send to it, and the boot image carries
-  no executable for it. It pages nothing of the
+* `sigma0`'s task remains, the task Fiasco's code takes for the root of
+  physical memory; no thread runs in it, nothing can send to it, and the
+  boot image carries no executable for it. Fiasco's memory mapping
+  database, which its boot rooted there, is not built: the only mappings
+  are erXos's mapping records ([design-stopgap.md](design-stopgap.md#transport)).
+  It pages nothing of the
   root task, which has no pager; the kernel maps the root task's whole
   image at start from the same startup plan that computes its charges
   ([design-stopgap.md](design-stopgap.md#transport)).

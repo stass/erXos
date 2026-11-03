@@ -783,6 +783,19 @@ call graph has none ([design-kernel.md](design-kernel.md#stack-proof)).
 The EL1 synchronous vector runs on the panic stack, so no kernel path
 counts it on a thread's stack.
 
+The relocation rule requires `-ffunction-sections` on every object the
+proof reads, the kernel's and the stopgap's C17 cores' alike: the
+assembler resolves a `bl` to a `static` function in the same section
+itself and keeps no relocation for it, and the proof refuses such a call
+rather than guess its target, since a call it cannot name would make its
+caller a leaf and the proof unsound. With every function in its own
+section, every call to another function crosses a section and keeps its
+`R_AARCH64_CALL26`. A function that a `section(...)` attribute places in
+a section shared with its callers is refused the same way, so a kernel
+function that must live in a named section (the boot entry's, a vector's)
+is reached only through calls from other sections, which the refusal
+enforces.
+
 ### Chokepoints
 
 The AArch64 forms of the generic chokepoint rules

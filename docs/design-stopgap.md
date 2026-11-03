@@ -355,11 +355,26 @@ yields `erx_pool_plan_t`, four figures and one list:
 * `heap`, the ranges the heap takes, chosen as `Kmem_alloc`'s
   constructor chooses them (`kmem_alloc-arm.cpp`): from the highest
   range of the free map downward, each range whole, the last cut to its
-  top so the total is exact. The plan selects the largest total that is
-  a multiple of `pool_align`, at most `usable`, within
-  `pool_regions_max - 2` ranges, the kernel image's region and the alias
-  being the other two, and with `heap + alias` at most `pool_window`.
-  `heap` is the sum of the list; `regions` its length.
+  top so the total is exact. The total is the smaller of `usable` and
+  `pool_window - alias`, a multiple of `pool_align` since every range
+  is: the whole free map, cut only where the window binds. `heap` is
+  the sum of the list; `regions` its length. The region limit is an
+  admission rule, not a selection input: a free map of more than
+  `pool_regions_max - 2` ranges fails the plan, the kernel image's
+  region and the alias being the other two. Fiasco's constructor takes
+  ranges from the top until `kmemsize` is met and panics when
+  `Mem_layout::add_pmem` refuses a region past the limit, so a plan
+  that let the limit choose a prefix would make the heap depend on
+  which ranges lie highest, and more RAM or a loader placement near the
+  top of memory changes that: six small ranges above one large range
+  would push the large one out of a six-range prefix and shrink the
+  heap when memory grew. With the limit as a refusal, `heap` depends on
+  the free map only through `usable`, which more RAM and smaller
+  reservations never reduce; that is the monotone relation the host's
+  admission rests on (**The startup plan and its charge evidence**). The
+  limit holds at boot over the actual map, and on the host over the
+  platform's table, where the loader's two placements have no address
+  and count as two more ranges, since each splits at most one range.
 * `kmemsize`, in KiB, is `heap / 1024` and nothing else: Fiasco rounds
   the option up to its superpage (`determine_kmem_alloc_size`) and
   panics when the free map cannot fill it (`kmem_alloc-arm.cpp`), so
@@ -551,17 +566,24 @@ CPU lock, stays, and the exit joins Fiasco's common return path
 entry passes the same return check as a call's return
 ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
 
-**FP and SIMD state.** `CONFIG_PERFORMANCE`, which the fork's
-configuration sets, selects lazy FP switching (`Kconfig`), under which
-a thread's first FP instruction traps and `Thread::handle_fpu_trap`,
-reached from `arm_esr_entry`'s trap case (`arm/thread-arm.cpp`),
-allocates its state and enables the unit. That handler is deleted with
-the dispatcher, so the fork sets `CONFIG_LAZY_FPU` off: the FP unit is
-enabled for every thread, `Context::switch_fpu` saves the outgoing
-thread's state and restores the incoming one's at every switch
-(`context.cpp`, the eager implementation), no FP trap ever occurs, and
-the trap class is a fault record like any instruction the kernel does
-not support. erXos's kernel switches the same way
+**FP and SIMD state.** Fiasco's lazy FP switching (`CONFIG_LAZY_FPU`,
+`Kconfig`) lets a thread's first FP instruction trap so that
+`Thread::handle_fpu_trap`, reached from `arm_esr_entry`'s trap case
+(`arm/thread-arm.cpp`), allocates its state and enables the unit. That
+handler is deleted with the dispatcher, so the fork switches eagerly and
+makes lazy switching unconfigurable rather than merely unset: Fiasco's
+`CONFIG_PERFORMANCE` carries `select LAZY_FPU if FPU && HAS_LAZY_FPU`,
+which a `# CONFIG_LAZY_FPU is not set` line in a defconfig cannot
+override, since a `select` wins over the file. The fork's `Kconfig`
+therefore drops that `select` line from `PERFORMANCE`, drops
+`HAS_LAZY_FPU` from the architecture's `ARCHSELECT` list
+(`kern/arm/Kconfig`), and deletes the `LAZY_FPU` option together with
+the lazy implementation it guarded, so no configuration of the fork can
+express lazy switching. What remains is the eager implementation: the FP
+unit is enabled for every thread, `Context::switch_fpu` saves the
+outgoing thread's state and restores the incoming one's at every switch
+(`context.cpp`), no FP trap ever occurs, and the trap class is a fault
+record like any instruction the kernel does not support. erXos's kernel switches the same way
 ([design-arch-aarch64.md](design-arch-aarch64.md#fp-and-simd-state)). The state
 itself, `Fpu_state_simd` (`arm/64/fpu-arm.cpp`), lives inline in the
 fork's `Thread_object`, in the thread block the thread already owns,
@@ -597,15 +619,32 @@ the stopgap's frames do hold state across the sleep, so the shortcut
 stays off. The `timer` and `park` benchmarks measure what it would
 have saved.
 
-**`sigma0`.** The kernel creates the `sigma0` task as Fiasco's boot
-does, because Fiasco's memory mapping database is rooted at it
-(`init_mapdb_mem`, `map_util-mem.cpp`), from the fork's workload step,
-before the root budget exists and within `boot_reserve`. No thread is
-ever started in it, nothing can send to it, and the mapping database
-holds no erXos mapping; it exists so that inherited code that assumes a
-root task finds one. Since no thread runs there, the boot image carries
-no `sigma0` executable: nothing in the kernel but `init_std_workload`,
-which the fork does not build, reads the information page's `sigma0_ip`.
+**`sigma0` and the mapping database.** The kernel creates the `sigma0`
+task as Fiasco's boot does, from the fork's workload step, before the
+root budget exists and within `boot_reserve`, as a plain `Task`: it is
+the task Fiasco's code takes for the root of physical memory
+(`Mem_space::is_sigma0`), and it exists so that inherited code that
+assumes a root task finds one. No thread is ever started in it and
+nothing can send to it. Since no thread runs there, the boot image
+carries no `sigma0` executable: nothing in the kernel but
+`init_std_workload`, which the fork does not build, reads the
+information page's `sigma0_ip`. Fiasco's memory mapping database, which
+its boot roots at `sigma0` (`init_mapdb_mem`, `map_util-mem.cpp`), is
+not built: `mapdb.cpp`, `mapping_tree.cpp`, `mapping.cpp`,
+`map_util.cpp`, `map_util-mem.cpp`, `sigma0_task.cpp`, the debugger's
+`jdb_mapdb.cpp` and the `mapdb` preprocessor part (`config.cpp`) leave
+the fork's module lists (`Modules.generic`, `Modules.arm`). Every
+reader of the database was a native protocol: the flexpage map and
+unmap of `Task`, the item transfer of `thread-ipc.cpp`, the vCPU map of
+`thread_object.cpp`, the page-fault path with `Sigma0_task::v_fabricate`
+and the unmap `Task::destroy` ran over all spaces, which the fork's
+space teardown replaces (**Deletion**). So there is no `Treemap` slab
+to replace, no root `Physframe` array to count in `boot_reserve`, and
+no second owner of a mapping: the reverse map of erXos's mapping
+records is the one. The debugger's memory listing
+(`jdb/jdb_kern_info_kmem_alloc.cpp`) keeps the page allocator's dump
+and loses its loop over `Kmem_slab::reap_list`, since the fork has no
+slab allocators.
 
 ### Capabilities in Fiasco's object space
 
@@ -816,8 +855,8 @@ interrupt masking alone.
 * **The take.** `erx_reserve_take(reserve)` moves a page from a
   reserve's pool into use, under the owner's lock, and zeroes it; it is
   the C17 function erXos's kernel runs, and the one way a page comes
-  into use. A populate or a copy on write in `erx_user_sync_entry`'s
-  fault path takes from the space's or the object's pool
+  into use. A populate in `erx_user_sync_entry`'s fault path takes from
+  the space's or the object's pool
   (**Faults, and the fault of the root task** below); the walk of
   `Mem_space::v_insert` and the space teardown take their tables
   through `Erx_table_alloc`, the fork's allocator adapter over the
@@ -989,13 +1028,27 @@ interrupt masking alone.
   pages of the thread's reserve, which `erx_thread_create` charges and
   backs through `erx_reserve_charge`, mapped into an 8 KiB-aligned
   slot of the **thread region**, a range of the fork's kernel virtual
-  layout beside the physical-memory window
-  (`arm/64/mem_layout-arm-64.cpp`), with page entries in the kernel
-  directory written as `Kmem_alloc::map_pmem` writes superpage ones
-  (`Kmem::kdir->walk`, `kmem_alloc-arm.cpp`). The region has one slot
-  per two pages of the heap, and its translation tables are built at
-  boot, within `boot_reserve`'s per-heap-page term; a free slot is
-  found in a bitmap under a leaf lock. A creation that holds its two
+  layout, with page entries in the kernel directory written as
+  `Kmem_alloc::map_pmem` writes superpage ones (`Kmem::kdir->walk`,
+  `kmem_alloc-arm.cpp`). The region is `Thread_region_start` to
+  `Thread_region_end`, `0xffff0000'c0000000` to `0xffff0001'00000000`,
+  two constants the fork adds to `Virt_layout_kern` of the
+  non-hypervisor layout in `arm/64/mem_layout-arm-64.cpp`, the one
+  layout the fork builds (`CONFIG_CPU_VIRT` unset, pinned by the
+  configuration check): 1 GiB, as large as the physical-memory window
+  it mirrors slot for page pair, starting 1 GiB above `Map_base`, which
+  is where that layout maps the kernel image (`Pmem_end` and `Map_base`
+  are the same address there), and ending below the debugger's service
+  area at `0xffff1000'eac00000`. Two `static_assert`s in the glue pin
+  it against the layout, that it ends at or below `Tbuf_status_page`
+  and is as long as `Pmem_end - Pmem_start`, and an `ASSERT` in the
+  fork's kernel linker script pins it against the image, that
+  `_initcall_end`, the end of the range `add_initial_pmem` registers,
+  lies below `Thread_region_start`; a layout or image change that
+  crosses any of them fails the build. The region has one slot per two
+  pages of the heap, and its translation tables are built at boot,
+  within `boot_reserve`'s per-heap-page term; a free slot is found in a
+  bitmap under a leaf lock. A creation that holds its two
   pages always finds a slot: a slot is taken only after its block's two
   pages are held and returned before they are released, so the slots in
   use never exceed half the pages held; the creation's own two are held
@@ -1188,9 +1241,11 @@ the kernel checks a stated relation between them.
   `loader_reserve` for what the loader places, whose addresses the host
   cannot know. At boot its inputs are the actual descriptors and the
   actual reservations. The relation is monotone: more RAM and smaller
-  reservations never shrink `heap`, which a host test of the plan pins,
-  so with RAM at least `memory_min` and each loader reservation within
-  `loader_reserve`, both checked at boot, the kernel's `heap` is at
+  reservations never shrink `heap`, because the region limit refuses a
+  map rather than choosing within it (**The pool plan**), which a host
+  test of the plan pins, so with RAM at least `memory_min`, each loader
+  reservation within `loader_reserve` and the free map within the
+  region limit, all three checked at boot, the kernel's `heap` is at
   least the host's. `bootstrap` and the kernel, which do see the same
   inputs, must agree exactly.
 
@@ -1370,11 +1425,13 @@ and the vCPU return (`__iret`) is not built until M5. `erx_thread_stop`,
 destroy reach the thread only through `Erx::thread_request`, the
 binding's one request to a thread's home CPU, so no call touches a
 thread's state or registers from another CPU. The stopper's wait for
-`EXITED` is a completion wait of the binding's wait funnel,
-`Erx::wait_sleep`, ended through `erx_wait_complete` by the death that
-publishes `EXITED`; nothing is counted, and the fork adds no
-thread-state bit for it. The exit record's cross-CPU delivery is an
-`Erx::request` naming the space.
+`EXITED` is a stopper's wait of the binding's wait funnel,
+`Erx::wait_sleep`, ended through `erx_wait_complete` either by the
+death that publishes `EXITED` or by the stopper's own kill, which is
+what lets two spaces stop each other (ST7 and the wait classes of
+[design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit));
+nothing is counted, and the fork adds no thread-state bit for it. The
+exit record's cross-CPU delivery is an `Erx::request` naming the space.
 
 **What this binding requires of the scheduling binding.** Three
 interface constraints follow from the constructions above, and the
@@ -1580,19 +1637,37 @@ measured with `tools/erx bench irq` when resources land.
   ([Security](design-kernel.md#security)); this is a difference that
   remains, acceptable only because development builds run trusted code,
   and the benchmarks still time themselves by the time page's counter.
-  `Irq_shortcut` is zero. `CONFIG_LAZY_FPU` and `CONFIG_ARM_SVE` are
-  off, written out in the file so that `CONFIG_PERFORMANCE`'s default
-  cannot bring lazy switching back, and the build check of the
-  configuration fails on either set.
+  `Irq_shortcut` is zero. The configuration the build checks is the
+  resolved one, `globalconfig.out`, which Fiasco's Kconfig writes from
+  the defconfig after every `select` and `depends on` has been applied
+  (the `fiasco-kernel-config` step of `tools/lib/erx/fiasco.rb`), not
+  the defconfig itself, since a `select` can set what the defconfig
+  leaves unset. `tools/check_fiasco_config.rb` reads that file and
+  requires `CONFIG_FPU=y`, `CONFIG_PERFORMANCE=y` and
+  `CONFIG_PERF_CNT_USER=y`, and `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and
+  `CONFIG_CPU_VIRT` absent or `is not set`; the fork's `Kconfig` has no
+  `LAZY_FPU` option at all (**FP and SIMD state**), so that line of the
+  check holds by construction and guards against the option being
+  reintroduced. `CONFIG_CPU_VIRT` is pinned because the thread region's
+  range is a constant of the non-hypervisor layout (**Thread blocks**).
 * **Build**: erXos's LLVM build compiles the cores for the target with
   `-ffreestanding -mgeneral-regs-only -mno-outline-atomics
-  -fstack-usage` into one archive, checks the archive's undefined
-  symbols against an allowlist (the `erx_effect_*` functions and
+  -fstack-usage -ffunction-sections` into one archive, checks the
+  archive's undefined symbols against an allowlist (the `erx_effect_*` functions and
   Fiasco's `memcpy` and `memset`), and `tools/erx build fiasco` passes
   it to the inherited make as `ERX_CORE_ARCHIVE=`, which the fork's
   `Makeconf` adds to the kernel link; the glue alone has
   `include/erx/core/` on its include path. The glue is compiled with
-  GCC's `-fstack-usage` as well.
+  GCC's `-fstack-usage` as well. `-ffunction-sections` is what the
+  stack proof's call-graph extraction requires of every object it reads
+  ([design-arch-aarch64.md](design-arch-aarch64.md#stack-proof)): the
+  extractor counts a `bl` as a call only with an `R_AARCH64_CALL26`
+  relocation naming its target, and the assembler resolves a call to a
+  `static` function in the same section without one, so with every
+  function in its own section every call crosses a section and keeps
+  its relocation; a function placed in a shared section by a
+  `section(...)` attribute loses that and its callers are refused like
+  any call without a relocation.
 * **The glue's checks.** The glue is erXos's code, so the chokepoint
   rules bind it, each with a seeded violation that fails the build:
   lookup (B2: no capability-valued parameter and no lookup reference),
@@ -1719,6 +1794,7 @@ ran.
 | --- | --- | --- |
 | the vector route (B1) | every user-mode vector entry is one direct branch to one of the three stubs, each stub's body holds the prologue, its one named first call and no indirect branch, and `erx_user_sync_entry` calls `erx_fault_classify` first | a vector entry pointed at a revived `arm_esr_entry` fails; an asynchronous-error entry restored to Fiasco's `ENTRY` template fails; an inlined decode of the syndrome ahead of the classify call fails; a `blr` seeded into a stub fails; a revived `do_syscall` called from `entry.cpp` after the classification fails the per-file allowlist |
 | every exception class | the hostile suite raises a foreign trap, a breakpoint, an undefined instruction, an SVE instruction, an alignment fault and both memory-fault kinds on every CPU and sees each as its fault record or populate; an FP instruction in a fresh thread runs without a trap, and FP values survive a switch between two threads of different spaces on one CPU and a migration between CPUs | a class routed to Fiasco's slow trap ends with a kernel panic and fails; a build with `CONFIG_LAZY_FPU` set fails the configuration check, and, run anyway, turns the first FP instruction into a fault record and fails the FP case |
+| the fork's configuration | `tools/check_fiasco_config.rb` over the resolved `globalconfig.out` of every kernel build finds `CONFIG_FPU`, `CONFIG_PERFORMANCE` and `CONFIG_PERF_CNT_USER` set and `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and `CONFIG_CPU_VIRT` unset; a host test runs the check over a resolved file with each required line present and each forbidden one absent | a resolved file with `CONFIG_LAZY_FPU=y`, the case a `select` would produce, fails the check; a resolved file with `CONFIG_CPU_VIRT=y` fails it; a `LAZY_FPU` option seeded back into the fork's `Kconfig` with its `select` restored makes the real build's resolved file fail the same way |
 | the import allowlist | the glue's undefined symbols are all listed for their files | a glue call of `Kmem_alloc::q_alloc`, of `L4_timeout::microsecs_abs` or of a deleted path fails the build; a Fiasco internal called from `entry.cpp` fails |
 | inherited allocation (B9) | the linked kernel's call sites of the raw page allocator are the funnel and the listed boot-time functions; no slab symbol is defined | a revived `Fpu_alloc::alloc_state` fails the link; an inherited runtime function given a direct `Kmem_alloc::alloc` fails the call-site check; a listed function moved out of its initialization section fails |
 | the glue's signatures and fields | no glue function takes a capability value, a `Utcb *`, a `Syscall_frame *`, an `erx_regs_t` or an `erx_uframe_t` but `erx_syscall`'s frame, no glue source names a header field or a UTCB field, and the frame's state word is written only in `Erx::regs_load` | a seeded parameter, a seeded field access and a seeded state-word write each fail |
@@ -1729,7 +1805,7 @@ ran.
 | opaque cores and the opaque header | no file outside `kernel/core/` includes an `_impl.h` or defines `ERX_CORE_INTERNAL` | a glue file that includes one or defines it fails |
 | the charge model | every constant's `static_assert` holds | a model constant changed by one fails |
 | the plan at boot | the conformance boot starts the root task | a seeded extra allocation in the glue refuses the start with the named step |
-| the pool plan | the boot under TCG and HVF with 1 and 4 CPUs, at 512 MiB and at the platform's `memory_min`, passes the kernel's comparison of `heap` and `regions` and prints both figures; host tests feed the plan a map with a reservation straddling a unit boundary and find the loss counted, a map whose free memory exceeds the window and find `heap` cut to the window with `usable` untouched, a map of many small ranges and find the selection stop at the region limit, and a map with a hole where Fiasco's top-down walk would cut and find the same ranges; the monotonicity test grows RAM and shrinks each reservation and finds `heap` never smaller | a plan that subtracts byte sizes without rounding predicts more than Fiasco holds and is refused at boot; a plan that passes `usable` as `kmemsize` on the window-bound map makes Fiasco panic on the unfillable request, which the boot test reports; `boot_reserve` set below Fiasco's real use refuses the start |
+| the pool plan | the boot under TCG and HVF with 1 and 4 CPUs, at 512 MiB and at the platform's `memory_min`, passes the kernel's comparison of `heap` and `regions` and prints both figures; host tests feed the plan a map with a reservation straddling a unit boundary and find the loss counted, a map whose free memory exceeds the window and find `heap` cut to the window with `usable` untouched, a map of more ranges than the region limit and find the plan refused with the count, the same map with two ranges merged and find it admitted, and a map with a hole where Fiasco's top-down walk would cut and find the same ranges; the monotonicity test grows RAM, shrinks each reservation, and adds small ranges above a large one within the limit, and finds `heap` never smaller | a plan that subtracts byte sizes without rounding predicts more than Fiasco holds and is refused at boot; a plan that lets the limit choose a top-down prefix instead of refusing predicts a smaller `heap` after small ranges are added above a large one, which the monotonicity test catches; a plan that passes `usable` as `kmemsize` on the window-bound map makes Fiasco panic on the unfillable request, which the boot test reports; `boot_reserve` set below Fiasco's real use refuses the start |
 | the pool bound | the root budget's guarantee is at least `heap - boot_reserve(cpus, heap)` under both accelerators with 1 and 4 CPUs, at 512 MiB and at `memory_min` | as above; the per-heap-page term set below the page records' and the thread region's tables' real size refuses the start |
 | the rounded alias | a boot whose archive follows the kernel by a whole unit maps the alias | a recipe placing the archive in the kernel's last unit stops in `bootstrap` with the placement reason, and with that check removed panics in `add_pmem`, which the test reports as the regression |
 | the archive's alias | the root planner reads the manifest and `erx_image_map` copies the writable segments | the alias removed makes the kernel's read fault and the boot fails before the root task |
@@ -1900,32 +1976,19 @@ None beyond the imported Fiasco set
 | Fiasco's eager FP implementation has seen less use than its lazy one | low | a switch that loses FP state | the FP cases of the conformance suite under both accelerators, and the hostile demo's threads, which use FP on every CPU |
 | mixed GCC and clang objects disagree on an ABI detail | low | a link or runtime failure | the archive's undefined symbols are allowlisted, both use AAPCS64, and the conformance boot is the test |
 | the kernel's 1 GiB physical-memory window | certain | memory beyond it is unusable on the stopgap | QEMU guests at 512 MiB; a limitation, not a defect |
-| the window's region limit of 8 | low | a fragmented memory map is refused | the plan counts regions and refuses before placement; QEMU `virt` has one RAM range |
-| an inherited use of a thread block's physical address (`Kmem::virt_to_phys` on a context or its stack), which the thread region does not have | low | a wrong physical address for a block in a slot | no thread or context code of Fiasco's needs one once the kernel-user page is out of `Task::alloc_ku_mem`; the converters assert `Mem_layout::is_pmem` in debug builds, so a use fails the conformance boot rather than computing an address, and the suite runs every call on threads in slots |
+| the window's region limit of 8 | low | a fragmented memory map is refused | the plan counts the free map's ranges and refuses, on the host over the platform's table before placement and at boot over the actual map with a diagnostic naming the count; QEMU `virt` has one RAM range and no `/reserved-memory`, so its four reservations (the kernel image, the archive, `bootstrap`, the device tree) split it into at most five ranges; a platform that needs more raises `Mem_layout::Max_pmem_regions` and `pool_regions_max` together, which is one array's size |
+| an inherited use of a thread block's physical address (`Kmem::virt_to_phys` on a context or its stack), which the thread region does not have | low | a wrong physical address for a block in a slot | no thread or context code of Fiasco's needs one once the kernel-user page is out of `Task::alloc_ku_mem`; Fiasco's converter has no assertion to catch one, `Mem_layout::pmem_to_phys` answers `~0UL` for an address outside every registered region (`arm/mem_layout-arm.cpp`), so the fork's call-site check lists every caller of `Mem_layout::pmem_to_phys`, `Mem_layout::phys_to_pmem` and `Kmem::kdir->virt_to_phys` in the linked kernel (`Mem_space`'s directory address and the page allocator's own use) and fails the build on a new site, with a seeded call in a context path proving it; the conformance suite runs every call on threads in slots |
 | `boot_reserve`'s per-heap-page term, the page records and the thread region's tables, drifts from what boot takes | low | a refused start | the term is a formula of the heap, checked by the pool-bound test at 512 MiB and at `memory_min`, with the kernel printing both figures |
+
+The thread region's range (**Thread blocks**), the previous crash
+record's rights (the memory table of
+[Rights](design-kernel.md#rights): as the machine page, plus `DESTROY`),
+the absence of a `sigma0` executable (**`sigma0` and the mapping
+database**) and `memory_min`'s place as a field of `erx_manifest`
+([Interfaces](#interfaces)) are decisions, stated where they apply.
 
 Open questions, each with a recommendation:
 
-* **The thread region's place in the kernel's virtual layout.** The
-  region must be as large as the heap, one 8 KiB slot per two pages,
-  and `arm/64/mem_layout-arm-64.cpp` has a layout per configuration.
-  Recommended: a range as large as the physical-memory window beside
-  it, pinned by `static_assert`s in the glue against the layout's
-  constants so that a layout change fails the build; the range above
-  `Pmem_end` is free in one layout and holds the kernel image in the
-  other, so the placement is per layout.
-
-* **The previous crash record's rights.** The memory table needs a row
-  for it. Recommended: as the machine page, read-only with `READ`,
-  `MAP`, `INSPECT`, `DUP` and `GIVE`, plus `DESTROY`, so the system
-  domain can free its pages once the inspector has it.
-* **`sigma0`'s executable.** Recommended: not in the image, since no
-  thread runs there and nothing reads its entry; the task alone remains.
-  The alternative keeps a dead executable and a second placement plan.
-* **Where `memory_min` lives.** Recommended: a field of `erx_manifest`,
-  written from the packer's platform table, since it is the one platform
-  figure the kernel checks; a platform record in the ABI would carry
-  the rest of a table only the packer reads.
 * **The raw allocator's call-site check.** It reads the linked kernel's
   disassembly, which inlining could defeat; the fork marks the raw
   entries `noinline`. Recommended: keep the check, and have it also
