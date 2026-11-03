@@ -23,7 +23,7 @@ module Erx
       INVENTORY = 'abi/generated.json'
       MAX_INVENTORY_BYTES = 8 * 1024 * 1024
       OWNED = ['include/erx/abi*.h', 'liberx/generated/abi*.c',
-               'liberx/generated/calls.h', 'kernel/generated/abi*',
+               'liberx/generated/calls.h', 'kernel/generated/abi*', 'kernel/generated/*_impl.h',
                'liberx/backend/erx/arch/*/generated/*',
                'liberx/backend/fiasco/generated/*', 'liberx/backend/hosted/generated/*',
                'tools/generated/abi*', 'erlang/apps/erx/include/generated/*',
@@ -44,6 +44,7 @@ module Erx
           'docs/generated/abi-reference.md' => SupportEmitter.reference(schema),
           'fuzz/generated/abi.c' => SupportEmitter.fuzz(schema)
         }
+        files.merge!(CEmitter.private_headers(schema))
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
         files.each do |path, bytes|

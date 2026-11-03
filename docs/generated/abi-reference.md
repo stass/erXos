@@ -28,6 +28,14 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_BUDGET_ELASTIC` | 2 |
 | `ERX_BUDGET_WALL` | 1 |
 | `ERX_CALL_DEBUG_LOG` | 1 |
+| `ERX_CAP_GENERATION_BITS` | 40 |
+| `ERX_CAP_PAGE_SLOTS` | 64 |
+| `ERX_CAP_SLOT_BITS` | 24 |
+| `ERX_CAP_SLOT_STATE_FREE` | 0 |
+| `ERX_CAP_SLOT_STATE_LIVE` | 2 |
+| `ERX_CAP_SLOT_STATE_RESERVED` | 1 |
+| `ERX_CAP_SLOT_STATE_RETIRED` | 3 |
+| `ERX_CAPS_MAX` | 1048576 |
 | `ERX_COPY_MAX` | 1048576 |
 | `ERX_CRASH_CAUSE_FAULT` | 1 |
 | `ERX_CRASH_CAUSE_HALT` | 2 |
@@ -143,6 +151,40 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_IMAGE_SPAN_MAX` | 4294963200 |
 | `ERX_IMAGE_VERSION` | 1 |
 | `ERX_IMAGE_WRITABLE_MAX` | 67108864 |
+| `ERX_K_BUDGET` | 1 |
+| `ERX_K_DMA` | 9 |
+| `ERX_K_GATE` | 6 |
+| `ERX_K_GROUP` | 4 |
+| `ERX_K_IRQ` | 7 |
+| `ERX_K_MEMORY` | 5 |
+| `ERX_K_RESOURCE` | 8 |
+| `ERX_K_SPACE` | 2 |
+| `ERX_K_THREAD` | 3 |
+| `ERX_KIND_BOOT_IMAGE` | 14 |
+| `ERX_KIND_CARVED_BUDGET` | 2 |
+| `ERX_KIND_CARVED_RESOURCE` | 24 |
+| `ERX_KIND_CONTIGUOUS_MEMORY` | 9 |
+| `ERX_KIND_COW_CHILD` | 13 |
+| `ERX_KIND_DEVICE_SECRET` | 19 |
+| `ERX_KIND_DMA_WINDOW` | 25 |
+| `ERX_KIND_IMAGE_SLICE` | 15 |
+| `ERX_KIND_JIT_MEMORY` | 10 |
+| `ERX_KIND_LINE_IRQ` | 21 |
+| `ERX_KIND_MACHINE_PAGE` | 17 |
+| `ERX_KIND_MSI_IRQ` | 22 |
+| `ERX_KIND_NEW_GATE` | 6 |
+| `ERX_KIND_NEW_GROUP` | 5 |
+| `ERX_KIND_NEW_SPACE` | 3 |
+| `ERX_KIND_NEW_THREAD` | 4 |
+| `ERX_KIND_PAGED_CODE_MEMORY` | 12 |
+| `ERX_KIND_PAGED_MEMORY` | 11 |
+| `ERX_KIND_PHYSICAL_MEMORY` | 8 |
+| `ERX_KIND_PREVIOUS_CRASH` | 18 |
+| `ERX_KIND_ROOT_BUDGET` | 1 |
+| `ERX_KIND_ROOT_RESOURCE` | 23 |
+| `ERX_KIND_SHARED_MEMORY` | 7 |
+| `ERX_KIND_SOFTWARE_IRQ` | 20 |
+| `ERX_KIND_TIME_PAGE` | 16 |
 | `ERX_LABEL_SPLIT` | 2147483648 |
 | `ERX_LANE_MAX` | 16777216 |
 | `ERX_LANE_MIN` | 4096 |
@@ -284,6 +326,22 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `data_off` | `u64` | 8 | 1 |
 | `data_size` | `u64` | 16 | 1 |
 | `manifest_off` | `u64` | 24 | 1 |
+
+### `erx_cap_slot_t`
+
+Storage: `shared`. Prefix size: 64. Alignment: 8.
+
+Private to `kernel/core/cap.c`: defined only in `kernel/generated/cap_slot_impl.h`.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `object` | `u64` | 0 | 1 |
+| `generation` | `u64` | 8 | 1 |
+| `seq` | `u64` | 16 | 1 |
+| `rights` | `u32` | 24 | 1 |
+| `type` | `u32` | 28 | 1 |
+| `state` | `u32` | 32 | 1 |
+| `next` | `u32` | 36 | 1 |
 
 ### `erx_elf64_dyn_t`
 

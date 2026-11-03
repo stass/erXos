@@ -34,6 +34,14 @@ struct erx_rights {
 #define ERX_BUDGET_ELASTIC UINT32_C(2)
 #define ERX_BUDGET_WALL UINT32_C(1)
 #define ERX_CALL_DEBUG_LOG UINT32_C(1)
+#define ERX_CAP_GENERATION_BITS UINT32_C(40)
+#define ERX_CAP_PAGE_SLOTS UINT32_C(64)
+#define ERX_CAP_SLOT_BITS UINT32_C(24)
+#define ERX_CAP_SLOT_STATE_FREE UINT32_C(0)
+#define ERX_CAP_SLOT_STATE_LIVE UINT32_C(2)
+#define ERX_CAP_SLOT_STATE_RESERVED UINT32_C(1)
+#define ERX_CAP_SLOT_STATE_RETIRED UINT32_C(3)
+#define ERX_CAPS_MAX UINT32_C(1048576)
 #define ERX_COPY_MAX UINT32_C(1048576)
 #define ERX_CRASH_CAUSE_FAULT UINT32_C(1)
 #define ERX_CRASH_CAUSE_HALT UINT32_C(2)
@@ -149,6 +157,40 @@ struct erx_rights {
 #define ERX_IMAGE_SPAN_MAX UINT64_C(4294963200)
 #define ERX_IMAGE_VERSION UINT16_C(1)
 #define ERX_IMAGE_WRITABLE_MAX UINT64_C(67108864)
+#define ERX_K_BUDGET UINT32_C(1)
+#define ERX_K_DMA UINT32_C(9)
+#define ERX_K_GATE UINT32_C(6)
+#define ERX_K_GROUP UINT32_C(4)
+#define ERX_K_IRQ UINT32_C(7)
+#define ERX_K_MEMORY UINT32_C(5)
+#define ERX_K_RESOURCE UINT32_C(8)
+#define ERX_K_SPACE UINT32_C(2)
+#define ERX_K_THREAD UINT32_C(3)
+#define ERX_KIND_BOOT_IMAGE UINT32_C(14)
+#define ERX_KIND_CARVED_BUDGET UINT32_C(2)
+#define ERX_KIND_CARVED_RESOURCE UINT32_C(24)
+#define ERX_KIND_CONTIGUOUS_MEMORY UINT32_C(9)
+#define ERX_KIND_COW_CHILD UINT32_C(13)
+#define ERX_KIND_DEVICE_SECRET UINT32_C(19)
+#define ERX_KIND_DMA_WINDOW UINT32_C(25)
+#define ERX_KIND_IMAGE_SLICE UINT32_C(15)
+#define ERX_KIND_JIT_MEMORY UINT32_C(10)
+#define ERX_KIND_LINE_IRQ UINT32_C(21)
+#define ERX_KIND_MACHINE_PAGE UINT32_C(17)
+#define ERX_KIND_MSI_IRQ UINT32_C(22)
+#define ERX_KIND_NEW_GATE UINT32_C(6)
+#define ERX_KIND_NEW_GROUP UINT32_C(5)
+#define ERX_KIND_NEW_SPACE UINT32_C(3)
+#define ERX_KIND_NEW_THREAD UINT32_C(4)
+#define ERX_KIND_PAGED_CODE_MEMORY UINT32_C(12)
+#define ERX_KIND_PAGED_MEMORY UINT32_C(11)
+#define ERX_KIND_PHYSICAL_MEMORY UINT32_C(8)
+#define ERX_KIND_PREVIOUS_CRASH UINT32_C(18)
+#define ERX_KIND_ROOT_BUDGET UINT32_C(1)
+#define ERX_KIND_ROOT_RESOURCE UINT32_C(23)
+#define ERX_KIND_SHARED_MEMORY UINT32_C(7)
+#define ERX_KIND_SOFTWARE_IRQ UINT32_C(20)
+#define ERX_KIND_TIME_PAGE UINT32_C(16)
 #define ERX_LABEL_SPLIT UINT32_C(2147483648)
 #define ERX_LANE_MAX UINT32_C(16777216)
 #define ERX_LANE_MIN UINT32_C(4096)
@@ -330,6 +372,8 @@ _Static_assert(offsetof(erx_msg_item_t, desc) ==
 _Static_assert(offsetof(erx_msg_item_t, cap) ==
     ERX_MSG_ITEM_OFF_CAP, "erx_msg_item.cap offset");
 
+typedef uint32_t erx_cap_slot_state_t;
+
 typedef uint32_t erx_crash_cause_t;
 
 typedef uint32_t erx_crash_form_t;
@@ -378,6 +422,10 @@ _Static_assert(offsetof(erx_pack_entry_t, data_size) ==
     ERX_PACK_ENTRY_OFF_DATA_SIZE, "erx_pack_entry.data_size offset");
 _Static_assert(offsetof(erx_pack_entry_t, manifest_off) ==
     ERX_PACK_ENTRY_OFF_MANIFEST_OFF, "erx_pack_entry.manifest_off offset");
+
+#define ERX_CAP_SLOT_SIZE 64
+#define ERX_CAP_SLOT_ALIGN 8
+typedef struct erx_cap_slot erx_cap_slot_t;
 
 #define ERX_ELF64_DYN_SIZE 16
 #define ERX_ELF64_DYN_ALIGN 8
@@ -2855,6 +2903,352 @@ erx_utcb_user_store(erx_utcb_t *record, size_t index, uint64_t value)
 	atomic_store_explicit(&record->user[index], value,
 	    memory_order_release);
 	return (true);
+}
+
+/* An object type and a creation kind, numbered by the ABI file. */
+typedef uint32_t erx_ktype_t;
+typedef uint32_t erx_create_kind_t;
+
+/* The rights a capability of the type can carry. */
+static inline uint32_t
+erx_ktype_rights_mask(erx_ktype_t type)
+{
+	static const uint32_t table[] = {
+		[ERX_K_BUDGET] = ERX_HR_ALLOC |
+		    ERX_HR_CARVE |
+		    ERX_HR_CODE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SPACES,
+		[ERX_K_DMA] = ERX_HR_BIND |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP,
+		[ERX_K_GATE] = ERX_HR_CALL |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SERVE,
+		[ERX_K_GROUP] = ERX_HR_ATTACH |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SIGNAL,
+		[ERX_K_IRQ] = ERX_HR_ACK |
+		    ERX_HR_BIND |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_TRIGGER,
+		[ERX_K_MEMORY] = ERX_HR_CARVE |
+		    ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_EXEC |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_JIT |
+		    ERX_HR_MAP |
+		    ERX_HR_PHYS |
+		    ERX_HR_READ |
+		    ERX_HR_SUPPLY |
+		    ERX_HR_SYSTEM |
+		    ERX_HR_WRITE,
+		[ERX_K_RESOURCE] = ERX_HR_CARVE |
+		    ERX_HR_DUP |
+		    ERX_HR_ENTROPY |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_POWER |
+		    ERX_HR_TRACE,
+		[ERX_K_SPACE] = ERX_HR_CAPS |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_STOP |
+		    ERX_HR_THREADS,
+		[ERX_K_THREAD] = ERX_HR_CONFIGURE |
+		    ERX_HR_CONTROL |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT,
+	};
+
+	if (type >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[type]);
+}
+
+/* The rights it keeps when it passes to a peer; 0: it never passes. */
+static inline uint32_t
+erx_ktype_pass_mask(erx_ktype_t type)
+{
+	static const uint32_t table[] = {
+		[ERX_K_BUDGET] = UINT32_C(0),
+		[ERX_K_DMA] = UINT32_C(0),
+		[ERX_K_GATE] = ERX_HR_CALL |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SERVE,
+		[ERX_K_GROUP] = UINT32_C(0),
+		[ERX_K_IRQ] = ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_TRIGGER,
+		[ERX_K_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+		[ERX_K_RESOURCE] = UINT32_C(0),
+		[ERX_K_SPACE] = UINT32_C(0),
+		[ERX_K_THREAD] = UINT32_C(0),
+	};
+
+	if (type >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[type]);
+}
+
+/* The type of object a creation kind makes. */
+static inline uint32_t
+erx_kind_ktype(erx_create_kind_t kind)
+{
+	static const uint32_t table[] = {
+		[ERX_KIND_BOOT_IMAGE] = ERX_K_MEMORY,
+		[ERX_KIND_CARVED_BUDGET] = ERX_K_BUDGET,
+		[ERX_KIND_CARVED_RESOURCE] = ERX_K_RESOURCE,
+		[ERX_KIND_CONTIGUOUS_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_COW_CHILD] = ERX_K_MEMORY,
+		[ERX_KIND_DEVICE_SECRET] = ERX_K_MEMORY,
+		[ERX_KIND_DMA_WINDOW] = ERX_K_DMA,
+		[ERX_KIND_IMAGE_SLICE] = ERX_K_MEMORY,
+		[ERX_KIND_JIT_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_LINE_IRQ] = ERX_K_IRQ,
+		[ERX_KIND_MACHINE_PAGE] = ERX_K_MEMORY,
+		[ERX_KIND_MSI_IRQ] = ERX_K_IRQ,
+		[ERX_KIND_NEW_GATE] = ERX_K_GATE,
+		[ERX_KIND_NEW_GROUP] = ERX_K_GROUP,
+		[ERX_KIND_NEW_SPACE] = ERX_K_SPACE,
+		[ERX_KIND_NEW_THREAD] = ERX_K_THREAD,
+		[ERX_KIND_PAGED_CODE_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_PAGED_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_PHYSICAL_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_PREVIOUS_CRASH] = ERX_K_MEMORY,
+		[ERX_KIND_ROOT_BUDGET] = ERX_K_BUDGET,
+		[ERX_KIND_ROOT_RESOURCE] = ERX_K_RESOURCE,
+		[ERX_KIND_SHARED_MEMORY] = ERX_K_MEMORY,
+		[ERX_KIND_SOFTWARE_IRQ] = ERX_K_IRQ,
+		[ERX_KIND_TIME_PAGE] = ERX_K_MEMORY,
+	};
+
+	if (kind >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[kind]);
+}
+
+/* The rights a creation of the kind returns. */
+static inline uint32_t
+erx_kind_default_mask(erx_create_kind_t kind)
+{
+	static const uint32_t table[] = {
+		[ERX_KIND_BOOT_IMAGE] = ERX_HR_CARVE |
+		    ERX_HR_CHILD |
+		    ERX_HR_DUP |
+		    ERX_HR_EXEC |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_SYSTEM,
+		[ERX_KIND_CARVED_BUDGET] = ERX_HR_ALLOC |
+		    ERX_HR_CARVE |
+		    ERX_HR_CODE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SPACES,
+		[ERX_KIND_CARVED_RESOURCE] = ERX_HR_CARVE |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT,
+		[ERX_KIND_CONTIGUOUS_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_PHYS |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+		[ERX_KIND_COW_CHILD] = ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+		[ERX_KIND_DEVICE_SECRET] = ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ,
+		[ERX_KIND_DMA_WINDOW] = ERX_HR_BIND |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP,
+		[ERX_KIND_IMAGE_SLICE] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_EXEC |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ,
+		[ERX_KIND_JIT_MEMORY] = ERX_HR_DESTROY |
+		    ERX_HR_EXEC |
+		    ERX_HR_INSPECT |
+		    ERX_HR_JIT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+		[ERX_KIND_LINE_IRQ] = ERX_HR_ACK |
+		    ERX_HR_BIND |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_TRIGGER,
+		[ERX_KIND_MACHINE_PAGE] = ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ,
+		[ERX_KIND_MSI_IRQ] = ERX_HR_ACK |
+		    ERX_HR_BIND |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_TRIGGER,
+		[ERX_KIND_NEW_GATE] = ERX_HR_CALL |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SERVE,
+		[ERX_KIND_NEW_GROUP] = ERX_HR_ATTACH |
+		    ERX_HR_CONFIGURE |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SIGNAL,
+		[ERX_KIND_NEW_SPACE] = ERX_HR_CAPS |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_STOP |
+		    ERX_HR_THREADS,
+		[ERX_KIND_NEW_THREAD] = ERX_HR_CONFIGURE |
+		    ERX_HR_CONTROL |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT,
+		[ERX_KIND_PAGED_CODE_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_EXEC |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_SUPPLY,
+		[ERX_KIND_PAGED_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_SUPPLY,
+		[ERX_KIND_PHYSICAL_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+		[ERX_KIND_PREVIOUS_CRASH] = ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ,
+		[ERX_KIND_ROOT_BUDGET] = ERX_HR_ALLOC |
+		    ERX_HR_CARVE |
+		    ERX_HR_CODE |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_SPACES,
+		[ERX_KIND_ROOT_RESOURCE] = ERX_HR_CARVE |
+		    ERX_HR_DUP |
+		    ERX_HR_ENTROPY |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_POWER |
+		    ERX_HR_TRACE,
+		[ERX_KIND_SHARED_MEMORY] = ERX_HR_CHILD |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_SUPPLY |
+		    ERX_HR_WRITE,
+		[ERX_KIND_SOFTWARE_IRQ] = ERX_HR_BIND |
+		    ERX_HR_DESTROY |
+		    ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_TRIGGER,
+		[ERX_KIND_TIME_PAGE] = ERX_HR_DUP |
+		    ERX_HR_GIVE |
+		    ERX_HR_INSPECT |
+		    ERX_HR_MAP |
+		    ERX_HR_READ |
+		    ERX_HR_WRITE,
+	};
+
+	if (kind >= sizeof(table) / sizeof(table[0]))
+		return (UINT32_C(0));
+	return (table[kind]);
 }
 
 #endif /* ERX_ABI_H */

@@ -81,8 +81,16 @@ module Erx
     Tail = Struct.new(:name, :type, :count_field, :maximum, :line,
                       keyword_init: true)
     Layout = Struct.new(:name, :version, :storage, :alignment, :size,
-                        :fields, :padding, :tail, :sequence, :line,
-                        keyword_init: true) do
+                        :fields, :padding, :tail, :sequence, :private_owner,
+                        :line, keyword_init: true) do
+      # A private layout's members are its owner's alone: private_owner is
+      # the one source file the ABI file names as its owner, nil for a
+      # public layout. Its definition, offsets and accessors go to its own
+      # header, named after the layout without its erx_ prefix; the public
+      # header declares only its tag, size and alignment.
+      def private? = !private_owner.nil?
+      def private_header = private? ? "kernel/generated/#{Names.stem(name)}_impl.h" : nil
+
       def fetch_field(name)
         fields.find { |field| field.name == name } || line.fail!("unknown field #{name}")
       end
@@ -94,7 +102,7 @@ module Erx
                         :order, :source_role, :extent, :line, keyword_init: true)
     Constant = Struct.new(:name, :value, :type, :description, keyword_init: true)
     Schema = Struct.new(:version, :architecture, :types, :type_order,
-                        :constants, :rights, :objects, :caps, :calls,
+                        :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
                         :inputs, keyword_init: true)
 
@@ -102,7 +110,7 @@ module Erx
     # declaration, and no output depends on hash insertion or include order.
     module Model
       TOP_LEVEL = %w[abi arch trap reg limit scalar enum flags bytes layout
-                     status right type cap call reader translation service
+                     status right type kind cap call reader translation service
                      projection].freeze
       TYPE_KINDS = %w[scalar enum flags bytes layout].freeze
       BASE_TYPES = [1, 2, 4, 8].flat_map do |size|
@@ -147,6 +155,7 @@ module Erx
         end
         unique_values(rights, label: 'right', line: abi.line)
         objects = validate_objects(by_kind.fetch('type', []), rights)
+        kinds = validate_kinds(by_kind.fetch('kind', []), objects, rights)
         caps = validate_caps(by_kind.fetch('cap', []), objects, rights)
         calls = validate_calls(by_kind.fetch('call', []), types, constants, objects, rights)
         abi.fail!('calls require a complete architecture binding') if calls.any? && !architecture
@@ -161,13 +170,15 @@ module Erx
             all_constants[name] = value
           end
         end
+        objects.each { |name, value| add_constant(all_constants, "k_#{name}", value.fetch(:number), BASE_TYPES.fetch('u32'), abi.line) }
+        kinds.each { |name, value| add_constant(all_constants, "kind_#{name}", value.fetch(:number), BASE_TYPES.fetch('u32'), abi.line) }
         caps.each { |name, value| add_constant(all_constants, "root_slot_#{name}", value.fetch(:slot), BASE_TYPES.fetch('u32'), abi.line) }
         calls.each { |name, value| add_constant(all_constants, "call_#{name}", value.fetch(:number), BASE_TYPES.fetch('u32'), abi.line) }
         Names.validate(types: types, constants: all_constants, calls: calls,
                        readers: readers, architecture: architecture, line: abi.line)
         result = Schema.new(version: version, architecture: architecture, types: types.freeze,
                    type_order: type_order.freeze, constants: all_constants.sort.to_h.freeze,
-                   rights: rights.freeze, objects: objects.freeze, caps: caps.freeze,
+                   rights: rights.freeze, objects: objects.freeze, kinds: kinds.freeze, caps: caps.freeze,
                    calls: calls.freeze, readers: readers.sort_by(&:name).freeze,
                    translations: translations.freeze, services: services.freeze,
                    projections: projections.freeze, inputs: source.inputs).freeze
@@ -456,6 +467,7 @@ module Erx
         sequence = nil
         current_field = nil
         metadata = []
+        private_owner = nil
         declaration.members.each do |line|
           keyword, *words = line.words
           if line.indent == 4
@@ -473,6 +485,7 @@ module Erx
             type = types.fetch(words[1])
             line.fail!('variable layout cannot be embedded') if type.is_a?(Layout) && type.tail
             line.fail!('nested layout storage differs from its owner') if type.is_a?(Layout) && type.storage != storage
+            line.fail!('a private layout cannot be embedded') if type.is_a?(Layout) && type.private?
             count = words.size == 5 ? reference(words[4], constants, line) : nil
             line.fail!('array count must be positive and bounded') if count && (!count.positive? || count > MAX_LAYOUT_SIZE)
             offset = unsigned(words[2], line, maximum: size)
@@ -498,6 +511,12 @@ module Erx
             sequence = { field: words[0], terminal: unsigned(words[2], line),
                          exhaustion: words[4], recovery: words[6], line: line }.freeze
             current_field = nil
+          when 'private'
+            arity(line, 2)
+            line.fail!('duplicate private declaration') if private_owner
+            line.fail!('a wire layout is read by other parties and cannot be private') if storage == 'wire_le'
+            private_owner = owner_source(words[0], line)
+            current_field = nil
           when 'atomic', 'writer', 'owner', 'zero', 'input_mask', 'visibility'
             metadata << line
             current_field = nil
@@ -515,10 +534,23 @@ module Erx
           tail.line.fail!('tail is misaligned or contains a variable layout') unless (size % tail.type.alignment).zero? && !(tail.type.is_a?(Layout) && tail.type.tail)
         end
         validate_sequence(sequence, completed, constants) if sequence
+        if tail && tail.type.is_a?(Layout) && tail.type.private?
+          tail.line.fail!('a private layout cannot be embedded')
+        end
         Layout.new(name: name, version: version, storage: storage,
                    alignment: alignment, size: size, fields: completed.freeze,
                    padding: padding.freeze, tail: tail, sequence: sequence,
+                   private_owner: private_owner,
                    line: declaration.line).freeze
+      end
+
+      # The owner of a private layout: one C source of erXos's own, by a
+      # plain relative path, which the chokepoint rule generated for the
+      # layout lets include its header.
+      def owner_source(path, line)
+        line.fail!('a private layout names its owner as a relative path to a C source') unless
+          path.match?(%r{\A[a-z0-9_]+(?:/[a-z0-9_]+)*\.c\z})
+        path
       end
 
       def validate_layout_extents(fields, padding, size:, alignment:, line:)
@@ -745,21 +777,59 @@ module Erx
           declaration.members.each do |line|
             arity(line, 2)
             key, value = line.words
-            line.fail!('unknown or duplicate object rights set') unless %w[rights default pass].include?(key) && !sets.key?(key)
+            line.fail!('unknown or duplicate object rights set') unless %w[rights pass].include?(key) && !sets.key?(key)
             members = list(value, line)
             line.fail!('undefined right') unless (members - rights.keys).empty?
             sets[key] = members
           end
-          declaration.fail!('object needs rights, default and pass sets') unless sets.keys.sort == %w[default pass rights]
-          %w[default pass].each do |kind|
-            declaration.fail!("#{kind} set exceeds type rights") unless (sets.fetch(kind) - sets.fetch('rights')).empty?
-          end
+          declaration.fail!('object needs rights and pass sets') unless sets.keys.sort == %w[pass rights]
+          declaration.fail!('pass set exceeds type rights') unless (sets.fetch('pass') - sets.fetch('rights')).empty?
           objects[name] = { number: positive(number, declaration.line, maximum: 65535), sets: sets.freeze }.freeze
         end
         if objects.any?
           unique_values(objects.transform_values { |object| object.fetch(:number) }, label: 'object type', line: declarations.first.line)
         end
         objects.sort.to_h
+      end
+
+      # A creation kind names one way an object is made and the rights its
+      # capability is created with (docs/design-kernel.md, "Rights"). Each
+      # kind's default lies within its type's carryable rights, and a kind
+      # that carves another, as a carved budget carves the root budget's,
+      # creates nothing its parent was not created with, DESTROY aside, so
+      # a carve, a shrink of a create, never needs a right its parent lacks.
+      def validate_kinds(declarations, objects, rights)
+        kinds = {}
+        declarations.each do |declaration|
+          arity(declaration.line, 4)
+          name, number, type = declaration.args
+          object = objects[type] || declaration.fail!('undefined kind object type')
+          sets = {}
+          declaration.members.each do |line|
+            arity(line, 2)
+            key, value = line.words
+            line.fail!('unknown or duplicate kind member') unless %w[default carves].include?(key) && !sets.key?(key)
+            sets[key] = key == 'default' ? list(value, line) : Syntax.identifier(value, line: line)
+          end
+          default = sets['default'] || declaration.fail!('kind needs a default set')
+          declaration.fail!('undefined right') unless (default - rights.keys).empty?
+          declaration.fail!('kind default exceeds type rights') unless (default - object.fetch(:sets).fetch('rights')).empty?
+          kinds[name] = { number: positive(number, declaration.line, maximum: 65535), type: type,
+                          default: default, carves: sets['carves'], line: declaration.line }
+        end
+        kinds.each_value do |kind|
+          next unless kind.fetch(:carves)
+
+          parent = kinds[kind.fetch(:carves)] || kind.fetch(:line).fail!('undefined carved kind')
+          kind.fetch(:line).fail!('carved kind of another type') unless parent.fetch(:type) == kind.fetch(:type)
+          unless (kind.fetch(:default) - parent.fetch(:default) - %w[destroy]).empty?
+            kind.fetch(:line).fail!('carved kind exceeds its parent kind and destroy')
+          end
+        end
+        if kinds.any?
+          unique_values(kinds.transform_values { |kind| kind.fetch(:number) }, label: 'creation kind', line: declarations.first.line)
+        end
+        kinds.sort.to_h.transform_values { |kind| kind.except(:line).freeze }
       end
 
       def validate_caps(declarations, objects, rights)
@@ -809,6 +879,7 @@ module Erx
           name, layout_name, build = declaration.args
           layout = types[layout_name]
           declaration.fail!('projection needs a layout and release/development build') unless layout.is_a?(Layout) && %w[release development].include?(build)
+          declaration.fail!('a private layout cannot be projected') if layout.private?
           leaves = leaf_fields(layout)
           selected = {}
           declaration.members.each do |line|

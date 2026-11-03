@@ -15,11 +15,9 @@ scalar deadline u64
 scalar uword u64 align 4
 type space 1
   rights stop
-  default stop
   pass none
 type gate 2
   rights call
-  default call
   pass none
 enum probe_mode u32
   value fast 1

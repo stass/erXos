@@ -30,6 +30,7 @@ module Erx
           next unless type.is_a?(Layout)
           out.concat(["### `#{CEmitter.c_type(type)}`", '',
                       "Storage: `#{type.storage}`. Prefix size: #{type.size}. Alignment: #{type.alignment}.", '',
+                      *(type.private? ? ["Private to `#{type.private_owner}`: defined only in `#{type.private_header}`.", ''] : []),
                       '| Field | Type | Offset | Count |', '| --- | --- | ---: | ---: |'])
           type.fields.each do |field|
             out << "| `#{field.name}` | `#{field.type.name}` | #{field.offset} | #{field.count || 1} |"

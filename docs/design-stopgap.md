@@ -200,7 +200,7 @@ Three layers carry them:
 | **B1.** Every exception from user mode enters through `erx_user_sync_entry`, Fiasco's interrupt entry or `erx_user_serror_entry`, the synchronous entry's first call is `erx_fault_classify`, and what follows the classification is the C17 `erx_entry_step` | each of the eight user-mode vector entries is one direct branch to one of the three stubs; each stub's body is the frame-saving prologue and direct calls to the functions it is named for, with no indirect branch; the synchronous stub's `entry.cpp` references no Fiasco internal but the common return path, its other calls being the cores' `erx_fault_classify`, `erx_entry_step` and `erx_dispatch`; the Fiasco functions that decoded user intent are deleted from the fork's sources, so no code implements a protocol an entry could reach | a vector entry pointing at another stub or carrying Fiasco's `ENTRY` template, whose target is a register; a decode of the syndrome in the synchronous entry before the classify call; an indirect call in a stub; a handler revived and called after the classification | `tools/check_vectors.rb` over the fork's `exception_vector` and the three stubs' disassembly, with a seeded vector to a revived `arm_esr_entry`, a seeded `ENTRY`-template entry, a seeded inlined syscall decode ahead of the classify call and a seeded `blr` in a stub, each failing the build; `entry.cpp`'s import allowlist, with a seeded call of a revived `do_syscall` after the classification failing the build |
 | **B2.** Every object a call names passed `erx_cap_lookup` in the caller's table | the generated decoder is the only caller of handlers, and only `erx_cap_lookup` turns a capability value into an object; the glue takes no capability value and references no lookup | a handler that takes a raw slot index; a glue function with a capability parameter | the glue's import allowlist and signature check; the hostile suite's stale and wrong-rights capabilities |
 | **B3.** The UTCB a thread sees is the ABI file's `erx_utcb`, byte for byte, and the kernel decides on each of its values from one load | Fiasco's `Utcb` (`abi/l4_types.cpp`) and `erx_utcb` have the same layout; the glue reaches it only through the generated accessors; every value a decision needs is in a kernel-owned argument record before any Fiasco internal runs, and no glue function takes a `Utcb *` | a field added to either; a Fiasco internal that re-reads a buffer word | `static_assert`s over every field; the glue's signature check; a conformance case that rewrites a deadline from another thread after the call entered |
-| **B4.** The glue decides nothing a core decides | the cores' record types are opaque to the glue, their definitions in `kernel/core/*_impl.h`, which only `kernel/core/*.c` includes; `erx_object_t` is embedded as opaque storage whose fields only the cores name | an `_impl.h` included from the glue; a glue function that branches on a core's result beyond translating it | the include check; the header's opaque storage, which has no field to write; review of each `erx_effect_*` function, which is one translation and one Fiasco call |
+| **B4.** The glue decides nothing a core decides | the cores' record types are opaque to the glue, their definitions in `kernel/core/*_impl.h` and the generated private headers `kernel/generated/*_impl.h`, which only `kernel/core/*.c` and the cores' host tests include; `erx_object_t` is embedded as opaque storage whose fields only the cores name | an `_impl.h` included from the glue; a glue function that branches on a core's result beyond translating it | the include check; the header's opaque storage, which has no field to write; review of each `erx_effect_*` function, which is one translation and one Fiasco call |
 | **B5.** The root task starts only as its plans say | the kernel applies `erx_root_plan`'s steps through the funnel and compares the root budget's counters with the plan, after it has compared the pool with `erx_pool_plan`, before it starts the first thread | an allocation outside the plan; a model constant that drifts from Fiasco's sizes; a reservation the pool plan does not know | `static_assert`s of every model constant against Fiasco's types; the two boot refusals; a seeded extra allocation makes the conformance boot refuse |
 | **B6.** No byte of a boot image is copied or run before the validator accepted the image and the file it belongs to passed its check, and no inherited code reads an ELF | `bootstrap` finds the archive with `erx_boot_locate` and opens it with `erx_pack_open` before it reads any entry, checks the kernel's file with `erx_pack_file_check` before it reads it, plans the kernel's placement with `erx_elf_plan` and `erx_boot_place`, and copies only what the plan names; it never relocates itself | an entry read before the open; a call of Fiasco's `exec_load_elf` | the order in `bootstrap`'s one erXos function; `exec_load_elf`, `load_elf_module` and `find_kip` are not built; a malformed image stops in `bootstrap` with the validator's reason; the fuzz targets of both planners |
 | **B7.** A crash record read from the console is valid or reported as truncated or corrupt | the frame's header fixes the form and the exact length, the reader reads exactly that many lines and no more, and accepts only a record whose fields check against its form | a reader that accepts a prefix, a length outside the form, or a record whose form differs from the frame's | the reader's fuzz target and its truncated and corrupt fixtures |
@@ -257,9 +257,11 @@ since the one installer takes an `erx_object_t`.
 table `erx_cap_table_t`, exactly as [Objects and
 capabilities](design-kernel.md#objects-and-capabilities) declares them,
 owned by `kernel/core/cap.c`; the table's pages are charged to the
-space's budget through the funnel. Fiasco's `Obj_space` becomes a facade
-that holds the table and answers Fiasco's own internal queries (the
-debugger's listing, `caps_free` at the task's end) through the core's
+space's budget through the funnel. Both records are private to the core,
+which `kernel/core/cap_impl.h` and `kernel/generated/cap_slot_impl.h`
+define. Fiasco's `Obj_space` becomes a facade that holds a pointer to
+the table and answers Fiasco's own internal queries (the debugger's
+listing, `caps_free` at the task's end) through the core's
 exported functions; `Obj::Entry`, `Obj::Capability`, `Obj_cap::deref`
 and the object mapping database (`map_util-objs.cpp`,
 `kobject_mapdb.cpp`) are not built. A capability's 64-bit value, slot
@@ -673,11 +675,11 @@ a `Helping_lock` and the existence lock a `Switch_lock`, which the
 generated decoder takes for the arguments the ABI file marks `exists`
 through `erx_object_lock_existence`.
 
-**`erx_cap_pass` in its creator's case** (M1) runs `erx_pass_plan` and
-`erx_pass_apply` from one table into the other under both tasks'
-existence locks, in address order, as Fiasco's `Task::sys_map` takes
-both tasks' locks; it uses no Fiasco map item, since the object mapping
-database is not built.
+**`erx_cap_pass` in its creator's case** (M1) runs `erx_pass_plan`,
+`erx_pass_take` and `erx_pass_install` from one table into the other
+under both tasks' existence locks, in address order, as Fiasco's
+`Task::sys_map` takes both tasks' locks; it uses no Fiasco map item,
+since the object mapping database is not built.
 
 ### Deletion
 
@@ -1611,13 +1613,14 @@ cross-space row pinned to another CPU
 
 **Where transfer fits.** The transfer has one install point: under the
 receiver's table lock, after the receiver is held in its transfer and
-the words have moved, where `erx_pass_apply` fills the slots the
+the words have moved, where `erx_pass_install` fills the slots the
 receiver's wait reserved ([Passing capabilities](design-kernel.md#passing-capabilities)).
 M1's binding already runs the reservation step of every receive, with a
 buffer descriptor that asks for zero slots, and already has the install
 point, where it installs nothing; a message whose tag names items is
 refused with `ERX_EINVAL` in M1. M5 lifts that refusal and runs
-`erx_pass_plan` before the install and `erx_pass_apply` at it, under
+`erx_pass_plan` and `erx_pass_take` before the install and
+`erx_pass_install` at it, under
 the ownership of a transfer with items that M5's design must fix
 first: the step that holds the receiver must stay one bounded step that
 no sender's scheduling controls, which Fiasco's item transfer in the
@@ -1822,8 +1825,9 @@ measured with `tools/erx bench irq` when resources land.
   next batch, the page records, translation-entry writes and
   TLB maintenance, the lock operations, readying and requesting a CPU,
   arming a timeout, the console writer, the firmware's end. Record
-  definitions are in `kernel/core/*_impl.h`, which only the cores
-  include.
+  definitions are in `kernel/core/*_impl.h` and, for a layout the ABI
+  file marks private, `kernel/generated/*_impl.h`, which only the cores
+  and their host tests include.
 * **`fiasco/erx_glue_imports.txt`**: every Fiasco internal the glue may
   reference, one per line with the effect that calls it and the glue
   file that may hold the call. It is an allowlist: a glue object whose
@@ -2034,7 +2038,7 @@ ran.
 | queued requests (B10) | an IRQ object delivering to a thread on another CPU is destroyed while its delivery is queued, ten thousand times on QEMU with four CPUs and on the hosted kernel under ASan: every run ends with the object freed once and the thread either delivered to or not, never faulted | the request's reference seeded away lets the handler touch freed memory, which ASan reports |
 | the UTCB layout | the glue's `static_assert`s pass | a field inserted into the generated layout fails the build |
 | a deadline read once (B3) | a thread that rewrites the deadline word of another thread's call after that call entered changes nothing about when the wait ends | the glue passing a `Utcb *` to a re-reading internal lets the rewrite take effect and fails |
-| opaque cores and the opaque header | no file outside `kernel/core/` includes an `_impl.h` or defines `ERX_CORE_INTERNAL` | a glue file that includes one or defines it fails |
+| opaque cores and the opaque header | no file outside `kernel/core/` and the cores' host tests includes an `_impl.h` or defines `ERX_CORE_INTERNAL` | a glue file that includes one or defines it fails |
 | the charge model | every constant's `static_assert` holds | a model constant changed by one fails |
 | the plan at boot | the conformance boot starts the root task | a seeded extra allocation in the glue refuses the start with the named step |
 | the pool plan | the boot under TCG and HVF with 1 and 4 CPUs, at 512 MiB and at the platform's `memory_min`, passes the kernel's comparison of `heap` and `regions` and prints both figures; host tests feed the plan a map with a reservation straddling a unit boundary and find the loss counted, a map whose free memory exceeds the window and find `heap` cut to the window with `usable` untouched, a map of more ranges than the region limit and find the plan refused with the count, the same map with two ranges merged and find it admitted, and a map with a hole where Fiasco's top-down walk would cut and find the same ranges; the monotonicity test grows RAM, shrinks each reservation, and adds small ranges above a large one within the limit, and finds `heap` never smaller | a plan that subtracts byte sizes without rounding predicts more than Fiasco holds and is refused at boot; a plan that lets the limit choose a top-down prefix instead of refusing predicts a smaller `heap` after small ranges are added above a large one, which the monotonicity test catches; a plan that passes `usable` as `kmemsize` on the window-bound map makes Fiasco panic on the unfillable request, which the boot test reports; `boot_reserve` set below Fiasco's real use refuses the start |

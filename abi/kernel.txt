@@ -224,3 +224,155 @@ layout erx_time_page 1 shared 8 48
   visibility reserved internal
   visibility wall_offset_ns release
   sequence seq terminal 0xffffffffffffffff exhaustion @limit recovery none
+
+# Capability values and tables (docs/design-kernel.md, "Objects and
+# capabilities"). A value holds its slot's index in bits 0-23 and the
+# slot's generation in bits 24-63; slot 0 is never issued, so value 0 names
+# nothing. A table grows a page of cap_page_slots slots at a time up to its
+# space's limit, at most caps_max slots, slot 0 included.
+limit cap_slot_bits u32 24
+limit cap_generation_bits u32 40
+limit caps_max u32 1048576
+limit cap_page_slots u32 64
+
+# Object types: the rights each type's capability can carry, and its pass
+# set, the rights it keeps when it passes to a peer or a fork copies it;
+# an empty pass set means it never passes between peers ("Rights").
+type budget 1
+  rights alloc,spaces,code,carve,inspect,dup,give,destroy
+  pass none
+type space 2
+  rights map,threads,caps,stop,inspect,dup,give,destroy
+  pass none
+type thread 3
+  rights control,configure,inspect,dup,give,destroy
+  pass none
+type group 4
+  rights configure,attach,signal,inspect,dup,give,destroy
+  pass none
+type memory 5
+  rights read,write,exec,map,jit,phys,supply,child,carve,system,inspect,dup,give,destroy
+  pass read,write,map,child,inspect,dup,give
+type gate 6
+  rights call,serve,configure,inspect,dup,give,destroy
+  pass call,serve,inspect,dup,give
+type irq 7
+  rights trigger,bind,ack,configure,inspect,dup,give,destroy
+  pass trigger,inspect,dup,give
+type resource 8
+  rights carve,power,trace,entropy,inspect,dup,give
+  pass none
+type dma 9
+  rights map,bind,inspect,dup,give,destroy
+  pass none
+
+# Creation kinds: one per row of the design's two rights tables, with the
+# rights a creation of that kind returns. A carve is a shrink of a create
+# by the carving capability's rights and destroy, so a carved kind holds
+# nothing beyond its parent kind and destroy.
+kind root_budget 1 budget
+  default alloc,spaces,code,carve,inspect,dup,give
+kind carved_budget 2 budget
+  default alloc,spaces,code,carve,inspect,dup,give,destroy
+  carves root_budget
+kind new_space 3 space
+  default map,threads,caps,stop,inspect,dup,give,destroy
+kind new_thread 4 thread
+  default control,configure,inspect,dup,give,destroy
+kind new_group 5 group
+  default configure,attach,signal,inspect,dup,give,destroy
+kind new_gate 6 gate
+  default call,serve,configure,inspect,dup,give,destroy
+kind shared_memory 7 memory
+  default read,write,map,supply,child,inspect,dup,give,destroy
+kind physical_memory 8 memory
+  default read,write,map,child,inspect,dup,give,destroy
+kind contiguous_memory 9 memory
+  default read,write,map,phys,child,inspect,dup,give,destroy
+kind jit_memory 10 memory
+  default read,write,exec,map,jit,inspect,destroy
+kind paged_memory 11 memory
+  default read,map,supply,child,inspect,dup,give,destroy
+kind paged_code_memory 12 memory
+  default read,exec,map,supply,child,inspect,dup,give,destroy
+kind cow_child 13 memory
+  default read,write,map,inspect,dup,give,destroy
+kind boot_image 14 memory
+  default read,exec,map,child,carve,system,inspect,dup,give
+kind image_slice 15 memory
+  default read,exec,map,child,inspect,dup,give,destroy
+  carves boot_image
+kind time_page 16 memory
+  default read,write,map,inspect,dup,give
+kind machine_page 17 memory
+  default read,map,inspect,dup,give
+kind previous_crash 18 memory
+  default read,map,inspect,dup,give,destroy
+kind device_secret 19 memory
+  default read,map,inspect
+kind software_irq 20 irq
+  default trigger,bind,inspect,dup,give,destroy
+kind line_irq 21 irq
+  default trigger,bind,ack,configure,inspect,dup,give,destroy
+kind msi_irq 22 irq
+  default trigger,bind,ack,configure,inspect,dup,give,destroy
+kind root_resource 23 resource
+  default carve,power,trace,entropy,inspect,dup,give
+kind carved_resource 24 resource
+  default carve,inspect,dup,give
+  carves root_resource
+kind dma_window 25 dma
+  default map,bind,inspect,dup,give,destroy
+
+# A capability slot, a sequence-counted record that lookups read without a
+# lock while its table's writer changes it ("Reading a slot without a
+# lock"). object is the object store's nonzero handle while the slot is
+# live, 0 otherwise; type is the object's type, fixed for its life; next
+# links the table's free list by slot index. seq never resets: its
+# terminal value retires the slot for good, and a lookup reads it as a
+# stale capability. It is private: only kernel/core/cap.c and its host
+# tests see its members (K1), through kernel/generated/cap_slot_impl.h.
+enum cap_slot_state u32
+  value free 0
+  value reserved 1
+  value live 2
+  value retired 3
+layout erx_cap_slot 1 shared 8 64
+  private kernel/core/cap.c
+  field object u64 0
+  field generation u64 8
+  field seq u64 16
+  field rights u32 24
+  field type u32 28
+  field state u32 32
+  field next u32 36
+  padding 40 24
+  atomic object load acquire store release
+  atomic generation load acquire store release
+  atomic seq load acquire store release
+  atomic rights load acquire store release
+  atomic type load acquire store release
+  atomic state load acquire store release
+  atomic next load acquire store release
+  writer object cap_table
+  writer generation cap_table
+  writer seq cap_table
+  writer rights cap_table
+  writer type cap_table
+  writer state cap_table
+  writer next cap_table
+  owner object kernel all
+  owner generation kernel all
+  owner seq kernel all
+  owner rights kernel all
+  owner type kernel all
+  owner state kernel all
+  owner next kernel all
+  visibility object internal
+  visibility generation internal
+  visibility seq internal
+  visibility rights internal
+  visibility type internal
+  visibility state internal
+  visibility next internal
+  sequence seq terminal 0xffffffffffffffff exhaustion @stale recovery none

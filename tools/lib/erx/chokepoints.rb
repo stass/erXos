@@ -5,6 +5,7 @@
 require 'strscan'
 require_relative 'bounded_file'
 require_relative 'error'
+require_relative 'stack_graph'
 
 module Erx
   # The chokepoint checks: every rule of the form "only X does Y" as data
@@ -26,9 +27,13 @@ module Erx
   #   cannot land before its check.
   # * Elsewhere: a rule another check enforces; the registry names that
   #   check and the test that seeds its violation, which must be listed.
+  # * Callers: only listed functions call a function, read from the cores'
+  #   call graph rather than from text; the stack proof evaluates it on the
+  #   graph of every level it proves.
   #
-  # Every active rule carries a seeded violation, and the host test feeds
-  # each seed to its rule and requires a failure (test/host/chokepoints_test.rb).
+  # Every active and call-graph rule carries a seeded violation, and the
+  # host test feeds each seed to its rule and requires a failure
+  # (test/host/chokepoints_test.rb).
   module Chokepoints
     # The extensions a C, C++ or assembler build reads. IncludeForm keeps
     # anything else out of a compile.
@@ -82,7 +87,8 @@ module Erx
       end
     end
 
-    # A seed is the violation a rule must catch: path => text.
+    # A seed is the violation a rule must catch: path => text for a text
+    # rule, function => reach for a call-graph rule (Callers).
     module Seeded
       def validate_seed!
         return if seed.is_a?(Hash) && !seed.empty? &&
@@ -168,6 +174,38 @@ module Erx
 
         [Violation.new(rule: name, path: test, line: nil,
                        detail: "the test that seeds this rule's violation (#{check}) is not in the tree")]
+      end
+    end
+
+    # How a Callers seed function reaches its callee.
+    CALLER_REACHES = %w[call tail_jump].freeze
+
+    # Callers: only the listed exported functions call or tail-jump to
+    # callee. It reads the cores' call graph, which the stack proof builds
+    # from the relocations of every core at each optimisation level, so a
+    # call that inlining hides at one level shows at -O0; a call through a
+    # pointer is refused by the stack proof unless its targets are listed.
+    # The text evaluation passes over it, and the stack proof hands each
+    # level's graph to enforce_call_graph. Its seed maps each function it
+    # must refuse, spelled "object:name" when file-local, to how that
+    # function reaches callee: "call" or "tail_jump".
+    Callers = Data.define(:name, :rule, :design, :callee, :callers, :seed) do
+      include Seeded
+
+      def initialize(name:, rule:, design:, callee:, callers:, seed:)
+        super(name: name, rule: rule, design: design, callee: callee, callers: callers.freeze, seed: seed.freeze)
+        validate_seed!
+        raise Error, "chokepoint #{name} seeds an unknown reach" unless (seed.values - CALLER_REACHES).empty?
+      end
+
+      def violations_in_graph(graph)
+        graph.functions.each_value.filter_map do |function|
+          targets = function.calls + function.tail_jumps
+          next unless targets.any? { |site| site.target.global? && site.target.name == callee }
+          next if function.id.global? && callers.include?(function.id.name)
+
+          Violation.new(rule: name, path: function.location, line: nil, detail: "#{function.id} calls #{callee}")
+        end
       end
     end
 
@@ -316,15 +354,40 @@ module Erx
           end
         in Pending | Elsewhere
           rule.violations_in(names)
+        in Callers
+          # Read from the call graph by the stack proof, not from text.
+          []
         end
       end.uniq
     end
 
-    # A rule's seed as the tree it is evaluated over: the seeded files, each
-    # an erXos source, and nothing imported.
-    def seeded_violations(rule)
-      violations([rule], names: rule.seed.keys.sort, imported: ->(_path) { false },
-                         read: ->(path) { rule.seed.fetch(path) })
+    # The violations of the call-graph rules over one level's graph.
+    def call_graph_violations(rules, graph)
+      rules.flat_map { |rule| rule.violations_in_graph(graph) }.uniq
+    end
+
+    # Raises Error listing every call-graph violation; the stack proof calls
+    # it on each level's graph before proving it.
+    def enforce_call_graph(rules, graph)
+      found = call_graph_violations(rules, graph)
+      return true if found.empty?
+
+      raise Error, (["#{found.size} chokepoint violation(s):"] + found.first(50).map(&:to_s)).join("\n")
+    end
+
+    # A call graph of functions, given as {"name" or "object:name" => reach},
+    # each reaching callee once by that reach.
+    def seeded_graph(functions, callee:)
+      target = StackGraph::Name.new(name: callee, object: nil)
+      site = [StackGraph::Site.new(offset: 0, target: target)].freeze
+      nodes = functions.to_h do |spec, reach|
+        object, name = spec.include?(':') ? spec.split(':', 2) : [nil, spec]
+        id = StackGraph::Name.new(name: name, object: object)
+        [id, StackGraph::Function.new(id: id, object: object || 'seeded.o', location: 'seeded.c:1', frame_bytes: 16,
+                                      calls: reach == 'call' ? site : [], tail_jumps: reach == 'tail_jump' ? site : [],
+                                      indirect_calls: [], indirect_branches: [])]
+      end
+      StackGraph::Graph.new(functions: nodes.freeze, externals: [target].freeze)
     end
 
     # Enforces rules over a checkout's listed names, reading each file once

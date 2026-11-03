@@ -33,13 +33,10 @@ module Erx
 
     INCLUDE = Chokepoints::INCLUDE_PREFIX
 
-    # The budget core's private header, which only the core and this host
-    # driver include.
-    BUDGET_IMPL = 'kernel/core/budget_impl.h'
-    BUDGET_DRIVER = 'test/fixtures/budget_driver.c'
-    # An include of that header by any path ending in its name, in any
-    # case, as a case-insensitive file system resolves it.
-    BUDGET_IMPL_INCLUDE = %r{#{INCLUDE}[<"](?:[^>"]*/)?budget_impl\.h[>"]}i
+    # An include of the header at path by any path ending in its file name,
+    # in any case, as a case-insensitive file system resolves it.
+    def self.include_of(path) = %r{#{INCLUDE}[<"](?:[^>"]*/)?#{Regexp.escape(File.basename(path))}[>"]}i
+
     # A use of a record's tag that is not one of the forms that only refer
     # to the record: a pointer or reference (*, &), the end of a
     # declaration or argument (; , )), or a declarator named after it
@@ -47,8 +44,86 @@ module Erx
     # something else after the tag (a brace, a base clause, final, an
     # attribute) or a line break, so any spelling of one is refused,
     # including those through a macro, and a declaration split after the
-    # tag is refused too, on the safe side.
-    BUDGET_RECORD_USE = /\berx_(?:budget|reserve)\b(?!\s*(?:[*&;),]|[A-Za-z_]\w*\s*[;,)]))/
+    # tag is refused too, on the safe side. A tag a macro pastes together
+    # (erx_ ## budget) gets past it.
+    def self.record_use(*tags)
+      /\b(?:#{tags.map { |tag| Regexp.escape(tag) }.join('|')})\b(?!\s*(?:[*&;),]|[A-Za-z_]\w*\s*[;,)]))/
+    end
+
+    # The host tests of a core's source, which alone besides the core see
+    # its private records: the drivers named after it in test/fixtures and
+    # its fuzzer. Neither tree is built into the kernel or any image, and a
+    # test of the core is named after it, so a new one needs no new entry.
+    def self.host_tests(source)
+      stem = File.basename(source, '.c')
+      ["test/fixtures/#{stem}_*.c", "tools/fuzz/#{stem}_fuzz.c"].freeze
+    end
+
+    # The budget core's private header, which only the core and this host
+    # driver include.
+    BUDGET_IMPL = 'kernel/core/budget_impl.h'
+    BUDGET_DRIVER = 'test/fixtures/budget_driver.c'
+    BUDGET_IMPL_INCLUDE = include_of(BUDGET_IMPL)
+    BUDGET_RECORD_USE = record_use('erx_budget', 'erx_reserve')
+
+    # The capability core and the hand-written header of its table record.
+    CAP_CORE = 'kernel/core/cap.c'
+    CAP_IMPL = 'kernel/core/cap_impl.h'
+    CAP_IMPL_INCLUDE = include_of(CAP_IMPL)
+    # The one function that clears a slot, by its whole name; a name a macro
+    # pastes together (erx_cap_slot_ ## clear) does not match.
+    CAP_SLOT_CLEAR = /\berx_cap_slot_clear\b/
+
+    # The layouts the ABI file marks private, each with its owner. Their
+    # records, offsets and accessors are only in their generated headers;
+    # include/erx/abi.h declares only each one's tag, size and alignment.
+    PRIVATE_LAYOUTS = ABI::Generated::SCHEMA.type_order
+                                            .map { |name| ABI::Generated::SCHEMA.types.fetch(name) }
+                                            .select { |type| type.is_a?(ABI::Layout) && type.private? }.freeze
+    # Each private layout's owner's host tests, each allowed to include
+    # that layout's generated header.
+    PRIVATE_LAYOUT_TEST_SITES = PRIVATE_LAYOUTS.flat_map do |layout|
+      host_tests(layout.private_owner).map do |test|
+        Chokepoints::Site.new(glob: test, permits: include_of(layout.private_header))
+      end
+    end.freeze
+    # The capability slot's generated header, which the rules below name.
+    CAP_SLOT_IMPL = ABI::Generated::SCHEMA.types.fetch('erx_cap_slot').private_header
+
+    # A private layout's rule, built from the ABI file: only the layout's
+    # owner and the owner's host tests include its generated header, and no
+    # other file names its record's tag but to refer to it. Everywhere else
+    # the layout is an incomplete type, so a member, an offset or an
+    # accessor of it does not compile, and this rule keeps it so. It reads
+    # the stopgap kernel's tree, glue and inherited sources alike. Its seed
+    # is built from the layout too: includes from other files, by other
+    # paths and in other cases, and definitions of the record in each form,
+    # the owner's included.
+    def self.private_layout_rule(layout)
+      header = layout.private_header
+      owner = layout.private_owner
+      tag = layout.name
+      name = File.basename(header, '_impl.h')
+      includers = [owner, *host_tests(owner)].map { |glob| Chokepoints::Site.new(glob: glob, permits: include_of(header)) }
+      definition = Chokepoints::Site.new(glob: header, permits: record_use(tag))
+      Chokepoints::Forbidden.new(
+        name: "#{name.tr('_', '-')}-private",
+        rule: "only #{owner}, which the ABI file names as the owner of #{tag}, and its host tests include " \
+              "#{header}, and no other file names struct #{tag} but to refer to it",
+        design: 'docs/design-abi.md#source-grammar',
+        scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
+        pattern: Regexp.union(include_of(header), record_use(tag)),
+        sites: [*includers, definition],
+        seed: { 'kernel/core/seeded_core.c' => "#include \"#{File.basename(header)}\"\n",
+                'liberx/seeded.c' => "#include \"#{header}\"\n",
+                'fiasco/kernel/src/erx/seeded.cpp' => "#include <#{File.basename(header).upcase}>\n",
+                'test/fixtures/seeded_driver.c' => "#include \"#{File.basename(header)}\"\n",
+                'kernel/core/seeded_split.c' => "struct #{tag}\n{\n\tint member;\n};\n",
+                'kernel/core/seeded_macro.c' => "#define R #{tag}\nstruct R { int member; };\n",
+                'fiasco/kernel/src/kern/seeded.cpp' => "struct alignas(64) #{tag} final { };\n",
+                owner => "union #{tag} { int member; };\n" }
+      )
+    end
 
     STOPGAP = 'docs/design-stopgap.md'
     KERNEL = 'docs/design-kernel.md'
@@ -110,13 +185,15 @@ module Erx
       ),
       Chokepoints::Forbidden.new(
         name: 'core-records-private',
-        rule: "the cores' record definitions (kernel/core/*_impl.h) are included only by the cores (B4), " \
-              "and the budget core's by its host driver too",
+        rule: "the cores' private headers (kernel/core/*_impl.h, and each private ABI layout's generated " \
+              'header) are included only by the cores (B4), and each by its own core\'s host tests',
         design: "#{STOPGAP}#invariants",
         scope: ERXOS_C,
         pattern: /#{INCLUDE}[<"][^>"]*_impl\.h[>"]/i,
         sites: [Chokepoints::Site.new(glob: 'kernel/core/*'),
-                Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE)],
+                Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE),
+                *host_tests(CAP_CORE).map { |test| Chokepoints::Site.new(glob: test, permits: CAP_IMPL_INCLUDE) },
+                *PRIVATE_LAYOUT_TEST_SITES],
         seed: { 'fiasco/kernel/src/erx/seeded.cpp' => "#include \"kernel/core/cap_impl.h\"\n",
                 'liberx/seeded.c' => "#import \"kernel/core/cap_IMPL.h\"\n" }
       ),
@@ -151,6 +228,54 @@ module Erx
                 'fiasco/kernel/src/erx/qualified.cpp' => "struct alignas(8) ::erx_reserve { long charged; };\n",
                 'fiasco/kernel/src/erx/final.cpp' => "struct erx_reserve final { long charged; };\n" }
       ),
+      # A capability table's directory, counts, free list and emptied flag
+      # are written only in kernel/core/cap.c (B4), by construction: its
+      # record is defined only in the core's private header, and everywhere
+      # else erx_cap_table_t is an incomplete type, so no file can write a
+      # member or store a page of its own in the directory. This rule keeps
+      # that header to the core and its host tests, and refuses any other
+      # definition of the record. It reads the stopgap kernel's tree, glue
+      # and inherited sources alike.
+      Chokepoints::Forbidden.new(
+        name: 'cap-table-private',
+        rule: "only #{CAP_CORE} and its host tests include #{CAP_IMPL}, and no other file names " \
+              'struct erx_cap_table but to refer to it',
+        design: "#{KERNEL}#chokepoint-checks",
+        scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
+        pattern: Regexp.union(CAP_IMPL_INCLUDE, record_use('erx_cap_table')),
+        sites: [CAP_CORE, *host_tests(CAP_CORE)].map { |glob| Chokepoints::Site.new(glob: glob, permits: CAP_IMPL_INCLUDE) } +
+               [Chokepoints::Site.new(glob: CAP_IMPL, permits: record_use('erx_cap_table'))],
+        seed: { 'kernel/core/space.c' => "#include \"erx/cap.h\"\n#include \"cap_impl.h\"\n" \
+                                         "void f(erx_cap_table_t *t, void *page) { t->pages[0] = page; }\n",
+                'kernel/core/budget.c' => "#include <core/Cap_Impl.h>\n",
+                'liberx/seeded.c' => "#include \"kernel/core/cap_impl.h\"\n",
+                'fiasco/kernel/src/erx/cap.cpp' => "#include \"cap_impl.h\"\n",
+                BUDGET_DRIVER => "#include \"cap_impl.h\"\n",
+                'kernel/core/table.c' => "struct erx_cap_table {\n\tunsigned capacity;\n};\n",
+                'include/erx/cap.h' => "struct erx_cap_table\n{\n\tunsigned capacity;\n};\n",
+                'kernel/core/macro.c' => "#define T erx_cap_table\nstruct T { unsigned capacity; };\n",
+                'fiasco/kernel/src/kern/table.cpp' => "struct alignas(8) erx_cap_table final { };\n",
+                CAP_CORE => "union erx_cap_table { unsigned capacity; };\n" }
+      ),
+      # One rule for each layout the ABI file marks private.
+      *PRIVATE_LAYOUTS.map { |layout| private_layout_rule(layout) },
+      # erx_cap_slot_clear is named only in the cores, its declaration in
+      # include/erx/cap.h and the core's host tests, so the call graph that
+      # cap-slot-clear-callers reads sees every caller (K21, K25). It reads
+      # the stopgap kernel's tree, glue and inherited sources alike.
+      Chokepoints::Forbidden.new(
+        name: 'cap-slot-clear-named',
+        rule: 'only the cores, include/erx/cap.h and the capability core\'s host tests name erx_cap_slot_clear',
+        design: "#{KERNEL}#chokepoint-checks",
+        scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
+        pattern: CAP_SLOT_CLEAR,
+        sites: ['kernel/core/*.c', 'include/erx/cap.h', *host_tests(CAP_CORE)].map { |glob| Chokepoints::Site.new(glob: glob) },
+        seed: { 'include/erx/space.h' => "erx_status_t erx_cap_slot_clear(erx_cap_table_t *, erx_cap_t, uint64_t);\n",
+                CAP_SLOT_IMPL => "static inline void f(void) { erx_cap_slot_clear(0, 0, 0); }\n",
+                'test/fixtures/budget_driver.c' => "void f(void) { erx_cap_slot_clear(0, 0, 0); }\n",
+                'fiasco/kernel/src/erx/cap.cpp' => "void f() { erx_cap_slot_clear(table, cap, object); }\n",
+                'fiasco/kernel/src/kern/space.cpp' => "void f() { erx_cap_slot_clear(table, cap, 0); }\n" }
+      ),
       Chokepoints::Forbidden.new(
         name: 'seam-only-from-glue',
         rule: "the glue alone of the stopgap kernel's sources includes erXos's headers",
@@ -158,6 +283,23 @@ module Erx
         scope: Chokepoints::Scope.new(own: false, extra: ['fiasco/kernel/**/*'], except: [GLUE]),
         pattern: %r{#{INCLUDE}[<"]erx/}i,
         seed: { 'fiasco/kernel/src/kern/seeded.cpp' => "#include \"erx/core/watchdog.h\"\n" }
+      )
+    ].freeze
+
+    # Rules read from the cores' call graph, which the stack proof builds at
+    # every level it proves and checks against these before proving it.
+    CALL_GRAPH = [
+      # The one function that clears a capability slot is called only by a
+      # close, a pass's take step and the emptying of a stopped space's
+      # table (K21, K25); cap-slot-clear-named keeps every call to it inside
+      # the cores, which this graph covers.
+      Chokepoints::Callers.new(
+        name: 'cap-slot-clear-callers',
+        rule: 'only erx_cap_close, erx_pass_take and erx_space_clear_caps call erx_cap_slot_clear',
+        design: "#{KERNEL}#chokepoint-checks",
+        callee: 'erx_cap_slot_clear',
+        callers: %w[erx_cap_close erx_pass_take erx_space_clear_caps],
+        seed: { 'erx_cap_install' => 'call', 'erx_cap_reserve' => 'tail_jump', 'cap.o:erx_pass_take' => 'call' }
       )
     ].freeze
 
@@ -237,13 +379,6 @@ module Erx
         awaits: ['kernel/core/*grace*', 'kernel/core/*tracker*'],
         reason: 'reads relocations of the cores'
       ),
-      Chokepoints::Pending.new(
-        name: 'cap-slot-private', rule: "only the capability table's code reads a slot, and one function clears " \
-                                        'it (K1, K21, K25)',
-        design: "#{KERNEL}#chokepoint-checks",
-        awaits: ['kernel/core/cap*', 'include/erx/core/cap*'],
-        reason: "reads clang's syntax trees and the cores' relocations"
-      ),
       # The core's own files are exempt: budget-records-private keeps their
       # records out of every other file until the syntax trees are read.
       Chokepoints::Pending.new(
@@ -264,6 +399,6 @@ module Erx
       )
     ].freeze
 
-    ALL = (ACTIVE + ELSEWHERE + PENDING).freeze
+    ALL = (ACTIVE + CALL_GRAPH + ELSEWHERE + PENDING).freeze
   end
 end

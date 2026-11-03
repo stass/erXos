@@ -188,6 +188,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_msg_item"] = Layout.new(
@@ -229,7 +230,20 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
+      ).freeze
+      types["cap_slot_state"] = EnumType.new(
+        name: "cap_slot_state".b,
+        base: types.fetch("u32"),
+        members: {
+          "free".b => 0,
+          "live".b => 2,
+          "reserved".b => 1,
+          "retired".b => 3
+        }.freeze,
+        flags: false,
+        allowed: nil
       ).freeze
       types["crash_cause"] = EnumType.new(
         name: "crash_cause".b,
@@ -387,6 +401,160 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_cap_slot"] = Layout.new(
+        name: "erx_cap_slot".b,
+        version: 1,
+        storage: "shared".b,
+        alignment: 8,
+        size: 64,
+        fields: [
+          Field.new(
+            name: "object".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "generation".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "seq".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "rights".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "type".b,
+            type: types.fetch("u32"),
+            offset: 28,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "state".b,
+            type: types.fetch("u32"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "next".b,
+            type: types.fetch("u32"),
+            offset: 36,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "cap_table".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [[40, 24].freeze].freeze,
+        tail: nil,
+        sequence: {
+          :field => "seq".b,
+          :terminal => 18446744073709551615,
+          :exhaustion => "@stale".b,
+          :recovery => "none".b,
+          :line => source_line
+        }.freeze,
+        private_owner: "kernel/core/cap.c".b,
         line: source_line
       ).freeze
       types["erx_elf64_dyn"] = Layout.new(
@@ -428,6 +596,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_elf64_ehdr"] = Layout.new(
@@ -637,6 +806,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_elf64_nhdr"] = Layout.new(
@@ -692,6 +862,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_abi_note"] = Layout.new(
@@ -747,6 +918,7 @@ module Erx
         padding: [[18, 2].freeze].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_elf64_phdr"] = Layout.new(
@@ -872,6 +1044,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_frame_header"] = Layout.new(
@@ -913,6 +1086,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_lane_hdr"] = Layout.new(
@@ -964,6 +1138,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_lane_rec"] = Layout.new(
@@ -1019,6 +1194,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_lane_rpage"] = Layout.new(
@@ -1070,6 +1246,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_boot_order"] = Layout.new(
@@ -1097,6 +1274,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_extent"] = Layout.new(
@@ -1138,6 +1316,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_introduction"] = Layout.new(
@@ -1179,6 +1358,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_liveness"] = Layout.new(
@@ -1206,6 +1386,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_operation"] = Layout.new(
@@ -1233,6 +1414,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_shell_principal"] = Layout.new(
@@ -1260,6 +1442,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_span"] = Layout.new(
@@ -1301,6 +1484,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_str"] = Layout.new(
@@ -1342,6 +1526,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_facet"] = Layout.new(
@@ -1523,6 +1708,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_lane_class"] = Layout.new(
@@ -1578,6 +1764,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_partial_boot"] = Layout.new(
@@ -1633,6 +1820,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_runtime_limits"] = Layout.new(
@@ -1800,6 +1988,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_service"] = Layout.new(
@@ -1869,6 +2058,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_unit"] = Layout.new(
@@ -1938,6 +2128,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_msgtag"] = Layout.new(
@@ -1987,6 +2178,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_regs"] = Layout.new(
@@ -2056,6 +2248,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_runtime_limits"] = Layout.new(
@@ -2237,6 +2430,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_saved_thread"] = Layout.new(
@@ -2376,6 +2570,7 @@ module Erx
         padding: [[808, 8].freeze].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_time_page"] = Layout.new(
@@ -2528,6 +2723,7 @@ module Erx
           :recovery => "none".b,
           :line => source_line
         }.freeze,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_uframe"] = Layout.new(
@@ -2617,6 +2813,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_vcpu"] = Layout.new(
@@ -2777,6 +2974,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_utcb"] = Layout.new(
@@ -2923,6 +3121,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_kupage"] = Layout.new(
@@ -2964,6 +3163,7 @@ module Erx
         padding: [[1360, 2736].freeze].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["fault_kind"] = EnumType.new(
@@ -3092,6 +3292,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_crash_brief"] = Layout.new(
@@ -3287,6 +3488,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_crash_record"] = Layout.new(
@@ -3342,6 +3544,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["group_flags"] = EnumType.new(
@@ -3507,6 +3710,7 @@ module Erx
         padding: [[44, 4].freeze].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_mf_principal"] = Layout.new(
@@ -3618,6 +3822,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["image_flags"] = EnumType.new(
@@ -3920,6 +4125,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["mf_kind"] = EnumType.new(
@@ -4125,6 +4331,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["mf_limits_flags"] = EnumType.new(
@@ -4329,6 +4536,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["mf_parameter_kind"] = EnumType.new(
@@ -4443,6 +4651,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["mf_selector"] = EnumType.new(
@@ -4648,6 +4857,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["mf_window_rights"] = EnumType.new(
@@ -4785,6 +4995,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["pack_flags"] = EnumType.new(
@@ -5186,6 +5397,7 @@ module Erx
         padding: [[20, 4].freeze, [188, 4].freeze].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["pack_magic"] = BytesType.new(
@@ -5358,6 +5570,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["pack_offset"] = ScalarType.new(
@@ -6017,6 +6230,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["seg_flags"] = EnumType.new(
@@ -6123,6 +6337,7 @@ module Erx
         padding: [].freeze,
         tail: nil,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["erx_image_manifest"] = Layout.new(
@@ -6296,6 +6511,7 @@ module Erx
           line: source_line
         ).freeze,
         sequence: nil,
+        private_owner: nil,
         line: source_line
       ).freeze
       types["system_manifest_path"] = BytesType.new(
@@ -6373,12 +6589,14 @@ module Erx
           "cap".b,
           "erx_boot_connection".b,
           "erx_msg_item".b,
+          "cap_slot_state".b,
           "crash_cause".b,
           "crash_form".b,
           "elf_magic".b,
           "entry_flags".b,
           "entry_kind".b,
           "erx_pack_entry".b,
+          "erx_cap_slot".b,
           "erx_elf64_dyn".b,
           "erx_elf64_ehdr".b,
           "erx_elf64_nhdr".b,
@@ -6537,6 +6755,54 @@ module Erx
           "call_debug_log" => Constant.new(
             name: "call_debug_log",
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_generation_bits".b => Constant.new(
+            name: "cap_generation_bits".b,
+            value: 40,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_page_slots".b => Constant.new(
+            name: "cap_page_slots".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_slot_bits".b => Constant.new(
+            name: "cap_slot_bits".b,
+            value: 24,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_slot_state_free".b => Constant.new(
+            name: "cap_slot_state_free".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_slot_state_live".b => Constant.new(
+            name: "cap_slot_state_live".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_slot_state_reserved".b => Constant.new(
+            name: "cap_slot_state_reserved".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "cap_slot_state_retired".b => Constant.new(
+            name: "cap_slot_state_retired".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "caps_max".b => Constant.new(
+            name: "caps_max".b,
+            value: 1048576,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -7230,6 +7496,210 @@ module Erx
             type: types.fetch("u64"),
             description: nil
           ).freeze,
+          "k_budget" => Constant.new(
+            name: "k_budget",
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_dma" => Constant.new(
+            name: "k_dma",
+            value: 9,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_gate" => Constant.new(
+            name: "k_gate",
+            value: 6,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_group" => Constant.new(
+            name: "k_group",
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_irq" => Constant.new(
+            name: "k_irq",
+            value: 7,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_memory" => Constant.new(
+            name: "k_memory",
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_resource" => Constant.new(
+            name: "k_resource",
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_space" => Constant.new(
+            name: "k_space",
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "k_thread" => Constant.new(
+            name: "k_thread",
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_boot_image" => Constant.new(
+            name: "kind_boot_image",
+            value: 14,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_carved_budget" => Constant.new(
+            name: "kind_carved_budget",
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_carved_resource" => Constant.new(
+            name: "kind_carved_resource",
+            value: 24,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_contiguous_memory" => Constant.new(
+            name: "kind_contiguous_memory",
+            value: 9,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_cow_child" => Constant.new(
+            name: "kind_cow_child",
+            value: 13,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_device_secret" => Constant.new(
+            name: "kind_device_secret",
+            value: 19,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_dma_window" => Constant.new(
+            name: "kind_dma_window",
+            value: 25,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_image_slice" => Constant.new(
+            name: "kind_image_slice",
+            value: 15,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_jit_memory" => Constant.new(
+            name: "kind_jit_memory",
+            value: 10,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_line_irq" => Constant.new(
+            name: "kind_line_irq",
+            value: 21,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_machine_page" => Constant.new(
+            name: "kind_machine_page",
+            value: 17,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_msi_irq" => Constant.new(
+            name: "kind_msi_irq",
+            value: 22,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_new_gate" => Constant.new(
+            name: "kind_new_gate",
+            value: 6,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_new_group" => Constant.new(
+            name: "kind_new_group",
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_new_space" => Constant.new(
+            name: "kind_new_space",
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_new_thread" => Constant.new(
+            name: "kind_new_thread",
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_paged_code_memory" => Constant.new(
+            name: "kind_paged_code_memory",
+            value: 12,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_paged_memory" => Constant.new(
+            name: "kind_paged_memory",
+            value: 11,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_physical_memory" => Constant.new(
+            name: "kind_physical_memory",
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_previous_crash" => Constant.new(
+            name: "kind_previous_crash",
+            value: 18,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_root_budget" => Constant.new(
+            name: "kind_root_budget",
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_root_resource" => Constant.new(
+            name: "kind_root_resource",
+            value: 23,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_shared_memory" => Constant.new(
+            name: "kind_shared_memory",
+            value: 7,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_software_irq" => Constant.new(
+            name: "kind_software_irq",
+            value: 20,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "kind_time_page" => Constant.new(
+            name: "kind_time_page",
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "label_split".b => Constant.new(
             name: "label_split".b,
             value: 2147483648,
@@ -7865,7 +8335,469 @@ module Erx
           "trace".b => 1073741824,
           "entropy".b => 2147483648
         }.freeze,
-        objects: {}.freeze,
+        objects: {
+          "budget".b => {
+            :number => 1,
+            :sets => {
+              "rights".b => [
+                "alloc".b,
+                "spaces".b,
+                "code".b,
+                "carve".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze,
+          "dma".b => {
+            :number => 9,
+            :sets => {
+              "rights".b => ["map".b, "bind".b, "inspect".b, "dup".b, "give".b, "destroy".b].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze,
+          "gate".b => {
+            :number => 6,
+            :sets => {
+              "rights".b => [
+                "call".b,
+                "serve".b,
+                "configure".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => ["call".b, "serve".b, "inspect".b, "dup".b, "give".b].freeze
+            }.freeze
+          }.freeze,
+          "group".b => {
+            :number => 4,
+            :sets => {
+              "rights".b => [
+                "configure".b,
+                "attach".b,
+                "signal".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze,
+          "irq".b => {
+            :number => 7,
+            :sets => {
+              "rights".b => [
+                "trigger".b,
+                "bind".b,
+                "ack".b,
+                "configure".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => ["trigger".b, "inspect".b, "dup".b, "give".b].freeze
+            }.freeze
+          }.freeze,
+          "memory".b => {
+            :number => 5,
+            :sets => {
+              "rights".b => [
+                "read".b,
+                "write".b,
+                "exec".b,
+                "map".b,
+                "jit".b,
+                "phys".b,
+                "supply".b,
+                "child".b,
+                "carve".b,
+                "system".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => [
+                "read".b,
+                "write".b,
+                "map".b,
+                "child".b,
+                "inspect".b,
+                "dup".b,
+                "give".b
+              ].freeze
+            }.freeze
+          }.freeze,
+          "resource".b => {
+            :number => 8,
+            :sets => {
+              "rights".b => [
+                "carve".b,
+                "power".b,
+                "trace".b,
+                "entropy".b,
+                "inspect".b,
+                "dup".b,
+                "give".b
+              ].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze,
+          "space".b => {
+            :number => 2,
+            :sets => {
+              "rights".b => [
+                "map".b,
+                "threads".b,
+                "caps".b,
+                "stop".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze,
+          "thread".b => {
+            :number => 3,
+            :sets => {
+              "rights".b => [
+                "control".b,
+                "configure".b,
+                "inspect".b,
+                "dup".b,
+                "give".b,
+                "destroy".b
+              ].freeze,
+              "pass".b => [].freeze
+            }.freeze
+          }.freeze
+        }.freeze,
+        kinds: {
+          "boot_image".b => {
+            :number => 14,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "exec".b,
+              "map".b,
+              "child".b,
+              "carve".b,
+              "system".b,
+              "inspect".b,
+              "dup".b,
+              "give".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "carved_budget".b => {
+            :number => 2,
+            :type => "budget".b,
+            :default => [
+              "alloc".b,
+              "spaces".b,
+              "code".b,
+              "carve".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => "root_budget".b
+          }.freeze,
+          "carved_resource".b => {
+            :number => 24,
+            :type => "resource".b,
+            :default => ["carve".b, "inspect".b, "dup".b, "give".b].freeze,
+            :carves => "root_resource".b
+          }.freeze,
+          "contiguous_memory".b => {
+            :number => 9,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "write".b,
+              "map".b,
+              "phys".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "cow_child".b => {
+            :number => 13,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "write".b,
+              "map".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "device_secret".b => {
+            :number => 19,
+            :type => "memory".b,
+            :default => ["read".b, "map".b, "inspect".b].freeze,
+            :carves => nil
+          }.freeze,
+          "dma_window".b => {
+            :number => 25,
+            :type => "dma".b,
+            :default => ["map".b, "bind".b, "inspect".b, "dup".b, "give".b, "destroy".b].freeze,
+            :carves => nil
+          }.freeze,
+          "image_slice".b => {
+            :number => 15,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "exec".b,
+              "map".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => "boot_image".b
+          }.freeze,
+          "jit_memory".b => {
+            :number => 10,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "write".b,
+              "exec".b,
+              "map".b,
+              "jit".b,
+              "inspect".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "line_irq".b => {
+            :number => 21,
+            :type => "irq".b,
+            :default => [
+              "trigger".b,
+              "bind".b,
+              "ack".b,
+              "configure".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "machine_page".b => {
+            :number => 17,
+            :type => "memory".b,
+            :default => ["read".b, "map".b, "inspect".b, "dup".b, "give".b].freeze,
+            :carves => nil
+          }.freeze,
+          "msi_irq".b => {
+            :number => 22,
+            :type => "irq".b,
+            :default => [
+              "trigger".b,
+              "bind".b,
+              "ack".b,
+              "configure".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "new_gate".b => {
+            :number => 6,
+            :type => "gate".b,
+            :default => [
+              "call".b,
+              "serve".b,
+              "configure".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "new_group".b => {
+            :number => 5,
+            :type => "group".b,
+            :default => [
+              "configure".b,
+              "attach".b,
+              "signal".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "new_space".b => {
+            :number => 3,
+            :type => "space".b,
+            :default => [
+              "map".b,
+              "threads".b,
+              "caps".b,
+              "stop".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "new_thread".b => {
+            :number => 4,
+            :type => "thread".b,
+            :default => [
+              "control".b,
+              "configure".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "paged_code_memory".b => {
+            :number => 12,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "exec".b,
+              "map".b,
+              "supply".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "paged_memory".b => {
+            :number => 11,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "map".b,
+              "supply".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "physical_memory".b => {
+            :number => 8,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "write".b,
+              "map".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "previous_crash".b => {
+            :number => 18,
+            :type => "memory".b,
+            :default => ["read".b, "map".b, "inspect".b, "dup".b, "give".b, "destroy".b].freeze,
+            :carves => nil
+          }.freeze,
+          "root_budget".b => {
+            :number => 1,
+            :type => "budget".b,
+            :default => [
+              "alloc".b,
+              "spaces".b,
+              "code".b,
+              "carve".b,
+              "inspect".b,
+              "dup".b,
+              "give".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "root_resource".b => {
+            :number => 23,
+            :type => "resource".b,
+            :default => [
+              "carve".b,
+              "power".b,
+              "trace".b,
+              "entropy".b,
+              "inspect".b,
+              "dup".b,
+              "give".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "shared_memory".b => {
+            :number => 7,
+            :type => "memory".b,
+            :default => [
+              "read".b,
+              "write".b,
+              "map".b,
+              "supply".b,
+              "child".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "software_irq".b => {
+            :number => 20,
+            :type => "irq".b,
+            :default => [
+              "trigger".b,
+              "bind".b,
+              "inspect".b,
+              "dup".b,
+              "give".b,
+              "destroy".b
+            ].freeze,
+            :carves => nil
+          }.freeze,
+          "time_page".b => {
+            :number => 16,
+            :type => "memory".b,
+            :default => ["read".b, "write".b, "map".b, "inspect".b, "dup".b, "give".b].freeze,
+            :carves => nil
+          }.freeze
+        }.freeze,
         caps: {}.freeze,
         calls: {
           "debug_log".b => {

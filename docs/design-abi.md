@@ -137,6 +137,34 @@ Its reader returns the selected typed view, and the bytes for no other
 case are read. This represents a brief/full crash record without treating
 a missing full body as a valid full record.
 
+A layout member `private OWNER` keeps a layout's members to the one
+source file that owns it, OWNER being that file's path from the
+repository root (`private kernel/core/cap.c`). `include/erx/abi.h` then
+declares only the layout's tag (`typedef struct erx_NAME erx_NAME_t;`),
+its `_SIZE` and its `_ALIGN`, which a caller needs to allocate one, so
+everywhere else the layout is an incomplete type, and a member, an offset
+or an accessor of it does not compile. Its offsets, its record with the
+size, alignment and offset assertions, and its field, atomic and sequence
+operations go to its own header, `kernel/generated/NAME_impl.h`, NAME
+being the layout's name without its `erx_` prefix, which includes
+`include/erx/abi.h`. The model derives that path from the name in one
+place. From the same declaration the chokepoint rules build one rule per
+private layout, `NAME-private` with NAME's underscores as hyphens
+([Chokepoint checks](design-kernel.md#chokepoint-checks)): only OWNER
+and OWNER's host tests include the header, and no other file defines the
+record. OWNER's host tests are the files named after it in the two
+host-only trees, `test/fixtures/STEM_*.c` and `tools/fuzz/STEM_fuzz.c`,
+STEM being OWNER's base name without `.c`; neither tree is built into the
+kernel or an image, so the rule widens to a new test of the owner without
+an edit and never to kernel code. A wire layout is a byte format another
+party decodes, so it never has a single owner and cannot be private; a
+shared layout that user mode reads cannot be private either, and marking
+one so fails the build of the code that reads it. No other layout embeds
+a private one, as a field or as a tail, and no projection shows one. The
+Erlang header carries only its size and alignment, and the generated
+reference names its owner and its private header. The capability slot is
+private to `kernel/core/cap.c` this way (K1).
+
 Shared fields additionally declare their atomic width and each permitted
 load/store order. The declared width equals the representation's width.
 Sequence-counted layouts name their sequence field, terminal retirement
@@ -156,6 +184,7 @@ The exact layout metadata forms, at two-space indentation, are:
 | `zero FIELD MASK` | these reserved bits are zero; an opaque `bytes` value uses `all`, while `FIELD[]` on a scalar array uses an element-width mask |
 | `input_mask FIELD ROLE MASK` | the reader for this input role accepts only these set bits; reserved-zero bits are excluded |
 | `visibility FIELD CLASS` | CLASS is `internal`, `release` or `development`; the declaration does not itself expose the field |
+| `private` | the layout's record, offsets and operations go only to its private header, described above |
 | `sequence FIELD terminal VALUE exhaustion STATUS recovery RECOVERY` | FIELD is an atomic unsigned sequence counter; VALUE fits it; STATUS names a declared failure result; RECOVERY is `none`, `new_object` or `new_incarnation` |
 
 `ROLE` is an identifier local to the layout, not a received name or an
@@ -1189,6 +1218,7 @@ The output families have explicit locations:
 | `include/erx/abi.h` | constants, strong scalar wrappers, typed layouts, size/offset assertions and field operations |
 | `include/erx/abi_reader.h`, `liberx/generated/abi_reader.c` | bounded structural readers and diagnostic types |
 | `kernel/generated/abi_calls.h`, `kernel/generated/abi_decode.c` | typed handler declarations, argument validation and closed dispatch/executor metadata |
+| `kernel/generated/NAME_impl.h` | a private layout's offsets, record and operations |
 | `liberx/generated/calls.h` | backend-independent call signatures |
 | `liberx/backend/<backend>/generated/` | the backend's declarations or native trap wrappers, with architecture-specific files inside its architecture directory |
 | `erlang/apps/erx/include/generated/erx_abi.hrl`, `erlang/apps/erx/src/generated/erx_manifest.erl` | constants and the generated manifest reader |

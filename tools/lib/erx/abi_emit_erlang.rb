@@ -45,6 +45,9 @@ module Erx
             prefix = Names.macro(type.name)
             lines << "-define(#{prefix}_SIZE, #{type.size})."
             lines << "-define(#{prefix}_ALIGN, #{type.alignment})."
+            # A private layout's offsets and sequence are the kernel's alone.
+            next if type.private?
+
             type.fields.each do |field|
               lines << "-define(#{prefix}_OFF_#{field.name.upcase}, #{field.offset})."
             end

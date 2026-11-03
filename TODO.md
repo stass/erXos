@@ -113,6 +113,107 @@ it; git history is the record of completed work.
   `erx_tlb_plan_t` is 1544 bytes, a fifth of an 8 KiB kernel stack. Keep
   it in the range call's plan storage rather than on the stack, or shrink
   `erx_tlb_inval_t` to 16 bytes (page number, log2 page count, reach).
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: the
+  syntax-tree checks of K2 (`erx_rights_t` built only in
+  `kernel/core/cap.c`) and the sequence-counted accessor rule do not
+  exist yet, and neither is in the registry.
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: the
+  text rules match whole names, so a name a macro pastes together
+  (`erx_cap_slot_ ## clear`, `erx_ ## cap_slot`) gets past
+  `cap-slot-clear-named`, `budget-records-private`, `cap-table-private`
+  and the rule generated for each private ABI layout (`cap-slot-private`).
+  Localize every symbol of `erx_cores.a` not on its API list, so code
+  outside the cores cannot reach `erx_cap_slot_clear` however it spells
+  it, and have the object leg read the objects' debug information, so no
+  object but its core's defines a private record. The same text rules
+  miss a slot reached by a cast at an offset copied by hand
+  (`*(uint32_t *)((char *)s + 24)`), an include through a macro in
+  inherited Fiasco, which `include-form` does not read, and a
+  `-include` flag in a build file; the syntax-tree leg should refuse a
+  cast from `erx_cap_slot_t *` or `erx_cap_table_t *` outside
+  `kernel/core/cap.c`. Nor does any rule stop a caller that keeps its own
+  untyped pointer to a table, its directory or a page it handed to the
+  core from writing their bytes; the space core should allocate them from
+  memory nothing else maps, and the syntax-tree leg refuse a write
+  through such a pointer.
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`:
+  `cap-slot-clear-callers` reads only the cores' call graph, so
+  `cap-slot-clear-named` keeps `erx_cap_slot_clear` out of the Fiasco glue
+  altogether. When the glue (WP12) gives the close and the space's
+  emptying their callers, extend the caller check to the glue's objects
+  and add the deletion walk's slot-clearing effect by name.
+* [Low] Capability core, `kernel/core/cap.c`: the slot-count decrement and
+  the release report move into `erx_cap_slot_clear` once the object store
+  exists (WP12).
+* [Medium] Capability core, `kernel/core/cap.c`: the table's owner hands
+  `erx_cap_table_add_page` each page's storage, so the core can refuse a
+  page that overlaps its own table, directory or pages, but not one that
+  another table already holds, and the check scans the whole directory
+  under the table's lock on every page added. Have the core take its
+  directory and pages itself through the budget-charging allocation
+  effect, so no caller supplies a page pointer and both the scan and the
+  aliasing go away
+  ([design-kernel.md](docs/design-kernel.md#objects-and-capabilities)).
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoint_rules.rb`: two
+  mechanisms keep a core's records private. Each private ABI layout's
+  rule is built from the ABI file, while `budget-records-private`,
+  `cap-table-private` and the core-to-header sites of
+  `core-records-private` are written by hand for the hand-written
+  `kernel/core/STEM_impl.h` headers. Build all of them with one helper
+  from one table, the private layouts plus every `kernel/core/STEM_impl.h`
+  owned by `kernel/core/STEM.c`. While at it, have the model expose a
+  private layout's stem and refuse a private layout whose generated
+  header shares its base name with a hand-written one (`erx_cap_table`,
+  `erx_budget`), and narrow `host_tests`, whose `test/fixtures/STEM_*.c`
+  also admits the drivers of a later `kernel/core/STEM_x.c`, with a check
+  that no build input lies under `test/` or `tools/fuzz/`.
+* [Medium] Kernel chokepoints, the pending syntax-tree leg: no `Pending`
+  rule awaits the syntax-tree reader for the capability records, so
+  nothing fails when it lands without them. Declare one that refuses,
+  from syntax trees, a definition of `struct erx_cap_slot` or
+  `struct erx_cap_table` outside their headers however its tag is
+  spelled, a member access through either type outside
+  `kernel/core/cap.c` and its host tests, and a cast from either
+  pointer type there
+  ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
+* [Medium] Capability core, `include/erx/cap.h`: a pass's route is two
+
+  flags the caller asserts (`from_own`, `to_created`), and nothing ties
+  them to the tables `erx_pass_take` and `erx_pass_install` are given, so
+  a rendezvous that sets `to_created` by mistake passes under the
+  creator's rule. Make the route a closed enum derived from the tables
+  (rendezvous, own to created, created to own, created to created), record
+  both tables in the plan, and have the steps refuse a mismatch.
+* [Medium] Capability core, `kernel/core/cap.c`: `erx_cap_install` takes a
+  type and a rights value from its caller, checked only against the
+  type's carryable set, whereas the design's install takes the creation
+  kind (K2). Replace it with an install by kind (type and rights from
+  `erx_kind_ktype` and `erx_rights_create`, plus a carve variant) and an
+  install by copy from an existing view, so no caller supplies a type and
+  rights pair.
+* [Medium] Capability core, `kernel/core/cap.c`: a pass is read sources,
+  plan, take, install and release the reservation, and growth is
+  `erx_cap_table_pages_needed`, allocate and `erx_cap_table_add_page`,
+  each a sequence the caller strings together (the plan's stage already
+  makes take and install run once each, in order). When the Fiasco glue
+  (WP12) gives them their callers, give each operation one effect-edge
+  function around the pure plan so no caller can reorder or skip a step.
+* [Medium] Capability core tests, `test/fixtures/cap_churn.c` and
+  `tools/fuzz/cap_fuzz.c`: the ThreadSanitizer churn adds no page while
+  readers run, never retires a slot under concurrent lookups and never
+  races a reserve and fill; the fuzzer has no seed operation, so a slot's
+  generation and count never near exhaustion. Add a growth thread and a
+  writer that drives one slot to the terminal count, and a seed operation.
+* [Medium] Kernel chokepoints, `tools/lib/erx/chokepoints.rb`: a `Callers`
+  rule counts only direct calls and tail jumps, not every relocation that
+  names its callee, so a core that takes the address of
+  `erx_cap_slot_clear` goes unseen (outside the cores
+  `cap-slot-clear-named` refuses any mention). Count every reference and
+  test an address-taken one.
+* [Low] Capability core, `kernel/core/cap.c`: `erx_pass_take` and
+  `erx_pass_install` return `ERX_EINVAL` for a plan or reservation that
+  breaks their preconditions (a kernel bug, never a domain's input); make
+  that an assertion in host and debug builds as well.
 
 
 * [High] storage and platforms, the Pi 4's boot image: the Pi 4's secure
@@ -262,6 +363,14 @@ it; git history is the record of completed work.
   `connections` quota. Leave headroom in `max_domains` for such records,
   and state how much
   ([design-system.md](docs/design-system.md#risks-and-open-questions)).
+* [Low] kernel ABI generator, `tools/lib/erx/abi_model.rb`: a private
+  layout stays out of every public declaration by three separate
+  refusals (embedding as a field, as a tail, and projection), so a new
+  construct that names a layout (a reader table, a call argument) must
+  remember a fourth. Walk every type reference of the schema once, after
+  parsing, and refuse each one from a public declaration to a private
+  layout, so the property holds for any construct
+  ([design-abi.md](docs/design-abi.md#source-grammar)).
 * [Low] kernel ABI, status codes: `ERX_EDEAD` carries two meanings (a
   dropped caller and a dead target). Split it, or state why one code
   serves both
@@ -573,8 +682,8 @@ document's "residual risks accepted" paragraph.
   reaching l4sys's headers); the linked-kernel call-site reader the raw
   allocator and pmem converter rules need; the glue-imports allowlist over
   the glue's GCC objects (`erx_probe.cpp` already exists, and its imports
-  are unchecked until then); the vector route; and the syntax-tree rules of
-  the capability table and budgets. Each fails the check as soon as a file
+  are unchecked until then); the vector route; and the syntax-tree rule of
+  the budgets' counters. Each fails the check as soon as a file
   it awaits lands, except the files it lists as existing: the budgets' rule
   exempts `kernel/core/budget.c` and `kernel/core/budget_impl.h`, which the
   active `budget-records-private` text rule covers until then

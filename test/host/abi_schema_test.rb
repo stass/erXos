@@ -151,7 +151,6 @@ class AbiSchemaTest < Minitest::Test
     right stop 0 "stop a space"
     type space 1
       rights stop
-      default stop
       pass none
     layout erx_utcb 1 shared 8 512
       field mr u64 0 count @msg_words
@@ -365,6 +364,53 @@ class AbiSchemaTest < Minitest::Test
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
+  PRIVATE = "layout erx_secret 1 native 8 16\n  private kernel/core/secret.c\n  field value u64 0\n  field other u64 8\n"
+
+  # A private layout leaves the public header its tag, size and alignment;
+  # its offsets, record and operations go to its own header alone.
+  def test_a_private_layout_is_defined_only_in_its_own_header
+    model = schema(PRIVATE)
+    secret = model.types.fetch('erx_secret')
+    assert_equal ['kernel/core/secret.c', 'kernel/generated/secret_impl.h'], [secret.private_owner, secret.private_header]
+    assert secret.private?
+    open = schema("layout open 1 native 8 8\n  field value u64 0\n").types.fetch('open')
+    assert_equal [false, nil], [open.private?, open.private_header]
+    public_header = Erx::ABI::CEmitter.header(model)
+    assert_includes public_header, "#define ERX_SECRET_SIZE 16\n#define ERX_SECRET_ALIGN 8\n" \
+                                   "typedef struct erx_secret erx_secret_t;\n"
+    refute_match(/struct erx_secret \{|ERX_SECRET_OFF_/, public_header)
+    headers = Erx::ABI::CEmitter.private_headers(model)
+    assert_equal ['kernel/generated/secret_impl.h'], headers.keys
+    text = headers.fetch('kernel/generated/secret_impl.h')
+    assert_includes text, "#ifndef ERX_SECRET_IMPL_H\n#define ERX_SECRET_IMPL_H\n\n#include \"erx/abi.h\"\n"
+    assert_includes text, "#define ERX_SECRET_OFF_OTHER 8\nstruct erx_secret {\n"
+    assert_includes text, '_Static_assert(sizeof(erx_secret_t) == ERX_SECRET_SIZE, "erx_secret size");'
+    assert_empty Erx::ABI::CEmitter.private_headers(schema("layout open 1 native 8 8\n  field value u64 0\n"))
+  end
+
+  # A private layout names one owner, a C source by a plain relative path.
+  # Nothing public may hold a private layout, and a wire layout, which
+  # another party decodes, cannot be one.
+  def test_a_private_layout_stays_out_of_every_public_declaration
+    refusals = {
+      'wire storage' => "layout erx_secret 1 wire_le 8 8\n  private kernel/core/secret.c\n  field value u64 0\n",
+      'twice' => "layout erx_secret 1 native 8 8\n  private kernel/core/secret.c\n  private kernel/core/secret.c\n" \
+                 "  field value u64 0\n",
+      'no owner' => "layout erx_secret 1 native 8 8\n  private\n  field value u64 0\n",
+      'two owners' => "layout erx_secret 1 native 8 8\n  private kernel/core/a.c kernel/core/b.c\n  field value u64 0\n",
+      'a header owner' => "layout erx_secret 1 native 8 8\n  private kernel/core/secret.h\n  field value u64 0\n",
+      'an absolute owner' => "layout erx_secret 1 native 8 8\n  private /kernel/core/secret.c\n  field value u64 0\n",
+      'an escaping owner' => "layout erx_secret 1 native 8 8\n  private kernel/../secret.c\n  field value u64 0\n",
+      'embedded' => "#{PRIVATE}layout outer 1 native 8 16\n  field inner erx_secret 0\n",
+      'a tail' => "#{PRIVATE}layout outer 1 native 8 8\n  field count u32 0\n  padding 4 4\n" \
+                  "  tail items erx_secret count 4\n",
+      'projected' => "#{PRIVATE}projection view erx_secret release\n  show value\n  show other\n"
+    }
+    refusals.each do |name, body|
+      assert_raises(Erx::ABI::SchemaError, name) { Erx::ABI::CEmitter.private_headers(schema(body)) }
+    end
+  end
+
   def test_reader_requires_wire_storage
     body = "layout sample 1 native 8 8\n  field value u64 0\nreader check sample 8\n"
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
@@ -388,7 +434,6 @@ class AbiSchemaTest < Minitest::Test
       scalar cap u64
       type memory 1
         rights none
-        default none
         pass none
       #{call_source('  arg target cap memory')}
     ABI

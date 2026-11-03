@@ -72,16 +72,23 @@ module Erx
 
   # The native boot-path parsers, each built from its own source with its
   # libFuzzer entry in tools/fuzz/KIND_fuzz.c: the ERXPACK boot image, ELF
-  # executable headers and the erx.watchdog= boot argument.
+  # executable headers and the erx.watchdog= boot argument; and the
+  # capability core over the values, masks and counts a domain controls.
   module PackFuzz
     module_function
 
     SOURCES = { 'pack' => 'kernel/core/pack.c', 'elf' => 'liberx/elf_plan.c',
-                'watchdog' => 'kernel/core/watchdog.c' }.freeze
+                'watchdog' => 'kernel/core/watchdog.c', 'cap' => 'kernel/core/cap.c' }.freeze
     # Accepted values at the bounds and one of each refusal, so mutations
     # start on both sides of every check.
     WATCHDOG_SEEDS = %w[1,5,60 60,120,600 1,2,2 0,5,60 1,1,60 1,5,4 1,5 1,5,60,
                         4294967296,5,60 1,,60 off].freeze
+    # Installs, then a lookup, a clear, a reservation and a pass of
+    # what was installed, so mutations start inside the tables.
+    CAP_SEEDS = ["\x00\x00\x07\xff\xff\xff\xff\x01\x00",
+                 "\x00\x00\x07\xff\xff\xff\xff\x01\x00\x00\x02\x01\x00\x00\x00\x00\x00\x00",
+                 "\x00\x00\x0b\xff\xff\xff\xff\x05\x00\x01\x03\x02\x00\x05\x00\x01\x01\x01\x01\x02\xff\xff\xff\xff\x00\x00",
+                 "\x00\x00\x06\xff\xff\xff\xff\x09\x00\x00\x01\x01\x01\x00\x07"].freeze
 
     def run(root:, runner:, compiler: 'clang', runs: 20_000)
       unless runs.is_a?(Integer) && runs.between?(1, 10_000_000)
@@ -95,7 +102,9 @@ module Erx
           program = File.join(directory, "#{kind}-fuzz")
           runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
-                      '-I', File.join(root, 'include'), File.join(root, source),
+                      '-I', File.join(root, 'include'), '-I', File.join(root, 'kernel/core'),
+                      '-I', File.join(root, 'kernel/generated'),
+                      File.join(root, source),
                       File.join(root, 'liberx/generated/abi_reader.c'),
                       File.join(root, "tools/fuzz/#{kind}_fuzz.c"), '-o', program],
                      name: "compile-#{kind}-fuzz", deadline: 90)
@@ -108,6 +117,7 @@ module Erx
 
     def seeds(kind)
       return WATCHDOG_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value] } if kind == 'watchdog'
+      return CAP_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value.b] } if kind == 'cap'
 
       bytes = kind == 'pack' ? PackFixture.valid : ElfFixture.valid
       # Every prefix of a valid wire header reaches a different truncation

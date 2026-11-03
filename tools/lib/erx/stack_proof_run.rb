@@ -5,6 +5,7 @@
 require 'fileutils'
 require 'tmpdir'
 require_relative 'bounded_file'
+require_relative 'chokepoint_rules'
 require_relative 'core_archive'
 require_relative 'output_directory'
 require_relative 'stack_graph'
@@ -55,6 +56,7 @@ module Erx
                                   runner: runner, scratch: scratch)
           graph = StackGraph.extract(inputs: objects.values.map { |object| StackGraph::Input.beside(object) },
                                      tools: tools, runner: runner)
+          Chokepoints.enforce_call_graph(ChokepointRules::CALL_GRAPH, graph)
           StackProof.prove(graph: graph, entries: entries(graph), budget: budget, targets: targets,
                            level: level).lines
         end

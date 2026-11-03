@@ -96,6 +96,26 @@ class StackProofRunTest < Minitest::Test
     end
   end
 
+  # The run checks the call-graph rules on the graph of each level it
+  # proves: a core that calls erx_cap_slot_clear from a function
+  # cap-slot-clear-callers does not list is refused when the call is in
+  # both levels' objects, and also when only the -O0 or only the -O2
+  # object holds it, so neither level goes unchecked.
+  def test_an_unlisted_caller_of_the_slot_clear_fails_at_each_level
+    { 'both' => ['', ''], 'O0' => ['#ifndef __OPTIMIZE__', '#endif'],
+      'O2' => ['#ifdef __OPTIMIZE__', '#endif'] }.each do |variant, (open, close)|
+      root = rogue_tree(variant, open: open, close: close)
+      error = assert_raises(Erx::Error, variant) do
+        Erx::StackProofRun.call(root: root, compiler: @compiler, runner: @runner, output: 'proof')
+      end
+      assert_match(/chokepoint cap-slot-clear-callers: .*erx_rogue_clear calls erx_cap_slot_clear/, error.message,
+                   variant)
+    end
+    # The same tree without the call proves.
+    root = rogue_tree('none', open: '#if 0', close: '#endif')
+    refute_empty Erx::StackProofRun.call(root: root, compiler: @compiler, runner: @runner, output: 'proof')
+  end
+
   def test_the_cores_pass_and_the_report_claims_their_bound_alone
     output = File.join('build', 'tests', "stack-proof-#{Process.pid}")
     lines = Erx::StackProofRun.call(root: ROOT, compiler: @compiler, runner: @runner, output: output)
@@ -133,4 +153,40 @@ class StackProofRunTest < Minitest::Test
   end
 
   def depth(report, name) = report.depths.find { |entry| entry.entry.name == name }
+
+  # A tree of two cores, the clear and a rogue caller whose call to it
+  # sits between open and close, with a budget whose tick entry is the
+  # rogue. The bootstrap core the archive requires is present but never
+  # compiled.
+  def rogue_tree(variant, open:, close:)
+    root = File.join(@directory, "rogue-#{variant}")
+    FileUtils.mkdir_p(File.join(root, 'kernel/core'))
+    File.write(File.join(root, 'kernel/stack_fiasco.txt'),
+               "block 8192\nallowance call 2048\nallowance tick 1024\ntick erx_rogue_clear\n")
+    File.write(File.join(root, 'kernel/stack_targets.txt'), '')
+    File.write(File.join(root, 'kernel/core/pack.c'), '')
+    File.write(File.join(root, 'kernel/core/clear.c'), <<~C)
+      void erx_cap_slot_clear(int *slot);
+
+      void
+      erx_cap_slot_clear(int *slot)
+      {
+      	*slot = 0;
+      }
+    C
+    File.write(File.join(root, 'kernel/core/rogue.c'), <<~C)
+      void erx_cap_slot_clear(int *slot);
+      void erx_rogue_clear(int *slot);
+
+      void
+      erx_rogue_clear(int *slot)
+      {
+      #{open}
+      	erx_cap_slot_clear(slot);
+      #{close}
+      	*slot += 1;
+      }
+    C
+    root
+  end
 end

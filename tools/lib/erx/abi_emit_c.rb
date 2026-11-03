@@ -66,15 +66,81 @@ module Erx
         out.concat(note_declaration(schema))
         schema.type_order.each do |type_name|
           type = schema.types.fetch(type_name)
-          next unless type.is_a?(Layout)
-          type.fields.each do |field|
-            out.concat(bit_accessors(type, field))
-            out.concat(atomic_accessors(type, field)) if field.atomic
-          end
-          out.concat(sequence_accessors(type, schema)) if type.sequence
+          out.concat(layout_operations(type, schema)) if type.is_a?(Layout) && !type.private?
         end
+        out.concat(rights_tables(schema)) if schema.objects.any?
         out.concat(['#endif /* ERX_ABI_H */', ''])
         out.join("\n")
+      end
+
+      # Each private layout's header: its offsets, its definition and its
+      # operations, after include/erx/abi.h, which declares only its tag,
+      # size and alignment. The chokepoint rule generated for the layout
+      # (tools/lib/erx/chokepoint_rules.rb) lets only its owner and the
+      # owner's host tests include it.
+      def private_headers(schema)
+        layouts = schema.type_order.map { |type_name| schema.types.fetch(type_name) }
+                        .select { |type| type.is_a?(Layout) && type.private? }
+        layouts.to_h do |layout|
+          guard = "ERX_#{File.basename(layout.private_header, '.h').upcase}_H"
+          text = [NOTICE, "#ifndef #{guard}", "#define #{guard}", '',
+                  '#include "erx/abi.h"', '',
+                  "/* The definition of #{c_type(layout)}, private to #{layout.private_owner}. */",
+                  *layout_offsets(layout), *layout_definition(layout), '',
+                  *layout_operations(layout, schema), "#endif /* #{guard} */", '']
+          [layout.private_header, text.join("\n")]
+        end
+      end
+
+      # A layout's field, atomic and sequence operations.
+      def layout_operations(layout, schema)
+        out = layout.fields.flat_map do |field|
+          bit_accessors(layout, field) + (field.atomic ? atomic_accessors(layout, field) : [])
+        end
+        layout.sequence ? out + sequence_accessors(layout, schema) : out
+      end
+
+      # The object types' carryable and pass sets and the creation kinds'
+      # types and default sets, as lookups over the ABI file's declarations.
+      # They return plain masks: only kernel/core/cap.c turns one into an
+      # erx_rights_t (erx_rights_create), so these grant nothing by
+      # themselves. A number that names no type or kind yields 0. Each
+      # lookup indexes a constant table rather than switching, so no
+      # optimisation level compiles it to an indirect branch, which the
+      # kernel's stack proof refuses. An ABI file that declares no kinds
+      # gets kind lookups that name nothing, since C17 has no empty array.
+      def rights_tables(schema)
+        mask = lambda do |names|
+          names.empty? ? "UINT32_C(0)" : names.sort.map { |right| constant("hr_#{right}") }.join(" |\n\t\t    ")
+        end
+        lookup = lambda do |result, function, argument, cases|
+          number = argument.split.last
+          if cases.empty?
+            next ['static inline uint32_t', "#{function}(#{argument})", '{', "\t(void)#{number};",
+                  "\treturn (#{result});", '}', '']
+          end
+
+          ['static inline uint32_t', "#{function}(#{argument})", '{', "\tstatic const uint32_t table[] = {",
+           *cases.map { |label, value| "\t\t[#{label}] = #{value}," }, "\t};", '',
+           "\tif (#{number} >= sizeof(table) / sizeof(table[0]))", "\t\treturn (#{result});",
+           "\treturn (table[#{number}]);", '}', '']
+        end
+        types = schema.objects.map { |name, object| [constant("k_#{name}"), object.fetch(:sets)] }
+        kinds = schema.kinds.map { |name, kind| [constant("kind_#{name}"), kind] }
+        ['/* An object type and a creation kind, numbered by the ABI file. */',
+         'typedef uint32_t erx_ktype_t;', 'typedef uint32_t erx_create_kind_t;', '',
+         '/* The rights a capability of the type can carry. */',
+         *lookup.call('UINT32_C(0)', 'erx_ktype_rights_mask', 'erx_ktype_t type',
+                      types.map { |label, sets| [label, mask.call(sets.fetch('rights'))] }),
+         '/* The rights it keeps when it passes to a peer; 0: it never passes. */',
+         *lookup.call('UINT32_C(0)', 'erx_ktype_pass_mask', 'erx_ktype_t type',
+                      types.map { |label, sets| [label, mask.call(sets.fetch('pass'))] }),
+         '/* The type of object a creation kind makes. */',
+         *lookup.call('UINT32_C(0)', 'erx_kind_ktype', 'erx_create_kind_t kind',
+                      kinds.map { |label, kind| [label, constant("k_#{kind.fetch(:type)}")] }),
+         '/* The rights a creation of the kind returns. */',
+         *lookup.call('UINT32_C(0)', 'erx_kind_default_mask', 'erx_create_kind_t kind',
+                      kinds.map { |label, kind| [label, mask.call(kind.fetch(:default))] })]
       end
 
       def sequence_accessors(layout, schema)
@@ -117,15 +183,31 @@ module Erx
         end
       end
 
+      # A private layout leaves include/erx/abi.h with an incomplete type:
+      # its tag, and the size and alignment a caller needs to allocate one;
+      # private_headers emits the rest.
       def layout_declaration(layout)
         tag = name(layout.name)
         prefix = constant(layout.name)
-        out = ["#define #{prefix}_SIZE #{layout.size}",
-               "#define #{prefix}_ALIGN #{layout.alignment}"]
-        layout.fields.each do |field|
-          out << "#define #{prefix}_OFF_#{field.name.upcase} #{field.offset}"
-        end
-        out.concat(["typedef struct #{tag} #{tag}_t;", "struct #{tag} {"])
+        extent = ["#define #{prefix}_SIZE #{layout.size}",
+                  "#define #{prefix}_ALIGN #{layout.alignment}"]
+        typedef = "typedef struct #{tag} #{tag}_t;"
+        return [*extent, typedef] if layout.private?
+
+        [*extent, *layout_offsets(layout), typedef, *layout_definition(layout)]
+      end
+
+      def layout_offsets(layout)
+        prefix = constant(layout.name)
+        layout.fields.map { |field| "#define #{prefix}_OFF_#{field.name.upcase} #{field.offset}" }
+      end
+
+      # The record and the assertions that pin its size, alignment and
+      # offsets to the ABI file's.
+      def layout_definition(layout)
+        tag = name(layout.name)
+        prefix = constant(layout.name)
+        out = ["struct #{tag} {"]
         members = layout.fields.map { |field| [field.offset, :field, field] }
         layout.padding.each_with_index { |range, index| members << [range[0], :padding, [index, range[1]]] }
         members.sort_by(&:first).each_with_index do |(_offset, kind, member), index|
