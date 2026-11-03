@@ -7287,10 +7287,12 @@ unknown keyword or type, a capability argument without a type and rights,
 a right outside its type's set, a type without a pass set or with one
 outside its rights, a pointer type, which the grammar does not have, a
 memory window with a maximum above `copy_max`, a call without a declared
-bound or wait property, a call that may wait without an executor rule or
-with a memory window, a written window on a call not marked `reads`, a
-UTCB layout longer than the 63 message words, a call with more than six
-arguments or two results, a misaligned field, and bit ranges that overlap
+bound or wait property, a call without an executor rule, a call that
+does not wait and refuses executors, a waiting call with a memory window,
+a written window on a call not marked `reads`, a UTCB layout longer than
+the 63 message words, two arguments or two results sharing a UTCB word, a
+call whose register parameters need more than six argument words or two
+result words, a misaligned field, and bit ranges that overlap
 or leave their field. The kernel, every `liberx` backend, the runtimes and
 the Erlang code therefore agree by construction, and every list the
 dispatch depends on (calls, rights, types, pass sets, charged budgets,
