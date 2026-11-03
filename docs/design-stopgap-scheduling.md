@@ -886,10 +886,37 @@ of its slice, up to the 50 ms a group may set
 ([design-scheduler.md](design-scheduler.md#data-model)), and leave a
 finisher queued after the period's end until something else
 rescheduled. Within the level, finishers run one tick each: the kill
-sets a dying thread's slice to one tick along with its priority, so
-the slice timeout rotates the running finisher to the end of the level
-at every tick, and a long finishing call cannot keep the level's share
-from the other finishers of its CPU.
+sets a dying thread's quantum to one tick along with its priority and
+replenishes its slice (`Sched_context::replenish`), since a new
+quantum changes neither the slice left nor an armed timeout
+(`sched_context-fixed_prio.cpp:229`), so the slice timeout rotates the
+running finisher to the end of the level at every tick, and a long
+finishing call cannot keep the level's share from the other finishers
+of its CPU.
+
+**The kill is a switch point.** When the killed thread's context is
+its CPU's current scheduling context, which it is whenever the
+request's handler interrupts the thread it kills, no switch follows
+the kill to publish the change: `schedule_switch_to_locked` calls
+`set_current_sched` only when the context pointer changes
+(`context.cpp:1157`), and `Thread::set_sched_params`'s own re-set of
+a current context keeps the slice remaining, since `set_current_sched`
+first saves the outgoing context's remaining slice
+(`sched_context.cpp:73`) and the outgoing context is the one being
+changed. Left so, the record would keep `dying` false while the thread
+finished a long call at the finishing priority on the old slice, up to
+the 50 ms a group may set, and nothing above would hold. The kill
+therefore ends the current slice itself: it invalidates the current
+scheduling context (`invalidate_sched`), which saves nothing, and sets
+it again to the thread's (`set_current_sched`), which arms the slice
+timeout one tick from the kill and passes through the hook, so the
+step sees a `SWITCH` whose incoming context is a dying thread's and
+sets `since` and `dying` at the kill: the stretch before the kill was
+a user thread's and is not counted, and the stretch after it is the
+level's. So every transition to finishing, by a switch to a killed
+thread or by the kill of the running one, is one `set_current_sched`,
+the hook sees them all, and the chokepoint check on `activate` covers
+the kill's call as it covers every other.
 
 **What the share guarantees.** Write `P` for `ERX_FINISHING_PERIOD`,
 `T` for `ERX_FINISHING_TICKS`, and a tick for 1 ms. In each of its
@@ -934,16 +961,40 @@ its CPU (**Death and the death edge**). With the defaults a one-tick
 teardown's work is done within 16 ms, a call with 40 ms of parts left
 within 88 ms, and the same call beside seven other finishers within
 648 ms. `W` counts the time charged to the thread, the interrupt work
-taken while it runs included. That work is bounded per tick by what
-can be queued, not by time. The timer is one interrupt a tick. A
-request interrupt is sent to a CPU only when its pending queue was
-empty (`pending_rqq_enqueue`, `context.cpp:2322`) or by its own entry
-that left work, so there is one per entry, and what an entry finds is
-one bounded step per request or wake another thread has outstanding, a
-waited request one per thread until its answer and a wake one per
-target context until it is visited, so a flood lengthens `W` by one
-step per thread of the flooding domains per tick and no more, which
-the flood case measures. A device interrupt is one bounded step of the
+taken while it runs included. The timer is one interrupt a tick.
+Request work has three bounds, and this binding sets two of them. The
+**queue's depth**: a thread has one request record and waits for its
+answer, and a context is on a CPU's pending queue at most once, so
+what is queued at a CPU is at most one request per thread of the
+machine and one visit per context homed there (**Bounded request
+queues**). An **entry's length**: at most `ERX_REQUEST_BATCH` steps,
+each bounded, after which the rest waits for the next entry. The
+**arrival rate** is not this binding's: a requester that has its
+answer may send again at once, and each request that finds the
+pending queue empty sends the request interrupt
+(`pending_rqq_enqueue`, `context.cpp:2322`), so the entries a CPU
+takes in a tick are as many as the requests that arrive in it, which
+only the requesters' round trips bound, one request per requesting
+thread per round trip, a round trip being the interrupt, its step and
+the wake of the requester. A flood therefore lengthens `W`, and every
+bound above that counts interrupt work, by one step per request that
+arrives in each tick, and that number is the requesting threads' to
+set, as an edge-triggered line's rate is its device's. The bounds of
+this section hold for the request rates the admitted domains produce;
+that is a stated condition, not a property of the code, and the flood
+case measures what the hostile domains' rate costs, in request entries
+per tick at the target CPU and in the progress its user thread keeps,
+for G1. The fork enforces no aggregate limit on request service,
+because each way of enforcing one costs more than it bounds: a
+per-tick cap on entries would hold every request beyond the cap, a
+kill's and a wake's included, until the next tick, moving the flood's
+cost from the CPU's time into every requester's latency without
+removing it, and charging an entry to its requester's group is the
+answer erXos's kernel may take, open there too (**Risks and open
+questions**, 4). Development builds run trusted code only, so the
+rate is a property of the domains the configuration admits, and it is
+recorded as a stopgap residual beside the device interrupt rate
+(**Risks and open questions**). A device interrupt is one bounded step of the
 hit path: a level-triggered line is masked at its hit until its holder
 unmasks it (`Irq_sender::_hit_level_irq`, `irq.cpp:1013`), so its rate
 is its holder's, but an edge-triggered line's rate is its device's, set
@@ -1565,9 +1616,10 @@ bounds stated.
 | build | the run word's one store function, with the chokepoint check that it is called only by the creation, the start, the stop, the death edge and the publication, each asserting the space's lock; a check that every `drq` call in the glue and the IPC path passes `eager = true`; a check that `switch_exec_locked(..., Not_Helping)` is called only in `schedule_switch_to_locked`; a check that a clearing of the ready bits followed by `schedule()` occurs only in `Erx::wait_sleep`, `Context::drq`, `do_kill`'s transfer wait and `rcu_wait`; the charge function's chokepoint; a check that a wait record's `outcome` is written only by the completion's swap and the resume's reset; a check that `Ipc_gate::invoke` reads `_thread` once, before `block`, and that `_unblocked_q` and `abort_all_unblocked` are absent from the image; a check that the dispatch's retry action is returned only by the send's glue; a check that `Ready_queue::activate` is called only from `set_current_sched` and `invalidate_sched`, so the finishing record's hook sees every change of the current scheduling context; the absence of `Thread::halt`, `pi_mutex`, `Ipc_gate::block`'s own sleep, `Rcu::call` and `Rcu_data::do_batch` from the image | pass | a seeded store to the word in a glue file, a seeded `drq` without `eager`, a seeded donating switch in `activate_ipc_partner`, a seeded `state_del_dirty(Thread_ready); schedule();` in a glue file, a seeded second writer of usage, a seeded plain store to `outcome`, a seeded second read of `_thread` after `block`, a seeded retry returned from the umtx wait's glue, a seeded `activate` in a glue file, and `Thread::halt` compiled back in each fail |
 | kernel, QEMU, TCG and HVF, 1 and 4 CPUs | K18: a space with threads on every CPU running user code, inside a long range call, in `erx_ipc_wait`, in `erx_ipc_call` to a server in another space on another CPU, mid-transfer as a receiver of a 63-word message, blocked at an unbound gate, in `erx_umtx_wait`, in `erx_park`, under a `CONTROL` stop, waiting at the fault gate after a fault, and never started; a thread created and one started during the stop; a second stopper, a self-stop and a thread of another space creating a thread in the stopped space, which takes the space's lock, racing on other CPUs | one exit record, received before the stoppers return; `erx_object_info` of the space reports `EXITED` with zero live threads after they return; no progress counter of the space moves afterwards; the creation and start fail `ERX_EDEAD`; the range call's object is gone | a kill that skips the umtx kind hangs the stop and the harness's deadline fails the case; a return check that resumes a stopped thread moves a counter after the record; the space's lock held across the kill request fires the home-CPU assertion of Fiasco's state writers when the creating thread helps the stopper on its CPU |
 | kernel, QEMU, 4 CPUs | the starved receiver: a space is stopped while its thread calls a gate bound to a thread on another CPU behind a spinner of a higher urgency, and while a thread of it is a receiver in a transfer from a sender on another CPU | the stop completes within the harness's bound | a handshake sent with `eager = false` waits for the spinner's turn and fails the bound |
-| kernel, QEMU, 4 CPUs | the request flood: threads of a hostile space on three CPUs send requests to CPU 0 for sixty seconds, IPC sends to a receiver there that never waits, `erx_thread_stop` and `erx_thread_start` on their own threads homed there, and umtx wakes and park wakes of four thousand of its threads waiting on CPU 0, each wake a context visit with no handler in it, while a thread of another space at urgency 1 on CPU 0 counts progress and the root task pets | the progress counter advances every period; the pet never misses; a debug counter of the steps of one entry, contexts visited, handlers run and the current thread's queue included, stays at or below `ERX_REQUEST_BATCH`; the throughput loss on CPU 0 is recorded for G1 | the batch bound removed, kept as one counter per queue loop so that it multiplies across Fiasco's nesting, or kept to handlers alone so that the wake flood's context visits and the entry's final `handle_drq` go uncounted, makes the longest entry exceed the bound under the flood |
+| kernel, QEMU, 4 CPUs | the request flood: threads of a hostile space on three CPUs send requests to CPU 0 for sixty seconds, IPC sends to a receiver there that never waits, `erx_thread_stop` and `erx_thread_start` on their own threads homed there, and umtx wakes and park wakes of four thousand of its threads waiting on CPU 0, each wake a context visit with no handler in it, while a thread of another space at urgency 1 on CPU 0 counts progress and the root task pets | the progress counter advances every period; the pet never misses; a debug counter of the steps of one entry, contexts visited, handlers run and the current thread's queue included, stays at or below `ERX_REQUEST_BATCH`; the request entries CPU 0 takes per tick, the fraction of each tick they take and the throughput loss on CPU 0 are recorded for G1, as the measure of the request-rate condition the bounds state | the batch bound removed, kept as one counter per queue loop so that it multiplies across Fiasco's nesting, or kept to handlers alone so that the wake flood's context visits and the entry's final `handle_drq` go uncounted, makes the longest entry exceed the bound under the flood |
 | kernel, QEMU, 4 CPUs | requests racing a death: threads on three CPUs send `erx_thread_stop`, `erx_thread_read` and kills to a thread on CPU 0 in the same tick it dies, a thousand times; then the same with the three CPUs flooding the dying thread with requests and IRQ deliveries throughout its drain | every request returns `ERX_OK`, `ERX_EBUSY` or `ERX_EDEAD` and none waits past the harness's bound; the drain runs at most `ceil(cohort / ERX_REQUEST_BATCH)` parts for the cohort the mark closed, and a debug counter of its longest masked stretch stays within one part; every delivery reaches the IRQ object's next binding or is held at it; the thread's record is freed, which the leak check shows | the dead mark read outside the request queue's lock lets a request queue after it, and its requester's wait fails the bound; the mark written after the drain, as a drain that closes only an empty queue would, lets the flood replenish the queue, the part count grows for as long as the flood lasts, and the case's bound fails |
 | kernel, QEMU, 4 CPUs | the finishing stream: threads of a hostile space on three CPUs create threads homed on CPU 0 and kill them as fast as their budget allows, for sixty seconds, in two forms, threads inside long range calls and threads with nothing to tear down, whose finishing takes well under a tick, while a thread of another space at urgency 1 on CPU 0 counts progress and the root task's petting thread runs on CPU 0 | the pet never misses; the progress counter advances every period; debug counters of the finishing level's clock time per period, its longest continuous stretch and the longest stretch a ready user thread waited for the level stay within `T + 1`, `2T + 2` and `2T + 2` ticks in both forms; the deaths complete, which the hostile space's live count shows | the level's time counted at the tick instead of measured at `set_current_sched` lets the short form's finishers run nearly every period whole, which the per-period counter shows and the progress counter misses; the share's answer stored for the pick, or its change left to the next decision something else makes while the hostile threads' group sets a 50 ms slice, lets the long form hold CPU 0, the pet misses, and the harness finds the watchdog's crash record |
+| kernel, QEMU, 4 CPUs | the kill of the running thread mid-slice: a thread on CPU 1 inside a long range call with 40 ms of parts left, whose group sets a 50 ms slice, killed from CPU 0 between two ticks, while a second thread homed on CPU 1 is killed in the same tick and a spinner of another space at urgency 40 runs on CPU 1 | debug counters of CPU 1's finishing level show its clock time rising from the first kill's instant, the second finisher running within one tick of its kill, the spinner delayed by at most `T + 1` ticks in any period, and both exit records within the bound | the kill left to set the priority and the quantum alone, without the invalidation and re-set of the current scheduling context, keeps the record's `dying` false through the first thread's call, so the level's per-period counter stays at zero while it runs, and holds the second finisher until the 50 ms slice's remainder expires, which its wake counter shows; the replenish omitted arms the old slice's remainder at the next switch to the finisher, which the second finisher's wait shows the same way; a model that feeds the step a `SWITCH` at every kill passes both, which is why this case runs on the fork |
 | kernel, QEMU, 4 CPUs | the grace-period wait's bound: a thousand threads die on CPU 0, with a thousand gates destroyed there meanwhile, while user spinners run on the other CPUs and a space on CPU 1 runs long range calls | a debug counter of the ticks between each thread's `rcu_wait` and its wake stays within five ticks plus one per 64 grace items ahead of it on CPU 0's list; a debug counter of the longest stretch CPU 0 ran with interrupts masked stays within the bound of one record step; the deaths complete | the tick's quiescent report (`inc_q_cnt`) removed on one CPU holds every death's wait, and the case's deadline fails; the step's limit of 64 removed runs the thousand wakes in one masked pass, which the masked-stretch counter catches |
 | kernel, QEMU, 4 CPUs | mutual stops: a thread of A stops B while a thread of B stops A, each space with threads in calls and waits on every CPU; then a ring of four spaces each stopping the next | two, then four, exit records, each after its space's last death, within the harness's bound; `erx_object_info` of each space reports `EXITED` | a stopper's wait left out of the kill's kick leaves every word `STOPPED` and the deadline fails |
 | kernel, QEMU | finishing: a stopper at urgency 10 stops a space whose thread is inside a long range call on a CPU where a spinner of another space runs at urgency 40, and a second stopper at 50 joins; in C1, the stopper's group with its quota spent | the record arrives within `ceil(W * k / T) + 1` periods of the kill, for the call's remaining ticks `W` and the finishers ready on that CPU; the spinner at 40 is delayed by the finishing thread for at most `T + 1` ticks in any period and `2T + 2` ticks at a stretch, which the spinner's progress counter shows; both stoppers return after the record; in C1 the stop completes at the stopper's next period and the stopped group's zero quota does not matter | the finishing priority set to the first stopper's lets the spinner at 40 hold the record until it yields, and the case's deadline fails |
@@ -1590,7 +1642,8 @@ the kill (the stopper's wait left alone), the one swap on the outcome
 fresh lookup after a wake (the binding read after the block), the one
 budget of an entry (one counter per loop; handlers alone), the closed
 queue (the mark after the drain), the forced decision (the
-`RESCHEDULE` dropped), and the
+`RESCHEDULE` dropped), the kill as a switch point (the priority and
+quantum changed in place), and the
 references a delivery and a finishing path hold (dropped at the
 handler's return; the innermost group alone). The stop and park conformance runs report the stack-fill
 watermark of every thread they ran, and the host cores run under ASan
@@ -1809,10 +1862,11 @@ Decisions that are the owner's, each with a recommendation:
    bounded step, on both kernels (**Transfer ownership**).
 4. **Who pays for request handling.** A request's handler runs on the
    target CPU and the tick charges it to whoever runs there; a hostile
-   sender's cost to a CPU is one bounded handler per request, in order.
-   Recommendation: accept on the stopgap, measure in the flood case, and
-   let erXos's kernel charge request handling to the requester's group
-   if G1 shows the loss matters.
+   sender's cost to a CPU is one bounded handler per request, in order,
+   and as many requests per tick as its round trips allow (**What the
+   share guarantees**). Recommendation: accept on the stopgap, measure
+   in the flood case, and let erXos's kernel charge request handling to
+   the requester's group if G1 shows the loss matters.
 
 Risks: the one-tick slack on every deadline and slice is a measured
 difference, not a correctness one, until a runtime depends on sub-ms
@@ -1822,8 +1876,8 @@ within one call's length; and `erx_thread_exit`'s teardown runs at the
 finishing priority too, bounded by the senders and bindings the thread's
 budget paid for.
 
-One residual is recorded rather than bounded: the number of device
-interrupts a CPU takes per tick. Each is one bounded step of the hit
+Two residuals are recorded rather than bounded. The first is the
+number of device interrupts a CPU takes per tick. Each is one bounded step of the hit
 path, and a level-triggered line is masked at its hit until its holder
 unmasks it, so its rate is its holder's; but an edge-triggered line
 fires at its device's rate, which the configuration that gave the
@@ -1833,7 +1887,17 @@ bounds, so every bound above that counts interrupt work, a finisher's
 the configuration admits. A device whose edge-triggered line fires
 faster than its CPU serves it takes that CPU from every thread on it.
 This is the same on erXos's kernel; it is a property of the system
-manifest, whose build check is where a bound on it belongs.
+manifest, whose build check is where a bound on it belongs. The second
+is the number of cross-CPU requests a CPU takes per tick. The queue
+holds at most one request per thread and one visit per context, an
+entry runs at most `ERX_REQUEST_BATCH` steps, and each step is
+bounded; but a requester sends again as soon as it has its answer, so
+the entries a CPU takes in a tick follow the requesters' round trips,
+which nothing in this binding bounds, and every bound above that
+counts interrupt work holds for the request rates the admitted domains
+produce (**What the share guarantees**). The flood case measures the
+cost. It is the same on erXos's kernel until decision 4 above charges
+an entry to its requester's group.
 
 ## References
 
