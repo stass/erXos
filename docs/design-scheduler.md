@@ -637,7 +637,7 @@ it dies, and a child counts until it is destroyed.
 | live | `erx_group_create` returns | its capabilities reach it; threads are created in it and groups under it |
 | released | its last capability goes while it has a member or a child | no capability reaches it, so nothing joins it; its members run on under its grant, park in it and take deliveries from the IRQ objects already bound to it, since `erx_park` and `erx_group_take_ready` act on the caller's own group and need no capability, and its children keep their place under it |
 | destroyed | it is deleted, by `erx_object_destroy` with `DESTROY`, by the destruction of the budget that pays for it or by the destruction of its parent group; or, released, its last member and child go | it is closed: every capability to it fails and nothing joins it; its teardown destroys its child groups, kills its member threads, unbinds the IRQ objects bound to it and withdraws the deliveries on its ready list, each owed to that object's next binding unless it is a level-sensitive line ([design-kernel.md](design-kernel.md#irq-objects)) |
-| freed | its destruction's grace period has passed and its last counted reference has gone | the reaper frees its record, its per-CPU records and its shared areas, and their charge returns to its budget, or to that budget's parent once the budget is destroyed ([design-kernel.md](design-kernel.md#the-reaper)) |
+| freed | its destruction's grace period has passed and its last counted reference has gone | its destroy released its shared areas, their charge ending there, and the reaper frees its record and its per-CPU records, whose cache pages are released when they hold no record ([design-kernel.md](design-kernel.md#the-reaper)) |
 
 Three facts follow by construction:
 
@@ -889,7 +889,7 @@ end on its own time, by helping, as a stopper runs a finishing thread
 ([design-kernel.md](design-kernel.md#closing-and-deleting)). So a
 destroy never waits on a member nobody will run. The reaper's steps,
 which free what the stop and the destroys leave, run on idle time or in
-the call whose charge needs the memory
+the page allocation that needs the pages
 ([design-kernel.md](design-kernel.md#the-reaper)).
 
 **Replenishment** is lazy: no timer refills a pool. The first draw of a new
