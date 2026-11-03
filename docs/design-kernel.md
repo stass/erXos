@@ -7725,6 +7725,19 @@ and relocations in the kernel's objects and the linked image (`llvm-nm`,
 `llvm-readelf`), its disassembly (`llvm-objdump`), and the syntax trees of
 its C sources (clang's JSON syntax-tree dump).
 
+The rules are declared as data in one registry,
+`tools/lib/erx/chokepoint_rules.rb`, which `make check` evaluates over
+every file git lists. A rule names the files it reads, what it forbids
+there and the sites allowed to do it, and carries the seeded violation its
+host test requires it to catch; text rules read each source after line
+splicing and comment removal, with every include directive limited to a
+plain header path so that no computed include or included non-header
+carries text past them. A rule another check enforces names that check
+and its test. A rule whose sites are not yet in the tree is declared
+pending with the files that would be its first sites, and the check fails
+when one of them appears, so no code lands before the check that polices
+it.
+
 A check proves the shape of the code: which code can reach an operation,
 where a type is built, that a path is bounded. It does not prove that the
 code allowed to perform an operation performs it only when it should:

@@ -36,8 +36,21 @@ class ChecksTest < Minitest::Test
                 env: Erx::Checks.isolated_git_environment)
   end
 
+  # The fixture trees hold none of the tests the Elsewhere rules name, so
+  # they are checked against the active chokepoint rules alone.
   def checks(imports: [], root: @root)
-    Erx::Checks.new(root: root, runner: @runner, required_imports: imports)
+    Erx::Checks.new(root: root, runner: @runner, required_imports: imports,
+                    chokepoints: Erx::ChokepointRules::ACTIVE)
+  end
+
+  # The source check runs the chokepoint rules over the git listing, so an
+  # untracked but unignored file is checked as a tracked one is.
+  def test_chokepoint_rules_run_over_listed_files
+    write('kernel/core/a.c', "int value;\n")
+    assert checks.run
+    write('kernel/core/b.c', "#include <l4/sys/ipc.h>\n")
+    error = assert_raises(Erx::Error) { checks.run }
+    assert_match(%r{fiasco-headers-in-backend: kernel/core/b.c:1}, error.message)
   end
 
   def write(relative, bytes)

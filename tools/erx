@@ -11,6 +11,7 @@ require_relative 'lib/erx/dependencies'
 require_relative 'lib/erx/tla'
 require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/qemu'
+require_relative 'lib/erx/conformance'
 require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
@@ -57,6 +58,8 @@ module Erx
         build(command_arguments, **collaborators)
       when 'qemu'
         qemu(command_arguments, **collaborators)
+      when 'conformance'
+        conformance(command_arguments, **collaborators)
       when 'oracle'
         oracle(command_arguments, **collaborators)
       when 'bench'
@@ -303,7 +306,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | status')
       0
     end
 
@@ -417,6 +420,35 @@ module Erx
                end
       Terminal.puts("Linux host oracle: #{result.fetch('state')}; #{result.fetch('report')}")
       result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
+    end
+
+    # The conformance roster over the matrix of accelerators and CPU counts.
+    # Succeeds only when every configuration passed; an unsupported, partial
+    # or timed-out configuration leaves the matrix incomplete.
+    def self.conformance(input_arguments)
+      arguments = input_arguments.dup
+      options = { image: Fiasco.new(root: ROOT).image_path, roster: File.join(ROOT, 'test/conformance/roster.txt'),
+                  accels: %w[tcg hvf], cpus: [1, 4] }
+      OptionParser.new do |flags|
+        flags.on('--image PATH', 'Explicit built guest image') { |value| options[:image] = value }
+        flags.on('--roster PATH', 'Conformance roster') { |value| options[:roster] = value }
+        flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| options[:accels] = value }
+        flags.on('--cpus LIST', Array, 'CPU counts') do |value|
+          options[:cpus] = value.map { |cpus| Integer(cpus, exception: false) || raise(OptionParser::InvalidArgument, cpus) }
+        end
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      unless (options.fetch(:accels) - %w[tcg hvf]).empty? && !options.fetch(:accels).empty?
+        raise OptionParser::InvalidArgument, 'accelerators must be tcg or hvf'
+      end
+      roster = Conformance.roster(BoundedFile.read(options.fetch(:roster), maximum: 1 << 20),
+                                  path: options.fetch(:roster))
+      configs = options.fetch(:accels).product(options.fetch(:cpus)).map do |accel, cpus|
+        Conformance::Config.new(accel: accel, cpus: cpus)
+      end
+      matrix = Conformance::Run.new(root: ROOT).run(image: options.fetch(:image), roster: roster, configs: configs)
+      Conformance.table(matrix).each { |line| Terminal.puts(line) }
+      matrix.fetch('status') == 'passed' ? 0 : 1
     end
 
     def self.bench(input_arguments)

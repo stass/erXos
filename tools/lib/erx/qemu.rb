@@ -4,6 +4,7 @@
 
 require 'digest'
 require 'fileutils'
+require 'set'
 require 'json'
 require_relative 'bootstrap_memory'
 require_relative 'runner'
@@ -32,6 +33,14 @@ module Erx
        '-smp', cpus.to_s, '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
        '-no-reboot', '-serial', "file:#{serial}", '-kernel', image].freeze
+    end
+
+    # The accelerators `qemu-system-aarch64 -accel help` lists: one name per
+    # line after its heading. A configuration whose accelerator is absent
+    # is unsupported on this host, which the conformance matrix shows as
+    # such rather than as a failure or a pass.
+    def accelerators(text)
+      text.b.lines.map(&:strip).grep(/\A[a-z][a-z0-9_-]{0,31}\z/).to_set.freeze
     end
   end
 

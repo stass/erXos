@@ -4,6 +4,7 @@
 
 require 'set'
 require_relative 'bounded_file'
+require_relative 'chokepoint_rules'
 require_relative 'origin'
 require_relative 'runner'
 require_relative 'source_text'
@@ -67,10 +68,11 @@ module Erx
       names.uniq.sort.freeze
     end
 
-    def initialize(root:, runner:, required_imports: IMPORTS)
+    def initialize(root:, runner:, required_imports: IMPORTS, chokepoints: ChokepointRules::ALL)
       @root = File.expand_path(root)
       @runner = runner
       @required_imports = required_imports
+      @chokepoints = chokepoints
     end
 
     def run
@@ -87,6 +89,9 @@ module Erx
       own_sources = listed.reject { |relative| imported?(relative) }
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_json_parsing(own_sources)
+      # The chokepoint rules read the same listing, imports included, since
+      # the glue lives inside the stopgap kernel's imported tree.
+      Chokepoints.enforce(@chokepoints, root: @root, names: listed, imported: method(:imported?))
       true
     end
 

@@ -243,6 +243,30 @@ output directly to the host terminal. A matched prefix is insufficient
 when a later checkpoint is missing. Reports include the guest image hash,
 QEMU identity, resolved invocation and observed checkpoints.
 
+The conformance harness (`tools/erx conformance`,
+`tools/lib/erx/conformance.rb`) runs the roster `test/conformance/roster.txt`
+over a matrix of configurations, TCG and HVF with one and four CPUs, one
+guest boot per configuration. A roster line declares a case the guest runs,
+with its share of the guest's deadline, or a pending case whose call does
+not exist yet. The guest reports each case on the serial console as
+`erx-test: case NAME passed|failed|skipped`, closes its report with
+`erx-test: end COUNT`, and ends the machine, so that under `-no-reboot`
+QEMU exits by itself. The harness separates that natural exit from a QEMU
+that exits with an error and from a guest it kills at its deadline (the
+boot allowance plus every running case's share), and kills the guest's
+whole process group in every case. A case's status in a configuration is
+the result the guest reported; `omitted` when the guest ended its report
+without it, which fails the configuration; `unknown` when the report never
+ended; `pending` as the roster says; and `unsupported` when the host's QEMU
+lacks the accelerator. A configuration is `passed`, `failed`, `partial` (a
+natural exit without an end line, or with a skipped case, since a skip did
+not run), `timed_out` or `unsupported`, and the
+matrix passes only when every configuration passed. Protocol lines are
+bounded, a malformed, repeated, late or miscounted line fails its
+configuration, and diagnostics quote guest bytes only escaped and
+truncated. Each configuration's serial log and report and the whole
+matrix stay under `build/conformance/`.
+
 ## Oracle and protocol models
 
 Stock host OTP builds are separate from the imported target source. Both

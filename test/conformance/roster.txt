@@ -1,0 +1,17 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The kernel interface's conformance roster (tools/lib/erx/conformance.rb).
+# One case per line:
+#
+#   case NAME SECONDS      a case the conformance guest runs, with its share
+#                          of the guest's deadline
+#   pending NAME SECONDS   a case declared before the call it tests exists;
+#                          the matrix shows it as pending and nothing runs
+#
+# NAME is lower case: letters, digits, '_', '.' and '-', at most 64 bytes.
+# Each case lands with the kernel call whose contract it tests; the guest
+# reports it as `erx-test: case NAME passed|failed|skipped` and ends its
+# report with `erx-test: end COUNT`. `tools/erx conformance` runs the
+# roster under TCG and HVF with one and four CPUs. A case the roster runs
+# and the guest does not report is omitted, and fails its configuration.

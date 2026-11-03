@@ -530,6 +530,39 @@ document's "residual risks accepted" paragraph.
   send's glue returns `ERX_SYS_ACTION_RETRY`, with a seeded second
   returner failing it, land with the dispatch and the IPC glue
   ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#the-wait-funnel)).
+* [High] chokepoints, the pending M1 rules of
+  `tools/lib/erx/chokepoint_rules.rb`: the object leg (no liberx target
+  object outside the fiasco backend references an `l4_` symbol or holds a
+  trap but the ABI's, read with `llvm-nm` and `llvm-objdump`; it also
+  closes the include-path gap the text rules cannot see, an `-I` flag
+  reaching l4sys's headers); the linked-kernel call-site reader the raw
+  allocator and pmem converter rules need; the glue-imports allowlist over
+  the glue's GCC objects (`erx_probe.cpp` already exists, and its imports
+  are unchecked until then); the vector route; and the syntax-tree rules of
+  the capability table and budgets. Each fails the check as soon as a file
+  it awaits lands ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
+* [Medium] chokepoints, gaps of the text rules until the object leg
+  closes them (`tools/lib/erx/chokepoints.rb`): rules match names, so they
+  do not follow includes (a `kernel/core/cap.h` allowed to include
+  `cap_impl.h` can be included by the glue), and they do not see token
+  pasting or `L4_` macros; files ignored by an exclude rule are not
+  scanned though a build file could name them; the glue, inside an
+  imported tree, gets no directory-alias or link-name check; and an
+  Elsewhere rule checks only that its test file exists, not its named
+  check or seeded case. A differential test of the C view against
+  `clang -E` would prove that it never drops code.
+* [Low] conformance harness details (`tools/lib/erx/conformance.rb`): hash
+  and boot one copy of the image, so a rebuild during the matrix cannot
+  mix images; show each failed configuration's reasons on the terminal,
+  not only in its report; split protocol lines on single spaces exactly.
+* [Medium] conformance, the guest side: a `liberx` reporter that prints
+  `erx-test:` lines and ends the machine through `erx_machine_end`, and the
+  roster's first cases with their calls; the harness gives one deadline per
+  configuration, not per case ([design-build.md](docs/design-build.md#images-and-guests)).
+* [Medium] bench, G1's guest workloads (`tools/erx bench timer`, `stop`,
+  the null call, IPC, park and wake, boot time): they reuse the conformance
+  harness's boot, deadline and guest endings, with results kept per
+  accelerator ([plan.md](docs/plan.md#m1-the-stopgap-speaks-erxoss-interface)).
 
 * [High] kernel memory, file-backed memory objects with evictable clean
   pages, so that large-file `mmap` (LMDB, SQLite in mmap mode) and ML
