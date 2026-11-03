@@ -9,6 +9,22 @@ require_relative '../../tools/fuzz/run_pack'
 load File.expand_path('../../tools/erx', __dir__) unless defined?(Erx::CLI)
 
 class LeafOutputsTest < Minitest::Test
+  class ImportDependencies
+    def initialize(**); end
+
+    def archive_for(_id)
+      [{ 'sha256' => 'a' * 64, 'directory' => 'musl-fixture' }, '/verified/fixture.tar']
+    end
+  end
+
+  ImportSources = Struct.new(:source) do
+    def unpack(**options)
+      target = options.fetch(:destination)
+      FileUtils.mkdir_p(target)
+      File.binwrite(File.join(target, 'fixture.c'), source)
+    end
+  end
+
   REPOSITORY = File.expand_path('../..', __dir__).freeze
 
   def setup
@@ -77,18 +93,8 @@ class LeafOutputsTest < Minitest::Test
     File.binwrite(File.join(directory, 'fixture.c'), source)
     profile_path = File.join(@root, 'config/imports/musl.json')
     File.symlink(@outside, profile_path)
-    dependency = Object.new
-    dependency.define_singleton_method(:archive_for) do |_id|
-      [{ 'sha256' => 'a' * 64, 'directory' => 'musl-fixture' }, '/verified/fixture.tar']
-    end
-    unpack = proc do |**options|
-      target = options.fetch(:destination)
-      FileUtils.mkdir_p(target)
-      File.binwrite(File.join(target, 'fixture.c'), source)
-    end
-    Erx::Dependencies.stub(:new, dependency) do
-      Erx::Sources.stub(:unpack, unpack) { Erx::ImportOrigins.write(root: @root, component: 'musl') }
-    end
+    Erx::ImportOrigins.write(root: @root, component: 'musl',
+                             dependencies: ImportDependencies, sources: ImportSources.new(source))
     assert File.binread(@outside) == 'outside stays unchanged', 'outside sentinel was modified'
     refute File.symlink?(profile_path)
     assert_equal 'v1.2.6', JSON.parse(File.binread(profile_path)).fetch('revision')

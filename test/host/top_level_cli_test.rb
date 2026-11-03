@@ -7,9 +7,30 @@ require 'tmpdir'
 load File.expand_path('../../tools/erx', __dir__) unless defined?(Erx::CLI)
 
 class TopLevelCliTest < Minitest::Test
-  def run_cli(*arguments)
+  Factory = Struct.new(:instance) do
+    def new(**) = instance
+  end
+
+  class UnexpectedRunner
+    def self.new(**) = raise 'unexpected command setup'
+  end
+
+  class PassingChecks
+    def run = true
+    def check(**) = true
+  end
+
+  class UnbuiltOracle
+    def with_runtime(_flavour) = raise Erx::Error, 'not built'
+  end
+
+  StatusDirectories = Struct.new(:path) do
+    def glob(_pattern) = [path]
+  end
+
+  def run_cli(*arguments, **collaborators)
     status = nil
-    _stdout, output = capture_io { status = Erx::CLI.run(arguments) }
+    _stdout, output = capture_io { status = Erx::CLI.run(arguments, **collaborators) }
     [status, output]
   end
 
@@ -26,24 +47,17 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def with_checks(commands, fail_name: nil)
-    checker = Object.new
-    checker.define_singleton_method(:run) { true }
     runtime = proc do |**_options, &block|
       block.call('ERX_ERL' => '/verified/erl', 'ERX_ERLC' => '/verified/erlc')
     end
-    Erx::Runner.stub(:new, recording_runner(commands, fail_name: fail_name)) do
-      Erx::Checks.stub(:new, checker) do
-        Erx::ArchTerms.stub(:check, true) do
-          Erx::CLI.stub(:with_test_runtime, runtime) { yield }
-        end
-      end
-    end
+    yield runner: Factory.new(recording_runner(commands, fail_name: fail_name)),
+          checks: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
   end
 
   def test_check_runs_every_generation_gate_and_real_renderer_integration
     commands = []
-    with_checks(commands) do
-      status, output = run_cli('check')
+    with_checks(commands) do |**collaborators|
+      status, output = run_cli('check', **collaborators)
       assert_equal 0, status, output
     end
     generated = commands.select { |_argv, options| options.fetch(:name).start_with?('check-gen-', 'check-sysreg') }
@@ -62,8 +76,8 @@ class TopLevelCliTest < Minitest::Test
 
   def test_failed_renderer_integration_fails_the_aggregate_gate
     commands = []
-    with_checks(commands, fail_name: 'native-integration') do
-      status, output = run_cli('check')
+    with_checks(commands, fail_name: 'native-integration') do |**collaborators|
+      status, output = run_cli('check', **collaborators)
       assert_equal 1, status
       assert_includes output, '/evidence/failure.log'
       refute_includes output, 'checks passed'
@@ -72,22 +86,14 @@ class TopLevelCliTest < Minitest::Test
 
   def test_unbuilt_native_jit_does_not_start_host_tests
     commands = []
-    checker = Object.new
-    checker.define_singleton_method(:run) { true }
-    oracle = Object.new
-    oracle.define_singleton_method(:with_runtime) { |_flavour, &_block| raise Erx::Error, 'not built' }
-    Erx::Runner.stub(:new, recording_runner(commands)) do
-      Erx::Checks.stub(:new, checker) do
-        Erx::ArchTerms.stub(:check, true) do
-          Erx::CLI.stub(:host_environment, {}) do
-            Erx::Oracle.stub(:new, oracle) do
-              status, output = run_cli('check')
-              assert_equal 1, status
-              assert_includes output, 'not built'
-            end
-          end
-        end
-      end
+    runtime = lambda do |runner:, &block|
+      Erx::CLI.send(:with_test_runtime, runner: runner, oracle: Factory.new(UnbuiltOracle.new),
+                    environment: ->(**) { {} }, &block)
+    end
+    with_checks(commands) do |**collaborators|
+      status, output = run_cli('check', **collaborators.merge(runtime: runtime))
+      assert_equal 1, status
+      assert_includes output, 'not built'
     end
     refute commands.any? { |_argv, options| options.fetch(:name) == 'host-tests' }
   end
@@ -100,8 +106,8 @@ class TopLevelCliTest < Minitest::Test
 
   def test_sanitizer_gate_instruments_the_pack_and_elf_regression_corpora
     commands = []
-    with_checks(commands) do
-      status, output = run_cli('check-sanitizers')
+    with_checks(commands) do |runner:, runtime:, **|
+      status, output = run_cli('check-sanitizers', runner: runner, runtime: runtime)
       assert_equal 0, status, output
     end
     tests = commands.find { |_argv, options| options.fetch(:name) == 'sanitizer-tests' }
@@ -111,31 +117,25 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_fuzz_limits_are_checked_before_starting_commands
-    Erx::Runner.stub(:new, proc { raise 'unexpected command setup' }) do
-      status, output = run_cli('check-fuzz', '--runs', '0')
-      assert_equal 2, status
-      assert_includes output, 'outside bounds'
-    end
+    status, output = run_cli('check-fuzz', '--runs', '0', runner: UnexpectedRunner)
+    assert_equal 2, status
+    assert_includes output, 'outside bounds'
   end
 
   def test_generation_gate_refuses_trailing_arguments
-    Erx::Runner.stub(:new, proc { raise 'unexpected command setup' }) do
-      status, output = run_cli('check-generated', 'ignored')
-      assert_equal 2, status
-      assert_includes output, 'unexpected arguments'
-    end
+    status, output = run_cli('check-generated', 'ignored', runner: UnexpectedRunner)
+    assert_equal 2, status
+    assert_includes output, 'unexpected arguments'
   end
 
   def test_malformed_status_record_fails_through_the_escaped_cli_boundary
     Dir.mktmpdir('erx-cli-status-') do |directory|
       path = File.join(directory, 'record.json')
       File.binwrite(path, "{\e]0;untrusted\a".b)
-      Dir.stub(:glob, [path]) do
-        status, output = run_cli('status')
-        assert_equal 1, status
-        refute_includes output, "\e"
-        refute_includes output, "\a"
-      end
+      status, output = run_cli('status', directories: StatusDirectories.new(path))
+      assert_equal 1, status
+      refute_includes output, "\e"
+      refute_includes output, "\a"
     end
   end
 
@@ -157,11 +157,9 @@ class TopLevelCliTest < Minitest::Test
       path = File.join(directory, 'record.json')
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
       runner.run(['mkfifo', path], name: 'status-fifo', deadline: 10)
-      Dir.stub(:glob, [path]) do
-        status, output = run_cli('status')
-        assert_equal 1, status
-        assert_includes output, 'bounded regular file'
-      end
+      status, output = run_cli('status', directories: StatusDirectories.new(path))
+      assert_equal 1, status
+      assert_includes output, 'bounded regular file'
     end
   end
 
@@ -170,14 +168,11 @@ class TopLevelCliTest < Minitest::Test
     observed = []
     c = proc { |**options| observed << [:c, options.fetch(:runs), options.fetch(:seed)] }
     ruby = proc { |**options| observed << [:ruby, options.fetch(:seconds), options.fetch(:seed)] }
-    with_checks(commands) do
-      Erx::CLI.stub(:fuzz_c, c) do
-        Erx::CLI.stub(:fuzz_ruby, ruby) do
-          status, output = run_cli('check-fuzz', '--seconds', '7', '--runs', '1234', '--seed', '19')
-          assert_equal 0, status
-          assert_includes output, 'fixed 20000 iterations, seed 1'
-        end
-      end
+    with_checks(commands) do |runner:, runtime:, **|
+      status, output = run_cli('check-fuzz', '--seconds', '7', '--runs', '1234', '--seed', '19',
+                               runner: runner, runtime: runtime, c_fuzzer: c, ruby_fuzzer: ruby)
+      assert_equal 0, status
+      assert_includes output, 'fixed 20000 iterations, seed 1'
     end
     assert_equal [[:c, 1234, 19], [:ruby, 7, 19]], observed
   end

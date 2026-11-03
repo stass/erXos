@@ -22,28 +22,28 @@ module Erx
   ROOT = File.expand_path('..', __dir__)
 
   module CLI
-    def self.run(arguments)
+    def self.run(arguments, **collaborators)
       command, *arguments = arguments
       case command
       when 'check'
-        check(arguments)
+        check(arguments, **collaborators)
       when 'check-generated'
-        check_generated(arguments)
+        check_generated(arguments, **collaborators)
       when 'check-reproducible'
         check_reproducible(arguments)
       when 'check-fuzz'
-        check_fuzz(arguments)
+        check_fuzz(arguments, **collaborators)
       when 'check-sanitizers'
-        check_sanitizers(arguments)
+        check_sanitizers(arguments, **collaborators)
       when 'check-ubsan'
-        check_sanitizers(arguments)
+        check_sanitizers(arguments, **collaborators)
         Terminal.puts('unsupported: kernel UBSan boot requires erXos kernel implementation; host UBSan checks passed')
         1
       when 'pack'
         Terminal.puts('unsupported root_startup: production packing requires the M1 initial-root startup and charge plan')
         1
       when 'status'
-        status(arguments)
+        status(arguments, **collaborators)
       when 'fetch'
         fetch(arguments)
       when 'check-tla'
@@ -60,7 +60,7 @@ module Erx
       when 'qemu'
         qemu(arguments)
       when 'oracle'
-        oracle(arguments)
+        oracle(arguments, **collaborators)
       when 'bench'
         bench(arguments)
       when 'check-oracle'
@@ -81,16 +81,16 @@ module Erx
       1
     end
 
-    def self.check(arguments)
+    def self.check(arguments, runner: Runner, checks: Checks, arch_terms: ArchTerms, runtime: method(:with_test_runtime))
       arguments = arguments.dup
       OptionParser.new.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-      Checks.new(root: ROOT).run
-      ArchTerms.check(root: ROOT)
-      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      checks.new(root: ROOT).run
+      arch_terms.check(root: ROOT)
+      runner = runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
-      with_test_runtime(runner: runner) do |environment|
+      runtime.call(runner: runner) do |environment|
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
         raise Error, 'no host tests found' if tests.empty?
         run_tests(tests, runner: runner, name: 'host-tests', environment: environment)
@@ -103,9 +103,9 @@ module Erx
       0
     end
 
-    def self.check_generated(arguments)
+    def self.check_generated(arguments, runner: Runner)
       no_arguments(arguments)
-      generated(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
+      generated(runner: runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
       Terminal.puts('ABI, hardware, system-register and terminal artifacts match')
       0
     end
@@ -151,9 +151,9 @@ module Erx
         'PATH' => path }.freeze
     end
 
-    def self.with_test_runtime(runner:)
-      environment = host_environment(runner: runner)
-      Oracle.new(root: ROOT, runner: runner).with_runtime('jit') do |runtime|
+    def self.with_test_runtime(runner:, oracle: Oracle, environment: method(:host_environment))
+      environment = environment.call(runner: runner)
+      oracle.new(root: ROOT, runner: runner).with_runtime('jit') do |runtime|
         yield Oracle::CLEAN_ERLANG_ENV.merge(environment)
                   .merge('ERX_ERL' => runtime.fetch('erl'), 'ERX_ERLC' => runtime.fetch('erlc')).freeze
       end
@@ -181,11 +181,11 @@ module Erx
       0
     end
 
-    def self.check_sanitizers(arguments)
+    def self.check_sanitizers(arguments, runner: Runner, runtime: method(:with_test_runtime))
       no_arguments(arguments)
-      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      runner = runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
-      with_test_runtime(runner: runner) do |environment|
+      runtime.call(runner: runner) do |environment|
         paths = %w[abi_calls manifest_reader elf_plan pack].map do |name|
           File.join(ROOT, "test/host/#{name}_test.rb")
         end
@@ -202,7 +202,8 @@ module Erx
       0
     end
 
-    def self.check_fuzz(arguments)
+    def self.check_fuzz(arguments, runner: Runner, runtime: method(:with_test_runtime),
+                        c_fuzzer: method(:fuzz_c), ruby_fuzzer: method(:fuzz_ruby))
       arguments = arguments.dup
       options = { seconds: 3, runs: 20_000, seed: 1 }
       OptionParser.new do |flags|
@@ -214,11 +215,11 @@ module Erx
              options.fetch(:runs).between?(1, 10_000_000) && options.fetch(:seed).between?(0, (1 << 31) - 1)
         raise OptionParser::InvalidArgument, 'fuzz budget, seed or trailing arguments outside bounds'
       end
-      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      runner = runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
-      with_test_runtime(runner: runner) do |environment|
-        fuzz_c(runner: runner, environment: environment, runs: options.fetch(:runs), seed: options.fetch(:seed))
-        fuzz_ruby(runner: runner, environment: environment, seconds: options.fetch(:seconds), seed: options.fetch(:seed))
+      runtime.call(runner: runner) do |environment|
+        c_fuzzer.call(runner: runner, environment: environment, runs: options.fetch(:runs), seed: options.fetch(:seed))
+        ruby_fuzzer.call(runner: runner, environment: environment, seconds: options.fetch(:seconds), seed: options.fetch(:seed))
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/abi_erlang_test.rb'),
                     '--name', 'test_production_fuzz_entry_refuses_mutations_without_vm_exception'],
                    name: 'fuzz-erlang-manifest', deadline: 180, chdir: ROOT, env: environment)
@@ -334,7 +335,7 @@ module Erx
       0
     end
 
-    def self.oracle(arguments)
+    def self.oracle(arguments, native: Oracle, container: OracleContainer)
       arguments = arguments.dup
       action = arguments.shift
       unless %w[build run probe].include?(action)
@@ -364,12 +365,12 @@ module Erx
         unless action == 'build' && !options[:context]
           raise OptionParser::InvalidArgument, 'native backend supports bootstrap build only, without Docker context'
         end
-        Oracle.new(root: ROOT).build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs), clean: options.fetch(:clean))
+        native.new(root: ROOT).build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs), clean: options.fetch(:clean))
         Terminal.puts("native stock OTP bootstrap #{options.fetch(:flavour)} ready")
         return 0
       end
       raise OptionParser::InvalidArgument, '--clean applies to native bootstrap builds' if options.fetch(:clean)
-      backend = OracleContainer.new(root: ROOT, context: options[:context])
+      backend = container.new(root: ROOT, context: options[:context])
       result = case action
                when 'build'
                  backend.build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs)).first
@@ -398,10 +399,10 @@ module Erx
       0
     end
 
-    def self.status(arguments)
+    def self.status(arguments, directories: Dir)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-      records = Dir.glob(File.join(ROOT, 'build/logs/*.json')).sort.map do |path|
+      records = directories.glob(File.join(ROOT, 'build/logs/*.json')).sort.map do |path|
         status_record(BoundedFile.read(path, maximum: 65_536))
       end
       active = records.select { |record| record.fetch('state') == 'running' }

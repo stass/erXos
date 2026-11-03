@@ -48,19 +48,19 @@ module Erx
       end + rules
     end
 
-    def write(root:, component:)
+    def write(root:, component:, dependencies: Dependencies, sources: Sources)
       raise Error, 'unsupported import component' unless %w[otp musl].include?(component)
       project = File.expand_path(root)
       directory = OutputDirectory.check(root: project, path: File.join(project, component))
       runner = Runner.new(owner_root: project, log_dir: File.join(project, 'build/logs'))
-      declaration, archive = Dependencies.new(root: project, runner: runner).archive_for(component)
+      declaration, archive = dependencies.new(root: project, runner: runner).archive_for(component)
       if File.exist?(File.join(directory, 'ORIGIN.md')) || File.symlink?(directory)
         raise Error, 'import already has an origin or is a symlink'
       end
 
       Dir.mktmpdir(".#{component}-origin-", project) do |temporary|
         extracted = File.join(temporary, 'unpacked')
-        Sources.unpack(archive: archive, sha256: declaration.fetch('sha256'),
+        sources.unpack(archive: archive, sha256: declaration.fetch('sha256'),
                        destination: extracted, owner_root: temporary,
                        source_directory: declaration.fetch('directory'), runner: runner)
         selected = extracted

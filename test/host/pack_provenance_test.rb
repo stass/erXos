@@ -7,6 +7,25 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/pack_provenance'
 
 class PackProvenanceTest < Minitest::Test
+  class HashTrackingInputs < Erx::BuildInputs
+    attr_reader :hashed_paths
+
+    def initialize(**options)
+      @hashed_paths = []
+      super
+    end
+
+    def read(path, **options)
+      hashed_paths << File.realpath(path)
+      super
+    end
+
+    def verify(path)
+      hashed_paths << File.realpath(path)
+      super
+    end
+  end
+
   class ReadTracking < Erx::PackProvenance
     attr_reader :opened_paths
 
@@ -199,8 +218,8 @@ class PackProvenanceTest < Minitest::Test
     path
   end
 
-  def build_catalog
-    Erx::BuildInputs.pack(root: @root, paths: @produced)
+  def build_catalog(inputs: Erx::BuildInputs)
+    inputs.pack(root: @root, paths: @produced)
   end
 
   def reference(path)
@@ -277,16 +296,14 @@ class PackProvenanceTest < Minitest::Test
       File.binwrite(path, 'outside bytes')
       @receipt['artifact'] = { 'path' => path, 'sha256' => Digest::SHA256.file(path).hexdigest }
       receipt = write('receipt.json', JSON.generate(@receipt))
-      hashes = []
-      original = Digest::SHA256.method(:file)
-      Digest::SHA256.stub(:file, lambda { |input| hashes << File.realpath(input); original.call(input) }) do
-        begin
-          @resolver.resolve(receipt: receipt, artifact: path, build_kind: 'development')
-        rescue Erx::Error
-          nil
-        end
+      catalog = build_catalog(inputs: HashTrackingInputs)
+      resolver = Erx::PackProvenance.new(root: @root, catalog: catalog)
+      begin
+        resolver.resolve(receipt: receipt, artifact: path, build_kind: 'development')
+      rescue Erx::Error
+        nil
       end
-      refute_includes hashes, File.realpath(path)
+      refute_includes catalog.hashed_paths, File.realpath(path)
     end
   end
 
@@ -299,12 +316,13 @@ class PackProvenanceTest < Minitest::Test
       File.write(@dependency, "root.o: escaped.c\n")
       @receipt.fetch('compiles').first['dependency'] = reference(@dependency)
       @receipt.fetch('compiles').first['sources'] = [{ 'path' => link, 'sha256' => Digest::SHA256.file(secret).hexdigest }]
-      hashes = []
-      original = Digest::SHA256.method(:file)
-      Digest::SHA256.stub(:file, lambda { |input| hashes << File.realpath(input); original.call(input) }) do
-        assert_raises(Erx::Error) { resolve }
+      receipt = write('receipt.json', JSON.generate(@receipt))
+      catalog = build_catalog(inputs: HashTrackingInputs)
+      resolver = Erx::PackProvenance.new(root: @root, catalog: catalog)
+      assert_raises(Erx::Error) do
+        resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'development')
       end
-      refute_includes hashes, File.realpath(secret)
+      refute_includes catalog.hashed_paths, File.realpath(secret)
       private_root = File.join(@root, '.git')
       Dir.mkdir(private_root)
       receipt = File.join(private_root, 'receipt.json')

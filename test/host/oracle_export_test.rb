@@ -9,6 +9,33 @@ require 'socket'
 require_relative '../../tools/lib/erx/oracle_export'
 
 class OracleExportTest < Minitest::Test
+  class FailingOutput
+    def write(_bytes) = raise IOError, 'fixture write failure'
+  end
+
+  FailingFiles = Struct.new(:target) do
+    def open(path, *arguments)
+      File.open(path, *arguments) do |output|
+        yield(path == target ? FailingOutput.new : output)
+      end
+    end
+  end
+
+  class CountingDirectories
+    attr_reader :visited
+
+    def initialize
+      @visited = 0
+    end
+
+    def each_child(path)
+      Dir.each_child(path) do |name|
+        @visited += 1
+        yield name
+      end
+    end
+  end
+
   CT_ROOT = 'source/lib/kernel/make_test_dir/ct_logs'.freeze
 
   def setup
@@ -41,10 +68,10 @@ class OracleExportTest < Minitest::Test
     write('logs/runner.log', 'runner evidence')
   end
 
-  def export(operation: 'run', suite: 'kernel', changes: {})
+  def export(operation: 'run', suite: 'kernel', changes: {}, **collaborators)
     limits = Erx::OracleExport::DEFAULT_LIMITS.merge(changes)
     Erx::OracleExport.call(source: @source, destination: @destination,
-                          operation: operation, suite: suite, limits: limits)
+                          operation: operation, suite: suite, limits: limits, **collaborators)
   end
 
   def verify(changes: {})
@@ -211,18 +238,7 @@ class OracleExportTest < Minitest::Test
     path = CT_ROOT + '/attachment/broken'
     write(path, 'ordinary source bytes')
     target = File.join(@destination, path)
-    open_file = File.method(:open)
-    failing_open = lambda do |*arguments, &block|
-      if arguments.first == target
-        open_file.call(*arguments) do |output|
-          output.define_singleton_method(:write) { |_bytes| raise IOError, 'fixture write failure' }
-          block.call(output)
-        end
-      else
-        open_file.call(*arguments, &block)
-      end
-    end
-    result = File.stub(:open, failing_open) { export }
+    result = export(files: FailingFiles.new(target))
     assert result.fetch('omissions').any? { |issue| issue.fetch('path') == path && issue.fetch('reason') == 'copy_failed' }, result.inspect
     refute File.exist?(target)
     refute File.exist?(File.dirname(target))
@@ -329,16 +345,9 @@ class OracleExportTest < Minitest::Test
       parent += '/a'
       FileUtils.mkdir_p(File.join(@source, parent))
     end
-    each_child = Dir.method(:each_child)
-    visited = 0
-    bounded_walk = lambda do |path, &block|
-      each_child.call(path) do |name|
-        visited += 1
-        block.call(name)
-      end
-    end
-    result = Dir.stub(:each_child, bounded_walk) { export(changes: { 'entries' => 20 }) }
-    assert_operator visited, :<=, 21
+    directories = CountingDirectories.new
+    result = export(changes: { 'entries' => 20 }, directories: directories)
+    assert_operator directories.visited, :<=, 21
     assert_equal 'partial', result.fetch('state')
   end
 

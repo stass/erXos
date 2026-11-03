@@ -6,9 +6,13 @@ require 'minitest/autorun'
 load File.expand_path('../../tools/erx', __dir__) unless defined?(Erx::CLI)
 
 class OracleCliTest < Minitest::Test
-  def run_cli(*arguments)
+  BackendFactory = Struct.new(:backend) do
+    def new(**) = backend
+  end
+
+  def run_cli(*arguments, **collaborators)
     status = nil
-    _stdout, output = capture_io { status = Erx::CLI.run(arguments) }
+    _stdout, output = capture_io { status = Erx::CLI.run(arguments, **collaborators) }
     [status, output]
   end
 
@@ -38,26 +42,23 @@ class OracleCliTest < Minitest::Test
       calls << [suite, options]
       { 'state' => 'failed', 'report' => '/owned/suite-result.json' }
     end
-    Erx::OracleContainer.stub(:new, backend) do
-      status, output = run_cli('oracle', 'run', 'kernel', '--docker-context', 'owned',
-                               '--flavour', 'jit', '--jobs', '2', '--deadline', '60',
-                               '--suite', 'basic_SUITE', '--case', 'simple')
-      assert_equal 1, status
-      assert_includes output, 'Linux host oracle: failed'
-      assert_equal [['kernel', { flavour: 'jit', jobs: 2, deadline: 60,
-                                test_suite: 'basic_SUITE', testcase: 'simple' }]], calls
-    end
+    status, output = run_cli('oracle', 'run', 'kernel', '--docker-context', 'owned',
+                             '--flavour', 'jit', '--jobs', '2', '--deadline', '60',
+                             '--suite', 'basic_SUITE', '--case', 'simple', container: BackendFactory.new(backend))
+    assert_equal 1, status
+    assert_includes output, 'Linux host oracle: failed'
+    assert_equal [['kernel', { flavour: 'jit', jobs: 2, deadline: 60,
+                              test_suite: 'basic_SUITE', testcase: 'simple' }]], calls
   end
 
   def test_native_build_is_separately_labelled
     calls = []
     backend = Object.new
     backend.define_singleton_method(:build) { |**options| calls << options }
-    Erx::Oracle.stub(:new, backend) do
-      status, output = run_cli('oracle', 'build', '--backend', 'native', '--flavour', 'jit', '--clean')
-      assert_equal 0, status
-      assert_includes output, 'native stock OTP bootstrap jit ready'
-      assert_equal [{ flavours: ['jit'], jobs: 4, clean: true }], calls
-    end
+    status, output = run_cli('oracle', 'build', '--backend', 'native', '--flavour', 'jit', '--clean',
+                             native: BackendFactory.new(backend))
+    assert_equal 0, status
+    assert_includes output, 'native stock OTP bootstrap jit ready'
+    assert_equal [{ flavours: ['jit'], jobs: 4, clean: true }], calls
   end
 end

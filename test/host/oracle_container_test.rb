@@ -8,6 +8,19 @@ require_relative '../../tools/lib/erx/oracle_container'
 require_relative '../../tools/lib/erx/oracle_guest'
 
 class OracleContainerTest < Minitest::Test
+  class CompletedJob < Erx::ContainerOracleJob
+    def initialize; end
+
+    private
+
+    def execute_plan = { 'state' => 'completed' }
+  end
+
+  class GuestEvidence
+    def exist?(path) = path == '/tmp/erx-oracle/operator-startup-executed'
+    def binread(_path, _maximum) = "oom 2\noom_kill 1\n"
+  end
+
   def self.with_controller_events(events)
     token = '#Ref<0.0.1>'
     events.flat_map do |event|
@@ -328,21 +341,15 @@ class OracleContainerTest < Minitest::Test
   end
 
   def test_guest_result_records_startup_marker_presence_after_the_operation
-    job = Erx::ContainerOracleJob.allocate
-    job.define_singleton_method(:execute_plan) { { 'state' => 'completed' } }
-    File.stub(:exist?, ->(path) { path == '/tmp/erx-oracle/operator-startup-executed' }) do
-      assert_equal true, job.call.fetch('operator_startup_marker')
-    end
+    job = CompletedJob.new
+    assert_equal true, job.call(files: GuestEvidence.new).fetch('operator_startup_marker')
   end
 
   def test_guest_result_keeps_kernel_memory_events_as_bounded_evidence
-    job = Erx::ContainerOracleJob.allocate
-    job.define_singleton_method(:execute_plan) { { 'state' => 'completed' } }
-    File.stub(:binread, "oom 2\noom_kill 1\n") do
-      evidence = job.call.fetch('memory_events')
-      assert_equal 'available', evidence.fetch('status')
-      assert_equal "oom 2\noom_kill 1\n", evidence.fetch('contents')
-    end
+    job = CompletedJob.new
+    evidence = job.call(files: GuestEvidence.new).fetch('memory_events')
+    assert_equal 'available', evidence.fetch('status')
+    assert_equal "oom 2\noom_kill 1\n", evidence.fetch('contents')
   end
 
   def test_wrong_platform_or_manifest_descriptor_is_refused
