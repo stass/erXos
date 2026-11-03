@@ -30,8 +30,6 @@ module Erx
       raise Error, 'duplicate source id in deps.lock' unless ids.uniq == ids
 
       sources.map { |source| source.transform_values(&:freeze).freeze }.freeze
-    rescue JSON::ParserError => error
-      raise Error, "invalid deps.lock JSON: #{error.message}"
     end
 
     def validate_source(source)
@@ -147,7 +145,7 @@ module Erx
                             name: 'verify-oci-image', deadline: 30, env: environment)
       bytes = File.binread(command.fetch('log'), 1024 * 1024 + 1) || ''.b
       raise Error, 'OCI image identity exceeds reader bound' if bytes.bytesize > 1024 * 1024
-      value = JSON.parse(bytes)
+      value = JsonInput.parse(bytes, max_bytes: 1024 * 1024, label: 'OCI image identity')
       unless value.is_a?(Hash) && %w[Os Architecture Id].all? { |field| value[field].is_a?(String) } &&
              value['RepoDigests'].is_a?(Array) && value['RepoDigests'].all? { |digest| digest.is_a?(String) }
         raise Error, 'invalid OCI image identity fields'
@@ -165,7 +163,7 @@ module Erx
              digests.is_a?(Array) && digests.any? { |digest| digest.end_with?("@sha256:#{source.fetch('sha256')}") }
         raise Error, 'cached OCI image does not match pinned platform and digests'
       end
-    rescue JSON::ParserError, KeyError, TypeError => error
+    rescue KeyError, TypeError => error
       raise Error, "invalid OCI image identity: #{error.message}"
     end
 
@@ -293,8 +291,6 @@ module Erx
           raise
         end
       end
-    rescue JSON::ParserError
-      raise Error, "invalid source provenance marker: #{destination}"
     end
 
   end

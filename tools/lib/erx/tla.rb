@@ -140,8 +140,6 @@ module Erx
         raise Error, 'missing or unregistered TLA configurations'
       end
       entries.map(&:freeze).freeze
-    rescue JSON::ParserError => error
-      raise Error, "invalid TLA roster JSON: #{error.message}"
     end
 
     def validate(entry, inputs:)
@@ -216,6 +214,9 @@ module Erx
   end
 
   class Tla
+    # Upper bounds of the records this tool and its runner write.
+    CACHE_RECORD_BYTES = 64 * 1024
+    COMMAND_RECORD_BYTES = 64 * 1024
     CLEAN_JAVA_ENV = { 'JAVA_TOOL_OPTIONS' => nil, '_JAVA_OPTIONS' => nil,
                        'JDK_JAVA_OPTIONS' => nil, 'CLASSPATH' => nil,
                        'TLA_LIBRARY' => nil }.freeze
@@ -430,9 +431,10 @@ module Erx
     def find_cached_result(key, entry:, input_hashes:)
       path = cache_path(key)
       OutputDirectory.check(root: @root, path: File.dirname(path))
-      return nil unless File.file?(path) && File.size(path) < 64 * 1024
+      return nil unless File.file?(path)
 
-      result = JSON.parse(File.read(path))
+      result = JsonInput.parse(BoundedFile.read(path, maximum: CACHE_RECORD_BYTES),
+                               max_bytes: CACHE_RECORD_BYTES, label: 'TLA cache record')
       return nil unless result.is_a?(Hash) && result['state'] == 'checked' && result['key'] == key &&
                         result['id'] == entry.fetch('id') && result['input_sha256'] == input_hashes
       work = result['work']
@@ -450,11 +452,13 @@ module Erx
       bytes = File.binread(log, TlcOutput::MAX_LOG_BYTES + 1) || ''.b
       return nil unless Digest::SHA256.hexdigest(bytes) == result['log_sha256']
       # Recheck original raw evidence rather than trusting a green JSON label.
-      command_report = JSON.parse(File.read(log.sub(/\.log\z/, '.json')))
+      command_report = JsonInput.parse(BoundedFile.read(log.sub(/\.log\z/, '.json'),
+                                                        maximum: COMMAND_RECORD_BYTES),
+                                       max_bytes: COMMAND_RECORD_BYTES, label: 'TLC command record')
       return nil unless TlcOutput.classify(bytes, command: command_report,
                                            expectation: entry.fetch('expect')).fetch('state') == 'checked'
       result.merge('state' => 'cached').freeze
-    rescue JSON::ParserError, KeyError, SystemCallError, Error
+    rescue KeyError, SystemCallError, Error
       nil
     end
 

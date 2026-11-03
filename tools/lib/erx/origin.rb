@@ -261,7 +261,7 @@ module Erx
       payload = JsonInput.parse(data, max_bytes: 64 * 1024 * 1024, label: 'origin inventory')
       validate_inventory(payload)
       payload
-    rescue JSON::ParserError, KeyError => error
+    rescue KeyError => error
       raise Error, "invalid origin inventory: #{error.message}"
     end
 

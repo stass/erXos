@@ -422,8 +422,6 @@ module Erx
       end
       validate_event_order(events)
       events
-    rescue JSON::ParserError => error
-      raise Error, "invalid oracle event JSON: #{error.message}"
     end
     private_class_method :read_events
 

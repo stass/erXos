@@ -4,13 +4,16 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require_relative 'lib/erx/bounded_file'
 require_relative 'lib/erx/dependencies'
+require_relative 'lib/erx/json_input'
 require_relative 'lib/erx/origin'
 
 module Erx
   # These are reviewed rules for the pinned imports, not a licence detector
   # for arbitrary packages. Actual file SPDX notices always take precedence.
   module ImportOrigins
+    MAX_PROFILE_BYTES = 1024 * 1024
     module_function
 
     def musl_license_rules(root)
@@ -84,7 +87,10 @@ module Erx
     end
 
     def import_profile(project, component:, source:)
-      return JSON.parse(File.read(File.join(project, 'config/imports/otp.json'))) if component == 'otp'
+      if component == 'otp'
+        bytes = BoundedFile.read(File.join(project, 'config/imports/otp.json'), maximum: MAX_PROFILE_BYTES)
+        return JsonInput.parse(bytes, max_bytes: MAX_PROFILE_BYTES, label: 'OTP import profile')
+      end
 
       { 'repository' => 'https://git.musl-libc.org/musl', 'revision' => 'v1.2.6',
         'default_license' => 'MIT', 'default_evidence' => 'reviewed musl COPYRIGHT package grant and no-notice original-file clause',
