@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+     SPDX-License-Identifier: BSD-2-Clause
+     Register facts: Arm DDI 0183G, sections 3.2 and 3.3. -->
+<device schemaVersion="1.3">
+  <name>PL011</name><version>1</version>
+  <description>PrimeCell UART register interface</description>
+  <addressUnitBits>8</addressUnitBits><width>32</width>
+  <peripherals>
+    <peripheral>
+      <name>PL011</name><baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
+      <registers>
+        <register>
+          <name>DR</name><addressOffset>0</addressOffset><access>read-write</access>
+          <readAction>modify</readAction>
+          <fields>
+            <field><name>DATA</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>ERRORS</name><bitOffset>8</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
+          </fields>
+        </register>
+        <register>
+          <name>FR</name><addressOffset>0x18</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>CTS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DSR</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DCD</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUSY</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXFE</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXFF</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXFF</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXFE</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RI</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>ICR</name><addressOffset>0x44</addressOffset><access>write-only</access>
+          <fields>
+            <field><name>IRQS</name><bitOffset>0</bitOffset><bitWidth>11</bitWidth>
+              <modifiedWriteValues>oneToClear</modifiedWriteValues>
+            </field>
+          </fields>
+        </register>
+      </registers>
+    </peripheral>
+  </peripherals>
+</device>

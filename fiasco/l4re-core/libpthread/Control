@@ -1,0 +1,2 @@
+# Modified by erXos: header support for libc-headers, without a thread library.
+Maintainer: adam@os.inf.tu-dresden.de

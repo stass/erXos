@@ -1,0 +1,190 @@
+INTERFACE [arm]:
+
+EXTENSION class Kip_init
+{
+public:
+  static void map_kip(Kip *) FIASCO_INIT;
+};
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm]:
+
+#include "amp_node.h"
+#include "config.h"
+#include "mem_space.h"
+#include "mem_unit.h"
+#include "timer.h"
+
+
+// Make the stuff below appearing only in this compilation unit.
+// Trick Preprocess to let the struct reside in the cc file rather
+// than putting it into the _i.h file which is perfectly wrong in 
+// this case.
+namespace KIP_namespace
+{
+  // See also restrictions about KIP layout in the kernel linker script!
+  enum
+  {
+    Num_mem_descs = 64,
+    Max_len_version = 512,
+
+    Size_mem_descs = sizeof(Mword) * 2 * Num_mem_descs,
+  };
+
+  template<unsigned NODE = 0>
+  struct KIP
+  {
+    Kip kip = {
+        /* 00 */ L4_KERNEL_INFO_MAGIC,
+                 Config::Kernel_version_id,
+                 (Size_mem_descs + sizeof(Kip)) >> 4,
+                 {}, 0,
+                 cxx::int_value<Amp_phys_id>(Amp_node::phys_id(NODE)),
+                 {},
+        /* 10 */ 0, 0,
+        /* 20 */ 0, 0,
+        /* 30 */ 0, 0,
+        /* 40 */ 0, 0,
+        /* 50 */ 0, sizeof(Kip), Num_mem_descs, {},
+	/* 60 */ {0},
+        /* 70 */ {"", 0, {0}},
+      };
+    char mem_descs[Size_mem_descs] = {0};
+  };
+
+  KIP my_kernel_info_page asm("my_kernel_info_page") __attribute__((section(".kernel_info_page")));
+};
+
+IMPLEMENT
+void
+Kip_init::init()
+{
+  Kip *kinfo = Kip::all_instances()[Amp_node::id()];
+  Kip::init_global_kip(kinfo);
+  kinfo->add_mem_region(Mem_desc(0, Mem_space::max_usable_user_address(),
+                        Mem_desc::Conventional, true));
+  init_syscalls(kinfo);
+}
+
+IMPLEMENT
+void
+Kip_init::init_kip_clock()
+{
+  extern char kip_time_fn_read_us[];
+  extern char kip_time_fn_read_us_end[];
+  extern char kip_time_fn_read_ns[];
+  extern char kip_time_fn_read_ns_end[];
+
+  auto *k = reinterpret_cast<Kip_initializer *>(Kip::k());
+
+  k->set_mword(OFFS__KIP_SCALER_TIME_STAMP_TO_US,
+               Timer::get_scaler_shift_ts_to_us().scaler);
+  k->set_mword(OFFS__KIP_SHIFT_TIME_STAMP_TO_US,
+               Timer::get_scaler_shift_ts_to_us().shift);
+  k->set_mword(OFFS__KIP_SCALER_TIME_STAMP_TO_NS,
+               Timer::get_scaler_shift_ts_to_ns().scaler);
+  k->set_mword(OFFS__KIP_SHIFT_TIME_STAMP_TO_NS,
+               Timer::get_scaler_shift_ts_to_ns().shift);
+  k->copy_fn(OFFS__KIP_FN_READ_US, kip_time_fn_read_us, kip_time_fn_read_us_end);
+  k->copy_fn(OFFS__KIP_FN_READ_NS, kip_time_fn_read_ns, kip_time_fn_read_ns_end);
+  k->make_coherent();
+}
+
+//--------------------------------------------------------------
+IMPLEMENTATION [64bit]:
+
+PRIVATE static inline FIASCO_INIT
+void
+Kip_init::init_syscalls(Kip *kinfo)
+{
+  auto *k = reinterpret_cast<Kip_initializer *>(kinfo);
+  k->set_uint64(OFFS__KIP_FN_SYSCALL, 0xd65f03c0d4000001U); // svc #0; ret
+}
+
+//--------------------------------------------------------------
+IMPLEMENTATION [32bit]:
+
+PRIVATE static inline FIASCO_INIT
+void
+Kip_init::init_syscalls(Kip *)
+{}
+
+//--------------------------------------------------------------
+IMPLEMENTATION [mpu]:
+
+#include "kmem.h"
+#include "panic.h"
+
+/**
+ * Map KIP in separate region to make it accessible to user space.
+ *
+ * There is a dedicated KIP region in the MPU so that user space can get
+ * access to it. So far the kernel region covered it. Remove it from there
+ * and establish the dedicated region.
+ */
+IMPLEMENT
+void
+Kip_init::map_kip(Kip *k)
+{
+  extern char _kernel_image_start[];
+  extern char _kernel_kip_end[];
+
+  auto diff = Kmem::kdir->del(reinterpret_cast<Mword>(&_kernel_image_start),
+                              reinterpret_cast<Mword>(&_kernel_kip_end) - 1U);
+  diff |= Kmem::kdir->add(reinterpret_cast<Mword>(k),
+                          reinterpret_cast<Mword>(k) + 0xfffU,
+                          Mpu_region_attr::make_attr(L4_fpage::Rights::URX()),
+                          false, Kpdir::Kip);
+
+  if (!diff)
+    panic("Cannot map KIP\n");
+
+  Mpu::sync(*Kmem::kdir, diff.value(), true);
+}
+
+//--------------------------------------------------------------
+IMPLEMENTATION [!mpu]:
+
+IMPLEMENT inline
+void
+Kip_init::map_kip(Kip *)
+{}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && amp]:
+
+namespace KIP_namespace
+{
+  /**
+   * KIP structures for additional AMP nodes.
+   *
+   * The primary KIP (my_kernel_info_page) is amended by the linker script with
+   * the version and feature strings (see .initkip.version and
+   * .initkip.features sections). It is finally expanded to a full page by an
+   * alignment directive.
+   *
+   * In contrast, the additional KIPs are only partially initialized and lack
+   * all these strings. They need to be amended by bootstrap before booting the
+   * kernel. The size is explicitly expanded by the `page` array, though.
+   */
+  template<unsigned NODES>
+  struct Amp_kip : Amp_kip<NODES - 1>
+  {
+    KIP<NODES> kip;
+    char page[Config::PAGE_SIZE - sizeof(KIP<NODES>)] = {0};
+  };
+
+  template<>
+  struct Amp_kip<0>
+  {};
+
+  // Add a dedicated KIP for each additional AMP core.
+  Amp_kip<Amp_node::Max_num_nodes - 1>
+  amp_kernel_info_pages __attribute__((used,section(".kernel_info_page.amp")));
+
+  // Keep in mind that sizeof(Amp_kip<0>) == 1!
+  static_assert(Amp_node::Max_num_nodes == 1
+                || (sizeof(amp_kernel_info_pages)
+                    == (Amp_node::Max_num_nodes - 1) * Config::PAGE_SIZE),
+                    "Additional KIPs must be PAGE_SIZE size each!");
+};

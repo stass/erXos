@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "unicode": "17.0.0",
+  "license": "Unicode-3.0",
+  "origin": "otp/ORIGIN.md",
+  "inputs": {
+    "otp/lib/stdlib/uc_spec/UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "otp/lib/kernel/src/prim_tty.erl": "92019451b1fbd4183e6a968bdfe25b3245ff24bd532302c0accc877f31211b52",
+    "otp/lib/stdlib/src/io_ansi.erl": "f981b8ade6ed8db6b31a75cf5d08b80b023882be5b98b4e184d09c68b47cdb93"
+  },
+  "original_unicode_notice": "# DerivedCoreProperties-17.0.0.txt\n# Date: 2025-07-30, 23:55:08 GMT\n# \u00a9 2025 Unicode\u00ae, Inc.\n# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.\n# For terms of use and license, see https://www.unicode.org/terms_of_use.html\n#\n# Unicode Character Database\n#   For documentation, see https://www.unicode.org/reports/tr44/\n\n# ================================================\n\n# Derived Property: Math\n#  Generated from: Sm + Other_Math\n\n"
+}

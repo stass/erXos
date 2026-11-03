@@ -1,0 +1,37 @@
+menu "Bootstrap"
+
+config BOOTSTRAP_THUMB_ENTRY
+	bool "Thumb mode entry point"
+	depends on BUILD_ARCH_arm
+	help
+	  Assume that bootstrap is started in Thumb mode.
+
+	  If in doubt, choose n.
+
+config BOOTSTRAP_COMPRESS
+	bool "Support for compressed modules"
+	depends on HAVE_BIDPC_ZLIB
+	help
+	  Allow bootstrap to decompress modules that have been compressed.
+	  Using compressed modules reduces the size of an l4image at the cost of
+	  increased startup time due to the required unpacking.
+
+	  Modules will not be automatically compressed when building.
+
+config BOOTSTRAP_CHECK_MD5
+	bool "Enable module integrity check (MD5)"
+	depends on HAVE_BIDPC_LIBBSD_LITE
+	help
+	  Enable module integrity check during boot using MD5. Only supported
+	  for modules packed into an l4image.
+
+comment "GZIP/ZLIB decompression not available due to missing zlib package"
+	depends on !HAVE_BIDPC_ZLIB
+
+source "server/src/platform/Kconfig.s32z"
+
+source "server/src/platform/Kconfig.s32n"
+
+source "server/src/platform/Kconfig.s32k5"
+
+endmenu

@@ -1,0 +1,102 @@
+/*
+ * (c) 2008-2009 Adam Lackorzynski <adam@os.inf.tu-dresden.de>,
+ *               Alexander Warg <warg@os.inf.tu-dresden.de>
+ *     economic rights: Technische Universität Dresden (Germany)
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
+#include "init_mem.h"
+#include "memmap.h"
+#include "globals.h"
+
+#include <l4/cxx/iostream>
+#include <l4/sys/kip>
+
+using L4::Kip::Mem_desc;
+
+void
+init_memory(l4_kernel_info_t *info)
+{
+#ifdef ARCH_x86
+  char kip_syscalls = info->kip_sys_calls;
+
+  L4::cout << "  Found Fiasco: KIP syscalls: "
+           << (kip_syscalls ? "yes\n" : "no\n");
+#endif
+
+  Region mismatch = Region::invalid();
+
+  if (!iomem.add_free(Region(0, ~0UL, 0, L4_FPAGE_RW)))
+    mismatch = Region(0, ~0UL, 0, L4_FPAGE_RW);
+
+  for (auto const &md: L4::Kip::Mem_desc::all(info))
+    {
+      if (mismatch.valid())
+        break;
+
+      if (md.is_virtual())
+        continue;
+
+      Mem_desc::Mem_type type = md.type();
+      unsigned long start, end;
+      if (type == Mem_desc::Conventional)
+        {
+          start = l4_round_page(md.start());
+          end = l4_trunc_page(md.end() + 1) - 1;
+          if (start > end)
+            continue;
+        }
+      else
+        {
+          start = l4_trunc_page(md.start());
+          end = l4_round_page(md.end() + 1) - 1;
+        }
+
+      switch (type)
+        {
+        case Mem_desc::Conventional:
+          if (   !iomem.reserve(Region(start, end, sigma0_taskno, L4_FPAGE_RW))
+              || !Mem_man::ram()->add_free(Region(start, end)))
+            mismatch = Region(start, end, sigma0_taskno, L4_FPAGE_RW);
+          break;
+
+        case Mem_desc::Reserved:
+        case Mem_desc::Dedicated:
+          if (   !iomem.reserve(Region(start, end, sigma0_taskno, L4_FPAGE_RW))
+              || !Mem_man::ram()->reserve(Region(start, end, sigma0_taskno)))
+            mismatch = Region(start, end, sigma0_taskno, L4_FPAGE_RW);
+          break;
+
+        case Mem_desc::Bootloader:
+          {
+            auto rights = static_cast<L4_fpage_rights>(md.sub_type()
+                                                       & L4_FPAGE_RIGHTS_MASK);
+            if (   !iomem.reserve(Region(start, end, sigma0_taskno))
+                || !Mem_man::ram()->reserve(Region(start, end, root_taskno,
+                                                   rights)))
+              mismatch = Region(start, end, root_taskno, rights);
+            break;
+          }
+
+        case Mem_desc::Info:
+        case Mem_desc::Arch:
+        case Mem_desc::Shared:
+          if (   !iomem.add_free(Region(start, end, 0, L4_FPAGE_RW))
+              || !Mem_man::ram()->reserve(Region(start, end, sigma0_taskno,
+                                                 L4_FPAGE_RW)))
+            mismatch = Region(start, end, root_taskno, L4_FPAGE_RW);
+          break;
+
+        default:
+          break;
+        }
+    }
+
+  if (mismatch.valid())
+    {
+      L4::cout << PROG_NAME": Could not reserve memory\n" << mismatch << "\n";
+      dump_all();
+      panic();
+    }
+}

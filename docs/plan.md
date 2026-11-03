@@ -30,10 +30,13 @@ Ground rules:
   lands with tests of its contract, which run on the stopgap from M1 for
   the calls it carries and on erXos's kernel from its first boot; with the
   slice's own tests, they decide the replacement.
-* **The oracle runs on a schedule.** From M3 on, OTP's `emulator`, `kernel`,
+* **The oracle runs on a schedule.** M0 verifies the test runner with focused
+  cases and controlled pass, failure, skip, timeout and interruption checks.
+  The complete stock reference runs are recorded before ERTS port changes
+  begin. From M3 on, OTP's `emulator`, `kernel`,
   `stdlib` and `compiler` suites run on erXos, in the system domain until
   M5 brings domains and in a test domain from then on, and are compared
-  case by case with stock OTP 29.1.2 on the host
+  case by case with stock OTP 29.1.2 in the host's isolated Linux oracle
   ([design.md](design.md#testing-and-the-oracle)). A fast subset runs with
   `make check` on every change; the full suites at every major change (to
   the kernel or the stopgap, the scheduler, memory, the funnel and the
@@ -84,7 +87,7 @@ of tracks S and P, adds everything else on erXos's kernel alone.
 
 | Milestone | Demo | New code (estimate) | Needs | Gate |
 | --- | --- | --- | --- | --- |
-| M0 The tree, the toolchain and the oracle | stock OTP 29.1.2 runs its suites on the Mac; the frozen Fiasco set builds from the tree; every generated file regenerates unchanged | 4,000 lines of Ruby | | G0 |
+| M0 The tree, the toolchain and the oracle | focused stock OTP 29.1.2 cases verify the offline Linux test runner; native Mac OTP supplies bootstrap tools; the frozen Fiasco set builds from the tree; every generated file regenerates unchanged | 4,000 lines of Ruby | | G0 |
 | M1 The stopgap speaks erXos's interface | the modified Fiasco prints erXos's banner and starts the root task under TCG and HVF; in a partial boot the root task builds two hostile programs that attack the interface for ten minutes on every CPU without effect; a stopped watchdog pet ends the machine with a crash record | 12,000 lines of C17, 2,000 of C++ glue | M0, G0 | G1 |
 | M2 The execution contract holds | a native test domain and a hostile domain share four CPUs by grants; no wakeup is lost; a blocking call from an executor is refused | 4,000 lines of C17 | M1 | G2 |
 | Track H Hosted mode | the runtime, with the domain library and connections between domains, runs as Mac processes under the sanitizers | 3,000 lines of C17 | M0 | |
@@ -254,14 +257,16 @@ SPIN, Alloy or a new property-testing dependency.
 
 ## M0: The tree, the toolchain and the oracle
 
-**Goal.** The tree builds offline from pinned sources, the oracle runs on
-the Mac, the harness can boot and judge a guest under both accelerators,
-and every generated file has its generator.
+**Goal.** The tree builds offline from pinned sources, the oracle runs in
+an isolated Linux container on the development host, native Mac OTP supplies
+the bootstrap compiler, the harness can boot and judge a guest under both
+accelerators, and every generated file has its generator.
 
-**Demo.** `make fetch` downloads and verifies every pinned source;
-`tools/erx oracle build` builds stock OTP 29.1.2 for the Mac in both
-flavours; `tools/erx oracle run emulator` runs OTP's emulator suite and
-stores its results; `tools/erx build fiasco` builds the frozen Fiasco set
+**Demo.** `make fetch` downloads and verifies every pinned source and the
+oracle's OCI toolchain image; `tools/erx oracle build` builds stock OTP
+29.1.2 for Linux in both flavours without external networking;
+`tools/erx oracle run emulator --suite binary_SUITE --case deep_bitstr_lists`
+runs a focused stock case and stores its result; `tools/erx build fiasco` builds the frozen Fiasco set
 from `fiasco/` and `tools/erx qemu --accel tcg` and `--accel hvf` boot it
 on `virt-11.1` to Fiasco's own banner; `make check` regenerates every
 generated file and finds it unchanged.
@@ -273,7 +278,8 @@ generated file and finds it unchanged.
   under `gtimeout -k 10`, and kills their process group on expiry; `make
   check` with the ASCII check.
 * `deps.lock` and `make fetch`: pinned URLs and SHA-256 hashes, unpacking
-  into separate directories under `build/third_party/`.
+  into separate directories under `build/third_party/`, plus the oracle's
+  platform-specific OCI image pinned by manifest digest in the local engine.
 * Imports, each with its licence notices and an `ORIGIN.md` recording the
   repository, the release or commit, and the SHA-256 of the import and of
   every file in it:
@@ -290,8 +296,12 @@ generated file and finds it unchanged.
   included; each check with its seeded-violation test; and the packer's
   `NOTICES` file ([design.md](design.md#licences-and-notices)).
 * The oracle: stock OTP 29.1.2 built from the pinned tarball with its own
-  `configure`, in both flavours, and a Ruby tool that runs OTP's suites and
-  records results case by case.
+  `configure`, in both flavours, and a Ruby tool that runs OTP's suites in
+  the [offline Linux context](design-host-oracle.md) and records results
+  case by case. M0 verifies this tool with representative cases and controlled
+  outcome fixtures; exhaustive suite runs are an ERTS-port prerequisite,
+  not an M0 exit condition. Native macOS builds supply bootstrap tools and separate
+  native performance baselines; they do not stand in for Linux suite results.
 * The QEMU harness: QEMU `virt` as
   [design-platforms.md](design-platforms.md#qemu-virt) configures it under
   both accelerators, `-no-reboot`, serial output in logs, named lines
@@ -310,9 +320,10 @@ generated file and finds it unchanged.
   the architecture-term check, `make check-arch-terms` over
   `hw/arch_terms/aarch64.txt`, with its seeded violation
   ([design-kernel.md](design-kernel.md#chokepoint-checks)).
-* The boot image: `tools/erx pack` writing `ERXPACK` version 1
-  deterministically, with its `NOTICES` file, the C17 validator built for
-  the host, and its fuzz target.
+* The boot-image format: test tooling writes deterministic `ERXPACK`
+  version 1 structural fixtures with `NOTICES`, checked by the host-built
+  C17 validator and its fuzz target. Production `tools/erx pack` refuses
+  output until the real startup planner is available, as specified below.
 * The TLA+/TLC runner and its tested expectation classification, private
   work directories and hard deadlines, `make check-tla` as a separate gate,
   tool version/hash pin and setup diagnostics
@@ -320,10 +331,42 @@ generated file and finds it unchanged.
 * `tools/erx bench`, recording every condition, with the host baselines on
   OTP 29.1.2.
 
+**Structural image evidence.** M0's reproducibility output is labelled a
+**structural test fixture**, not an admitted boot image. It contains a valid
+non-JIT native root executable and a system manifest selecting native
+partial boot, with zero configured and zero partial-boot child domains.
+The fixture uses the canonical serializers and actual binary, executable
+and provenance validators. Its report names their results separately and
+records `root_startup = unsupported`, `policy_admission = unsupported`
+and `child_plan_instances = 0`. The empty child set requires no child
+planner call; it supplies no evidence about the initial root's stack,
+UTCB, kernel objects, private image memory or bootstrap allocations.
+
+Only test tooling writes these fixtures. They carry no new wire flag and
+cannot construct the production `Admitted` value or bypass its publisher.
+`Manifest.admit` and production packing remain blocked on the real
+initial-root feasibility/charge plan, even when no child is configured.
+The root image's checked private-memory lower bound is still enforced;
+a sufficient declared baseline alone is not a startup proof. The separate
+M0 guest demo boots the frozen Fiasco set to its banner and does not claim
+to execute erXos's root interface.
+
+Independent populated binary fixtures exercise every manifest record and
+the C, Erlang and Ruby structural readers without claiming policy
+admission. M1 supplies the production initial-root bootstrap/charge plan
+and `erx_dom_plan_create` for both host admission checks and runtime
+creation. Any unavailable required sizing, planning or service consumer
+fails as unsupported. There is no temporary planner, weakened admission
+path or reduced target manifest format.
+
 **Exit criteria.** `make check` passes offline after `make fetch`; the
-oracle stores results for `emulator`, `kernel` and `stdlib` on the host;
+oracle records a focused Linux stock case and correctly reports controlled
+passes, failures, skips, timeouts and interrupted/incomplete runs. It proves
+loopback peer operation and absence of external networking, and removes
+its container including daemonized test children on success or cancellation;
 the stopgap boots to Fiasco's banner under TCG and HVF in the harness; a
-build twice from clean gives identical boot images; the fuzz target of the
+build twice from clean gives identical structural `ERXPACK` fixtures, with
+startup and policy admission explicitly unsupported; the fuzz target of the
 boot-image validator runs its budget clean.
 The TLC runner's tests pass, including targeted expected failures, wrong
 properties, parser errors, incomplete runs, cache invalidation and empty
@@ -402,9 +445,14 @@ Above the fork: `liberx` with its generated calls and its `fiasco` backend;
 manifest through its generated C reader and, for a development manifest's
 partial boot, builds the programs the manifest names as domains through
 the domain library ([design-system.md](design-system.md#boot)); the
-domain library's creation plan for native domains, validated whole and
+domain library's production `erx_dom_plan_create` core for native domains,
+built for the host as the packer's property-12 checker as well as for
+the runtime, validated whole and
 undone step by step
 ([design-system.md](design-system.md#the-domain-library)); the
+production initial-root bootstrap plan and backend/ABI-bound charge
+evidence, which make full boot admission possible rather than substituting
+source-declared costs; the
 conformance suite for every call; the chokepoint checks that confine
 kernel calls to `liberx` and Fiasco headers to its `fiasco` backend; the
 stack proof and chokepoint checks over the C17 cores; the fuzz targets of
@@ -483,6 +531,12 @@ returns to the user with the numbers before ERTS builds on the contract.
 
 ## Track H: Hosted mode
 
+Before modifying ERTS for the port, record the complete stock OTP 29.1.2
+`emulator`, `kernel` and `stdlib` reference runs in interpreter and JIT modes.
+Keep case identities, outcomes, skips, environment details and incomplete
+records explicit. These reference runs are required for the ERTS comparison;
+they do not block the earlier kernel milestones.
+
 `liberx`'s hosted backend implements the kernel interface inside a macOS
 process: spaces are the process, threads are pthreads, memory objects are
 `mmap`ped regions, umtx waits are `os_sync_wait_on_address`, and groups and
@@ -498,6 +552,9 @@ they run under QEMU. QEMU remains authoritative.
 
 **Goal.** ERTS runs as the system domain in user mode on the contract,
 started by the root task, with only the changes it cannot run without.
+
+**Prerequisite.** The complete stock reference runs described in
+[hosted mode](#track-h-hosted-mode) are available before the ERTS port changes.
 
 **Demo.** `1>` on the serial console; the shell evaluates, line editing
 and history work, and `erlang:processes()` lists the system domain's

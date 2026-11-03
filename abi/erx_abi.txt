@@ -1,0 +1,246 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# Architecture-neutral interface and binary representations.
+abi 1
+include inspection.txt
+include services/console.txt
+include manifest.txt
+include formats/elf64.txt
+include kernel.txt
+
+limit page_size u32 4096
+limit copy_max u32 1048576
+limit group_executors u32 64
+limit msg_words u32 63
+limit msg_caps u32 4
+limit utcb_brs u32 58
+limit utcb_bytes_max u32 504
+limit period_min u64 1000000
+limit period_max u64 1000000000
+limit slice_min_us u32 500
+limit slice_max_us u32 50000
+limit grace_min_us u32 5
+limit grace_max_us u32 1000
+limit urgency_max u8 63
+limit pack_version u32 1
+limit pack_entries_max u32 65536
+limit pack_path_max u32 4096
+limit pack_strings_max u32 4194304
+limit image_version u16 1
+limit image_magic u32 0x49585245
+limit image_segments_max u16 8
+limit image_span_max u64 0xfffff000
+limit image_writable_max u64 67108864
+limit user_base_min u64 65536
+limit elf_segments_max u32 16
+limit abi_note_type u32 1
+limit lane_min u32 4096
+limit lane_max u32 16777216
+limit frame_max u32 16777216
+limit ctl_max u32 4096
+limit rec_frame u32 1
+limit label_split u32 2147483648
+limit boot_version u32 1
+limit boot_strings_max u32 2048
+limit crash_version u32 1
+limit crash_size u32 16384
+limit crash_magic u64 0x4853415243585245
+
+status ok 0 "success"
+status inval -1 "invalid argument"
+status stale -2 "stale capability or object"
+status type -3 "wrong object or thread type"
+status rights -4 "insufficient rights"
+status range -5 "range outside object"
+status nomem -6 "memory budget exhausted"
+status limit -7 "count or sequence limit exhausted"
+status busy -8 "resource is in use"
+status timedout -9 "deadline passed"
+status fault -10 "user word is not readable"
+status exist -11 "range or destination is occupied"
+status notsup -12 "unsupported operation or version"
+status nocaller -13 "no caller to receive a reply"
+status wouldblock -14 "executor made a call that would wait"
+status dead -15 "peer or owning space ended"
+status intr -16 "wait was interrupted"
+
+scalar cap u64
+scalar uaddr u64
+scalar upage u64 align 4096
+scalar pack_offset u64
+scalar utcb_length u32 range 0 @utcb_bytes_max
+
+flags pack_flags u32
+  bit development 0
+  bit unconfined_dma 1
+enum entry_kind u8
+  value file 1
+  value image 2
+flags entry_flags u8
+  bit system 0
+  bit seal 1
+flags image_flags u32
+  bit fixed 0
+  bit jit 1
+flags seg_flags u32
+  bit guarded 0
+enum prot u32
+  value none 0
+  value r 1
+  value rw 3
+  value rx 5
+flags boot_flags u32
+  bit det 0
+  bit installed_only 1
+  bit root 2
+enum crash_form u32
+  value brief 1
+  value full 2
+enum crash_cause u32
+  value fault 1
+  value halt 2
+  value watchdog 3
+  value panic 4
+
+bytes pack_magic 8 value 4552585041434b00
+bytes system_manifest_path 15 value 73797374656d2f6d616e6966657374
+bytes abi_note_owner 6 value 6572586f7300
+bytes abi_note_section 13 value 2e6e6f74652e6572782e616269
+layout erx_abi_note 1 wire_le 4 24
+  field header erx_elf64_nhdr 0
+  field owner abi_note_owner 12
+  padding 18 2
+  field abi_version u32 20
+layout erx_pack_header 1 wire_le 8 64
+  field magic pack_magic 0
+  field version u32 8
+  field flags pack_flags 12
+  field total_size u64 16
+  field nentries u32 24
+  field entry_size u32 28
+  field entries_off u64 32
+  field strings_off u64 40
+  field strings_size u32 48
+  field root_entry u32 52
+  field build_id u8 56 count 8
+layout erx_pack_entry 1 wire_le 8 32
+  field path_off u32 0
+  field path_len u16 4
+  field kind entry_kind 6
+  field flags entry_flags 7
+  field data_off u64 8
+  field data_size u64 16
+  field manifest_off u64 24
+layout erx_image_segment 1 wire_le 8 40
+  field file_offset u64 0
+  field mem_offset u64 8
+  field file_size u64 16
+  field mem_size u64 24
+  field prot prot 32
+  field flags seg_flags 36
+layout erx_image_manifest 1 wire_le 8 56
+  field magic u32 0
+  field version u16 4
+  field nsegments u16 6
+  field abi_version u32 8
+  field flags image_flags 12
+  field span u64 16
+  field fixed_base u64 24
+  field entry u64 32
+  field phdr_offset u64 40
+  field phnum u32 48
+  field base_alignment u32 52
+  tail segments erx_image_segment nsegments @image_segments_max
+
+layout erx_lane_hdr 1 shared 8 16
+  field wpos u64 0
+  field need u64 8
+  atomic wpos load acquire store release
+  atomic need load acquire store release
+  writer wpos producer
+  writer need producer
+  owner wpos producer all
+  owner need producer all
+  visibility wpos release
+  visibility need release
+layout erx_lane_rpage 1 shared 8 16
+  field rpos u64 0
+  field wake u64 8
+  atomic rpos load acquire store release
+  atomic wake load acquire store release
+  writer rpos consumer
+  writer wake consumer
+  owner rpos consumer all
+  owner wake consumer all
+  visibility rpos release
+  visibility wake release
+layout erx_lane_rec 1 wire_le 8 16
+  field len u32 0
+  field kind u32 4
+  field zero u64 8
+layout erx_frame_header 1 wire_le 4 8
+  field ctl_len u32 0
+  field payload_len u32 4
+
+layout erx_runtime_limits 1 wire_le 8 64
+  field max_frame u32 0
+  field max_message_heap u32 4
+  field funnel_depth u32 8
+  field exports u32 12
+  field tmp u64 16
+  field overlay u64 24
+  field atoms u32 32
+  field foreign_atoms u32 36
+  field processes u32 40
+  field reserved u32 44
+  field peer_held u64 48
+  field peer_held_total u64 56
+  zero reserved all
+layout erx_boot_connection 1 wire_le 8 48
+  field side cap 0
+  field peer_side cap 8
+  field peer_bell cap 16
+  field label u32 24
+  field peer u32 28
+  field peer_node_off u32 32
+  field peer_node_len u32 36
+  field out_size u32 40
+  field in_size u32 44
+layout erx_boot_info 1 wire_le 8 272
+  field version u32 0
+  field abi_version u32 4
+  field domain_id u32 8
+  field flags boot_flags 12
+  field pack_flags pack_flags 16
+  padding 20 4
+  field budget cap 24
+  field space cap 32
+  field group cap 40
+  field group_ctl cap 48
+  field group_stat cap 56
+  field time_page cap 64
+  field release cap 72
+  field release_addr u64 80
+  field seal_addr u64 88
+  field crash_area cap 96
+  field system_connection erx_boot_connection 104
+  field cpuset u64 152
+  field capacity_mcpu u32 160
+  field node_off u32 164
+  field node_len u32 168
+  field args_off u32 172
+  field args_len u32 176
+  field env_off u32 180
+  field env_len u32 184
+  padding 188 4
+  field hwcap u64 192
+  field hwcap2 u64 200
+  field limits erx_runtime_limits 208
+
+call debug_log 1
+  waits no
+  executor allow
+  effects changes
+  charges none
+  bound bytes @utcb_bytes_max
+  arg len utcb_length register 0

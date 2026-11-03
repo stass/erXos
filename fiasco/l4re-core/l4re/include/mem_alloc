@@ -1,0 +1,201 @@
+// -*- Mode: C++ -*-
+// vim:ft=cpp
+/**
+ * \file
+ * \brief   Memory allocator interface
+ */
+/*
+ * Copyright (C) 2014-2016, 2019, 2021, 2024-2025 Kernkonzept GmbH.
+ * Author(s): Alexander Warg <alexander.warg@kernkonzept.com>
+ */
+/*
+ * (c) 2008-2009 Adam Lackorzynski <adam@os.inf.tu-dresden.de>,
+ *               Alexander Warg <warg@os.inf.tu-dresden.de>,
+ *               Torsten Frenzel <frenzel@os.inf.tu-dresden.de>
+ *     economic rights: Technische Universität Dresden (Germany)
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+#pragma once
+
+#include <l4/re/protocols.h>
+#include <l4/sys/capability>
+#include <l4/sys/cxx/ipc_iface>
+#include <l4/sys/factory>
+
+namespace L4Re {
+class Dataspace;
+
+// MISSING:
+// * alignment constraints
+// * shall we support superpages in noncont memory?
+
+/**
+ * Memory allocation interface.
+ *
+ * The memory-allocator API is the basic API to allocate memory from the
+ * L4Re subsystem. The memory is allocated in terms of dataspaces (see
+ * L4Re::Dataspace). The provided dataspaces have at least the
+ * property that data written to such a dataspace is available as long
+ * as the dataspace is not freed or the data is not overwritten. In particular,
+ * the memory backing a dataspace from an allocator need not be allocated
+ * instantly, but may be allocated lazily on demand.
+ *
+ * A memory allocator can provide dataspaces with additional properties,
+ * such as physically contiguous memory, pre-allocated memory, or pinned
+ * memory. To request memory with an additional property the
+ * L4Re::Mem_alloc::alloc() method provides a flags parameter. If the
+ * concrete implementation of a memory allocator does not support or allow
+ * allocation of memory with a certain property, the allocation may be
+ * refused.
+ */
+class L4_EXPORT Mem_alloc :
+  public L4::Kobject_t<Mem_alloc, L4::Factory, L4RE_PROTO_MEM_ALLOC>
+{
+public:
+  /**
+   * Flags for the allocator.
+   *
+   * They describe requested properties of the allocated memory.
+   * Support of these properties by the dataspace provider is optional.
+   */
+  enum Mem_alloc_flags : unsigned long
+  {
+    Continuous   = 0x01,  ///< Allocate physically contiguous memory
+    Pinned       = 0x02,  ///< Deprecated, use L4Re::Dma_space instead
+    Super_pages  = 0x04,  ///< Allocate super pages
+    Fixed_paddr  = 0x08,  ///< Allocate at fixed physical address. Only honored
+                          ///< on no-MMU systems. Will fail on MMU systems.
+
+    Dma_mask_bits   = 0x3f0, ///< See Dma_mask().
+    Invert_dma_mask = 0x400, ///< Effectively says to allocate above the Dma_mask()
+  };
+
+  /**
+   * Constrain allocations to physical addresses below given bits.
+   *
+   * Requires the Mem_alloc_flags::Continuous flag to be set. Requires a
+   * factory that holds the *DMA constraints* permission.
+   */
+  static L4_INLINE L4_CONSTEXPR unsigned Dma_mask(unsigned bits)
+  {
+    if (L4_UNLIKELY(bits > 64))
+      return 0;
+
+    if (L4_UNLIKELY(bits == 0))
+      bits = 1; // prevent overflow below
+
+    // Implemented as (64 - bits) << 4 for backwards compatibility.
+    return (64 - bits) << 4;
+  }
+
+  /**
+   * Statistics about memory-allocator.
+   */
+  struct Stats
+  {
+    /**
+     * Memory quota of this allocator.
+     *
+     * Strictly limits the amount of memory that can be allocated. This may be
+     * larger than there is actual physical memory available. In particular,
+     * the root factory has an artificial quota and returns -1 in this field.
+     */
+    l4_size_t quota;
+
+    /**
+     * Amount of currently used quota of this allocator.
+     *
+     * The amount of used quota is not necessarily linked to the current
+     * memory usage. See `mem_used` for this information. The quota of a
+     * factory is immediately and fully accounted to the parent factory quota.
+     *
+     * This value may even exceed `mem_limit` if the system is over-committed.
+     */
+    l4_size_t quota_used;
+
+    /**
+     * Maximum amount of memory that can be allocated by this allocator.
+     *
+     * Will never exceed the `quota` but may be smaller if the system has less
+     * memory installed.
+     */
+    l4_size_t mem_limit;
+
+    /**
+     * Amount of currently allocated memory.
+     *
+     * This field represents the amount of memory that is in use by this
+     * allocator. It recursively includes the memory used by sub-factories, if
+     * any.
+     *
+     * Will never exceed `mem_limit` or `quota_used`.
+     *
+     * \note Dataspaces may allocate memory lazily! As such, the field will
+     *       increase only after pages have been allocated to a dataspace.
+     */
+    l4_size_t mem_used;
+
+    /**
+     * Amount of memory that is still available for allocation.
+     *
+     * This field can be lower than `mem_limit - mem_used`. In this case the
+     * system may be over-committed and there is globally not enough memory
+     * left. Also, if the quota is already used up for sub-factories (see
+     * `quota_used`), there may be not enough quota left.
+     */
+    l4_size_t mem_free;
+  };
+
+  /**
+   * Allocate anonymous memory.
+   *
+   * \param      size   Size in bytes to be requested. Allocation
+   *                    granularity is (super)pages, however, the allocator
+   *                    will store the byte-granular given size as the size
+   *                    of the dataspace and consecutively will use this
+   *                    byte-granular size for servicing the dataspace.
+   *                    Allocators may optionally also implement a maximum
+   *                    allocation strategy: if `size` is a negative value and
+   *                    `flags` set the Mem_alloc_flags::Continuous bit, the
+   *                    allocator tries to allocate as much memory as possible
+   *                    leaving an amount of at least `-size` bytes within the
+   *                    associated quota.
+   * \param[out] mem    Capability slot where the capability to the
+   *                    dataspace is received.
+   * \param      flags  Special dataspace properties, see #Mem_alloc_flags
+   * \param      align  Log2 alignment of dataspace if supported by allocator,
+   *                    will be at least L4_PAGESHIFT,
+   *                    with Super_pages flag set at least L4_SUPERPAGESHIFT
+   * \param      paddr  The physical address where the dataspace should be
+   *                    allocated if Mem_alloc_flags::Fixed flag is set.
+   * \param      type   Allocate the dataspace from a typed memory with the
+   *                    given name. Otherwise the dataspace is allocated from
+   *                    untyped memory.
+   *
+   * \retval 0           Success
+   * \retval -L4_EINVAL  Invalid `size`, `flags` or `align`.
+   * \retval -L4_ENOMEM  Not enough memory available.
+   * \retval -L4_EPERM   Dma_mask() passed in `flags` but factory lacks the
+   *                     *DMA constraints* permission.
+   * \retval -L4_ERANGE  Given size not supported.
+   * \retval <0          IPC error
+   */
+  l4_ret_t alloc(long size, L4::Cap<Dataspace> mem, unsigned long flags = 0,
+                 unsigned long align = 0, l4_addr_t paddr = 0,
+                 char const *type = nullptr) const noexcept;
+
+  /**
+   * Get allocator information.
+   *
+   * \param[out] stats  Allocator information
+   *
+   * \retval 0    Success
+   * \retval <0   IPC error
+   */
+  L4_INLINE_RPC(long, info, (Stats &stats));
+
+  typedef L4::Typeid::Rpcs<info_t> Rpcs;
+};
+
+};

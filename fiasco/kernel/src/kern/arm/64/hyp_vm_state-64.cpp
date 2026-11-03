@@ -1,0 +1,183 @@
+INTERFACE:
+
+EXTENSION class Hyp_vm_state
+{
+public:
+  struct Regs_g
+  {
+    Unsigned64 hcr;
+
+    Unsigned32 sctlr;
+    Unsigned32 cpacr;
+    Unsigned32 cntv_ctl;
+    Unsigned32 _res;
+  };
+
+  struct Regs_h
+  {
+    Unsigned64 hcr;
+  };
+
+  typedef Gic_h_global::Arm_vgic Gic;
+
+  /* === The following part is our user API === */
+
+  Regs_h host_regs;
+  Regs_g guest_regs;
+
+  Unsigned64 cntvoff;   // also in Context_hyp
+
+  Unsigned64 vmpidr;
+  Unsigned32 vpidr;
+
+  Gic_h::Vcpu_ppi_cfg vtmr;
+  Unsigned64 vtcr;
+
+  // size depends on GIC version, number of LRs and APRs
+  Gic  gic;
+
+  /* === The user API ends here =============== */
+
+  Unsigned64 actlr;     // ACTLR_EL1 protected by HCR.TACR=1
+
+  Unsigned64 tcr;       // TCR_EL1 protected by HCR.{TRVM,TVM}=1
+  Unsigned64 ttbr0;     // TTBR0_EL1 protected by HCR.{TRVM,TVM}=1
+  Unsigned64 ttbr1;     // TTBR1_EL1 protected by HCR.{TRVM,TVM}=1
+
+  Unsigned32 sctlr;     // SCTLR_EL1 protected by HCR.{TRVM,TVM}=1
+  Unsigned32 esr;       // ESR_EL1 protected by HCR.{TRVM,TVM}=1
+
+  Unsigned64 mair;      // MAIR_EL1 protected by HCR.{TRVM,TVM}=1
+  Unsigned64 amair;     // AMAIR_EL1 protected by HCR.{TRVM,TVM}=1
+
+  Unsigned64 sp_el1;    // also in Context_hyp
+  Unsigned64 elr_el1;   // also in Context_hyp
+
+  Unsigned64 far;       // FAR_EL1 protected by HCR.{TRVM,TVM}=1
+
+  Unsigned32 afsr[2];   // AFSR{0,1}_EL1 protected by HCR.{TRVM,TVM}=1
+
+  // EL2 registers switched during Context::{load,save}_ext_vcpu_state()
+  Unsigned32 dacr32;    // DACR32_EL2 context-switched
+  Unsigned32 fpexc32;   // FPEXC32_EL2 untouched
+  Unsigned32 ifsr32;    // IFSR32_EL2 context-switched
+
+  struct
+  {
+    Unsigned64 prselr;  // PRSELR_EL1 protected by HCR.{TRVM,TVM}=1
+    struct
+    {
+      Unsigned64 prbar; // PRBAR_EL1 protected by HCR.{TRVM,TVM}=1
+      Unsigned64 prlar; // PRLAR_EL1 protected by HCR.{TRVM,TVM}=1
+    } r[32];
+  } mpu;
+};
+
+EXTENSION struct Context_hyp
+{
+public:
+  // The following registers are not protected by HCR.{TRVM,TVM} and hence need
+  // to be context-switched during Context_hyp::{load,store}().
+  Unsigned64 sp_el1;
+  Unsigned64 elr_el1;
+  Unsigned64 vbar;
+  Unsigned32 cpacr = Cpu::Cpacr_el1_generic_hyp;
+  // we need to store all banked registers for PL1 modes
+  // because a hyp kernel runs applications in system mode (PL1)
+  Unsigned32 spsr_fiq, spsr_irq, spsr_svc, spsr_abt, spsr_und;
+  Unsigned32 csselr;
+};
+
+//------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "cpu.h"
+
+PUBLIC inline
+void
+Context_hyp::save(bool from_privileged)
+{
+  asm volatile ("mrs %x0, HCR_EL2"   : "=r"(hcr));
+  asm volatile ("mrs %x0, CPACR_EL1" : "=r"(cpacr));
+
+  if (!from_privileged)
+    return;
+
+  asm volatile ("mrs %x0, PAR_EL1" : "=r"(par));
+
+  // we do not save the CNTVOFF_EL2 because this kept in sync by the
+  // VMM->VM switch code
+  asm volatile ("mrs %x0, CNTV_CVAL_EL0"  : "=r"(cntv_cval));
+  asm volatile ("mrs %x0, CNTKCTL_EL1"    : "=r"(cntkctl));
+  asm volatile ("mrs %x0, CNTV_CTL_EL0"   : "=r"(cntv_ctl));
+  asm volatile ("mrs %x0, TPIDR_EL1"      : "=r"(tpidrprw));
+  asm volatile ("mrs %x0, CONTEXTIDR_EL1" : "=r"(contextidr));
+
+  asm volatile ("mrs %x0, SP_EL1"    : "=r"(sp_el1));
+  asm volatile ("mrs %x0, ELR_EL1"   : "=r"(elr_el1));
+  asm volatile ("mrs %x0, VBAR_EL1"  : "=r"(vbar));
+
+  asm volatile ("mrs %x0, SPSR_EL1"  : "=r"(spsr_svc));
+  asm volatile ("mrs %x0, CSSELR_EL1": "=r"(csselr));
+
+  if (Cpu::has_aarch32_el1()) [[likely]]
+    {
+      // If AArch32 is not supported, these registers are actually RES0
+      // so strictly speaking, we could read them unconditionally.
+      asm volatile ("mrs %x0, SPSR_fiq" : "=r"(spsr_fiq));
+      asm volatile ("mrs %x0, SPSR_irq" : "=r"(spsr_irq));
+      asm volatile ("mrs %x0, SPSR_abt" : "=r"(spsr_abt));
+      asm volatile ("mrs %x0, SPSR_und" : "=r"(spsr_und));
+    }
+}
+
+PUBLIC inline NEEDS["cpu.h"]
+void
+Context_hyp::load(bool from_privileged, bool to_privileged)
+{
+  asm volatile ("msr HCR_EL2, %x0" : : "r"(hcr));
+  asm volatile ("msr CPACR_EL1, %x0" : : "r"(cpacr));
+
+  if (!to_privileged)
+    {
+      if (from_privileged)
+        {
+          asm volatile ("msr CNTVOFF_EL2, %x0"    : : "r"(0));
+          asm volatile ("msr CNTKCTL_EL1, %x0"    : : "r"(0x3));
+          asm volatile ("msr CNTV_CTL_EL0, %x0"   : : "r"(0));
+        }
+
+      return;
+    }
+
+  asm volatile ("msr PAR_EL1, %x0"        : : "r"(par));
+
+  asm volatile ("msr CNTVOFF_EL2, %x0"    : : "r"(cntvoff));
+  asm volatile ("msr CNTV_CVAL_EL0, %x0"  : : "r"(cntv_cval));
+  asm volatile ("msr CNTKCTL_EL1, %x0"    : : "r"(cntkctl));
+  asm volatile ("msr CNTV_CTL_EL0, %x0"   : : "r"(cntv_ctl));
+  asm volatile ("msr TPIDR_EL1, %x0"      : : "r"(tpidrprw));
+  asm volatile ("msr CONTEXTIDR_EL1, %x0" : : "r"(contextidr));
+
+  asm volatile ("msr SP_EL1, %x0"         : : "r"(sp_el1));
+  asm volatile ("msr ELR_EL1, %x0"        : : "r"(elr_el1));
+  asm volatile ("msr VBAR_EL1, %x0"       : : "r"(vbar));
+
+  asm volatile ("msr SPSR_EL1, %x0"       : : "r"(spsr_svc));
+  asm volatile ("msr CSSELR_EL1, %x0"     : : "r"(csselr));
+
+  if (Cpu::has_aarch32_el1()) [[likely]]
+    {
+      // If AArch32 is not supported, these registers are actually RES0
+      // so strictly speaking, we could write them unconditionally.
+      asm volatile ("msr SPSR_fiq, %x0" : : "r"(spsr_fiq));
+      asm volatile ("msr SPSR_irq, %x0" : : "r"(spsr_irq));
+      asm volatile ("msr SPSR_abt, %x0" : : "r"(spsr_abt));
+      asm volatile ("msr SPSR_und, %x0" : : "r"(spsr_und));
+    }
+
+  if (Cpu::boot_cpu_has_ras())
+    asm volatile (".arch_extension ras   \n"
+                  "msr VDISR_EL2, xzr    \n"
+                  ".arch_extension noras \n": : "r"(0));
+}

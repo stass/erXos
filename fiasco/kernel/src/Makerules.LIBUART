@@ -1,0 +1,11 @@
+# vim:set ft=make:
+
+# We do not build the UART drivers into a libuart.a to be able to use KEEP
+# statements in the linker script instead of using the --whole-archive
+# linker flag
+
+# Allow to use `#ifndef UART_WITHOUT_INPUT..#endif` in UART objects.
+$(foreach o,$(basename $(OBJECTS_LIBUART)),\
+  $(eval CXXFLAGS_$o += $(if $(CONFIG_INPUT),,-DUART_WITHOUT_INPUT)))
+
+vpath %.cc $(srcdir)/lib/uart

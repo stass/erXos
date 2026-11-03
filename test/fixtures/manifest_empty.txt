@@ -1,0 +1,77 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+manifest 1
+share system
+  quota_ns 2000000
+  period_ns 10000000
+  cpuset 1
+  capacity_mcpu 200
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 24
+  ceiling 47
+  flags none
+share users
+  quota_ns 8000000
+  period_ns 10000000
+  cpuset 1
+  capacity_mcpu 800
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
+runtime_limits native
+  max_frame 4096
+  max_message_heap 8192
+  funnel_depth 64
+  exports 64
+  tmp 0
+  overlay 0
+  atoms 1024
+  foreign_atoms 64
+  processes 64
+limits native
+  memory 16777216
+  outer 1048576
+  grant @share.users
+  spaces none
+  lane 4096
+  connections 0
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.native
+  peer_held 4096
+  peer_held_total 4096
+principal root
+  memory 268435456
+  grant @share.users
+  domains 4
+  names 4
+  default_limits @limits.native
+  ceiling_limits @limits.native
+machine
+  flags development,partial_boot
+  host "fixture"
+  console "/uart@0"
+  hostlink ""
+  platform "fixture"
+  root_memory 1073741824
+  system_baseline 67108864
+  system_share @share.system
+  users_share @share.users
+  system_principal @principal.root
+  max_domains 4
+  max_connections 4
+  system_lane 4096
+  system_queue 16384
+  peer_held 4096
+  system_reserve 250
+  sealing none
+  system_runtime_limits @runtime_limits.native
+  native_limits @limits.native
+unit console
+  placement "uart0"
+  holder system

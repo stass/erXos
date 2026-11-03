@@ -1,0 +1,353 @@
+INTERFACE:
+
+#include "irq_chip.h"
+#include "mem.h"
+#include "mmio_register_block.h"
+
+#include "gic_redist_regs.h"
+
+class Gic_redist : public Gic_redist_regs
+{
+private:
+  Mmio_register_block _redist;
+};
+
+class Gic_redist_find
+{
+public:
+  virtual Mmio_register_block get_redist_mmio(Unsigned64) = 0;
+
+  /**
+   * \return True if the redistributors are not coherent with the CPUs and
+   *         the LPI tables must use non-shareable and non-cacheable memory.
+   */
+  virtual bool is_non_coherent() const = 0;
+
+  static bool cmp_affinity(Unsigned32 x, Unsigned32 y);
+
+  static Mmio_register_block scan_range(void *base, unsigned size, Unsigned64 mpidr)
+  {
+    unsigned o = 0;
+    Gic_redist::Typer gicr_typer;
+    Unsigned64 typer_aff = (mpidr & 0x0000ffffff) | ((mpidr & 0xff00000000) >> 8);
+    do
+      {
+        Mmio_register_block r(offset_cast<void *>(base, o));
+
+        unsigned arch_rev = (r.read<Unsigned32>(Gic_redist::GICR_PIDR2) >> 4) & 0xf;
+        if (arch_rev != 0x3 && arch_rev != 0x4)
+          // No GICv3 and no GICv4
+          break;
+
+        gicr_typer.raw = r.read_non_atomic<Unsigned64>(Gic_redist::GICR_TYPER);
+        if (cmp_affinity(gicr_typer.affinity(), typer_aff))
+          return r;
+
+        o += 2 * Gic_redist::GICR_frame_size;
+        if (gicr_typer.vlpis())
+          o += 2 * Gic_redist::GICR_frame_size;
+      }
+    while (o < size && !gicr_typer.last());
+
+    return Mmio_register_block();
+  }
+};
+
+// ------------------------------------------------------------------------
+INTERFACE[arm_gic_msi]:
+
+#include "gic_mem.h"
+
+EXTENSION class Gic_redist
+{
+private:
+  enum
+  {
+    GICR_lpi_default_prio = 0xa0,
+
+    GICR_config_table_align  = 0x1000,
+    GICR_pending_table_align = 0x10000,
+  };
+
+  struct Propbaser
+  {
+    Unsigned64 raw = 0;
+    Propbaser() = default;
+    explicit Propbaser(Unsigned64 v) : raw(v) {}
+    CXX_BITFIELD_MEMBER          ( 0,  4, id_bits, raw);
+    CXX_BITFIELD_MEMBER          ( 7,  9, cacheability, raw);
+    CXX_BITFIELD_MEMBER          (10, 11, shareability, raw);
+    CXX_BITFIELD_MEMBER_UNSHIFTED(12, 51, pa, raw);
+  };
+
+  struct Pendbaser
+  {
+    Unsigned64 raw = 0;
+    Pendbaser() = default;
+    explicit Pendbaser(Unsigned64 v) : raw(v) {}
+    CXX_BITFIELD_MEMBER          ( 7,  9, cacheability, raw);
+    CXX_BITFIELD_MEMBER          (10, 11, shareability, raw);
+    CXX_BITFIELD_MEMBER_UNSHIFTED(16, 51, pa, raw);
+    CXX_BITFIELD_MEMBER          (62, 62, ptz, raw);
+  };
+
+  Gic_mem _lpi_pending_table;
+
+  static unsigned num_lpi_intid_bits;
+  static Gic_mem lpi_config_table;
+};
+
+// ------------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "cpu.h"
+#include "l4_types.h"
+#include "kmem_alloc.h"
+#include "panic.h"
+#include "poll_timeout_counter.h"
+#include "warn.h"
+#include <cstdio>
+#include <string.h>
+
+IMPLEMENT_DEFAULT static inline
+bool
+Gic_redist_find::cmp_affinity(Unsigned32 x, Unsigned32 y)
+{ return x == y; }
+
+PUBLIC
+void
+Gic_redist::cpu_init()
+{
+  unsigned val = _redist.read<Unsigned32>(GICR_WAKER);
+  if (val & GICR_WAKER_Children_asleep)
+    {
+      val &= ~GICR_WAKER_Processor_sleep;
+      _redist.write<Unsigned32>(val, GICR_WAKER);
+
+      L4::Poll_timeout_counter i(5000000);
+      while (i.test(_redist.read<Unsigned32>(GICR_WAKER) & GICR_WAKER_Children_asleep))
+        Proc::pause();
+
+      if (i.timed_out())
+        panic("GIC: redistributor did not awake\n");
+    }
+
+  _redist.write<Unsigned32>(0xffffffffU, GICR_ICENABLER0);
+
+  _redist.write<Unsigned32>(0x0000001eU, GICR_ISENABLER0);
+  _redist.write<Unsigned32>(0xffffffffU, GICR_IGROUPR0);
+
+  _redist.write<Unsigned32>(0xffffffffU, GICR_ICPENDR0);
+  _redist.write<Unsigned32>(0xffffffffU, GICR_ICACTIVER0); // clear active
+
+  for (unsigned g = 0; g < 32; g += 4)
+    _redist.write<Unsigned32>(0xa0a0a0a0U, GICR_IPRIORITYR0 + g);
+}
+
+PUBLIC
+void
+Gic_redist::mask(Mword pin)
+{
+  _redist.write<Unsigned32>(1u << pin, GICR_ICENABLER0);
+  sync_rwp();
+}
+
+PUBLIC
+void
+Gic_redist::unmask(Mword pin)
+{
+  _redist.write<Unsigned32>(1u << pin, GICR_ISENABLER0);
+}
+
+PUBLIC inline
+void
+Gic_redist::irq_prio(unsigned irq, unsigned prio)
+{
+  _redist.write<Unsigned8>(prio, GICR_IPRIORITYR0 + irq);
+}
+
+PUBLIC inline
+unsigned
+Gic_redist::irq_prio(unsigned irq)
+{
+  return _redist.read<Unsigned8>(GICR_IPRIORITYR0 + irq);
+}
+
+PUBLIC inline NEEDS["l4_types.h"]
+int
+Gic_redist::set_mode(Mword pin, Irq_chip::Mode m)
+{
+  if (!m.set_mode())
+    return 0;
+
+  unsigned v = 0;
+  switch (m.flow_type())
+    {
+    case Irq_chip::Mode::Trigger_level | Irq_chip::Mode::Polarity_high:
+    case Irq_chip::Mode::Trigger_level | Irq_chip::Mode::Polarity_low:
+      break;
+    case Irq_chip::Mode::Trigger_edge  | Irq_chip::Mode::Polarity_high:
+    case Irq_chip::Mode::Trigger_edge  | Irq_chip::Mode::Polarity_low:
+      v = 2;
+      break;
+    default:
+      return -L4_err::EInval;
+    };
+
+  unsigned shift = (pin & 15) * 2;
+
+  _redist.modify<Unsigned32>(v << shift, 3 << shift, GICR_ICFGR0 + (pin >> 4) * 4);
+
+  return 0;
+}
+
+PRIVATE inline NEEDS["poll_timeout_counter.h", "warn.h"]
+void
+Gic_redist::sync_rwp()
+{
+  L4::Poll_timeout_counter i(1U << 27); // ~134ms @ 1GHz
+  while (i.test(Ctrl(_redist.read<Unsigned32>(GICR_CTRL)).rwp()))
+    Proc::pause();
+
+  if (i.timed_out()) [[unlikely]]
+    WARNX(Error, "GICR: RWP timed out!\n");
+}
+
+PUBLIC inline
+void
+Gic_redist::set_region(Mmio_register_block b)
+{
+  _redist = b;
+}
+
+// ------------------------------------------------------------------------
+IMPLEMENTATION [mp]:
+
+PUBLIC
+void
+Gic_redist::disable()
+{
+  unsigned val = _redist.read<Unsigned32>(GICR_WAKER);
+  val |= GICR_WAKER_Processor_sleep;
+  _redist.write<Unsigned32>(val, GICR_WAKER);
+
+  L4::Poll_timeout_counter i(5000000);
+  while (i.test(!(_redist.read<Unsigned32>(GICR_WAKER) & GICR_WAKER_Children_asleep)))
+    Proc::pause();
+
+  if (i.timed_out())
+    panic("GIC: redistributor still active\n");
+}
+
+//-------------------------------------------------------------------
+IMPLEMENTATION[arm_gic_msi]:
+
+#include "gic.h"
+
+#include <arithmetic.h>
+
+unsigned Gic_redist::num_lpi_intid_bits = 0;
+Gic_mem Gic_redist::lpi_config_table;
+
+PUBLIC
+static void
+Gic_redist::init_lpi(unsigned num_lpis, bool non_coherent)
+{
+  num_lpi_intid_bits = cxx::log2u(Gic_dist::Lpi_intid_base + num_lpis - 1) + 1;
+  num_lpis = (1U << num_lpi_intid_bits) - Gic_dist::Lpi_intid_base;
+
+  lpi_config_table = Gic_mem::alloc_mem(num_lpis, GICR_config_table_align);
+  if (!lpi_config_table.is_valid())
+    panic("GIC: Failed to allocate redistributor LPI configuration table.\n");
+  if (non_coherent)
+    lpi_config_table.set_non_coherent();
+  // Initialize all LPIs with default priority and disabled.
+  memset(lpi_config_table.virt_ptr(), GICR_lpi_default_prio, num_lpis);
+}
+
+PUBLIC
+void
+Gic_redist::cpu_init_lpi(bool non_coherent)
+{
+  Typer gicr_typer(_redist.read_non_atomic<Unsigned64>(GICR_TYPER));
+  if (!gicr_typer.plpis())
+    panic("GIC: Redistributor does not support physical LPIs.\n");
+
+  Ctrl ctrl(_redist.read<Unsigned32>(GICR_CTRL));
+  if (ctrl.enable_lpis())
+    {
+      WARNX(Warning,
+            "GIC: LPI support of redistributor already enabled; disabling...");
+      ctrl.enable_lpis() = 0;
+      _redist.write<Unsigned32>(ctrl.raw, GICR_CTRL);
+      Mem::dsb();
+      sync_rwp();
+      ctrl = Ctrl(_redist.read<Unsigned32>(GICR_CTRL));
+      if (ctrl.enable_lpis())
+        {
+          WARNX(Warning, "... did not work!\n");
+          panic("GIC: LPI support of redistributor is already enabled.");
+        }
+    }
+
+  Propbaser propbaser;
+  propbaser.id_bits() = num_lpi_intid_bits - 1;
+  propbaser.pa() = lpi_config_table.phys_addr();
+  lpi_config_table.setup_reg(_redist.r<Unsigned64>(GICR_PROPBASER), propbaser);
+  lpi_config_table.make_coherent();
+
+  // Each bit in the pending table represents the pending state of one LPI.
+  // The first 1 KiB is reserved for the pending state of SGIs/PPIs/SPIs.
+  unsigned lpi_pending_table_size = (1U << num_lpi_intid_bits) / 8;
+  // Zero initialize pending table, no LPIs are pending.
+  _lpi_pending_table = Gic_mem::alloc_zmem(lpi_pending_table_size,
+                                           GICR_pending_table_align);
+  if (!_lpi_pending_table.is_valid())
+    panic("GIC: Failed to allocate redistributor LPI pending table.\n");
+  if (non_coherent)
+    _lpi_pending_table.set_non_coherent();
+
+  Pendbaser pendbaser;
+  pendbaser.pa() = _lpi_pending_table.phys_addr();
+  pendbaser.ptz() = 1;
+  _lpi_pending_table.setup_reg(_redist.r<Unsigned64>(GICR_PENDBASER), pendbaser);
+  _lpi_pending_table.make_coherent();
+
+  // Enable LPI support for redistributor.
+  ctrl.enable_lpis() = 1;
+  _redist.write<Unsigned32>(ctrl.raw, GICR_CTRL);
+}
+
+PUBLIC static inline
+void
+Gic_redist::enable_lpi(Mword lpi, bool enabled)
+{
+  Unsigned8 *lpi_config = lpi_config_table.virt_ptr<Unsigned8>() + lpi;
+  write_now(lpi_config, GICR_lpi_default_prio | (enabled ? 1 : 0));
+  lpi_config_table.make_coherent(lpi_config, lpi_config + 1);
+}
+
+PUBLIC inline
+void *
+Gic_redist::get_base() const
+{
+  return _redist.get_mmio_base();
+}
+
+PUBLIC inline
+unsigned
+Gic_redist::get_processor_nr() const
+{
+  return Typer(_redist.read_non_atomic<Unsigned64>(GICR_TYPER)).processor_nr();
+}
+
+//-------------------------------------------------------------------
+IMPLEMENTATION[arm_cortex_r52]:
+
+IMPLEMENT_OVERRIDE static inline
+bool
+Gic_redist_find::cmp_affinity(Unsigned32 x, Unsigned32 y)
+{
+  // Arm erratum 2743885 workaround for broken Aff1/2 field on clusters.
+  return (x & 0xffU) == (y & 0xffU);
+}

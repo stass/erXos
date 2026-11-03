@@ -1,0 +1,212 @@
+INTERFACE[mips]:
+
+#include "l4_types.h"
+#include "types.h"
+#include "cp0_status.h"
+#include "mem.h"
+#include <cxx/bitfield>
+
+EXTENSION class Syscall_frame
+{
+private:
+  Mword r[5];
+};
+
+EXTENSION class Return_frame
+{
+public:
+  Mword bad_instr_p;
+  Mword bad_instr;
+  Mword r[32];
+  Mword hi, lo;
+  Mword bad_v_addr;
+  Mword cause;
+  Mword status;
+  Mword epc;
+
+  enum Regs
+  {
+    R_a0 =  4,  R_a1 =  5,  R_a2 =  6,  R_a3 =  7,
+    R_t0 =  8,  R_t1 =  9,  R_t2 = 10,  R_t3 = 11,
+    R_t4 = 12,  R_t5 = 13,
+    R_s0 = 16,  R_s1 = 17,  R_s2 = 18,  R_s3 = 19,
+    R_s4 = 20,  R_s5 = 21,  R_s6 = 22,  R_s7 = 23,
+    R_sp = 29,
+  };
+
+  enum Cause_bits
+  {
+    C_type_mask = 0x00000300, // use the IP0 and IP1 bits for L4 specifics
+    C_type_mips = 0x00000000, ///< 0 means HW cause value
+    C_type_l4   = 0x00000100, ///< L4 specific cause code in bits 0..7
+    C_l4_ipc_upcall     = 0x00000100,
+    C_l4_sw_exception   = 0x00000101,
+    C_l4_syscall_upcall = 0x00000102,
+  };
+
+  enum Status_bits
+  {
+    S_ksu = 0x18
+  };
+
+  struct Cause
+  {
+    Mword raw;
+    Cause() = default;
+    Cause(Mword c) : raw(c) {}
+    /// L4-extension: source context: kern=0, user=1, guest=2
+    CXX_BITFIELD_MEMBER( 0,  1, src_context, raw);
+    /// Exception code
+    CXX_BITFIELD_MEMBER( 2,  6, exc_code, raw);
+    /// L4-extension: break point spec:
+    /// 0 normal/cstr, 1 normal/nstr, 2 JDB sequence, 3 JDB IPI (fake)
+    CXX_BITFIELD_MEMBER(16, 17, bp_spec, raw);
+  };
+
+  Mword eret_work() const
+  { return r[0]; /* unused zero register */ }
+
+  void eret_work(Mword v)
+  { r[0] = v; /* unused zero register */ }
+
+  bool user_mode() const
+  { return status & Cp0_status::ST_KSU_USER; }
+
+  void copy_and_sanitize(Return_frame const *f)
+  {
+    Mem::memcpy_mwords(&r[1], &f->r[1], 31u + 2u);
+    status = access_once(&f->status);
+    status &= Cp0_status::ST_USER_MASK;
+    status |= Cp0_status::ST_USER_MUST_SET;
+
+    epc = access_once(&f->epc);
+  }
+
+  void set_ipc_upcall()
+  { cause = C_l4_ipc_upcall; }
+};
+
+//------------------------------------------------------------------------------
+IMPLEMENTATION [mips]:
+
+#include <cstdio>
+#include "cp0_status.h"
+
+IMPLEMENT inline
+void
+Syscall_frame::from(Mword id)
+{ r[4] = id; }
+
+IMPLEMENT inline
+Mword
+Syscall_frame::from_spec() const
+{ return r[4]; }
+
+IMPLEMENT inline
+L4_obj_ref
+Syscall_frame::ref() const
+{ return L4_obj_ref::from_raw(r[1]); }
+
+IMPLEMENT inline
+void
+Syscall_frame::ref(L4_obj_ref const &ref)
+{ r[1] = ref.raw(); }
+
+IMPLEMENT inline
+L4_timeout_pair
+Syscall_frame::timeout() const
+{ return L4_timeout_pair(r[2]); }
+
+IMPLEMENT inline
+void
+Syscall_frame::timeout(L4_timeout_pair const &to)
+{ r[2] = to.raw(); }
+
+IMPLEMENT inline
+Utcb *
+Syscall_frame::utcb() const
+{ return reinterpret_cast<Utcb*>(r[0]); }
+
+IMPLEMENT inline
+L4_msg_tag
+Syscall_frame::tag() const
+{ return L4_msg_tag(r[3]); }
+
+IMPLEMENT inline
+void
+Syscall_frame::tag(L4_msg_tag const &tag)
+{ r[3] = tag.raw(); }
+
+
+IMPLEMENT inline
+Mword
+Return_frame::sp() const
+{ return r[R_sp]; }
+
+IMPLEMENT inline
+void
+Return_frame::sp(Mword new_sp)
+{ r[R_sp] = new_sp; }
+
+IMPLEMENT inline
+Mword
+Return_frame::ip() const
+{ return epc; }
+
+IMPLEMENT inline
+void
+Return_frame::ip(Mword new_ip)
+{ epc = new_ip; }
+
+IMPLEMENT inline
+Address
+Return_frame::ip_syscall_user() const
+{ return epc; }
+
+IMPLEMENT inline
+void
+Return_frame::disable_continuation()
+{ eret_work(0); }
+
+
+IMPLEMENT static inline
+Entry_frame *
+Entry_frame::to_entry_frame(Syscall_frame *sf)
+{
+  // assume Entry_frame == Return_frame
+  return reinterpret_cast<Entry_frame *>
+    (reinterpret_cast<char *>(sf) - offsetof(Return_frame, r[R_s0]));
+}
+
+IMPLEMENT inline
+Syscall_frame *
+Entry_frame::syscall_frame()
+{ return reinterpret_cast<Syscall_frame *>(&r[R_s0]); }
+
+IMPLEMENT inline
+Syscall_frame const *
+Entry_frame::syscall_frame() const
+{ return reinterpret_cast<Syscall_frame const *>(&r[R_s0]); }
+
+PUBLIC
+void
+Return_frame::dump() const
+{
+  static constinit char const *const regs[] =
+  {
+    "00", "at", "v0", "v1", "a0", "a1", "a2", "a3",
+    "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+    "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+    "t8", "t9", "k0", "k1", "gp", "sp", "fp", "ra"
+  };
+
+  int sz = 2 * sizeof(Mword);
+  printf("00[ 0]: %0*x ", sz, 0);
+
+  for (unsigned i = 1; i < 32; ++i)
+    printf("%s[%2d]: %0*lx%s", regs[i], i, sz, r[i], (i & 3) == 3 ? "\n" : " ");
+
+  printf("HI: %*lx LO: %*lx\n", sz, hi, sz, lo);
+  printf("Status %0*lx Cause %0*lx EPC %0*lx\n", sz, status, sz, cause, sz, epc);
+  //printf("Cause  %0*lx BadVaddr %0*lx\n", sz, cause, sz, badvaddr);
+}

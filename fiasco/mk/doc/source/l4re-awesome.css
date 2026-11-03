@@ -1,0 +1,388 @@
+/* Explicitly loading fonts avoids some quirks, e.g., with font weights for
+   Museo. However, it is unclear how portable this is. Disabling for now. */
+/*
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 100; src: local('NotoSerif-Thin'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 100; src: local('NotoSerif-ThinItalic'); }
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 300; src: local('NotoSerif-Light'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 300; src: local('NotoSerif-LightItalic'); }
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 400; src: local('NotoSerif-Regular'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 400; src: local('NotoSerif-Italic'); }
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 500; src: local('NotoSerif-Medium'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 500; src: local('NotoSerif-MediumItalic'); }
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 700; src: local('NotoSerif-Bold'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 700; src: local('NotoSerif-BoldItalic'); }
+@font-face { font-family: 'Noto Serif'; font-style: normal; font-weight: 900; src: local('NotoSerif-Black'); }
+@font-face { font-family: 'Noto Serif'; font-style: italic; font-weight: 900; src: local('NotoSerif-BlackItalic'); }
+
+
+@font-face { font-family: 'Museo Sans'; font-style: normal; font-weight: 100; src: local('MuseoSans-100'); }
+@font-face { font-family: 'Museo Sans'; font-style: italic; font-weight: 100; src: local('MuseoSans-100Italic'); }
+@font-face { font-family: 'Museo Sans'; font-style: normal; font-weight: 300; src: local('MuseoSans-300'); }
+@font-face { font-family: 'Museo Sans'; font-style: italic; font-weight: 300; src: local('MuseoSans-300Italic'); }
+@font-face { font-family: 'Museo Sans'; font-style: normal; font-weight: 500; src: local('MuseoSans-500'); }
+@font-face { font-family: 'Museo Sans'; font-style: italic; font-weight: 500; src: local('MuseoSans-500Italic'); }
+@font-face { font-family: 'Museo Sans'; font-style: normal; font-weight: 700; src: local('MuseoSans-700'); }
+@font-face { font-family: 'Museo Sans'; font-style: italic; font-weight: 700; src: local('MuseoSans-700Italic'); }
+@font-face { font-family: 'Museo Sans'; font-style: normal; font-weight: 900; src: local('MuseoSans-900'); }
+@font-face { font-family: 'Museo Sans'; font-style: italic; font-weight: 900; src: local('MuseoSans-900Italic'); }
+
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 100; src: local('NotoSans-Thin'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 100; src: local('NotoSans-ThinItalic'); }
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 300; src: local('NotoSans-Light'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 300; src: local('NotoSans-LightItalic'); }
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 400; src: local('NotoSans-Regular'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 400; src: local('NotoSans-Italic'); }
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 500; src: local('NotoSans-Medium'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 500; src: local('NotoSans-MediumItalic'); }
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 700; src: local('NotoSans-Bold'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 700; src: local('NotoSans-BoldItalic'); }
+@font-face { font-family: 'Noto Sans'; font-style: normal; font-weight: 900; src: local('NotoSans-Black'); }
+@font-face { font-family: 'Noto Sans'; font-style: italic; font-weight: 900; src: local('NotoSans-BlackItalic'); }
+
+
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 200; src: local('SourceCodePro-ExtraLight'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 200; src: local('SourceCodePro-ExtraLightIt'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 300; src: local('SourceCodePro-Light'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 300; src: local('SourceCodePro-LightIt'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 400; src: local('SourceCodePro-Regular'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 400; src: local('SourceCodePro-It'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 500; src: local('SourceCodePro-Medium'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 500; src: local('SourceCodePro-MediumIt'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 600; src: local('SourceCodePro-Semibold'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 600; src: local('SourceCodePro-SemiboldIt'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 700; src: local('SourceCodePro-Bold'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 700; src: local('SourceCodePro-BoldIt'); }
+@font-face { font-family: 'Source Code Pro'; font-style: normal; font-weight: 900; src: local('SourceCodePro-Black'); }
+@font-face { font-family: 'Source Code Pro'; font-style: italic; font-weight: 900; src: local('SourceCodePro-BlackIt'); }
+
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 100; src: local('NotoSansMono-Thin'); }
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 300; src: local('NotoSansMono-Light'); }
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 400; src: local('NotoSansMono-Regular'); }
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 500; src: local('NotoSansMono-Medium'); }
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 700; src: local('NotoSansMono-Bold'); }
+@font-face { font-family: 'Noto Sans Mono'; font-style: normal; font-weight: 900; src: local('NotoSansMono-Black'); }
+*/
+
+
+/* Note: Some of the CSS rules below override definitions from Doxygen Awesome
+ *       or Doxygen. For that purpose, the CSS selectors are copied from the
+ *       existing rules, otherwise overriding does not work. Therefore some
+ *       selectors might need adaption when Doxygen Awesome or Doxygen is
+ *       updated.
+ */
+
+
+/*** fonts ********************************************************************/
+
+html {
+    --font-family: 'Noto Serif', serif;
+    --font-family-secondary: 'Museo Sans', 'Noto Sans', sans-serif;
+    --font-family-monospace: 'Source Code Pro', 'Noto Sans Mono', monospace;
+
+    /* TODO: in Doxygen Awesome, font size depends on media and screen size */
+    --page-font-size: 16px;
+    --navigation-font-size: 14px;
+    --toc-font-size: 14px;
+    --code-font-size: 16px; /* affects code, fragment */
+    --title-font-size: 22px;
+}
+
+div.header .title, .title, #projectname, #projectbrief,
+h1, h1.groupheader, h2, h2.groupheader,
+h3, h3.groupheader, h4, h4.groupheader,
+h5, h5.groupheader, h6, h6.groupheader {
+    font-family: var(--font-family-secondary);
+    font-weight: 900;
+}
+
+.sm-dox a, .sm-dox a:active, .sm-dox a:hover, .sm-dox a:focus,
+.navpath li.navelem a, .navpath li.navelem a:hover,
+th {
+    font-family: var(--font-family-secondary);
+    font-weight: 700;
+}
+
+/* sub menus */
+.sm-dox ul a, .sm-dox ul a:active, .sm-dox ul a:hover, .sm-dox ul a:focus {
+    font-family: var(--font-family-secondary);
+    font-weight: 300;
+}
+
+#nav-tree .label, #nav-tree a, #page-nav ul.page-outline li a {
+    font-family: var(--font-family-secondary);
+}
+#nav-tree a, #page-nav ul.page-outline li a {
+    font-weight: 300;
+}
+#nav-tree .selected a, #page-nav ul.page-outline li.vis:not(.vis ~ .vis) a {
+    font-weight: 500;
+}
+
+#nav-tree a[href*='#'] {
+    font-style: italic;
+}
+
+/* override search.css fonts */
+/* TODO: upstream? */
+#MSearchField, .SelectItem, .SRSymbol, a.SRScope, span.SRScope,
+.SRPage .SRStatus {
+    font-family: var(--font-family);
+    font-size: var(--page-font-size);
+}
+span.SelectionMark {
+    font-family: var(--font-family-monospace);
+}
+
+
+/*** colors *******************************************************************/
+
+html {
+    --kkBeringSea:   #475B6C;
+    --kkOuterSpace:  #273845;
+    --kkCoral:       #EC5F47;
+    --kkOcean:       #6399AD;
+    --kkSky:         #B4C7D2;
+    --kkIce:         #E0E8ED;
+
+    /* secondary colors */
+    --kkLime:        #76BDA4;
+    --kkLemon:       #FFE162;
+    --kkOrange:      #F7AF61;
+    --kkAubergine:   #A3729A;
+
+    /* colors for code and technical drawings */
+    --kkCodeCoral:   #FF624A;
+    --kkCodeOcean:   #2D91B5;
+    --kkCodeLime:    #2EB57F;
+    --kkCodeOrange:  #FDB619;
+    --kkCodeViolett: #A35294;
+}
+
+
+html, html:not(.light-mode), html.dark-mode {
+    --primary-color: var(--kkCoral);
+    --primary-dark-color: var(--kkCodeOcean);
+    --primary-light-color: var(--kkCoral);
+
+    --warning-color: color-mix(in srgb, var(--warning-color-dark) 12.5%, var(--page-background-color));
+    --warning-color-dark: var(kkCodeOrange);
+    --warning-color-darker: var(--page-foreground-color);
+    --note-color: color-mix(in srgb, var(--note-color-dark) 12.5%, var(--page-background-color));
+    --note-color-dark: var(--kkCodeOcean);
+    --note-color-darker: var(--page-foreground-color);
+    --todo-color: color-mix(in srgb, var(--todo-color-dark) 12.5%, var(--page-background-color));
+    --todo-color-dark: var(--kkCodeViolett);
+    --todo-color-darker: var(--page-foreground-color);
+    --deprecated-color: color-mix(in srgb, var(--deprecated-color-dark) 12.5%, var(--page-background-color));
+    --deprecated-color-dark: gray;
+    --deprecated-color-darker: var(--page-foreground-color);
+    --bug-color: color-mix(in srgb, var(--bug-color-dark) 12.5%, var(--page-background-color));
+    --bug-color-dark: var(--kkCodeCoral);
+    --bug-color-darker: var(--page-foreground-color);
+    --invariant-color: color-mix(in srgb, var(--invariant-color-dark) 12.5%, var(--page-background-color));
+    --invariant-color-dark: var(--kkCodeLime);
+    --invariant-color-darker: var(--page-foreground-color);
+
+    --tablehead-background: var(--kkBeringSea);
+    --tablehead-foreground: #FFF;
+
+    --code-foreground: var(--page-foreground-color);
+
+    --fragment-background: var(--code-background);
+    --fragment-foreground: var(--code-foreground);
+    --fragment-link: var(--primary-color);
+    --fragment-linenumber-color: var(--fragment-comment);
+}
+
+table.doxtable th, table.fieldtable th, table.markdownTable th {
+    border-left-color: var(--page-background-color);
+    border-right-color: var(--page-background-color);
+}
+
+/* light-mode-specific */
+html {
+    --page-background-color: white;
+    --page-foreground-color: var(--kkOuterSpace);
+    --page-secondary-foreground-color: var(--kkBeringSea);
+
+    --blockquote-background: var(--side-nav-background);
+    --blockquote-foreground: var(--page-foreground-color);
+
+    --code-background: #EFF3F6;  /* website background; probably ice 50 % */
+
+    /* non-Doxygen-Awesome definitions */
+    --side-nav-hover-background: #f0f0f0;
+}
+
+/* dark-mode-specific */
+@media (prefers-color-scheme: dark) {
+    html:not(.light-mode) {
+        --page-background-color: color-mix(in srgb, black 50%, var(--kkOuterSpace));
+        --page-foreground-color: var(--kkIce);
+        --page-secondary-foreground-color: var(--kkSky);
+        --separator-color: var(--kkBeringSea);
+
+        --blockquote-background: color-mix(in srgb, black 25%, var(--kkOuterSpace));
+        --blockquote-foreground: var(--page-foreground-color);
+
+        --code-background: color-mix(in srgb, black 25%, var(--kkOuterSpace));
+
+        --fragment-linenumber-background: var(--code-background);
+        --fragment-linenumber-border: transparent;
+
+        --side-nav-background: color-mix(in srgb, black 25%, var(--kkOuterSpace));;
+
+        /* non-Doxygen-Awesome definitions */
+        --side-nav-hover-background: var(--kkBeringSea);
+        }
+}
+
+
+/*** borders and spacing ******************************************************/
+
+html {
+    --border-radius-large: 0px;
+    --border-radius-small: 0px;
+    --border-radius-medium: 0px;
+
+    --content-line-height: 24px;
+    --table-line-height: 24px;
+}
+
+code, div.fragment, pre.fragment, span.tt {
+    border: initial;
+}
+dl.warning code, dl.warning span.tt,
+dl.attention code, dl.attention span.tt,
+dl.note code, dl.note span.tt,
+dl.remark code, dl.remark span.tt,
+dl.todo code, dl.todo span.tt,
+dl.bug code, dl.bug span.tt,
+dl.deprecated code, dl.deprecated span.tt,
+dl.invariant code, dl.invariant span.tt,
+dl.pre code, dl.pre span.tt,
+dl.post code, dl.post span.tt {
+    border: initial;
+}
+dl.warning div.fragment, dl.warning pre.fragment,
+dl.attention div.fragment, dl.attention pre.fragment,
+dl.note div.fragment, dl.note pre.fragment,
+dl.remark div.fragment, dl.remark pre.fragment,
+dl.todo div.fragment, dl.todo pre.fragment,
+dl.bug div.fragment, dl.bug pre.fragment,
+dl.deprecated div.fragment, dl.deprecated pre.fragment,
+dl.invariant div.fragment, dl.invariant pre.fragment,
+dl.pre div.fragment, dl.pre pre.fragment,
+dl.post div.fragment, dl.post pre.fragment {
+    border: initial;
+}
+
+code, span.tt {
+    /* Horizontal padding messes with inline spacing, vertical padding looks
+     * strange when there is code in consecutive lines. Therefore remove it. */
+    padding: 0;
+}
+
+
+/*** logo *********************************************************************/
+
+@media screen and (min-width: 768px) {
+    #projectlogo img {
+        margin-right: var(--spacing-large);
+    }
+}
+
+
+/*** search results ***********************************************************/
+
+#MSearchResultsWindow {
+    background-color: var(--searchbar-background);
+}
+
+/* Make it easier to visually separate child items. */
+#MSearchResults .SRPage .SREntry .SRChildren a {
+    margin-top: var(--spacing-small);
+}
+
+/* Disable animation when showing search results. */
+#MSearchResultsWindow {
+    animation: none;
+}
+
+/* increase size of search result box */
+#MSearchResultsWindow {
+    height: auto !important;
+    bottom: calc( 20px  /* Doxygen awesome translates the box by 20px */
+                + 30px  /* height of footer */
+                + 1px   /* border-top-width of footer */
+                );
+}
+@media screen and (min-width: 768px) {
+    #MSearchResultsWindow {
+        min-width: 300px;
+        max-width: 500px;
+        width: 50svw !important;
+    }
+}
+
+/* show visual cue for expandable search results */
+.SREntry:has(> .SRChildren) > a::after {
+    content: ' ►';
+    opacity: var(--side-nav-arrow-opacity);
+}
+.SREntry:has(> .SRChildren) > a:hover::after {
+    opacity: var(--side-nav-arrow-hover-opacity);
+}
+
+
+/*** side nav *****************************************************************/
+
+html {
+    --side-nav-arrow-opacity: 0.4;
+    --side-nav-arrow-hover-opacity: 1;
+}
+
+/* override Doxygen Awesome: do not highlight arrow when section link is hovered */
+#nav-tree div.item:hover .arrow {
+    opacity: var(--side-nav-arrow-opacity);
+}
+#nav-tree div.item a:hover .arrow {
+    opacity: var(--side-nav-arrow-hover-opacity);
+}
+
+#nav-tree div.item:has(.label a:focus),
+#nav-tree div.item:has(.label a:hover) {
+    background-color: var(--side-nav-hover-background);
+}
+
+/* make mouse targets in navigation tree vertically gap-less (analogously to .arrow) */
+#nav-tree div.item .label {
+    line-height: var(--tree-item-height);
+}
+#nav-tree div.item .label a {
+    display: inline-block;
+    height: auto;
+}
+
+/* override Doxygen Awesome: fix incompatibility with above inline-block */
+#nav-tree .item {
+    overflow: revert;
+    text-overflow: revert;
+}
+
+
+/*** fix formulas in dark mode ************************************************/
+
+/* related issue: https://github.com/jothepro/doxygen-awesome-css/issues/206 */
+
+@media (prefers-color-scheme: dark) {
+    html:not(.light-mode) img.formulaInl,
+    html:not(.light-mode) img.formulaDsp {
+        filter: invert() hue-rotate(180deg);
+    }
+}
+
+html.dark-mode img.formulaInl,
+html.dark-mode img.formulaDsp {
+    filter: invert() hue-rotate(180deg);
+}

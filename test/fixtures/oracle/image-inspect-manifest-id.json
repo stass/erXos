@@ -1,0 +1,12 @@
+{
+  "Id": "sha256:1b4ee3a2e4d38a7c0d31d8736133ddf76ef3bf0e9a3054c544863cbb199cdf7e",
+  "RepoDigests": ["ruby@sha256:1b4ee3a2e4d38a7c0d31d8736133ddf76ef3bf0e9a3054c544863cbb199cdf7e"],
+  "Os": "linux",
+  "Architecture": "arm64",
+  "Variant": "v8",
+  "Config": {},
+  "Descriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:1b4ee3a2e4d38a7c0d31d8736133ddf76ef3bf0e9a3054c544863cbb199cdf7e"
+  }
+}

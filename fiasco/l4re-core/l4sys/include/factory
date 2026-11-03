@@ -1,0 +1,516 @@
+// vi:set ft=cpp: -*- Mode: C++ -*-
+/**
+ * \file
+ * Common factory related definitions.
+ */
+/*
+ * (c) 2008-2009 Adam Lackorzynski <adam@os.inf.tu-dresden.de>,
+ *               Alexander Warg <warg@os.inf.tu-dresden.de>
+ *     economic rights: Technische Universität Dresden (Germany)
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
+#pragma once
+
+#include <l4/sys/factory.h>
+#include <l4/sys/capability>
+#include <l4/sys/snd_destination>
+#include <l4/sys/cxx/ipc_iface>
+#include <l4/sys/cxx/ipc_varg>
+
+namespace L4 {
+
+/**
+ * C++ %Factory interface, see \ref l4_factory_api for the C interface.
+ *
+ * Factories provide an interface to create objects which are accessed via
+ * capabilities.
+ *
+ * For additional information about which objects can be created via this
+ * interface, see server-specific information in
+ * \ref l4re_concepts_kernel_factory and \ref l4re_servers.
+ *
+ * \includefile{l4/sys/factory}
+ *
+ * For the C interface refer to \ref l4_factory_api.
+ */
+class Factory : public Kobject_t<Factory, Kobject, L4_PROTO_FACTORY>
+{
+public:
+
+  typedef l4_mword_t Proto;
+
+  /**
+   * Special type to add a void argument into the factory create stream.
+   */
+  struct Nil {};
+
+  /**
+   * Special type to add a pascal string into the factory create stream.
+   *
+   * This encapsulates a string that has an explicit length.
+   */
+  struct Lstr
+  {
+    /**
+     * The character buffer.
+     */
+    char const *s;
+
+    /**
+     * The number of characters in the buffer.
+     */
+    unsigned len;
+
+    /**
+     * \param s    Pointer to the c-style string.
+     * \param len  Length in number of characters of the string s.
+     */
+    Lstr(char const *s, unsigned len) noexcept : s(s), len(len) {}
+  };
+
+  /**
+   * Stream class for the create() argument stream.
+   *
+   * This stream allows a variable number of arguments to be
+   * added to a create() call.
+   */
+  class S
+  {
+  private:
+    l4_utcb_t *u;
+    l4_msgtag_t t;
+    l4_cap_idx_t f;
+
+    template<typename T>
+    static T &&_move(T &c) { return static_cast<T &&>(c); }
+
+  public:
+    S(S const &) = delete;
+    S &operator = (S const &) & = delete;
+
+    /**
+     * Move constructor.
+     *
+     * \param o  Instance of S to move.
+     */
+    S(S &&o) noexcept
+    : u(o.u), t(o.t), f(o.f)
+    { o.t.raw = 0; }
+
+    S &operator = (S &&o) & noexcept
+    {
+      u = o.u;
+      t = o.t;
+      f = o.f;
+      o.t.raw = 0;
+      return *this;
+    }
+
+    /**
+     * Create a stream for a specific create() call.
+     *
+     * \param      f       The capability for the factory object (L4::Factory).
+     * \param      obj     The protocol ID to describe the type of the object
+     *                     that shall be created.
+     * \param[out] target  The capability slot for the new object. The
+     *                     caller must allocate the capability slot. The kernel
+     *                     stores the new object's capability into this slot.
+     * \utcb{utcb}
+     *
+     * \pre The capability `f` must have the permission #L4_CAP_FPAGE_S,
+     *      otherwise the later factory IPC will fail with #L4_EPERM.
+     */
+    S(l4_cap_idx_t f, long obj, L4::Cap<void> target,
+      l4_utcb_t *utcb) noexcept
+    : u(utcb), t(l4_factory_create_start_u(obj, target.cap(), u)), f(f)
+    {}
+
+    /**
+     * Commit the create() operation if not already done explicitly via
+     * #operator l4_msgtag_t().
+     *
+     * \warning If the commit is deferred until destruction, potential errors
+     *          are silently ignored. It is therefore recommended to commit
+     *          explicitly via #operator l4_msgtag_t() and check the return
+     *          value.
+     */
+    ~S() noexcept
+    {
+      if (t.raw)
+	l4_factory_create_commit_u(f, t, u);
+    }
+
+    /**
+     * Explicitly commits the operation and returns the result.
+     *
+     * \return The result of the create() operation.
+     *
+     * \retval L4_EOK     No error occurred.
+     * \retval -L4_EPERM  Insufficient permissions; see precondition.
+     * \retval <0         Error code.
+     *
+     * \pre The invoked Factory capability must have the permission
+     *      #L4_CAP_FPAGE_S.
+     */
+    operator l4_msgtag_t () noexcept
+    {
+      l4_msgtag_t r = l4_factory_create_commit_u(f, t, u);
+      t.raw = 0;
+      return r;
+    }
+
+    /**
+     * Put a single l4_mword_t as next argument.
+     *
+     * \param i  The value to add as next argument.
+     */
+    void put(l4_mword_t i) noexcept
+    {
+      l4_factory_create_add_int_u(i, &t, u);
+    }
+
+    /**
+     * Put a single l4_umword_t as next argument.
+     *
+     * \param i  The value to add as next argument.
+     */
+    void put(l4_umword_t i) noexcept
+    {
+      l4_factory_create_add_uint_u(i, &t, u);
+    }
+
+    /**
+     * Add a zero-terminated string as next argument.
+     *
+     * \param s  The string to add as next argument.
+     *
+     * The string will be added with the zero-terminator.
+     */
+    void put(char const *s) & noexcept
+    {
+      l4_factory_create_add_str_u(s, &t, u);
+    }
+
+    /**
+     * Add a pascal string as next argument.
+     *
+     * \param s  The string to add as next argument.
+     *
+     * The string will be added with the exact length given. It is the
+     * responsibility of the caller to make sure that the string is zero-
+     * terminated when that is required by the server.
+     */
+    void put(Lstr const &s) & noexcept
+    {
+      l4_factory_create_add_lstr_u(s.s, s.len, &t, u);
+    }
+
+    /**
+     * Add an empty argument.
+     */
+    void put(Nil) & noexcept
+    {
+      l4_factory_create_add_nil_u(&t, u);
+    }
+
+    /**
+     * Add a flexpage as next argument.
+     *
+     * \param d  The flexpage to add (there will be no map operation).
+     */
+    void put(l4_fpage_t d) & noexcept
+    {
+      l4_factory_create_add_fpage_u(d, &t, u);
+    }
+
+    /**
+     * Add next argument.
+     *
+     * \tparam T  The argument type. Compilation succeeds only if it is a
+     *            possible argument type for `%S::put()`.
+     *
+     * \param d  The value to add as next argument.
+     */
+    template<typename T>
+    S &operator << (T const &d) & noexcept
+    {
+      put(d);
+      return *this;
+    }
+
+    /**
+     * Add next argument.
+     *
+     * \tparam T  The argument type. Compilation succeeds only if it is a
+     *            possible argument type for `%S::put()`.
+     *
+     * \param d  The value to add as next argument.
+     */
+    template<typename T>
+    S &&operator << (T const &d) && noexcept
+    {
+      put(d);
+      return _move(*this);
+    }
+  };
+
+
+public:
+
+  /**
+   * Generic create call to the factory.
+   *
+   * \param[out] target  Capability slot for the new object. The caller
+   *                     must allocate the capability slot. The kernel stores
+   *                     the new object's capability into this slot.
+   * \param      obj     The protocol ID that specifies which kind of object
+   *                     shall be created.
+   * \utcb_def{utcb}
+   *
+   * \return A create stream that allows additional arguments to be passed to
+   *         the `%create()` call via the left-shift (<<) operator (see
+   *         S::operator <<).
+   *
+   * This method does not directly invoke the factory. The factory is invoked
+   * when the create stream returned by this method is converted to an
+   * #l4_msgtag_t (see S::operator l4_msgtag_t()), or otherwise when the stream
+   * goes out of scope (not recommended; see S::~S()).
+   *
+   * \pre The invoked Factory capability must have the permission
+   *      #L4_CAP_FPAGE_S, otherwise the later factory IPC will fail with
+   *      #L4_EPERM (see S::operator l4_msgtag_t()).
+   *
+   * \note The create stream uses the UTCB to store parameters for the service
+   *       call. During the lifetime of a create stream or, until it is
+   *       converted to an #l4_msgtag_t, other UTCB-using operations must not
+   *       be used.
+   *
+   * \see create(Cap<OBJ>, l4_utcb_t *)
+   */
+  S create(Cap<void> target, long obj, l4_utcb_t *utcb = l4_utcb()) noexcept
+  {
+    return S(cap(), obj, target, utcb);
+  }
+
+  /**
+   * Create call for typed capabilities.
+   *
+   * \tparam      OBJ     Capability type of the object to be created.
+   * \param[out]  target  Capability of type OBJ.
+   * \utcb_def{utcb}
+   *
+   * \return A create stream that allows additional arguments to be passed to
+   *         the `%create()` call via the left-shift (<<) operator (see
+   *         S::operator <<).
+   *
+   * This method does not directly invoke the factory. The factory is invoked
+   * when the create stream returned by this method is converted to an
+   * #l4_msgtag_t (see S::operator l4_msgtag_t()), or otherwise when the stream
+   * goes out of scope (not recommended; see S::~S()).
+   *
+   * \pre The invoked Factory capability must have the permission
+   *      #L4_CAP_FPAGE_S, otherwise the later factory IPC will fail with
+   *      #L4_EPERM (see S::operator l4_msgtag_t()).
+   *
+   * \note The create stream uses the UTCB to store parameters for the service
+   *       call. During the lifetime of a create stream or, until it is
+   *       converted to an #l4_msgtag_t, other UTCB-using operations must not
+   *       be used.
+   *
+   * Usage:
+   * ~~~
+   * L4::Cap<L4Re::Dataspace> ds = L4Re::Util::cap_alloc.alloc<L4Re::Dataspace>();
+   * factory->create(ds) << l4_mword_t(size_in_bytes);
+   * ~~~
+   */
+  template<typename OBJ>
+  S create(Cap<OBJ> target, l4_utcb_t *utcb = l4_utcb()) noexcept
+  {
+    return S(cap(), OBJ::Protocol, target, utcb);
+  }
+
+  L4_INLINE_RPC_NF(
+      l4_msgtag_t, create, (L4::Ipc::Out<L4::Cap<void> > target, l4_mword_t obj,
+                            L4::Ipc::Varg const *args),
+      L4::Ipc::Call_t<L4_CAP_FPAGE_S>);
+
+  /**
+   * Create a new task.
+   *
+   * \param[out] target_cap    The kernel stores the new task's capability into
+   *                           this slot.
+   * \param[in,out] utcb_area  Flexpage that describes an area in the address
+   *                           space of the new task, where the kernel should
+   *                           map the kernel-allocated kernel-user memory to.
+   *                           The kernel uses the kernel-user memory to store
+   *                           UTCBs and vCPU state-save-areas of the new task.
+   *
+   *                           On systems without MMU, the flexpage is adjusted
+   *                           to reflect the actually allocated physical
+   *                           address.
+   * \utcb_def{utcb}
+   *
+   * \return Syscall return tag
+   *
+   * \retval L4_EOK     No error occurred.
+   * \retval -L4_EPERM  Insufficient permissions; see precondition.
+   * \retval <0         Error code.
+   *
+   * \pre The invoked Factory capability must have the permission
+   *      #L4_CAP_FPAGE_S.
+   *
+   * \note The size of the UTCB area specifies indirectly the number
+   *       of UTCBs available for this task. Refer to L4::Task::add_ku_mem for
+   *       adding more of this type of memory.
+   *
+   * \see L4::Task
+   */
+  l4_msgtag_t create_task(Cap<Task> const & target_cap,
+                          l4_fpage_t *utcb_area,
+                          l4_utcb_t *utcb = l4_utcb()) noexcept
+  { return l4_factory_create_task_u(cap(), target_cap.cap(), utcb_area, utcb); }
+
+  /**
+   * Create a new factory.
+   *
+   * \param[out] target_cap  The kernel stores the new factory's capability into
+   *                         this slot.
+   * \param      limit       Limit for the new factory in bytes.
+   * \utcb_def{utcb}
+   *
+   * \return Syscall return tag
+   *
+   * \retval L4_EOK     No error occurred.
+   * \retval -L4_EPERM  Insufficient permissions; see precondition.
+   * \retval <0         Error code.
+   *
+   * \pre The invoked Factory capability must have the permission
+   *      #L4_CAP_FPAGE_S.
+   *
+   * \note In addition to memory needed for internal data structures, the
+   *       `limit` (quota) of the new factory is counted towards the quota of
+   *       the creating factory. The `limit` must be within
+   *       `1 ≤ limit ≤ 2^(8 * sizeof(l4_umword_t) − 1) − 2` otherwise the
+   *       behavior is undefined.
+   *
+   * \note This method is only guaranteed to work with the
+   *       \ref l4re_concepts_kernel_factory. For other services, use the
+   *       generic create() method and consult the service documentation for
+   *       information on the arguments that need to be passed to the create
+   *       stream.
+   */
+  l4_msgtag_t create_factory(Cap<Factory> const &target_cap,
+                             unsigned long limit,
+                             l4_utcb_t *utcb = l4_utcb()) noexcept
+  { return l4_factory_create_factory_u(cap(), target_cap.cap(), limit, utcb); }
+
+  /**
+   * Create a new IPC gate, optionally bound to a send destination (a thread
+   * or thread group).
+   *
+   * \param[out] target_cap   The kernel stores the new IPC gate's capability
+   *                          into this slot.
+   * \param      snd_dst_cap  Optional capability index of a thread or thread
+   *                          group to bind the gate to. Use #L4_INVALID_CAP to
+   *                          create an unbound IPC gate.
+   * \param      label        Optional label of the gate (precisely used if
+   *                          `snd_dst_cap` is valid). If `snd_dst_cap` is
+   *                          valid, `label` must be present.
+   * \utcb_def{utcb}
+   *
+   * \return Syscall return tag containing one of the following return codes.
+   *
+   * \retval L4_EOK      No error occurred.
+   * \retval -L4_ENOMEM  Out-of-memory during allocation of the Ipc_gate object.
+   * \retval -L4_EINVAL  `snd_dst_cap` is void or points to something that is
+   *                     not a thread or thread group.
+   * \retval -L4_EPERM   Insufficient permissions; see precondition.
+   *
+   * \pre The invoked Factory capability must have the permission
+   *      #L4_CAP_FPAGE_S. Also `snd_dst_cap` (if [valid](#L4::Cap::is_valid()))
+   *      must have the permission #L4_CAP_FPAGE_S.
+   *
+   * An unbound IPC gate can be bound to a thread or thread group using
+   * L4::Ipc_gate::bind_thread() or bind_snd_destination().
+   *
+   * \see L4::Ipc_gate
+   */
+  l4_msgtag_t create_gate(Cap<void> const &target_cap,
+                          Cap<Snd_destination> const &snd_dst_cap,
+                          l4_umword_t label,
+                          l4_utcb_t *utcb = l4_utcb()) noexcept
+  {
+    return l4_factory_create_gate_u(cap(), target_cap.cap(), snd_dst_cap.cap(),
+                                    label, utcb);
+  }
+
+  /**
+   * Create a new thread group.
+   *
+   * An IPC endpoint can be bound to a thread group. When a message arrives at
+   * the IPC endpoint, a specific thread of the thread group is selected to
+   * actually receive the message. A thread group is a send destination for an
+   * IPC endpoint.
+   *
+   * \param[out] target_cap  The kernel stores the new thread group's capability
+   *                         into this slot.
+   * \param      policy      Policy parameter for the thread group. See
+   *                         #L4_thread_group_policy for a list of supported
+   *                         values.
+   *
+   * \utcb_def{utcb}
+   *
+   * \return Syscall return tag containing one of the following return codes.
+   *
+   * \retval L4_EOK      No error occurred.
+   * \retval -L4_ENOMEM  Out-of-memory during allocation of the Thread_group
+   *                     object.
+   * \retval -L4_EINVAL  Invalid policy parameter.
+   * \retval -L4_EPERM   The factory instance requires #L4_CAP_FPAGE_S rights on
+   *                     the invoked capability and #L4_CAP_FPAGE_S is not
+   *                     present.
+   */
+  l4_msgtag_t create_thread_group(Cap<Thread_group> const &target_cap,
+                                  unsigned policy,
+                                  l4_utcb_t *utcb = l4_utcb()) noexcept
+  {
+    return l4_factory_create_thread_group_u(cap(), target_cap.cap(),
+                                            policy, utcb);
+  }
+
+  /**
+   * Create a new priority inheritance mutex.
+   *
+   * The priority inheritance mutex is bound to the specified task.
+   *
+   * \param[out] target_cap  The kernel stores the new mutex's capability into
+   *                         this slot.
+   * \param      ku_status   Address of mutex status field in kernel-user memory
+   *                         of specified task.
+   * \param      task_cap    Task the mutex gets bound to.
+   * \utcb_def{utcb}
+   *
+   * \return Syscall return tag containing one of the following return codes.
+   *
+   * \retval L4_EOK      No error occurred.
+   * \retval -L4_ENOMEM  Out-of-memory during allocation of the mutex object.
+   * \retval -L4_EINVAL  Invalid `ku_status` or `task_cap` parameter.
+   * \retval -L4_EPERM   Insufficient permissions; see precondition.
+   * \retval -L4_ENODEV  Priority inheritance mutexes not supported.
+   *
+   * \pre The capability `task_cap` must have the permission #L4_CAP_FPAGE_S.
+   */
+  l4_msgtag_t create_pi_mutex(Cap<Pi_mutex> const &target_cap,
+                              l4_addr_t ku_status, Cap<Task> const &task_cap,
+                              l4_utcb_t *utcb = l4_utcb()) noexcept
+  {
+    return l4_factory_create_pi_mutex_u(cap(), target_cap.cap(), ku_status,
+                                        task_cap.cap(), utcb);
+  }
+
+  typedef L4::Typeid::Rpc_nocode<create_t> Rpcs;
+};
+
+}

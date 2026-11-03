@@ -1,0 +1,95 @@
+/*
+ * Copyright (C) 2008-2009 Technische Universität Dresden.
+ * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
+ *            Alexander Warg <warg@os.inf.tu-dresden.de>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <l4/sys/kip.h>
+#include <l4/util/l4_macros.h>
+#include "panic.h"
+#include "assert.h"
+
+#include "init_kip.h"
+#include "region.h"
+#include "startup.h"
+#include <l4/sys/kip>
+
+using L4::Kip::Mem_desc;
+
+void
+init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi, l4util_l4mod_info *mbi)
+{
+  if (L4_KIP_VERSION_FIASCO != l4_kip_version(l4i))
+    panic("Cannot load kernels other than Fiasco");
+
+  l4i->user_ptr = reinterpret_cast<unsigned long>(mbi);
+
+  /* set up sigma0 info */
+  l4i->sigma0_ip = bi->sigma0_start;
+  printf("  Sigma0 config    node: %d   ip:%016llx\n",
+         l4i->node, l4i->sigma0_ip);
+
+  /* set up roottask info */
+  l4i->root_ip = bi->roottask_start;
+  printf("  Roottask config  node: %d   ip:%016llx\n",
+         l4i->node, l4i->root_ip);
+
+  /* Platform info */
+  strncpy(l4i->platform_info.name, PLATFORM_TYPE,
+          sizeof(l4i->platform_info.name));
+  l4i->platform_info.name[sizeof(l4i->platform_info.name) - 1] = 0;
+}
+
+void
+init_kip_md(l4_kernel_info_t *l4i, Region_list *ram, Region_list *regions)
+{
+  Mem_desc *md = Mem_desc::first(l4i);
+  assert((unsigned long)md - (unsigned long)l4i >= sizeof(*l4i));
+
+  for (Region const &r : *ram)
+    {
+      // Exclude any non 1K-aligned conventional memory.
+      unsigned long begin = l4_round_size(r.begin(), 10);
+      unsigned long end = l4_trunc_size(r.end() + 1, 10) - 1;
+      (md++)->set(begin, end, Mem_desc::Conventional);
+    }
+
+  for (Region const &r : *regions)
+    {
+      Mem_desc::Mem_type type = Mem_desc::Reserved;
+      unsigned char sub_type = 0;
+      switch (r.type())
+        {
+        case Region::No_mem:
+        case Region::Ram_dont_use:
+        case Region::Boot:
+          continue;
+        case Region::Kmem:
+          type = Mem_desc::Kmem;
+          break;
+        case Region::Kernel:
+          type = Mem_desc::Reserved;
+          break;
+        case Region::Sigma0:
+          type = Mem_desc::Dedicated;
+          break;
+        case Region::Root:
+          type = Mem_desc::Bootloader;
+          sub_type = r.sub_type();
+          break;
+        case Region::Arch:
+          type = Mem_desc::Arch;
+          sub_type = r.sub_type();
+          break;
+        case Region::Info:
+          type = Mem_desc::Info;
+          sub_type = r.sub_type();
+          break;
+        }
+      (md++)->set(r.begin(), r.end(), type, sub_type, false, r.eager());
+    }
+}

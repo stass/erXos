@@ -1,0 +1,49 @@
+# -*- makefile -*-
+# vim:se ft=make:
+
+# Don't link against libgcc to avoid link errors with toolchains that were built
+# with incompatible code model (-mcmodel) or floating point configuration
+# (-march and -mabi). The few functions needed from libgcc are instead
+# implemented in gcc_lib.c.
+
+OBJ_KERNEL_noboot = $(filter-out bootstrap%,$(OBJ_KERNEL))
+OBJ_BOOTSTRAP = $(filter  bootstrap%,$(OBJ_KERNEL))
+
+-include .kernel.riscv.lds.d
+
+bootstrap_lds      = $(srcdir)/kern/riscv/bootstrap.riscv.ld
+
+bootstrap_ldflags  = $(LDFLAGS) $(LD_EMULATION_FLAG) --strip-debug
+bootstrap_ldflags += -defsym kernel_load_addr=$(CONFIG_KERNEL_LOAD_ADDR)
+bootstrap_ldflags += -T$(bootstrap_lds)
+
+bootstrap_syms     = end_of_bootstrap_info|_start|_start_hsm|start_of_loader
+bootstrap_sed      = 's/^0*([0-9a-f]*) [a-zA-Z] ($(bootstrap_syms))/\2 = 0x\1;/p'
+
+bootstrap.$(KERNEL).pre.o: $(OBJ_BOOTSTRAP) gcc_lib.o $(bootstrap_lds)
+	$(LINK_MESSAGE)
+	$(VERBOSE)$(LD) $(bootstrap_ldflags) $(OBJ_BOOTSTRAP) gcc_lib.o -o $@
+
+bootstrap.$(KERNEL).bin: bootstrap.$(KERNEL).pre.o
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(OBJCOPY) -O binary --only-section=.bootstrap.text $< $@
+
+bootstrap.$(KERNEL).rel: bootstrap.$(KERNEL).bin
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(OBJCOPY) -I binary -O $(OBJCOPY_BFDNAME) -B $(OBJCOPY_BFDARCH) \
+	--rename-section .data=.bootstrap.text $< $@
+
+# The linker will treat this file as linker script.
+bootstrap.$(KERNEL).sym: bootstrap.$(KERNEL).pre.o
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(NM) $< | sed -n -E $(bootstrap_sed) > $@
+
+# $(1) = Additional $(OBJ_X), e.g. OBJ_<unittest>
+KERNEL_PREREQUISITES = kernel.riscv.lds $$(CRT0) bootstrap.$$(KERNEL).rel \
+                       bootstrap.$$(KERNEL).sym $$(OBJ_KERNEL_noboot) $(1) \
+                       $$(JDB) $$(LIBDISASM) $$(ABI) libdrivers.a $$(LIBUART) \
+                       $$(KERNEL_EXTRA_LIBS) $$(LIBK) $$(CXXLIB) $$(LIBC) \
+                       libgluedriverslibc.a
+
+clean-KERNEL:
+	$(VERBOSE)$(RM) $(foreach s,bin rel sym,bootstrap.$(KERNEL).$(s))

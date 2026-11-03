@@ -1,0 +1,15 @@
+#pragma once
+
+#include <stdlib.h>
+
+namespace std
+{
+  using ::strtoul;
+  using ::strtol;
+
+  inline long
+  abs(long i) { return __builtin_labs(i); }
+
+  inline long long
+  abs(long long i) { return __builtin_llabs(i); }
+};

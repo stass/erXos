@@ -1,0 +1,32 @@
+/*
+ * Copyright (C) 2022, 2024-2025 Kernkonzept GmbH.
+ * Author(s): Georg Kotheimer <georg.kotheimer@kernkonzept.com>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
+#include <l4/sys/types.h>
+
+#include <string.h>
+
+#include "memory.h"
+#include "panic.h"
+#include "paging.h"
+#include "region.h"
+
+extern "C" void
+ptab_alloc(l4_uint32_t *out_ptab_pa)
+{
+  // try to find a free region for the page table
+  l4_addr_t ptab = mem_manager->find_free_ram_rev(PAGE_SIZE, 0, ~0U);
+  if (!ptab)
+    panic("Could not allocate memory for page table");
+
+  // mark the region as reserved
+  mem_manager->regions->add(
+    Region::start_size(ptab, PAGE_SIZE, ".ptab",
+                       Region::Boot, Region::Root_section_rw));
+
+  memset((void *)ptab, 0, PAGE_SIZE);
+  *out_ptab_pa = ptab;
+}

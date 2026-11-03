@@ -1,0 +1,16 @@
+choice
+  prompt "Libc variant"
+  default L4_LIBC_MUSL
+
+config L4_LIBC_UCLIBC
+  bool "uclibc-ng (deprecated)"
+
+config L4_LIBC_MUSL
+  bool "musl"
+
+endchoice
+
+config L4_LIBC
+  string
+  default "uclibc-ng" if L4_LIBC_UCLIBC
+  default "musl" if L4_LIBC_MUSL

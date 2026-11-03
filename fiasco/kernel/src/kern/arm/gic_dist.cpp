@@ -1,0 +1,588 @@
+INTERFACE:
+#include "irq_chip.h"
+#include "gic_dist_regs.h"
+
+class Gic_dist : public Gic_dist_regs
+{
+private:
+  Mmio_register_block _dist;
+  Spin_lock<> _lock;
+};
+
+INTERFACE [arm && pic_gic_mxc_tzic]:
+
+#include <arithmetic.h>
+
+EXTENSION class Gic_dist
+{
+public:
+  static constexpr bool Config_mxc_tzic = true;
+
+  Unsigned32 mxc_pending()
+  {
+    Address a = MXC_TZIC_PND;
+    for (unsigned g = 0; g < 128; g += 32, a += 4)
+      {
+        Unsigned32 v = _dist.read<Unsigned32>(a);
+        if (v)
+          return g + cxx::log2u(v);
+      }
+    return 0;
+  }
+};
+
+// ------------------------------------------------------------------------
+INTERFACE [arm && !pic_gic_mxc_tzic]:
+
+EXTENSION class Gic_dist
+{
+public:
+  static constexpr bool Config_mxc_tzic = false;
+
+  static constexpr Unsigned32 mxc_pending() { return 0; }
+};
+
+// ------------------------------------------------------------------------
+INTERFACE [arm && arm_em_tz]:
+
+EXTENSION class Gic_dist { static constexpr bool Config_tz_sec = true; };
+
+// ------------------------------------------------------------------------
+INTERFACE [arm && !arm_em_tz]:
+
+EXTENSION class Gic_dist { static constexpr bool Config_tz_sec = false; };
+
+//-------------------------------------------------------------------
+IMPLEMENTATION [have_arm_gicv2]:
+
+PUBLIC inline
+void
+Gic_dist::init_targets(unsigned max, V2)
+{
+  // use target from local IRQ 0-3
+  Unsigned32 t = itarget(0);
+
+  for (unsigned i = 32; i < max; i += 4)
+    _dist.write<Unsigned32>(t, GICD_ITARGETSR + i);
+}
+
+PUBLIC inline
+void
+Gic_dist::set_cpu(Mword pin, Unsigned8 target, V2)
+{
+  // GICD_ITARGETSR<0..31> are read-only
+  _dist.write<Unsigned8>(target, GICD_ITARGETSR + pin);
+}
+
+PUBLIC inline
+Unsigned32
+Gic_dist::itarget(unsigned offset)
+{
+  return _dist.read<Unsigned32>(GICD_ITARGETSR + offset);
+}
+
+PUBLIC inline
+void
+Gic_dist::igroup_init(V2, unsigned num)
+{
+  Unsigned32 v = 0;
+  if constexpr (Config_tz_sec || Config_mxc_tzic)
+    v = 0xffffffffU;
+
+  for (unsigned i = 32; i < num; i += 32)
+    _dist.write<Unsigned32>(v, GICD_IGROUPR + i / 8);
+}
+
+PUBLIC inline
+void
+Gic_dist::enable(V2)
+{
+  Unsigned32 dist_enable = GICD_CTRL_ENABLE;
+  if constexpr (Config_mxc_tzic && !Config_tz_sec)
+    dist_enable |= MXC_TZIC_CTRL_NSEN | MXC_TZIC_CTRL_NSENMASK;
+
+  _dist.write<Unsigned32>(dist_enable, GICD_CTRL);
+}
+
+PUBLIC inline
+void
+Gic_dist::cpu_init_v2()
+{
+  Mword sec_irqs;
+
+  if constexpr (Config_tz_sec)
+    sec_irqs = 0x00000f00;
+
+  _dist.write<Unsigned32>(0xffffffffU, GICD_ICENABLER);
+  if constexpr (Config_tz_sec)
+    {
+      _dist.write<Unsigned32>(0x00000f00U, GICD_ISENABLER);
+      _dist.write<Unsigned32>(~sec_irqs, GICD_IGROUPR);
+    }
+  else
+    {
+      _dist.write<Unsigned32>(0x0000001eU, GICD_ISENABLER);
+      _dist.write<Unsigned32>(0U, GICD_IGROUPR);
+    }
+
+  _dist.write<Unsigned32>(0xffffffffU, GICD_ICPENDR);
+
+  _dist.write<Unsigned32>(0xffffffffU, GICD_ICACTIVER); // clear active
+  _dist.write<Unsigned32>(0xffffffffU, 0xf10); // sgi pending clear
+  _dist.write<Unsigned32>(0xffffffffU, 0xf14); // sgi pending clear
+  _dist.write<Unsigned32>(0xffffffffU, 0xf18); // sgi pending clear
+  _dist.write<Unsigned32>(0xffffffffU, 0xf1c); // sgi pending clear
+
+  for (unsigned g = 0; g < 32; g += 4)
+    {
+      if constexpr (Config_tz_sec)
+        {
+          Unsigned32 v = 0;
+          unsigned b = (sec_irqs >> g) & 0xf;
+
+          for (int i = 0; i < 4; ++i)
+            if (b & (1 << i))
+              v |= 0x40 << (i * 8);
+            else
+              v |= 0xa0U << (i * 8);
+          _dist.write<Unsigned32>(v, GICD_IPRIORITYR + g);
+        }
+      else
+        _dist.write<Unsigned32>(0xa0a0a0a0U, GICD_IPRIORITYR + g);
+    }
+}
+
+PUBLIC inline
+void
+Gic_dist::sync_rwp(V2)
+{}
+
+PUBLIC inline
+unsigned
+Gic_dist::hw_pin_space(V2)
+{ return hw_nr_pins(); }
+
+PRIVATE
+unsigned
+Gic_dist::init_espi(V2)
+{ return 0; }
+
+PRIVATE
+void
+Gic_dist::init_espi_targets(unsigned, V2)
+{}
+
+//-------------------------------------------------------------------
+IMPLEMENTATION [have_arm_gicv3]:
+
+#include "cpu.h"
+#include "poll_timeout_counter.h"
+#include "processor.h"
+#include "warn.h"
+
+PUBLIC inline
+unsigned
+Gic_dist::hw_nr_lpis()
+{
+  Typer_v3 t = typer<Typer_v3>();
+  if (!t.lpis())
+    return 0;
+
+  Unsigned64 num_intids = 1ULL << (t.id_bits() + 1);
+  if (num_intids <= Lpi_intid_base)
+    return 0;
+
+  unsigned num_lpis = t.num_lpis();
+  if (num_lpis == 0)
+    // Number of supported LPIs is indicated by GICD_TYPER.IDbits.
+    return num_intids - Lpi_intid_base;
+
+  // Number of supported LPIs = 2^(num_lpis+1)
+  return 1U << (num_lpis + 1);
+}
+
+PUBLIC inline
+unsigned
+Gic_dist::hw_nr_espis()
+{
+  if constexpr (!TAG_ENABLED(gicv3_espi))
+    return 0;
+
+  Typer_v3 t = typer<Typer_v3>();
+  if (!t.espi())
+    return 0;
+
+  return (t.espi_range() + 1) * 32;
+}
+
+PUBLIC inline
+unsigned
+Gic_dist::hw_pin_space(V3)
+{
+  unsigned num_espis = hw_nr_espis();
+  return num_espis ? Espi_intid_base + num_espis : hw_nr_pins();
+}
+
+PRIVATE
+unsigned
+Gic_dist::init_espi(V3)
+{
+  unsigned num = hw_nr_espis();
+
+  for (unsigned i = 0; i < num; i += 16)
+    _dist.write<Unsigned32>(0, GICD_ICFGRnE + i * 4 / 16);
+
+  for (unsigned i = 0; i < num; i += 4)
+    _dist.write<Unsigned32>(0xa0a0a0a0U, GICD_IPRIORITYRnE + i);
+
+  for (unsigned i = 0; i < num; i += 32)
+    {
+      _dist.write<Unsigned32>(0xffffffffU, GICD_ICENABLERnE + i / 8);
+      _dist.write<Unsigned32>(~0u, GICD_IGROUPRnE + i / 8);
+    }
+
+  return num;
+}
+
+PRIVATE
+void
+Gic_dist::init_espi_targets(unsigned num, V3)
+{
+  Unsigned64 t = Cpu::mpidr() & 0xff00ffffffULL;
+
+  for (unsigned i = 0; i < num; ++i)
+    _dist.write_non_atomic<Unsigned64>(t, GICD_IROUTERnE + 8 * i);
+}
+
+PUBLIC static inline
+Unsigned64
+Gic_dist::cpu_to_irouter_entry(Cpu_number cpu)
+{
+  auto phys_id = cxx::int_value<Cpu_phys_id>(Cpu::cpus.cpu(cpu).phys_id());
+  return Unsigned64{phys_id & 0xff000000U} << 8 | (phys_id & 0xffffff);
+}
+
+PUBLIC inline
+void
+Gic_dist::set_cpu(Mword pin, Unsigned64 irouter_entry, V3)
+{
+  if (is_espi(pin))
+    {
+      _dist.write_non_atomic<Unsigned64>(irouter_entry,
+                                         GICD_IROUTERnE
+                                         + 8 * (pin - Espi_intid_base));
+      return;
+    }
+
+  if (pin < 32) // GICD_IROUTER<0..31> are reserved
+    return;
+  _dist.write_non_atomic<Unsigned64>(irouter_entry, GICD_IROUTER + 8 * pin);
+}
+
+PUBLIC inline NEEDS["cpu.h"]
+void
+Gic_dist::init_targets(unsigned max, V3)
+{
+  Unsigned64 t = Cpu::mpidr() & 0xff00ffffffULL;
+
+  for (unsigned i = 32; i < max; ++i)
+    _dist.write_non_atomic<Unsigned64>(t, GICD_IROUTER + 8 * i);
+}
+
+PRIVATE
+void
+Gic_dist::igroup_init(V3, unsigned num)
+{
+  for (unsigned i = 32; i < num; i += 32)
+    _dist.write<Unsigned32>(~0u, GICD_IGROUPR + i / 8);
+}
+
+PUBLIC inline
+void
+Gic_dist::enable(V3)
+{
+  Unsigned32 dist_enable = GICD_CTRL_ENGR1 | GICD_CTRL_ENGR1A | GICD_CTRL_ARE_NS;
+  _dist.write<Unsigned32>(dist_enable, GICD_CTRL);
+  sync_rwp(V3());
+}
+
+PUBLIC inline
+void
+Gic_dist::cpu_init(V3)
+{}
+
+PUBLIC inline NEEDS["poll_timeout_counter.h", "processor.h", "warn.h"]
+void
+Gic_dist::sync_rwp(V3)
+{
+  L4::Poll_timeout_counter i(1U << 27); // ~134ms @ 1GHz
+  while (i.test(_dist.read<Unsigned32>(GICD_CTRL) & GICD_CTRL_RWP))
+    Proc::pause();
+
+  if (i.timed_out()) [[unlikely]]
+    WARNX(Error, "GICD: RWP timed out!\n");
+}
+
+//-------------------------------------------------------------------
+IMPLEMENTATION [have_arm_gicv3 && mp]:
+
+PUBLIC inline
+Unsigned64
+Gic_dist::irouter(unsigned num)
+{
+  if (is_espi(num))
+    return _dist.read_non_atomic<Unsigned64>(GICD_IROUTERnE
+                                             + (num - Espi_intid_base) * 8);
+
+  return _dist.read_non_atomic<Unsigned64>(GICD_IROUTER + num * 8);
+}
+
+//-------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "l4_types.h"
+#include "lock_guard.h"
+
+PUBLIC explicit inline
+Gic_dist::Gic_dist(void *dist_base)
+  : _dist(dist_base)
+{}
+
+PUBLIC template <typename TYPER> inline
+TYPER
+Gic_dist::typer()
+{
+  return TYPER(_dist.read<Unsigned32>(GICD_TYPER));
+}
+
+PUBLIC inline
+unsigned
+Gic_dist::hw_nr_pins()
+{
+  return (typer<Typer>().num_spis() + 1) * 32;
+}
+
+PUBLIC static inline
+bool
+Gic_dist::is_espi(Mword pin)
+{ return TAG_ENABLED(gicv3_espi) && pin >= Espi_intid_base; }
+
+PUBLIC inline
+bool
+Gic_dist::has_sec_ext()
+{
+  return typer<Typer>().security_extn();
+}
+
+PUBLIC inline
+void
+Gic_dist::softint(Unsigned32 sgi)
+{
+  _dist.write<Unsigned32>(sgi, GICD_SGIR);
+}
+
+PUBLIC inline
+template<typename VERSION>
+void
+Gic_dist::disable(VERSION)
+{
+  _dist.write<Unsigned32>(0, GICD_CTRL);
+  sync_rwp(VERSION());
+}
+
+PUBLIC inline
+void
+Gic_dist::init_prio(unsigned from, unsigned to)
+{
+  for (unsigned i = from; i < to; i += 4)
+    _dist.write<Unsigned32>(0xa0a0a0a0U, GICD_IPRIORITYR + i);
+}
+
+PUBLIC inline
+void
+Gic_dist::init_regs(unsigned from, unsigned to)
+{
+  for (unsigned i = from; i < to; i += 32)
+    _dist.write<Unsigned32>(0xffffffffU, GICD_ICENABLER + i * 4 / 32);
+}
+
+PUBLIC inline NEEDS["l4_types.h", "lock_guard.h"]
+int
+Gic_dist::set_mode(Mword pin, Irq_chip::Mode m)
+{
+  if (!m.set_mode())
+    return 0;
+
+  if (pin < 16)
+    return -L4_err::EInval;
+
+  unsigned v = 0;
+  switch (m.flow_type())
+    {
+    case Irq_chip::Mode::Trigger_level | Irq_chip::Mode::Polarity_high:
+    case Irq_chip::Mode::Trigger_level | Irq_chip::Mode::Polarity_low:
+      break;
+    case Irq_chip::Mode::Trigger_edge  | Irq_chip::Mode::Polarity_high:
+    case Irq_chip::Mode::Trigger_edge  | Irq_chip::Mode::Polarity_low:
+      v = 2;
+      break;
+    default:
+      return -L4_err::EInval;
+    };
+
+  unsigned base = GICD_ICFGR;
+  if (is_espi(pin))
+    {
+      base = GICD_ICFGRnE;
+      pin -= Espi_intid_base;
+    }
+
+  unsigned shift = (pin & 15) * 2;
+
+  auto guard = lock_guard(_lock);
+  _dist.modify<Unsigned32>(v << shift, 3 << shift, base + (pin >> 4) * 4);
+
+  return 0;
+}
+
+PUBLIC inline
+bool
+Gic_dist::is_edge_triggered(Mword pin) const
+{
+  if (pin < 16)
+    return false;
+
+  unsigned base = GICD_ICFGR;
+  if (is_espi(pin))
+    {
+      base = GICD_ICFGRnE;
+      pin -= Espi_intid_base;
+    }
+
+  Unsigned32 v = _dist.read<Unsigned32>(base + (pin >> 4) * 4);
+  return (v >> ((pin & 15) * 2)) & 2;
+}
+
+PUBLIC inline NEEDS["lock_guard.h"]
+void
+Gic_dist::setup_pin_grp0(Mword pin)
+{
+  unsigned shift = (pin & 3) * 8;
+  auto guard = lock_guard(_lock);
+
+  _dist.clear<Unsigned32>(1UL << (pin & 0x1f),
+                          GICD_IGROUPR + (pin & ~0x1f) / 8);
+
+  _dist.modify<Unsigned32>(0x40 << shift, 0xff << shift, GICD_IPRIORITYR + (pin & ~3));
+}
+
+PUBLIC inline NEEDS["lock_guard.h"]
+void
+Gic_dist::set_pending_irq(unsigned idx, Unsigned32 val)
+{
+  if (idx < 32)
+    {
+      Address o = idx * 4;
+      auto guard = lock_guard(_lock);
+      Unsigned32 v = val & _dist.read<Unsigned32>(o + GICD_IGROUPR);
+      _dist.write<Unsigned32>(v, o + GICD_ISPENDR);
+    }
+}
+
+PUBLIC
+template<typename VERSION>
+void
+Gic_dist::disable_irq(VERSION, unsigned irq)
+{
+  unsigned base = GICD_ICENABLER;
+  if (is_espi(irq))
+    {
+      base = GICD_ICENABLERnE;
+      irq -= Espi_intid_base;
+    }
+
+  _dist.write<Unsigned32>(1 << (irq % 32), base + (irq / 32) * 4);
+  sync_rwp(VERSION());
+}
+
+PUBLIC inline
+void
+Gic_dist::enable_irq(unsigned irq)
+{
+  unsigned base = GICD_ISENABLER;
+  if (is_espi(irq))
+    {
+      base = GICD_ISENABLERnE;
+      irq -= Espi_intid_base;
+    }
+
+  _dist.write<Unsigned32>(1 << (irq % 32), base + (irq / 32) * 4);
+}
+
+PUBLIC
+template<typename VERSION>
+unsigned
+Gic_dist::init(VERSION, unsigned cpu_prio, int nr_pins_override = -1)
+{
+  disable(VERSION());
+
+  unsigned num = hw_nr_pins();
+  if (nr_pins_override >= 0)
+    num = static_cast<unsigned>(nr_pins_override);
+
+  if constexpr (!Config_mxc_tzic)
+    {
+      for (unsigned i = 32; i < num; i += 16)
+        _dist.write<Unsigned32>(0, GICD_ICFGR + i * 4 / 16);
+    }
+
+  init_prio(32, num);
+  init_regs(32, num);
+  igroup_init(VERSION(), num);
+
+  unsigned num_espi = init_espi(VERSION());
+
+  enable(VERSION());
+
+  // Initialize interrupt targets last, since for the GICv3 affinity routing
+  // must be enabled before interrupt affinities (targets) can be assigned.
+  init_targets(num, VERSION());
+  init_espi_targets(num_espi, VERSION());
+
+  if constexpr (Config_mxc_tzic)
+    {
+      _dist.write<Unsigned32>(0x0, MXC_TZIC_SYNCCTRL);
+      _dist.write<Unsigned32>(cpu_prio, MXC_TZIC_PRIOMASK);
+    }
+
+  return num_espi ? Espi_intid_base + num_espi : num;
+}
+
+PUBLIC inline
+void
+Gic_dist::irq_prio(unsigned irq, unsigned prio)
+{
+  unsigned base = GICD_IPRIORITYR;
+  if (is_espi(irq))
+    {
+      base = GICD_IPRIORITYRnE;
+      irq -= Espi_intid_base;
+    }
+
+  _dist.write<Unsigned8>(prio, base + irq);
+}
+
+PUBLIC inline
+unsigned
+Gic_dist::irq_prio(unsigned irq)
+{
+  unsigned base = GICD_IPRIORITYR;
+  if (is_espi(irq))
+    {
+      base = GICD_IPRIORITYRnE;
+      irq -= Espi_intid_base;
+    }
+
+  return _dist.read<Unsigned8>(base + irq);
+}
+

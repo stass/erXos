@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "inputs": {
+    "abi/terminal.txt": "f3efa197d4696e97b115adf3e039cfc03a40686fb5377f96a35fcb23c4f8ce59",
+    "otp/ORIGIN.md": "72de4c148353d702f7422db981495da80f2b98b20e2be7700de8a219f30f4f74",
+    "otp/lib/kernel/src/prim_tty.erl": "92019451b1fbd4183e6a968bdfe25b3245ff24bd532302c0accc877f31211b52",
+    "otp/lib/stdlib/src/io_ansi.erl": "f981b8ade6ed8db6b31a75cf5d08b80b023882be5b98b4e184d09c68b47cdb93",
+    "otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "otp/lib/stdlib/uc_spec/UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "tools/gen_terminal.rb": "1bbc76a53235a43685d6f1286cfca08ceda3cc5b29ae60eb2f08acd655abfe76",
+    "tools/lib/erx/terminal_generation.rb": "b04c0fd0757c2d8c28b5ab31d6cabad0ceb74ec8077c4a56b272256d87329be5",
+    "tools/lib/erx/terminal_rules.rb": "12ac8386465fa671cd30cbfa5a5b659fcc36bdf9bfcb48ea9fca5c0c7c2bd35f"
+  },
+  "outputs": [
+    "abi/terminal_generated.json",
+    "erlang/apps/erx/src/erx_text_tables.erl",
+    "include/erx/terminal_ascii.h",
+    "tools/generated/terminal_notices.json",
+    "tools/generated/terminal_tables.rb"
+  ]
+}

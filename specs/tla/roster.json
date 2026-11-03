@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "runner-good",
+      "module": "RunnerSmoke",
+      "config": "SmokeGood.cfg",
+      "translation": "tla",
+      "deadline": 30,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": { "kind": "pass" }
+    },
+    {
+      "id": "runner-broken",
+      "module": "RunnerSmoke",
+      "config": "SmokeBroken.cfg",
+      "translation": "tla",
+      "deadline": 30,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": { "kind": "counterexample", "property": "Bounded", "exit_status": 12 }
+    },
+    {
+      "id": "runner-initial",
+      "module": "RunnerSmoke",
+      "config": "SmokeInitial.cfg",
+      "translation": "tla",
+      "deadline": 30,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": { "kind": "counterexample", "property": "Bounded", "exit_status": 12 }
+    },
+    {
+      "id": "runner-reached",
+      "module": "RunnerSmoke",
+      "config": "SmokeReached.cfg",
+      "translation": "tla",
+      "deadline": 30,
+      "deadlock": "check",
+      "scope": "finite",
+      "expect": { "kind": "counterexample", "property": "NotReached", "exit_status": 12 }
+    }
+  ]
+}

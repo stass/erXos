@@ -1,0 +1,62 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# Foreign ELF declarations are checked against the pinned musl/include/elf.h.
+limit elf_class64 u8 2
+limit elf_data_lsb u8 1
+limit elf_version_current u32 1
+limit elf_ei_class u32 4
+limit elf_ei_data u32 5
+limit elf_ei_version u32 6
+limit elf_ei_osabi u32 7
+limit elf_ei_abiversion u32 8
+limit elf_ei_pad u32 9
+limit elf_osabi_none u8 0
+limit elf_et_exec u16 2
+limit elf_et_dyn u16 3
+limit elf_pt_load u32 1
+limit elf_pt_dynamic u32 2
+limit elf_pt_interp u32 3
+limit elf_pt_note u32 4
+limit elf_pt_phdr u32 6
+limit elf_pt_tls u32 7
+limit elf_pf_x u32 1
+limit elf_pf_w u32 2
+limit elf_pf_r u32 4
+limit elf_dt_null i64 0
+limit elf_dt_needed i64 1
+limit elf_dt_textrel i64 22
+limit elf_dt_flags i64 30
+limit elf_df_textrel u64 4
+limit elf_pn_xnum u16 65535
+bytes elf_magic 4 value 7f454c46
+layout erx_elf64_ehdr 1 wire_le 8 64
+  field e_ident u8 0 count 16
+  field e_type u16 16
+  field e_machine u16 18
+  field e_version u32 20
+  field e_entry u64 24
+  field e_phoff u64 32
+  field e_shoff u64 40
+  field e_flags u32 48
+  field e_ehsize u16 52
+  field e_phentsize u16 54
+  field e_phnum u16 56
+  field e_shentsize u16 58
+  field e_shnum u16 60
+  field e_shstrndx u16 62
+layout erx_elf64_phdr 1 wire_le 8 56
+  field p_type u32 0
+  field p_flags u32 4
+  field p_offset u64 8
+  field p_vaddr u64 16
+  field p_paddr u64 24
+  field p_filesz u64 32
+  field p_memsz u64 40
+  field p_align u64 48
+layout erx_elf64_nhdr 1 wire_le 4 12
+  field n_namesz u32 0
+  field n_descsz u32 4
+  field n_type u32 8
+layout erx_elf64_dyn 1 wire_le 8 16
+  field d_tag i64 0
+  field d_value u64 8

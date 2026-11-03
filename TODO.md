@@ -25,8 +25,8 @@ it; git history is the record of completed work.
   the kernel debugger's `jdb_object.cpp`, so any distribution outside the
   project, in source or binary form, waits for this replacement
   ([design.md](docs/design.md#dependencies)). The import also records
-  the link closure of L4Re's `bootstrap` and `sigma0` and the licence of
-  each library in it.
+  the link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
+  UART support, and the licence of each library in it.
 * [Medium] storage: replace littlefs, which runs as a sub-space port of
   the storage domains of the data partition and of the vault's partition,
   with erXos's F2FS, written in Erlang, at parity over the file-semantics
@@ -45,6 +45,15 @@ it; git history is the record of completed work.
   native code ([plan.md](docs/plan.md)).
 
 ## Bugs by subsystem
+
+* [Medium] Kernel capability defaults: refine the rights-constructor
+  input in [the rights contract](docs/design-kernel.md#rights). The
+  declared `erx_rights_default(erx_ktype_t)` cannot distinguish memory
+  kinds, hardware IRQs and root-resource creation, although their
+  default sets differ. Bind the constructor to the validated creation
+  kind before M1 capability admission; no generic constructor may grant
+  the union of those sets.
+
 
 * [High] storage and platforms, the Pi 4's boot image: the Pi 4's secure
   boot checks `boot.img` at about 2.6 MB/s under a firmware watchdog fixed

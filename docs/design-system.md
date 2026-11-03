@@ -254,7 +254,8 @@ check below over it, and packs the result. The manifest holds:
 * **The machine:** its host name, an identifier that is the host part of
   every domain's node name ([Identifiers](#identifiers)); `root_memory`,
   the size of root budget the configuration assumes; the shares of the
-  `system` and `users` groups; the system domain's own limits,
+  `system` and `users` groups; the
+  system domain's own limits,
   `max_domains`, `max_connections`, `system_lane`, `system_queue`,
   `peer_held` and `system_reserve`, the part of `system` the service
   grants inside it leave to the system domain's own threads; the lane
@@ -303,55 +304,25 @@ validation and Erlang policy
 **The packed form** is a layout of the ABI source, `erx_manifest_t`, read
 through readers generated from it: a C reader in `liberx`, which the
 root-task entry uses before ERTS starts, and an Erlang module,
-`erx_manifest`, which the system services use. The file is a header, then
-arrays of fixed records, then a string table; every reference between
-records is an index, and every string an offset and length, each checked
-by the generated reader against the array or the table it names:
+`erx_manifest`, which the system services use. The complete
+[binary representation](design-abi.md#system-manifest-representation)
+defines the fixed header, every record table, their canonical order and
+their bounds. The header is followed by fixed-record arrays and a string
+table. A record reference is a checked index; a span names complete
+records within its table by a file offset and count; a string uses an
+offset within the string table and a byte length. No reader follows a
+native pointer from the file.
 
-```c
-typedef struct erx_mf_span {
-	uint32_t	offset;		/* from the file's start */
-	uint32_t	count;		/* records in the array */
-} erx_mf_span_t;
-
-typedef struct erx_manifest {
-	uint32_t	magic;		/* ERX_MANIFEST_MAGIC */
-	uint16_t	version;	/* 1 */
-	uint16_t	flags;		/* ERX_MANIFEST_DEVELOPMENT */
-	uint32_t	length;		/* bytes, header included */
-	erx_mf_str_t	host;		/* the machine's host name */
-	erx_mf_str_t	console;	/* device-tree path of the console's UART */
-	erx_mf_str_t	hostlink;	/* device-tree path of the host link's
-					 * UART; empty for none */
-	uint64_t	root_memory;	/* the root budget it assumes, bytes */
-	erx_share_t	system_share, users_share;
-	uint32_t	max_domains, max_connections;
-	uint32_t	system_lane, system_queue, peer_held;
-	uint32_t	system_reserve;	/* thousandths of system's rate that the
-					 * service grants inside it leave to the
-					 * system domain's own threads */
-	uint32_t	sealing;	/* ERX_SEAL_NONE, ERX_SEAL_DEVICE, ERX_SEAL_TPM */
-	erx_mf_span_t	principals, domains, devices, windows, facets,
-			introductions, images, boot_order, liveness,
-			shell_principals, partial_boot;
-	erx_mf_span_t	strings;
-} erx_manifest_t;
-
-typedef struct erx_mf_domain {
-	erx_mf_str_t	name;
-	uint32_t	principal;	/* index into principals */
-	uint32_t	kind;		/* ERX_MF_SERVICE or ERX_MF_SECRET */
-	uint32_t	flags;		/* ERX_MF_REQUIRED, ERX_MF_RESCUE, ERX_MF_SPACES */
-	uint32_t	runtime;	/* boot-image entry of its runtime image */
-	uint32_t	release, release_files;	/* its release's run of entries */
-	uint64_t	memory, outer;	/* its own and outer budgets, bytes */
-	erx_share_t	grant, spaces;	/* shares of its parent group */
-	uint32_t	lane, connections, crash;
-	uint32_t	restarts, restart_period_s;
-	erx_mf_span_t	devices, windows, facets, introductions;
-	erx_mf_str_t	args, env;	/* NUL-separated */
-} erx_mf_domain_t;
-```
+The records cover principals, configured domains, named domain and
+runtime limits, lane classes, units and devices, role-based partition
+windows, services, facets with typed bounded scope parameters,
+introductions, read-only image extents and hash-tree metadata, boot order,
+liveness, system-shell principals and partial-boot programs. A unit owns
+its devices' one holder field. Domain records refer to complete named
+limit records, so neither a runtime default nor a second compiled table
+can supply missing configuration. `erx_share_t` is the 48-byte wire
+representation of the scheduler's existing `erx_grant_t`: exact quota,
+period, CPU set, hints and urgency bounds, not another kind of share.
 
 A reader that finds an offset, count or index out of range, a version
 other than its own, or a string that is not what its field requires,
@@ -391,7 +362,7 @@ violation fails the build with the property, the record and the field:
    configured domain.
 3. **Exactly one domain holds PCIe configuration space, and that domain
    holds nothing else,** on every platform where erXos drives a PCIe
-   bridge: the PCIe domain, `pcie`, which runs the PCIe enumerator and
+   bridge in a full boot: the PCIe domain, `pcie`, which runs the PCIe enumerator and
    nothing beside it. On a platform that drives no bridge, as the
    Raspberry Pi 4, no domain holds configuration space and there is no
    PCIe domain.
@@ -410,11 +381,15 @@ violation fails the build with the property, the record and the field:
    ([Identifiers](#identifiers)); no two configured domains or principals
    share a name, and no configured domain's name has a pooled name's
    form.
-6. **The root task's image is the interpreter's:** the boot image's root
-   entry carries no `ERX_IMAGE_JIT` (A11).
-7. **The sealing secret goes to the vault alone:** exactly one configured
+6. **The root task makes no machine code:** the boot image's root entry
+   carries no `ERX_IMAGE_JIT` (A11). A full boot uses the interpreter
+   image; a native partial boot may use the C17 root-entry image without
+   ERTS, identified by its checked build provenance.
+7. **The sealing secret goes to the vault alone:** in a full boot exactly one configured
    domain boots the release whose files carry `ERX_ENTRY_SEAL`, it is the
    one `secret` domain and has no crash area, and only it holds a TPM.
+   A partial boot creates no vault and grants no sealing secret or TPM
+   to its native children.
 8. **Partitions, devices and the console reach only their holders:** only
    the slot writer holds the windows on the slots, the boot-selection
    record and the reset count; only storage domains hold windows on data,
@@ -439,24 +414,27 @@ violation fails the build with the property, the record and the field:
 11. **The rescue configuration stands alone:** every facet of a domain
     the rescue configuration starts names the system release or another
     domain it starts, and it starts no domain that holds a network device.
-12. **Every configured domain can be built:** the check runs the host
-    build of `erx_dom_plan_create` over each configured domain's
-    specification against the view of a machine just booted with
+12. **Every child domain can be built:** the check runs the host build of
+    `erx_dom_plan_create` over each configured-domain or partial-boot
+    child's specification against the view of a machine just booted with
     `root_memory`, so a domain the library would refuse fails the build,
-    not the boot.
-13. **The system domain keeps its reserve of `system`:** with each grant
+    not the boot. An empty set of children needs no planner invocation;
+    a nonempty set requires the production planner and fails closed
+    when it is unavailable.
+13. **The system configuration leaves headroom in `system`:** with each grant
     taken as a rate, its quota over its period (an uncapped grant's rate
     being the size of its cpuset), the configured service domains' grants
     inside `system` sum to at most `system`'s rate less `system_reserve`
-    of it; on the CPUs of the cpuset of the system domain's own threads,
+    of it; on the CPUs allowed to the system domain's runtime,
     the service grants whose cpusets meet it take, each at most its rate
     and at most the number of CPUs it shares with that cpuset, no more
-    than the number of those CPUs less that reserve; and the grant of the
-    system domain's own threads is at least the reserve. A quota only caps
-    ([design-scheduler.md](design-scheduler.md#invariants), S5), so
-    however the services run, at urgency 28 above the system domain's 24,
-    the root task's threads and the watchdog process keep the reserve on
-    CPUs they may use ([Resource policy](#resource-policy)).
+    than the number of those CPUs less that headroom. This is a
+    normalized configuration check, not a lower bound on CPU supplied
+    within a period or deadline. The system runtime's threads belong
+    directly to `system` and have no separate quota that could expire
+    before residual parent quota becomes available. Quota phases,
+    bursts, urgency and CPU placement still affect when they run
+    ([Resource policy](#resource-policy)).
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -508,6 +486,13 @@ three; every entry holds it for bounded work, and the fault thread's open
 wait is outside it.
 
 ```c
+typedef struct erx_dom_origin {
+	uint32_t	kind;		/* ERX_DOM_REQUEST, ERX_DOM_CONFIGURED,
+					 * or ERX_DOM_PARTIAL_BOOT */
+	uint32_t	record;		/* REQUEST: ERX_MF_NONE; otherwise the
+					 * index in the origin's manifest table */
+} erx_dom_origin_t;
+
 typedef enum erx_dom_state {
 	ERX_DOM_BUILDING,	/* plan being applied */
 	ERX_DOM_BUILT,		/* built; first thread waiting for erx_dom_start */
@@ -520,6 +505,7 @@ typedef enum erx_dom_state {
 typedef struct erx_dom {
 	uint32_t	id;		/* the domain id; 0 for a free record */
 	uint32_t	principal;
+	erx_dom_origin_t origin;	/* immutable creation source and manifest row */
 	erx_dom_state_t	state;
 	uint32_t	flags;		/* ERX_DOM_SECRET, ERX_DOM_SPACES */
 	erx_cap_t	budget;		/* its own budget, carved from its
@@ -646,10 +632,11 @@ The kernel builds the first space, which has no parent and no fault gate,
 maps the runtime image into it from the boot image with `erx_image_map`,
 gives it the initial capabilities at the ABI file's well-known slots,
 writes it a boot information page flagged `ERX_BOOT_ROOT`, creates its
-first thread, a worker in the root group's `system` child, and starts it
-at the image's entry with that page's address as its argument
+first thread, a worker in `system`, and starts it at the image's
+entry with that page's address as its argument
 ([design-kernel.md](design-kernel.md#the-root-task)). The runtime image
-is the interpreter's and carries no `ERX_IMAGE_JIT`, so the first space
+is the interpreter's for a full boot or the C17 root entry's for a native
+partial boot. Neither carries `ERX_IMAGE_JIT`, so the first space
 allows no JIT objects (A11); its budget, the root budget, carries `CODE`,
 and so does every capability the system domain holds to a budget carved
 through it, while the capability a domain receives to its own budget
@@ -670,9 +657,18 @@ reaches when the boot information page carries `ERX_BOOT_ROOT`
    ([The manifest](#the-manifest)). A manifest the reader refuses, or a
    root budget smaller than the manifest's `root_memory`, ends the machine
    with a crash record that says which, before anything is created.
-2. **Gives the `system` group its grant**, the manifest's share for it,
-   before it creates anything: the kernel holds no policy and creates
-   `system`, the group its thread runs in, uncapped
+   An explicitly selected native partial boot with no child programs then
+   takes the ordinary partial-boot completion path. It creates no users
+   group, principal budgets, domain-library tables or fault worker merely
+   to end them, and admits no dynamic domains. Its dynamic-domain
+   reservation is zero. The initial root image, thread, stack, UTCB and
+   boot objects already exist; their feasibility and charges still belong
+   to the production initial-root bootstrap plan.
+2. **Gives `system` its grant**, the manifest's `system_share`, before
+   it starts any other thread: the kernel holds no policy and creates
+   that group uncapped. The first root worker belongs to `system` from
+   its creation, so no thread
+   changes group during bootstrap
    ([design-kernel.md](design-kernel.md#the-root-task)). It then creates
    the root group's second child, `users`, with the manifest's share for
    it ([Resource policy](#resource-policy)), and the `system` principal's
@@ -697,11 +693,17 @@ reaches when the boot information page carries `ERX_BOOT_ROOT`
    and the `SYSTEM` right, maps the slice read-only, and completes the
    boot information page the kernel gave it, in the layout every domain
    receives ([design-runtime.md](design-runtime.md#data-model)): its
-   budget, group, release slice, the time page, the root resource with
+   budget, the `system` runtime group, release slice, the time page, the root
+   resource with
    `INSPECT`, `TRACE` and `POWER`, the machine page, the crash record's
    page where there is one, its domain id, 4, and its node name. The
    system domain's lanes to
    other domains come later, one at each domain's creation.
+   The page also receives the complete runtime-limit projection from
+   `system_runtime_limits`, the header's `peer_held` and its checked
+   aggregate peer-held bound. ERTS receives those values through its boot
+   page, using the same startup validator as every other runtime; it does
+   not open the system manifest to discover its limits.
 6. **Starts ERTS** as every domain starts it: the runtime reads its boot
    information page and boots the release it names. One startup path
    serves every domain; the system domain's runtime image is the
@@ -717,8 +719,9 @@ and 6 give way to the partial boot below.
    other CPUs, creates the root objects, prints its banner, which says
    `development build: trusted code only` in development builds, and
    starts the root task ([design-kernel.md](design-kernel.md#boot)).
-2. **The root-task entry** reads the manifest, gives the `system` group
-   its grant before anything else, builds the system domain as above and
+2. **The root-task entry** reads the manifest, gives `system` its grant
+   before starting other threads, builds the system domain
+   as above and
    starts ERTS.
 3. **The system release** starts its services under one supervisor
    ([System services](#system-services)). The domain service then creates
@@ -810,13 +813,17 @@ the committed slot. After the commit the update service ends the machine
 with `reset`, so the committed system runs from a normal boot
 ([design-storage.md](design-storage.md#system-updates)).
 
-**Partial boots.** A development build's manifest may name, instead of
-configured domains, the native programs of a **partial boot**: the
+**Partial boots.** A development build's manifest selects a native
+partial boot with `ERX_MANIFEST_PARTIAL_BOOT`, independently of how many
+programs its `partial_boot` list names. It replaces configured domains:
+the
 root-task entry then, instead of starting ERTS, builds each program the
 list names in the boot image as a domain through the domain library, with
 the default limits and no connection, starts each, pets the watchdog at
 its period from its own thread, and ends the machine when all of them have
-ended. The programs write through `erx_debug_log` to the kernel log, which
+ended. The empty list follows that same completion path immediately;
+it has no child to create or wait for and introduces no different end
+or crash behavior. The programs write through `erx_debug_log` to the kernel log, which
 the kernel's early console prints while no console driver runs
 ([design-kernel.md](design-kernel.md#console-log-and-panic)). This is how
 the kernel interface, the domain library and the execution contract are
@@ -840,7 +847,7 @@ NIFs, since none of them waits:
 
 | Entry | What it does | Result |
 | --- | --- | --- |
-| `erx_dom_principal(number, memory, grant, quota)` | carves the principal's budget from the root budget and creates its group under `users`, with its quota of domains | `ERX_OK`, `ERX_EEXIST`, `ERX_ENOMEM`, `ERX_EINVAL` |
+| `erx_dom_principal(number, configuration)` | validates the complete normalized principal configuration, stores its resolved default and ceiling profiles, carves its budget from the root budget and creates its group under `users`, with its domain quota | `ERX_OK`, `ERX_EEXIST`, `ERX_ENOMEM`, `ERX_EINVAL` |
 | `erx_dom_create(spec)` | validates an `erx_dom_spec_t` into a plan and applies it ([Creating a domain](#creating-a-domain)) | the domain's record, with the number of its connection to the system domain and the system domain's values of that connection's objects, or the failing step's status after every applied step is undone |
 | `erx_dom_start(id)` | starts the built domain's first thread | `ERX_OK`; `ERX_EDEAD` for a stopped space; `ERX_EINVAL` for any state but built |
 | `erx_dom_stop(id, status)` | stops the domain's space, and with it every sub-space below it | `ERX_OK`; `ERX_EINVAL` for an unknown or ended id |
@@ -860,6 +867,14 @@ domain service's registered process when it has handled an exit record
 ([Ending a domain](#ending-a-domain)). Every other outcome is the return
 value of the call that caused it.
 
+A principal configuration contains its budget, group grant and quotas
+plus complete resolved default and ceiling profiles, including their
+runtime limits. The principal constructor checks defaults against
+ceilings and retains immutable copies in the library's principal view.
+Creation planning therefore reads those limits from the same owner that
+holds the principal's budget and quota; it neither follows a requester
+supplied profile index nor relies on a second default table in Erlang.
+
 **The one installer.** Only a space's creator installs into its table
 (A1), so the domain library is the one party that installs into a
 domain's table, and what it installs is fixed: the domain's own budget,
@@ -874,14 +889,16 @@ gate, and the library's host test runs a seeded plan that installs one,
 which must fail.
 
 A creation specification is the domain service's description of the
-domain, a fixed layout the NIF fills from `erx_domain:create/1`'s spec, or
-from the domain's manifest record, and the policy's decisions:
+domain, a fixed layout constructed from an admitted request, a checked
+configured-domain row or a checked partial-boot row. Its creation origin
+is authority provenance, not a field accepted from a request:
 
 ```c
 typedef struct erx_dom_spec {
 	uint32_t	version;	/* 1 */
 	uint32_t	id;		/* allocated by the domain service; nonzero, unused */
 	uint32_t	principal;
+	erx_dom_origin_t origin;	/* set by the library's origin constructor */
 	uint32_t	flags;		/* ERX_DOM_SECRET: the vault's: no crash
 					 * area; required for the release the
 					 * boot image marks with ERX_ENTRY_SEAL,
@@ -897,6 +914,7 @@ typedef struct erx_dom_spec {
 					 * crash area */
 	erx_grant_t	grant;		/* the domain group's grant */
 	erx_grant_t	spaces;		/* ERX_DOM_SPACES: the sub-space group's grant, within `grant` */
+	erx_runtime_limits_t runtime_limits; /* complete per-domain startup values */
 	uint32_t	lane;		/* data area of the lane the domain reads;
 					 * the system domain's side adds the
 					 * reserve for connection-control records */
@@ -913,6 +931,51 @@ typedef struct erx_dom_spec {
 } erx_dom_spec_t;
 ```
 
+The library has one constructor per source. The request constructor
+takes the principal handle produced by the caller's admitted domain
+facet and the request fields; it sets `ERX_DOM_REQUEST` and no manifest
+index. The configured constructor takes a row handle from the checked
+manifest's boot order or restart record; it resolves the principal,
+images, complete limits and flags from that row and sets
+`ERX_DOM_CONFIGURED`. The partial-boot constructor takes a checked native
+program row, its system principal and the manifest's native limits, and
+sets `ERX_DOM_PARTIAL_BOOT`. Each returns a complete copied specification
+or an error. Missing request limits are resolved from the principal's
+`default_limits`; every resolved value is checked against the independent
+`ceiling_limits`. The result contains the complete runtime-limit projection
+defined by the ABI, not references into the system manifest. These are
+constructors of one internal type, not additional
+domain-creation protocols.
+
+The public request schema has no origin, manifest-row or CPU-parent
+field; supplying one is an unknown-field error. Only these library
+constructors build `erx_dom_origin_t`, enforced by a source check with a
+seeded violation. The configured and partial constructors are called
+only from manifest startup/restart and root partial-boot entry points,
+respectively, also checked; neither is an operation exposed through a
+domain facet. A numeric index supplied by a requester never selects
+manifest authority. The pure planner checks the origin's range and the
+specification's static fields against the referenced immutable row;
+origin metadata does not bypass the ordinary whole-plan checks.
+
+CPU placement is derived from that origin: a configured domain's parent
+is `system`, while a requested or partial-boot domain's parent is its
+principal's group under `users`. The plan records this typed parent
+selection and the resolved group capability from the locked machine
+view. Its apply phase consumes that selection without choosing a parent
+again. Memory ownership is independent: every origin carves both domain
+budgets from the named principal's budget, and every domain space remains
+a child of the system domain's space. A service's CPU placement grants
+no access to another principal's memory or to a parent group capability.
+
+The domain record retains the origin for its lifetime. A configured
+domain's restart uses the same immutable manifest row, with a new domain
+id; a live grant adjustment validates against the CPU parent derived
+from the stored origin and the single system-reserve predicate when
+that parent is `system`. A request cannot reclassify a running domain,
+and no operation changes a domain group's parent. The configured-domain
+baseline remains the manifest's; runtime changes do not edit it.
+
 ### Creating a domain
 
 `erx_dom_create` builds a domain from an `erx_dom_spec_t`:
@@ -920,21 +983,31 @@ typedef struct erx_dom_spec {
 1. **Copy and validate.** The NIF copies the specification into the
    library's memory once. `erx_dom_plan_create(spec, view)` is a pure
    function of that copy and of the library's view of the machine (free
-   records, the principal's budget, group and count of domains, the number
+   records, the principal's budget, group and count of domains, the
+   checked manifest, principal defaults and ceilings, `system`'s group
+   and admitted service grants, the number
    of domains alive, the boot image's index, whether a living domain holds
    the sealing page). It checks the version; every size against its range;
    that `id` is nonzero and names no record; that the release's files
    exist, form a slice of whole entries, and are not files of the system
    release, which the kernel's slicing refuses without `SYSTEM` and the
    library asks with that right only for its own; the runtime image's
-   manifest and ABI version; that the grant lies within the principal's
-   group and `spaces` within `grant`; that the principal holds fewer
+   manifest and ABI version; the origin and its static row binding; every
+   runtime limit against the principal's ceilings and the runtime's ABI
+   bounds; that
+   the grant fits the parent derived from that origin and `spaces` fits
+   `grant`; for a configured origin, that the complete service-grant
+   set satisfies the same system-reserve predicate as the manifest
+   checker; that the principal holds fewer
    domains than its quota and the machine fewer than the manifest's
    `max_domains`; that `ERX_DOM_SECRET` is set exactly when the release is
    the one marked `ERX_ENTRY_SEAL`, and that no other living domain holds
    the sealing page then; and that the ending record is not installed,
    since no domain is created once the machine is ending. It returns a
-   plan, a list of steps with their arguments, or an error.
+   plan, a list of steps with their arguments including the resolved CPU
+   parent, or an error. Planning and application hold the library lock;
+   grant changes use that same lock, so neither the parent nor its
+   admitted grant set changes between their check and use.
 2. **Apply.** The steps, in order, each recording its undo:
    1. carve the domain's own budget and its outer budget, side by side,
       from its principal's;
@@ -943,7 +1016,7 @@ typedef struct erx_dom_spec {
       runtime image carries `ERX_IMAGE_JIT`
       ([design-kernel.md](design-kernel.md#image-manifests)), and the
       system domain's own space as its parent (A8);
-   3. create the domain's group under the principal's group with `grant`,
+   3. create the domain's group under the plan's resolved CPU parent with `grant`,
       and with `ERX_DOM_SPACES` its sub-space group under it with
       `spaces`;
    4. create the boot information page, charged to the domain's own
@@ -965,6 +1038,8 @@ typedef struct erx_dom_spec {
       with a label that names the connection, through which the runtime
       learns which connection rang
       ([design-runtime.md](design-runtime.md#connections-in-erts));
+      for a partial-boot origin the plan contains no system-connection
+      objects or capability installs, and the boot page names no connection;
    5. slice the boot image for the release's files with
       `erx_image_slice`, charged to the domain's own budget; map the runtime
       image's executable with `erx_image_map`, the release slice read-only
@@ -981,7 +1056,8 @@ typedef struct erx_dom_spec {
       with `TRIGGER` alone, and no capability to its own bell, whose label
       it learns; the time page with `READ` and `MAP`; the release slice;
       the crash area; then write the boot information page with the
-      capability values the installs returned, the addresses of the
+      plan's complete `runtime_limits` projection, the capability values
+      the installs returned, the addresses of the
       mappings, the release slice's and the sealing page's included, the
       label of its own bell, the two data areas' sizes, the domain's own
       node name, and the system domain's node name and id as the peer of
@@ -1523,7 +1599,7 @@ its clients.
 
 ```text
 root
- |- system (the system domain's own grant, capped)
+ |- system (aggregate grant, capped; contains the system runtime's threads)
  |   |- storage domain
  |   |- network domain
  |   |- devices domain
@@ -1545,13 +1621,20 @@ its own group, the kernel's rule
 runs on its own group's grant, which the policy caps and sizes for the
 domains it serves.
 
+`system` directly contains every thread of the system domain; configured
+service groups are its children. The kernel creates `system` uncapped
+and puts the first worker there at creation; the root entry sets its
+manifest grant. Thread membership is immutable, so bootstrap needs no
+migration or second runtime startup. The aggregate cap applies to both
+the direct runtime and the service children. The principal budget tree
+is independent of this CPU hierarchy.
+
 **Grants.** The defaults, all subject to experiments E-S1 and E-S8
 ([design-scheduler.md](design-scheduler.md#performance)):
 
 | Group | Quota per period | Base urgency | Ceiling |
 | --- | --- | --- | --- |
 | `system` | a capped share of the machine, from the manifest, given by the root-task entry before anything else ([The root task](#the-root-task)) | 24 | 47 |
-| the system domain's own threads, within `system` | a capped share, sized for bounded control for the manifest's `max_domains` domains | 24 | 40 |
 | a service domain the manifest lists (storage, network, devices, PCIe, the vault) | a capped share, sized for the domains it serves | 28 | 40 |
 | `users` | the root group's remainder after `system` | 16 | 31 |
 | a principal | its configured share of `users` | 16 | 31 |
@@ -1568,19 +1651,22 @@ period, with headroom from the configuration; the grant is the cap, and
 when the cap is reached the service shares it among its clients as Erlang
 shares a runtime among its processes.
 
-**The system domain's reserve.** The service domains' groups sit inside
-`system` beside the system domain's own threads and above them in
-urgency, and a quota only caps, so services that stayed runnable could
-spend all of `system` before the root task ran. The policy keeps the
-system domain a reserve by the arithmetic of property 13 of [The
-manifest](#the-manifest): the service grants inside `system`, taken as
-rates, leave the manifest's `system_reserve` of it, on the CPUs of the
-system domain's own threads too. The check proves it for the configured
-grants. At run time the domain service sets no service grant that
-`erx_policy`'s rule refuses, a resize for a new client's admission
-included: the admission that asked for it fails with `{error, quota}`,
-and no grant changes. So the root task's threads and the watchdog
-process always have capacity, whatever the services do.
+**The system domain's reserve.** `system_reserve` is the fraction of the
+aggregate system grant that configuration leaves unassigned to service
+children, expressed in thousandths: 250 means one quarter. Property 13
+checks that headroom using normalized rates and configured CPU sets.
+The system runtime spends the aggregate group's remaining quota
+directly, with no independent runtime cap. At run time a service-grant
+change uses the same predicate; a refused change returns `{error, quota}`
+and changes no grant.
+
+Headroom is not a real-time reservation. Independent quota periods,
+bursts, priorities and placement can delay control work despite a
+configuration passing that arithmetic. The watchdog deadline and control
+latency are tested under the shipped configurations and adversarial
+service loads; the headroom check alone proves neither. No replenishment
+epoch, dedicated runtime group or separate scheduling mechanism follows
+from `system_reserve`.
 
 **Admission.** A shared service admits requests per client, by the
 client's share of measured reductions per period, in the client's
@@ -2615,7 +2701,7 @@ read at boot and changed by a new build, never at run time. Its limits:
 | `system_lane` | data area of the lane the system domain reads from each domain | 16 KiB |
 | `system_queue` | the system domain's outbound queue to a domain whose lane is full, and the queue quota of each system process whose facet's grant names none: the bytes of undecoded frames from other domains queued on it past which the funnel leaves the next frame for it in the lane ([design-domains.md](design-domains.md#flow-control)) | 16 KiB |
 | `peer_held` | what the system domain holds for one domain's processes: links, monitors and queued signals | 64 KiB |
-| `system_reserve` | the part of the `system` group's rate that the service grants inside it leave to the system domain's own threads, in thousandths ([The manifest](#the-manifest), property 13) | 250 |
+| `system_reserve` | normalized configuration headroom left unassigned to service children, in thousandths of `system`'s rate; not CPU supply within a deadline ([The manifest](#the-manifest), property 13) | 250 |
 
 The system domain reads no boot argument. Two keys the kernel owns shape
 this document: `erx.panic=halt|reset|off`, how the machine ends when the
@@ -2854,14 +2940,31 @@ under test ran.
   sum past one CPU; a group's capacity never exceeds its demand; every run
   lies in its group's cpuset; the same grants give the same runs in any
   order), each property once against a mutated placement step.
-* **The reserve:** `erx_policy`'s grant rule over random service grants,
-  periods and cpusets, checking that every grant it accepts leaves
-  `system_reserve` of `system` on the CPUs of the system domain's own
-  threads and that it refuses the rest with `{error, quota}`, and that it
+* **Creation origin and CPU parent:** a valid configured service whose
+  grant exceeds its principal's user CPU share but fits `system` plans
+  its group under `system` while charging its two budgets to that
+  principal; the same grant from a dynamic request is refused. A forged
+  origin field in a public request fails decoding; a mismatched manifest
+  row fails planning; a partial-boot plan has its principal CPU parent
+  and no connection; a restart preserves the configured origin with a
+  new domain id. Seeded apply code that substitutes the principal group
+  for a planned service parent fails the plan-conformance test. The
+  constructor and caller source checks each have a planted violation.
+* **Startup limits:** independently chosen, non-default values for every
+  runtime limit survive source normalization, whole-plan validation and
+  boot-page projection for configured, requested and system runtimes.
+  A missing, out-of-range or above-ceiling value prevents start. A hook
+  that opens a peer lane before the complete limit record is installed
+  fails the startup-order check; no fallback runtime default makes it pass.
+* **Configuration headroom:** `erx_policy`'s grant rule over random service
+  grants, periods and cpusets, checking the normalized rate and overlap
+  inequalities of property 13, refusing the rest with `{error, quota}`,
+  and that it
   agrees with the manifest check's property 13 on every shipped manifest;
   seeded failure: a rule that sums rates without the cpuset term, which
   accepts a grant set that the random cases find leaves the reserve's
-  CPUs short. Under QEMU, every service domain spins at its full grant
+  CPUs overassigned. These are configuration tests, not a scheduler
+  supply proof. Separately, under QEMU, every service domain spins at its full grant
   while the watchdog process keeps petting and the domain service answers
   within the period; seeded failure: a manifest built around the check
   that gives the services all of `system`, under which the watchdog's

@@ -1,0 +1,105 @@
+# -*- Makefile -*-
+#
+# L4Re Buildsystem
+#
+# Makefile-Template for include directories
+#
+# supported targets:
+#
+#   all				- the default, link the includes into the
+#				  local include dir
+#   install			- install the includes into the global
+#				  include dir
+#   config			- do nothing, may be overwritten
+
+
+INSTALLDIR_INC		?= $(DROPS_STDDIR)/include
+INSTALLDIR_INC_LOCAL	?= $(OBJ_BASE)/include
+INSTALLDIR		= $(INSTALLDIR_INC)
+INSTALLDIR_LOCAL	= $(INSTALLDIR_INC_LOCAL)
+
+ifeq ($(origin TARGET),undefined)
+# use POSIX -print here
+TARGET_CMD		= (cd $(INCSRC_DIR) \
+                            && find . -name '*.[ih]' -print \
+                            $(if $(EXTRA_TARGET),&& echo '$(EXTRA_TARGET)'))
+else
+TARGET_CMD		= echo $(TARGET)
+endif
+ifeq ($(CONTRIB_HEADERS),)
+INSTALL_INC_PREFIX	?= l4/$(PKGNAME)
+else
+INSTALL_INC_PREFIX	?= contrib/$(PKGNAME)
+endif
+INCSRC_DIR		?= $(SRC_DIR)
+
+include $(L4DIR)/mk/Makeconf
+include $(L4DIR)/mk/variants.inc
+$(GENERAL_D_LOC): $(L4DIR)/mk/include.mk
+-include $(DEPSVAR)
+
+do_link = my $$rl = readlink($$dst);                                          \
+          if (!defined $$rl || $$rl ne $$src) {                               \
+            if ($$notify == 1) {                                              \
+              $$notify=0;                                                     \
+              $(if $(VERBOSE),print "  [$(BID_MESSAGE_TAG)] ==> Updating symlinks\n";,)\
+            }                                                                 \
+            system("ln","-sf$(if $(VERBOSE),,v)",$$src,$$dst) && exit 1;      \
+          }
+do_inst = system("install","-$(if $(VERBOSE),,v)m","644",$$src,$$dst) && exit 1;
+installscript = perl -W -e '                                                  \
+  chomp($$srcdir="$(INCSRC_DIR)");                                            \
+  $$notify=1;                                                                 \
+  while(<>) {                                                                 \
+    foreach (split) {                                                         \
+      s|^\./||;                                                               \
+      my ($$src, $$srcorig) = $$_ =~ m/^(.*?)<(.*)/g;                         \
+      $$srcorig = $$src = $$_ if not defined $$srcorig;                       \
+      s|<.*$$||;                                                              \
+      if(s|^ARCH-([^/]*)/([^ ]*)$$|$$1/$(INSTALL_INC_PREFIX)/$$2| ||          \
+         s|^(/.*/)?(\S*)$$|$(INSTALL_INC_PREFIX)/$$2|) {                      \
+            $$src="$$srcdir/$$srcorig" if $$srcorig !~ /^\//;                 \
+            $$dstdir=$$dst="$(if $(1),$(INSTALLDIR_LOCAL),$(INSTALLDIR))/$$_";\
+            $$dstdir=~s|/[^/]*$$||;                                           \
+            -d $$dstdir || system("install","-$(if $(VERBOSE),,v)d",$$dstdir) && exit 1;        \
+            $(if $(1),$(do_link),$(do_inst))                                  \
+            if (! -e $$dst)                                                   \
+              { print STDERR "Error: $$dst could not be installed.\n"; exit 1; } \
+          }                                                                   \
+    }                                                                         \
+  }'
+
+PC_FILENAMES ?= $(PC_FILENAME)
+
+# We want pc files for all possible variants
+VARIANT_PC_FILES := $(foreach v,$(VARIANTS),                       \
+                      $(foreach pcfile,$(call with_variant,        \
+                                              $(PC_FILENAMES),$v), \
+                        $(OBJ_BASE)/pc/$(pcfile).pc))
+
+$(VARIANT_PC_FILES): $(OBJ_BASE)/pc/%.pc: $(GENERAL_D_LOC)
+	$(VERBOSE)$(call generate_pcfile,$*,$@,$(PKGNAME),,    \
+	            $(call get_cont_variant,REQUIRES_LIBS,$*))
+
+headers::
+
+all:: headers $(VARIANT_PC_FILES)
+	@$(TARGET_CMD) | $(call installscript,1)
+
+install::
+	@$(INSTALL_LINK_MESSAGE)
+	@$(TARGET_CMD) | $(call installscript);
+
+cleanall::
+	$(VERBOSE)$(RM) .general.d
+
+help::
+	@echo "  all            - install files to $(INSTALLDIR_LOCAL)"
+	@echo "  install        - install files to $(INSTALLDIR)"
+	@echo "  scrub          - delete backup and temporary files"
+	@echo "  clean          - same as scrub"
+	@echo "  cleanall       - same as scrub"
+	@echo "  help           - this help"
+
+scrub clean cleanall::
+	$(VERBOSE)$(SCRUB)

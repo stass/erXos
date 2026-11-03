@@ -1,0 +1,215 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# Kernel-visible values and fixed prefixes shared with runtimes and tooling.
+right dup 0 "copy a capability"
+right give 1 "transfer a capability out of its space"
+right destroy 2 "delete the object for all holders"
+right inspect 3 "inspect authorized object state"
+right read 4 "read mapped memory"
+right map 5 "map memory or change a space mapping"
+right write 6 "write permitted data"
+right exec 7 "execute permitted code"
+right jit 8 "map the owning space's JIT object"
+right phys 9 "read the device address of contiguous memory"
+right supply 10 "manage a memory object's contents and size"
+right child 11 "create an immutable object's copy-on-write child"
+right code 12 "create objects with an execute ceiling"
+right alloc 13 "allocate against a budget"
+right spaces 14 "create spaces against a budget"
+right carve 15 "carve a resource, budget or image slice"
+right system 16 "slice system-release files"
+right threads 17 "create a space's threads"
+right caps 18 "install into a creator-controlled capability table"
+right stop 19 "stop a space and its descendants"
+right control 20 "control a thread's execution and registers"
+right configure 21 "configure a thread, group or route"
+right attach 22 "attach a thread to a group"
+right signal 23 "bind a group notification"
+right call 24 "send or call through a gate"
+right serve 25 "serve a gate or use it for faults"
+right trigger 26 "trigger an IRQ notification"
+right bind 27 "bind an IRQ or DMA notification"
+right ack 28 "acknowledge a hardware interrupt"
+right power 29 "end the machine or pet its watchdog"
+right trace 30 "read authorized trace and log records"
+right entropy 31 "credit entropy from an authorized source"
+
+limit root_slot_root_budget u32 1
+limit root_slot_root_group u32 2
+limit root_slot_system_group u32 3
+limit root_slot_root_resource u32 4
+limit root_slot_boot_image u32 5
+limit root_slot_time_page u32 6
+limit root_slot_self_space u32 7
+limit root_slot_self_thread u32 8
+limit root_slot_device_secret u32 9
+limit root_slot_machine_page u32 10
+limit root_slot_previous_crash u32 11
+
+enum fault_kind u32
+  value memory 1
+  value deleted 2
+  value undefined 3
+  value alignment 4
+  value breakpoint 5
+  value foreign_trap 6
+  value async_error 7
+  value budget 8
+  value exit 9
+layout erx_fault 1 wire_le 8 48
+  field kind fault_kind 0
+  field cause u32 4
+  field addr u64 8
+  field pc u64 16
+  field thread u64 24
+  field space u64 32
+  field status i64 40
+layout erx_crash_brief 1 wire_le 8 112
+  field magic u64 0
+  field version u32 8
+  field length u32 12
+  field crc u32 16
+  field form crash_form 20
+  field cause crash_cause 24
+  field cpu u32 28
+  field uptime_ns u64 32
+  field since_pet_ns u64 40
+  field build_id u8 48 count 8
+  field boot_value u32 56
+  field nframes u32 60
+  field fault erx_fault 64
+# The full form's text starts at this fixed prefix's generated size.
+layout erx_crash_record 1 wire_le 8 896
+  field header erx_crash_brief 0
+  field regs erx_regs 112
+  field frames u64 384 count 64
+
+layout erx_msgtag 1 wire_le 8 8
+  field raw u64 0
+    bits words 0 5
+    bits items 6 11
+    bits protocol 16 63
+  zero raw 0xf000
+layout erx_msg_item 1 wire_le 8 16
+  field desc u64 0
+  field cap cap 8
+
+layout erx_utcb 1 shared 8 1024
+  field mr u64 0 count @msg_words
+  field self u64 504
+  field bdr u64 512
+  field br u64 520 count @utcb_brs
+  field error u64 984
+  field reserved u64 992
+  field user u64 1000 count 3
+  atomic mr[] load acquire store release
+  atomic self load acquire store none
+  atomic bdr load acquire store release
+  atomic br[] load acquire store release
+  atomic error load acquire store release
+  atomic reserved load acquire store none
+  atomic user[] load acquire store release
+  writer mr[] thread_context
+  writer self kernel_boot
+  writer bdr thread_context
+  writer br[] thread_context
+  writer error thread_context
+  writer reserved kernel_boot
+  writer user[] runtime
+  owner mr[] caller all
+  owner self kernel all
+  owner bdr caller all
+  owner br[] caller all
+  owner error kernel all
+  owner reserved kernel 0
+  owner user[] runtime all
+  zero reserved all
+  visibility mr[] development
+  visibility self internal
+  visibility bdr development
+  visibility br[] internal
+  visibility error release
+  visibility reserved internal
+  visibility user[] internal
+layout erx_vcpu 1 shared 8 336
+  field state u16 0
+  field saved_state u16 2
+  field sticky u16 4
+  field reserved u16 6
+  field label u64 8
+  field entry u64 16
+  field user u64 24 count 5
+  field frame erx_uframe 64
+  atomic state load acquire store release
+  atomic saved_state load acquire store release
+  atomic sticky load acquire store release
+  atomic reserved load acquire store none
+  atomic label load acquire store release
+  atomic entry load acquire store release
+  atomic user[] load acquire store release
+  writer state thread_context
+  writer saved_state thread_context
+  writer sticky thread_context
+  writer reserved kernel_boot
+  writer label thread_context
+  writer entry thread_context
+  writer user[] runtime
+  owner state runtime all
+  owner saved_state kernel all
+  owner sticky kernel all
+  owner reserved kernel 0
+  owner label kernel all
+  owner entry runtime all
+  owner user[] runtime all
+  zero reserved all
+  visibility state development
+  visibility saved_state development
+  visibility sticky release
+  visibility reserved internal
+  visibility label release
+  visibility entry development
+  visibility user[] internal
+layout erx_kupage 1 shared 4096 4096
+  field utcb erx_utcb 0
+  field vcpu erx_vcpu 1024
+  padding 1360 2736
+
+layout erx_time_page 1 shared 8 48
+  field seq u64 0
+  field version u32 8
+  padding 12 4
+  field counter_hz u64 16
+  field mult u64 24
+  field shift u32 32
+  field reserved u32 36
+  field wall_offset_ns i64 40
+  atomic seq load acquire store release
+  atomic version load acquire store none
+  atomic counter_hz load acquire store none
+  atomic mult load acquire store release
+  atomic shift load acquire store none
+  atomic reserved load acquire store none
+  atomic wall_offset_ns load acquire store release
+  writer seq time_writer
+  writer version kernel_boot
+  writer counter_hz kernel_boot
+  writer mult time_writer
+  writer shift kernel_boot
+  writer reserved kernel_boot
+  writer wall_offset_ns time_writer
+  owner seq kernel all
+  owner version kernel all
+  owner counter_hz kernel all
+  owner mult kernel all
+  owner shift kernel all
+  owner reserved kernel 0
+  owner wall_offset_ns kernel all
+  zero reserved all
+  visibility seq internal
+  visibility version release
+  visibility counter_hz release
+  visibility mult release
+  visibility shift release
+  visibility reserved internal
+  visibility wall_offset_ns release
+  sequence seq terminal 0xffffffffffffffff exhaustion @limit recovery none

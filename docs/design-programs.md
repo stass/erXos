@@ -1097,7 +1097,21 @@ the path into one of four images:
   erXos runs, static and position-independent in the first tier, with at
   most 16 loadable segments inside the file, page-aligned, not overlapping,
   none both writable and executable, its entry in an executable segment, and
-  in the first tier no interpreter. `erx_exec` maps each executable segment
+  in the first tier no interpreter. The ABI version is carried by exactly
+  one erXos ELF ABI note in a `PT_NOTE` segment. The note's owner is the six
+  bytes `erXos` and NUL, its type is 1, and its descriptor is one
+  little-endian `u32` ABI version; name and descriptor use ELF's four-byte
+  alignment, so the complete note is 24 bytes. Its layouts and constants
+  are generated from the ABI sources and checked against the pinned musl
+  ELF definitions. Startup emits the note once through the generated C17
+  declaration; the linker retains it and includes it in `PT_NOTE`.
+  Missing, duplicate, truncated or unsupported notes fail with a diagnostic,
+  even when duplicate versions agree. Unknown owners and note types are
+  bounded metadata, not alternative ABI declarations. The note asserts
+  interface compatibility; it authenticates no code. The boot packer uses
+  this same ELF planner before producing the kernel's normalized image
+  manifest ([image manifests](design-kernel.md#image-manifests)).
+  `erx_exec` maps each executable segment
   from the object, read-only and executable, so its pages are shared with
   every program that runs the same file; maps each writable segment as a
   copy-on-write child of the object, so only the pages a program writes are

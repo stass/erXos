@@ -1275,19 +1275,18 @@ cover the shares it admits, with the headroom its urgency band needs,
 and then no client within its share waits for the next period because
 of another.
 
-**The system domain's reserve holds by the carve.** The service domains
-the manifest lists have their groups inside `system`, beside the system
-domain's own threads and above them in urgency, and a quota only caps
-(S5): nothing in the kernel keeps services that stay runnable from
-spending all of `system` first. The policy carves the service grants so
-that they cannot: taken as rates, they leave the manifest's
-`system_reserve` of `system`, on the CPUs of the system domain's own
-threads too; the manifest check proves it for the configured grants, and
-the domain service refuses at run time a service grant that would break
-it ([design-system.md](design-system.md#resource-policy)). Since every
-service is capped within that sum, whatever its urgency, the root task's
-threads and the watchdog process keep the reserve, and the scheduler
-needs nothing for it.
+**The system domain's configuration headroom.** Configured service groups
+are children of `system`; the system runtime's threads belong directly
+to `system` and have no separate quota. The manifest's `system_reserve`
+leaves a normalized share of the aggregate grant unassigned to those
+children. Configuration and live service-grant changes use the same
+rate and CPU-set predicate
+([design-system.md](design-system.md#resource-policy)). This is admission
+headroom, not a CPU-supply or deadline guarantee: independent periods,
+bursts and urgency still determine when parent quota is available to the
+runtime. The shipped workload and hostile-load tests check watchdog and
+control latency separately. The scheduler implements no reservation
+mechanism for this configuration field.
 Genode has shipped on this split for
 fifteen years: memory accounted per session, CPU by quota and priority
 per component, and no CPU donated per request

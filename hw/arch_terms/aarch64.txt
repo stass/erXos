@@ -1,0 +1,29 @@
+# Architecture-specific vocabulary kept out of generic code and designs.
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+word EL0
+word EL1
+word EL2
+word EL3
+word DAIF
+word WXN
+word PXN
+word UXN
+word GIC
+word GICv2
+word GICv2m
+word GICv3
+word GICv4
+word SMMUv3
+word MRS
+word MSR
+word ERET
+word SVC
+word TLBI
+word LDTR
+word STTR
+prefix ICC_
+prefix GICD_
+prefix GICR_
+prefix SMMU_
+prefix FEAT_

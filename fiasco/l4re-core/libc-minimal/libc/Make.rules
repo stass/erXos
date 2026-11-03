@@ -1,0 +1,57 @@
+# vim:set ft=make:
+
+PKGDIR		?= ..
+L4DIR		?= $(PKGDIR)/../..
+
+TARGET          := libc_minimal.a libc_minimal.p.a
+PC_FILENAME     := libc_minimal
+PC_LIBS         := -lc_minimal
+define PC_EXTRA
+Link_Libs=  %{static|static-pie:-lc_minimal}
+Link_Libs_pic=  %{static|static-pie:-lc_minimal.p}
+endef
+
+include $(L4DIR)/mk/Makeconf
+
+DEFINES		+= -DL4_MINIMAL_LIBC
+LIBCSRC_DIR	?= $(PKGDIR)/../libc/$(CONFIG_L4_LIBC)
+
+LIBC_BUILD_MODE = minimal
+
+include $(LIBCSRC_DIR)/make_vars.mk
+include $(LIBCSRC_DIR)/make_rules.mk
+include $(LIBCSRC_DIR)/contrib_files.mk
+include $(LIBCSRC_DIR)/sources.mk
+
+DEFINES-$(CONFIG_BID_PIE) += -DSTATIC_PIE
+
+CFLAGS_arm += -mno-unaligned-access
+CXXFLAGS_arm += -mno-unaligned-access
+CFLAGS_arm64 += -mstrict-align
+CXXFLAGS_arm64 += -mstrict-align
+
+CFLAGS_clang += -mno-implicit-float
+CXXFLAGS_clang += -mno-implicit-float
+
+CFLAGS += $(CFLAGS_$(BID_COMPILER_TYPE))
+CXXFLAGS += $(CXXFLAGS_$(BID_COMPILER_TYPE))
+
+# process all sources for the libc
+$(eval $(call PROCESS_src_lists, $(DIRS), $(SUB_MODULES)))
+
+
+define GEN_SRC_VARS
+SRC_C_$(1)  += $(LIBC_SRC_C)  $(LIBC_SRC_C_libc_minimal.a)
+SRC_CC_$(1) += $(LIBC_SRC_CC) $(LIBC_SRC_CC_libc_minimal.a)
+SRC_S_$(1)  += $(LIBC_SRC_S)  $(LIBC_SRC_S_libc_minimal.a)
+endef
+
+SRC_CC += pthread_stubs-nothreads.cc
+
+# Musl has no standalone reloc_static_pie(). Provide one for bootstrap and
+# sigma0.
+SRC_C-$(and $(CONFIG_L4_LIBC_MUSL),$(CONFIG_BID_PIE)) += reloc_static_pie.c
+
+$(foreach target,$(TARGET), $(eval $(call GEN_SRC_VARS,$(target))))
+
+$(GENERAL_D_LOC): $(SRC_DIR)/Make.rules $(LIBCSRC_DIR)/contrib_files.mk

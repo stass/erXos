@@ -1,0 +1,405 @@
+// vi:set ft=cpp: -*- Mode: C++ -*-
+/**
+ * \internal
+ * \file
+ * \brief Region mapper server template.
+ */
+/*
+ * (c) 2014 Alexander Warg <alexander.warg@kernkonzept.com>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+#pragma once
+
+#include <l4/sys/types.h>
+#include <l4/re/rm>
+#include <l4/re/util/region_mapping>
+
+namespace L4Re { namespace Util {
+
+template<typename DERIVED, typename Dbg>
+struct Rm_server
+{
+private:
+  DERIVED *rm() { return static_cast<DERIVED*>(this); }
+  DERIVED const *rm() const { return static_cast<DERIVED const *>(this); }
+
+public:
+
+  /**
+   * Implementation of L4Re::Rm::_attach
+   */
+  l4_ret_t op_attach(L4Re::Rm::Rights, l4_addr_t &_start,
+                     unsigned long size, Rm::Flags flags,
+                     L4::Ipc::Snd_fpage ds_cap, L4Re::Rm::Offset offs,
+                     unsigned char align, l4_cap_idx_t client_cap_idx,
+                     L4::Ipc::String<> name, L4Re::Rm::Offset backing_offset)
+  {
+    typename DERIVED::Dataspace ds;
+
+    constexpr auto Known_flags =
+      // Attach_flags
+        Rm::F::Search_addr | Rm::F::In_area | Rm::F::Eager_map
+      | Rm::F::No_eager_map
+      // Region_flags
+      | Rm::F::RWX | Rm::F::Kernel | Rm::F::Pager
+      | Rm::F::Reserved | Rm::F::Private | Rm::F::Anonymous
+      | Rm::F::Caching_mask;
+
+    if (flags & ~Known_flags)
+      return -L4_EINVAL;
+
+    if (!(flags & (Rm::F::Reserved | Rm::F::Kernel | Rm::F::Anonymous)))
+      {
+        if (l4_ret_t r = rm()->validate_ds(ds_cap, flags.region_flags(), &ds))
+          return r;
+      }
+
+    if (size == 0)
+      return -L4_EINVAL;
+
+    constexpr unsigned Max_align = sizeof(l4_addr_t) * 8 - 1;
+    if (flags & Rm::F::Search_addr && (   align < L4_PAGESHIFT
+                                       || align > Max_align))
+      return -L4_EINVAL;
+
+    size  = l4_round_page(size);
+    l4_addr_t start = l4_trunc_page(_start);
+    if (size == 0 || start + size - 1 < start)
+      return -L4_EINVAL;
+
+    Rm::Region_flags r_flags = flags.region_flags();
+    Rm::Attach_flags a_flags = flags.attach_flags();
+
+    typename DERIVED::Region_handler handler(ds, client_cap_idx, offs, r_flags);
+    if (int err = handler.init(rm(), size); err < 0)
+      return err;
+
+    start = l4_addr_t(rm()->attach(reinterpret_cast<void*>(start), size,
+                                   handler, a_flags, align,
+                                   name.data,
+                                   // L4::Ipc::String includes terminating '\0'
+                                   name.length ? name.length - 1 : 0,
+                                   backing_offset));
+
+    if (start == L4_INVALID_ADDR)
+      return -L4_EADDRNOTAVAIL;
+
+    _start = start;
+    return L4_EOK;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::free_area
+   */
+  l4_ret_t op_free_area(L4Re::Rm::Rights, l4_addr_t start)
+  {
+    if (!rm()->detach_area(start))
+      return -L4_ENOENT;
+
+    return L4_EOK;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::_find
+   */
+  l4_ret_t op_find(L4Re::Rm::Rights, l4_addr_t &addr, unsigned long &size,
+               L4Re::Rm::Flags &flags, L4Re::Rm::Offset &offset,
+               l4_cap_idx_t &m)
+  {
+    if (!DERIVED::Have_find)
+      return -L4_EPERM;
+
+    if (size == 0)
+      return -L4_EINVAL;
+
+    Rm::Flags flag_area { 0 };
+
+    typename DERIVED::Node r = rm()->find(Region(addr, addr + size -1));
+    if (!r)
+      {
+        r = rm()->area_find(Region(addr, addr + size - 1));
+        if (!r)
+          return -L4_ENOENT;
+        flag_area = Rm::F::In_area;
+      }
+
+    addr = r->first.start();
+    size = r->first.end() + 1 - addr;
+
+    flags = r->second.flags() | flag_area;
+    offset = r->second.offset();
+    m = r->second.client_cap_idx();
+    return L4_EOK;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::_detach
+   */
+  l4_ret_t op_detach(L4Re::Rm::Rights, l4_addr_t addr,
+                     unsigned long size, unsigned flags,
+                     l4_addr_t &start, l4_addr_t &rsize,
+                     l4_cap_idx_t &mem_cap)
+  {
+    start = rsize = 0;
+    mem_cap = L4_INVALID_CAP;
+
+    constexpr unsigned Known_flags =   Rm::Detach_exact | Rm::Detach_overlap;
+    if (flags & ~Known_flags)
+      return -L4_EINVAL;
+
+    if (size == 0)
+      return -L4_EINVAL;
+
+    l4_addr_t aligned_addr = l4_trunc_page(addr);
+    size = l4_round_page(addr - aligned_addr + size);
+    if (size == 0 || aligned_addr + size - 1 < aligned_addr)
+      return -L4_EINVAL;
+
+    Region r;
+    typename DERIVED::Region_handler h;
+    int err = rm()->detach(reinterpret_cast<void*>(aligned_addr), size, flags,
+                           &r, &h);
+    if (err < 0)
+      return err;
+
+    if (r.invalid())
+      return -L4_ENOENT;
+
+    start = r.start();
+    rsize = r.size();
+    mem_cap = h.client_cap_idx();
+    return err;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::_reserve_area
+   */
+  l4_ret_t op_reserve_area(L4Re::Rm::Rights, l4_addr_t &start, unsigned long size,
+                           L4Re::Rm::Flags flags, unsigned char align)
+  {
+    constexpr auto Known_flags =   Rm::F::Search_addr | Rm::F::Kernel
+                                 | Rm::F::Reserved;
+    if (flags & ~Known_flags)
+      return -L4_EINVAL;
+
+    if (size == 0 || start + size - 1 < start)
+      return -L4_EINVAL;
+
+    constexpr unsigned Max_align = sizeof(l4_addr_t) * 8 - 1;
+    if (flags & Rm::F::Search_addr && align > Max_align)
+      return -L4_EINVAL;
+
+    start = rm()->attach_area(start, size, flags, align);
+    if (start == L4_INVALID_ADDR)
+      return -L4_EADDRNOTAVAIL;
+
+    return L4_EOK;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::get_regions
+   */
+  l4_ret_t op_get_regions(L4Re::Rm::Rights, l4_addr_t addr,
+                          L4::Ipc::Array_ref<L4Re::Rm::Region> &regions)
+  {
+    typename DERIVED::Node r;
+    unsigned limit = regions.length;
+
+    regions.length = 0;
+    while ((r = rm()->lower_bound(Region(addr))))
+      {
+        Rm::Region &x = regions.data[regions.length];
+        x.start  = r->first.start();
+        x.end    = r->first.end();
+        x.flags  = r->second.flags();
+
+        if (++regions.length >= limit)
+          break;
+
+        if (x.end >= rm()->max_addr())
+          break;
+        addr = x.end + 1;
+      }
+
+    return regions.length;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::get_areas
+   */
+  l4_ret_t op_get_areas(L4Re::Rm::Rights, l4_addr_t addr,
+                        L4::Ipc::Array_ref<L4Re::Rm::Area> &areas)
+  {
+    typename DERIVED::Node r;
+    unsigned limit = areas.length;
+
+    areas.length = 0;
+    while ((r = rm()->lower_bound_area(Region(addr))))
+      {
+        Rm::Area &x = areas.data[areas.length];
+        x.start  = r->first.start();
+        x.end    = r->first.end();
+        x.flags  = r->second.flags();
+
+        if (++areas.length >= limit)
+          break;
+
+        if (x.end >= rm()->max_addr())
+          break;
+
+        addr = x.end + 1;
+      }
+
+    return areas.length;
+  }
+
+  /**
+   * Implementation of L4Re::Rm::add_rescue_jump
+   */
+  l4_ret_t op_add_rescue_jump(L4Re::Rm::Rights, l4_addr_t pc_begin,
+                              l4_addr_t pc_end, l4_addr_t rescue_pc)
+  {
+    return rm()->add_rescue_jump(pc_begin, pc_end, rescue_pc);
+  }
+
+  /**
+   * Implementation of L4Re::Rm::remove_rescue_jump
+   */
+  l4_ret_t op_remove_rescue_jump(L4Re::Rm::Rights, l4_addr_t pc)
+  {
+    return rm()->remove_rescue_jump(pc);
+  }
+
+  /**
+   * Implementation of L4Re::Rm::page_in RPC call.
+   */
+  l4_ret_t op_page_in(L4Re::Rm::Rights, l4_addr_t min_addr, l4_addr_t max_addr,
+                      L4Re::Rm::Region_flags rights, L4::Ipc::Snd_fpage &fp,
+                      L4Re::Rm::page_in_fn &helper)
+  {
+    // Start and end address are inclusive. They must be page aligned.
+    if (   l4_trunc_page(min_addr)     != min_addr
+        || l4_trunc_page(max_addr + 1) != max_addr + 1)
+      return -L4_EINVAL;
+
+    // The default implementation assumes it is executed in a dedicated thread.
+    helper = nullptr;
+
+    typename DERIVED::Region_handler::Map_result map_res;
+    l4_ret_t res = rm()->page_in(min_addr, max_addr, rights, &map_res);
+    if (res >= 0)
+      pager_set_result(&fp, map_res);
+
+    return res;
+  }
+
+private:
+  static void pager_set_result(L4::Ipc::Opt<L4::Ipc::Snd_fpage> *fp,
+                               L4::Ipc::Snd_fpage const &f)
+  { *fp = f;  }
+
+  static void pager_set_result(L4::Ipc::Snd_fpage *fp,
+                               L4::Ipc::Snd_fpage const &f)
+  { *fp = f; }
+
+  static void pager_set_result(L4::Ipc::Opt<L4::Ipc::Snd_fpage> *, ...)
+  {}
+
+public:
+
+  /**
+   * Pager API
+   */
+  l4_ret_t op_io_page_fault(L4::Io_pager::Rights, l4_fpage_t, l4_umword_t,
+                            L4::Ipc::Opt<L4::Ipc::Snd_fpage> &)
+  {
+    // generate exception
+    return -L4_ENOMEM;
+  }
+
+  l4_ret_t op_page_fault(L4::Pager::Rights, l4_umword_t addr, l4_umword_t pc,
+                         L4::Ipc::Opt<L4::Ipc::Snd_fpage> &fp)
+  {
+    Dbg(Dbg::Server).printf("page fault: %lx pc=%lx\n", addr, pc);
+
+    bool need_w = addr & 2;
+    bool need_x = addr & 4;
+
+    typename DERIVED::Node n = rm()->find(addr);
+
+    if (!n)
+      {
+        Dbg(Dbg::Warn, "rm").printf("unhandled %s page fault at 0x%lx pc=0x%lx\n",
+                                    need_w ? "write" :
+                                    need_x ? "instruction" : "read", addr, pc);
+        // generate exception
+        return -L4_ENOMEM;
+      }
+
+    if (!(n->second.flags() & L4Re::Rm::F::W) && need_w)
+      {
+        Dbg(Dbg::Warn, "rm").printf("write page fault in readonly region at 0x%lx pc=0x%lx\n",
+                                    addr, pc);
+        // generate exception
+        return -L4_EACCESS;
+      }
+
+    if (!(n->second.flags() & L4Re::Rm::F::X) && need_x)
+      {
+        Dbg(Dbg::Warn, "rm").printf("instruction page fault in non-exec region at 0x%lx pc=0x%lx\n",
+                                    addr, pc);
+        // generate exception
+        return -L4_EACCESS;
+      }
+
+    // This check is optional but avoids doing a map operation that will not
+    // work. We shall never get here from a page-fault but only from
+    // artificial page handling.
+    if (n->second.flags() & (L4Re::Rm::F::Kernel | L4Re::Rm::F::Reserved))
+      {
+        Dbg(Dbg::Warn, "rm").printf("page fault handling in kernel-memory provided region or reserved region at 0x%lx pc=0x%lx\n",
+                                    addr, pc);
+        // generate exception
+        return -L4_ENODEV;
+      }
+
+    typename DERIVED::Region_handler::Map_result map_res;
+    if (int err = n->second.map(addr, n->first, need_w, &map_res))
+      {
+        Dbg(Dbg::Warn, "rm").printf("mapping for page fault failed with error %d at 0x%lx pc=0x%lx\n",
+                                    err, addr, pc);
+        // generate exception
+        return -L4_ENOMEM;
+      }
+
+    pager_set_result(&fp, map_res);
+    return L4_EOK;
+  }
+
+  long op_get_info(L4Re::Rm::Rights, l4_addr_t addr,
+                   L4::Ipc::String<char> &name, L4Re::Rm::Offset &backing_offset)
+  {
+#ifdef CONFIG_L4RE_REGION_INFO
+    typename DERIVED::Node r = rm()->find(Region(addr));
+    if (!r)
+      return -L4_ENOENT;
+    backing_offset = r->first.backing_offset();
+    unsigned long i;
+    char const *src = r->first.name();
+    unsigned src_len = r->first.name_len();
+    for (i = 0; i < src_len && i < name.length - 1; ++i)
+      name.data[i] = src[i];
+    name.length = i + 1;
+    name.data[i] = '\0';
+    return L4_EOK;
+#else
+    (void)addr;
+    (void)name;
+    (void)backing_offset;
+    return -L4_ENOSYS;
+#endif
+  }
+};
+
+}}

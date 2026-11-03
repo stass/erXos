@@ -1,0 +1,607 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'json'
+require 'tmpdir'
+require_relative 'pack_provenance'
+require_relative 'runner'
+require_relative 'bounded_file'
+require_relative 'toolchain_provenance'
+require_relative 'archive_member'
+require_relative 'fiasco_inputs'
+require_relative 'build_inputs'
+
+module Erx
+  # Audits the inherited build's recorded evidence. This is an evidence report,
+  # missing source records prevent a successful build record.
+  class FiascoProvenance
+    PARTS = %w[kernel mk l4re-core bootstrap libfdt drivers-frst].freeze
+    MAPS = {
+      'kernel' => ['kernel/fiasco', 'kernel/fiasco.map'],
+      'bootstrap' => ['users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/bootstrap.elf',
+                      'users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/bootstrap.elf.map'],
+      'sigma0' => ['users/pkg/l4re-core/sigma0/server/src/OBJ-arm64_armv8a-std-l4f/sigma0',
+                   'users/pkg/l4re-core/sigma0/server/src/OBJ-arm64_armv8a-std-l4f/sigma0.map']
+    }.freeze
+
+    def initialize(root:, runner:, external: [], archive_program: 'aarch64-elf-ar')
+      @root = File.realpath(root)
+      @build = File.join(@root, 'build/fiasco')
+      @runner = runner
+      @archive_program = archive_program
+      @archive_requested = archive_program
+      @external = external.to_h { |entry| [File.realpath(entry.fetch('path')), entry] }
+      @origins = {}
+      @import_scopes = {}
+      @hashes = {}
+      @bytes = {}
+      @snapshot_bytes = 0
+      @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
+    end
+
+    def audit
+      @audit_complete = false
+      @checked_catalog = nil
+      @unresolved = []
+      @sources = {}
+      @origins = {}
+      @import_scopes = {}
+      @hashes = {}
+      @bytes = {}
+      @snapshot_bytes = 0
+      @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
+      load_build_inputs
+      load_generation_profiles
+      archive_tool = tool_identity(@archive_requested, role: 'archive')
+      @archive_program = archive_tool.fetch('path')
+      executables = MAPS.map do |name, (artifact, map)|
+        audit_executable(name, File.join(@build, artifact), File.join(@build, map))
+      end
+      tools = [archive_tool]
+      image = nil
+      if @unresolved.empty?
+        tools.concat(%w[gmake aarch64-elf-gcc aarch64-elf-g++ aarch64-elf-objcopy perl].map { |program| tool_identity(program) })
+        programs = tools.to_h { |tool| [tool.fetch('program'), tool.fetch('path')] }
+        @image_objcopy = programs.fetch('aarch64-elf-objcopy')
+        @image_perl = programs.fetch('perl')
+        image = audit_image(executables)
+        @bytes.each do |path, snapshot|
+          unless Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA)) == Digest::SHA256.hexdigest(snapshot)
+            raise Error, "Fiasco audit input changed: #{label(path)}"
+          end
+        end
+      end
+      @inputs.verify if @inputs
+      report = { 'version' => 1, 'kind' => 'fiasco-link-audit',
+        'state' => @unresolved.empty? ? 'complete' : 'blocked',
+        'distribution' => 'project-only: non-permissive stopgap Fiasco',
+        'generation_profile' => reference(@generation_profile),
+        'build_inputs' => @inputs && @inputs.reference,
+        'license_notices' => license_notices,
+        'tools' => tools, 'image' => image, 'executables' => executables, 'sources' => @sources.values.sort_by { |item| item.fetch('path') },
+        'unresolved' => @unresolved.uniq.sort }.freeze
+      @audit_complete = report.fetch('state') == 'complete'
+      report
+    rescue KeyError, Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, ArgumentError => error
+      raise Error, "invalid Fiasco build records: #{error.message}"
+    end
+
+    def capture_construction
+      require_relative 'fiasco'
+      load_build_inputs
+      environment = Fiasco.build_environment
+      kernel = File.join(@build, 'kernel')
+      emit = lambda do |directory, output, variable, arguments|
+        @runner.run(['gmake', '-C', directory, *arguments, 'CROSS_COMPILE=aarch64-elf-',
+                     '--eval=.PHONY: erx-provenance',
+                     "--eval=erx-provenance: ; $(file >#{output},$(#{variable}))", 'erx-provenance'],
+                    name: 'fiasco-construction', deadline: 45, env: environment)
+      end
+      emit.call(kernel, '.erx-vpath', 'VPATH', [])
+      source = @inputs.part('kernel')
+      emit.call(kernel, '.erx-bootstrap-inputs', 'OBJ_BOOTSTRAP',
+                ['-f', File.join(source, 'src/Makefile.sub2'),
+                 "srcdir=#{source}/src", "objbase=#{kernel}"])
+      emit.call(File.join(@build, 'users/pkg/l4re-core/minimal_l4re/OBJ-arm64_armv8a-std-l4f'),
+                '.erx-archive-inputs', 'OBJS_libc_minimal_l4re.a', [])
+    end
+
+    def self.external_registry(root:)
+      compiler = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, 'aarch64-elf-gcc') }
+                    .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+      raise Error, 'missing aarch64-elf-gcc' unless compiler
+      installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
+      registry = ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/gcc-16.2.0.json'), installation: installation)
+      relative = 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3'
+      profile = JsonInput.parse(BoundedFile.read(File.join(root, 'config/provenance/fiasco-generation.json'), maximum: 1024 * 1024),
+                                max_bytes: 1024 * 1024, label: 'Fiasco generation profile')
+      expected = profile.fetch('recipes').fetch(relative)
+      path = File.join(root, relative)
+      unless Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: 1024 * 1024)) == expected
+        raise Error, 'changed GCC GPL version 3 notice'
+      end
+      notice = { 'path' => path, 'sha256' => expected }.freeze
+      registry.map { |entry| entry.merge('notices' => entry.fetch('notices') + [notice]).freeze }.freeze
+    end
+
+    def self.canonical_report(report)
+      JSON.generate(report) + "\n"
+    end
+
+    def record_receipt(report)
+      unless report.fetch('state') == 'complete' && report.fetch('image').fetch('artifact').fetch('path') == 'build/fiasco/images/bootstrap_banner.elf'
+        raise Error, 'cannot record an incomplete Fiasco build receipt'
+      end
+      @inputs.verify if @inputs
+      audit_path = File.join(@build, 'provenance.json')
+      receipt_path = File.join(@build, 'receipt.json')
+      audit_bytes = self.class.canonical_report(report)
+      receipt = { 'version' => 1, 'kind' => 'fiasco', 'artifact' => report.fetch('image').fetch('artifact'),
+                  'audit' => { 'path' => 'build/fiasco/provenance.json', 'sha256' => Digest::SHA256.hexdigest(audit_bytes) } }
+      [[audit_path, audit_bytes], [receipt_path, JSON.generate(receipt) + "\n"]].each do |path, bytes|
+        raise Error, 'Fiasco receipt destination is a symlink' if File.symlink?(path)
+        Dir.mktmpdir('.receipt-', @build) do |directory|
+          temporary = File.join(directory, 'output')
+          File.binwrite(temporary, bytes)
+          File.rename(temporary, path)
+        end
+      end
+      receipt_path
+    end
+
+    # Permission comes from this producer's actual reads and fixed output
+    # names, not from paths supplied by an artifact's JSON build record.
+    def input_catalog
+      raise Error, 'Fiasco source checking has not completed' unless @audit_complete && @inputs
+      return @checked_catalog if @checked_catalog
+      @inputs.verify
+      fixed = %w[build/fiasco/receipt.json build/fiasco/provenance.json build/fiasco/images/bootstrap_banner.elf]
+      fixed << 'build/fiasco/inputs/RECORD.json'
+      external_notices = @external.values.flat_map { |entry| entry.fetch('notices').map { |notice| notice.fetch('path') } }
+      fixed.each { |path| read(File.join(@root, path)) }
+      entries = {}
+      aliases = {}
+      external = external_notices.dup
+      @bytes.each do |path, bytes|
+        unless path.start_with?(@root + '/')
+          external << path
+          next
+        end
+        entries[path] = { 'path' => path, 'size' => bytes.bytesize, 'sha256' => Digest::SHA256.hexdigest(bytes) }
+        aliases[path] = path
+      end
+      catalog = BuildInputs.observed(root: @root, entries: entries, aliases: aliases, imports: {})
+      catalog = catalog.merge(BuildInputs.pack(root: @root, paths: []))
+      catalog = catalog.merge(BuildInputs.capture(root: @root, paths: external.uniq))
+      PARTS.each do |part|
+        scope = import_scope(part, @inputs.part(part))
+        catalog = catalog.merge(scope)
+      end
+      @checked_catalog = catalog
+    end
+
+    # mk's fixdep output is data, never evaluated as make or shell code. Only
+    # its literal source/dependency assignments and closed config wildcard are
+    # accepted; the saved command is retained verbatim as evidence.
+    def self.recorded_compile(bytes, object:)
+      raise Error, 'compiler command record exceeds bound' if bytes.bytesize > PackProvenance::MAX_METADATA
+      text = bytes.gsub(/\\\r?\n/, '')
+      fields = %w[savedcmd source deps].to_h do |field|
+        matches = text.scan(/^#{field}_#{Regexp.escape(object)} := ([^\n]*)$/)
+        raise Error, "missing or duplicate #{field} compiler record" unless matches.size == 1
+        [field, matches.first.first.strip]
+      end
+      dependencies = fields.fetch('deps').gsub(/\$\(wildcard \$\(OBJ_BASE\)\/include\/config\/[A-Z0-9_]+\)/, '')
+      _, sources = PackProvenance.dependencies("#{object}: #{fields.fetch('source')} #{dependencies}\n")
+      { 'command' => fields.fetch('savedcmd'), 'sources' => sources }.freeze
+    end
+
+    private
+
+    def import_scope(part, part_root)
+      return @import_scopes.fetch(part) if @import_scopes.key?(part)
+      unless @inputs
+        return @import_scopes[part] = BuildInputs.imported(root: part_root)
+      end
+      inventory = Origin.new(root: part_root, authorize: @inputs.method(:authorize),
+        read_bytes: lambda { |path| @inputs.read(path) }, known_hash: @inputs.method(:verified_hash)).check
+      observed = @inputs.observations
+      prefix = part_root + '/'
+      entries = observed.fetch('entries').select { |path, _entry| path.start_with?(prefix) }
+      aliases = observed.fetch('aliases').select { |path, target| path.start_with?(prefix) && entries.key?(target) }
+      @import_scopes[part] = BuildInputs.observed(root: part_root, entries: entries, aliases: aliases,
+                                                 imports: { part_root => inventory })
+    end
+
+    def load_build_inputs
+      @inputs = FiascoInputs.new(root: @root)
+      @inputs.verify
+    end
+
+    def license_notices
+      @sources.values.map { |source| source['license'] }.compact.uniq.each_with_object({}) do |license, result|
+        identifiers = license.scan(/[A-Za-z0-9][A-Za-z0-9.+_:\-]*/)
+        files = []
+        files << 'fiasco/kernel/tool/preprocess/COPYING' unless (identifiers & %w[GPL-2.0-only GPL-2.0-or-later]).empty?
+        files << 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3' unless (identifiers & %w[GPL-3.0-only GPL-3.0-or-later]).empty?
+        files << 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME' if identifiers.include?('GCC-exception-3.1')
+        result[license] = files.map { |file| reference(project_input(file)) } unless files.empty?
+      end
+    end
+
+    def audit_image(executables)
+      require_relative 'fiasco'
+      final = File.join(@build, 'images/bootstrap_banner.elf')
+      original = read(final)
+      inputs = executables.to_h { |item| [item.fetch('name'), item.fetch('artifact')] }
+      Dir.mktmpdir('.image-audit-', @build) do |directory|
+        modules = File.join(directory, 'modules')
+        output = File.join(directory, 'output')
+        FileUtils.mkdir_p([modules, output])
+        { 'kernel' => 'fiasco', 'bootstrap' => 'bootstrap.elf', 'sigma0' => 'sigma0' }.each do |name, filename|
+          File.binwrite(File.join(modules, filename), read(File.join(@root, inputs.fetch(name).fetch('path'))))
+        end
+        # The installed sigma0 retains a GNU debug-link section. Reproduce its
+        # exact install transform before feeding it to the image builder.
+        link_directory = File.join(directory, 'linked')
+        FileUtils.mkdir_p(link_directory)
+        linked_sigma = File.join(link_directory, 'sigma0')
+        File.binwrite(linked_sigma, read(File.join(@root, inputs.fetch('sigma0').fetch('path'))))
+        installed_sigma = File.join(@build, 'users/bin/arm64_armv8a/std/l4f/sigma0')
+        installed_bytes = read(installed_sigma)
+        sigma_copy = File.join(modules, 'sigma0')
+        @runner.run([@image_objcopy || 'aarch64-elf-objcopy', '--strip-unneeded',
+                     "--add-gnu-debuglink=#{linked_sigma}", linked_sigma, sigma_copy],
+                    name: 'fiasco-install-proof', deadline: 30, env: Fiasco.build_environment)
+        unless BoundedFile.read(sigma_copy, maximum: PackProvenance::MAX_METADATA) == installed_bytes
+          raise Error, 'installed sigma0 differs from its fixed strip/debug-link transform'
+        end
+        recipe = @inputs ? @inputs.configuration('modules.list') : File.join(@root, 'config/fiasco/modules.list')
+        module_recipe = File.join(modules, 'modules.list')
+        File.binwrite(module_recipe, read(recipe))
+        image_configuration = @generation.fetch('image')
+        @runner.run([@image_perl || 'perl', project_input('fiasco/mk/tool/bin/l4image'),
+                     '-i', File.join(modules, 'bootstrap.elf'), '-o', File.join(output, 'bootstrap_banner.elf'),
+                     '--verbose', 'create', '--entry', image_configuration.fetch('entry'),
+                     '--modules-list-file', module_recipe, '--search-path', modules,
+                     '--set-attr', 'l4i:QEMUcmd', image_configuration.fetch('qemu_command')],
+                    name: 'fiasco-image-proof', deadline: 180, env: Fiasco.build_environment)
+        replay = BoundedFile.read(File.join(output, 'bootstrap_banner.elf'), maximum: PackProvenance::MAX_METADATA)
+        unless replay == original
+          File.binwrite(File.join(@build, 'images/replay-mismatch.elf'), replay)
+          raise Error, 'final Fiasco image differs from its fixed construction replay'
+        end
+        { 'artifact' => reference(final), 'method' => 'byte-identical fixed construction replay',
+          'inputs' => inputs.values, 'installed_sigma0' => reference(installed_sigma), 'modules' => reference(recipe) }
+      end
+    end
+
+    def load_generation_profiles
+      @generation_profile = File.join(@root, 'config/provenance/fiasco-generation.json')
+      @generation = JsonInput.parse(read(@generation_profile), max_bytes: 1024 * 1024, label: 'Fiasco generation profile')
+      unless @generation.is_a?(Hash) && @generation.keys.sort == %w[compile_dependencies image inputs profiles recipes version] && @generation['version'] == 1 &&
+             @generation['profiles'].is_a?(Hash) && @generation['profiles'].size == 9 && @generation['recipes'].is_a?(Hash) &&
+             @generation['recipes'].size.between?(1, 8192) && @generation['compile_dependencies'].is_a?(Hash) &&
+             @generation['compile_dependencies'].size <= 64 && @generation['inputs'].is_a?(Hash) && @generation['inputs'].size.between?(1, 8192) &&
+             @generation['image'].is_a?(Hash) && @generation['image'].keys.sort == %w[entry qemu_command] && @generation['image']['entry'] == 'banner' &&
+             @generation['image']['qemu_command'].is_a?(String) && @generation['image']['qemu_command'].ascii_only? &&
+             !@generation['image']['qemu_command'].match?(/[\x00-\x1f\x7f]/)
+        raise Error, 'invalid fixed Fiasco generation profile'
+      end
+      @generation.fetch('compile_dependencies').each do |object, dependency|
+        unless object.is_a?(String) && dependency.is_a?(String) && object.end_with?('.o') && dependency.end_with?('.d')
+          raise Error, 'invalid fixed compiler dependency record'
+        end
+        project_input('build/fiasco/' + object)
+        project_input('build/fiasco/' + dependency)
+      end
+      @generation.fetch('recipes').each do |relative, expected|
+        path = project_input(relative)
+        raise Error, "stale Fiasco generation recipe: #{relative}" unless digest(path) == expected
+        if relative.start_with?('fiasco/') && !relative.start_with?('fiasco/kernel/')
+          part, suffix = relative.delete_prefix('fiasco/').split('/', 2)
+          staged = part == 'mk' ? File.join(@build, 'source', suffix) : File.join(@build, 'source/pkg', part, suffix)
+          raise Error, "stale staged Fiasco recipe: #{relative}" unless digest(staged) == expected
+        end
+      end
+      @generation.fetch('inputs').each do |relative, expected|
+        unless expected.is_a?(Hash) && expected.keys.sort == %w[mode sha256] && %w[binary text].include?(expected['mode']) &&
+               expected['sha256'].is_a?(String) && expected['sha256'].match?(/\A[0-9a-f]{64}\z/)
+          raise Error, 'invalid fixed generation input record'
+        end
+        bytes = read(project_input(relative))
+        if expected.fetch('mode') == 'text'
+          raise Error, 'literal project marker in a build input' if bytes.include?('${PROJECT_ROOT}'.b)
+          bytes = bytes.gsub(@root.b, '${PROJECT_ROOT}'.b)
+        end
+        raise Error, "changed fixed generation input: #{relative}" unless Digest::SHA256.hexdigest(bytes) == expected.fetch('sha256')
+      end
+      @generation.fetch('profiles').each do |relative, profile|
+        project_input('build/fiasco/' + relative)
+        unless profile.is_a?(Hash) && profile.keys.sort == %w[code configuration metadata object_list objects output_sha256 role tools] &&
+               %w[code configuration object].include?(profile['role']) && profile['output_sha256'].is_a?(String) &&
+               profile['output_sha256'].match?(/\A[0-9a-f]{64}\z/) &&
+               %w[code configuration metadata object_list objects tools].all? { |key| profile[key].is_a?(Array) && profile[key].size <= 4096 }
+          raise Error, 'invalid fixed generation input shape'
+        end
+        ancestry = profile.fetch('role') == 'configuration' ? profile.fetch('configuration') :
+          profile.fetch('code') + profile.fetch('objects') + profile.fetch('object_list')
+        raise Error, 'fixed generation profile has no input ancestry' if ancestry.empty?
+        %w[configuration metadata tools].each do |role|
+          unless profile.fetch(role).all? { |path| @generation.fetch('inputs').key?(path) || @generation.fetch('recipes').key?(path) }
+            raise Error, 'unregistered fixed generation input'
+          end
+        end
+      end
+    end
+
+    def project_input(relative)
+      unless relative.is_a?(String) && relative.match?(/\A[\w.\/+\-]+\z/) && !relative.start_with?('/') &&
+             relative.split('/').none? { |part| %w[. ..].include?(part) }
+        raise Error, 'invalid generation profile path'
+      end
+      selected = if @inputs && FiascoInputs::ROOTS.any? { |prefix| relative == prefix || relative.start_with?(prefix + '/') }
+                   @inputs.path(relative)
+                 else
+                   File.join(@root, relative)
+                 end
+      File.realpath(selected)
+    end
+
+    def fixed_generation(path, ancestry: [])
+      relative = path.delete_prefix(@build + '/')
+      profile = @generation && @generation.fetch('profiles')[relative]
+      return nil unless profile
+      raise Error, "unsupported generated output: #{relative}" unless digest(path) == profile.fetch('output_sha256')
+      record = reference(path).merge('role' => profile.fetch('role'), 'profile' => reference(@generation_profile))
+      # Install the node before following header dependencies; generated layout
+      # headers and their compiled type definitions can refer to each other.
+      @sources[path] = record unless profile.fetch('role') == 'object'
+      %w[code configuration tools metadata].each do |role|
+        record[role] = profile.fetch(role).map do |input|
+          file = project_input(input)
+          attribute(file) if role == 'code'
+          reference(file)
+        end
+      end
+      objects = profile.fetch('objects').map { |input| project_input(input) }
+      record['construction'] = profile.fetch('object_list').map do |input|
+        file = project_input(input)
+        _, parts = PackProvenance.dependencies("objects: #{read(file)}")
+        unless parts.all? { |part| part.match?(/\A[\w.-]+\.o\z/) }
+          raise Error, 'unsupported fixed transform object list'
+        end
+        objects.concat(parts.map { |part| File.realpath(File.join(File.dirname(file), part)) })
+        reference(file)
+      end
+      record['objects'] = objects.map { |object| audit_object(object, ancestry: ancestry + [path]) }
+      record
+    end
+
+    def tool_identity(program, role: program)
+      path = if program.include?('/')
+               File.realpath(program)
+             else
+               ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, program) }
+                  .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
+             end
+      raise Error, "missing build audit tool: #{program}" unless path
+      path = File.realpath(path)
+      bytes = BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA)
+      result = @runner.run([path, '--version'], name: 'fiasco-audit-tool', deadline: 30, env: command_environment)
+      { 'program' => role, 'path' => path, 'sha256' => Digest::SHA256.hexdigest(bytes),
+        'version' => BoundedFile.read(result.fetch('log'), maximum: 1024 * 1024).lines.map(&:strip).find { |line| !line.empty? }.to_s,
+        'role' => 'external build tool; no linked contribution' }
+    end
+
+    def command_environment
+      require_relative 'fiasco'
+      Fiasco.build_environment
+    end
+
+    def audit_executable(name, artifact, map)
+      directory = File.dirname(map)
+      contributions = PackProvenance.contributors(read(map), format: 'gnu').map do |input|
+        archive, member = input.match(/\A(.+)\(([^()]+)\)\z/)&.captures
+        if archive
+          archive_path = File.realpath(File.expand_path(archive, directory))
+          member_hash = archive_member_hash(archive_path, member: member)
+          manifest = File.join(File.dirname(archive_path), '.erx-archive-inputs')
+          candidates = File.file?(manifest) ? archive_objects(manifest) : @objects.fetch(member, [])
+          candidates = candidates.select { |path| File.basename(path) == member && digest(path) == member_hash }.uniq
+          # Equal output bytes do not prove equal source/flag ancestry.
+          if candidates.size > 1
+            @unresolved << "ambiguous archive construction record: #{label(archive_path)}(#{member})"
+          end
+          compiles = candidates.map { |path| audit_object(path) }
+          @unresolved << "archive member has no matching object: #{label(archive_path)}(#{member})" if candidates.empty?
+          contribution = { 'archive' => reference(archive_path), 'member' => member, 'sha256' => member_hash, 'compiles' => compiles }
+          contribution['construction'] = reference(manifest) if File.file?(manifest)
+          contribution
+        else
+          audit_object(File.expand_path(input, directory))
+        end
+      end
+      { 'name' => name, 'artifact' => reference(artifact), 'map' => reference(map), 'contributions' => contributions }
+    end
+
+    def archive_objects(manifest)
+      directory = File.dirname(manifest)
+      _, inputs = PackProvenance.dependencies("archive: #{read(manifest)}")
+      inputs.flat_map do |input|
+        path = File.realpath(File.expand_path(input, directory))
+        if path.end_with?('.ofl')
+          _, objects = PackProvenance.dependencies("archive: #{read(path)}")
+          objects.map { |object| File.realpath(File.expand_path(object, directory)) }
+        elsif path.end_with?('.o')
+          [path]
+        else
+          raise Error, 'unsupported recorded archive construction input'
+        end
+      end
+    end
+
+    def archive_member_hash(path, member:)
+      ArchiveMember.sha256(bytes: read(path), member: member, runner: @runner, program: @archive_program,
+        owner_root: @root, directory: @build, name: 'fiasco-audit-member', environment: command_environment)
+    end
+
+    def audit_object(path, ancestry: [])
+      path = File.realpath(path)
+      raise Error, 'cyclic or overdeep compound object graph' if ancestry.include?(path) || ancestry.size >= 64
+      external = @external[path]
+      if external
+        attribute(path)
+        return { 'object' => reference(path), 'external' => external.fetch('label') }
+      end
+      directory = File.dirname(path)
+      object = File.basename(path)
+      command = File.join(directory, ".#{object}.cmd")
+      dependencies = Dir.glob(File.join(directory, ".#{object.delete_suffix('.o')}.*.d"))
+      special = @generation && @generation.fetch('compile_dependencies')[path.delete_prefix(@build + '/')]
+      dependencies = [File.join(@build, special)] if special
+      fixed = fixed_generation(path, ancestry: ancestry)
+      return fixed if fixed
+      if File.file?(command)
+        key = read(command)[/^source_([^\s]+) := /, 1]
+        raise Error, 'compiler record names another object' unless key && File.basename(key) == object
+        record = self.class.recorded_compile(read(command), object: key)
+        sources = record.fetch('sources')
+        evidence = reference(command).merge('command' => record.fetch('command'))
+      elsif dependencies.size == 1
+        targets, sources = PackProvenance.dependencies(read(dependencies.first))
+        raise Error, 'dependency does not name compiled object' unless targets.include?(object)
+        evidence = reference(dependencies.first)
+      elsif object == 'jdb_compound.o' && File.file?(File.join(directory, '.jdb_compound.o.deps'))
+        parts = read(File.join(directory, '.jdb_compound.o.deps')).split
+        raise Error, 'unsupported compound object list' unless parts.all? { |part| part.match?(/\A[\w.-]+\.o\z/) }
+        return { 'object' => reference(path), 'components' => parts.map do |part|
+          audit_object(File.join(directory, part), ancestry: ancestry + [path])
+        end }
+      else
+        @unresolved << "object has no compiler dependency record: #{label(path)}"
+        return { 'object' => reference(path), 'state' => 'unresolved' }
+      end
+      source_refs = sources.map do |source|
+        file = File.realpath(File.expand_path(source, directory))
+        attribute(file)
+        reference(file)
+      end
+      { 'object' => reference(path), 'record' => evidence, 'sources' => source_refs }
+    end
+
+    def attribute(path)
+      return if @sources.key?(path)
+      authoritative = authoritative_path(path)
+      if authoritative
+        part, source = authoritative
+        part_root = @inputs ? @inputs.part(part) : File.join(@root, 'fiasco', part)
+        scope = import_scope(part, part_root)
+        inventory = @origins[part] ||= scope.find_import(part_root)
+        relative = source.delete_prefix(part_root + '/')
+        item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative]
+        raise Error, "missing imported provenance: #{label(source)}" unless item
+        raise Error, "derived source differs from its origin: #{label(path)}" unless digest(source) == digest(path)
+        @sources[path] = reference(path).merge('origin' => reference(File.join(part_root, 'ORIGIN.md')),
+                                              'source' => label(source), 'original_source' => "fiasco/#{part}/#{relative}", 'license' => item.fetch('license'),
+                                              'evidence' => item.fetch('evidence'), 'status' => 'stopgap')
+        if part == 'l4re-core' && relative.start_with?('libc/musl/contrib/musl/')
+          logical = 'fiasco/l4re-core/libc/musl/contrib/musl/COPYRIGHT'
+          notice = project_input(logical)
+          unless digest(notice) == @generation.fetch('recipes').fetch(logical)
+            raise Error, 'changed embedded musl package notice'
+          end
+          @sources[path]['notices'] = [reference(notice)]
+        end
+      elsif @external.key?(path)
+        item = @external.fetch(path)
+        raise Error, 'external compiler input changed' unless digest(path) == item.fetch('sha256')
+        @sources[path] = reference(path).merge('license' => item.fetch('license'), 'evidence' => item.fetch('evidence'),
+                                              'status' => item.fetch('status'), 'notices' => item.fetch('notices'))
+      elsif path.start_with?(File.join(@build, 'kernel/auto/'))
+        attribute_kernel_generated(path)
+      elsif fixed_generation(path)
+        # The fixed profile records input-code ancestry without inventing a
+        # licence for configuration values or generator-only implementation.
+      else
+        @sources[path] = reference(path).merge('state' => 'unresolved')
+        @unresolved << "source has no origin or generator source record: #{label(path)}"
+      end
+    end
+
+    def attribute_kernel_generated(path)
+      relative = path.delete_prefix(File.join(@build, 'kernel/') )
+      graph = File.join(@build, 'kernel/.Modules.deps')
+      lines = read(graph).lines
+      output = module_rule(lines, target: relative)
+      stamp = output && output.split(':', 2).last.split.first
+      rule = stamp && module_rule(lines, target: stamp)
+      names = rule && rule.split(':', 2).last.split
+      vpath = File.join(@build, 'kernel/.erx-vpath')
+      directories = File.file?(vpath) ? read(vpath).split : []
+      source_root = @inputs ? File.join(@inputs.part('kernel'), 'src') : File.join(@root, 'fiasco/kernel/src')
+      unless directories.all? { |directory| directory.match?(/\A[\w\/-]+\z/) && !directory.split('/').include?('..') && !directory.start_with?('/') }
+        raise Error, 'unsupported recorded kernel source search path'
+      end
+      originals = names && names.map do |name|
+        raise Error, 'unsupported module source name' unless name.match?(/\A[\w.-]+\.cpp\z/)
+        directories.map { |directory| File.join(source_root, directory, name) }.find { |source| File.file?(source) }
+      end
+      if names && !names.empty? && names.uniq.size == names.size && originals.none?(&:nil?)
+        @sources[path] = reference(path).merge('generated_from' => originals.map { |source| reference(source) },
+                                              'graph' => reference(graph), 'search_path' => reference(vpath))
+        originals.each { |source| attribute(source) }
+      else
+        @sources[path] = reference(path).merge('state' => 'unresolved')
+        @unresolved << "generated source has no unambiguous module source record: #{label(path)}"
+      end
+    end
+
+    def module_rule(lines, target:)
+      rules = lines.select { |line| line.include?(':') && line.split(':', 2).first.split.include?(target) }
+      rules.size == 1 ? rules.first : nil
+    end
+
+    def authoritative_path(path)
+      PARTS.each do |part|
+        prefix = File.join(@root, 'fiasco', part) + '/'
+        captured = @inputs ? @inputs.part(part) + '/' : prefix
+        return [part, path] if path.start_with?(captured)
+        if path.start_with?(prefix)
+          raise Error, 'compiled Fiasco source refers to mutable repository inputs' if @inputs
+          return [part, path]
+        end
+        derived = part == 'mk' ? File.join(@build, 'source/mk/') : File.join(@build, 'source/pkg', part) + '/'
+        return [part, captured + path.delete_prefix(derived)] if path.start_with?(derived)
+      end
+      nil
+    end
+
+    def read(path)
+      captured = @inputs && @inputs.find_captured_path(path)
+      path = captured || File.realpath(path)
+      unless path.start_with?(@build + '/') || path.start_with?(File.join(@root, 'config/')) || PARTS.any? { |part| path.start_with?(File.join(@root, 'fiasco', part) + '/') } || @external.key?(path)
+        raise Error, "unregistered audit input: #{label(path)}"
+      end
+      @bytes[path] ||= begin
+        bytes = captured ? @inputs.read(path, maximum: PackProvenance::MAX_METADATA) : BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA)
+        @snapshot_bytes += bytes.bytesize
+        raise Error, 'audit input closure exceeds byte bound' if @snapshot_bytes > 512 * 1024 * 1024
+        bytes
+      end
+    end
+
+    def digest(path)
+      @hashes[path] ||= Digest::SHA256.hexdigest(read(path))
+    end
+
+    def reference(path)
+      { 'path' => label(path), 'sha256' => digest(path) }
+    end
+
+    def label(path)
+      path.start_with?(@root + '/') ? path.delete_prefix(@root + '/') : path
+    end
+  end
+end

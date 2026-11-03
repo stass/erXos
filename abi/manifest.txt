@@ -1,0 +1,398 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+limit manifest_version u16 1
+limit manifest_magic u32 0x4d585245
+limit manifest_bytes_max u32 16777216
+limit manifest_records_max u32 65536
+limit manifest_strings_max u32 4194304
+limit mf_none u32 0xffffffff
+limit quota_none u64 0xffffffffffffffff
+flags manifest_flags u16
+  bit development 0
+  bit partial_boot 1
+  allow 0,1,3
+enum manifest_mode u16
+  value release 0
+  value development 1
+  value partial 3
+flags group_flags u16
+  bit hints 0
+  bit defer 1
+  bit status 2
+  bit place 3
+enum mf_kind u32
+  value service 1
+  value secret 2
+flags mf_domain_flags u32
+  bit required 0
+  bit rescue 1
+flags mf_limits_flags u32
+  bit spaces 0
+enum seal u32
+  value none 0
+  value device 1
+  value tpm 2
+enum mf_selector u32
+  value dt 1
+  value pci 2
+enum mf_device_role u32
+  value ordinary 1
+  value uart 2
+  value configuration 3
+  value network 4
+  value block 5
+  value tpm 6
+enum mf_dma u32
+  value none 0
+  value confined 1
+  value unconfined 2
+flags mf_device_flags u32
+  bit hostile 0
+enum mf_window_role u32
+  value slot_a 1
+  value slot_b 2
+  value boot_selection 3
+  value reset_count 4
+  value vault 5
+  value data 6
+  value fat 7
+  value verified_image 8
+flags mf_window_rights u32
+  bit read 0
+  bit write 1
+enum mf_parameter_kind u32
+  value u64 1
+  value i64 2
+  value boolean 3
+  value identifier 4
+  value namespace_path 5
+  value domain 6
+  value principal 7
+  value device 8
+  value bytes 9
+enum mf_image_format u32
+  value erofs_verity 1
+enum mf_hash_algorithm u32
+  value sha256 1
+
+layout erx_mf_span 1 wire_le 4 8
+  field offset u32 0
+  field count u32 4
+layout erx_mf_str 1 wire_le 4 8
+  field offset u32 0
+  field length u32 4
+layout erx_share 1 wire_le 8 48
+  field quota_ns u64 0
+  field period_ns u64 8
+  field cpuset u64 16
+  field capacity_mcpu u32 24
+  field capacity_first u32 28
+  field slice_us u32 32
+  field grace_us u32 36
+  field base u8 40
+  field ceiling u8 41
+  field flags group_flags 42
+  padding 44 4
+layout erx_manifest 1 wire_le 8 368
+  field magic u32 0
+  field version u16 4
+  field flags manifest_flags 6
+  field length u32 8
+  field header_size u32 12
+  field host erx_mf_str 16
+  field console erx_mf_str 24
+  field hostlink erx_mf_str 32
+  field platform erx_mf_str 40
+  field root_memory u64 48
+  field system_baseline u64 56
+  field system_reservation u64 64
+  field system_share erx_share 72
+  field users_share erx_share 120
+  field system_principal u32 168
+  field max_domains u32 172
+  field max_connections u32 176
+  field system_lane u32 180
+  field system_queue u32 184
+  field peer_held u32 188
+  field system_reserve u32 192
+  field sealing seal 196
+  field system_runtime_limits u32 200
+  field native_limits u32 204
+  field principals erx_mf_span 208
+  field domains erx_mf_span 216
+  field limits erx_mf_span 224
+  field runtime_limits erx_mf_span 232
+  field lane_classes erx_mf_span 240
+  field units erx_mf_span 248
+  field devices erx_mf_span 256
+  field windows erx_mf_span 264
+  field services erx_mf_span 272
+  field facets erx_mf_span 280
+  field facet_operations erx_mf_span 288
+  field facet_parameters erx_mf_span 296
+  field introductions erx_mf_span 304
+  field images erx_mf_span 312
+  field extents erx_mf_span 320
+  field boot_order erx_mf_span 328
+  field liveness erx_mf_span 336
+  field shell_principals erx_mf_span 344
+  field partial_boot erx_mf_span 352
+  field strings erx_mf_span 360
+layout erx_mf_principal 1 wire_le 8 80
+  field name erx_mf_str 0
+  field memory u64 8
+  field grant erx_share 16
+  field domains u32 64
+  field names u32 68
+  field default_limits u32 72
+  field ceiling_limits u32 76
+layout erx_mf_domain 1 wire_le 8 64
+  field name erx_mf_str 0
+  field principal u32 8
+  field kind mf_kind 12
+  field flags mf_domain_flags 16
+  field runtime u32 20
+  field release u32 24
+  field release_files u32 28
+  field limits u32 32
+  field restarts u32 36
+  field restart_period_s u32 40
+  field reserved u32 44
+  field args erx_mf_str 48
+  field env erx_mf_str 56
+  zero reserved all
+layout erx_mf_limits 1 wire_le 8 160
+  field name erx_mf_str 0
+  field memory u64 8
+  field outer u64 16
+  field grant erx_share 24
+  field spaces erx_share 72
+  field lane u32 120
+  field connections u32 124
+  field crash u32 128
+  field flags mf_limits_flags 132
+  field runtime_limits u32 136
+  field reserved u32 140
+  field peer_held u64 144
+  field peer_held_total u64 152
+  zero reserved all
+layout erx_mf_runtime_limits 1 wire_le 8 56
+  field name erx_mf_str 0
+  field max_frame u32 8
+  field max_message_heap u32 12
+  field funnel_depth u32 16
+  field exports u32 20
+  field tmp u64 24
+  field overlay u64 32
+  field atoms u32 40
+  field foreign_atoms u32 44
+  field processes u32 48
+  field reserved u32 52
+  zero reserved all
+layout erx_mf_lane_class 1 wire_le 8 16
+  field name erx_mf_str 0
+  field lane u32 8
+  field reserved u32 12
+  zero reserved all
+layout erx_mf_unit 1 wire_le 8 24
+  field name erx_mf_str 0
+  field holder u32 8
+  field devices erx_mf_span 12
+  field reserved u32 20
+  zero reserved all
+layout erx_mf_device 1 wire_le 8 64
+  field selector mf_selector 0
+  field role mf_device_role 4
+  field path erx_mf_str 8
+  field bridge erx_mf_str 16
+  field compatible erx_mf_str 24
+  field bus u16 32
+  field device u8 34
+  field function u8 35
+  field dma mf_dma 36
+  field flags mf_device_flags 40
+  field reserved u32 44
+  field dma_memory u64 48
+  field placement_key erx_mf_str 56
+  zero reserved all
+layout erx_mf_window 1 wire_le 8 32
+  field holder u32 0
+  field device u32 4
+  field role mf_window_role 8
+  field partition u32 12
+  field rights mf_window_rights 16
+  field image u32 20
+  field reserved u64 24
+  zero reserved all
+layout erx_mf_service 1 wire_le 8 24
+  field name erx_mf_str 0
+  field server u32 8
+  field interface u32 12
+  field reserved u64 16
+  zero reserved all
+layout erx_mf_facet 1 wire_le 8 80
+  field name erx_mf_str 0
+  field grantee u32 8
+  field service u32 12
+  field operations erx_mf_span 16
+  field parameters erx_mf_span 24
+  field max_request u32 32
+  field in_flight u32 36
+  field reductions u64 40
+  field period_ns u64 48
+  field max_heap_size u64 56
+  field queue u64 64
+  field reserved u64 72
+  zero reserved all
+layout erx_mf_operation 1 wire_le 4 4
+  field operation u32 0
+layout erx_mf_parameter 1 wire_le 8 32
+  field key u32 0
+  field kind mf_parameter_kind 4
+  field scalar u64 8
+  field bytes erx_mf_str 16
+  field index u32 24
+  field reserved u32 28
+  zero reserved all
+layout erx_mf_introduction 1 wire_le 8 8
+  field from u32 0
+  field to u32 4
+layout erx_mf_image 1 wire_le 8 136
+  field name erx_mf_str 0
+  field device u32 8
+  field format mf_image_format 12
+  field extents erx_mf_span 16
+  field data_bytes u64 24
+  field data_block_size u32 32
+  field hash_block_size u32 36
+  field data_blocks u64 40
+  field hash_offset u64 48
+  field hash_bytes u64 56
+  field salt_length u32 64
+  field hash_algorithm mf_hash_algorithm 68
+  field salt u8 72 count 32
+  field root_hash u8 104 count 32
+layout erx_mf_extent 1 wire_le 8 16
+  field slot_offset u64 0
+  field length u64 8
+layout erx_mf_boot_order 1 wire_le 4 4
+  field domain u32 0
+layout erx_mf_liveness 1 wire_le 4 4
+  field service u32 0
+layout erx_mf_shell_principal 1 wire_le 4 4
+  field principal u32 0
+layout erx_mf_partial_boot 1 wire_le 8 16
+  field name erx_mf_str 0
+  field image u32 8
+  field reserved u32 12
+  zero reserved all
+
+reader manifest erx_manifest @manifest_bytes_max
+  extent root.length
+  value root.magic @manifest_magic
+  value root.version @manifest_version
+  value root.header_size 368
+  range root.max_domains 1 65536
+  range root.max_connections 1 65536
+  range root.system_reserve 1 1000
+  choice root.flags manifest_mode root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.partial_boot.count
+    case release root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
+    case development root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
+    case partial root.partial_boot.count
+  table principals erx_mf_principal root.principals.offset root.principals.count @manifest_records_max 8
+  table domains erx_mf_domain root.domains.offset root.domains.count @manifest_records_max 8
+  table limits erx_mf_limits root.limits.offset root.limits.count @manifest_records_max 8
+  table runtime_limits erx_mf_runtime_limits root.runtime_limits.offset root.runtime_limits.count @manifest_records_max 8
+  table lane_classes erx_mf_lane_class root.lane_classes.offset root.lane_classes.count @manifest_records_max 8
+  table units erx_mf_unit root.units.offset root.units.count @manifest_records_max 8
+  table devices erx_mf_device root.devices.offset root.devices.count @manifest_records_max 8
+  table windows erx_mf_window root.windows.offset root.windows.count @manifest_records_max 8
+  table services erx_mf_service root.services.offset root.services.count @manifest_records_max 8
+  table facets erx_mf_facet root.facets.offset root.facets.count @manifest_records_max 8
+  table facet_operations erx_mf_operation root.facet_operations.offset root.facet_operations.count @manifest_records_max 4
+  table facet_parameters erx_mf_parameter root.facet_parameters.offset root.facet_parameters.count @manifest_records_max 8
+  table introductions erx_mf_introduction root.introductions.offset root.introductions.count @manifest_records_max 8
+  table images erx_mf_image root.images.offset root.images.count @manifest_records_max 8
+  table extents erx_mf_extent root.extents.offset root.extents.count @manifest_records_max 8
+  table boot_order erx_mf_boot_order root.boot_order.offset root.boot_order.count @manifest_records_max 4
+  table liveness erx_mf_liveness root.liveness.offset root.liveness.count @manifest_records_max 4
+  table shell_principals erx_mf_shell_principal root.shell_principals.offset root.shell_principals.count @manifest_records_max 4
+  table partial_boot erx_mf_partial_boot root.partial_boot.offset root.partial_boot.count @manifest_records_max 8
+  string_table strings root.strings.offset root.strings.count @manifest_strings_max
+  order principals domains limits runtime_limits lane_classes units devices windows services facets facet_operations facet_parameters introductions images extents boot_order liveness shell_principals partial_boot strings
+  index root.system_principal principals
+  index root.system_runtime_limits runtime_limits
+  index root.native_limits limits
+  string root.host.offset root.host.length strings identifier 63 empty no
+  string root.console.offset root.console.length strings dt_path 4096 empty no
+  string root.hostlink.offset root.hostlink.length strings dt_path 4096 empty yes
+  string root.platform.offset root.platform.length strings identifier 63 empty no
+  string principals[].name.offset principals[].name.length strings identifier 63 empty no
+  index principals[].default_limits limits
+  index principals[].ceiling_limits limits
+  string domains[].name.offset domains[].name.length strings identifier 63 empty no
+  string domains[].args.offset domains[].args.length strings args 2048 empty yes
+  string domains[].env.offset domains[].env.length strings env 2048 empty yes
+  index domains[].principal principals
+  index domains[].limits limits
+  string limits[].name.offset limits[].name.length strings identifier 63 empty no
+  index limits[].runtime_limits runtime_limits
+  optional limits[].spaces limits[].flags spaces
+  string runtime_limits[].name.offset runtime_limits[].name.length strings identifier 63 empty no
+  string lane_classes[].name.offset lane_classes[].name.length strings identifier 63 empty no
+  string units[].name.offset units[].name.length strings identifier 63 empty no
+  index units[].holder domains absent 0xffffffff
+  partition units[].devices.offset units[].devices.count devices
+  range units[].devices.count 1 @manifest_records_max
+  choice devices[].selector mf_selector devices[].path,devices[].bridge,devices[].bus,devices[].device,devices[].function
+    case dt devices[].path
+    case pci devices[].bridge,devices[].bus,devices[].device,devices[].function
+  string devices[].path.offset devices[].path.length strings dt_path 4096 empty no when devices[].selector dt
+  string devices[].bridge.offset devices[].bridge.length strings dt_path 4096 empty no when devices[].selector pci
+  string devices[].compatible.offset devices[].compatible.length strings utf8 4096 empty no
+  string devices[].placement_key.offset devices[].placement_key.length strings utf8 4096 empty no
+  range devices[].bus 0 255
+  range devices[].device 0 31
+  range devices[].function 0 7
+  choice devices[].dma mf_dma devices[].dma_memory
+    case none none
+    case confined none
+    case unconfined devices[].dma_memory
+  index windows[].holder domains absent 0xffffffff
+  index windows[].device devices
+  index windows[].image images absent 0xffffffff
+  string services[].name.offset services[].name.length strings identifier 63 empty no
+  index services[].server domains absent 0xffffffff
+  string facets[].name.offset facets[].name.length strings identifier 63 empty no
+  index facets[].grantee domains
+  index facets[].service services
+  partition facets[].operations.offset facets[].operations.count facet_operations
+  partition facets[].parameters.offset facets[].parameters.count facet_parameters
+  choice facet_parameters[].kind mf_parameter_kind facet_parameters[].scalar,facet_parameters[].bytes,facet_parameters[].index
+    case u64 facet_parameters[].scalar
+    case i64 facet_parameters[].scalar
+    case boolean facet_parameters[].scalar
+    case identifier facet_parameters[].bytes
+    case namespace_path facet_parameters[].bytes
+    case domain facet_parameters[].index
+    case principal facet_parameters[].index
+    case device facet_parameters[].index
+    case bytes facet_parameters[].bytes
+  range facet_parameters[].scalar 0 1 when facet_parameters[].kind boolean
+  index facet_parameters[].index domains when facet_parameters[].kind domain
+  index facet_parameters[].index principals when facet_parameters[].kind principal
+  index facet_parameters[].index devices when facet_parameters[].kind device
+  string facet_parameters[].bytes.offset facet_parameters[].bytes.length strings identifier 63 empty no when facet_parameters[].kind identifier
+  string facet_parameters[].bytes.offset facet_parameters[].bytes.length strings namespace_path 4096 empty no when facet_parameters[].kind namespace_path
+  string facet_parameters[].bytes.offset facet_parameters[].bytes.length strings bytes 4194304 empty yes when facet_parameters[].kind bytes
+  index introductions[].from domains
+  index introductions[].to domains
+  string images[].name.offset images[].name.length strings identifier 63 empty no
+  index images[].device devices
+  partition images[].extents.offset images[].extents.count extents
+  range images[].extents.count 1 @manifest_records_max
+  range images[].salt_length 0 32
+  index boot_order[].domain domains
+  index liveness[].service services
+  index shell_principals[].principal principals
+  string partial_boot[].name.offset partial_boot[].name.length strings identifier 63 empty no

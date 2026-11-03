@@ -1,0 +1,43 @@
+INTERFACE [(ia32 || amd64) && rtc_timer]:
+
+#include "irq_chip.h"
+
+IMPLEMENTATION[(ia32 || amd64) && rtc_timer]:
+
+#include "rtc.h"
+#include "pit.h"
+
+#include <cstdio>
+
+PUBLIC static inline
+unsigned Timer::irq() { return 8; }
+
+PUBLIC static inline NEEDS["irq_chip.h"]
+Irq_chip::Mode Timer::irq_mode()
+{ return Irq_chip::Mode::F_raising_edge; }
+
+IMPLEMENT
+void
+Timer::init(Cpu_number)
+{
+  printf("Using the RTC on IRQ %d (%sHz) for scheduling\n",
+         8, TAG_ENABLED(slow_rtc) ? "64" : "1k");
+
+  // set up timer interrupt (~ 1ms)
+  Rtc::init();
+
+  // make sure that PIT does pull its interrupt line
+  Pit::done();
+}
+
+PUBLIC static inline NEEDS["rtc.h"]
+void
+Timer::acknowledge()
+{
+  // periodic scheduling is triggered by irq 8 connected with RTC
+  //  irq.mask();
+  Rtc::reset();
+  //  irq.ack();
+  //  Rtc::reset();
+  //  irq.unmask();
+}

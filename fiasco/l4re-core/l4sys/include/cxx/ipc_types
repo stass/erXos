@@ -1,0 +1,994 @@
+// vi:set ft=cpp: -*- Mode: C++ -*-
+/*
+ * (c) 2014 Alexander Warg <alexander.warg@kernkonzept.com>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+#pragma once
+
+#include "capability.h"
+#include "types"
+#include "ipc_basics"
+/**
+ * \file
+ */
+
+namespace L4 {
+
+/// Data type for RPC opcodes
+using Opcode = int;
+
+namespace Ipc {
+
+/**
+ * Mark an argument as a output value in an RPC signature.
+ * \tparam T  The original type of the argument.
+ * \note The use of Out<> is usually not needed, because typical output data
+ * types in C++ (pointers to non-const objects or non-const references are
+ * interpreted as output values anyway. However, there are some data types,
+ * such as returned capabilities that can be marked as such by using Out<>.
+ */
+template<typename T> struct L4_EXPORT Out;
+
+
+/**
+ * Mark an argument as in-out argument.
+ * \tparam T  The original argument type, usually a pointer or a reference.
+ *
+ * In_out<> is used when an otherwise output-only value shall also be used as
+ * input value.
+ */
+template<typename T> struct  L4_EXPORT In_out
+{
+  T v;
+  In_out() {}
+  In_out(T v) : v(v) {}
+  operator T () const { return v; }
+  operator T & () { return v; }
+};
+
+namespace Msg {
+
+template<typename A> struct Elem< In_out<A *> > : Elem<A *>
+{
+  static constexpr bool Is_input = true;
+  static constexpr bool Is_output = true;
+};
+
+template<typename A>
+struct Is_valid_rpc_type< In_out<A *> > : Is_valid_rpc_type<A *> {};
+template<typename A>
+struct Is_valid_rpc_type< In_out<A const *> > : L4::Types::False {};
+
+template<typename A>
+struct Is_valid_rpc_type< In_out<A &> > : L4::Types::False {};
+
+// Value types don't make sense for output.
+template<typename A>
+struct Is_valid_rpc_type< In_out<A> > : L4::Types::False {};
+
+}
+
+
+/**
+ * Attribute for defining an optional RPC argument.
+ *
+ * \attention Do not use in new code. It is solely used for the implementation
+ *            of some legacy message formats and should generally not be needed
+ *            for the definition of ordinary interfaces.
+ */
+template<typename T> struct L4_EXPORT Opt
+{
+  T _value{};          ///< The value
+  bool _valid = false; ///< True if the optional argument is present, false else
+
+  /// Make an absent optional argument
+  Opt() noexcept = default;
+
+  /// Make a present optional argument with the given value
+  Opt(T value) noexcept : _value(value), _valid(true) {}
+
+  /// Assign a value to the optional argument (makes the argument present)
+  Opt &operator = (T value) noexcept
+  {
+    this->_value = value;
+    this->_valid = true;
+    return *this;
+  }
+
+  /// Set the argument to present or absent
+  void set_valid(bool valid = true) noexcept { _valid = valid; }
+
+  /// Get the pointer to the value
+  T *operator -> () noexcept { return &this->_value; }
+  /// Get the const pointer to the value
+  T const *operator -> () const noexcept { return &this->_value; }
+  /// Get the value
+  T const &value() const noexcept { return this->_value; }
+  /// Get the value
+  T &value() noexcept { return this->_value; }
+  /// Get true if present, false if not
+  bool is_valid() const noexcept { return this->_valid; }
+};
+
+namespace Msg {
+
+template<typename T> struct Elem< Opt<T &> > : Elem<T &>
+{
+  static constexpr bool Is_optional = true;
+  using svr_arg_type = Opt<typename Elem<T &>::svr_type> &;
+  using svr_type = Opt<typename Elem<T &>::svr_type>;
+};
+
+template<typename T> struct Elem< Opt<T *> > : Elem<T *>
+{
+  static constexpr bool Is_optional = true;
+  using svr_arg_type = Opt<typename Elem<T *>::svr_type> &;
+  using svr_type = Opt<typename Elem<T *>::svr_type>;
+};
+
+template<typename T> struct Elem< Opt<T> > : Elem<T>
+{
+  static constexpr bool Is_optional = true;
+  using arg_type = Opt<T>;
+};
+
+template<typename T> struct Elem< Opt<T const *> > : Elem<T const *>
+{
+  static constexpr bool Is_optional = true;
+  using arg_type = Opt<T const *>;
+};
+
+template<typename T>
+struct Is_valid_rpc_type< Opt<T const &> > : L4::Types::False {};
+
+// This specialization is only used for optional input arguments. Optional
+// output arguments use a plain `T &` or `T *` on the client side. If the
+// argument is not present, it stays default constructed.
+template<typename T>
+struct Clnt_val_ops<Opt<T>>
+{
+  using Native = Detail::_Clnt_val_ops<T>;
+  using Plain = Detail::_Plain<T>;
+
+  static int to_msg_data(char *msg, unsigned offset, unsigned limit,
+                         Opt<T> const &arg) noexcept
+  {
+    if (arg.is_valid())
+      return Native::to_msg_data(msg, offset, limit, Plain::deref(arg.value()));
+    return offset;
+  }
+
+  static int to_msg_items(char *msg, unsigned offset, unsigned limit,
+                          Opt<T> const &arg) noexcept
+  {
+    if (arg.is_valid())
+      return Native::to_msg_items(msg, offset, limit,
+                                  Plain::deref(arg.value()));
+    return offset;
+  }
+
+  // No to_msg_* methods. They are never called because optional output
+  // arguments don't use the Opt<> type on the client side (see Elem<Opt<...>>
+  // above). Likewise, intentionally left without to_msg_buffers(). Buffer
+  // items are not supported because they are client side output arguments.
+};
+
+// This specialization is only used for optional output arguments. Optional
+// input arguments use a plain `T` on the server side. If the argument is not
+// present, it stays default constructed.
+template<typename T>
+struct Svr_val_ops<Opt<T>>
+{
+  using Native = Svr_val_ops<T>;
+
+  // Intentinally without to_svr_data() and to_svr_items(). They are never
+  // called. Optional input arguments don't use the Opt<> type on the server
+  // side. See Elem<Opt<...>> above.
+
+  static int reserve_data(char *msg, unsigned offset, unsigned limit,
+                          Opt<T> &arg) noexcept
+  {
+    return Native::reserve_data(msg, offset, limit, arg.value());
+  }
+
+  static int from_svr_data(char *msg, unsigned offset, unsigned limit,
+                           Opt<T> const &arg) noexcept
+  {
+    if (arg.is_valid())
+      return Native::from_svr_data(msg, offset, limit, arg.value());
+    return offset;
+  }
+
+  static int from_svr_items(char *msg, unsigned offset, unsigned limit,
+                            Opt<T> const &arg) noexcept
+  {
+    if (arg.is_valid())
+      return Native::from_svr_items(msg, offset, limit, arg.value());
+    return offset;
+  }
+};
+
+}
+
+/**
+ * \brief A receive item for receiving a single object capability.
+ *
+ * This class is the main abstraction for receiving object capabilities
+ * via Ipc::Istream. To receive an object capability, an instance of Small_buf
+ * that refers to an empty capability slot must be inserted into the
+ * Ipc::Istream before the receive operation.
+ *
+ * In an RPC interface, a Small_buf must be combined with a Snd_fpage output
+ * argument. The Small_buf argument is removed from the server function
+ * signature. Instead, the adjacent Snd_fpage output argument is used by the
+ * server function to send the capability. On the client side, the caller can
+ * check the Snd_fpage output argument what has been received. See the
+ * following example:
+ *
+ * ~~~~~~{.cpp}
+ * L4_RPC(l4_ret_t, test, (L4::Ipc::Small_buf cap, L4::Ipc::Snd_fpage &snd_cap));
+ * ~~~~~~
+ */
+class  L4_EXPORT Small_buf
+{
+public:
+  /**
+   * Create a receive item from a C++ cap.
+   *
+   * \param cap   Capability slot where to save the capability.
+   * \param flags Receive buffer flags, see #l4_msg_item_consts_t.
+   *              #L4_RCV_ITEM_SINGLE_CAP will always be set.
+   */
+  explicit Small_buf(L4::Cap<void> cap, unsigned long flags = 0) noexcept
+  : _data(cap.cap() | L4_RCV_ITEM_SINGLE_CAP | flags) {}
+
+  /**
+   * Create a receive item from a C cap.
+   * \copydetails Small_buf
+   */
+  explicit Small_buf(l4_cap_idx_t cap, unsigned long flags = 0) noexcept
+  : _data(cap | L4_RCV_ITEM_SINGLE_CAP | flags) {}
+
+  /// Return the raw data.
+  l4_umword_t raw() const noexcept { return _data; }
+private:
+  l4_umword_t _data;
+};
+
+/**
+ * Generic RPC base for typed message items.
+ */
+class L4_EXPORT Gen_fpage
+{
+public:
+  /// Type of mapping object, see #L4_fpage_type.
+  enum Type
+  {
+    Special = L4_FPAGE_SPECIAL << 4,  ///< \copydoc L4_FPAGE_SPECIAL
+    Memory  = L4_FPAGE_MEMORY  << 4,  ///< \copydoc L4_FPAGE_MEMORY
+    Io      = L4_FPAGE_IO      << 4,  ///< \copydoc L4_FPAGE_IO
+    Obj     = L4_FPAGE_OBJ     << 4   ///< \copydoc L4_FPAGE_OBJ
+  };
+
+  /// Construct from raw values.
+  Gen_fpage(l4_umword_t base, l4_umword_t data) noexcept
+  : _base(base), _data(data)
+  {}
+
+  /// Return the raw flexpage descriptor.
+  l4_umword_t data() const noexcept { return _data; }
+  /// Return the raw base descriptor.
+  l4_umword_t base_x() const noexcept { return _base; }
+
+protected:
+  l4_umword_t _base;
+  l4_umword_t _data;
+};
+
+/**
+ * Send item or return item.
+ *
+ * This class represents a typed message item in the message registers of the
+ * UTCB. If it is provided by the sender, then it is a *send item*. If it is
+ * provided by the kernel during IPC, it is a *return item*.
+ *
+ * Note that some members are dedicated for send items only or return items
+ * only.
+ */
+class Snd_fpage : public Gen_fpage
+{
+public:
+  /// *(Defined for send items only.)*
+  /// Kind of mapping.
+  enum Map_type
+  {
+    Map   = L4_MAP_ITEM_MAP,    ///< \copydoc L4_MAP_ITEM_MAP
+    Grant = L4_MAP_ITEM_GRANT,  ///< \copydoc L4_MAP_ITEM_GRANT
+  };
+
+  /// *(Defined for memory send items only.)*
+  /// Caching options, see #l4_fpage_cacheability_opt_t.
+  enum Cacheopt
+  {
+    None     = 0,                          ///< Copy options from sender.
+    Cached   = L4_FPAGE_CACHEABLE   << 4,  ///< \copybrief L4_FPAGE_CACHEABLE
+    Buffered = L4_FPAGE_BUFFERABLE  << 4,  ///< \copybrief L4_FPAGE_BUFFERABLE
+    Uncached = L4_FPAGE_UNCACHEABLE << 4   ///< \copybrief L4_FPAGE_UNCACHEABLE
+  };
+
+  /// Specify if the following item is associated with the same receive item as
+  /// this one, see #L4_ITEM_CONT.
+  enum Continue
+  {
+    Single   = 0,             ///< Inverse of #Compound.
+    Last     = 0,             ///< Inverse of #More.
+    More     = L4_ITEM_CONT,  ///< Alias for #Compound.
+    Compound = L4_ITEM_CONT,  ///< \copydoc L4_ITEM_CONT
+  };
+
+  /// Construct from raw values.
+  Snd_fpage(l4_umword_t base = 0, l4_umword_t data = 0) noexcept
+  : Gen_fpage(base, data)
+  {}
+
+  /**
+   * Construct a send item for the memory space.
+   *
+   * \param fp        Memory flexpage defining which range and kind of
+   *                  capabilities shall be sent (see l4_fpage()).
+   * \param snd_base  Position in receive window in case it has a different size
+   *                  than `fp`.
+   * \param map_type  See #Map_type.
+   * \param cache     See #Cacheopt.
+   * \param cont      See #Continue.
+   */
+  Snd_fpage(l4_fpage_t const &fp, l4_addr_t snd_base = 0,
+            Map_type map_type = Map,
+            Cacheopt cache = None, Continue cont = Last) noexcept
+  : Gen_fpage(L4_ITEM_MAP | (snd_base & (~0UL << 12)) | l4_umword_t(map_type)
+                | l4_umword_t(cache) | l4_umword_t(cont),
+              fp.raw)
+  {}
+
+  /**
+   * Construct a send item for the object space.
+   *
+   * \param cap       Capability to be sent.
+   * \param rights    Permissions to be transferred. See #L4_cap_fpage_rights
+   *                  and \ref L4_obj_fpage_ctl.
+   * \param map_type  See #Map_type.
+   */
+  Snd_fpage(L4::Cap<void> cap, unsigned rights, Map_type map_type = Map) noexcept
+  : Gen_fpage(L4_ITEM_MAP | l4_umword_t(map_type) | (rights & 0xf0),
+              cap.fpage(rights).raw)
+  {}
+
+  /**
+   * Construct a send item for the object space.
+   *
+   * \param base      Start of flexpage (see l4_obj_fpage()).
+   * \param order     Log₂ size of flexpage (see l4_obj_fpage()).
+   * \param rights    Permissions of flexpage (see l4_obj_fpage()).
+   * \param snd_base  Position in receive window in case it has a different size
+   *                  than `1 << order`.
+   * \param map_type  See #Map_type.
+   * \param cont      See #Continue.
+   */
+  static Snd_fpage obj(l4_cap_idx_t base, int order,
+                       unsigned char rights,
+                       l4_addr_t snd_base = 0,
+                       Map_type map_type = Map,
+                       Continue cont = Last) noexcept
+  {
+    return Snd_fpage(l4_obj_fpage(base, order, rights), snd_base,
+                     map_type, None, cont);
+  }
+
+  /**
+   * Construct a send item for the memory space.
+   *
+   * \param base      Start of flexpage (see l4_fpage()).
+   * \param order     Log₂ size of flexpage (see l4_fpage()).
+   * \param rights    Permissions of flexpage (see l4_fpage()).
+   * \param snd_base  Position in receive window in case it has a different size
+   *                  than `1 << order`.
+   * \param map_type  See #Map_type.
+   * \param cache     See #Cacheopt.
+   * \param cont      See #Continue.
+   */
+  static Snd_fpage mem(l4_addr_t base, int order,
+                       unsigned char rights,
+                       l4_addr_t snd_base = 0,
+                       Map_type map_type = Map,
+                       Cacheopt cache = None, Continue cont = Last) noexcept
+  {
+    return Snd_fpage(l4_fpage(base, order, rights), snd_base, map_type, cache,
+                     cont);
+  }
+
+  /**
+   * Construct a send item for the I/O port space.
+   *
+   * \param base      Start of flexpage (see l4_iofpage()).
+   * \param order     Log₂ size of flexpage (see l4_iofpage()).
+   * \param rights    Permissions of flexpage (see #L4_fpage_rights).
+   * \param snd_base  Position in receive window in case it has a different size
+   *                  than `1 << order`.
+   * \param map_type  See #Map_type.
+   * \param cont      See #Continue.
+   */
+  static Snd_fpage io(unsigned long base, int order,
+                      unsigned char rights,
+                      l4_addr_t snd_base = 0,
+                      Map_type map_type = Map,
+                      Continue cont = Last) noexcept
+  {
+    return Snd_fpage(l4_fpage_set_rights(l4_iofpage(base, order), rights),
+                     snd_base, map_type, None, cont);
+  }
+
+  /// *(Defined only if send item or if local_id_received() is true.)*
+  /// Get log₂ size.
+  unsigned order() const noexcept { return (_data >> 6) & 0x3f; }
+
+  /// *(Defined only if send item or if local_id_received() is true.)*
+  /// Get log₂ size.
+  unsigned snd_order() const noexcept { return (_data >> 6) & 0x3f; }
+
+  /// *(Defined for return items only.)*
+  /// Get log₂ size.
+  unsigned rcv_order() const noexcept { return (_base >> 6) & 0x3f; }
+
+  /// *(Defined only if send item or if local_id_received() is true.)*
+  /// Get the start of the item (i.e., the start of its flexpage).
+  l4_addr_t base() const noexcept { return _data & (~0UL << 12); }
+
+  /// Get the position in receive window for the case that this item has a
+  /// different size than the corresponding receive item.
+  l4_addr_t snd_base() const noexcept { return _base & (~0UL << 12); }
+
+  /// Set the position in receive window for the case that this item has a
+  /// different size than the corresponding receive item.
+  void snd_base(l4_addr_t b) noexcept { _base = (_base & ~(~0UL << 12)) | (b & (~0UL << 12)); }
+
+  /// Check if the capability is valid.
+  bool is_valid() const noexcept { return _base & L4_ITEM_MAP; }
+
+  /**
+   * *(Defined for return items only.)*
+   * Check if at least one object capability has been mapped for this item.
+   *
+   * The capabilities themselves can then be retrieved from the cap slots that
+   * have been provided in the receive operation.
+   *
+   * \note If this function returns `true` and the receive window covers more
+   *       than one capability slot, then it is not possible to determine which
+   *       slots actually got capabilities mapped from the sender.
+   *
+   * \note If the received capabilities do not have type object (see
+   *       #L4_FPAGE_OBJ), then this function returns `false`.
+   */
+  bool cap_received() const noexcept { return (_base & 0x3e) == 0x38; }
+  /**
+   * *(Defined for return items only.)*
+   * Check if an IPC gate label has been received instead of a mapping.
+   *
+   * If the #L4_RCV_ITEM_LOCAL_ID flag has been set by the receiver, the
+   * conditions for local_id_received() do not apply, the sender sent an IPC
+   * gate capability, and the receiving thread is in the same task as the thread
+   * that is attached to the IPC gate, then no mapping is done for this item and
+   * only the bitwise OR (`|`) of the label of the IPC gate and the special and
+   * write permission (#L4_CAP_FPAGE_S and #L4_CAP_FPAGE_W) that would have been
+   * mapped is received.
+   *
+   * The bitwise OR of the label and the permissions can be retrieved with
+   * Gen_fpage::data().
+   */
+  bool id_received() const noexcept { return (_base & 0x3e) == 0x3c; }
+  /**
+   * *(Defined for return items only.)*
+   * Check if a raw object flexpage has been received instead of a mapping.
+   *
+   * If the #L4_RCV_ITEM_LOCAL_ID flag has been set by the receiver, and sender
+   * and receiver are in the same task, then no mapping is done for this item
+   * and only the raw flexpage (#l4_fpage_t) is received.
+   *
+   * This function checks if this is the case and if it is an object flexpage.
+   *
+   * The flexpage can be retrieved with Gen_fpage::data().
+   *
+   * \note If a raw flexpage was received, but it does not have type object (see
+   *       #L4_FPAGE_OBJ), then this function returns `false`.
+   */
+  bool local_id_received() const noexcept { return (_base & 0x3e) == 0x3e; }
+  /**
+   * Check if the item has the compound bit set, see #Continue.
+   *
+   * A set compound bit means the next message item of the same type
+   * will be mapped to the same receive buffer as this message item.
+   */
+  bool is_compound() const noexcept { return _base & 1; }
+};
+
+/**
+ * Non-small receive item.
+ *
+ * This class represents a non-small receive item. A receive item is a message
+ * item in the buffer registers of the UTCB of the receiver (see l4_utcb_br()).
+ *
+ * In an RPC interface, a Rcv_fpage must be combined with a Snd_fpage output
+ * argument. The Rcv_fpage argument is removed from the server function
+ * signature. Instead, the adjacent Snd_fpage output argument is used by the
+ * server function to send the capability. On the client side, the caller can
+ * check the Snd_fpage output argument what has been received. See the
+ * following example:
+ *
+ * ~~~~~~{.cpp}
+ * L4_RPC(l4_ret_t, test, (L4::Ipc::Rcv_fpage fp, L4::Ipc::Snd_fpage &snd_fp));
+ * ~~~~~~
+ */
+class Rcv_fpage : public Gen_fpage
+{
+public:
+  /**
+   * Construct a void receive item.
+   */
+  Rcv_fpage() noexcept : Gen_fpage(0, 0), _rcv_task(L4_INVALID_CAP) {}
+
+  /**
+   * Construct a non-small receive item.
+   *
+   * \param fp        Flexpage defining where and which kind of capabilities may
+   *                  be received.
+   * \param snd_base  Reserved; should be zero.
+   * \param rcv_task  Optional destination task for received capabilities. If
+   *                  invalid, capabilities are received in the invoking task.
+   */
+  Rcv_fpage(l4_fpage_t const &fp, l4_addr_t snd_base = 0,
+            l4_cap_idx_t rcv_task = L4_INVALID_CAP) noexcept
+  : Gen_fpage(L4_ITEM_MAP | (snd_base & (~0UL << 12))
+               | (l4_is_valid_cap(rcv_task) ? L4_RCV_ITEM_FORWARD_MAPPINGS : 0),
+              fp.raw),
+    _rcv_task(rcv_task)
+  {}
+
+  /**
+   * Construct a non-small receive item for the object space.
+   *
+   * \param base      Start of flexpage (see l4_obj_fpage()).
+   * \param order     Log₂ size of flexpage (see l4_obj_fpage()).
+   * \param snd_base  Reserved; should be zero.
+   * \param rcv_task  Optional destination task for received capabilities. If
+   *                  invalid, capabilities are received in the invoking task.
+   */
+  static Rcv_fpage obj(l4_cap_idx_t base, int order, l4_addr_t snd_base = 0,
+                      L4::Cap<void> rcv_task = L4::Cap<void>::Invalid) noexcept
+  {
+    return Rcv_fpage(l4_obj_fpage(base, order, 0), snd_base,
+                     rcv_task.cap());
+  }
+
+  /**
+   * Construct a receive item for the memory space.
+   *
+   * \param base      Start of flexpage (see l4_fpage()).
+   * \param order     Log₂ size of flexpage (see l4_fpage()).
+   * \param snd_base  Reserved; should be zero.
+   * \param rcv_task  Optional destination task for received capabilities. If
+   *                  invalid, capabilities are received in the invoking task.
+   */
+  static Rcv_fpage mem(l4_addr_t base, int order, l4_addr_t snd_base = 0,
+                       L4::Cap<void> rcv_task = L4::Cap<void>::Invalid) noexcept
+  {
+    return Rcv_fpage(l4_fpage(base, order, 0), snd_base, rcv_task.cap());
+  }
+
+  /**
+   * Construct a receive item for the I/O port space.
+   *
+   * \param base      Start of flexpage (see l4_iofpage()).
+   * \param order     Log₂ size of flexpage (see l4_iofpage()).
+   * \param snd_base  Reserved; should be zero.
+   * \param rcv_task  Optional destination task for received capabilities. If
+   *                  invalid, capabilities are received in the invoking task.
+   */
+  static Rcv_fpage io(unsigned long base, int order, l4_addr_t snd_base = 0,
+                      L4::Cap<void> rcv_task = L4::Cap<void>::Invalid) noexcept
+  {
+    return Rcv_fpage(l4_iofpage(base, order), snd_base, rcv_task.cap());
+  }
+
+  /**
+   * Get the capability index of the destination task for received capabilities.
+   *
+   * Only relevant if forward_mappings() is true.
+   */
+  l4_cap_idx_t rcv_task() const { return _rcv_task; }
+
+  /**
+   * Check if rcv_task() shall be used as destination for received capabilities.
+   */
+  bool forward_mappings() const noexcept
+  { return _base & L4_RCV_ITEM_FORWARD_MAPPINGS; }
+
+protected:
+  l4_cap_idx_t _rcv_task;
+};
+
+
+namespace Msg {
+
+template<>
+struct Clnt_val_ops<L4::Ipc::Snd_fpage>
+  : Clnt_noops<L4::Ipc::Snd_fpage>
+{
+  static int to_msg_items(char *msg, unsigned offset, unsigned limit,
+                          L4::Ipc::Snd_fpage const &arg) noexcept
+  { return msg_add<L4::Ipc::Snd_fpage>(msg, offset, limit, arg); }
+
+  static int from_msg_items(char *msg, unsigned offset, unsigned limit,
+                            L4::Ipc::Snd_fpage &arg) noexcept
+  { return msg_get<L4::Ipc::Snd_fpage>(msg, offset, limit, arg); }
+};
+
+template<>
+struct Svr_val_ops<L4::Ipc::Snd_fpage>
+  : Svr_noops<L4::Ipc::Snd_fpage>
+{
+  static int to_svr_items(char *msg, unsigned offset, unsigned limit,
+                          L4::Ipc::Snd_fpage &arg) noexcept
+  { return msg_get<L4::Ipc::Snd_fpage>(msg, offset, limit, arg); }
+
+  static int from_svr_items(char *msg, unsigned offset, unsigned limit,
+                            L4::Ipc::Snd_fpage const &arg) noexcept
+  { return msg_add(msg, offset, limit, arg); }
+};
+
+// Rcv_fpage are special buffer items. They are invisible on the server side
+// and must be passed literally to setup the client receive buffers.
+template<> struct Is_valid_rpc_type<L4::Ipc::Rcv_fpage *> : L4::Types::False {};
+template<> struct Is_valid_rpc_type<L4::Ipc::Rcv_fpage &> : L4::Types::False {};
+
+template<>
+struct Clnt_val_ops<L4::Ipc::Rcv_fpage>
+  : Clnt_noops<L4::Ipc::Rcv_fpage>
+{
+  static int to_msg_buffers(char *brs, unsigned offs, unsigned limit,
+                            L4::Ipc::Rcv_fpage const &arg) noexcept
+  {
+    offs = align_to<l4_umword_t>(offs);
+    unsigned words = arg.forward_mappings() ? 3 : 2;
+    if (L4_UNLIKELY(!check_size<l4_umword_t>(offs, limit, words)))
+      return -L4_EMSGTOOLONG;
+    auto *buf = reinterpret_cast<l4_umword_t*>(brs + offs);
+    *buf++ = arg.base_x();
+    *buf++ = arg.data();
+    if (arg.forward_mappings())
+      *buf++ = arg.rcv_task();
+    return offs + sizeof(l4_umword_t) * words;
+  }
+};
+
+
+// Remove receive buffers from server-side arguments
+template<> struct Elem<L4::Ipc::Rcv_fpage>
+{
+  using arg_type = L4::Ipc::Rcv_fpage;
+  using svr_type = void;
+  using svr_arg_type = void;
+  static constexpr bool Is_optional = false;
+  static constexpr bool Is_input = false;
+  static constexpr bool Is_output = true;
+};
+
+// Small_buf are special buffer items. They are invisible on the server side
+// and must be passed literally to setup the client receive buffers.
+template<> struct Is_valid_rpc_type<L4::Ipc::Small_buf *> : L4::Types::False {};
+template<> struct Is_valid_rpc_type<L4::Ipc::Small_buf &> : L4::Types::False {};
+
+template<>
+struct Clnt_val_ops<L4::Ipc::Small_buf>
+  : Clnt_noops<L4::Ipc::Small_buf>
+{
+  static int to_msg_buffers(char *brs, unsigned offs, unsigned limit,
+                            L4::Ipc::Small_buf const &arg) noexcept
+  { return msg_add<L4::Ipc::Small_buf>(brs, offs, limit, arg); }
+};
+
+// Remove receive buffers from server-side arguments
+template<> struct Elem<L4::Ipc::Small_buf>
+{
+  using arg_type = L4::Ipc::Small_buf;
+  using svr_type = void;
+  using svr_arg_type = void;
+  static constexpr bool Is_optional = false;
+  static constexpr bool Is_input = false;
+  static constexpr bool Is_output = true;
+};
+
+} // namespace Msg
+
+// L4::Cap<> handling
+
+/**
+ * Capability type for RPC interfaces (see `L4::Cap<T>`).
+ * \tparam T  type of the interface referenced by the capability.
+ *
+ * In contrast to `L4::Cap<T>` this type additionally stores a rights mask
+ * that shall be used when the capability is transferred to the receiver. This
+ * allows to apply restrictions to the transferred capability in the form of
+ * a subset of the rights possessed by the sender.
+ * \sa L4::Ipc::make_cap()
+ */
+template<typename T> class Cap
+{
+  template<typename O> friend class Cap;
+  l4_umword_t _cap_n_rights;
+
+public:
+  enum
+  {
+    /**
+     * Mask for rights bits stored internally.
+     *
+     * #L4_FPAGE_RIGHTS_MASK | #L4_FPAGE_C_NO_REF_CNT | #L4_FPAGE_C_OBJ_RIGHTS).
+     */
+    Rights_mask = 0xff,
+
+    /**
+     * Mask for map vs. grant operation.
+     */
+    Map_type_mask  = 0x100,
+
+    /**
+     * Mask for significant capability bits.
+     * (incl. the invalid bit to support invalid caps)
+     */
+    Cap_mask    = L4_CAP_MASK
+  };
+
+  /// Kind of mapping.
+  enum Map_type
+  {
+    /// Map capability in RPC operation.
+    Map   = 0,
+    /// Grant capability in RPC operation. \see #L4_MAP_ITEM_GRANT
+    Grant = 0x100,
+  };
+
+  /// Make copy with conversion
+  template<typename O>
+  Cap(Cap<O> const &o) noexcept : _cap_n_rights(o._cap_n_rights)
+  {
+    L4::Cap<T>::template check_convertible_from<O>();
+  }
+
+  /// Make a Cap from L4::Cap<T>, with minimal rights
+  Cap(L4::Cap<T> cap) noexcept
+  : _cap_n_rights((cap.cap() & Cap_mask) | (cap ? L4_CAP_FPAGE_R : 0))
+  {}
+
+  /// Make IPC Cap from L4::Cap with conversion (and minimal rights).
+  template<typename O>
+  Cap(L4::Cap<O> cap) noexcept
+  : _cap_n_rights((cap.cap() & Cap_mask) | (cap ? L4_CAP_FPAGE_R : 0))
+  {
+    L4::Cap<T>::template check_convertible_from<O>();
+  }
+
+  /// Make an invalid cap
+  Cap() noexcept : _cap_n_rights(L4_INVALID_CAP) {}
+
+  /**
+   *  Make a Cap from L4::Cap<T> with the given rights.
+   *
+   *  \param cap    Capability to be sent.
+   *  \param rights Rights to be sent. Consists of #L4_fpage_rights
+   *                and \ref L4_obj_fpage_ctl.
+   */
+  Cap(L4::Cap<T> cap, unsigned char rights) noexcept
+  : _cap_n_rights((cap.cap() & Cap_mask) | (rights & Rights_mask)) {}
+
+  /**
+   *  Make a Cap from L4::Cap<T> with the given rights and map type.
+   *
+   *  \param cap       Capability to be sent.
+   *  \param rights    Rights to be sent. Consists of #L4_fpage_rights
+   *                   and \ref L4_obj_fpage_ctl.
+   *  \param map_type  Indicate if capability is mapped or granted.
+   */
+  Cap(L4::Cap<T> cap, unsigned char rights, Map_type map_type) noexcept
+  : _cap_n_rights((cap.cap() & Cap_mask) | (rights & Rights_mask)
+                  | (static_cast<l4_umword_t>(map_type) & Map_type_mask))
+  {}
+
+  /**
+   * Create an IPC capability from a C capability index plus rights.
+   * \param c  C capability index with the lowest 8 bits used as rights
+   *           for the map operation (see #L4_fpage_rights).
+   */
+  static Cap from_ci(l4_cap_idx_t c) noexcept
+  { return Cap(L4::Cap<T>(c & Cap_mask), c & Rights_mask); }
+
+  /// Return the L4::Cap<T> of this Cap
+  L4::Cap<T> cap() const noexcept
+  { return L4::Cap<T>(_cap_n_rights & Cap_mask); }
+
+  /// Return the rights bits stored in this IPC cap.
+  unsigned rights() const noexcept
+  { return _cap_n_rights & Rights_mask; }
+
+  Map_type map_type() const noexcept
+  { return static_cast<Map_type>(_cap_n_rights & Map_type_mask); }
+
+  /// Return the send flexpage for this Cap (see #l4_fpage_t)
+  L4::Ipc::Snd_fpage fpage() const noexcept
+  {
+    return L4::Ipc::Snd_fpage(cap(), rights(), map_type() == Map
+                                               ? Snd_fpage::Map
+                                               : Snd_fpage::Grant);
+  }
+
+  /// Return true if this Cap is valid
+  bool is_valid() const noexcept
+  { return !(_cap_n_rights & L4_INVALID_CAP_BIT); }
+};
+
+/**
+ * Make an L4::Ipc::Cap<T> for the given capability and rights.
+ * \tparam T       (IMPLICIT) type of the referenced interface
+ * \param  cap     source capability (L4::Cap<T>)
+ * \param  rights  rights mask that shall be applied on transfer.
+ */
+template<typename T>
+Cap<T> make_cap(L4::Cap<T> cap, unsigned rights) noexcept
+{ return Cap<T>(cap, rights); }
+
+/**
+ * Make an L4::Ipc::Cap<T> for the given capability with
+ * #L4_CAP_FPAGE_RW rights.
+ * \tparam T       (IMPLICIT) type of the referenced interface
+ * \param  cap     source capability (L4::Cap<T>)
+ */
+template<typename T>
+Cap<T> make_cap_rw(L4::Cap<T> cap) noexcept
+{ return Cap<T>(cap, L4_CAP_FPAGE_RW); }
+
+/**
+ * Make an L4::Ipc::Cap<T> for the given capability with
+ * #L4_CAP_FPAGE_RWS rights.
+ * \tparam T       (IMPLICIT) type of the referenced interface
+ * \param  cap     source capability (L4::Cap<T>)
+ */
+template<typename T>
+Cap<T> make_cap_rws(L4::Cap<T> cap) noexcept
+{ return Cap<T>(cap, L4_CAP_FPAGE_RWS); }
+
+/**
+ * Make an L4::IPC::Cap<T> for the given capability with full fpage
+ * and object-specific rights.
+ *
+ * \tparam T       (implicit) type of the referenced interface
+ * \param  cap     source capability (L4::Cap<T>)
+ *
+ * \see L4_cap_fpage_rights
+ * \see \ref L4_obj_fpage_ctl
+ *
+ * \note Full rights (including object-specific rights) are required when mapping
+ *       an IPC gate where the receiver should become the server, i.e. where
+ *       the receiver wants to call L4::Ipc_gate::bind_thread() or
+ *       L4::Ipc_gate::bind_snd_destination().
+ */
+template<typename T>
+Cap<T> make_cap_full(L4::Cap<T> cap) noexcept
+{ return Cap<T>(cap, L4_CAP_FPAGE_RWSD | L4_FPAGE_C_OBJ_RIGHTS); }
+
+/**
+ * Make an L4::IPC::Cap<T> for the given capability that shall be granted with
+ * full rights.
+ *
+ * \tparam T       (implicit) type of the referenced interface
+ * \param  cap     source capability (L4::Cap<T>)
+ *
+ * \see #L4_MAP_ITEM_GRANT
+ */
+template<typename T>
+Cap<T> make_cap_grant(L4::Cap<T> cap) noexcept
+{
+  return Cap<T>(cap, L4_CAP_FPAGE_RWSD | L4_FPAGE_C_OBJ_RIGHTS, Cap<T>::Grant);
+}
+
+// caps are special, they have an invalid representation
+template<typename T> struct L4_EXPORT Opt< Cap<T> >
+{
+  Cap<T> _value;
+  Opt() noexcept {}
+  Opt(Cap<T> value) noexcept : _value(value) {}
+  Opt(L4::Cap<T> value) noexcept : _value(value) {}
+  Opt &operator = (Cap<T> value) noexcept
+  { this->_value = value; return *this; }
+  Opt &operator = (L4::Cap<T> value) noexcept
+  { this->_value = value; return *this; }
+
+  Cap<T> value() const noexcept { return this->_value; }
+  bool is_valid() const noexcept { return this->_value.is_valid(); }
+};
+
+
+namespace Msg {
+// prohibit L4::Cap as argument
+template<typename A>
+struct Is_valid_rpc_type< L4::Cap<A> > : L4::Types::False {};
+
+template<typename A> struct Elem< Cap<A> >
+{
+  using arg_type = Cap<A>;
+  using svr_type = L4::Ipc::Snd_fpage;
+  using svr_arg_type = L4::Ipc::Snd_fpage;
+  static constexpr bool Is_optional = false;
+  static constexpr bool Is_input = true;
+  static constexpr bool Is_output = false;
+};
+
+
+template<typename A>
+struct Svr_val_ops<Cap<A>>
+  : Svr_noops<Cap<A>>
+{
+  static int from_svr_items(char *msg, unsigned offset, unsigned limit,
+                            Cap<A> const &arg) noexcept
+  {
+    if (L4_UNLIKELY(!arg.is_valid()))
+      // do not map anything
+      return msg_add(msg, offset, limit, L4::Ipc::Snd_fpage(arg.cap(), 0));
+
+    return msg_add(msg, offset, limit, arg.fpage());
+  }
+};
+
+template<typename A>
+struct Clnt_val_ops<Cap<A>> :
+  Clnt_noops< Cap<A> >
+{
+  static int to_msg_items(char *msg, unsigned offset, unsigned limit,
+                          Cap<A> const &arg) noexcept
+  {
+    // passing an invalid cap as mandatory argument is an error
+    if (L4_UNLIKELY(!arg.is_valid()))
+      return -L4_EMSGMISSARG;
+
+    return msg_add(msg, offset, limit, arg.fpage());
+  }
+};
+
+template<typename A>
+struct Elem<Out<L4::Cap<A> > >
+{
+  using arg_type = L4::Cap<A>;
+  using svr_type = Ipc::Cap<A>;
+  using svr_arg_type = svr_type &;
+  static constexpr bool Is_optional = false;
+  static constexpr bool Is_input = false;
+  static constexpr bool Is_output = true;
+};
+
+template<typename A>
+struct Clnt_val_ops< L4::Cap<A> > :
+  Clnt_noops< L4::Cap<A> >
+{
+  static int to_msg_buffers(char *brs, unsigned offset, unsigned limit,
+                            L4::Cap<A> const &arg) noexcept
+  {
+    if (L4_UNLIKELY(!arg.is_valid()))
+      return -L4_EMSGMISSARG; // no buffer inserted
+    return msg_add(brs, offset, limit, Small_buf(arg));
+  }
+};
+
+// prohibit a UTCB pointer as normal RPC argument
+template<> struct Is_valid_rpc_type<l4_utcb_t *> : L4::Types::False {};
+
+} // namespace Msg
+} // namespace Ipc
+} // namespace L4

@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "architecture": "aarch64",
+  "source_sha256": "06d6f82f60cd3e4defe687f7a9d182acdafca3cf914b432c3fbe848295794e9e",
+  "registers": [
+    {
+      "name": "CNTFRQ_EL0",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 3,
+        "CRn": 14,
+        "CRm": 0,
+        "op2": 0
+      },
+      "fields": [
+        {
+          "name": "ClockFreq",
+          "offset": 0,
+          "width": 32
+        },
+        {
+          "reserved": "RES0",
+          "offset": 32,
+          "width": 32
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "CNTPCT_EL0",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "isb",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 3,
+        "CRn": 14,
+        "CRm": 0,
+        "op2": 1
+      },
+      "fields": [
+        {
+          "name": "PhysicalCount",
+          "offset": 0,
+          "width": 64
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "CNTVCT_EL0",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "isb",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 3,
+        "CRn": 14,
+        "CRm": 0,
+        "op2": 2
+      },
+      "fields": [
+        {
+          "name": "VirtualCount",
+          "offset": 0,
+          "width": 64
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    }
+  ]
+}

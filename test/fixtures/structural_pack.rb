@@ -1,0 +1,114 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require_relative 'pack_root'
+require_relative 'manifest_context'
+require_relative '../../tools/lib/erx/elf_plan'
+require_relative '../../tools/lib/erx/pack_wire'
+require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/pack_tools'
+require_relative '../../tools/lib/erx/toolchain_provenance'
+
+# Test-only, fixed native-root recipe. This produces a structural wire fixture,
+# never boot admission. The executable, source closure and full archive receive
+# their real checks; M1's root-startup and policy obligations remain unsupported.
+module StructuralPackFixture
+  BUDGET = 1_048_576
+  module_function
+
+  def check_reproducible(root:, directory:, runner:, compiler: 'clang', linker: 'ld.lld')
+    directory = Erx::OutputDirectory.prepare(root: root, path: directory)
+    raise Erx::Error, 'structural reproducibility requires a clean directory' unless Dir.empty?(directory)
+    codec = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: root).schema)
+    tools = Erx::PackTools.build(root: root, owner_root: root, directory: File.join(directory, 'tools'), runner: runner,
+                                compiler: compiler, sanitizers: %w[address undefined])
+    resource = runner.run([compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
+    installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
+    external = Erx::ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/llvm-23.1.3.json'),
+                                                installation: installation)
+    first, second = %w[first second].map do |name|
+      build(root: root, directory: File.join(directory, name), codec: codec, runner: runner,
+            tools: tools, compiler: compiler, linker: linker, external: external)
+    end
+    left, right = [first, second].map { |fixture| fixture.fetch('report') }
+    identical = File.binread(left.fetch('path')) == File.binread(right.fetch('path'))
+    report = { 'kind' => 'structural_fixture_reproducibility', 'state' => identical ? 'completed' : 'failed',
+               'byte_identical' => identical, 'structure' => 'validated', 'executable' => 'validated',
+               'provenance' => 'validated', 'root_startup' => 'unsupported',
+               'policy_admission' => 'unsupported', 'child_plan_instances' => 0,
+               'first' => left, 'second' => right, 'report' => File.join(directory, 'result.json') }
+    File.write(report.fetch('report'), JSON.pretty_generate(report) + "\n")
+    raise Erx::Error, 'structural ERXPACK fixture differs across clean builds' unless identical
+    report.freeze
+  end
+
+  def build(root:, directory:, codec:, runner:, tools:, compiler:, linker:, external:)
+    directory = Erx::OutputDirectory.prepare(root: root, path: directory)
+    raise Erx::Error, 'structural fixture build requires a clean directory' unless Dir.empty?(directory)
+    native = PackRootFixture.build(root: root, directory: File.join(directory, 'native'),
+                                   codec: codec, runner: runner, compiler: compiler, linker: linker)
+    planner = Erx::ElfPlanner.new(helper: tools.fetch('planner'), runner: runner, codec: codec)
+    plan = planner.call(native.fetch('artifact'), budget: BUDGET)
+    resolver = Erx::PackProvenance.new(root: root, catalog: native.fetch('catalog'), external: external, runner: runner)
+    provenance = resolver.resolve(receipt: native.fetch('receipt'), artifact: native.fetch('artifact'),
+                                  build_kind: 'development', notice_budget: BUDGET)
+    writer = Erx::PackWire.new(codec: codec)
+    system = codec.member('entry_flags', 'system')
+    ordinary = codec.member('entry_kind', 'file')
+    rows = [
+      { 'path' => 'system/NOTICES', 'kind' => ordinary, 'flags' => system,
+        'source' => { 'kind' => 'generated', 'producer' => 'notices' } },
+      { 'path' => codec.fixed_bytes('system_manifest_path'), 'kind' => ordinary, 'flags' => system,
+        'source' => { 'kind' => 'generated', 'producer' => 'manifest' } },
+      { 'path' => 'system/root', 'kind' => codec.member('entry_kind', 'image'), 'flags' => system,
+        'source' => { 'kind' => 'artifact', 'id' => 'root',
+                      'sha256' => Digest::SHA256.file(native.fetch('artifact')).hexdigest },
+        'image' => writer.image_manifest(plan) }
+    ].sort_by { |row| row.fetch('path').b }
+    root_entry = rows.index { |row| row.fetch('path') == 'system/root' }
+    context = Erx::Manifest::Context.new(build_kind: 'development', platform: ManifestContextFixture.platform,
+                                         catalog: rows, root_entry: root_entry,
+                                         artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_entry } },
+                                         provenance: provenance)
+    source = File.binread(File.join(root, 'test/fixtures/manifest_empty.txt'))
+    structural = Erx::Manifest.structural_fixture(source: source, codec: codec, context: context)
+    unless structural.is_a?(Erx::Manifest::StructuralFixture) && !structural.is_a?(Erx::Manifest::Admitted) && structural.matches?(context)
+      raise Erx::Error, 'structural fixture is not bound to its exact catalog'
+    end
+    manifest_path = File.join(directory, 'manifest.bin')
+    notices_path = File.join(directory, 'NOTICES')
+    File.binwrite(manifest_path, structural.bytes)
+    File.binwrite(notices_path, resolver.notices(provenance, budget: BUDGET))
+    rows = rows.map do |row|
+      if row.fetch('kind') == codec.member('entry_kind', 'image')
+        row.merge('snapshot' => native.fetch('artifact'), 'size' => plan.fetch('output_size'), 'plan' => plan)
+      else
+        snapshot = row.fetch('source').fetch('producer') == 'manifest' ? manifest_path : notices_path
+        row.merge('snapshot' => snapshot, 'size' => File.size(snapshot))
+      end
+    end
+    output_path = File.join(directory, 'structural.erxpack')
+    File.open(output_path, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
+      writer.write(rows: rows, root_entry: root_entry, build_kind: 'development', output: output, budget: BUDGET)
+      output.flush
+      output.fsync
+    end
+    checked = tools.fetch('checker').run([output_path], runner: runner, name: 'check-structural-pack', deadline: 30)
+    unless File.binread(checked.fetch('log')) == "ok #{rows.size}\n"
+      raise Erx::Error, 'structural checker did not report the expected entry count'
+    end
+    report = { 'kind' => 'structural_test_fixture', 'path' => output_path,
+               'sha256' => Digest::SHA256.file(output_path).hexdigest, 'size' => File.size(output_path),
+               'structure' => 'validated', 'executable' => 'validated', 'provenance' => 'validated',
+               'root_startup' => 'unsupported', 'policy_admission' => 'unsupported',
+               'child_plan_instances' => 0, 'entries' => rows.size,
+               'manifest_sha256' => Digest::SHA256.hexdigest(structural.bytes),
+               'configuration_sha256' => Digest::SHA256.hexdigest(source),
+               'manifest' => structural.report }
+    File.write(File.join(directory, 'fixture-result.json'), JSON.pretty_generate(report) + "\n")
+    { 'report' => report.freeze, 'context' => context, 'manifest_source' => source.freeze,
+      'native' => native, 'provenance' => provenance, 'rows' => rows.freeze }.freeze
+  end
+end

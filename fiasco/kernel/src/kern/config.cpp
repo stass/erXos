@@ -1,0 +1,355 @@
+/*
+ * Global kernel configuration
+ */
+
+INTERFACE:
+
+#include <globalconfig.h>
+#include "config_tcbsize.h"
+#include "initcalls.h"
+#include "l4_types.h"
+#include "global_data.h"
+
+#if defined(__clang__)
+# define COMPILER "clang " __clang_version__
+#else
+#if defined(__GNUC__)
+# define COMPILER "gcc " __VERSION__
+#else
+# define COMPILER "Non-GCC"
+#endif
+#endif
+
+#define GREETING_COLOR_ANSI_OFF    "\033[0m"
+
+#define FIASCO_KERNEL_SUBVERSION 3
+
+class Config
+{
+public:
+
+  enum User_memory_access_type
+  {
+    No_access_user_mem = 0,
+    Access_user_mem_direct,
+    Must_access_user_mem_direct
+  };
+
+  enum Serial_input_mode
+  {
+    /// No input via UART.
+    Serial_no_input = 0,
+    /// UART is polled during timer interrupt on the boot CPU.
+    Serial_input_noirq = 1,
+    /// UART receive IRQ triggers receiving input from UART.
+    Serial_input_irq = 2,
+  };
+
+  static void init();
+  static void init_arch();
+
+  // global kernel configuration
+  enum
+  {
+    Kernel_version_id = 0x87004444U | (FIASCO_KERNEL_SUBVERSION << 16), // "DD....."
+    Kernel_prio = 0,
+    Default_prio = 1,
+
+    Warn_level = CONFIG_WARN_LEVEL,
+
+    One_shot_min_interval_us = 200,
+#ifdef CONFIG_SCHED_GRANULARITY
+    Rcu_grace_period = CONFIG_SCHED_GRANULARITY,
+#else
+    Rcu_grace_period = 1000,
+#endif
+
+    Fine_grained_cputime = TAG_ENABLED(fine_grained_cputime),
+    Stack_depth = TAG_ENABLED(stack_depth),
+    Have_frame_ptr = !TAG_ENABLED(no_frame_ptr),
+    Jdb = TAG_ENABLED(jdb),
+    Jdb_logging = TAG_ENABLED(jdb_logging),
+    Jdb_accounting = TAG_ENABLED(jdb_accounting),
+#if defined(CONFIG_MP) || defined(CONFIG_AMP)
+    Max_num_cpus = CONFIG_MP_MAX_CPUS,
+#else
+    Max_num_cpus = 1,
+#endif
+    // RCU (tick) is not necessary if there is only a single CPU in the system,
+    // or in each AMP node.
+    Need_rcu_tick = TAG_ENABLED(mp) && Config::Max_num_cpus > 1,
+    Big_endian = TAG_ENABLED(big_endian),
+    Have_mmu = TAG_ENABLED(mmu),
+    Have_mpu = !TAG_ENABLED(mmu),
+  };
+
+  static Cpu_number max_num_cpus() { return Cpu_number(Max_num_cpus); }
+
+  static Global_data<bool> kmem_descs;
+
+  static Global_data<bool> esc_hack;
+  static Global_data<unsigned> tbuf_entries;
+
+  static constexpr Order page_order()
+  { return Order(PAGE_SHIFT); }
+
+  static constexpr Bytes page_size()
+  { return Bytes(PAGE_SIZE); }
+
+  static constexpr unsigned kmem_per_cent();
+  static constexpr unsigned long kmem_max();
+
+  static constexpr unsigned long ext_vcpu_size();
+
+  static constexpr const char *kernel_warn_config_string() FIASCO_INIT;
+};
+
+#ifdef __GCC_DESTRUCTIVE_SIZE
+static_assert(Config::stable_cache_alignment >= __GCC_DESTRUCTIVE_SIZE,
+              "Stable cache alignment not sufficient");
+#endif // __GCC_DESTRUCTIVE_SIZE
+
+#define GREETING_COLOR_ANSI_TITLE  "\033[1;32m"
+#define GREETING_COLOR_ANSI_INFO   "\033[0;32m"
+
+INTERFACE[ia32 || amd64]:
+#define DISPLAY_ARCH "x86"
+
+INTERFACE[!(ia32 || amd64)]:
+#define DISPLAY_ARCH CONFIG_XARCH
+
+INTERFACE[bit64]:
+#define TARGET_WORD_LEN "64"
+
+INTERFACE[!bit64]:
+#define TARGET_WORD_LEN "32"
+
+//---------------------------------------------------------------------------
+INTERFACE [serial]:
+
+EXTENSION class Config
+{
+public:
+  static Global_data<bool> serial_esc;
+  static Global_data<int> serial_input;
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!serial]:
+
+EXTENSION class Config
+{
+public:
+  static const bool serial_esc = false;
+  static const int serial_input = Serial_no_input;
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!(ia32 || amd64) || sched_apic]:
+
+EXTENSION class Config
+{
+public:
+  static constexpr unsigned default_time_slice()
+  { return CONFIG_SCHED_DEF_TIME_SLICE * CONFIG_SCHED_GRANULARITY; }
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!one_shot_param && (!(ia32 || amd64) || sched_apic)]:
+
+EXTENSION class Config
+{
+public:
+  static constexpr unsigned scheduler_granularity()
+  { return scheduler_one_shot() ? 1U : CONFIG_SCHED_GRANULARITY; }
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!one_shot_param]:
+
+EXTENSION class Config
+{
+public:
+  static constexpr bool scheduler_one_shot()
+  { return TAG_ENABLED(one_shot); }
+
+  static constexpr unsigned scheduler_granularity_runtime()
+  { return scheduler_granularity(); }
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [one_shot_param]:
+
+#include "alternatives.h"
+
+EXTENSION class Config
+{
+public:
+  struct scheduler_one_shot : public Alternative_static_functor<scheduler_one_shot>
+  {
+    static bool probe() { return one_shot_timer; }
+  };
+
+  static unsigned scheduler_granularity()
+  { return scheduler_one_shot() ? 1UL : CONFIG_SCHED_GRANULARITY; }
+
+  /* This function must not use runtime patching because it's used in bootstrap
+   * code (in init_global_kip()) which does not perform runtime patching. */
+  static unsigned scheduler_granularity_runtime()
+  { return one_shot_timer ? 1UL : CONFIG_SCHED_GRANULARITY; }
+
+  static Global_data<bool> one_shot_timer;
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!arm]:
+
+EXTENSION class Config
+{
+public:
+  // Attention: this enum is used by the Lauterbach Trace32 OS awareness.
+  enum Ext_vcpu_info : Mword
+  {
+    Ext_vcpu_infos_offset = 0x200,
+    Ext_vcpu_state_offset = 0x400,
+  };
+};
+
+//---------------------------------------------------------------------------
+INTERFACE [!virtual_space_iface]:
+
+#define FIASCO_SPACE_VIRTUAL
+
+//---------------------------------------------------------------------------
+INTERFACE [virtual_space_iface]:
+
+#define FIASCO_SPACE_VIRTUAL virtual
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include <cstring>
+#include <cstdlib>
+#include <cstdio>
+#include "feature.h"
+#include "koptions.h"
+#include "panic.h"
+#include "std_macros.h"
+
+KIP_KERNEL_ABI_VERSION(FIASCO_STRINGIFY(FIASCO_KERNEL_SUBVERSION));
+
+// class variables
+DEFINE_GLOBAL Global_data<bool> Config::kmem_descs;
+DEFINE_GLOBAL Global_data<bool> Config::esc_hack;
+#ifdef CONFIG_SERIAL
+DEFINE_GLOBAL_CONSTINIT
+Global_data<int> Config::serial_input(Config::Serial_no_input);
+DEFINE_GLOBAL_CONSTINIT
+Global_data<bool> Config::serial_esc(false);
+#endif
+
+#ifdef CONFIG_MMU
+DEFINE_GLOBAL_CONSTINIT
+Global_data<unsigned> Config::tbuf_entries(0x20000 / sizeof(Mword));
+#else
+// The Buddy_alloc can only allocate up to 128 KiB. So far only Arm is no-MMU
+// capable and we know the size of each tbuf entry.
+DEFINE_GLOBAL_CONSTINIT
+Global_data<unsigned> Config::tbuf_entries((1U << 17) / (sizeof(Mword) * 16));
+#endif
+
+IMPLEMENT_DEFAULT constexpr
+const char *
+Config::kernel_warn_config_string()
+{
+  return nullptr;
+}
+
+IMPLEMENT FIASCO_INIT
+void
+Config::init()
+{
+  init_arch();
+
+  if (Koptions::o()->opt(Koptions::F_esc))
+    esc_hack = true;
+
+#ifdef CONFIG_SERIAL
+  if (!Koptions::o()->opt(Koptions::F_noserial))
+    {
+      if (Koptions::o()->opt(Koptions::F_serial_input)
+          || Koptions::o()->opt(Koptions::F_serial_esc))
+        serial_input = Serial_input_irq;
+
+      if constexpr (TAG_ENABLED(jdb))
+        if (Koptions::o()->opt(Koptions::F_serial_esc)
+            && !Koptions::o()->opt(Koptions::F_nojdb))
+          serial_esc = true;
+    }
+#endif
+
+  if (Koptions::o()->opt(Koptions::F_kmem_descs))
+    kmem_descs = true;
+}
+
+PUBLIC static
+unsigned long
+Config::kmem_size([[maybe_unused]] unsigned long available_size)
+{
+#ifdef CONFIG_KMEM_SIZE_AUTO
+  static_assert(kmem_per_cent() < 100, "Sanitize kmem_per_cent");
+  unsigned long alloc_size = available_size / 100U * kmem_per_cent();
+  if (alloc_size > kmem_max())
+    alloc_size = kmem_max();
+  return alloc_size;
+#else
+  return static_cast<unsigned long>(CONFIG_KMEM_SIZE_KB) << 10;
+#endif
+}
+
+IMPLEMENT_DEFAULT
+constexpr unsigned long Config::ext_vcpu_size() { return PAGE_SIZE; }
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [!64bit]:
+
+IMPLEMENT_DEFAULT inline ALWAYS_INLINE
+constexpr unsigned Config::kmem_per_cent() { return 8; }
+
+IMPLEMENT_DEFAULT inline ALWAYS_INLINE
+constexpr unsigned long Config::kmem_max() { return 60UL << 20; }
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [64bit]:
+
+IMPLEMENT_DEFAULT inline ALWAYS_INLINE
+constexpr unsigned Config::kmem_per_cent() { return 6; }
+
+IMPLEMENT_DEFAULT inline ALWAYS_INLINE
+constexpr unsigned long Config::kmem_max() { return 3328UL << 20; }
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [one_shot_param]:
+
+DEFINE_GLOBAL_CONSTINIT
+Global_data<bool> Config::one_shot_timer(false);
+
+static void one_shot_init()
+{ Config::one_shot_timer = Koptions::o()->opt(Koptions::F_oneshot_timer); }
+
+STATIC_INITIALIZER_P(one_shot_init, BOOTSTRAP_INIT_PRIO);
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [fine_grained_cputime]:
+
+KIP_KERNEL_FEATURE("fi_gr_cputime");
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [mapdb]:
+
+KIP_KERNEL_FEATURE("mapdb");
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [perf_cnt_user]:
+
+KIP_KERNEL_FEATURE("perf_cnt_user");

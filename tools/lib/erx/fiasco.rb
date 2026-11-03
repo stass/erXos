@@ -1,0 +1,360 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'digest'
+require 'fileutils'
+require 'json'
+require 'tmpdir'
+require_relative 'runner'
+require_relative 'sources'
+require_relative 'fiasco_inputs'
+require_relative 'output_directory'
+
+module Erx
+  class Fiasco
+    IMPLEMENTATION_SHA256 = Digest::SHA256.file(__FILE__).hexdigest.freeze
+    KERNEL_COMMIT = '50bbe8a981199e17865e8553a4eb02c387b339cf'
+    CORE_COMMIT = 'e2e2d5af9de7aa0e1df2a25ebadee54488fa4a49'
+    # SHA-256 of git archives with no prefix, at the full commits above.
+    KERNEL_SHA256 = '80cb4b4db43f18521b859012cb16201d62b3b541c69cdfb2f36f6fa726a8aea5'
+    CORE_SHA256 = '6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f'
+    ARCHIVES = {
+      'mk' => {
+        'commit' => '22cc26e5c971f65a1425d8cae87d793c2573528a',
+        'sha256' => '98c8b2b81391cfee4797586e150fc74bd5ba48a2decdcb18e7daa5ccc3db3097'
+      }.freeze,
+      'bootstrap' => {
+        'commit' => 'a4f4ad182c78a97a1c50098511092dd32f05c63d',
+        'sha256' => 'e6ec5fa08e6ae44ef88263428c2f5936ce0bd804b99626858a330b141e7043dc'
+      }.freeze,
+      'libfdt' => {
+        'commit' => '5756062b7067dd831b0ef7a7f841a3f63a8b8a22',
+        'sha256' => '4c5d66c202a33c3af29dc7b4315d8ec56357936db9a8a8193773c724d063392f'
+      }.freeze,
+      'drivers-frst' => {
+        'commit' => '6459d70997da1a2ad97775c8772b4a41284b0a9e',
+        'sha256' => '3eb24fe67cf4eb7968ba5379016befd3fb72977066a3708468290e9a9ca9f4ff'
+      }.freeze
+    }.freeze
+    KERNEL_EXCLUSIONS = %w[
+      src/lib/regex src/lib/simple_malloc src/lib/gcov src/lib/perfctr
+      src/kern/arm/bsp/qcom
+    ].freeze
+    CORE_PACKAGES = %w[
+      compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io
+      l4re l4re_c l4sys l4util ldscripts libc libc-headers libc-minimal
+      libc_backends libgcc libgcc-crt libgcc-headers libgcc-pure
+      libgcc_eh libgcc_eh-headers libgcc_eh-pure libpthread
+      libsigma0 libstdc++-headers libstdc++-v3 minimal_l4re sigma0
+    ].freeze
+    UART_FILES = %w[
+      Makefile Control Kconfig.L4 LICENSE.spdx README
+      include/Makefile include/io_regblock.h include/poll_timeout_counter.h
+      include/ARCH-arm64/asm_access.h
+      uart/Makefile uart/include/Makefile
+      uart/include/device.h uart/include/uart_base.h uart/include/uart_pl011.h
+      uart/src/Makefile uart/src/uart_pl011.cc
+    ].freeze
+
+    def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')))
+      @root = File.expand_path(root)
+      @runner = runner
+      @source = File.join(@root, 'fiasco')
+      @build = File.join(@root, 'build/fiasco')
+    end
+
+    # One-time import accepts explicit local caches. Normal builds only read
+    # the committed trees, and never contact a remote or inspect those caches.
+    def import_sources(kernel_repo:, core_repo:, archive_cache:)
+      raise Error, 'Fiasco source destination already exists' if File.exist?(@source)
+
+      OutputDirectory.prepare(root: @root, path: File.dirname(@source))
+      Dir.mktmpdir('.fiasco-import-', File.dirname(@source)) do |temporary|
+        stage = File.join(temporary, 'fiasco')
+        FileUtils.mkdir_p(stage)
+        identities = []
+        identities << import_git(kernel_repo, commit: KERNEL_COMMIT,
+                                 sha256: KERNEL_SHA256, name: 'kernel',
+                                 temporary: temporary, stage: stage)
+        identities << import_git(core_repo, commit: CORE_COMMIT,
+                                 sha256: CORE_SHA256, name: 'l4re-core',
+                                 temporary: temporary, stage: stage)
+        ARCHIVES.each do |name, pin|
+          identities << import_archive(name, pin: pin, cache: archive_cache,
+                                       temporary: temporary, stage: stage)
+        end
+        trim_sources(stage)
+        File.write(File.join(stage, 'IMPORTS.json'), JSON.pretty_generate(identities) + "\n")
+        File.rename(stage, @source)
+      end
+    end
+
+    def build(jobs: 4)
+      @input_catalog = nil
+      raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
+      required = %w[kernel mk l4re-core bootstrap libfdt drivers-frst]
+      raise Error, 'imported Fiasco source root must not be a symlink' if File.symlink?(@source)
+      required.each do |name|
+        path = File.join(@source, name)
+        raise Error, "missing or external imported Fiasco part: #{name}" unless File.directory?(path) && !File.symlink?(path)
+      end
+      OutputDirectory.prepare(root: @root, path: @build)
+      prepare_source_cache
+      kernel = build_kernel(jobs: jobs)
+      users = build_users(jobs: jobs)
+      build_image(kernel: kernel, users: users)
+      record_provenance
+      image_path
+    end
+
+    def image_path
+      File.join(@build, 'images/bootstrap_banner.elf')
+    end
+
+    def input_catalog
+      @input_catalog || raise(Error, 'Fiasco build has not produced checked source inputs')
+    end
+
+    private
+
+    def record_provenance
+      require_relative 'fiasco_provenance'
+      auditor = FiascoProvenance.new(root: @root, runner: @runner,
+                                     external: FiascoProvenance.external_registry(root: @root))
+      auditor.capture_construction
+      report = auditor.audit
+      auditor.record_receipt(report)
+      @input_catalog = auditor.input_catalog
+    end
+
+    # Inherited dependency stamps do not cover every generator's code. A
+    # source change therefore discards that component's derived outputs;
+    # ordinary incremental work is reused only for the same source bytes.
+    def prepare_source_cache
+      @inputs = FiascoInputs.new(root: @root)
+      captured = @inputs.prepare
+      expected = {
+        'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'kernel')),
+        'users' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'users'))
+      }
+      marker = File.join(@build, '.erx-inputs.json')
+      previous = File.file?(marker) ? JSON.parse(File.read(marker)) : {}
+      valid = previous.is_a?(Hash) &&
+              (previous.empty? || (previous.keys.sort == expected.keys.sort &&
+                previous.values.all? { |value| value.is_a?(String) && /\A[0-9a-f]{64}\z/.match?(value) }))
+      unless valid
+        raise Error, 'invalid Fiasco source record; recreate the build directory'
+      end
+      changed = expected.keys.select { |name| previous[name] != expected.fetch(name) }
+      changed.each do |name|
+        path = File.join(@build, name)
+        FileUtils.remove_entry(path) if File.exist?(path)
+      end
+      if changed.include?('users') && File.exist?(File.join(@build, 'source'))
+        validate_user_source(File.join(@build, 'source'))
+        FileUtils.remove_entry(File.join(@build, 'source'))
+      end
+      if !changed.empty? && File.exist?(File.join(@build, 'images'))
+        FileUtils.remove_entry(File.join(@build, 'images'))
+      end
+      File.write(marker, JSON.pretty_generate(expected) + "\n")
+    rescue JSON::ParserError
+      raise Error, 'invalid Fiasco source record; recreate the build directory'
+    end
+
+    def import_git(repository, commit:, sha256:, name:, temporary:, stage:)
+      archive = File.join(temporary, "#{name}.tar")
+      @runner.run(['git', '--no-replace-objects', '-C', File.expand_path(repository), 'archive', '--format=tar',
+                   "--output=#{archive}", commit], name: "import-#{name}", deadline: 120)
+      Sources.unpack(archive: archive, sha256: sha256,
+                     destination: File.join(stage, name), owner_root: temporary, source_directory: '.', runner: @runner)
+      { 'part' => name, 'repository' => "https://github.com/kernkonzept/#{name == 'kernel' ? 'fiasco' : name}",
+        'revision' => commit, 'archive_sha256' => sha256 }
+    end
+
+    def import_archive(name, pin:, cache:, temporary:, stage:)
+      filename = "#{name}-#{pin.fetch('commit')}.tar.gz"
+      candidates = Dir.glob(File.join(File.expand_path(cache), '**', filename))
+      raise Error, "expected one cached archive for #{name}" unless candidates.size == 1
+      archive = candidates.first
+      extracted = File.join(temporary, "unpacked-#{name}")
+      Sources.unpack(archive: archive, sha256: pin.fetch('sha256'),
+                     destination: extracted, owner_root: temporary,
+                     source_directory: "#{name}-#{pin.fetch('commit')}", runner: @runner)
+      File.rename(extracted, File.join(stage, name))
+      { 'part' => name, 'repository' => "https://github.com/kernkonzept/#{name}",
+        'revision' => pin.fetch('commit'), 'archive_sha256' => pin.fetch('sha256') }
+    end
+
+    def trim_sources(stage)
+      kernel = File.join(stage, 'kernel')
+      KERNEL_EXCLUSIONS.each { |path| FileUtils.remove_entry(File.join(kernel, path)) }
+      core = File.join(stage, 'l4re-core')
+      keep = CORE_PACKAGES + %w[LICENSE.spdx Makefile README.md SECURITY.md]
+      Dir.children(core).reject { |path| keep.include?(path) }.each do |path|
+        FileUtils.remove_entry(File.join(core, path))
+      end
+      FileUtils.remove_entry(File.join(core, 'libc/uclibc-ng'))
+      retain_uart(File.join(stage, 'drivers-frst'))
+    end
+
+    def retain_uart(directory)
+      selected = Dir.mktmpdir('.uart-', File.dirname(directory))
+      UART_FILES.each do |relative|
+        source = File.join(directory, relative)
+        next if relative == 'README' && !File.exist?(source)
+        raise Error, "missing pinned UART import file: #{relative}" unless File.file?(source)
+        target = File.join(selected, relative)
+        FileUtils.mkdir_p(File.dirname(target))
+        FileUtils.copy_file(source, target)
+      end
+      FileUtils.remove_entry(directory)
+      File.rename(selected, directory)
+    ensure
+      FileUtils.remove_entry(selected) if selected && File.exist?(selected)
+    end
+
+    def build_kernel(jobs:)
+      directory = File.join(@build, 'kernel')
+      configure(source: @inputs.part('kernel'), directory: directory,
+                input: @inputs.configuration('kernel.defconfig'),
+                output: 'globalconfig.out', name: 'fiasco-kernel-config')
+      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-'],
+                  name: 'fiasco-kernel-build', deadline: 600, env: build_environment)
+      directory
+    end
+
+    def assemble_user_source
+      directory = File.join(@build, 'source')
+      validate_user_source(directory)
+
+      # Inherited make canonicalizes source paths. A private physical copy
+      # preserves that model and prevents its generators touching imports.
+      Dir.mktmpdir('.source-', @build) do |temporary|
+        staged = File.join(temporary, 'tree')
+        FileUtils.cp_r(File.join(@inputs.part('mk'), '.'), staged, preserve: true)
+        FileUtils.mkdir_p(File.join(staged, 'pkg'))
+        %w[l4re-core bootstrap libfdt drivers-frst].each do |name|
+          FileUtils.cp_r(@inputs.part(name), File.join(staged, 'pkg', name), preserve: true)
+        end
+        Dir.glob(File.join(staged, '**/*'), File::FNM_DOTMATCH).each do |path|
+          File.chmod(File.stat(path).mode | 0o200, path) if File.file?(path) && !File.symlink?(path)
+        end
+        record = { 'owner' => 'erx-fiasco', 'source' => @source }
+        File.write(File.join(staged, '.erx-source.json'), JSON.pretty_generate(record) + "\n")
+        previous = File.join(temporary, 'previous')
+        File.rename(directory, previous) if File.exist?(directory)
+        begin
+          File.rename(staged, directory)
+        rescue SystemCallError
+          File.rename(previous, directory) if File.exist?(previous)
+          raise
+        end
+      end
+      directory
+    rescue JSON::ParserError
+      raise Error, 'invalid Fiasco source assembly record'
+    end
+
+    def validate_user_source(directory)
+      return unless File.exist?(directory) || File.symlink?(directory)
+      marker = File.join(directory, '.erx-source.json')
+      unless File.directory?(directory) && !File.symlink?(directory) &&
+             File.file?(marker) && JSON.parse(File.read(marker)) == { 'owner' => 'erx-fiasco', 'source' => @source }
+        raise Error, 'incomplete or stale Fiasco source assembly; recreate build/fiasco/source'
+      end
+    end
+
+    def build_users(jobs:)
+      source = assemble_user_source
+      directory = File.join(@build, 'users')
+      configure(source: source, directory: directory,
+                input: @inputs.configuration('user.defconfig'),
+                output: '.kconfig', name: 'fiasco-users-config')
+      # Image tools clear MAKEFLAGS when querying the configuration. Keep the
+      # compiler prefix in the build's own configuration as well as argv.
+      local = File.join(directory, 'Makeconf.local')
+      settings = "# Generated by erXos.\nCROSS_COMPILE := aarch64-elf-\n"
+      File.write(local, settings) unless File.file?(local) && File.read(local) == settings
+      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-'],
+                  name: 'fiasco-users-build', deadline: 600, env: build_environment)
+      directory
+    end
+
+    # Both the authoritative input and its resolved output participate in
+    # reuse. Editing a generated config cannot silently change the build.
+    def configure(source:, directory:, input:, output:, name:)
+      marker = File.join(directory, '.erx-config.json')
+      resolved = File.join(directory, output)
+      expected = { 'source' => source, 'input_sha256' => Digest::SHA256.file(input).hexdigest }
+      if File.file?(marker) && File.file?(resolved)
+        recorded = JSON.parse(File.read(marker))
+        current = expected.merge('resolved_sha256' => Digest::SHA256.file(resolved).hexdigest)
+        return if current == recorded
+      end
+      if File.file?(File.join(directory, 'Makefile'))
+        FileUtils.copy_file(input, resolved)
+        @runner.run(['gmake', '-C', directory, 'olddefconfig', 'CROSS_COMPILE=aarch64-elf-'],
+                    name: name, deadline: 120, env: build_environment)
+      else
+        writable_input = build_configuration_copy(input)
+        @runner.run(['gmake', '-C', source, "B=#{directory}", "DEFCONFIG=#{writable_input}",
+                     'CROSS_COMPILE=aarch64-elf-'], name: name, deadline: 120,
+                    env: build_environment)
+      end
+      raise Error, "configuration did not produce #{output}" unless File.file?(resolved)
+      File.write(marker, JSON.pretty_generate(expected.merge('resolved_sha256' => Digest::SHA256.file(resolved).hexdigest)) + "\n")
+    rescue JSON::ParserError
+      raise Error, 'invalid Fiasco configuration record; recreate the build directory'
+    end
+
+    # Inherited configuration appends cached tool settings to its copied
+    # defconfig. Its writable copy must not change the captured template.
+    def build_configuration_copy(input)
+      directory = File.join(@build, 'config')
+      OutputDirectory.prepare(root: @root, path: directory)
+      output = File.join(directory, File.basename(input))
+      raise Error, 'Fiasco configuration copy is a symlink' if File.symlink?(output)
+      Dir.mktmpdir('.config-', directory) do |temporary|
+        staged = File.join(temporary, 'input')
+        File.binwrite(staged, BoundedFile.read(input, maximum: FiascoInputs::MAX_FILE))
+        File.rename(staged, output)
+      end
+      output
+    end
+
+    def build_image(kernel:, users:)
+      directory = File.join(@build, 'images')
+      OutputDirectory.prepare(root: @root, path: directory)
+      @runner.run(['gmake', '-C', users, 'CROSS_COMPILE=aarch64-elf-', 'elfimage',
+                   'E=banner', 'PT=arm_virt',
+                   "MODULES_LIST=#{@inputs.configuration('modules.list')}",
+                   "MODULE_SEARCH_PATH=#{kernel}", "BOOTSTRAP_OUTPUT_DIR=#{directory}"],
+                  name: 'fiasco-image', deadline: 180, env: build_environment)
+      raise Error, 'Fiasco image was not produced' unless File.file?(image_path)
+      image_path
+    end
+
+    def build_environment
+      self.class.build_environment
+    end
+
+    def self.build_environment
+      path = ENV.fetch('PATH')
+      if RUBY_PLATFORM.include?('darwin')
+        directories = %w[gcp gfind gmake].map do |program|
+          executable = path.split(File::PATH_SEPARATOR)
+                           .map { |directory| File.join(directory, program) }
+                           .find { |candidate| File.executable?(candidate) }
+          raise Error, "missing #{program}; install Homebrew coreutils and findutils" unless executable
+          File.expand_path('../libexec/gnubin', File.dirname(File.realpath(executable)))
+        end
+        path = (directories.uniq + [path]).join(File::PATH_SEPARATOR)
+      end
+      ENV.keys.to_h { |name| [name, nil] }.merge('PATH' => path, 'SOURCE_DATE_EPOCH' => '0',
+                                                'LC_ALL' => 'C', 'TZ' => 'UTC',
+                                                'TMPDIR' => File.realpath(Dir.tmpdir))
+    end
+  end
+end

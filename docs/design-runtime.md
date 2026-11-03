@@ -427,6 +427,8 @@ typedef struct erx_boot_info {
 	uint32_t	domain_id;		/* its node's creation; never reused */
 	uint32_t	flags;			/* ERX_BOOT_DET, ERX_BOOT_INSTALLED_ONLY,
 						 * ERX_BOOT_ROOT */
+	uint32_t	pack_flags;		/* checked boot-image build flags */
+	uint32_t	reserved;		/* zero; keeps capability alignment */
 	erx_cap_t	budget;			/* the domain's budget: ALLOC, and with
 						 * SPACES also SPACES, CARVE, DUP, GIVE */
 	erx_cap_t	space;			/* its own space: THREADS, SPACES */
@@ -470,8 +472,39 @@ typedef struct erx_boot_info {
 						 * args_len + env_len <=
 						 * ERX_BOOT_STRINGS_MAX (2,048) */
 	uint64_t	hwcap, hwcap2;		/* CPU features, as Linux's AT_HWCAP words */
+	erx_runtime_limits_t limits;	/* complete validated startup limits */
 } erx_boot_info_t;
 ```
+
+The fixed prefix is 272 bytes. The kernel supplies `pack_flags` from the
+validated boot-image header; the root entry preserves that value and
+compares its development bit with the system manifest's development bit
+before applying any configuration. Either mismatch is an invalid boot.
+The build selects one build kind for both artifacts, and conflicting
+source flags fail packing. The domain library copies the checked value
+into each child boot page; a runtime does not infer build kind from its
+own manifest text or compile-time defaults.
+
+`erx_runtime_limits_t` is the ABI's fixed 64-byte startup projection:
+`max_frame`, `max_message_heap`, `funnel_depth`, `exports`, `tmp`,
+`overlay`, `atoms`, `foreign_atoms`, `processes`, `peer_held` and
+`peer_held_total`, with widths and offsets defined in
+[Runtime-limit projection](design-abi.md#runtime-limit-projection).
+It carries values only for this runtime, with no principal table, facet
+scope or reference into the system manifest. The domain library copies
+it from the validated creation plan; the root entry constructs the same
+record from the system's checked manifest fields.
+
+Startup validates and installs the complete record before initializing
+the node's atom/process bounds, accepting a peer, enabling a lane drain
+or decoding an untrusted frame. The funnel receives one immutable limit
+value, so a missing field cannot be replaced by a library default and no
+caller must install several limits in a particular order. Command-line
+options can lower the resulting runtime settings where their documented
+interface permits it, but cannot raise them. Invalid or unsupported
+records end startup with a diagnostic; they do not start a partly bounded
+runtime. The system runtime follows this same path before serving any
+domain, including when its peer set is initially empty.
 
 Every capability in it is already in the domain's table; the page only tells
 the runtime where. The node name is the domain service's choice, written
@@ -1898,8 +1931,9 @@ layers:
 
 ### The root-task entry
 
-The kernel starts one user-mode task, the system domain, on the
-interpreter image's root entry point, with the root capabilities at
+The kernel starts one user-mode task, the system domain, on the root
+entry point of the interpreter image for a full boot or the native C17
+root-entry image for a development partial boot, with the root capabilities at
 well-known slots of its table and the machine page mapped
 ([design-kernel.md](design-kernel.md#the-root-task)). The entry is
 `liberx`'s `erx_root_main`, in the system layer. Everything it does
@@ -1911,11 +1945,18 @@ with its tests.
 What the runtime sees of it is a domain's start like any other. The
 entry's own thread becomes ERTS's main thread on a boot information page
 in the layout every domain receives ([Data model](#data-model)), flagged
-`ERX_BOOT_ROOT`, with domain id 4 and the node name `system@<host>`, and
+`ERX_BOOT_ROOT`, with domain id 4, the node name `system@<host>` and
+`system` as its runtime group, and
 continued by the root capabilities in the page's root extension, which
 only this page has; by then the system domain's space maps neither the
 device-secret page nor the sealing page. So ERTS's start-up is one code
-path in every domain. ERTS boots the system release: the domain service,
+path in every domain. The first worker belongs to `system` from creation;
+the root entry's fault worker and every executor and worker ERTS creates,
+including the executors running the watchdog, belong to that same group. The root
+capabilities name that group for resource policy; runtime startup never
+migrates a thread between groups. There is no separate runtime quota
+beneath the aggregate system grant.
+ERTS boots the system release: the domain service,
 the device service, the drivers, storage, the network, the vault, the
 console, login.
 

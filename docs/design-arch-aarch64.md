@@ -152,17 +152,17 @@ trap      svc 0x4552                       # any other immediate is foreign
 reg       number            x8
 reg       args              x0,x1,x2,x3,x4,x5
 reg       results           x0,x1,x2       # status, then two results
-layout    pte_page          1    # stage 1 page descriptor, 4 KiB granule, level 3
-  field   raw                    u64
-    bits  valid             0
-    bits  attrindx          2..4
-    bits  ap                6..7
-    bits  af                10
-    bits  ng                11
-    bits  oa                12..47    shift 12
-    bits  gp                50
-    bits  pxn               53
-    bits  uxn               54
+layout pte_page 1 native 8 8     # stage 1 page descriptor, 4 KiB granule, level 3
+  field raw u64 0
+    bits valid 0 0
+    bits attrindx 2 4
+    bits ap 6 7
+    bits af 10 10
+    bits ng 11 11
+    bits oa 12 47 shift 12
+    bits gp 50 50
+    bits pxn 53 53
+    bits uxn 54 54
 ```
 
 The generator emits a get and set function for every bit range, so no code

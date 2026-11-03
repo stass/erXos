@@ -1,0 +1,107 @@
+# -*- makefile -*-
+# vim:se ft=make:
+
+ivt.o: $(TCBOFFSET)
+hvt.o: $(TCBOFFSET)
+tramp-mp.o: $(TCBOFFSET)
+
+OBJ_KERNEL_noboot = $(filter-out bootstrap%,$(OBJ_KERNEL))
+OBJ_BOOTSTRAP = $(filter bootstrap%,$(OBJ_KERNEL))
+
+COVFLAGS_bootstrap-gcc   := -fno-profile-arcs -fno-test-coverage
+COVFLAGS_bootstrap-clang := -fno-profile-instr-generate -fno-coverage-mapping \
+                            $(if $(CLANG_SUPPORTS_MCDC),-fno-coverage-mcdc)
+
+# Additional required objects. Don't link against libdrivers.a because
+# OBJ_BOOTSTRAP may be compiled using dedicated compiler options, see above.
+OBJ_BOOTSTRAP += bootstrap-mmu.o bootstrap-mmu-arm.o bootstrap-mmu-arm-$(BITS).o
+bootstrap-mmu%o: mmu%cc
+	$(call comp_msg,$*)
+	$(VERBOSE)$(CXX) -c -MD -MP -MF .$*.cc.d.new -o $@ $(call cc_flgs,\
+	  $*,$@) $< $(COLLECT_REDIR)
+	@mv .$*.cc.d.new .$*.cc.d
+
+# For debugging purposes: Make it possible to use printf() during bootstrap
+# phase. The backend writes directly to the PL011 UART. It's even possible to
+# add printf() to code from the kern/ directoy (e.g. ptab_base). It is NOT
+# possible to use printf() after Bootstrap::enable_paging() was called.
+PRINTF_PL011_DURING_BOOT ?=
+
+ifeq ($(PRINTF_PL011_DURING_BOOT),1)
+  OBJ_BOOTSTRAP_LIBC = $(addprefix bootstrap-,printf.o vfprintf.o strlen.o \
+                         stdout_write.o memset.o strnlen.o memchr.o puts.o \
+                         putchar.o)
+  OBJ_BOOTSTRAP += $(OBJ_BOOTSTRAP_LIBC) bootstrap-glue_libc.o
+  CXXFLAGS += -include $(srcdir)/lib/libc/include/cstdio
+
+  define bootstrap_libc_rule =
+$(1): $(2)
+	$$(call comp_msg,$$*)
+	$$(VERBOSE)$$(CC) -c -MD -MP -MF .bootstrap-$(2).d.new -o $$@ \
+	  $$(call c_flgs,$(2),$$@) -fno-builtin $$< $$(COLLECT_REDIR)
+	@mv .bootstrap-$(2).d.new .bootstrap-$$*.d
+
+  endef
+
+  $(foreach f,$(OBJ_BOOTSTRAP_LIBC),$(eval $(call bootstrap_libc_rule,\
+    $(f),$(patsubst bootstrap-%.o,%.c,$(f)))))
+endif
+
+define gen_bootstrap_flags =
+CFLAGS_$(basename $(notdir $(1))) = \
+  -fPIC $(if $(CONFIG_COV),$(COVFLAGS_bootstrap-$(CC_TYPE)))
+CXXFLAGS_$(basename $(notdir $(1))) = \
+  -fPIC $(if $(CONFIG_COV),$(COVFLAGS_bootstrap-$(CC_TYPE))) \
+  $(if $(PRINTF_DURING_BOOT),-include $(srcdir)/lib/libc/include/cstdio)
+endef
+
+$(foreach obj,$(OBJ_BOOTSTRAP),$(eval $(call gen_bootstrap_flags, $(obj))))
+
+-include .kernel.arm.lds.d
+
+bootstrap_lds      = $(srcdir)/kern/arm/bootstrap.arm.ld
+
+bootstrap_ldflags  = $(LDFLAGS) $(LD_EMULATION_FLAG)
+bootstrap_ldflags += -static -pie --no-dynamic-linker -z text
+bootstrap_ldflags += -defsym kernel_load_addr=$(CONFIG_KERNEL_LOAD_ADDR)
+bootstrap_ldflags += -T$(bootstrap_lds)
+bootstrap_ldflags += $(if $(filter clang,$(LD_TYPE)),-z rel)
+
+bootstrap_export   = _start start_of_loader end_of_bootstrap_info
+bootstrap_strip    = --strip-all $(addprefix --keep-symbol=,$(bootstrap_export))
+bootstrap_syms     = end_of_bootstrap_info|_start|start_of_loader
+bootstrap_sed      = 's/^0*([0-9a-f]*) [a-zA-Z] ($(bootstrap_syms))/\2 = 0x\1;/p'
+
+bootstrap.$(KERNEL).pre.o: $(OBJ_BOOTSTRAP) $(bootstrap_lds)
+	$(LINK_MESSAGE)
+	$(VERBOSE)$(LD) $(bootstrap_ldflags) $(OBJ_BOOTSTRAP) -o $@
+
+# Make a raw binary. The linker script is already minimal. Only explicitly drop
+# the things that are still unneeded (dynamic symbols) and what is expected to
+# come from fiasco instead (.bootstrap.dropped_info).
+bootstrap.$(KERNEL).bin: bootstrap.$(KERNEL).pre.o
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(OBJCOPY) -O binary --remove-section=.bootstrap.dropped_info \
+	                     --remove-section=.dynsym \
+	                     --remove-section=.dynstr $< $@
+
+bootstrap.$(KERNEL).rel: bootstrap.$(KERNEL).bin
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(OBJCOPY) -I binary -O $(OBJCOPY_BFDNAME) -B $(OBJCOPY_BFDARCH) \
+	--rename-section .data=.bootstrap.text $< $@
+
+# The linker will treat this file as linker script.
+bootstrap.$(KERNEL).sym: bootstrap.$(KERNEL).pre.o
+	$(COMP_MESSAGE)
+	$(VERBOSE)$(NM) $< | sed -n -E $(bootstrap_sed) > $@
+
+
+# $(1) = Additional $(OBJ_X), e.g. OBJ_<unittest>
+KERNEL_PREREQUISITES = kernel.arm.lds $$(CRT0) bootstrap.$$(KERNEL).rel \
+                       bootstrap.$$(KERNEL).sym $$(OBJ_KERNEL_noboot) $(1) \
+                       $$(JDB) $$(LIBDISASM) $$(ABI) libdrivers.a $$(LIBUART) \
+                       $$(KERNEL_EXTRA_LIBS) $$(CXXLIB) $$(LIBC) $$(LIBK) \
+                       $$(FONTS) libgluedriverslibc.a
+
+clean-KERNEL:
+	$(VERBOSE)$(RM) $(foreach s,bin rel sym,bootstrap.$(KERNEL).$(s))

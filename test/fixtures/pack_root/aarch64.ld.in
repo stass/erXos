@@ -1,0 +1,19 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Values are substituted from the generated ABI codec by pack_root.rb.
+ */
+
+ENTRY(erx_fixture_start)
+PHDRS
+{
+	text PT_LOAD FILEHDR PHDRS FLAGS(@ERX_RX@);
+	note PT_NOTE FLAGS(@ERX_R@);
+}
+SECTIONS
+{
+	. = @ERX_BASE@ + SIZEOF_HEADERS;
+	.text : { *(.text .text.*) } :text
+	.note.erx.abi : { KEEP(*(.note.erx.abi)) } :text :note
+	/DISCARD/ : { *(.comment) *(.eh_frame*) *(.note.GNU-stack) }
+}

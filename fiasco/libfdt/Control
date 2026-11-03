@@ -1,0 +1,4 @@
+# Modified by erXos: bootstrap uses only the plain static library.
+provides: libfdt
+requires: libc-headers compiler-rt-pure
+Maintainer: adam@os.inf.tu-dresden.de

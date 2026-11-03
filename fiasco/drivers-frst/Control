@@ -1,0 +1,4 @@
+# Modified by erXos: retain the bootstrap's UART dependency only.
+requires: l4sys
+provides: drivers_uart
+Maintainer: adam@os.inf.tu-dresden.de

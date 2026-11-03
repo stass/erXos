@@ -1,0 +1,1086 @@
+INTERFACE:
+
+#include "context.h"
+#include "kobject.h"
+#include "l4_types.h"
+#include "space.h"
+#include "spin_lock.h"
+#include "unique_ptr.h"
+
+/**
+ * A task is a protection domain.
+ *
+ * A task is derived from Space, which aggregates a set of address spaces.
+ * Additionally to a space, a task provides initialization and destruction
+ * functionality for a protection domain.
+ */
+class Task :
+  public cxx::Dyn_castable<Task, Kobject>,
+  public Space
+{
+  friend class Jdb_space;
+
+public:
+  enum class Op : Mword
+  {
+    Map           = 0,
+    Unmap         = 1,
+    Cap_info      = 2,
+    Add_ku_mem    = 3,
+    Ldt_set_x86   = 0x11,
+    Vgicc_map_arm = 0x12,
+  };
+
+  virtual int resume_vcpu(Context *ctxt, Vcpu_state *vcpu, bool user_mode);
+  virtual void cleanup_vcpu(Context *ctxt, Vcpu_state *vcpu);
+
+  /**
+   * Map regions marked as eligible for eager mapping.
+   *
+   * MPU platforms provide only a limited number of MPU regions, so it is
+   * essential to have contiguous regions in tasks. On the other hand we cannot
+   * simply map too much because MPU regions must not overlap with the kernel.
+   * Instead, bootstraps mark precisely the regions that shall be mapped
+   * eagerly, and this function then maps them.
+   */
+  void map_all_segs(Mem_desc::Mem_type mt);
+
+  /**
+   * Leave the kernel directly into a vCPU context.
+   *
+   * \param ts  Trap_state to be loaded before returning to vCPU context.
+   * \param sp  The kernel stack pointer to be loaded before loading the
+   *            Trap_state and returning to vCPU context. As the interrupts are
+   *            disabled and the relevant state is loaded from `ts`, many
+   *            architectures ignore this parameter. For ARM32 with banked
+   *            registers, this parameter is essential.
+   *
+   * \pre Interrupts must be disabled.
+   * \pre There must be no exception pending.
+   *
+   * This function may safely assume that there is no exception pending because
+   * interrupts remained disabled since entering the kernel and the continuation
+   * can only be activated by the thread context itself.
+   */
+  [[noreturn]] static void vcpu_resume(Trap_state *ts, Return_frame *sp)
+    asm ("vcpu_resume") FIASCO_FASTCALL;
+};
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "atomic.h"
+#include "config.h"
+#include "entry_frame.h"
+#include "globals.h"
+#include "kdb_ke.h"
+#include "kmem.h"
+#include "kmem_slab.h"
+#include "kobject_rpc.h"
+#include "l4_types.h"
+#include "logdefs.h"
+#include "map_util.h"
+#include "mem_layout.h"
+#include "ram_quota.h"
+#include "thread_state.h"
+#include "paging.h"
+#include "global_data.h"
+
+JDB_DEFINE_TYPENAME(Task, "\033[31mTask\033[m");
+
+IMPLEMENT_DEFAULT
+int
+Task::resume_vcpu(Context *ctxt, Vcpu_state *vcpu, bool user_mode)
+{
+  // We pass a Trap_state to vcpu_resume() that replaces the Entry_frame created
+  // upon entering the kernel via a syscall.
+  //
+  // Certain architectures gradually pop the Trap_state in vcpu_resume() from
+  // the stack before returning to userland. Therefore the Trap_state must be
+  // at the top of the stack.
+  static_assert(sizeof(Entry_frame) >= sizeof(Trap_state));
+
+  Trap_state *ts = reinterpret_cast<Trap_state *>(ctxt->regs() + 1) - 1;
+  ctxt->copy_and_sanitize_trap_state(ts, &vcpu->_regs.s);
+
+  if (user_mode)
+    {
+      ctxt->state_add_dirty(Thread_vcpu_user);
+      vcpu->state |= Vcpu_state::F_traps;
+
+      ctxt->vcpu_pv_switch_to_user(vcpu, true);
+    }
+
+  ctxt->space_ref()->user_mode(user_mode);
+  switchin_context(ctxt->space());
+  vcpu_resume(ts, ctxt->regs());
+}
+
+IMPLEMENT_DEFAULT
+void
+Task::cleanup_vcpu(Context *, Vcpu_state *)
+{}
+
+PUBLIC
+bool
+Task::put() override
+{ return dec_ref() == 0; }
+
+/**
+ * Map a chunk of kernel-user memory to the task address space.
+ *
+ * \see Task::alloc_ku_mem(L4_fpage)
+ *
+ * \param[in,out] u_addr                 User address of the kernel-user
+ *                                       memory. On MMU-less platforms, it is
+ *                                       derived from the kernel address,
+ *                                       otherwise it is supplied by the
+ *                                       caller.
+ * \param         k_addr                 Kernel address of the kernel-user
+ *                                       memory.
+ * \param         k_addr_pmem            Whether the kernel address is in pmem.
+ * \param         size                   Number of bytes to map.
+ * \param         need_remote_tlb_flush  Whether the Task might be active on
+ *                                       another CPU and thus requires a
+ *                                       remote TLB flush after the mapping.
+ * \param         rights                 What rights to use for mapping the
+ *                                       memory.
+ *
+ * \return Status returned by #Mem_space::v_insert().
+ */
+PRIVATE
+Mem_space::Status
+Task::map_ku_mem_chunk(User_ptr<void> *u_addr, void *k_addr, bool k_addr_pmem,
+                       size_t size, bool need_remote_tlb_flush,
+                       L4_fpage::Rights rights)
+{
+  Virt_addr base(k_addr);
+  Mem_space::Page_order page_order(Config::PAGE_SHIFT);
+
+  // Need to use physical address on systems without MMU.
+  if constexpr (!Config::Have_mmu)
+    *u_addr = User_ptr<void>(k_addr);
+
+  for (Virt_size i = Virt_size(0); i < Virt_size(size);
+       i += Virt_size(1) << page_order)
+    {
+      Virt_addr kern_va = base + i;
+      Virt_addr user_va = Virt_addr(u_addr->get()) + i;
+
+      Address kern_va_raw = cxx::int_value<Virt_addr>(kern_va);
+      Mem_space::Phys_addr pa{k_addr_pmem
+        ? pmem_to_phys(kern_va_raw) : Kmem::kdir->virt_to_phys(kern_va_raw)};
+
+      // Must be valid physical address.
+      assert(pa != Mem_space::Phys_addr(~0UL));
+
+      auto res = static_cast<Mem_space *>(this)
+        ->v_insert(pa, user_va, page_order,
+                   Mem_space::Attr::space_local(rights), true);
+      if (res == Mem_space::Insert_ok)
+        continue;
+
+      // Handle error conditions.
+      switch (res)
+        {
+        case Mem_space::Insert_err_nomem:
+        case Mem_space::Insert_err_exists:
+          // Non-fatal error. Proceed with unmapping and stop.
+          break;
+        default:
+          // Fatal error. Enter the debugger, then proceed with unmapping
+          // and stop.
+          printf("KU memory mapping failed: user_va=%p kern_va=%p res=%u\n",
+                 static_cast<void *>(user_va), static_cast<void *>(kern_va),
+                 res);
+          kdb_ke("BUG in KU memory mapping");
+          break;
+        }
+
+      // On error, unmap what has been already mapped.
+      unmap_ku_mem_chunk(*u_addr, cxx::int_value<Virt_size>(i), true,
+                         need_remote_tlb_flush);
+      return res;
+    }
+
+  if constexpr (Mem_space::Need_insert_tlb_flush)
+    {
+      if (need_remote_tlb_flush)
+        static_cast<Mem_space *>(this)->tlb_flush_all_cpus();
+      else
+        static_cast<Mem_space *>(this)->tlb_flush_current_cpu();
+    }
+
+  return Mem_space::Insert_ok;
+}
+
+/**
+ * Allocate and map a chunk of kernel-user memory for this task.
+ *
+ * \see Task::alloc_ku_mem(L4_fpage)
+ *
+ * \param[in,out] u_addr                 User address of the kernel-user
+ *                                       memory. On MMU-less platforms, it is
+ *                                       derived from the kernel address,
+ *                                       otherwise it is supplied by the
+ *                                       caller.
+ * \param[out]    k_addr                 Kernel address of the allocated
+ *                                       kernel-user memory.
+ * \param         size                   Number of bytes to allocate and map.
+ * \param         need_remote_tlb_flush  Whether the Task might be active on
+ *                                       another CPU and thus requires a
+ *                                       remote TLB flush after the mapping.
+ *
+ * \retval 0                 Allocation and mapping succeeded.
+ * \retval -L4_err::ENomem   Memory allocation failed.
+ * \retval -L4_err::EExists  Memory already mapped.
+ * \retval -L4_err::EInval   Other error conditions.
+ */
+PRIVATE
+int
+Task::alloc_ku_mem_chunk(User_ptr<void> *u_addr, void **k_addr, size_t size,
+                         bool need_remote_tlb_flush)
+{
+  assert((size & (size - 1)) == 0);
+  assert(size < Config::SUPERPAGE_SIZE);
+
+  Kmem_alloc *const alloc = Kmem_alloc::allocator();
+  *k_addr = alloc->q_alloc(ram_quota(), Bytes(size));
+
+  if (!*k_addr) [[unlikely]]
+    return -L4_err::ENomem;
+
+  memset(*k_addr, 0, size);
+
+  auto res = map_ku_mem_chunk(u_addr, *k_addr, true, size,
+                              need_remote_tlb_flush, L4_fpage::Rights::URW());
+  if (res == Mem_space::Insert_ok)
+    return 0;
+
+  // On error, free the memory.
+  free_ku_mem_chunk(*k_addr, size);
+
+  // Handle error conditions.
+  switch (res)
+    {
+    case Mem_space::Insert_err_nomem:
+      return -L4_err::ENomem;
+    case Mem_space::Insert_err_exists:
+      return -L4_err::EExists;
+    }
+
+  return -L4_err::EInval;
+}
+
+/**
+ * Check flexpage for being suitable for kernel-user memory and return its
+ * size in bytes.
+ *
+ * \param ku_area  Flexpage to check.
+ *
+ * \return Flexpage size in bytes or 0 if the flexpage does not pass the
+ *         checks.
+ */
+PRIVATE
+size_t
+Task::check_ku_area_size(L4_fpage *ku_area)
+{
+  if (ku_area->order() < Config::PAGE_SHIFT)
+    return 0;
+
+  if (ku_area->order() >= sizeof(size_t) * 8)
+    return 0;
+
+  size_t size = size_t{1U} << ku_area->order();
+
+  if (ku_area->mem_address() > Virt_addr(max_usable_user_address() - size + 1))
+    return 0;
+
+  return size;
+}
+
+/**
+ * Insert kernel-user memory into the list of kernel-user memories.
+ *
+ * \param ku_area  Flexpage of the kernel-user memory.
+ * \param ku_mem   Kernel-user memory to insert into the list.
+ * \param u_addr   User address of the kernel-user memory.
+ * \param k_addr   Kernel address of the kernel-user memory.
+ * \param size     Size of the kernel-user memory in bytes.
+ * \param k_alloc  Flag whether the kernel address has been allocated.
+ */
+PRIVATE
+void
+Task::insert_ku_mem(L4_fpage *ku_area, Ku_mem *ku_mem, User_ptr<void> u_addr,
+                    void *k_addr, size_t size, bool k_alloc)
+{
+  ku_mem->u_addr = u_addr;
+  ku_mem->k_addr = k_addr;
+  ku_mem->size = size;
+  ku_mem->k_alloc = k_alloc;
+
+  *ku_area = L4_fpage::mem(reinterpret_cast<Mword>(u_addr.get()),
+                           ku_area->order());
+
+  _ku_mem.add(ku_mem, cas<cxx::S_list_item *>);
+}
+
+/**
+ * Allocate and map kernel-user memory for this task.
+ *
+ * \pre Not thread-safe, the caller must ensure that no one else modifies the
+ *      page table of the Task at the same time, for example by acquiring the
+ *      existence lock or knowing that no one else has a reference to the Task
+ *      object.
+ * \pre If `need_remote_tlb_flush == true`, the CPU lock must not be held (as
+ *      the remote TLB flush might do cross-CPU call) and the caller must ensure
+ *      that the Task object does not get deleted.
+ *
+ * \param ku_area                Flexpage specifying the size and desired user
+ *                               virtual address of the kernel user memory to
+ *                               allocate.
+ * \param need_remote_tlb_flush  Whether the Task might be active on another CPU
+ *                               and thus requires a remote TLB flush after
+ *                               allocating kernel-user memory.
+ *
+ * \retval 0                 Allocation and mapping succeeded.
+ * \retval -L4_err::ENomem   Memory allocation failed.
+ * \retval -L4_err::EExists  Memory already mapped.
+ * \retval -L4_err::EInval   Invalid flexpage and other error conditions.
+ */
+PUBLIC
+int
+Task::alloc_ku_mem(L4_fpage *ku_area, bool need_remote_tlb_flush)
+{
+  // The limit comes from the kernel allocator (Buddy_alloc).
+  if (ku_area->order() > 17)
+    return -L4_err::EInval;
+
+  size_t size = check_ku_area_size(ku_area);
+  if (size == 0)
+    return -L4_err::EInval;
+
+  Ku_mem *ku_mem = new (ram_quota()) Ku_mem();
+  if (!ku_mem)
+    return -L4_err::ENomem;
+
+  User_ptr<void> u_addr(static_cast<void *>(ku_area->mem_address()));
+  void *k_addr = nullptr;
+
+  int res = alloc_ku_mem_chunk(&u_addr, &k_addr, size, need_remote_tlb_flush);
+  if (res)
+    {
+      ku_mem->free(ram_quota());
+      return res;
+    }
+
+  insert_ku_mem(ku_area, ku_mem, u_addr, k_addr, size, true);
+  return 0;
+}
+
+/**
+ * Map kernel-user memory for this task.
+ *
+ * \pre Not thread-safe, the caller must ensure that no one else modifies the
+ *      page table of the Task at the same time, for example by acquiring the
+ *      existence lock or knowing that no one else has a reference to the Task
+ *      object.
+ * \pre If `need_remote_tlb_flush == true`, the CPU lock must not be held (as
+ *      the remote TLB flush might do cross-CPU call) and the caller must ensure
+ *      that the Task object does not get deleted.
+ *
+ * \param ku_area                Flexpage specifying the size and desired user
+ *                               virtual address of the kernel user memory to
+ *                               map.
+ * \param k_addr                 Kernel address to map.
+ * \param k_addr_pmem            Whether the kernel address is in pmem.
+ * \param size_bound             Maximal size (in bytes) to map.
+ * \param need_remote_tlb_flush  Whether the Task might be active on another CPU
+ *                               and thus requires a remote TLB flush after
+ *                               mapping kernel-user memory.
+ * \param rights                 What rights to use for mapping the memory.
+ *
+ * \retval 0                 Mapping succeeded.
+ * \retval -L4_err::ENomem   Induced memory allocation failed.
+ * \retval -L4_err::EExists  Memory already mapped.
+ * \retval -L4_err::EInval   Invalid flexpage and other error conditions.
+ */
+PRIVATE
+int
+Task::map_ku_mem(L4_fpage *ku_area, void *k_addr, bool k_addr_pmem,
+                 size_t size_bound, bool need_remote_tlb_flush,
+                 L4_fpage::Rights rights)
+{
+  size_t size = check_ku_area_size(ku_area);
+  if (size == 0 || size > size_bound)
+    return -L4_err::EInval;
+
+  Ku_mem *ku_mem = new (ram_quota()) Ku_mem();
+  if (!ku_mem)
+    return -L4_err::ENomem;
+
+  User_ptr<void> u_addr(static_cast<void *>(ku_area->mem_address()));
+  auto res = map_ku_mem_chunk(&u_addr, k_addr, k_addr_pmem, size,
+                              need_remote_tlb_flush, rights);
+
+  // Handle error conditions.
+  switch (res)
+    {
+    case Mem_space::Insert_ok:
+      insert_ku_mem(ku_area, ku_mem, u_addr, k_addr, size, false);
+      return 0;
+    case Mem_space::Insert_err_nomem:
+      return -L4_err::ENomem;
+    case Mem_space::Insert_err_exists:
+      return -L4_err::EExists;
+    default:
+      break;
+    }
+
+  return -L4_err::EInval;
+}
+
+/**
+ * Unmap and free kernel-user memory.
+ *
+ * \param m                      Kernel-user memory to unmap and free.
+ * \param need_tlb_flush         Need for CPU-local TLB flush of the removed
+ *                               mapping.
+ * \param need_remote_tlb_flush  Need for remote TLB flush of the removed
+ *                               mapping.
+ *
+ */
+PRIVATE inline NOEXPORT
+void
+Task::free_ku_mem(Ku_mem *m, bool need_tlb_flush, bool need_remote_tlb_flush)
+{
+  unmap_ku_mem_chunk(m->u_addr, m->size, need_tlb_flush, need_remote_tlb_flush);
+
+  // Only free the kernel memory if it has been allocated.
+  if (m->k_alloc)
+    free_ku_mem_chunk(m->k_addr, m->size);
+
+  m->free(ram_quota());
+}
+
+/**
+ * Unmap kernel-user memory chunk.
+ *
+ * \param u_addr                 User address of the kernel-user memory.
+ * \param mapped_size            Mapped size of the kernel-user memory in
+ *                               bytes.
+ * \param need_tlb_flush         Need for CPU-local TLB flush of the removed
+ *                               mapping.
+ * \param need_remote_tlb_flush  Need for remote TLB flush of the removed
+ *                               mapping.
+ */
+PRIVATE
+void
+Task::unmap_ku_mem_chunk(User_ptr<void> u_addr, size_t mapped_size,
+                         bool need_tlb_flush, bool need_remote_tlb_flush)
+{
+  Mem_space::Page_order page_order(Config::PAGE_SHIFT);
+
+  for (Virt_size i = Virt_size(0); i < Virt_size(mapped_size);
+       i += Virt_size(1) << page_order)
+    {
+      Virt_addr user_va = Virt_addr(u_addr.get()) + i;
+      static_cast<Mem_space *>(this)->v_delete(user_va, page_order,
+                                               Page::Rights::FULL());
+    }
+
+  if (need_tlb_flush && mapped_size > 0)
+    {
+      if (need_remote_tlb_flush)
+        static_cast<Mem_space *>(this)->tlb_flush_all_cpus();
+      else
+        static_cast<Mem_space *>(this)->tlb_flush_current_cpu();
+    }
+}
+
+/**
+ * Free kernel-user memory chunk.
+ *
+ * \param k_addr Kernel address of the kernel-user memory.
+ * \param size   Size of the kernel-user memory in bytes.
+ */
+PRIVATE
+void
+Task::free_ku_mem_chunk(void *k_addr, size_t size)
+{
+  Kmem_alloc *const alloc = Kmem_alloc::allocator();
+  alloc->q_free(ram_quota(), Bytes(size), k_addr);
+}
+
+/**
+ * Free all kernel-user memory of this Task.
+ *
+ * \pre Not thread-safe, the caller must ensure that no one else modifies the
+ *      page table of the Task at the same time, for example by acquiring the
+ *      existence lock or knowing that no one else has a reference to the Task
+ *      object.
+ * \pre If `need_remote_tlb_flush == true`, the CPU lock must not be held (as
+ *      the remote TLB flush might do cross-CPU call) and the caller must ensure
+ *      that the Task object does not get deleted.
+ *
+ * \param need_tlb_flush         Whether the Task requires a TLB flush after
+ *                               freeing the kernel user memory.
+ * \param need_remote_tlb_flush  Whether the Task might be active on another CPU
+ *                               and thus requires a remote TLB flush after
+ *                               freeing kernel user memory.
+ */
+PRIVATE
+void
+Task::free_ku_mem(bool need_tlb_flush, bool need_remote_tlb_flush)
+{
+  while (Ku_mem *m = _ku_mem.pop_front())
+    free_ku_mem(m, need_tlb_flush, need_remote_tlb_flush);
+}
+
+
+/** Allocate resources for this task (e.g. UTCBs, page/cap directories).
+ *  @ return true on success, false if not enough memory
+ */
+PUBLIC
+bool
+Task::initialize()
+{
+  if (!Space::initialize())
+    return false;
+
+  CNT_TASK_CREATE;
+
+  return true;
+}
+
+/**
+ * Create a normal Task.
+ *
+ * \pre \a parent must be valid and exist.
+ */
+PUBLIC explicit
+Task::Task(Ram_quota *q, Caps c) : Space(q, c)
+{
+  // increment reference counter from zero
+  inc_ref(true);
+}
+
+PUBLIC explicit
+Task::Task(Ram_quota *q)
+: Space(q, Caps::mem() | Caps::io() | Caps::obj() | Caps::threads())
+{
+  // increment reference counter from zero
+  inc_ref(true);
+}
+
+PROTECTED
+Task::Task(Ram_quota *q, Mem_space::Dir_type* pdir, Caps c)
+: Space(q, pdir, c)
+{
+  // increment reference counter from zero
+  inc_ref(true);
+}
+
+static DEFINE_GLOBAL Global_data<Kmem_slab_t<Task>> _task_allocator("Task");
+
+PRIVATE static
+Task *Task::alloc(Ram_quota *q)
+{
+  return _task_allocator->q_new(q, q);
+}
+
+PUBLIC static
+Task *Task::alloc(Ram_quota *q, Caps c)
+{
+  return _task_allocator->q_new(q, q, c);
+}
+
+PUBLIC //inline
+void
+Task::operator delete (Task *t, std::destroying_delete_t)
+{
+  Ram_quota *q = t->ram_quota();
+  LOG_TRACE("Kobject delete", "del", current(), Log_destroy,
+            l->id = t->dbg_id();
+            l->obj = t;
+            l->type = cxx::Typeid<Task>::get();
+            l->ram = t->ram_quota()->current());
+
+  t->~Task();
+  _task_allocator->q_free(q, t);
+}
+
+PUBLIC template<typename TASK_TYPE, bool MUST_SYNC_KERNEL = true,
+                int UTCB_AREA_MR = 0> static
+TASK_TYPE * FIASCO_FLATTEN
+Task::create(Ram_quota *q,
+             L4_msg_tag t, Utcb const *u, Utcb *out,
+             int *err, unsigned *words)
+{
+  static_assert(UTCB_AREA_MR == 0 || UTCB_AREA_MR >= 2,
+                "invalid value for UTCB_AREA_MR");
+  if (UTCB_AREA_MR >= 2)
+    {
+      if (t.words() <= UTCB_AREA_MR) [[unlikely]]
+        {
+          *err = L4_err::EInval;
+          return nullptr;
+        }
+    }
+
+  *err = L4_err::ENomem;
+  cxx::unique_ptr<TASK_TYPE> v(TASK_TYPE::alloc(q));
+
+  if (!v) [[unlikely]]
+    return nullptr;
+
+  if (!v->initialize()) [[unlikely]]
+    return nullptr;
+
+  if (MUST_SYNC_KERNEL && (v->sync_kernel() == Ptab::Sync_result::Allocation_failed))
+    return nullptr;
+
+  if (UTCB_AREA_MR >= 2)
+    {
+      L4_fpage utcb_area(access_once(&u->values[UTCB_AREA_MR]));
+      if (utcb_area.is_valid())
+        {
+          // Task just newly created, no need for locking or remote TLB flush.
+          int e = v->alloc_ku_mem(&utcb_area, false);
+          if (e < 0)
+            {
+              *err = -e;
+              return nullptr;
+            }
+          else
+            {
+              *words = 1;
+              out->values[0] = utcb_area.raw();
+            }
+        }
+    }
+
+  return v.release();
+}
+
+PUBLIC template<typename TASK_TYPE, bool MUST_SYNC_KERNEL = false,
+                int UTCB_AREA_MR = 0> static
+Kobject_iface * FIASCO_FLATTEN
+Task::generic_factory(Ram_quota *q, Space *,
+                      L4_msg_tag t, Utcb const *u, Utcb *o,
+                      int *err, unsigned *w)
+{
+  return create<TASK_TYPE, MUST_SYNC_KERNEL, UTCB_AREA_MR>(q, t, u, o, err, w);
+}
+
+/**
+ * Shutdown the task.
+ *
+ * Currently:
+ * -# Unbind and delete all contexts bound to this task.
+ * -# Unmap everything from all spaces.
+ * -# Delete child tasks.
+ */
+PUBLIC
+void
+Task::destroy(Kobjects_list &reap_list) override
+{
+  Kobject::destroy(reap_list);
+
+  // Here we have invalidated the existence_lock of this task and waited for it
+  // to be released by the last owner (if any). Under the assumption that to
+  // invoke `fpage_map()` it is required to first grab the existence_lock of the
+  // destination task, we can be sure that the task is not and can never again
+  // be the destination of an fpage_map(), i.e. no new mappings can be created.
+  // Thereby it is guaranteed that after the following `fpage_unmap()` the task
+  // will be completely void of mappings.
+  fpage_unmap(this, L4_fpage::all_spaces(L4_fpage::Rights::FULL()),
+              L4_map_mask::full(), reap_list);
+}
+
+/*
+ * L4-IFACE: kernel-task.task-map, kernel-vm.task-map, kernel-dma_space.task-map
+ * PROTOCOL: L4_PROTO_TASK
+ * RIGHTS: write
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_map(L4_fpage::Rights rights, Syscall_frame *f, Utcb *utcb)
+{
+  LOG_TRACE("Task map", "map", ::current(), Log_map_unmap,
+      l->id = dbg_id();
+      l->map   = true;
+      l->mask  = utcb->values[1];
+      l->fpage = utcb->values[2]);
+
+  if (!(rights & L4_fpage::Rights::CW())) [[unlikely]]
+    return commit_result(-L4_err::EPerm);
+
+  L4_msg_tag tag = f->tag();
+
+  L4_fpage::Rights mask;
+  Task *_from = Ko::deref<Task>(&tag, utcb, &mask);
+  if (!_from)
+    return tag;
+
+  L4_fpage sfp(utcb->values[2]);
+
+  if (sfp.type() == L4_fpage::Obj)
+    {
+      // handle Rights::CS() bit masking for capabilities
+      mask &= rights;
+      mask |= L4_fpage::Rights::CD() | L4_fpage::Rights::CRW();
+
+      // diminish when sending via restricted ipc gates
+      sfp.mask_rights(mask);
+    }
+
+  L4_error ret;
+
+    {
+      // Must be destroyed _after_ destruction of the lock guard below!
+      Kobject::Reap_list reap_list;
+
+      Ref_ptr<Task> from(_from);
+      Ref_ptr<Task> self(this);
+      // enforce lock order to prevent deadlocks.
+      // always take lock from task with the lower memory address first
+      Lock_guard_2<Helping_lock> guard;
+
+      if (!guard.check_and_lock(&existence_lock, &from->existence_lock))
+        return commit_result(-L4_err::EInval);
+
+      cpu_lock.clear();
+      // Take the existence_lock for synchronizing maps -- kind of
+      // coarse-grained but necessary for the destination task (see
+      // the reasoning in Task::destroy()).
+      ret = fpage_map(from.get(), sfp, this,
+                      L4_fpage::all_spaces(), L4_snd_item(utcb->values[1]),
+                      reap_list.list());
+      cpu_lock.lock();
+    }
+
+  // FIXME: treat reaped stuff
+  if (ret.ok())
+    return commit_result(0);
+  else
+    return commit_error(utcb, ret);
+}
+
+
+/*
+ * L4-IFACE: kernel-task.task-unmap
+ * PROTOCOL: L4_PROTO_TASK
+ * RIGHTS: delete for each object argument if deletion is requested
+ */
+/*
+ * L4-IFACE: kernel-vm.task-unmap, kernel-dma_space.task-unmap
+ * PROTOCOL: L4_PROTO_TASK
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_unmap(Syscall_frame *f, Utcb *utcb)
+{
+  // Must be destroyed _after_ releasing the existence lock below!
+  Kobject::Reap_list reap_list;
+  unsigned words = f->tag().words();
+
+  LOG_TRACE("Task unmap", "unm", ::current(), Log_map_unmap,
+            l->id = dbg_id();
+            l->map   = false;
+            l->mask  = utcb->values[1];
+            l->fpage = utcb->values[2]);
+
+    {
+      Ref_ptr<Task> self(this);
+
+      auto guard = switch_lock_guard(existence_lock);
+      if (!guard.is_valid())
+        return commit_error(utcb, L4_error::Not_existent);
+
+      cpu_lock.clear();
+
+      L4_map_mask m(utcb->values[1]);
+
+      for (unsigned i = 2; i < words; ++i)
+        {
+          Page::Flags const flushed
+            = fpage_unmap(this, L4_fpage(utcb->values[i]), m, reap_list.list());
+
+          utcb->values[i] = (utcb->values[i] & ~0xfUL)
+                          | cxx::int_value<Page::Flags>(flushed);
+        }
+      cpu_lock.lock();
+    }
+
+  return commit_result(0, words);
+}
+
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_cap_valid(Syscall_frame *, Utcb *utcb)
+{
+  L4_obj_ref obj(utcb->values[1]);
+
+  if (obj.special())
+    return commit_result(0);
+
+  Obj_space::Capability cap = lookup(obj.cap());
+  if (cap.valid()) [[likely]]
+    return commit_result(1);
+  else
+    return commit_result(0);
+}
+
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_caps_equal(Syscall_frame *, Utcb *utcb)
+{
+  L4_obj_ref obj_a(utcb->values[1]);
+  L4_obj_ref obj_b(utcb->values[2]);
+
+  if (obj_a == obj_b)
+    return commit_result(1);
+
+  if (obj_a.special() || obj_b.special())
+    return commit_result(obj_a.special_cap() == obj_b.special_cap() ? 1 : 0);
+
+  Obj_space::Capability c_a = lookup(obj_a.cap());
+  Obj_space::Capability c_b = lookup(obj_b.cap());
+
+  return commit_result(c_a == c_b ? 1 : 0);
+}
+
+/*
+ * L4-IFACE: kernel-task.task-add_ku_mem, kernel-vm.task-add_ku_mem
+ * PROTOCOL: L4_PROTO_TASK
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_add_ku_mem(Syscall_frame *f, Utcb const *utcb, Utcb *out)
+{
+  if (!(caps() & Task::Caps::kumem())) [[unlikely]]
+    return commit_result(-L4_err::ENosys);
+
+  // Acquire reference to ensure the task is not deleted while we try to acquire
+  // its existence lock.
+  Ref_ptr self(this);
+
+  // Acquire existence lock to prevent concurrent modification of the Task's
+  // page table.
+  auto guard_task = switch_lock_guard(existence_lock);
+  if (!guard_task.is_valid())
+    return commit_error(utcb, L4_error::Not_existent);
+
+  // alloc_ku_mem() must run with interrupts enabled (for potentially required
+  // remote TLB flushes).
+  auto guard_cpu = lock_guard<Lock_guard_inverse_policy>(cpu_lock);
+
+  unsigned words = 0;
+  unsigned const w = f->tag().words();
+  for (unsigned i = 1; i < w; ++i)
+    {
+      L4_fpage ku_fp(utcb->values[i]);
+      if (!ku_fp.is_valid() || !ku_fp.is_mempage())
+        return commit_result(-L4_err::EInval);
+
+      int e = alloc_ku_mem(&ku_fp, true);
+      if (e < 0)
+        return commit_result(e);
+
+      if (out)
+        out->values[words++] = ku_fp.raw();
+    }
+
+  return commit_result(0, words);
+}
+
+/**
+ * Map kernel-user memory.
+ *
+ * This is a backend routine for mapping kernel-user memory defined by the
+ * kernel into the task's address space via IPC calls of other objects.
+ *
+ * \param      utcb         Input arguments.
+ * \param[out] out          Output arguments. Can be nullptr.
+ * \param      k_addr       Kernel address of the kernel-user memory.
+ * \param      k_addr_pmem  Whether the kernel address is in pmem.
+ * \param      size         Size of the kernel-user memory (in bytes).
+ * \param      rights       What rights to use for mapping the memory.
+ *
+ * \return IPC tag.
+ */
+PUBLIC inline
+L4_msg_tag
+Task::ext_map_ku_mem(Utcb const *utcb, Utcb *out, void *k_addr,
+                     bool k_addr_pmem, size_t size, L4_fpage::Rights rights)
+{
+  if (!(caps() & Task::Caps::kumem())) [[unlikely]]
+    return commit_result(-L4_err::ENosys);
+
+  // Acquire reference to ensure the task is not deleted while we try to acquire
+  // its existence lock.
+  Ref_ptr self(this);
+
+  // Acquire existence lock to prevent concurrent modification of the task's
+  // page table.
+  auto guard_task = switch_lock_guard(existence_lock);
+  if (!guard_task.is_valid())
+    return commit_error(utcb, L4_error::Not_existent);
+
+  // The map_ku_mem() method must run with interrupts enabled (for potentially
+  // required remote TLB flushes).
+  auto guard_cpu = lock_guard<Lock_guard_inverse_policy>(cpu_lock);
+
+  L4_fpage ku_area(utcb->values[1]);
+  if (!ku_area.is_valid() || !ku_area.is_mempage())
+    return commit_result(-L4_err::EInval);
+
+  auto res = map_ku_mem(&ku_area, k_addr, k_addr_pmem, size, true, rights);
+  if (res < 0)
+    return commit_result(res);
+
+  if (out)
+    {
+      out->values[0] = ku_area.raw();
+      return commit_result(0, 1);
+    }
+
+  return commit_result(0);
+}
+
+/*
+ * L4-IFACE: kernel-task.task-cap_info, kernel-vm.task-cap_info
+ * PROTOCOL: L4_PROTO_TASK
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Task::sys_cap_info(Syscall_frame *f, Utcb *utcb)
+{
+  L4_msg_tag const &tag = f->tag();
+
+  switch (tag.words())
+    {
+    default: return commit_result(-L4_err::EInval);
+    case 2:  return sys_cap_valid(f, utcb);
+    case 3:  return sys_caps_equal(f, utcb);
+    }
+}
+
+
+PUBLIC
+void
+Task::invoke(L4_obj_ref self, L4_fpage::Rights rights, Syscall_frame *f, Utcb *utcb) override
+{
+  if (f->tag().proto() != L4_msg_tag::Label_task) [[unlikely]]
+    {
+      f->tag(commit_result(-L4_err::EBadproto));
+      return;
+    }
+
+  Utcb *out = self.have_recv() ? utcb : nullptr;
+  L4_msg_tag tag;
+  switch (Op{utcb->values[0]})
+    {
+    case Op::Map:
+      tag = sys_map(rights, f, utcb);
+      break;
+    case Op::Unmap:
+      tag = sys_unmap(f, utcb);
+      break;
+    case Op::Cap_info:
+      tag = sys_cap_info(f, utcb);
+      break;
+    case Op::Add_ku_mem:
+      tag = sys_add_ku_mem(f, utcb, out);
+      break;
+    default:
+      L4_msg_tag arch_tag = f->tag();
+      if (invoke_arch(arch_tag, utcb))
+        tag = arch_tag;
+      else
+        tag = commit_result(-L4_err::ENosys);
+      break;
+    }
+
+  if (self.have_recv() || tag.has_error())
+    f->tag(tag);
+}
+
+namespace {
+
+static inline
+void __attribute__((constructor)) FIASCO_INIT_SFX(task_register_factory)
+register_factory()
+{
+  Kobject_iface::set_factory(L4_msg_tag::Label_task,
+                             &Task::generic_factory<Task, true, 2>);
+}
+
+}
+
+IMPLEMENT_DEFAULT inline void
+Task::map_all_segs(Mem_desc::Mem_type)
+{}
+
+PUBLIC inline
+Task::~Task() override
+{
+  // Task, and thus also its page table, is no longer used anywhere at this
+  // point, so no not necessary to flush the freed kernel user memory mappings
+  // from the TLB.
+  free_ku_mem(false, false);
+}
+
+
+// ---------------------------------------------------------------------------
+INTERFACE [debug]:
+
+#include "tb_entry.h"
+
+EXTENSION class Task
+{
+private:
+  struct Log_map_unmap : public Tb_entry
+  {
+    Mword id;
+    Mword mask;
+    Mword fpage;
+    bool  map;
+    void print(String_buffer *buf) const;
+  };
+  static_assert(sizeof(Log_map_unmap) <= Tb_entry::Tb_entry_size);
+};
+
+// ---------------------------------------------------------------------------
+IMPLEMENTATION [debug]:
+
+#include "string_buffer.h"
+
+IMPLEMENT
+void
+Task::Log_map_unmap::print(String_buffer *buf) const
+{
+  L4_fpage fp(fpage);
+  buf->printf("task=[%c:%lx] %s=%lx fpage=[%u/",
+              map ? 'M' : 'U', id,
+              map ? "snd_base" : "mask", mask, fp.order().get());
+  switch (fp.type())
+    {
+    case L4_fpage::Special:
+      buf->printf("spc] fpage=%lx", fpage);
+      break;
+    case L4_fpage::Memory:
+      buf->printf("mem] addr=%lx", cxx::int_value<Virt_addr>(fp.mem_address()));
+      break;
+    case L4_fpage::Io:
+      buf->printf("io] port=%lx", cxx::int_value<Port_number>(fp.io_address()));
+      break;
+    case L4_fpage::Obj:
+      buf->printf("obj] cap=C:%lx", cxx::int_value<Cap_index>(fp.obj_index()));
+      break;
+    default:
+      buf->printf("???] fpage=%lx", fpage);
+      break;
+    }
+}

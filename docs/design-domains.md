@@ -2157,8 +2157,13 @@ service. It has:
 A **session** is a principal's login on the console or on the host link; it
 holds facets and a default domain, created at login, in which the
 principal's shell runs and whose sub-spaces are the principal's programs.
-Every domain belongs to one principal, and its budget and group are children
-of the principal's, so no principal spends beyond its own
+Every domain belongs to one principal, and its budgets are children of
+that principal's budget. A requested domain's CPU group is a child of
+its principal's group under `users`; a configured service domain's group
+is a child of `system`, from its checked manifest origin. The
+domain library derives that placement from the creation source, never
+from a requester-selected parent. Each spends only the memory and CPU
+its own parent grants
 ([design-system.md](design-system.md#resource-policy)).
 
 A domain's limits, fixed at creation within its principal's ceilings:

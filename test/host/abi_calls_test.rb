@@ -1,0 +1,125 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'minitest/autorun'
+require 'tmpdir'
+require_relative '../../tools/lib/erx/abi'
+
+class AbiCallsTest < Minitest::Test
+  def setup
+    @root = File.expand_path('../..', __dir__)
+    @directory = Dir.mktmpdir('erx-abi-calls-')
+    @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'), timeout_program: 'gtimeout')
+    @compiler = ENV.fetch('ERX_CLANG', 'clang')
+    @flags = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
+              '-I', File.join(@root, 'include'), '-I', @root]
+  end
+
+  def teardown
+    FileUtils.remove_entry(@directory) if passed? && @directory && File.directory?(@directory)
+  end
+
+  def run_command(arguments, name:)
+    @runner.run(arguments, name: name, deadline: 60)
+  rescue Erx::CommandError => error
+    flunk(File.binread(error.result.fetch('log')))
+  end
+
+  def test_kernel_shape_decoder_under_sanitizers
+    output = File.join(@directory, 'call-probe')
+    run_command([@compiler, *@flags, '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+                 File.join(@root, 'kernel/generated/abi_decode.c'),
+                 File.join(@root, 'test/fixtures/abi_call_probe.c'), '-o', output], name: 'compile-call-probe')
+    record = run_command([output], name: 'call-probe')
+    assert_equal "call shape checks passed\n", File.binread(record.fetch('log'))
+  end
+
+  def test_generated_atomic_accessors_under_thread_sanitizer
+    output = File.join(@directory, 'atomic-probe')
+    run_command([@compiler, *@flags, '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread',
+                 File.join(@root, 'test/fixtures/abi_atomic_probe.c'), '-o', output], name: 'compile-atomic-probe')
+    record = run_command([output], name: 'atomic-probe')
+    assert_equal "atomic accessor checks passed\n", File.binread(record.fetch('log'))
+  end
+
+  def test_native_trap_and_note_compile_for_target
+    %w[liberx/backend/erx/arch/aarch64/generated/calls.c test/fixtures/abi_note_probe.c].each_with_index do |path, index|
+      record = run_command([@compiler, *@flags, '--target=aarch64-none-elf', '-ffreestanding',
+                            '-c', File.join(@root, path), '-o', File.join(@directory, "target#{index}.o")],
+                           name: "target#{index}")
+      assert_equal 0, record.fetch('exit_status')
+    end
+  end
+
+  def test_result_registers_need_not_also_be_argument_registers
+    source = Erx::ABI::Sources.read(root: @root)
+    declarations = source.declarations.flat_map do |declaration|
+      if declaration.kind == 'reg' && declaration.args.first == 'args'
+        Erx::ABI::Syntax.parse("reg args x3,x4,x5,x6,x7,x9\n", path: declaration.line.path)
+      else
+        [declaration]
+      end
+    end
+    schema = Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations, inputs: source.inputs))
+    headers = { 'include/erx/abi.h' => Erx::ABI::CEmitter.header(schema),
+                'liberx/generated/calls.h' => Erx::ABI::CEmitter.call_header(schema),
+                'calls.c' => Erx::ABI::CallEmitter.trap_source(schema) }
+    headers.each do |path, bytes|
+      destination = File.join(@directory, path)
+      FileUtils.mkdir_p(File.dirname(destination))
+      File.write(destination, bytes)
+    end
+    record = run_command([@compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
+                          '--target=aarch64-none-elf', '-ffreestanding', '-I', File.join(@directory, 'include'),
+                          '-I', @directory, '-c', File.join(@directory, 'calls.c'),
+                          '-o', File.join(@directory, 'distinct-results.o')], name: 'distinct-results')
+    assert_equal 0, record.fetch('exit_status')
+  end
+
+  def test_backend_wrappers_compile_without_implementing_authority
+    %w[fiasco hosted].each do |backend|
+      path = "liberx/backend/#{backend}/generated/calls.c"
+      record = run_command([@compiler, *@flags, '-c', File.join(@root, path),
+                            '-o', File.join(@directory, "#{backend}.o")], name: backend)
+      assert_equal 0, record.fetch('exit_status')
+    end
+  end
+
+  def test_foreign_elf_facts_match_pinned_musl
+    schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: @root))
+    declarations = ["#include <stddef.h>", '#include "erx/abi.h"', '#include "musl/include/elf.h"']
+    { 'erx_elf64_ehdr' => 'Elf64_Ehdr', 'erx_elf64_phdr' => 'Elf64_Phdr',
+      'erx_elf64_nhdr' => 'Elf64_Nhdr', 'erx_elf64_dyn' => 'Elf64_Dyn' }.each do |name, foreign|
+      type = schema.types.fetch(name)
+      declarations << "_Static_assert(sizeof(#{name}_t) == sizeof(#{foreign}), \"#{name} size\");"
+      type.fields.each do |field|
+        member = field.name == 'd_value' ? 'd_un' : field.name
+        declarations << "_Static_assert(offsetof(#{name}_t, #{field.name}) == offsetof(#{foreign}, #{member}), \"#{name}.#{field.name}\");"
+      end
+    end
+    overrides = { 'elf_class64' => 'ELFCLASS64', 'elf_data_lsb' => 'ELFDATA2LSB',
+                  'elf_version_current' => 'EV_CURRENT', 'elf_osabi_none' => 'ELFOSABI_NONE' }
+    schema.constants.each_key do |name|
+      next unless name.start_with?('elf_') && name != 'elf_segments_max'
+      foreign = overrides.fetch(name) { name.delete_prefix('elf_').upcase }
+      declarations << "_Static_assert(#{Erx::ABI::Names.macro(name)} == #{foreign}, \"#{name}\");"
+    end
+    declarations << '_Static_assert(ERX_ARCH_ELF_MACHINE == EM_AARCH64, "machine");'
+    source = File.join(@directory, 'elf-oracle.c')
+    File.write(source, declarations.join("\n") + "\n")
+    record = run_command([@compiler, *@flags, '-c', source, '-o', File.join(@directory, 'elf-oracle.o')], name: 'elf-oracle')
+    assert_equal 0, record.fetch('exit_status')
+  end
+
+  def test_fixed_byte_strings_do_not_form_c_trigraphs
+    declarations = Erx::ABI::Syntax.parse("abi 1\nbytes trigraph 3 value 3f3f2f\n")
+    schema = Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations, inputs: {}))
+    File.write(File.join(@directory, 'trigraph.h'), Erx::ABI::CEmitter.header(schema))
+    source = File.join(@directory, 'trigraph.c')
+    File.write(source, "#include \"trigraph.h\"\n_Static_assert(sizeof(ERX_TRIGRAPH_STRING) == 4, \"fixed bytes\");\n")
+    record = run_command([@compiler, *@flags, '-trigraphs', '-c', source,
+                          '-o', File.join(@directory, 'trigraph.o')], name: 'trigraph')
+    assert_equal 0, record.fetch('exit_status')
+  end
+end

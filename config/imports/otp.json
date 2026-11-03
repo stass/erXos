@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/erlang/otp",
+  "revision": "OTP-29.1.2",
+  "applications": ["compiler", "kernel", "runtime_tools", "sasl", "stdlib", "tools"],
+  "default_license": "Apache-2.0",
+  "default_evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+  "rules": [
+    {"pattern": "lib/compiler/test/beam_ssa_check_SUITE_data/phis.erl", "license": "Apache-2.0 OR LGPL-2.1-or-later", "evidence": "reviewed actual file header; LGPL alternative is 2.1-or-later"},
+    {"pattern": "erts/emulator/asmjit/**/*", "license": "Zlib", "evidence": "reviewed erts/emulator/asmjit/vendor.info and LICENSE.md"},
+    {"pattern": "erts/emulator/zlib/**/*", "license": "Zlib", "evidence": "reviewed erts/emulator/zlib/vendor.info and per-file notices"},
+    {"pattern": "erts/emulator/zstd/**/*", "license": "BSD-3-Clause OR GPL-2.0-only", "evidence": "reviewed erts/emulator/zstd/vendor.info and LICENSE; BSD alternative selected"},
+    {"pattern": "erts/emulator/ryu/to_chars.h", "license": "Apache-2.0 WITH LLVM-exception AND BSL-1.0", "evidence": "reviewed erts/emulator/ryu/vendor.info and file header"},
+    {"pattern": "erts/emulator/ryu/{common.h,d2s.c,d2s_full_table.h,d2s_intrinsics.h,digit_table.h,ryu.h,LICENSE-Apache2,LICENSE-Boost}", "license": "Apache-2.0 OR BSL-1.0", "evidence": "reviewed erts/emulator/ryu/vendor.info"},
+    {"pattern": "erts/emulator/pcre/**/*", "license": "BSD-3-Clause", "evidence": "reviewed erts/emulator/pcre/vendor.info and LICENCE"},
+    {"pattern": "lib/stdlib/uc_spec/**/*", "license": "Unicode-3.0", "evidence": "reviewed lib/stdlib/uc_spec/vendor.info and OTP .ort.yml curations"},
+    {"pattern": "erts/emulator/test/bs_utf_SUITE_data/NormalizationTest.txt", "license": "Unicode-3.0", "evidence": "reviewed OTP .ort.yml curation"},
+    {"pattern": "lib/stdlib/test/unicode_util_SUITE_data/{GraphemeBreakTest.txt,LineBreakTest.txt,NormalizationTest.txt}", "license": "Unicode-3.0", "evidence": "reviewed OTP .ort.yml Unicode test-data curations"},
+    {"pattern": "lib/stdlib/test/json_SUITE_data/**/*", "license": "MIT", "evidence": "reviewed lib/stdlib/test/json_SUITE_data/vendor.info"},
+    {"pattern": "lib/stdlib/test/re_SUITE_data/**/*", "license": "BSD-3-Clause", "evidence": "reviewed OTP .ort.yml curation, whose provenance attribution to PCRE is qualified as believed"},
+    {"pattern": "{erts,make}/autoconf/config.{guess,sub}", "license": "GPL-3.0-or-later WITH Autoconf-exception-generic-3.0", "evidence": "reviewed actual GNU configuration-script notices and OTP .ort.yml"},
+    {"pattern": "{erts,make}/autoconf/install-sh", "license": "X11", "evidence": "reviewed actual X Consortium notice including its name-use clause; SPDX X11"},
+    {"pattern": "erts/lib_src/yielding_c_fun/test/examples/sha256_erlang_nif/c_src/sha-2/**/*", "license": "Unlicense", "evidence": "reviewed nested SHA-2 LICENSE"}
+  ],
+  "exclusions": [
+    {"path": "lib/kernel/test/zlib_SUITE_data/zipdoc", "reason": "OTP .ort.yml explicitly states that this fixture's licence is unknown"}
+  ]
+}

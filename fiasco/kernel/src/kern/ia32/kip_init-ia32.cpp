@@ -1,0 +1,154 @@
+INTERFACE [ia32 || amd64]:
+
+#include "initcalls.h"
+#include "kip.h"
+#include "types.h"
+
+class Cpu;
+
+EXTENSION class Kip_init
+{
+public:
+  static void init_freq(Cpu const &cpu) FIASCO_INIT;
+};
+
+//----------------------------------------------------------------------------
+IMPLEMENTATION [ia32 || amd64]:
+
+#include "config.h"
+#include "cpu.h"
+#include "div32.h"
+#include "kmem.h"
+#include "panic.h"
+
+namespace KIP_namespace
+{
+  // See also restrictions about KIP layout in the kernel linker script!
+  enum
+  {
+    Num_mem_descs = 64,
+    Max_len_version = 512,
+
+    Size_mem_descs = sizeof(Mword) * 2 * Num_mem_descs,
+  };
+
+  struct KIP
+  {
+    Kip kip;
+    char mem_descs[Size_mem_descs];
+  };
+
+  KIP my_kernel_info_page asm("my_kernel_info_page") __attribute__((section(".kernel_info_page"))) =
+    {
+      {
+        /* 00 */ L4_KERNEL_INFO_MAGIC,
+                 Config::Kernel_version_id,
+                 (Size_mem_descs + sizeof(Kip)) >> 4,
+                 {}, 0,
+                 0,
+                 {},
+        /* 10 */ 0, 0,
+        /* 20 */ 0, 0,
+        /* 30 */ 0, 0,
+        /* 40 */ 0, 0,
+        /* 50 */ 0, sizeof(Kip), Num_mem_descs, {},
+        /* 60 */ {0},
+        /* 70 */ {"", 0}, {},
+      },
+      {}
+    };
+};
+
+IMPLEMENT
+void
+Kip_init::init()
+{
+  Kip *kinfo = reinterpret_cast<Kip*>(&KIP_namespace::my_kernel_info_page);
+
+  Kip::init_global_kip(kinfo);
+
+  setup_user_virtual(kinfo);
+
+  reserve_amd64_hole();
+
+
+  extern char _boot_sys_start[];
+  extern char _boot_sys_end[];
+
+  for (auto &md: kinfo->mem_descs_a())
+    {
+      if (md.type() != Mem_desc::Reserved || md.is_virtual())
+        continue;
+
+      if (md.start() == reinterpret_cast<Address>(_boot_sys_start)
+          && md.end() == reinterpret_cast<Address>(_boot_sys_end) - 1)
+        md.type(Mem_desc::Undefined);
+
+      if (md.contains(Kmem::kernel_image_start())
+          && md.contains(Kmem::kcode_end() - 1))
+        {
+          md = Mem_desc(Kmem::kernel_image_start(), Kmem::kcode_end() - 1,
+                        Mem_desc::Reserved);
+        }
+    }
+}
+
+IMPLEMENT
+void
+Kip_init::init_freq(Cpu const &cpu)
+{
+  Kip::k()->frequency_cpu = div32(cpu.frequency(), 1000);
+}
+
+IMPLEMENT
+void
+Kip_init::init_kip_clock()
+{
+  extern char kip_time_fn_read_us[];
+  extern char kip_time_fn_read_us_end[];
+  extern char kip_time_fn_read_ns[];
+  extern char kip_time_fn_read_ns_end[];
+
+  auto *k = reinterpret_cast<Kip_initializer *>(Kip::k());
+
+  Cpu cpu = Cpu::cpus.cpu(Cpu_number::boot_cpu());
+  k->set_mword(OFFS__KIP_SCALER_TIME_STAMP_TO_US, cpu.get_scaler_tsc_to_us());
+  k->set_mword(OFFS__KIP_SCALER_TIME_STAMP_TO_NS, cpu.get_scaler_tsc_to_ns());
+
+  k->copy_fn(OFFS__KIP_FN_READ_US, kip_time_fn_read_us, kip_time_fn_read_us_end);
+  k->copy_fn(OFFS__KIP_FN_READ_NS, kip_time_fn_read_ns, kip_time_fn_read_ns_end);
+  k->make_coherent();
+}
+
+//----------------------------------------------------------------------------
+IMPLEMENTATION [amd64]:
+
+PRIVATE static inline NOEXPORT NEEDS["kip.h"]
+void
+Kip_init::reserve_amd64_hole()
+{
+  enum { Trigger = 0x0000800000000000UL };
+  Kip::k()->add_mem_region(Mem_desc(Trigger, ~Trigger, 
+	                   Mem_desc::Reserved, true));
+}
+
+//----------------------------------------------------------------------------
+IMPLEMENTATION [!amd64]:
+
+PRIVATE static inline NOEXPORT
+void
+Kip_init::reserve_amd64_hole()
+{}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "mem_space.h"
+
+PRIVATE static FIASCO_INIT
+void
+Kip_init::setup_user_virtual(Kip *kinfo)
+{
+  kinfo->add_mem_region(Mem_desc(0, Mem_space::max_usable_user_address(),
+                        Mem_desc::Conventional, true));
+}

@@ -1,0 +1,117 @@
+// vi:set ft=cpp: -*- Mode: C++ -*-
+/*
+ * (c) 2014 Alexander Warg <alexander.warg@kernkonzept.com>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+#pragma once
+
+#include "types"
+#include "ipc_basics"
+#include "ipc_array"
+
+namespace L4 { namespace Ipc {
+
+/**
+ * String data type providing read-only access to an array of characters.
+ *
+ * \tparam CHAR  Character type, defaults to 'char const'.
+ * \tparam LEN   Length type, defaults to 'unsigned long'.
+ */
+template<typename CHAR = char const, typename LEN = unsigned long>
+struct String : Array<CHAR, LEN>
+{
+  static LEN strlength(CHAR *d) { LEN l = 0; while (d[l]) ++l; return l; }
+  String() {}
+  String(CHAR *d) : Array<CHAR, LEN>(strlength(d) + 1, d) {}
+  String(LEN len, CHAR *d) : Array<CHAR, LEN>(len, d) {}
+  /**
+   * Create String object from C string.
+   *
+   * \param s  Pointer to the C string.
+   *
+   * \note The string is guaranteed to be 0-terminated if the string length
+   *       is not zero.
+   */
+  void copy_in(CHAR const *s)
+  {
+    if (this->length < 1)
+      return;
+
+    LEN i;
+    for (i = 0; i < this->length - 1 && s[i]; ++i)
+      this->data[i] = s[i];
+    this->length = i + 1;
+    this->data[i] = CHAR();
+  }
+};
+
+template< typename CHAR = char, typename LEN_TYPE = unsigned long,
+          LEN_TYPE MAX  = (L4_UTCB_GENERIC_DATA_SIZE *
+                           sizeof(l4_umword_t)) / sizeof(CHAR) >
+using String_in_buf = Array_in_buf<CHAR, LEN_TYPE, MAX>;
+
+namespace Msg {
+
+/**
+ * Defines server-side handling of strings with a certain length as RPC
+ * argument.
+ */
+template<typename A, typename LEN>
+struct Svr_val_ops< String<A, LEN> > : Svr_val_ops< Array_ref<A, LEN> >
+{
+  using Base = Svr_val_ops< Array_ref<A, LEN> >;
+  using svr_type = typename Base::svr_type;
+
+  /**
+   * Copy string data (char array and length) from the message to a server
+   * reference.
+   *
+   * \note The target string is guaranteed to be 0-terminated.
+   */
+  static int to_svr_data(char *msg, unsigned offset, unsigned limit,
+                         svr_type &a)
+  {
+    int r = Base::to_svr_data(msg, offset, limit, a);
+    if (r < 0)
+      return r;
+
+    // correct clients send at least the zero terminator
+    if (a.length < 1)
+      return -L4_EMSGTOOSHORT;
+
+    using elem_type = L4::Types::Remove_const_t<A>;
+    const_cast<elem_type*>(a.data)[a.length - 1] = A();
+    return r;
+  }
+};
+
+template<typename A, typename LEN>
+struct Clnt_val_ops<String<A, LEN>> : Clnt_val_ops<Array<A, LEN>>
+{
+  using Base = Clnt_val_ops<Array<A, LEN>>;
+  using type = typename Base::type;
+
+  static int from_msg_data(char *msg, unsigned offset, unsigned limit, type &a)
+  {
+    int r = Base::from_msg_data(msg, offset, limit, a);
+    if (r < 0)
+      return r;
+
+    // check for a bad server
+    if (a.length < 1)
+      return -L4_EMSGTOOSHORT;
+
+    a.data[a.length - 1] = A();
+    return r;
+  };
+};
+
+template<typename A, typename LEN>
+struct Is_valid_rpc_type<String<A, LEN> const *> : L4::Types::False {};
+template<typename A, typename LEN>
+struct Is_valid_rpc_type<String<A, LEN> const &> : L4::Types::False {};
+
+} // namespace Msg
+
+}}

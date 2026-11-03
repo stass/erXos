@@ -1,0 +1,1031 @@
+INTERFACE:
+
+#include "kobject.h"
+#include "kobject_helper.h"
+#include "thread.h"
+
+class Thread_object : public Thread, public Kobject_helper_base
+{
+private:
+  struct Remote_syscall
+  {
+    Thread *thread;
+    L4_msg_tag result;
+    bool have_recv;
+  };
+};
+
+class Obj_cap : public L4_obj_ref
+{
+};
+
+
+// ---------------------------------------------------------------------------
+IMPLEMENTATION:
+
+#include "context.h"
+#include "fpu.h"
+#include "irq.h"
+#include "irq_chip.h"
+#include "map_util.h"
+#include "processor.h"
+#include "task.h"
+#include "thread_state.h"
+#include "timer.h"
+
+
+
+PUBLIC inline
+Obj_cap::Obj_cap(L4_obj_ref const &o) : L4_obj_ref(o) {}
+
+PUBLIC inline NEEDS["kobject.h"]
+Kobject_iface * __attribute__((nonnull))
+Obj_cap::deref(L4_fpage::Rights *rights, bool dbg = false)
+{
+  Thread *current = current_thread();
+  if (op() & L4_obj_ref::Ipc_reply)
+    {
+      Reply_cap_index reply_cap_index = Receiver::Implicit_reply_cap_index;
+      if (!special())
+        reply_cap_index = reply_cap();
+
+      Reply_cap reply_cap;
+      if (!dbg) [[likely]]
+        reply_cap = current->reset_reply_cap(reply_cap_index);
+      else
+        reply_cap = current->get_reply_cap(reply_cap_index);
+
+      *rights = reply_cap.caller_rights();
+      return static_cast<Thread*>(reply_cap.caller());
+    }
+
+  // When explicitly requested by the user via #Special_bit, use the curent
+  // thread. Do the same when dealing with an open wait without a send since
+  // there is no partner in this case. We cannot require the user to set
+  // #Special_bit, because in the latter case the upper bits of the capability
+  // selector refer to a reply capability where #Special_bit has a dedicated
+  // meaning.
+  if ( special()
+     || ( !(op() & L4_obj_ref::Ipc_send     )
+        && (op() & L4_obj_ref::Ipc_open_wait)
+     )  ) [[unlikely]]
+    {
+      // "self" or "explicit reply capability".
+      *rights = L4_fpage::Rights::CWS();
+      return current;
+    }
+
+  return current->space()->lookup_local(cap(), rights);
+}
+
+PUBLIC explicit
+Thread_object::Thread_object(Ram_quota *q) : Thread(q) {}
+
+PUBLIC explicit
+Thread_object::Thread_object(Ram_quota *q, Context_mode_kernel k)
+: Thread(q, k) {}
+
+PUBLIC
+bool
+Thread_object::put() override
+{ return dec_ref() == 0; }
+
+PRIVATE static inline
+void *
+Thread_object::alloc(Ram_quota *q) noexcept
+{
+  static_assert(sizeof(Thread_object) <= Thread::Size);
+
+  void *t = Kmem_alloc::allocator()->q_alloc(q, Bytes(Thread::Size));
+  if (t) [[likely]]
+    memset(t, 0, sizeof(Thread_object));
+
+  // separate_lifetime() is required to convince the compiler that this new
+  // operator does more than allocating memory.
+  return separate_lifetime(t);
+}
+
+PUBLIC template<typename THREAD_TYPE = Thread_object>
+static inline NEEDS[Thread_object::alloc]
+THREAD_TYPE *
+Thread_object::create(Ram_quota *q) noexcept
+{
+  void *mem = Thread_object::alloc(q);
+  if (!mem) [[unlikely]]
+    return nullptr;
+
+  THREAD_TYPE *t = new (mem) THREAD_TYPE(q);
+  if (!t->initialize()) [[unlikely]]
+    {
+      delete t;
+      return nullptr;
+    }
+
+  return t;
+}
+
+PUBLIC template<typename T> static inline
+void *
+Thread_object::operator new(size_t, T &&p) noexcept
+{
+  static_assert(
+    cxx::is_same_v<cxx::remove_reference_t<T>, void *>,
+    "Ram_quota placement new was replaced with Thread_object::create");
+
+  return p;
+}
+
+PUBLIC
+void
+Thread_object::operator delete(Thread_object *t, std::destroying_delete_t)
+{
+  Ram_quota * const q = t->_quota;
+
+  LOG_TRACE("Kobject delete", "del", current(), Log_destroy,
+      l->id = t->dbg_id();
+      l->obj = t;
+      l->type = cxx::Typeid<Thread>::get();
+      l->ram = q->current());
+
+  t->~Thread_object();
+  Kmem_alloc::allocator()->q_free(q, Bytes(Thread::Size), t);
+}
+
+
+PUBLIC
+void
+Thread_object::destroy(Kobjects_list &reap_list) override
+{
+  Kobject::destroy(reap_list);
+
+  if (!is_invalid(false))
+    kill();
+  else
+    unbind();
+
+  assert(_magic == magic);
+}
+
+PUBLIC
+void
+Thread_object::invoke(L4_obj_ref self, L4_fpage::Rights rights,
+                      Syscall_frame *f, Utcb *utcb) override
+{
+  L4_obj_ref::Operation op = f->ref().op();
+  if (((op != 0) && !(op & L4_obj_ref::Ipc_send))
+      || (op & L4_obj_ref::Ipc_reply)
+      || f->tag().proto() != L4_msg_tag::Label_thread)
+    {
+      /* we do IPC */
+      Thread *ct = current_thread();
+      Thread *sender = nullptr;
+      Thread *partner = nullptr;
+      bool have_rcv = false;
+
+      if (!check_sys_ipc(op, &partner, &sender, &have_rcv)) [[unlikely]]
+        {
+          f->tag(commit_error(utcb, L4_error::Not_existent));
+          return;
+        }
+
+      ct->do_ipc(f->tag(), f->from_spec(), partner, have_rcv, sender,
+                 f->timeout(), f, rights);
+      return;
+    }
+
+  if (f->tag().words() < 1) [[unlikely]]
+    {
+      f->tag(commit_result(-L4_err::EMsgtooshort));
+      return;
+    }
+
+  Utcb *out = self.have_recv() ? utcb : utcb_dummy();
+  L4_msg_tag tag;
+  switch (Op{utcb->values[0] & Opcode_mask})
+    {
+    case Op::Control:
+      tag = sys_control(rights, f->tag(), utcb, out);
+      break;
+    case Op::Ex_regs:
+      tag = sys_ex_regs(f->tag(), utcb, out);
+      break;
+    case Op::Switch:
+      tag = sys_thread_switch(f->tag(), utcb, out);
+      break;
+    case Op::Stats:
+      tag = sys_thread_stats(f->tag(), utcb, out);
+      break;
+    case Op::Vcpu_resume:
+      tag = sys_vcpu_resume(f->tag(), utcb, out);
+      break;
+    case Op::Register_del_irq:
+      tag = sys_register_delete_irq(f->tag(), utcb, out);
+      break;
+    case Op::Modify_senders:
+      tag = sys_modify_senders(f->tag(), utcb, out);
+      break;
+    case Op::Vcpu_control:
+      tag = sys_vcpu_control(rights, f->tag(), utcb, out);
+      break;
+    case Op::Register_doorbell_irq:
+      tag = sys_register_doorbell_irq(f->tag(), utcb);
+      break;
+    case Op::Pf_tramp_control:
+      tag = sys_pf_tramp_control(rights, f->tag(), utcb, out);
+      break;
+    default:
+      tag = invoke_arch(f->tag(), utcb, out);
+      break;
+    }
+
+  if (self.have_recv() || tag.has_error())
+    f->tag(tag);
+}
+
+
+/*
+ * L4-IFACE: kernel-thread.thread-vcpu_resume
+ * PROTOCOL: L4_PROTO_THREAD
+ * RIGHTS: special for the user task passed in the vCPU state
+ */
+PRIVATE inline
+L4_msg_tag
+Thread_object::sys_vcpu_resume(L4_msg_tag const &tag, Utcb const *utcb, Utcb *)
+{
+  if (this != current() || !(state() & Thread_vcpu_enabled))
+    return commit_result(-L4_err::EInval);
+
+  Space *s = space();
+  Vcpu_state *vcpu = vcpu_state().access(true);
+
+  L4_obj_ref user_task = vcpu->user_task;
+  if (user_task.valid() && user_task.op() == 0)
+    {
+      L4_fpage::Rights task_rights = L4_fpage::Rights(0);
+      Task *task = cxx::dyn_cast<Task*>(s->lookup_local(user_task.cap(),
+                                                         &task_rights));
+
+      if (task && !(task_rights & L4_fpage::Rights::CS())) [[unlikely]]
+        return commit_result(-L4_err::EPerm);
+
+      if (task != vcpu_user_space())
+        vcpu_set_user_space(task);
+
+      reinterpret_cast<Mword &>(vcpu->user_task) |= L4_obj_ref::Ipc_send;
+    }
+  else if (user_task.op() == L4_obj_ref::Ipc_reply)
+    vcpu_set_user_space(nullptr);
+
+  L4_snd_item_iter snd_items(utcb, tag.words());
+  int items = tag.items();
+  if (vcpu_user_space())
+    {
+      for (; items && snd_items.next(); --items)
+        {
+          // Must be destroyed _after_ releasing the existence lock below!
+          Reap_list reap_list;
+
+          // Take the existence_lock for synchronizing maps -- kind of
+          // coarse-grained but necessary for the destination task (see the
+          // reasoning in Task::destroy()).
+          // Note: We already have a counted reference managed by
+          //       vcpu_user_space(), which ensures the lock is not deleted.
+          auto guard = switch_lock_guard(static_cast<Task *>(vcpu_user_space())->existence_lock);
+          if (!guard.is_valid())
+            return commit_result(-L4_err::ENoent);
+
+          cpu_lock.clear();
+
+          L4_snd_item_iter::Item const *const item = snd_items.get();
+          L4_fpage sfp(item->d);
+          L4_error err = fpage_map(space(), sfp, vcpu_user_space(),
+                                   L4_fpage::all_spaces(), item->b,
+                                   reap_list.list());
+
+          cpu_lock.lock();
+
+          if (!err.ok()) [[unlikely]]
+            return commit_error(utcb, err);
+        }
+    }
+
+  if ((vcpu->_saved_state & Vcpu_state::F_irqs)
+      && (vcpu->sticky_flags & Vcpu_state::Sf_irq_pending))
+    {
+      assert(cpu_lock.test());
+      // The object reference of the IPC registers is set up in
+      // sys_vcpu_control().
+      do_ipc(L4_msg_tag(), 0, nullptr, true, nullptr,
+             L4_timeout_pair(L4_timeout::Zero, L4_timeout::Zero),
+             &vcpu->_ipc_regs, L4_fpage::Rights::FULL());
+
+      vcpu = vcpu_state().access(true);
+
+      if (!vcpu->_ipc_regs.tag().has_error()
+          || this->utcb().access(true)->error.error() == L4_error::R_timeout)
+          [[likely]]
+        {
+          vcpu->_regs.set_ipc_upcall();
+
+          Address sp;
+
+          // tried to resume to user mode, so an IRQ enters from user mode
+          if (vcpu->_saved_state & Vcpu_state::F_user_mode)
+            sp = vcpu->_entry_sp;
+          else
+            sp = vcpu->_regs.s.sp();
+
+          LOG_TRACE("VCPU events", "vcpu", this, Vcpu_log,
+              l->type = 4;
+              l->state = vcpu->state;
+              l->ip = vcpu->_entry_ip;
+              l->sp = sp;
+              l->space = static_cast<Task*>(_space.vcpu_aware())->dbg_id();
+              );
+
+          vcpu_return_to_kernel(vcpu->_entry_ip, sp, vcpu_state().usr().get());
+        }
+    }
+
+  vcpu->state = vcpu->_saved_state;
+  Task *target_space = nonull_static_cast<Task*>(space());
+  bool user_mode = false;
+
+  if (vcpu->state & Vcpu_state::F_user_mode)
+    {
+      if (!vcpu_user_space())
+        return commit_result(-L4_err::ENoent);
+
+      user_mode = true;
+
+      if (!(vcpu->state & Vcpu_state::F_fpu_enabled))
+        {
+          state_add_dirty(Thread_vcpu_fpu_disabled);
+          Fpu::fpu.current().disable();
+        }
+      else
+        state_del_dirty(Thread_vcpu_fpu_disabled);
+
+      target_space = static_cast<Task*>(vcpu_user_space());
+
+      arch_load_vcpu_user_state(vcpu);
+    }
+
+  LOG_TRACE("VCPU events", "vcpu", this, Vcpu_log,
+      l->type = 0;
+      l->state = vcpu->state;
+      l->ip = vcpu->_regs.s.ip();
+      l->sp = vcpu->_regs.s.sp();
+      l->space = target_space->dbg_id();
+      );
+
+  return commit_result(target_space->resume_vcpu(this, vcpu, user_mode));
+}
+
+/*
+ * L4-IFACE: kernel-thread.thread-modify_senders
+ * PROTOCOL: L4_PROTO_THREAD
+ */
+PRIVATE inline NOEXPORT NEEDS["processor.h"]
+L4_msg_tag
+Thread_object::sys_modify_senders(L4_msg_tag tag, Utcb const *in, Utcb * /*out*/)
+{
+  // Prevent vanishing of this thread during the whole operation.
+  Ref_ptr<Thread> self(this);
+
+  // Only threads running on our CPU are allowed to iterate our sender list.
+  if (current_cpu() != home_cpu())
+    return commit_result(-L4_err::EInval);
+
+  if (sender_list()->cursor())
+    return commit_result(-L4_err::EBusy);
+
+  if constexpr (0) // Intentionally disabled, only used for diagnostics
+    printf("MODIFY ID (%08lx:%08lx->%08lx:%08lx\n",
+           in->values[1], in->values[2],
+           in->values[3], in->values[4]);
+
+
+  int elems = tag.words();
+
+  if (elems < 5)
+    return Kobject_iface::commit_result(0);
+
+  --elems;
+
+  elems = elems / 4;
+
+  ::Prio_list_elem *c = sender_list()->first();
+  while (c)
+    {
+      // this is kind of arbitrary
+      for (int cnt = 50; c && cnt > 0; --cnt)
+        {
+          Sender *s = Sender::cast(c);
+          s->modify_label(&in->values[1], elems);
+          c = sender_list()->next(c);
+        }
+
+      if (!c)
+        break;
+
+      sender_list()->cursor(c);
+      Proc::preemption_point();
+
+      // After resuming from preemption we have to enforce again that only
+      // threads running on our CPU are allowed to iterate our sender list.
+      if (current_cpu() != home_cpu())
+        {
+          sender_list()->cursor(nullptr);
+          return commit_result(-L4_err::EInval);
+        }
+
+      c = sender_list()->cursor();
+    }
+
+  sender_list()->cursor(nullptr);
+  return Kobject_iface::commit_result(0);
+}
+
+/*
+ * L4-IFACE: kernel-thread.thread-register_del_irq
+ * PROTOCOL: L4_PROTO_THREAD
+ * RIGHTS: write for IRQ argument
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_register_delete_irq(L4_msg_tag tag, Utcb const *in, Utcb * /*out*/)
+{
+  L4_fpage::Rights irq_rights;
+  Irq_base *irq = Ko::deref<Irq>(&tag, in, &irq_rights);
+  if (!irq)
+    return tag;
+
+  if (!(irq_rights & L4_fpage::Rights::CW())) [[unlikely]]
+    return Kobject_iface::commit_result(-L4_err::EPerm);
+
+  if (register_delete_irq(irq))
+    return Kobject_iface::commit_result(0);
+  else
+    return Kobject_iface::commit_result(-L4_err::EBusy);
+}
+
+
+/*
+ * L4-IFACE: kernel-thread.thread-control
+ * PROTOCOL: L4_PROTO_THREAD
+ * RIGHTS: special, also for optional task argument
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_control(L4_fpage::Rights rights, L4_msg_tag tag,
+                           Utcb const *utcb, Utcb *out)
+{
+  if (!(rights & L4_fpage::Rights::CS())) [[unlikely]]
+    return commit_result(-L4_err::EPerm);
+
+  if (tag.words() < 6) [[unlikely]]
+    return commit_result(-L4_err::EInval);
+
+  Mword flags = utcb->values[0];
+
+  Mword _old_pager = cxx::int_value<Cap_index>(_pager.raw()) << L4_obj_ref::Cap_shift;
+  Mword _old_exc_handler = cxx::int_value<Cap_index>(_exc_handler.raw()) << L4_obj_ref::Cap_shift;
+
+  Thread_ptr _new_pager(Thread_ptr::Invalid);
+  Thread_ptr _new_exc_handler(Thread_ptr::Invalid);
+
+  if (flags & Ctl_set_pager)
+    _new_pager = Thread_ptr(Cap_index(utcb->values[1] >> L4_obj_ref::Cap_shift));
+
+  if (flags & Ctl_set_exc_handler)
+    _new_exc_handler = Thread_ptr(Cap_index(utcb->values[2] >> L4_obj_ref::Cap_shift));
+
+  if (flags & Ctl_bind_task)
+    {
+      L4_fpage::Rights task_rights = L4_fpage::Rights(0);
+      Task *task = Ko::deref<Task>(&tag, utcb, &task_rights);
+      if (!task)
+        return tag;
+
+      if (!(task_rights & L4_fpage::Rights::CS())) [[unlikely]]
+        return commit_result(-L4_err::EPerm);
+
+      if (!(task->caps() & Task::Caps::threads())) [[unlikely]]
+        return commit_result(-L4_err::EInval);
+
+      User_ptr<Utcb> utcb_addr =
+        User_ptr<Utcb>(reinterpret_cast<Utcb*>(utcb->values[5]));
+
+      if (!bind(task, utcb_addr)) [[unlikely]]
+        return commit_result(-L4_err::EInval); // unbind first !!
+    }
+
+  long res = control(_new_pager, _new_exc_handler);
+
+  if (res < 0)
+    return commit_result(res);
+
+  if (flags & Ctl_alien_thread)
+    {
+      if constexpr (TAG_ENABLED(alien))
+        {
+          if (utcb->values[4] & Ctl_alien_thread)
+            xcpu_state_change(~Thread_dis_alien, Thread_alien, true);
+          else
+            xcpu_state_change(~Thread_alien, 0, true);
+        }
+      else
+        return commit_result(-L4_err::ENosys);
+    }
+
+  out->values[1] = _old_pager;
+  out->values[2] = _old_exc_handler;
+
+  return commit_result(0, 3);
+}
+
+
+/*
+ * L4-IFACE: kernel-thread.thread-vcpu_control
+ * PROTOCOL: L4_PROTO_THREAD
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_vcpu_control(L4_fpage::Rights, L4_msg_tag const &tag,
+                                Utcb const *utcb, Utcb * /* out */)
+{
+  User_ptr<Vcpu_state> vcpu(nullptr);
+
+  if (tag.words() >= 2)
+    vcpu = User_ptr<Vcpu_state>(reinterpret_cast<Vcpu_state*>(utcb->values[1]));
+
+  Mword del_state = 0;
+  Mword add_state = 0;
+
+  if (vcpu)
+    {
+      Mword size = sizeof(Vcpu_state);
+      if (utcb->values[0] & Vcpu_ctl_extended_vcpu)
+        {
+          if (!arch_ext_vcpu_enabled())
+            return commit_result(-L4_err::ENosys);
+          size = Config::ext_vcpu_size();
+          add_state |= Thread_ext_vcpu_enabled;
+        }
+
+      Space::Ku_mem const *vcpu_m =
+        space()->find_ku_mem(vcpu, size, alignof(Vcpu_state));
+      if (!vcpu_m)
+        return commit_result(-L4_err::EInval);
+
+      Mword ret = arch_check_vcpu_state(add_state & Thread_ext_vcpu_enabled);
+      if (ret != 0)
+        return commit_result(ret);
+
+      add_state |= Thread_vcpu_enabled;
+      _vcpu_state.set(vcpu, vcpu_m->kern_addr(vcpu));
+
+      Vcpu_state *s = _vcpu_state.access();
+      arch_init_vcpu_state(s, add_state & Thread_ext_vcpu_enabled);
+      arch_update_vcpu_state(s);
+      /*
+       * Prepare the IPC registers for receiving pending IPC in
+       * sys_vcpu_resume() and vcpu_upcall_pending_ipc(): use the implicit
+       * reply cap slot by default.
+       */
+      s->_ipc_regs.ref(L4_obj_ref(L4_obj_ref::Special_bit,
+                                  L4_obj_ref::Ipc_wait));
+    }
+  else
+    return commit_result(-L4_err::EInval);
+
+  /* hm, we do not allow to disable vCPU mode, it's one way enable
+  else
+    {
+      del_state |= Thread_vcpu_enabled | Thread_vcpu_user_mode
+                   | Thread_vcpu_fpu_disabled | Thread_ext_vcpu_enabled;
+    }
+  */
+
+  assert(!(add_state & Thread_ready_mask));
+  xcpu_state_change(~del_state, add_state, true);
+
+  return commit_result(0);
+}
+
+
+// -------------------------------------------------------------------
+// Thread::ex_regs class system calls
+
+PUBLIC
+bool
+Thread_object::ex_regs(Address ip, Address sp,
+                Address *o_ip = nullptr, Address *o_sp = nullptr,
+                Mword *o_flags = nullptr, Mword ops = 0)
+{
+  if (current() == this)
+    spill_user_state();
+
+  if (o_sp)
+    *o_sp = user_sp();
+  if (o_ip)
+    *o_ip = user_ip();
+  if (o_flags)
+    *o_flags = user_flags();
+
+  // Changing the run state is only possible when the thread is not in
+  // an exception.
+  if (!(ops & Exr_cancel) && (state() & Thread_in_exception))
+    // XXX Maybe we should return false here.  Previously, we actually
+    // did so, but we also actually didn't do any state modification.
+    // If you change this value, make sure the logic in
+    // sys_thread_ex_regs still works (in particular,
+    // ex_regs_cap_handler and friends should still be called).
+    return true;
+
+  if (!ex_regs_arch(ops))
+    return false;
+
+  if (state() & Thread_dead)	// resurrect thread
+    state_change_dirty(~Thread_dead, Thread_ready);
+
+  else if (ops & Exr_cancel)
+    // cancel ongoing IPC or other activity
+    state_add_dirty(Thread_cancel | Thread_ready);
+
+  if (ops & Exr_trigger_exception)
+    {
+      extern char leave_by_trigger_exception[];
+      do_trigger_exception(regs(), leave_by_trigger_exception);
+    }
+
+  if (ip != ~0UL)
+    user_ip(ip);
+
+  if (sp != ~0UL)
+    user_sp (sp);
+
+  if (current() == this)
+    fill_user_state();
+
+  return true;
+}
+
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::ex_regs(Utcb const *utcb, Utcb *out)
+{
+  Address ip = utcb->values[1];
+  Address sp = utcb->values[2];
+  Mword flags;
+  Mword ops = utcb->values[0];
+
+  LOG_TRACE("Ex-regs", "exr", current(), Log_thread_exregs,
+      l->id = dbg_id();
+      l->ip = ip; l->sp = sp; l->op = ops;);
+
+  if (!ex_regs(ip, sp, &ip, &sp, &flags, ops))
+    return commit_result(-L4_err::EInval);
+
+  out->values[0] = flags;
+  out->values[1] = ip;
+  out->values[2] = sp;
+
+  return commit_result(0, 3);
+}
+
+PRIVATE static
+Context::Drq::Result
+Thread_object::handle_remote_ex_regs(Drq *, Context *self, void *p)
+{
+  Remote_syscall *params = reinterpret_cast<Remote_syscall*>(p);
+  params->result = nonull_static_cast<Thread_object *>(self)->ex_regs(
+    params->thread->utcb().access(),
+    params->have_recv ? params->thread->utcb().access() : utcb_dummy());
+  return params->result.proto() == 0 ? Drq::need_resched() : Drq::done();
+}
+
+/*
+ * L4-IFACE: kernel-thread.thread-ex_regs
+ * PROTOCOL: L4_PROTO_THREAD
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_ex_regs(L4_msg_tag const &tag, Utcb *utcb, Utcb *out)
+{
+  if (tag.words() != 3)
+    return commit_result(-L4_err::EInval);
+
+  if (current() == this)
+    return ex_regs(utcb, out);
+
+  Remote_syscall params;
+  params.thread = current_thread();
+  params.have_recv = (utcb == out);
+
+  drq(handle_remote_ex_regs, &params);
+  return params.result;
+}
+
+/*
+ * L4-IFACE: kernel-thread.thread-switch_to
+ * PROTOCOL: L4_PROTO_THREAD
+ */
+PRIVATE inline NOEXPORT NEEDS["timer.h"]
+L4_msg_tag
+Thread_object::sys_thread_switch(L4_msg_tag const & /*tag*/, Utcb const * /*utcb*/,
+                                 Utcb * /*out*/)
+{
+  Context *curr = current();
+
+  if (curr == this)
+    return commit_result(0);
+
+  if (current_cpu() != home_cpu())
+    return commit_result(0);
+
+  if (state() & Thread_ready_mask)
+    curr->schedule_if(curr->switch_exec_locked(this, Not_Helping) != Switch::Ok);
+  else
+    curr->schedule();
+
+  return commit_result(0);
+}
+
+
+
+// -------------------------------------------------------------------
+// Gather statistics information about thread execution
+
+PRIVATE inline NOEXPORT
+Context::Drq::Result
+Thread_object::sys_thread_stats_remote(void *data)
+{
+  // For threads whose home CPU is the invalid CPU, this method is executed in
+  // the context of another thread, don't consume CPU time in that case.
+  if (this == current())
+    update_consumed_time();
+  *static_cast<Clock::Time *>(data) = consumed_time();
+  return Drq::done();
+}
+
+PRIVATE static
+Context::Drq::Result FIASCO_FLATTEN
+Thread_object::handle_sys_thread_stats_remote(Drq *, Context *self, void *data)
+{
+  return nonull_static_cast<Thread_object*>(self)->sys_thread_stats_remote(data);
+}
+
+/*
+ * L4-IFACE: kernel-thread.thread-stats_time
+ * PROTOCOL: L4_PROTO_THREAD
+ */
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_thread_stats(L4_msg_tag const &/*tag*/, Utcb const * /*utcb*/, Utcb *out)
+{
+  Clock::Time value;
+
+  if (home_cpu() != current_cpu())
+    drq(handle_sys_thread_stats_remote, &value);
+  else
+    {
+      // Respect the fact that the consumed time is only updated on context switch
+      if (this == current())
+        update_consumed_time();
+      value = consumed_time();
+    }
+
+  reinterpret_cast<Utcb::Time_val *>(out->values)->t = value;
+
+  return commit_result(0, Utcb::Time_val::Words);
+}
+
+namespace {
+
+static Kobject_iface * FIASCO_FLATTEN
+thread_factory(Ram_quota *q, Space *,
+               L4_msg_tag, Utcb const *, Utcb *,
+               int *err, unsigned *)
+{
+  *err = L4_err::ENomem;
+  return Thread_object::create(q);
+}
+
+static inline
+void __attribute__((constructor)) FIASCO_INIT_SFX(thread_register_factory)
+register_factory()
+{
+  Kobject_iface::set_factory(L4_msg_tag::Label_thread, thread_factory);
+}
+
+}
+
+//-----------------------------------------------------------------------------
+IMPLEMENTATION [!irq_direct_inject]:
+
+PRIVATE inline
+L4_msg_tag
+Thread_object::sys_register_doorbell_irq(L4_msg_tag, Utcb const *)
+{
+  return commit_result(-L4_err::ENosys);
+}
+
+//-----------------------------------------------------------------------------
+IMPLEMENTATION [irq_direct_inject]:
+
+PRIVATE
+L4_msg_tag
+Thread_object::sys_register_doorbell_irq(L4_msg_tag tag, Utcb const *in)
+{
+  L4_fpage::Rights irq_rights;
+  Irq_base *irq = Ko::deref<Irq>(&tag, in, &irq_rights);
+  if (!irq)
+    return tag;
+
+  if (!(irq_rights & L4_fpage::Rights::CW())) [[unlikely]]
+    return Kobject_iface::commit_result(-L4_err::EPerm);
+
+  if (register_doorbell_irq(irq))
+    return Kobject_iface::commit_result(0);
+  else
+    return Kobject_iface::commit_result(-L4_err::EBusy);
+}
+
+//-----------------------------------------------------------------------------
+IMPLEMENTATION [!pagefault_trampoline]:
+
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control(L4_fpage::Rights, L4_msg_tag const &,
+                                    Utcb const *, Utcb *)
+{
+  return commit_result(-L4_err::ENosys);
+}
+
+//-----------------------------------------------------------------------------
+IMPLEMENTATION [pagefault_trampoline]:
+
+PRIVATE inline NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control(L4_fpage::Rights, L4_msg_tag const &tag,
+                                    Utcb const *utcb, Utcb *out)
+{
+  if (tag.items())
+    return commit_result(-L4_err::EMsgtoolong);
+
+  switch (Pf_tramp_op{access_once(&utcb->values[0]) & ~Opcode_mask})
+    {
+    case Pf_tramp_op::Setup:   return sys_pf_tramp_control_setup(tag, utcb);
+    case Pf_tramp_op::Resume:  return sys_pf_tramp_control_resume(tag, false);
+    case Pf_tramp_op::Reflect: return sys_pf_tramp_control_resume(tag, true);
+    case Pf_tramp_op::Disable: return sys_pf_tramp_control_disable(tag, out);
+    case Pf_tramp_op::Enable:  return sys_pf_tramp_control_enable(tag);
+    default:                   return commit_result(-L4_err::ENosys);
+    }
+}
+
+PRIVATE inline
+NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control_setup(L4_msg_tag const &tag,
+                                          Utcb const *utcb)
+{
+  if (tag.words() < 2)
+    return commit_result(-L4_err::EMsgtooshort);
+  if (tag.words() > 2)
+    return commit_result(-L4_err::EMsgtoolong);
+
+  auto pf_tramp_uptr = User_ptr<Pf_trampoline>(
+    reinterpret_cast<Pf_trampoline *>(access_once(&utcb->values[1])));
+  Space::Ku_mem const *pf_tramp_m = space()->find_ku_mem(
+    pf_tramp_uptr, sizeof(Pf_trampoline), alignof(Pf_trampoline));
+  if (!pf_tramp_m)
+    return commit_result(-L4_err::EInval);
+
+  _pf_tramp_state.set(pf_tramp_uptr, pf_tramp_m->kern_addr(pf_tramp_uptr));
+  xcpu_state_change(~0UL, Thread_pf_trampoline, true);
+  return  commit_result(0);
+}
+
+PRIVATE inline
+NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control_resume(L4_msg_tag const &tag, bool reflect)
+{
+  if (tag.words() > 1) [[unlikely]]
+    return commit_result(-L4_err::EMsgtoolong);
+
+  // Resuming from a trampoline page fault is permitted only for the thread
+  // itself. Otherwise, we would need a DRQ, complicating things needlessly.
+  if (current() != this) [[unlikely]]
+    return commit_result(-L4_err::EPerm);
+
+  if (!_pf_tramp_state || (state() & Thread_pf_trampoline)) [[unlikely]]
+    return commit_result(-L4_err::EInval);
+
+  // update thread state directly because we checked current() == this
+  state_add_dirty(Thread_pf_trampoline, false);
+
+  Pf_trampoline *tramp_state = pf_tramp_state().access();
+  this->utcb().access(true)->values[0] = tramp_state->saved_mr0;
+
+  // reflecting the PF exception has precedence
+  bool trigger_exception = false;
+  if (reflect)
+    trigger_exception = true;
+  if (tramp_state->flags & Pf_trampoline::Trigger_exception_after_resume)
+    trigger_exception = true;
+
+  tramp_state->flags &= ~(Pf_trampoline::Pf_in_progress
+                          | Pf_trampoline::Trigger_exception_after_resume);
+
+  if (trigger_exception)
+    {
+      // Note: It is essential on all architectures to use the top of the stack
+      // to be able to handle pending continuations (e.g. eret_work)!
+      //
+      // Don't unwind the kernel stack. arch_exception_from_pf_trampoline()
+      // replaces the Entry_frame -- which was created upon entering the kernel
+      // via this syscall -- with a Trap_state. Then it re-enters the kernel
+      // with an exception prepared in the Trap_state.
+      static_assert(sizeof(Entry_frame) >= sizeof(Trap_state));
+      Trap_state *ts = reinterpret_cast<Trap_state *>(regs() + 1) - 1;
+      arch_exception_from_pf_trampoline(ts, tramp_state, !reflect);
+      // does not return
+    }
+  else
+    {
+      // Don't unwind the kernel stack, because on some architectures the
+      // syscall entry path does not use a fully-fledged trap state -- in
+      // contrast to the page fault entry path.
+      arch_return_from_pf_trampoline(tramp_state);
+      // does not return
+    }
+}
+
+PRIVATE inline
+NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control_disable(L4_msg_tag const &tag, Utcb *out)
+{
+  if (tag.words() > 1)
+    return commit_result(-L4_err::EMsgtoolong);
+
+  if (!_pf_tramp_state)
+    {
+      // be permissive
+      out->values[0] = 0;
+      return commit_result(0, 1);
+    }
+
+  Mword was_enabled = 0;
+  Cpu_number current_cpu = ::current_cpu();
+  if (access_once(&_home_cpu) != current_cpu) [[unlikely]]
+    {
+      auto drq_func = [](Context::Drq *, Context *self, void *arg)
+        {
+          Mword *was_enabled = static_cast<Mword *>(arg);
+          *was_enabled = (self->state() & Thread_pf_trampoline) ? 1 : 0;
+          self->state_change_dirty(~Thread_pf_trampoline, 0);
+          return Context::Drq::done();
+        };
+      drq(drq_func, &was_enabled);
+    }
+  else
+    {
+      was_enabled = (state() & Thread_pf_trampoline) ? 1 : 0;
+      state_change_dirty(~Thread_pf_trampoline, 0);
+    }
+
+  out->values[0] = was_enabled;
+  return commit_result(0, 1);
+}
+
+PRIVATE inline
+NOEXPORT
+L4_msg_tag
+Thread_object::sys_pf_tramp_control_enable(L4_msg_tag const &tag)
+{
+  if (tag.words() > 1)
+    return commit_result(-L4_err::EMsgtoolong);
+
+  if (!_pf_tramp_state)
+    return commit_result(-L4_err::EInval);
+
+  // It's OK if Thread_pf_trampoline is already enabled.
+  Cpu_number current_cpu = ::current_cpu();
+  if (access_once(&_home_cpu) != current_cpu) [[unlikely]]
+    {
+      auto drq_func = [](Context::Drq *, Context *self, void *)
+        {
+          self->state_change_dirty(~0UL, Thread_pf_trampoline);
+          return Context::Drq::done();
+        };
+      drq(drq_func, nullptr);
+    }
+  else
+    state_change_dirty(~0UL, Thread_pf_trampoline);
+  return commit_result(0);
+}

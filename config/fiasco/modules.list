@@ -1,0 +1,9 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+
+modaddr 0x01100000
+
+entry[no-defaults] banner
+bootstrap bootstrap
+kernel fiasco -serial_esc
+sigma0 sigma0

@@ -1,0 +1,453 @@
+#!/usr/bin/env ruby
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'optparse'
+require 'rbconfig'
+require_relative 'lib/erx/runner'
+require_relative 'lib/erx/output_directory'
+require_relative 'lib/erx/dependencies'
+require_relative 'lib/erx/tla'
+require_relative 'lib/erx/fiasco'
+require_relative 'lib/erx/qemu'
+require_relative 'lib/erx/checks'
+require_relative 'lib/erx/hardware'
+require_relative 'lib/erx/arch_terms'
+require_relative 'lib/erx/oracle_container'
+require_relative 'lib/erx/bench'
+require_relative 'lib/erx/toolchain_provenance'
+
+module Erx
+  ROOT = File.expand_path('..', __dir__)
+
+  module CLI
+    def self.run(arguments)
+      command, *arguments = arguments
+      case command
+      when 'check'
+        check(arguments)
+      when 'check-generated'
+        check_generated(arguments)
+      when 'check-reproducible'
+        check_reproducible(arguments)
+      when 'check-fuzz'
+        check_fuzz(arguments)
+      when 'check-sanitizers'
+        check_sanitizers(arguments)
+      when 'check-ubsan'
+        check_sanitizers(arguments)
+        Terminal.puts('unsupported: kernel UBSan boot requires erXos kernel implementation; host UBSan checks passed')
+        1
+      when 'pack'
+        Terminal.puts('unsupported root_startup: production packing requires the M1 initial-root startup and charge plan')
+        1
+      when 'status'
+        status(arguments)
+      when 'fetch'
+        fetch(arguments)
+      when 'check-tla'
+        check_tla(arguments)
+      when 'check-sources'
+        check_sources(arguments)
+      when 'check-arch-terms'
+        raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+        ArchTerms.check(root: ROOT)
+        Terminal.puts('architecture terms stay within binding layers')
+        0
+      when 'build'
+        build(arguments)
+      when 'qemu'
+        qemu(arguments)
+      when 'oracle'
+        oracle(arguments)
+      when 'bench'
+        bench(arguments)
+      when 'check-oracle'
+        raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+        Terminal.puts('unsupported: target ERTS and libc-test domains are required for erXos oracle parity')
+        1
+      when '--help', '-h', nil
+        Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-oracle | check-tla | status')
+        0
+      else
+        raise OptionParser::InvalidArgument, "unknown command: #{command}"
+      end
+    rescue OptionParser::ParseError => error
+      Terminal.puts(error.message)
+      2
+    rescue Error, SystemCallError => error
+      Terminal.puts(error.message)
+      1
+    end
+
+    def self.check(arguments)
+      arguments = arguments.dup
+      OptionParser.new.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      Checks.new(root: ROOT).run
+      ArchTerms.check(root: ROOT)
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      generated(runner: runner)
+      with_test_runtime(runner: runner) do |environment|
+        tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
+        raise Error, 'no host tests found' if tests.empty?
+        run_tests(tests, runner: runner, name: 'host-tests', environment: environment)
+        integration = %w[terminal_tables pack_fixture structural_pack sanitizer_gate].map do |name|
+          File.join(ROOT, "test/integration/#{name}_test.rb")
+        end
+        run_tests(integration, runner: runner, name: 'native-integration', environment: environment)
+      end
+      Terminal.puts('offline source, generation, host and native integration checks passed')
+      0
+    end
+
+    def self.check_generated(arguments)
+      no_arguments(arguments)
+      generated(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
+      Terminal.puts('ABI, hardware, system-register and terminal artifacts match')
+      0
+    end
+
+    def self.generated(runner:)
+      { 'gen_abi.rb' => 60, 'gen_hw.rb' => 60,
+        'sysreg_extract.rb' => 120, 'gen_terminal.rb' => 120 }.each do |script, deadline|
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools', script), '--check'],
+                   name: "check-#{script.delete_suffix('.rb').tr('_', '-')}", deadline: deadline, chdir: ROOT)
+      end
+    end
+
+    # The checked LLVM resource-header inventory is the fixture's provenance
+    # input. An arbitrary compiler selected by PATH cannot stand in for it.
+    def self.host_environment(runner:)
+      compiler = ENV['ERX_CLANG']
+      if !compiler || compiler.empty?
+        raise Error, 'set ERX_CLANG to the installed LLVM 23.1.3 clang; see README.md'
+      end
+      compiler = File.realpath(compiler)
+      raise Error, 'ERX_CLANG is not an executable compiler' unless File.file?(compiler) && File.executable?(compiler)
+      linker = ENV.fetch('ERX_LLD', 'ld.lld')
+      path = [File.dirname(compiler), ENV.fetch('PATH', '')].join(File::PATH_SEPARATOR)
+      { 'clang' => [compiler, /\A(?:Homebrew )?clang version 23\.1\.3(?:\s|$)/],
+        'lld' => [linker, /\A(?:Homebrew )?LLD 23\.1\.3(?:\s|$)/] }.each do |name, (program, expected)|
+        identity = runner.run([program, '--version'], name: "check-#{name}-version", deadline: 30,
+                              env: { 'PATH' => path })
+        first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s
+        raise Error, "#{name} does not report the required LLVM 23.1.3 version" unless expected.match?(first_line)
+      end
+      resource = runner.run([compiler, '-print-resource-dir'], name: 'check-clang-resource', deadline: 30)
+      installation = File.expand_path('../../..', BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
+      ToolchainProvenance.registry(profile: File.join(ROOT, 'config/provenance/llvm-23.1.3.json'),
+                                  installation: installation)
+      macos = RbConfig::CONFIG.fetch('host_os').include?('darwin')
+      asan = %w[halt_on_error=1 abort_on_error=1 detect_stack_use_after_return=1 allocator_may_return_null=1]
+      asan.concat(macos ? %w[detect_leaks=0] : %w[detect_leaks=1 check_initialization_order=1 strict_init_order=1])
+      { 'ERX_CLANG' => compiler, 'CC' => compiler,
+        'ERX_LLD' => linker,
+        'ASAN_OPTIONS' => asan.join(':'),
+        'UBSAN_OPTIONS' => 'halt_on_error=1:print_stacktrace=1:report_error_type=1',
+        'TSAN_OPTIONS' => 'halt_on_error=1:abort_on_error=1:exitcode=66',
+        'PATH' => path }.freeze
+    end
+
+    def self.with_test_runtime(runner:)
+      environment = host_environment(runner: runner)
+      Oracle.new(root: ROOT, runner: runner).with_runtime('jit') do |runtime|
+        yield Oracle::CLEAN_ERLANG_ENV.merge(environment)
+                  .merge('ERX_ERL' => runtime.fetch('erl'), 'ERX_ERLC' => runtime.fetch('erlc')).freeze
+      end
+    end
+
+    def self.run_tests(paths, runner:, name:, environment:)
+      runner.run([RbConfig.ruby, '-I', File.join(ROOT, 'test/host'), '-e',
+                  'ARGV.each { |path| require path }', *paths],
+                 name: name, deadline: 900, chdir: ROOT, env: environment)
+    end
+
+    def self.check_reproducible(arguments)
+      no_arguments(arguments)
+      require_relative '../test/fixtures/structural_pack'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      environment = host_environment(runner: runner)
+      parent = File.join(ROOT, 'build/reproducible')
+      OutputDirectory.prepare(root: ROOT, path: parent)
+      directory = Dir.mktmpdir('structural-', parent)
+      report = StructuralPackFixture.check_reproducible(root: ROOT, directory: directory, runner: runner,
+                                                        compiler: environment.fetch('ERX_CLANG'),
+                                                        linker: environment.fetch('ERX_LLD'))
+      Terminal.puts("structural test fixture: byte-identical; #{report.fetch('report')}")
+      Terminal.puts('root_startup: unsupported; policy_admission: unsupported; child_plan_instances: 0')
+      0
+    end
+
+    def self.check_sanitizers(arguments)
+      no_arguments(arguments)
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      generated(runner: runner)
+      with_test_runtime(runner: runner) do |environment|
+        paths = %w[abi_calls manifest_reader elf_plan pack].map do |name|
+          File.join(ROOT, "test/host/#{name}_test.rb")
+        end
+        paths.concat(%w[terminal_tables structural_pack sanitizer_gate].map do |name|
+          File.join(ROOT, "test/integration/#{name}_test.rb")
+        end)
+        run_tests(paths, runner: runner, name: 'sanitizer-tests',
+                  environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
+      end
+      Terminal.puts('implemented host C parsers passed ASan/UBSan; atomic accessor checks passed TSan')
+      if RbConfig::CONFIG.fetch('host_os').include?('darwin')
+        Terminal.puts('LeakSanitizer and ASan initialization-order checks: unsupported on macOS; Linux run required')
+      end
+      0
+    end
+
+    def self.check_fuzz(arguments)
+      arguments = arguments.dup
+      options = { seconds: 3, runs: 20_000, seed: 1 }
+      OptionParser.new do |flags|
+        flags.on('--seconds N', Integer, 'Budget per timed Ruby target, 1..60') { |value| options[:seconds] = value }
+        flags.on('--runs N', Integer, 'C libFuzzer executions per target, 1..10000000') { |value| options[:runs] = value }
+        flags.on('--seed N', Integer, 'Seed for C ABI and timed Ruby targets') { |value| options[:seed] = value }
+      end.parse!(arguments)
+      unless arguments.empty? && options.fetch(:seconds).between?(1, 60) &&
+             options.fetch(:runs).between?(1, 10_000_000) && options.fetch(:seed).between?(0, (1 << 31) - 1)
+        raise OptionParser::InvalidArgument, 'fuzz budget, seed or trailing arguments outside bounds'
+      end
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      generated(runner: runner)
+      with_test_runtime(runner: runner) do |environment|
+        fuzz_c(runner: runner, environment: environment, runs: options.fetch(:runs), seed: options.fetch(:seed))
+        fuzz_ruby(runner: runner, environment: environment, seconds: options.fetch(:seconds), seed: options.fetch(:seed))
+        runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/abi_erlang_test.rb'),
+                    '--name', 'test_production_fuzz_entry_refuses_mutations_without_vm_exception'],
+                   name: 'fuzz-erlang-manifest', deadline: 180, chdir: ROOT, env: environment)
+      end
+      Terminal.puts('implemented ABI, manifest, ERXPACK, ELF and host metadata parser fuzz targets passed')
+      Terminal.puts('pack/terminal/export Ruby targets: fixed 20000 iterations, seed 1; pack/ELF C seeds are recorded in logs')
+      Terminal.puts('root-startup and target runtime/service parsers: unsupported until their implementations land')
+      0
+    end
+
+    def self.fuzz_c(runner:, environment:, runs:, seed:)
+      require_relative 'fuzz/run_pack'
+      FuzzWorkspace.run(root: ROOT, name: 'abi', maximum_input: 65_536) do |directory, artifacts|
+        corpus = File.join(directory, 'corpus')
+        Dir.mkdir(corpus, 0o700)
+        program = File.join(directory, 'abi-fuzz')
+        runner.run([RbConfig.ruby, File.join(ROOT, 'test/fuzz/abi_corpus.rb'), corpus],
+                   name: 'abi-fuzz-corpus', deadline: 30, chdir: ROOT, env: environment)
+        runner.run([environment.fetch('ERX_CLANG'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
+                    '-O1', '-g', '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
+                    '-I', File.join(ROOT, 'include'), '-I', ROOT,
+                    File.join(ROOT, 'liberx/generated/abi_reader.c'),
+                    File.join(ROOT, 'kernel/generated/abi_decode.c'),
+                    File.join(ROOT, 'fuzz/generated/abi.c'), '-o', program],
+                   name: 'compile-abi-fuzz', deadline: 90, chdir: ROOT, env: environment)
+        runner.run([program, "-runs=#{runs}", "-seed=#{seed}", '-max_len=65536', '-timeout=5',
+                    "-artifact_prefix=#{artifacts}/", corpus],
+                   name: 'abi-fuzz', deadline: 180, chdir: ROOT, env: environment)
+      end
+      runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/run_pack.rb')],
+                 name: 'pack-elf-fuzz', deadline: 600, chdir: ROOT,
+                 env: environment.merge('RUNS' => runs.to_s))
+    end
+
+    def self.fuzz_ruby(runner:, environment:, seconds:, seed:)
+      %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb].each do |path|
+        runner.run([RbConfig.ruby, File.join(ROOT, path), '--seconds', seconds.to_s, '--seed', seed.to_s],
+                   name: "fuzz-#{File.basename(path, '.rb').tr('_', '-')}", deadline: seconds + 30,
+                   chdir: ROOT, env: environment)
+      end
+      %w[pack_host_fuzz terminal_rules_fuzz oracle_export_fuzz].each do |name|
+        runner.run([RbConfig.ruby, File.join(ROOT, "tools/fuzz/#{name}.rb")],
+                   name: name.tr('_', '-'), deadline: 180, chdir: ROOT, env: environment)
+      end
+      require_relative 'fuzz/host_metadata'
+      HostMetadataFuzz::TARGETS.each do |target|
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/host_metadata.rb'), '--target', target,
+                    '--seconds', seconds.to_s, '--seed', seed.to_s],
+                   name: "fuzz-#{target.tr('_', '-')}", deadline: seconds + 30,
+                   chdir: ROOT, env: environment)
+      end
+    end
+
+    def self.no_arguments(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+    end
+
+    def self.check_sources(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      Checks.new(root: ROOT).run
+      Terminal.puts('source ASCII and imported provenance checks passed')
+      0
+    end
+
+    def self.build(arguments)
+      arguments = arguments.dup
+      component = arguments.shift
+      raise OptionParser::InvalidArgument, 'build currently accepts fiasco' unless component == 'fiasco'
+      jobs = 4
+      parser = OptionParser.new do |options|
+        options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      path = Fiasco.new(root: ROOT).build(jobs: jobs)
+      Terminal.puts("built #{path}")
+      0
+    end
+
+    def self.qemu(arguments)
+      arguments = arguments.dup
+      options = { accel: 'tcg', image: Fiasco.new(root: ROOT).image_path }
+      parser = OptionParser.new do |flags|
+        flags.on('--accel NAME', %w[tcg hvf], 'Guest accelerator') { |value| options[:accel] = value }
+        flags.on('--image PATH', 'Explicit built guest image') { |value| options[:image] = value }
+        flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
+        flags.on('--memory-mib N', Integer, 'Guest RAM in MiB') { |value| options[:memory_mib] = value }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      report = Qemu.new(root: ROOT).run(**options)
+      Terminal.puts("#{options.fetch(:accel)}: #{report.fetch('state')}; #{report.fetch('serial_log')}")
+      0
+    end
+
+    def self.fetch(arguments)
+      arguments = arguments.dup
+      cache = nil
+      source_id = nil
+      docker_context = nil
+      parser = OptionParser.new do |options|
+        options.on('--cache DIRECTORY', 'Use only this explicit local source cache') { |value| cache = value }
+        options.on('--source ID', 'Fetch only this pinned source') { |value| source_id = value }
+        options.on('--docker-context NAME', 'Use this local Docker context for image fetch') { |value| docker_context = value }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      Dependencies.new(root: ROOT, runner: runner, docker_context: docker_context)
+                  .fetch(cache: cache, source_id: source_id)
+      Terminal.puts('sources verified and extracted')
+      0
+    end
+
+    def self.oracle(arguments)
+      arguments = arguments.dup
+      action = arguments.shift
+      unless %w[build run probe].include?(action)
+        raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe [--docker-context NAME] [--flavour emu|jit]'
+      end
+      suite = arguments.shift if action == 'run'
+      options = { backend: 'linux', flavour: 'emu', jobs: 4, deadline: 14_400, clean: false }
+      OptionParser.new do |flags|
+        flags.on('--backend NAME', %w[linux native], 'Linux suites or native bootstrap build') { |value| options[:backend] = value }
+        flags.on('--docker-context NAME', 'Explicit local Docker context; cached pinned image only') { |value| options[:context] = value }
+        flags.on('--flavour NAME', %w[emu jit]) { |value| options[:flavour] = value }
+        flags.on('--jobs N', Integer) { |value| options[:jobs] = value } unless action == 'probe'
+        if action == 'run'
+          flags.on('--deadline SECONDS', Integer, 'Suite hard deadline') { |value| options[:deadline] = value }
+          flags.on('--suite NAME', 'Select one stock Common Test suite') { |value| options[:test_suite] = value }
+          flags.on('--case NAME', 'Select a case within --suite') { |value| options[:testcase] = value }
+        end
+        if action == 'build'
+          flags.on('--clean', 'Replace an existing native bootstrap build') { options[:clean] = true }
+        end
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      unless options.fetch(:jobs).between?(1, 64)
+        raise OptionParser::InvalidArgument, 'jobs must be between 1 and 64'
+      end
+      if options.fetch(:backend) == 'native'
+        unless action == 'build' && !options[:context]
+          raise OptionParser::InvalidArgument, 'native backend supports bootstrap build only, without Docker context'
+        end
+        Oracle.new(root: ROOT).build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs), clean: options.fetch(:clean))
+        Terminal.puts("native stock OTP bootstrap #{options.fetch(:flavour)} ready")
+        return 0
+      end
+      raise OptionParser::InvalidArgument, '--clean applies to native bootstrap builds' if options.fetch(:clean)
+      backend = OracleContainer.new(root: ROOT, context: options[:context])
+      result = case action
+               when 'build'
+                 backend.build(flavours: [options.fetch(:flavour)], jobs: options.fetch(:jobs)).first
+               when 'probe'
+                 backend.probe(flavour: options.fetch(:flavour))
+               when 'run'
+                 backend.run(suite, flavour: options.fetch(:flavour), jobs: options.fetch(:jobs),
+                             deadline: options.fetch(:deadline), test_suite: options[:test_suite], testcase: options[:testcase])
+               end
+      Terminal.puts("Linux host oracle: #{result.fetch('state')}; #{result.fetch('report')}")
+      result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
+    end
+
+    def self.bench(arguments)
+      arguments = arguments.dup
+      name = arguments.shift
+      options = { flavour: 'emu', iterations: 10_000, samples: 7 }
+      OptionParser.new do |flags|
+        flags.on('--flavour NAME', %w[emu jit]) { |value| options[:flavour] = value }
+        flags.on('--iterations N', Integer) { |value| options[:iterations] = value }
+        flags.on('--samples N', Integer) { |value| options[:samples] = value }
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      report = Bench.new(root: ROOT).run(name, **options)
+      Terminal.puts("native host benchmark: #{report.fetch('report')}")
+      0
+    end
+
+    def self.status(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      records = Dir.glob(File.join(ROOT, 'build/logs/*.json')).sort.map do |path|
+        status_record(BoundedFile.read(path, maximum: 65_536))
+      end
+      active = records.select { |record| record.fetch('state') == 'running' }
+      active.each do |record|
+        age = Time.now - record.fetch('started_at')
+        Terminal.puts("recorded running (liveness unknown) #{record.fetch('argv').first}: age #{age.round}s, " \
+                      "deadline #{record.fetch('deadline_seconds')}s; #{record.fetch('log')}")
+      end
+      Terminal.puts('no commands recorded as running') if active.empty?
+      0
+    end
+
+    def self.status_record(bytes)
+      record = JsonInput.parse(bytes, max_bytes: 65_536, label: 'runner status record')
+      unless record.is_a?(Hash) &&
+             %w[running succeeded failed timed_out cancelled setup_error].include?(record['state']) &&
+             record['argv'].is_a?(Array) && record['argv'].size.between?(1, 1024) &&
+             record['argv'].all? { |value| value.is_a?(String) && value.bytesize <= 4096 && !value.include?("\0") } &&
+             record['started_at'].is_a?(String) &&
+             /\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z/.match?(record['started_at']) &&
+             record['deadline_seconds'].is_a?(Integer) && record['deadline_seconds'].between?(1, 86_400) &&
+             record['log'].is_a?(String) && record['log'].bytesize.between?(1, 4096) && !record['log'].include?("\0")
+        raise Error, 'invalid runner status record fields'
+      end
+      record.merge('started_at' => Time.iso8601(record.fetch('started_at'))).freeze
+    rescue ArgumentError
+      raise Error, 'invalid runner status record start time'
+    end
+
+    def self.check_tla(arguments)
+      arguments = arguments.dup
+      filter = nil
+      no_cache = ENV['TLA_NO_CACHE'] == '1'
+      parser = OptionParser.new do |options|
+        options.on('--filter TEXT', 'Select configuration ids containing this text') { |value| filter = value }
+        options.on('--no-cache', 'Check without reusing earlier evidence') { no_cache = true }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      Tla.new(root: ROOT).run(filter: filter, no_cache: no_cache)
+      0
+    end
+
+    private_class_method :generated, :host_environment, :with_test_runtime,
+                         :run_tests, :fuzz_c, :fuzz_ruby, :no_arguments, :status_record
+  end
+end
+
+exit(Erx::CLI.run(ARGV)) if $PROGRAM_NAME == __FILE__

@@ -1,0 +1,48 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+arch aarch64
+limit arch_user_limit u64 0x1000000000000
+limit arch_elf_machine u16 183
+trap svc 0x4552
+reg number x8
+reg args x0,x1,x2,x3,x4,x5
+reg results x0,x1,x2
+reg preserved x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15,x16,x17,x18,x19,x20,x21,x22,x23,x24,x25,x26,x27,x28,x29,x30
+
+layout erx_regs 1 wire_le 8 272
+  field gpr u64 0 count 31
+  field sp u64 248
+  field pc u64 256
+  field state u64 264
+layout erx_saved_thread 1 native 16 816
+  field gpr u64 0 count 31
+  field sp u64 248
+  field pc u64 256
+  field state u64 264
+  field tls u64 272
+  field kernel_user_page u64 280
+  field vectors u8 288 count 512
+  field fp_control u32 800
+  field fp_status u32 804
+  padding 808 8
+layout erx_uframe 1 shared 8 272
+  field gpr u64 0 count 31
+  field sp u64 248
+  field pc u64 256
+  field state u64 264
+  atomic gpr[] load acquire store release
+  atomic sp load acquire store release
+  atomic pc load acquire store release
+  atomic state load acquire store release
+  writer gpr[] runtime
+  writer sp runtime
+  writer pc runtime
+  writer state runtime
+  owner gpr[] runtime all
+  owner sp runtime all
+  owner pc runtime all
+  owner state runtime all
+  visibility gpr[] development
+  visibility sp development
+  visibility pc development
+  visibility state development

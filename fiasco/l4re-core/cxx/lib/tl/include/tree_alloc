@@ -1,0 +1,487 @@
+// vim:set ft=cpp: -*- Mode: C++ -*-
+/*
+ * (c) 2025 Viktor Reusch
+ *
+ * based on the list_alloc by
+ * (c) 2008-2009 Alexander Warg <warg@os.inf.tu-dresden.de>,
+ *               Torsten Frenzel <frenzel@os.inf.tu-dresden.de>
+ *     economic rights: Technische Universität Dresden (Germany)
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
+#pragma once
+
+#include <l4/cxx/arith>
+#include <l4/cxx/avl_tree>
+#include <l4/cxx/iostream>
+#include <l4/cxx/minmax>
+#include <l4/cxx/type_traits>
+#include <l4/sys/consts.h>
+
+namespace cxx
+{
+
+/**
+ * Standard tree-based allocator.
+ */
+class Tree_alloc
+{
+private:
+  friend class Tree_alloc_sanity_guard;
+
+  struct Mem_block : public Avl_tree_node
+  {
+    unsigned long size;
+
+    unsigned long addr() { return reinterpret_cast<unsigned long>(this); }
+    unsigned long end() { return addr() + size; }
+  };
+
+  struct Mem_block_get_key
+  {
+    typedef unsigned long Key_type;
+    static Key_type key_of(Mem_block const *e)
+    {
+      return reinterpret_cast<unsigned long>(e);
+    }
+  };
+
+  Avl_tree<Mem_block, Mem_block_get_key> _tree;
+
+  inline void check_overlap(void *, unsigned long) const;
+  inline void sanity_check_list(char const *, char const *,
+                                bool unmerged = true) const;
+  inline void merge(Mem_block *, Mem_block *);
+
+public:
+  /**
+   * Return a free memory block to the allocator.
+   *
+   * \param block        Pointer to memory block.
+   * \param size         Size of memory block.
+   * \param initial_free Set to true for putting fresh memory
+   *                     to the allocator. This will enforce alignment on that
+   *                     memory.
+   *
+   * \pre `block` must not be NULL.
+   * \pre `2 * sizeof(void *)` <= `size` <= `~0UL - 32`.
+   */
+  inline void free(void *block, unsigned long size, bool initial_free = false);
+
+  /**
+   * Allocate a memory block.
+   *
+   * \param size  Size of the memory block.
+   * \param align Alignment constraint.
+   * \param lower Lower bound of the physical region the memory block should be
+   *              allocated from.
+   * \param upper Upper bound of the physical region the memory block should be
+   *              allocated from, value is inclusive.
+   *
+   * \return      Pointer to memory block
+   *
+   * \pre 0 < `size` <= `~0UL - 32`.
+   */
+  inline void *alloc(unsigned long size, unsigned long align,
+                     unsigned long lower = 0, unsigned long upper = ~0UL);
+
+  /**
+   * Allocate a memory block of `min` <= size <= `max`.
+   *
+   * \param         min          Minimal size to allocate (in bytes).
+   * \param[in,out] max          Maximum size to allocate (in bytes). The actual
+   *                             allocated size is returned here.
+   * \param         align        Alignment constraint.
+   * \param         granularity  Granularity to use for the allocation (power
+   *                             of 2).
+   * \param         lower        Lower bound of the physical region the memory
+   *                             block should be allocated from.
+   * \param         upper        Upper bound of the physical region the memory
+   *                             block should be allocated from, value is
+   *                             inclusive.
+   *
+   * \return  Pointer to memory block
+   *
+   * \pre 0 < `min` <= `~0UL - 32`.
+   * \pre 0 < `max`.
+   */
+  inline void *alloc_max(unsigned long min, unsigned long *max,
+                         unsigned long align, unsigned granularity,
+                         unsigned long lower = 0, unsigned long upper = ~0UL);
+
+  /**
+   * Get the amount of available memory.
+   *
+   * \return Available memory in bytes
+   */
+  inline unsigned long avail() const;
+
+  template<typename DBG>
+  void dump_free_list(DBG &out) const;
+};
+
+#if !defined(CXX_TREE_ALLOC_SANITY)
+class Tree_alloc_sanity_guard
+{
+public:
+  Tree_alloc_sanity_guard(Tree_alloc const *, char const *, bool = true) {}
+};
+
+void
+Tree_alloc::check_overlap(void *, unsigned long) const
+{}
+
+void
+Tree_alloc::sanity_check_list(char const *, char const *, bool) const
+{}
+
+#else
+
+class Tree_alloc_sanity_guard
+{
+private:
+  Tree_alloc const *a;
+  char const *func;
+
+public:
+  Tree_alloc_sanity_guard(Tree_alloc const *a, char const *func,
+                          bool unmerged = false)
+  : a(a), func(func)
+  {
+    a->sanity_check_list(func, "entry", unmerged);
+  }
+
+  ~Tree_alloc_sanity_guard() { a->sanity_check_list(func, "exit"); }
+};
+
+void
+Tree_alloc::check_overlap(void *b, unsigned long s) const
+{
+  unsigned long const mb_align =
+    (1UL << arith::Ld<sizeof(Mem_block)>::value) - 1;
+  if (reinterpret_cast<unsigned long>(b) & mb_align)
+    {
+      L4::cerr << "Tree_alloc(FATAL): trying to free unaligned memory: " << b
+               << " align=" << arith::Ld<sizeof(Mem_block)>::value << "\n";
+    }
+
+  for (auto const &c : tree)
+    {
+      unsigned long x_s = (unsigned long)b;
+      unsigned long x_e = x_s + s;
+      unsigned long b_s = (unsigned long)&c;
+      unsigned long b_e = b_s + c.size;
+
+      if ((x_s >= b_s && x_s < b_e) || (x_e > b_s && x_e <= b_e)
+          || (b_s >= x_s && b_s < x_e) || (b_e > x_s && b_e <= x_e))
+        {
+          L4::cerr << "Tree_alloc(FATAL): trying to free memory that "
+                      "is already free: \n  ["
+                   << (void *)x_s << '-' << (void *)x_e << ") overlaps ["
+                   << (void *)b_s << '-' << (void *)b_e << ")\n";
+        }
+    }
+}
+
+void
+Tree_alloc::sanity_check_list(char const *func, char const *info, bool unmerged) const
+{
+  for (auto c = tree.begin(); c != tree.end(); ++c)
+    {
+      auto next = c + 1;
+
+      if (next != tree.end())
+        {
+          if (c->addr() >= next->addr())
+            {
+              L4::cerr << "Tree_alloc(FATAL): " << func << '(' << info
+                       << "): list order violation\n";
+            }
+
+          auto cmp = +[](unsigned long a, unsigned long b) { return a >= b; };
+          if (unmerged)
+            cmp = +[](unsigned long a, unsigned long b) { return a > b; };
+          if (cmp(c->addr() + c->size, next->addr()))
+            {
+              L4::cerr << "Tree_alloc(FATAL): " << func << '(' << info
+                       << "): list order violation\n";
+            }
+        }
+    }
+}
+
+#endif
+
+void
+Tree_alloc::free(void *block, unsigned long size, bool initial_free)
+{
+  [[maybe_unused]] Tree_alloc_sanity_guard guard(this, __func__);
+
+  unsigned long const mb_align =
+    (1UL << arith::Ld<sizeof(Mem_block)>::value) - 1;
+
+  if (initial_free)
+    {
+      // enforce alignment constraint on initial memory
+      unsigned long nblock =
+        (reinterpret_cast<unsigned long>(block) + mb_align) & ~mb_align;
+      size =
+        (size - (nblock - reinterpret_cast<unsigned long>(block))) & ~mb_align;
+      block = reinterpret_cast<void *>(nblock);
+    }
+  else
+    // blow up size to the minimum aligned size
+    size = (size + mb_align) & ~mb_align;
+
+  check_overlap(block, size);
+
+  Mem_block *m;
+  auto addr = reinterpret_cast<unsigned long>(block);
+  // Extend preceding region if it is adjacent.
+  auto lower = _tree.last_less_equal_node(addr);
+  if (lower && lower->end() == addr)
+    {
+      lower->size += size;
+      m = lower;
+    }
+  else
+    {
+      m = reinterpret_cast<Mem_block *>(block);
+      m->size = size;
+      _tree.insert(m);
+    }
+
+  // Merge with following region if it is adjacent.
+  auto next = _tree.remove(m->end());
+  if (next)
+    m->size += next->size;
+}
+
+void *
+Tree_alloc::alloc_max(unsigned long min, unsigned long *max,
+                      unsigned long align, unsigned granularity,
+                      unsigned long lower, unsigned long upper)
+{
+  [[maybe_unused]] Tree_alloc_sanity_guard guard(this, __func__);
+
+  unsigned char const mb_bits = arith::Ld<sizeof(Mem_block)>::value;
+  unsigned long const mb_align = (1UL << mb_bits) - 1;
+
+  // blow minimum up to at least the minimum aligned size of a Mem_block
+  min = l4_round_size(min, mb_bits);
+  // truncate maximum to at least the size of a Mem_block
+  *max = l4_trunc_size(*max, mb_bits);
+  // truncate maximum size according to granularity
+  *max = *max & ~(granularity - 1UL);
+
+  if (min > *max)
+    return nullptr;
+
+  unsigned long almask = align ? (align - 1UL) : 0;
+
+  // minimum alignment is given by the size of a Mem_block
+  if (almask < mb_align)
+    almask = mb_align;
+
+  Mem_block *fit = nullptr;
+  unsigned long max_fit = 0;
+  unsigned long a_lower = (lower + almask) & ~almask;
+
+  for (auto &c : _tree)
+    {
+      // address of free memory block
+      unsigned long n_start = c.addr();
+
+      // block too small, next
+      // XXX: maybe we can skip this and just do the test below
+      if (c.size < min)
+        continue;
+
+      // block outside region, next
+      if (upper < n_start || a_lower > n_start + c.size)
+        continue;
+
+      // aligned start address within the free block
+      unsigned long a_start = (n_start + almask) & ~almask;
+
+      // check if aligned start address is behind the block, next
+      if (a_start - n_start >= c.size)
+        continue;
+
+      a_start = a_start < a_lower ? a_lower : a_start;
+
+      // end address would overflow, next
+      if (min > ~0UL - a_start)
+        continue;
+
+      // block outside region, next
+      if (a_start + min - 1UL > upper)
+        continue;
+
+      // remaining size after subtracting the padding for the alignment
+      unsigned long r_size = c.size - a_start + n_start;
+
+      // upper limit can limit maximum size
+      if (a_start + r_size - 1UL > upper)
+        r_size = upper - a_start + 1UL;
+
+      // round down according to granularity
+      r_size &= ~(granularity - 1UL);
+
+      // block too small
+      if (r_size < min)
+        continue;
+
+      if (r_size >= *max)
+        {
+          fit = &c;
+          max_fit = *max;
+          break;
+        }
+
+      if (r_size > max_fit)
+        {
+          max_fit = r_size;
+          fit = &c;
+        }
+    }
+
+  if (fit)
+    {
+      unsigned long n_start = fit->addr();
+      unsigned long a_lower = (lower + almask) & ~almask;
+      unsigned long a_start = (n_start + almask) & ~almask;
+      a_start = a_start < a_lower ? a_lower : a_start;
+      unsigned long r_size = fit->size - a_start + n_start;
+
+      if (a_start > n_start)
+        fit->size -= r_size;
+      else
+        _tree.remove(fit->addr());
+
+      *max = max_fit;
+      if (r_size == max_fit)
+        return reinterpret_cast<void *>(a_start);
+
+      Mem_block *m = reinterpret_cast<Mem_block *>(a_start + max_fit);
+      m->size = r_size - max_fit;
+      _tree.insert(m);
+      return reinterpret_cast<void *>(a_start);
+    }
+
+  return 0;
+}
+
+void *
+Tree_alloc::alloc(unsigned long size, unsigned long align, unsigned long lower,
+                  unsigned long upper)
+{
+  [[maybe_unused]] Tree_alloc_sanity_guard guard(this, __func__);
+
+  unsigned long const mb_align =
+    (1UL << arith::Ld<sizeof(Mem_block)>::value) - 1;
+
+  // blow up size to the minimum aligned size
+  size = (size + mb_align) & ~mb_align;
+
+  unsigned long almask = align ? (align - 1UL) : 0;
+
+  // minimum alignment is given by the size of a Mem_block
+  if (almask < mb_align)
+    almask = mb_align;
+
+  unsigned long a_lower = (lower + almask) & ~almask;
+
+  for (auto &c : _tree)
+    {
+      // address of free memory block
+      unsigned long n_start = c.addr();
+
+      // block too small, next
+      // XXX: maybe we can skip this and just do the test below
+      if (c.size < size)
+        continue;
+
+      // block outside region, next
+      if (upper < n_start || a_lower > n_start + c.size)
+        continue;
+
+      // aligned start address within the free block
+      unsigned long a_start = (n_start + almask) & ~almask;
+
+      // block too small after alignment, next
+      if (a_start - n_start >= c.size)
+        continue;
+
+      a_start = a_start < a_lower ? a_lower : a_start;
+
+      // end address would overflow, next
+      if (size > ~0UL - a_start)
+        continue;
+
+      // block outside region, next
+      if (a_start + size - 1UL > upper)
+        continue;
+
+      // remaining size after subtracting the padding
+      // for the alignment
+      unsigned long r_size = c.size - a_start + n_start;
+
+      // block too small
+      if (r_size < size)
+        continue;
+
+      if (a_start > n_start)
+        // have free space before the allocated block
+        // shrink the block
+        c.size -= r_size;
+      else
+        // drop the block
+        _tree.remove(c.addr());
+
+      // allocated the whole remaining space
+      if (r_size == size)
+        return reinterpret_cast<void *>(a_start);
+
+      // add a new free block behind the allocated block
+      Mem_block *m = reinterpret_cast<Mem_block *>(a_start + size);
+      m->size = r_size - size;
+      _tree.insert(m);
+      return reinterpret_cast<void *>(a_start);
+    }
+
+  return 0;
+}
+
+unsigned long
+Tree_alloc::avail() const
+{
+  [[maybe_unused]] Tree_alloc_sanity_guard guard(this, __func__);
+  unsigned long a = 0;
+  for (auto const &c : _tree)
+    a += c.size;
+
+  return a;
+}
+
+template<typename DBG>
+void
+Tree_alloc::dump_free_list(DBG &out) const
+{
+  for (auto const &c : _tree)
+    {
+      static constexpr char const *const unitstr[4] =
+      { "Byte", "KiB", "MiB", "GiB" };
+
+      unsigned sz = c.size;
+      unsigned i;
+      for (i = 0; i < cxx::array_size(unitstr) && sz > 8 << 10; ++i)
+        sz >>= 10;
+
+      out.printf("%12p - %12p (%u %s)\n",
+                 &c, reinterpret_cast<char const *>(&c) + c.size - 1, sz, unitstr[i]);
+    }
+}
+
+} // namespace cxx

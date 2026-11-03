@@ -1915,8 +1915,8 @@ implements the same protocol, so no step is specific to one loader
     mode when it is on, and the CPUs and memory found.
 11. **The root task.** Create the first space, which has no parent and no
     fault gate and is not a JIT space, and the root group's child
-    `system`, uncapped until the
-    root task gives it its grant ([The root task](#the-root-task)); map
+    `system`, uncapped until the root task gives it its grant
+    ([The root task](#the-root-task)); map
     the root task's executable, the entry the boot image's `root_entry`
     names, from a slice of its own file with `erx_image_map`; install the
     root capabilities; create its first thread, a worker in `system`, and
@@ -1942,7 +1942,8 @@ mode ([Port contract](#port-contract)).
 
 The system domain is the **root task**: the one user-mode task the kernel
 starts, from the executable the boot image's `root_entry` names, which is
-`liberx`'s root-task entry with ERTS and the system release behind it
+`liberx`'s root-task entry, with ERTS and the system release behind it
+for a full boot or as a C17 native root for a development partial boot
 ([design-runtime.md](design-runtime.md#the-root-task-entry),
 [design-system.md](design-system.md#the-root-task)). The kernel hands it
 the root capabilities, and nothing else in the machine has authority the
@@ -1953,16 +1954,17 @@ has no parent and no fault gate, and the root group's child `system`;
 maps the root task's executable from a slice of its own file with
 `erx_image_map`; installs the root capabilities at the well-known slots
 the ABI file defines; creates the task's first thread, a worker in
-`system`, and starts it. The kernel holds no policy, so it creates
-`system` uncapped, and the root task's first act is to give it the grant
-the system configuration names, as policy caps every group; it then
+`system`, and starts it. The kernel holds no policy, so it creates that
+group uncapped. Before starting other threads, the root task gives it
+the grant the system configuration names, as policy caps every group;
+it then
 creates the root group's other children, `users` with the root group's
 remainder among them, every domain and everything else as its policy
 decides ([design-system.md](design-system.md#boot)). The boot image
 carries the system configuration as one slice in the ABI file's record
 format ([The boot image](#the-boot-image)), which the packer writes and
 the root-task entry reads through the generated reader of that format,
-so the grant of the `system` group, the `users` group's share and the
+so the grant of `system`, the `users` group's share and the
 system principal's budget come from it before ERTS starts; ERTS later
 reads the same slice for the rest of the configuration.
 
@@ -2186,8 +2188,8 @@ header, 64 bytes, at offset 0
   u64     total_size     bytes of the archive, a multiple of 4,096
   u32     nentries       1 .. 65,536
   u32     entry_size     32
-  u64     entries_off    entry table, 8-byte aligned
-  u64     strings_off    string table
+  u64     entries_off    64: entry table immediately after the header
+  u64     strings_off    64 + nentries * entry_size: after the entry table
   u32     strings_size   at most 4 MiB
   u32     root_entry     index of the root task's executable
   u8[8]   build_id       identifies the build; the host tool compares it
@@ -2203,24 +2205,35 @@ entry, 32 bytes, sorted by path, strictly ascending as byte strings
 ```
 
 The validator (`kernel/core/pack.c`) is one pass with no recursion,
-bounded by `nentries`:
+bounded by `nentries` and the total path bytes. Its caller supplies
+16 KiB of scratch for the bounded path-prefix stack described in
+[File-prefix exclusion](design-abi.md#file-prefix-exclusion); it allocates
+nothing and puts no input-sized array on the kernel stack:
 
 1. The archive's length is the initrd's length; `total_size` equals it.
-2. The header's fields hold their stated values and ranges; the entry
-   table and the string table lie inside the archive, after the header,
-   without overlapping each other, with every offset-plus-size computed with
-   overflow checks.
+2. The header's fields hold their stated values and ranges. The entry
+   table starts immediately after the header and the string table
+   immediately after the entry table; their declared offsets equal those
+   derived positions. Both tables lie inside the archive, with every
+   product and offset-plus-size computed with overflow checks. The
+   index therefore ends with the string table, before any file data.
 3. Each entry's path lies inside the string table and is valid: UTF-8 with
    no byte below `0x20` and no `0x7f`, components separated by `/`, no
    leading or trailing `/`, no empty component, no `.` or `..`.
-4. Paths ascend strictly, so no path appears twice, and no path followed by
-   `/` is a prefix of the next path, so no file is also a directory.
+4. Paths ascend strictly, so no path appears twice. The bounded
+   file-prefix stack rejects a path that begins with any earlier file's
+   path followed by `/`, so no file is also a directory. The comparison
+   includes nonadjacent entries: byte order can place `a-foo` between
+   `a` and `a/b`.
 5. Each entry's data lies inside the archive, and the entries' data appear
    in entry order with nothing between them but padding to a page: the
    first starts at the first page boundary after the string table, and each
    other at the first page boundary at or after the end of the previous
    one's data. So no two files share a page, no file shares a page with the
-   index, and a run of entries is exactly a run of pages.
+   index, and a run of entries is exactly a run of pages. The archive
+   ends at the first page boundary at or after the last entry's data;
+   every padding byte, after the index and between or after files, is
+   zero.
 6. The entries that carry `ERX_ENTRY_SYSTEM` form one contiguous run of the
    table, `root_entry` is an executable among them whose manifest does not
    carry `ERX_IMAGE_JIT`; the entries that carry `ERX_ENTRY_SEAL` form one
@@ -2273,8 +2286,10 @@ system release
 
 ### Image manifests
 
-The kernel parses no ELF. For each executable in the boot image, the packer
-writes a manifest derived from its program headers:
+The kernel parses no ELF. For each user-mode executable in the boot image,
+the packer writes a manifest derived from its program headers. Kernel and
+initial-pager payloads consumed by the stopgap's bootstrap are opaque file
+entries, outside this user-mode mapping interface:
 
 ```c
 typedef struct erx_image_segment {
@@ -2300,7 +2315,7 @@ typedef struct erx_image_manifest {
 					 * library that finds its TLS template
 					 * through them */
 	uint32_t	phnum;
-	uint32_t	reserved;	/* zero */
+	uint32_t	base_alignment;	/* required placement alignment */
 	erx_image_segment_t segments[];
 } erx_image_manifest_t;
 ```
@@ -2315,27 +2330,87 @@ domains run; the system domain creates a domain's space with
 `ERX_SPACE_JIT` exactly when the domain's image carries it
 ([design-system.md](design-system.md#creating-a-domain)), so the right to
 make code follows from the image, never from a request. **The root image
-is not a JIT image.** The root task's executable carries the interpreter
-runtime, without BeamAsm, asmjit or any C++
+is not a JIT image.** For a full boot the root task's executable carries
+the interpreter runtime, without BeamAsm, asmjit or any C++; a development
+partial boot may use the native C17 root-entry image
 ([design-runtime.md](design-runtime.md#the-root-task-entry)); the boot
 validator refuses an image whose `root_entry` carries `ERX_IMAGE_JIT`, and
 the kernel creates the first space without `ERX_SPACE_JIT`, so no thread of
 the system domain can create a JIT object (K8), and no view of code that
 was written exists in the trusted base.
 
-**The manifest check**, which the boot validator runs on every executable:
-magic and version; segment count; every segment's file range inside its
-entry's data; alignment; segments in ascending order without overlap;
-protections; `mem_size >= file_size`; the span; no flag but
-`ERX_IMAGE_FIXED` and `ERX_IMAGE_JIT`; and for a fixed image a
-page-aligned `fixed_base` whose span lies in the user half above 64 KiB.
+**Canonical image storage.** An executable entry starts with its manifest
+at offset zero, alone on the first 4,096-byte page. The fixed prefix and
+segment array fit that page; its unused bytes are zero. Segment payloads
+follow in virtual-address order, each starting at the first page after
+the preceding payload. The logical `file_size` and `mem_size` describe the
+ELF load segment, not the storage padding. A read-only or executable
+payload occupies `round_up(mem_size, 4096)` bytes: the packer copies its
+`file_size` source bytes and zeroes the entire remainder. A writable
+payload occupies only `round_up(file_size, 4096)` bytes, with zero page
+padding; the rest of its memory is private zero-filled memory. A writable
+segment with zero file bytes consumes no payload pages. No payload shares
+a page with the manifest or another payload, and the entry ends exactly
+at the final payload boundary.
+
+The ELF planner discards zero-memory load segments and refuses unaligned
+load addresses or file offsets with a diagnostic; it never rounds an
+unaligned start into bytes outside the declared load. It bounds every
+source range before copying. The whole pack plan computes the expanded
+read-only tails and total output with checked arithmetic and rejects an
+output beyond the caller's declared packing budget before allocation or
+publication. This host resource budget is not another wire-format version.
+
+**The manifest check**, which the boot validator runs on every user-mode
+executable, verifies:
+
+* magic, version, ABI version, segment count, reserved zeroes and exactly
+  the declared image, segment and protection flags;
+* the canonical manifest/payload layout and every payload extent within
+  the entry, including all required zero-filled bytes;
+* nonzero logical memory lengths, `mem_size >= file_size`, page-aligned
+  starts, and virtual intervals that do not overlap after their lengths
+  are rounded to pages;
+* a nonzero, page-aligned span below 4 GiB equal to the rounded end of the
+  last segment, and an entry offset inside an executable segment's logical
+  memory interval;
+* each writable segment's memory length at most 64 MiB;
+* a positive program-header count and the complete
+  `phnum * architecture_program_header_size` virtual range, with checked
+  arithmetic. Every byte of that range belongs to a readable segment's
+  logical file-backed portion; stored zero padding and anonymous tails do
+  not qualify. Coverage is checked across the at most eight ordered
+  segments, without parsing any ELF header;
+* a power-of-two base alignment, at least one page and representable in
+  its `u32` field; a zero fixed base for a position-independent image, or
+  a page-aligned fixed base above 64 KiB whose entire span lies in the
+  architecture's user half. Fixed images have the canonical base alignment
+  of one page.
+
+For a position-independent ELF, the normalized virtual origin is the
+minimum load address rounded down to the greatest of one page and its
+load segments' `p_align` values. Each offset in the manifest is relative
+to that origin. A mapped base aligned to `base_alignment` therefore makes
+the ELF load bias, mapped base minus original origin, a multiple of every
+load alignment; an unmapped leading virtual gap is permitted. A fixed ELF
+uses its minimum load address as `fixed_base`, preserving its original
+addresses. The ELF planner checks that each nontrivial `p_align` is a
+power of two and that file and virtual addresses satisfy its congruence.
+
+The planner preserves the original program-header bytes in their load
+segments. Their virtual addresses retain ELF meaning for TLS; their
+original file offsets do not name the normalized archive's payload offsets.
+The checks have independent malformed fixtures for rounded overlap,
+metadata/tail exposure, entry membership, and truncated or uncovered
+program-header arrays.
 
 `erx_image_map(space, image, entry)` finds `entry` in the validated index,
 checks that it is an executable whose pages lie inside the slice `image`,
 and reads its manifest: an `abi_version` other than the kernel's
 `ERX_ABI_VERSION` fails with `ERX_ENOTSUP`. It places a position-independent
-image at a random base (fixed in deterministic mode) and a fixed image at
-`fixed_base`, failing with `ERX_EEXIST` if that range is in use. Read-only
+image at a random base aligned to `base_alignment` (fixed in deterministic
+mode) and a fixed image at `fixed_base`, failing with `ERX_EEXIST` if that
+range is in use. Read-only
 and executable segments map the slice itself, so every domain given that
 slice shares their pages and none can write them. Each writable segment, at
 most 64 MiB, is private memory committed at once whose source is the
@@ -5578,9 +5653,13 @@ once as erXos's code under `fiasco/` with an `ORIGIN.md` for each part
 kernel at commit `50bbe8a9`; Fiasco's `bootstrap` at `a4f4ad18`; from
 `l4re-core` at `e2e2d5af`, `sigma0`, the `l4sys` headers and the libraries
 those two link; `libfdt` at `5756062b`; and the `mk` build system at
-`22cc26e5`, which builds them behind erXos's top-level build. The kernel
-and its user-level parts must come from the same tree: a snapshot user land
-and a newer kernel fail a boot-information layout check
+`22cc26e5`, which builds them behind erXos's top-level build; and, from
+`drivers-frst` at `6459d70997da1a2ad97775c8772b4a41284b0a9e`, only
+the PL011 UART source, its required headers and build support that
+`bootstrap` links. The UART subset keeps its MIT package licence and has
+its own origin inventory; other `drivers-frst` drivers are excluded.
+The kernel and its user-level parts must come from the same tree: a
+snapshot user land and a newer kernel fail a boot-information layout check
 ([research](research-hierarchical-scheduling.md#fiasco-under-hvf)). None of
 L4Re's user-level stack above `sigma0` enters: no `moe`, no `ned`, no L4Re
 libraries for applications. The kernel is built to run in kernel mode
@@ -5763,35 +5842,31 @@ shows AArch64's). The generator reads the neutral file and the file of the
 architecture it builds for, and refuses a name declared in both.
 
 ```text
-abi       1                                # ERX_ABI_VERSION
-limit     copy_max          1048576        # ERX_COPY_MAX: bytes one memory window covers
-limit     group_executors   64
-status    wouldblock        -14  an executor made a call that would wait
-right     map               5    map the object; act on a space's mappings
-type      memory            5    rights read,write,exec,map,jit,phys,supply,child,carve,system,inspect,dup,give,destroy
-                                 default read,write,map,child,inspect,dup,give,destroy
-                                 pass read,write,map,child,inspect,dup,give
-cap       root_budget       1    budget  alloc,spaces,code,carve,inspect,dup,give
-trace     dispatch          3    args thread_oid,group_oid,urgency
-call      vm_commit         20   waits no  bound records:3,tables:edge per part
-  arg     space                  cap space map exists
-  arg     addr                   upage
-  arg     size                   npages max limit:user_span
-  charges space                  # the space's budget pays
-call      ipc_call          40   waits yes  bound words:63,items:4  executor refuse
-  arg     gate                   cap gate call
-  arg     tag                    msgtag utcb
-  arg     send_by                time
-  arg     reply_by               time
-  result  tag                    msgtag
-call      ipc_wait          41   waits yes  bound words:63,items:4  executor refuse
-  arg     wait_by                time
-  result  tag                    msgtag
-  result  label                  u64
-layout    erx_image_manifest 1
-  field   magic                  u32
-  field   version                u16
+abi 1
+include inspection.txt
+limit copy_max u32 1048576
+limit group_executors u32 64
+status wouldblock -14 "an executor made a call that would wait"
+bytes erx_pack_magic 8 value 4552585041434b00
+layout erx_pack_header 1 wire_le 8 64
+  field magic erx_pack_magic 0
+  field version u32 8
+  field flags u32 12
+  field total_size u64 16
+  field nentries u32 24
+  field entry_size u32 28
+  field entries_off u64 32
+  field strings_off u64 40
+  field strings_size u32 48
+  field root_entry u32 52
+  field build_id u8 56 count 8
 ```
+
+The [declaration grammar](design-abi.md#source-grammar) defines every
+form, the validated model, numeric assignment and reader contracts. A
+layout declaration states representation; its reader also declares field
+ranges, fixed values and table relationships before exposing a validated
+view. The example above shows a layout, not the archive's entire check.
 
 It declares the calls (number, name, whether it may wait, its bound per
 part, executor rule, the budget it charges, arguments with types and

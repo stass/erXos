@@ -1,0 +1,7 @@
+provides: compiler-rt
+requires: libatomic[arch(riscv)]
+          libgcc[config(CONFIG_COMPILER_RT_USE_LIBGCC)]
+          libgcc_eh[config(CONFIG_COMPILER_RT_USE_LIBGCC)]
+          libclang_rt-builtins[config(CONFIG_COMPILER_RT_USE_LIBCLANG_RT)]
+          libunwind_llvm[config(CONFIG_COMPILER_RT_USE_LIBCLANG_RT)]
+maintainer: georg.kotheimer@kernkonzept.com

@@ -1,0 +1,4 @@
+# Modified by erXos: sigma0 needs only the minimal logging backend.
+Provides: libc_be_minimal_log_io
+Requires: l4re libc-headers
+Maintainer: adam@os.inf.tu-dresden.de

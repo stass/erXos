@@ -1,0 +1,506 @@
+{
+  "version": 1,
+  "recipes": {
+    "config/fiasco/kernel.defconfig": "9b157dafcde3b2016c03a0d458cd7d71bc3914d04afb6db940792f311c55543b",
+    "config/fiasco/modules.list": "b4527eb6aefd34ed0f51a635a5c3540cf91e8e59519b5798f89677c81c02115c",
+    "config/fiasco/user.defconfig": "975ea49277a430f70224de9335c8775aac26d02a932b2ae35aeecb6be2144235",
+    "fiasco/bootstrap/server/src/Make.rules": "f15c49c595eeaa7c8ceb0cdf162c3cfef3034a69158b5c0d2a11c42ca2cfecfb",
+    "fiasco/bootstrap/server/src/build.pl": "14dfbddca3e348880d5c3e82e1047f1afc1a806bb6d115917d222a2c5bdb1e0c",
+    "fiasco/kernel/src/Makeconf": "9f0a946d22de3a8825aa8a5d84f714ca329b424b4b6f9cf2a7ed9df4ac80a0e0",
+    "fiasco/kernel/src/Makefile": "945a0189969c7d57817a9ef340c850f8aa2035d0a8cfcbc9a37dc39f1bc1f3db",
+    "fiasco/kernel/src/Makefile.sub1": "a7ab2a6b1f5c04f88ad6ba39af3b231c62df41fac0c7cd68b390f5e6ecc7f137",
+    "fiasco/kernel/src/Makefile.sub2": "a717a2f669e4a5af1ad7fade3b3a6e6316b209002def978d06bad4157e1dd359",
+    "fiasco/kernel/src/Makerules.TCBOFFSET": "3925981e6c0c4781b29d2dae04d8af728785ef7f3f8e888d508c358916e84487",
+    "fiasco/kernel/src/Makerules.VERSION": "da58b8087505d7abfd20720ba523c20de38518d444c146dd3faee4d8788f78ef",
+    "fiasco/kernel/src/kern/arm/Makerules.KERNEL.arm": "ad5530f5b9faff560440174b3eac38fa9f5fe20bd3a9193921ad43b56458f264",
+    "fiasco/kernel/src/kern/arm/bootstrap.arm.ld": "694d127a30951029020e6cc0e27a5e743ffaf82644cf5afffeee8e3ff70803f4",
+    "fiasco/kernel/src/kern/dump_tcboffsets.cc": "e2947eb49cb2cff66199257c35de0dbc2c0dab405946f1aaf2715f9dfb6db4f7",
+    "fiasco/kernel/tool/config-tags": "791f463b77a54e1862d294b32afb78a8d4f9b52558f0b746ee3533cda11324a1",
+    "fiasco/kernel/tool/gen_kconfig": "8d1cde5253ba072714454357627990af042345fbb209546e1849ae8e89154451",
+    "fiasco/kernel/tool/kconfig/COPYING": "fb5a425bd3b3cd6071a3a9aff9909a859e7c1158d54d32e07658398cd67eb6a0",
+    "fiasco/kernel/tool/kconfig/Makefile": "aaceaacfd59508468f9bed4cffaf6a82d7e9d3929827253b44857a41e17c0c30",
+    "fiasco/kernel/tool/kconfig/README": "a80946576917ef74f4668292e94dc403e6d146a3613cc478fc804b3685610164",
+    "fiasco/kernel/tool/kconfig/scripts/Kbuild.include": "1953e3cb531ea8d93dfd0de7779e89dd4243f550e070d99356887e0121a70de9",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile": "b25f2c1fcd47dbe44203bdaf5917d9deaf87c8a018752805f8448283f5d9e414",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.build": "f809b9faecae017150b3ac0b999176be0a25efc6725bda566bf20d8f9f7c9414",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.clang": "c385b73ad4c36348bf4a7cd8ddc0f6afb88e4804579f8d5f3f18de0f1fa2c8d7",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.clean": "385225abf868f3075f8f814ea242704adabae1125e28256fae3b019537696591",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.compiler": "3de828ba8ace97964d3b6ceec8a98d570c6a1c5738d52344199a78add66e01be",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.headersinst": "a763f07b49b50df48fd47440dd64868874774edba92914ea5fb4fae002564b37",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.host": "d4219009850204dce60b27baf3b483c0bcdd7c5c999c0ebc6972f5580f3dbabc",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.lib": "2e7d55db33cc8db3d2909d9bac0dc6be08de7b859e7b7ebbd279b42f533068bc",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.modinst": "3063335b53928dbd6358c8c456f30791a98032322f4eb4c7c6c2802be0eb28b9",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.modpost": "1816d5dc8cfa39f33cac7c17d28579b04453b979ebf863a334113be907e58b76",
+    "fiasco/kernel/tool/kconfig/scripts/basic/Makefile": "c246f266cacc723eba76ee78c6a091d864be7c0f9c80a0c8f63fb1033d675eb3",
+    "fiasco/kernel/tool/kconfig/scripts/basic/fixdep.c": "512a85c24ca2cdd44d1d652e071abc6650cf4776e21979e0a08b421178f59590",
+    "fiasco/kernel/tool/kconfig/scripts/config": "a05f1a7669fd88820761bbeb1c3f321cc4c48e65624f9ae39572f58c264f1e85",
+    "fiasco/kernel/tool/kconfig/scripts/include/array_size.h": "90ea8c7000afb1f9ad8504dcc24c1ddcd3c08239787248b617fc632ed3577ce4",
+    "fiasco/kernel/tool/kconfig/scripts/include/hash.h": "036b553056d9b4728a27658ecdd33e23cd5174bf07b8cbb79a4a91a66c7fda60",
+    "fiasco/kernel/tool/kconfig/scripts/include/hashtable.h": "3f3b31f8490d515f62c7a65b69145f39aeae4f3cf7963267f6d697ffd08aa377",
+    "fiasco/kernel/tool/kconfig/scripts/include/list.h": "962c98d2e9cb30f559e4e53a450bacf073cf16f7e250f09073c5a3a3fd4f4f69",
+    "fiasco/kernel/tool/kconfig/scripts/include/list_types.h": "36df90fe1e5b16bff75afbbe2b0018f21eaeca9fe67f95e054cf645f28071356",
+    "fiasco/kernel/tool/kconfig/scripts/include/xalloc.h": "c69a8c5116bd0aac41088990401ddcfaffc1b28fe7d649117b7452b8fb5af7fa",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/Makefile": "d43aaa5e76a1eb4fb186f6dc0f48920183893979d809d234330258eefcb6442c",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/conf.c": "027d209d2fb12a4350bf629a05f876f065f9254ba788bcf61e68eed135401a0a",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/confdata.c": "75810864753b4994a17ecc119c4da918c43d29856b02c08d4b524ceae2c78ba7",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.c": "e1db484d6011e0855ddad833a00ca90ac445e284e8a9cd4608114c51b2f622a2",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.h": "cce11d519da373fca76f897d8b6a6d1baa61d84d9220dcd5b91e86549afc36aa",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf-cfg.sh": "080339e0f10d0fed364ee6045f218b90fbed67fcd7c2fc53e2f88d2e29697192",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf.c": "fcc7fddd99d6f2fa0ae3433eb46606a8a2f8ef2aaadb4cf57605bdc6f3b385d0",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf.ui": "ccb10be947b636701f568a65b31bfa201ad9bb2e7f1cb28a589d77de719d5d48",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/back.xpm": "e2be85e0af5809a7cfe015a680f98451dc31de6ecd0b3fd6cc60dfd22590500c",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/choice_no.xpm": "e0b6be03cc47d783d27bb125defe93f3522f95d0efddb6299ffbc929ddfc2437",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/choice_yes.xpm": "9cccf11b4e03a8702e8a7041db1d786b30303cb2ad911a6c80026e430344d2d5",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/load.xpm": "b1b6bf1e8496b12b9cd5a7c858ddd6cf7bdebcdc6d15d259eabd05f4367fb4e2",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/menu.xpm": "d496aa3fc55508f0b172fc4c34298a841644cff0fce455c226395a993352d90e",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/menuback.xpm": "2652c9e13c9a8dda84bfe4db7cbbd9d9eeaf737ee8f49f4c34fd5ad9a8169c04",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/save.xpm": "68041300cd11d014f1df18e103b7c6d78e43135f3138512a20398c3e8569bd60",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/single_view.xpm": "5df44f4470c2914551c8233af3239171786498e5ddb66b9bc1954520b9398540",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/split_view.xpm": "55721f31549d4619b92cf7fad31da0b97a52f7e7b4f7e49b86d7f6a5eade1958",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/symbol_mod.xpm": "b36cecf481399141a0cfc30212ab18715046b161f888da2c829c2167a160d30c",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/symbol_no.xpm": "dd9174afc8ffda59d3cde22bf0bab9e78e7de4ec82120f98c1fd74891687f21e",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/symbol_yes.xpm": "89586e0d9fbf704e9b6afab54c48d3b60411ac1688a485300d797387175b1da3",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/icons/tree_view.xpm": "286164c806cfb332f7204adeb5ee1f645163e0bc10495c0df60968145a3446a3",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/internal.h": "cadb1a49e558de332aef828b9f3e315d5e2f75c4da61e0321655c3b8ecaa29ff",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lexer.l": "cc33fed7acb53e4a8d40afcb78e700a771fa302610d65fcc5199030497983673",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lkc.h": "6babb2eba40c899b9060082ba96261737ba0f7c0e4aaedbf9f5ab7f4d743856c",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lkc_proto.h": "ef82913bfcd9e431929c1adcbe9b7777d1828191ae08c0ae236f71748ad7debf",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/BIG.FAT.WARNING": "73ad660058cb21d83c3d9c12e40d5734dd6cb2b8369ce6200378e08ac11ea3f7",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/checklist.c": "13ee1a6d7dec21313cf9478f5ec8c2b98b1d585a50c9cd07de106ba1065becc7",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/dialog.h": "39813ccd980e42dc910b8070294d65ef38b76326ee229bcd2563d75028263337",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/inputbox.c": "b5d32eec2b7067d44c943424d1da04caa722fe1b5e671bf663ab70f11e7cc9b4",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/menubox.c": "04d3f716175673de86327a3b525e898961112f0c6abd7cee0efd0f4ee8bf89b8",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/textbox.c": "9d74ba950894702fec79e9c4462ec9c82c2e7f1f10e0b3d5bf93ea4a8c414806",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/util.c": "10ecdd901d3b59b35725163a972202f1f599920669e18201f6b9766b95db3188",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/yesno.c": "4da4dec3cc1ee87b839ce3612c57e47976a658b3144d8b087b1e2621d5991134",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/mconf-cfg.sh": "3a05180e35f6e60174bde4d91986964571d920b18c75029e097811aa1baf61c1",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/mconf.c": "21aa06ac1dcc11c2662c4dfc8db753ae514ff940510acbad7e3b097ff2b51b02",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/menu.c": "a2028cc88d847d91ea10676eb1bce9d65d16aab44e87be65f09c678eada35aae",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/mnconf-common.c": "0681901f2ccf1188d624407e0321952bff15989f34b6a583ba2fdee6128989a5",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/mnconf-common.h": "8f24b6108b76594bfb50079623885e1e2ab12183fc182a28f6de4c6a8c861d06",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/nconf-cfg.sh": "e0f4b29605e09cee76cbf50f0742a9b80f4d6d15c5dd0c74470f8a507b6b1377",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/nconf.c": "5909d0b33302c484e6347f521fd940370b15b9f85659749b855c7a9b551f4bb1",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/nconf.gui.c": "45e71b4f9187a3f525e443a16258d2502ecb7331242cf9cb19ea3a215bbe3d99",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/nconf.h": "6ae827d0fc52d9419be83159a3e82be1a246bdae7ebd563d0137cf3b6810ff75",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/parser.y": "d85cf8412fe2888fce9cc00744b2ad48fdd6a7c19252e411fef773a67454c56b",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/preprocess.c": "93c62d8634e3d30d71ae5092a6e49212c980837789693643f15434e74717104e",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/preprocess.h": "f7e9581e1d92804acadca02ffdbd298e681cb4d1fb1e04bacb59e0e2a7fe6f9b",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/qconf-cfg.sh": "6539bec5d083f88af344d5af5f2f8cd2c63a497ef9fb7542b0049d43fef30a54",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/qconf.cc": "9066935739f9e83bb5b55fb9e4fa0dd1f3134978266758b81499a8f3b4ff2604",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/qconf.h": "6e27491eb0137428a29c60324f288dcb7feab7466863bf2f23d1df447663db61",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/symbol.c": "85dc34a5d0d23792bbe032a67f348e9d2bb08fcdf4fe0090789ba133606ff031",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/util.c": "4d840998f0d4768e0ddd9834d607a5d6aecd1413010cec57f91ff324b4c62138",
+    "fiasco/kernel/tool/kconfig/scripts/pahole-version.sh": "7640978c9f22186f8305f7574c5713a731ce5ad9dca6dc2e762f214208208ecc",
+    "fiasco/kernel/tool/kconfig/scripts/subarch.include": "e4934004173824330f2f08311607c1d9a5b5b586f236a839a8fdb5b13add32be",
+    "fiasco/kernel/tool/migrate_kconfig": "1f833d49e399920735550983d17530f47518de08eaf48bf6e64a3cbe98a74804",
+    "fiasco/kernel/tool/preprocess/COPYING": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70",
+    "fiasco/kernel/tool/preprocess/src/preprocess": "06cd44a10ae966f07258dbd33a86d60bbd3a2e7a53c90f3c68e68d3ac06067a5",
+    "fiasco/l4re-core/ldscripts/Makefile": "cc9f4b2033dabb1b804a560b06475af8edd01a5a96da6f42e5d4ef12a1f2aa72",
+    "fiasco/l4re-core/libc-headers/Makefile": "2f6b86427eb6b84270e592feb054865fb85b6c5cfe10595198fc022fc1c78ecf",
+    "fiasco/l4re-core/libc/musl/contrib/musl/arch/aarch64/bits/alltypes.h.in": "77699f51c0cec751e2e3aff743659184d0f2b10176925d1a050b3b8be457b08c",
+    "fiasco/l4re-core/libc/musl/contrib/musl/crt/aarch64/crti.s": "26105e1ee3194f01eaeb0d7bb8b73212f0a55219f9f42df8ee047f08c8dc18f7",
+    "fiasco/l4re-core/libc/musl/contrib/musl/crt/aarch64/crtn.s": "7201078c30e74f5825b580d86ba51636adb73a2fce6dfaa9c03f3bd22772cd8f",
+    "fiasco/l4re-core/libc/musl/contrib/musl/include/alltypes.h.in": "ef456ce1fb8494e122b4c42083c64819d7cbc4395ab9d375ffe155ee6b44a0b4",
+    "fiasco/l4re-core/libc/musl/contrib/musl/tools/mkalltypes.sed": "8ccea9ec27a8450a52973cab8cdea0af8b4bd93d246b1f206b37ccc6fa0b8b7b",
+    "fiasco/l4re-core/libc/musl/make_vars.mk": "722650bc787418c4eb4c0f6f6ec393260660b89234fd6c710ef2f5f738b2c39a",
+    "fiasco/l4re-core/libc/musl/sources.mk": "4652ba40c5feb0c3aa734a27585e5eb68c8f4010ded6ce578ca18f0d81033bd7",
+    "fiasco/l4re-core/libc/musl/target_headers.mk": "f53d7796fb8cc72b2290a76c142be6df44fd8c555c8a958c25f51be53d8eee7f",
+    "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "fiasco/mk/Makefile": "4d9b57de770559ba0290ffb6e9a3376fe28cf0b049eaec4c405ffbe3cf3ae7d8",
+    "fiasco/mk/mk/binary.inc": "5ede7b24f83d35e9df92f1e62a2148134e375412a560dc727040e50520d7f654",
+    "fiasco/mk/mk/install.inc": "592450adbe49b6ba807197162d75326c5bb23c7732baf489c3903784fee23351",
+    "fiasco/mk/mk/lib.mk": "2c1f456f30703b2e6959d46c7293713828572922c6a7e983893f78a3968a7e90",
+    "fiasco/mk/mk/prog.mk": "57b869c5df95773d870e3dd2b00d24ea3047f0bde371231b1330d38bd59889a6",
+    "fiasco/mk/mk/util.mk": "21ef020d94261934bd7d0b70ae6782f870b4b76dbc1e3d650d74572ba029e296",
+    "fiasco/mk/tool/bin/l4image": "e30d2a198a9dfe628f95d7f510b95b021f0e95bc366e3bd59893db03d4e578f7",
+    "fiasco/mk/tool/bin/makeconf": "96403152fada9a58de5ddb74ba2d6fc7c89919f884a0d0186cce81249655f268",
+    "fiasco/mk/tool/imagebuilder/_l4image_build.sh.inc": "b4d5bd41118ef0284279e5ada7cc1192f8f2ea672b6365cfd424dd726643e786",
+    "fiasco/mk/tool/imagebuilder/_platform_rebuild.pl": "bf4951de2074b2a7b07741394f17e60d856a70daf038e0d2cf96aad4b491926f",
+    "fiasco/mk/tool/imagebuilder/elfimage": "d6634f6ac84b95a1b6979480f9b41899965cd530cbc243a53e44e3b07cbb6eae",
+    "fiasco/mk/tool/lib/L4/Grub.pm": "d5a7a0c7f67adb0a862f442e8a7c386015ca7b2a85b9ac14b8de4b381e715bf4",
+    "fiasco/mk/tool/lib/L4/Image.pm": "1742497c5d40bc4db32ead7ee179c0f4745794a29e98ffe8edce44b67b90da63",
+    "fiasco/mk/tool/lib/L4/Image/EFI.pm": "cc8b15838f139a46064cf75d2a303eb016be88b0886264013156ef841f316043",
+    "fiasco/mk/tool/lib/L4/Image/Elf.pm": "8fa2a12959889f5f12bf0a6432913d1b2a8a713d2b136c0f845daccaac5fc146",
+    "fiasco/mk/tool/lib/L4/Image/ITB.pm": "404f2d95176ac5bb00ccdad54836e19906ddbc3b095b34f304f58f139032615e",
+    "fiasco/mk/tool/lib/L4/Image/Raw.pm": "086e33d3111e9ecb0fc292b4616581a36c5a94b8e82178fd9967508e4718bfe9",
+    "fiasco/mk/tool/lib/L4/Image/Struct.pm": "64a7411061b9a1e93512eaf8e993e12965dc145d0b7dd4ca2e0412eb74d4df6f",
+    "fiasco/mk/tool/lib/L4/Image/UImage.pm": "5ef7e3a1b07c0b53c3fd1a31e4f03ce075b75a1476f1d7f35f5b16dbb85b4c81",
+    "fiasco/mk/tool/lib/L4/Image/Utils.pm": "a48e402607cf0d6968a73730fc797404d5020637df4a1285197749312f2225e0",
+    "fiasco/mk/tool/lib/L4/Image/Utils/FDT.pm": "1591471017f0c37f746bb6ab9f7c53c832cf084e8e497af0bdb2d2a72836e10f",
+    "fiasco/mk/tool/lib/L4/KeyValueConfig.pm": "de51185fb92d33208f7168e0f5de981ef632bcc3bc6cd92dcb7d23be666ce484",
+    "fiasco/mk/tool/lib/L4/Makeconf.pm": "c99faebf8e7baa4b147c229c06f4bdd427fedbe0be8c1ce1c355adb014065a00",
+    "fiasco/mk/tool/lib/L4/ModList.pm": "ba300dcca2d388a2c42b7fe31dbfad9889a45e11253d815086e63e48329d5cc0",
+    "fiasco/mk/tool/lib/L4/TapWrapper.pm": "a887dedb8ef401ce49c90912b2aae0192c5d049667ee4fa168f2c1881f2a56f3",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Filter.pm": "8dfa3eb474c7a88d64abb19a598808ed281be09bb0f4e547d02510f78eb22178",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Filter/ChecksumCheck.pm": "1d8839de9f16efa2ca61d5ebeebb2601558548645d741a6df6783872404871a9",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin.pm": "bbba1443825139005068450a97ab1caa15de359dfb303d277dcd36d654f17c12",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/BundleMode.pm": "253757f605059fdac90d9639a511e65e919b0fddae33e7009a5f1b67cd944feb",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/ExpectScript.pm": "8cbcd7e418fddac89f0426587b6b886875411dca7b7000cb55d4661e90fd307f",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/External.pm": "19dbfd2df16c88fc9533caceaa02d4a88db6116493c1e5d860e278eb70bc7f04",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/LLVMCov.pm": "5320f957cd1b9f893f9c6261ac8dcc102fe3740d98154a7b7e58754f7353be82",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/Metrics.pm": "27cd53cfddc51f6eecbd1ae56119cf5fe4ae522db8defbf66ef2b975d39ce2fc",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/OutputMatching.pm": "fb8d5a2d17804b6fa2c3709e9715e9b67733a6121a09843d3dda411432ccade6",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/TAPOutput.pm": "4d8038cd21de65fe705982828ad916e730e6bd552b791745b6da8e22943c180c",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/TagPluginBase.pm": "de0f347ac4d4ada9745cc72c5a710bc7c1e0978d530c757a750022453f98f550",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Plugin/TaggedOutputMatch.pm": "9427491875d2371f7e98a0390ff1452be45044c694513833c0b107fd5102a8bf",
+    "fiasco/mk/tool/lib/L4/TapWrapper/Util.pm": "1785c63a7125fae57bb9b00273b61ee31385658f236087f67c4e05df589c0048",
+    "fiasco/mk/tool/lib/L4/TestEnvLua.pm": "4a73e4bdf8e20bef91b92dde91282f4ee38d32d8be3925652dfb72292eeda75b",
+    "fiasco/l4re-core/libc/musl/contrib/musl/COPYRIGHT": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"
+  },
+  "profiles": {
+    "kernel/globalconfig.h": {
+      "role": "configuration",
+      "output_sha256": "4af417eac827a99b798bdcf721ae8980074a2972ce40317a194cb7732ec56816",
+      "code": [
+
+      ],
+      "configuration": [
+        "build/fiasco/kernel/globalconfig.out",
+        "build/fiasco/kernel/Kconfig",
+        "build/fiasco/kernel/.Kconfig.parts"
+      ],
+      "tools": [
+        "build/fiasco/kernel/scripts/kconfig/conf"
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+
+      ],
+      "object_list": [
+
+      ]
+    },
+    "kernel/version.h": {
+      "role": "configuration",
+      "output_sha256": "b0442b922075029b6fed86da5a28d48c60bc5b8f2e04093d96d077d538baf349",
+      "code": [
+
+      ],
+      "configuration": [
+        "build/fiasco/kernel/globalconfig.out"
+      ],
+      "tools": [
+
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+
+      ],
+      "object_list": [
+
+      ]
+    },
+    "kernel/tcboffset.h": {
+      "role": "code",
+      "output_sha256": "f655b495c62a1b8b46de261939399fc5e46a9816f3e841e3914f186dd7f2e0b6",
+      "code": [
+
+      ],
+      "configuration": [
+        "build/fiasco/kernel/globalconfig.out",
+        "build/fiasco/kernel/.Compiler-config",
+        "build/fiasco/kernel/.Host-config"
+      ],
+      "tools": [
+        "build/fiasco/kernel/dump_tcboffsets",
+        "fiasco/kernel/src/kern/dump_tcboffsets.cc"
+      ],
+      "objects": [
+        "build/fiasco/kernel/tcboffset.o"
+      ],
+      "metadata": [
+        "build/fiasco/kernel/tcboffset.bin",
+        "build/fiasco/kernel/.dump_tcboffsets.cc.d"
+      ],
+      "object_list": [
+
+      ]
+    },
+    "users/include/l4/bid_config.h": {
+      "role": "configuration",
+      "output_sha256": "4630514e7fd0c71e44fd53f50abfa486aaf1182dbf78c19e70f7bbb5973febaa",
+      "code": [
+
+      ],
+      "configuration": [
+        "build/fiasco/users/.config",
+        "build/fiasco/users/.config.all",
+        "build/fiasco/users/include/generated/autoconf.h"
+      ],
+      "tools": [
+
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+
+      ],
+      "object_list": [
+
+      ]
+    },
+    "users/pkg/l4re-core/libc-headers/install_includes/bits/alltypes.h": {
+      "role": "code",
+      "output_sha256": "5a7ffbb1a9c837585520a7bf90293aa05e6b77dd0a610e01e5c859a25616a240",
+      "code": [
+        "fiasco/l4re-core/libc/musl/contrib/musl/arch/aarch64/bits/alltypes.h.in",
+        "fiasco/l4re-core/libc/musl/contrib/musl/include/alltypes.h.in"
+      ],
+      "configuration": [
+        "build/fiasco/users/.config.all"
+      ],
+      "tools": [
+        "fiasco/l4re-core/libc/musl/contrib/musl/tools/mkalltypes.sed"
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+
+      ],
+      "object_list": [
+
+      ]
+    },
+    "kernel/bootstrap.fiasco.rel": {
+      "role": "object",
+      "output_sha256": "5198c77a4048b0863ce0580aa4e7727e29b4030e8e1076a45612651169180c23",
+      "code": [
+        "fiasco/kernel/src/kern/arm/bootstrap.arm.ld"
+      ],
+      "configuration": [
+        "build/fiasco/kernel/globalconfig.out",
+        "build/fiasco/kernel/.Compiler-config"
+      ],
+      "tools": [
+
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+        "build/fiasco/kernel/bootstrap.fiasco.pre.o",
+        "build/fiasco/kernel/bootstrap.fiasco.bin"
+      ],
+      "object_list": [
+        "build/fiasco/kernel/.erx-bootstrap-inputs"
+      ]
+    },
+    "users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/mbi_modules.o": {
+      "role": "object",
+      "output_sha256": "a7d85e772bac9c5edddcd8526c76324daf00522891da58d13aafdcb6c29acd21",
+      "code": [
+        "fiasco/bootstrap/server/src/build.pl"
+      ],
+      "configuration": [
+        "build/fiasco/users/.config.all"
+      ],
+      "tools": [
+        "fiasco/mk/tool/lib/L4/Image.pm",
+        "fiasco/mk/tool/lib/L4/Image/EFI.pm",
+        "fiasco/mk/tool/lib/L4/Image/Raw.pm",
+        "fiasco/mk/tool/lib/L4/Image/UImage.pm",
+        "fiasco/mk/tool/lib/L4/Image/ITB.pm",
+        "fiasco/mk/tool/lib/L4/Image/Utils/FDT.pm",
+        "fiasco/mk/tool/lib/L4/Image/Utils.pm",
+        "fiasco/mk/tool/lib/L4/Image/Elf.pm",
+        "fiasco/mk/tool/lib/L4/Image/Struct.pm"
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+        "build/fiasco/users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/mod.make.inc",
+        "build/fiasco/users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/mods.offsets"
+      ],
+      "object_list": [
+
+      ]
+    },
+    "users/pkg/l4re-core/ldscripts/OBJ-arm64_armv8a-std-plain/crti.o": {
+      "role": "object",
+      "output_sha256": "f3f1cb83864a2a3c2a9040dccb475f3da8811cf94af17fad52e358a23e501fc1",
+      "code": [
+        "fiasco/l4re-core/libc/musl/contrib/musl/crt/aarch64/crti.s"
+      ],
+      "configuration": [
+        "build/fiasco/users/.config.all"
+      ],
+      "tools": [
+
+      ],
+      "objects": [
+        "build/fiasco/users/pkg/l4re-core/ldscripts/OBJ-arm64_armv8a-std-plain/kip_addr.o"
+      ],
+      "metadata": [
+        "build/fiasco/users/pkg/l4re-core/ldscripts/OBJ-arm64_armv8a-std-plain/crti_s.o"
+      ],
+      "object_list": [
+
+      ]
+    },
+    "users/pkg/l4re-core/ldscripts/OBJ-arm64_armv8a-std-plain/crtn.o": {
+      "role": "object",
+      "output_sha256": "da084ed0f0c7b988d432a981dba9edf2c5f09d0fab1fae39ec733109bdf309b8",
+      "code": [
+        "fiasco/l4re-core/libc/musl/contrib/musl/crt/aarch64/crtn.s"
+      ],
+      "configuration": [
+        "build/fiasco/users/.config.all"
+      ],
+      "tools": [
+
+      ],
+      "objects": [
+
+      ],
+      "metadata": [
+
+      ],
+      "object_list": [
+
+      ]
+    }
+  },
+  "compile_dependencies": {
+    "kernel/bootstrap-mmu.o": "kernel/...cc.d",
+    "kernel/bootstrap-mmu-arm.o": "kernel/.-arm..cc.d",
+    "kernel/bootstrap-mmu-arm-64.o": "kernel/.-arm-64..cc.d"
+  },
+  "inputs": {
+    "build/fiasco/kernel/.-arm-64..cc.d": {
+      "mode": "text",
+      "sha256": "94370c54ffd69b86331845f4e9e9515bef313a1378d2a2a1a7d6c29f867f781d"
+    },
+    "build/fiasco/kernel/.-arm..cc.d": {
+      "mode": "text",
+      "sha256": "49ded6932437b854bc19f6d59223e2a551034e3f549f272c170402394a456e09"
+    },
+    "build/fiasco/kernel/...cc.d": {
+      "mode": "text",
+      "sha256": "83cae1409036af152b05441bb1f6dfcc6042e63077e4099927b9dea0e7c660c9"
+    },
+    "build/fiasco/kernel/.Compiler-config": {
+      "mode": "text",
+      "sha256": "7848b7e6303f6a8e7433cdfab148de66efbdbd78f52fbb09a4777f8a68ae6453"
+    },
+    "build/fiasco/kernel/.Host-config": {
+      "mode": "text",
+      "sha256": "1353dbc8fb593fb5b82046ff3e696ef93c63ba7811f6fabf608e2c8593fe92c0"
+    },
+    "build/fiasco/kernel/.Kconfig.parts": {
+      "mode": "text",
+      "sha256": "9ec21c54d2451787c242437de083511d56fd713c8ebc2d9f925cd691ec971768"
+    },
+    "build/fiasco/kernel/.Modules.deps": {
+      "mode": "text",
+      "sha256": "c7ea72554139022a4a0ccb4b4ccdb8ee5b5f18c45d5c9c3e583241a74123b6fd"
+    },
+    "build/fiasco/kernel/.dump_tcboffsets.cc.d": {
+      "mode": "text",
+      "sha256": "9c0d8296695098c56774226c026677cf08d51b62a551c29df8527b58031938e7"
+    },
+    "build/fiasco/kernel/.erx-bootstrap-inputs": {
+      "mode": "text",
+      "sha256": "80ffbf486a81410bdfe4928fe689a94a5bec3fac91f7bd529e2936b902ea0349"
+    },
+    "build/fiasco/kernel/.erx-vpath": {
+      "mode": "text",
+      "sha256": "2e500a356b14354e40fd9089bc2e368887ee3861b3453540553634e37a76c8bf"
+    },
+    "build/fiasco/kernel/Kconfig": {
+      "mode": "text",
+      "sha256": "08ef407fc50a29302c073830c7d1c3ad92cb430f50cf18f6d7d69b8627e8a466"
+    },
+    "build/fiasco/kernel/bootstrap.fiasco.bin": {
+      "mode": "binary",
+      "sha256": "42352cf7ebf5c8d5a72160d9724a99a1dc7232e117052e908b76ba9901898a72"
+    },
+    "build/fiasco/kernel/bootstrap.fiasco.pre.o": {
+      "mode": "binary",
+      "sha256": "f2ce6b5506606d2ac0a25a5c720c2334f77c7233c74a955acdaa90952d2e1664"
+    },
+    "build/fiasco/kernel/dump_tcboffsets": {
+      "mode": "binary",
+      "sha256": "2739aaaabbd2020890f1dde46a87ad52d347c8ef9e533652f7c40cb2b5cf66e4"
+    },
+    "build/fiasco/kernel/globalconfig.out": {
+      "mode": "text",
+      "sha256": "95278a8d6ea21742fd85721c5cc3d8fcc1fe19174af43adaaed5a0e8736aa4f9"
+    },
+    "build/fiasco/kernel/scripts/kconfig/conf": {
+      "mode": "binary",
+      "sha256": "b0a076daec79157be64abe53bd0702a40ab78a1b3ae9c7e10c068905e0821898"
+    },
+    "build/fiasco/kernel/tcboffset.bin": {
+      "mode": "binary",
+      "sha256": "52449d79e0f5708a63383fd9ea34d1d21e2e2d5d3998fb46c02cc2c191fb52aa"
+    },
+    "build/fiasco/users/.config": {
+      "mode": "text",
+      "sha256": "b1e20378f44e15429bc3736536bd14bdec5b5802f620a22bab73b50fc276449c"
+    },
+    "build/fiasco/users/.config.all": {
+      "mode": "text",
+      "sha256": "b07753eaab31b1b8b56a1bb7408a6ec020dc1563a7eb4dbf55cecb1cde6cfb6e"
+    },
+    "build/fiasco/users/include/generated/autoconf.h": {
+      "mode": "text",
+      "sha256": "d47bbea55ca6f24b554e13e16cacef901c5d07096c6a646e3229d2c7a4af87c9"
+    },
+    "build/fiasco/users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/mod.make.inc": {
+      "mode": "text",
+      "sha256": "e5cdc8af6eb051f932a69c0040c90c6905524906a37511833dfabf348f402914"
+    },
+    "build/fiasco/users/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/mods.offsets": {
+      "mode": "text",
+      "sha256": "90b69c929196ace867e46bd3a457cef8b815e93f9c797e53ddc7dcbfe2e95936"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4re/lib/src/OBJ-arm64_armv8a-std-l4f/lib4re.ofl": {
+      "mode": "text",
+      "sha256": "07d5d51ea2c825dc8bb3afc2201844eeac6cb9eea7c625c905d92c8bb1d5052c"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4re/util/libs/OBJ-arm64_armv8a-std-l4f/lib4re-util.ofl": {
+      "mode": "text",
+      "sha256": "5a10719577280e33c04a03aa3b252c5ea8a9d266e19fdf5bcb298358d25e0fda"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4re_c/lib/src/OBJ-arm64_armv8a-std-l4f/lib4re-c.ofl": {
+      "mode": "text",
+      "sha256": "bb35f54eb09c6199a3720d2f6225e9a3fcf2b8f5f53b7f8d6d87969d9d148ef2"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4re_c/util/lib/OBJ-arm64_armv8a-std-l4f/lib4re-c-util.ofl": {
+      "mode": "text",
+      "sha256": "ad63ee94905bd3d44bbe824c291e2e6483e5412a0692f20b27da0026ad165f9f"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4sys/lib/src/OBJ-arm64_armv8a-std-l4f/libl4sys.ofl": {
+      "mode": "text",
+      "sha256": "3eb0ced19453d38ef5a599eee28a2d14dc2d60d06105b28eeb726bc3e2162ae2"
+    },
+    "build/fiasco/users/pkg/l4re-core/l4util/lib/src/OBJ-arm64_armv8a-std-l4f/libl4util.ofl": {
+      "mode": "text",
+      "sha256": "3bb5c421b8113e6daa17a11f241bcbbdfa453ec835e55a75ba41dce9266a2443"
+    },
+    "build/fiasco/users/pkg/l4re-core/ldscripts/OBJ-arm64_armv8a-std-plain/crti_s.o": {
+      "mode": "binary",
+      "sha256": "490a1d895dcc769e6c7153488a484f3eb16f20cd6112bc5793f412d77ff8844c"
+    },
+    "build/fiasco/users/pkg/l4re-core/libc_backends/lib/minimal_io/OBJ-arm64_armv8a-std-l4f/libc_be_minimal_log_io.ofl": {
+      "mode": "text",
+      "sha256": "b52ab3f8ade3c1bca4aa97a8f1831f06efa46341a7ba320a77084f69306fc198"
+    },
+    "build/fiasco/users/pkg/l4re-core/minimal_l4re/OBJ-arm64_armv8a-std-l4f/.erx-archive-inputs": {
+      "mode": "text",
+      "sha256": "f822f3ca950bb116da79ab63a345a34b389597a375819050dcfdba9eb846a2e1"
+    }
+  },
+  "image": {
+    "entry": "banner",
+    "qemu_command": "  -kernel $L4IMAGE_FILE"
+  }
+}

@@ -1,0 +1,455 @@
+IMPLEMENTATION [arm && mmu && arm_v6plus]:
+
+#include "kmem_space.h"
+
+static inline void
+Bootstrap::set_asid()
+{
+  asm volatile ("mcr p15, 0, %0, c13, c0, 1" : : "r" (0)); // ASID 0
+}
+
+static inline NEEDS["kmem_space.h"]
+void
+Bootstrap::set_ttbcr()
+{
+  asm volatile("mcr p15, 0, %[ttbcr], c2, c0, 2" // TTBCR
+               : : [ttbcr] "r" (Page::Ttbcr_bits));
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && arm_lpae && !cpu_virt]:
+
+#include "cpu.h"
+
+PUBLIC static inline NEEDS["cpu.h"]
+void
+Bootstrap::enable_paging(Mword pdir)
+{
+  unsigned dacr = 0x55555555; // client for all domains
+  unsigned sctlr = Cpu::Sctlr_generic;
+
+  disable_mmu_and_caches();
+  set_mair0(Page::Mair0_prrr_bits);
+
+  asm volatile("mcr p15, 0, %[ttbcr], c2, c0, 2" // TTBCR
+               : : [ttbcr] "r" (Page::Ttbcr_bits));
+  Mem::dsb();
+  asm volatile("mcr p15, 0, r0, c8, c7, 0"); // TLBIALL
+  Mem::dsb();
+  asm volatile("mcr p15, 0, %[dacr], c3, c0, 0" // DACR
+               : : [dacr]  "r" (dacr));
+
+  asm volatile("mcrr p15, 0, %[pdir], %[null], c2" // TTBR0
+               : : [pdir]  "r" (pdir), [null]  "r" (0));
+
+  asm volatile("mcr p15, 0, %[sctlr], c1, c0, 0" // SCTLR
+               : : [sctlr] "r" (sctlr));
+  Mem::isb();
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && arm_lpae && cpu_virt]:
+
+PUBLIC static inline void
+Bootstrap::enable_paging(Mword pdir)
+{
+  disable_mmu_and_caches();
+
+  asm volatile("mcr p15, 4, %[ttbcr], c2, c0, 2" // HTCR
+               : : [ttbcr] "r" (Page::Ttbcr_bits));
+  asm volatile("mcr p15, 4, %[hmair0], c10, c2, 0" // HMAIR0
+               : : [hmair0] "r" (Page::Mair0_prrr_bits));
+  asm volatile("mcrr p15, 4, %[pdir], %[null], c2" // HTBR
+               : : [pdir]  "r" (pdir), [null]  "r" (0));
+  Mem::dsb();
+  asm volatile("mcr p15, 4, r0, c8, c7, 0" : : : "memory"); // TLBIALLH
+  asm volatile("mcr p15, 4, r0, c8, c7, 4" : : : "memory"); // TLBIALLNSNH
+  Mem::dsb();
+
+  asm volatile("mcr p15, 4, %[hsctlr], c1, c0, 0" // HSCTLR
+               : : [hsctlr] "r" (1 | 4 | 32 | 0x1000));
+  Mem::isb();
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && arm_lpae]:
+
+static inline
+Bootstrap::Order
+Bootstrap::map_page_order() { return Order(21); }
+
+static inline void
+Bootstrap::set_mair0(Mword v)
+{ asm volatile ("mcr p15, 0, %0, c10, c2, 0" : : "r"(v)); }
+
+PUBLIC static inline
+Bootstrap::Phys_addr
+Bootstrap::init_paging()
+{
+  void *page_dir = kern_to_boot(bs_info.pi.kernel_page_directory);
+  Phys_addr *const lpae = reinterpret_cast<Phys_addr*>(kern_to_boot(bs_info.pi.kernel_lpae_dir));
+
+  for (unsigned i = 0; i < 4; ++i)
+    lpae[i] = Phys_addr((reinterpret_cast<Address>(page_dir) + 0x1000 * i) | 3);
+
+  create_initial_mappings();
+
+  return Phys_addr(reinterpret_cast<Mword>(lpae));
+}
+
+static inline NEEDS[Bootstrap::map_page_order]
+Bootstrap::Phys_addr
+Bootstrap::pt_entry(Phys_addr pa, bool local)
+{
+  Phys_addr res = cxx::mask_lsb(pa, map_page_order()) | Phys_addr(1); // this is a block
+
+  if (local)
+    res |= Phys_addr(1 << 11); // nG flag
+
+  res |= Phys_addr(8); // Cached
+  res |= Phys_addr(1 << 10); // AF
+  res |= Phys_addr(3 << 8);  // Inner sharable
+  return res;
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && !arm_lpae && !(arm_v7 || arm_v8 || arm_mpcore)]:
+
+PUBLIC static inline
+Bootstrap::Phys_addr
+Bootstrap::init_paging()
+{
+  create_initial_mappings();
+  return Phys_addr(reinterpret_cast<Mword>(kern_to_boot(bs_info.pi.kernel_page_directory)));
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && !arm_lpae]:
+
+#include "config.h"
+#include "cpu.h"
+#include "paging.h"
+
+PUBLIC static inline NEEDS["cpu.h", "config.h"]
+void
+Bootstrap::enable_paging(Mword pdir)
+{
+  unsigned dacr = 0x55555555; // client for all domains
+  unsigned sctlr = Cpu::Sctlr_generic;
+
+  disable_mmu_and_caches();
+
+  set_asid();
+  set_ttbcr();
+  Mem::dsb();
+  asm volatile("mcr p15, 0, r0, c8, c7, 0"); // TLBIALL
+  Mem::dsb();
+  asm volatile("mcr p15, 0, %[dacr], c3, c0, 0" // DACR
+               : : [dacr]  "r" (dacr));
+
+  asm volatile("mcr p15, 0, %[pdir], c2, c0, 0" // TTBR0
+               : : [pdir] "r" (pdir));
+
+  asm volatile("mcr p15, 0, %[sctlr], c1, c0, 0" // SCTLR
+               : : [sctlr] "r" (sctlr));
+  Mem::isb();
+}
+
+PUBLIC static inline NEEDS["paging.h"]
+Bootstrap::Phys_addr
+Bootstrap::pt_entry(Phys_addr pa, bool local)
+{
+  return cxx::mask_lsb(pa, map_page_order())
+                | Phys_addr(Page::Section_cachable)
+                | Phys_addr(local ? Page::Section_local : Page::Section_global);
+}
+
+static inline
+Bootstrap::Order
+Bootstrap::map_page_order() { return Order(20); }
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && arm_1176_cache_alias_fix]:
+
+PUBLIC static inline void
+Bootstrap::do_arm_1176_cache_alias_workaround()
+{
+  Mword v;
+  asm volatile ("mrc p15, 0, %0, c0, c0, 1   \n" : "=r" (v));
+  if (v & ((1 << 23) | (1 << 11)))
+    { // P bits set
+      asm volatile ("mrc p15, 0, r0, c1, c0, 1   \n"
+                    "orr r0, r0, #(1 << 6)       \n"
+                    "mcr p15, 0, r0, c1, c0, 1   \n"
+                    : : : "r0");
+    }
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && !arm_lpae && (arm_v7 || arm_v8 || arm_mpcore)]:
+
+#include "paging.h"
+
+PUBLIC static inline NEEDS["paging.h"]
+Bootstrap::Phys_addr
+Bootstrap::init_paging()
+{
+  asm volatile ("mcr p15, 0, %0, c10, c2, 0" : : "r"(Page::Mair0_prrr_bits));
+  asm volatile ("mcr p15, 0, %0, c10, c2, 1" : : "r"(Page::Mair1_nmrr_bits));
+  create_initial_mappings();
+
+  return Phys_addr(reinterpret_cast<Mword>(kern_to_boot(bs_info.pi.kernel_page_directory)));
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && !cpu_virt]:
+
+#include "mem_layout.h"
+#include "paging_bits.h"
+
+static void
+Bootstrap::leave_hyp_mode()
+{
+  Mword cpsr;
+  asm volatile ("mrs %0, cpsr" : "=r"(cpsr));
+  if ((cpsr & 0x1f) != 0x13)
+    { // we have no hyp mode support so leave hyp mode
+      Mword tmp, tmp2;
+      asm volatile ("   mov %[tmp], sp   \n"
+                    "   mov %[tmp2], lr  \n"
+                    "   msr spsr, %[psr] \n"
+                    "   adr r4, 1f       \n"
+#ifdef __thumb__
+                    "   .inst.w 0xf3848e30    @ msr elr_hyp, r4 \n"
+                    "   .inst.w 0xf3de8f00    @ eret \n"
+#else
+                    "   .inst 0xe12ef300 | 4   @ msr elr_hyp, r4 \n"
+                    "   .inst 0xe160006e       @ eret \n"
+#endif
+                    "1: mov sp, %[tmp]   \n"
+                    "   mov lr, %[tmp2]  \n"
+                    : [tmp]"=&r"(tmp), [tmp2]"=&r"(tmp2)
+                    : [psr]"r"((cpsr & ~0x1f) | 0xd3) : "cc", "r4");
+    }
+}
+
+PUBLIC static inline NEEDS["mem_layout.h", "paging_bits.h"]
+void
+Bootstrap::create_initial_mappings()
+{
+  typedef Bootstrap::Phys_addr Phys_addr;
+  typedef Bootstrap::Virt_addr Virt_addr;
+
+  void *page_dir = kern_to_boot(bs_info.pi.kernel_page_directory);
+
+  leave_hyp_mode();
+
+  Virt_addr va;
+  Phys_addr pa;
+
+  // map kernel to desired virtual address
+  for (va = Virt_addr(Mem_layout::Map_base),
+       pa = Phys_addr(Super_pg::trunc(bs_info.kernel_start_phys));
+       pa < Phys_addr(Super_pg::round(bs_info.kernel_end_phys));
+       va += Bootstrap::map_page_size(), pa += Bootstrap::map_page_size_phys())
+    Bootstrap::map_memory(page_dir, va, pa, false);
+
+  // Map kernel 1:1. Needed by Fiasco bootstrap and the mp trampoline after they
+  // enable paging, and by add_initial_pmem().
+  for (pa = Phys_addr(Super_pg::trunc(bs_info.kernel_start_phys));
+       pa < Phys_addr(Super_pg::round(bs_info.kernel_end_phys));
+       pa += Bootstrap::map_page_size_phys())
+    Bootstrap::map_memory(page_dir, Virt_addr(cxx::int_value<Phys_addr>(pa)),
+                          pa, true);
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu && cpu_virt]:
+
+#include "kip.h"
+#include "paging_bits.h"
+
+PUBLIC static inline NEEDS["kip.h", "paging_bits.h"]
+void
+Bootstrap::create_initial_mappings()
+{
+  typedef Bootstrap::Phys_addr Phys_addr;
+  typedef Bootstrap::Virt_addr Virt_addr;
+
+  void *page_dir = kern_to_boot(bs_info.pi.kernel_page_directory);
+
+  // Map whole RAM 1:1. This is needed by Fiasco because of
+  // Mem_op::arm_mem_cache_maint() needing to have access to potentially all
+  // RAM. Assumes that no platform ever has physical RAM above the lowest
+  // virtual address in the Mem_layout!
+  Kip *kip = reinterpret_cast<Kip*>(kern_to_boot(bs_info.kip));
+  for (auto const &md: kip->mem_descs_a())
+    {
+      if (!md.valid())
+        {
+          const_cast<Mem_desc&>(md).type(Mem_desc::Undefined);
+          continue;
+        }
+
+      if (md.is_virtual())
+        continue;
+
+      if (md.type() == Mem_desc::Conventional)
+        {
+          auto va = Virt_addr(md.start());
+          auto pa = Phys_addr(md.start());
+          for (; va < Virt_addr(md.end());
+               va += Bootstrap::map_page_size(), pa += Bootstrap::map_page_size_phys())
+            Bootstrap::map_memory(page_dir, va, pa, false);
+        }
+    }
+
+  Virt_addr va;
+  Phys_addr pa;
+
+  // map kernel to desired virtual address
+  for (va = Virt_addr(Mem_layout::Map_base),
+       pa = Phys_addr(Super_pg::trunc(bs_info.kernel_start_phys));
+       pa < Phys_addr(Super_pg::round(bs_info.kernel_end_phys));
+       va += Bootstrap::map_page_size(), pa += Bootstrap::map_page_size_phys())
+    Bootstrap::map_memory(page_dir, va, pa, false);
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && !mmu]:
+
+PUBLIC static inline void
+Bootstrap::switch_to_el1()
+{
+  // Nothing to do. Already done by bootstrap on AArch32.
+}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && !mmu && amp]:
+
+#include "global_data.h"
+
+PUBLIC static inline NEEDS["global_data.h"]
+void
+Bootstrap::init_node_data()
+{ Global_data_base::set_amp_offset(0); }
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && !mmu && !amp]:
+
+PUBLIC static inline void
+Bootstrap::init_node_data()
+{}
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm]:
+
+asm
+(
+".section .text.init,\"ax\"            \n"
+".p2align 2                            \n"
+".type _start,#function                \n"
+".global _start                        \n"
+"_start:                               \n"
+"     adr  r12, _start                 \n"
+"     ldr  sp, .Lstack_offs            \n"
+"     add  sp, sp, r12                 \n"
+"     ldr  a1, .L_GOT                  \n"
+"     adr  a2, .L_GOT                  \n"
+"     ldr  a3, .L_GOT+4                \n"
+"     add  a1, a1, a2                  \n"
+"     ldr  a2, [a1, a3]                \n"
+"     sub  a1, r12, a2                 \n"
+"     mov  v1, a1                      \n"
+"     bl   relocate                    \n"
+"     mov  a1, v1                      \n"
+"     bl   bootstrap_main              \n"
+
+".Lstack_offs: .word (_stack - _start) \n"
+".L_GOT:                               \n"
+"     .word _GLOBAL_OFFSET_TABLE_ - .L_GOT \n"
+"     .word _start(GOT)                \n"
+".previous                             \n"
+".section .bss                         \n"
+".p2align 3                            \n"
+"     .space 2048                      \n"
+"_stack:                               \n"
+".previous                             \n"
+);
+
+//---------------------------------------------------------------------------
+IMPLEMENTATION [arm && mmu]:
+
+#include "cpu.h"
+
+struct Elf32_dyn
+{
+  enum { Reloc = 17 /* REL */, Reloc_count = 0x6ffffffa /* RELCOUNT */ };
+
+  Signed32 tag;
+  union {
+    Unsigned32 val;
+    Unsigned32 ptr;
+  };
+};
+
+struct Elf32_rel
+{
+  Unsigned32  offset;
+  Unsigned32  info;
+
+  inline void apply(unsigned long load_addr)
+  {
+    auto *addr = reinterpret_cast<unsigned long *>(load_addr + offset);
+    *addr += load_addr;
+  }
+};
+
+extern "C"
+void
+relocate(unsigned long load_addr)
+{
+  Elf<Elf32_dyn, Elf32_rel>::relocate(load_addr);
+}
+
+PRIVATE
+static inline NEEDS["cpu.h"]
+void
+Bootstrap::disable_mmu_and_caches()
+{
+  unsigned long sctlr;
+  asm ("mrc p15, 0, %0, c1, c0, 0" : "=r" (sctlr));
+  if (sctlr & Cpu::Sctlr_m)
+    {
+      if (sctlr & Cpu::Sctlr_c)
+        {
+          Mmu::clean_dcache(&bs_info, &bs_info + 1);
+
+          extern char start_of_loader[];
+          extern char end_of_loader[];
+          Mmu::clean_dcache(start_of_loader, end_of_loader);
+        }
+
+      sctlr &= ~(Cpu::Sctlr_m | Cpu::Sctlr_c | Cpu::Sctlr_i);
+      asm volatile("mcr p15, 0, %0, c1, c0, 0" : : "r" (sctlr));
+      Mem::isb();
+      Mem::barrier();
+    }
+}
+
+static inline NEEDS[Bootstrap::map_page_order]
+Bootstrap::Phys_addr
+Bootstrap::map_page_size_phys()
+{ return Phys_addr(1) << map_page_order(); }
+
+static inline NEEDS[Bootstrap::map_page_order]
+Bootstrap::Virt_addr
+Bootstrap::map_page_size()
+{ return Virt_addr(1) << map_page_order(); }
+
+static inline void
+Bootstrap::map_memory(void *pd, Virt_addr va, Phys_addr pa, bool local)
+{
+  Phys_addr *const p = static_cast<Phys_addr *>(pd);
+  p[cxx::int_value<Virt_addr>(va >> map_page_order())] = pt_entry(pa, local);
+}

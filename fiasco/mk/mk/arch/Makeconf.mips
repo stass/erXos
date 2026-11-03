@@ -1,0 +1,27 @@
+# vim:se ft=make:
+
+CROSS_COMPILE_mips        = mipsel-linux-gnu-
+ASFLAGS_mips              = -Wa,--noexecstack
+ELF_BINARY_TYPE_mips_bl   = $(if $(CONFIG_MIPS_LITTLE_ENDIAN),l,b)
+OFORMAT_mips_bl           = $(if $(CONFIG_MIPS_LITTLE_ENDIAN),little,big)
+LD_EMULATION_CHOICE_mips  = elf$(CPU_ABI)$(ELF_BINARY_TYPE_mips_bl)tsmip
+OFORMAT_mips              = elf$(CPU_ABI)-trad$(OFORMAT_mips_bl)mips
+BFD_ARCH_mips             = mips:isa$(CPU)
+L4_KIP_ADDR_mips         ?= 0x7fff0000
+L4_STACK_ADDR_mips       ?= 0x70000000
+CARCHFLAGS_mips          += -march=mips$(CPU) -mabi=$(CPU_ABI)
+CARCHFLAGS_mips          += $(if $(CONFIG_MIPS_LITTLE_ENDIAN),-EL,-EB)
+LDFLAGS_mips             += $(call if_for_target,$(if $(CONFIG_MIPS_LITTLE_ENDIAN),-EL,-EB) \
+                                                 -z noexecstack)
+# Some toolchains default to --hash-style=gnu, which on MIPS emits a
+# .MIPS.xhash (DT_MIPS_XHASH) section instead of a classic DT_HASH or
+# DT_GNU_HASH. The musl dynamic linker only understands DT_HASH/DT_GNU_HASH,
+# so force emission of both hash styles (like upstream musl's configure does)
+# to keep a usable DT_HASH in every shared object.
+LDFLAGS_mips             += $(call if_for_target,--hash-style=both)
+SYSTEMS_ABI              += mips-l4f
+SYSTEMS_PLAIN            += mips-plain
+
+QEMU_ARCH_MAP_mips_64     = qemu-system-mips64el
+QEMU_ARCH_MAP_mips_32     = qemu-system-mipsel
+QEMU_ARCH_MAP_mips        = $(QEMU_ARCH_MAP_mips_$(CPU_ABI))

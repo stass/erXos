@@ -1,0 +1,38 @@
+[
+  {
+    "part": "kernel",
+    "repository": "https://github.com/kernkonzept/fiasco",
+    "revision": "50bbe8a981199e17865e8553a4eb02c387b339cf",
+    "archive_sha256": "80cb4b4db43f18521b859012cb16201d62b3b541c69cdfb2f36f6fa726a8aea5"
+  },
+  {
+    "part": "l4re-core",
+    "repository": "https://github.com/kernkonzept/l4re-core",
+    "revision": "e2e2d5af9de7aa0e1df2a25ebadee54488fa4a49",
+    "archive_sha256": "6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f"
+  },
+  {
+    "part": "mk",
+    "repository": "https://github.com/kernkonzept/mk",
+    "revision": "22cc26e5c971f65a1425d8cae87d793c2573528a",
+    "archive_sha256": "98c8b2b81391cfee4797586e150fc74bd5ba48a2decdcb18e7daa5ccc3db3097"
+  },
+  {
+    "part": "bootstrap",
+    "repository": "https://github.com/kernkonzept/bootstrap",
+    "revision": "a4f4ad182c78a97a1c50098511092dd32f05c63d",
+    "archive_sha256": "e6ec5fa08e6ae44ef88263428c2f5936ce0bd804b99626858a330b141e7043dc"
+  },
+  {
+    "part": "libfdt",
+    "repository": "https://github.com/kernkonzept/libfdt",
+    "revision": "5756062b7067dd831b0ef7a7f841a3f63a8b8a22",
+    "archive_sha256": "4c5d66c202a33c3af29dc7b4315d8ec56357936db9a8a8193773c724d063392f"
+  },
+  {
+    "part": "drivers-frst",
+    "repository": "https://github.com/kernkonzept/drivers-frst",
+    "revision": "6459d70997da1a2ad97775c8772b4a41284b0a9e",
+    "archive_sha256": "3eb24fe67cf4eb7968ba5379016befd3fb72977066a3708468290e9a9ca9f4ff"
+  }
+]

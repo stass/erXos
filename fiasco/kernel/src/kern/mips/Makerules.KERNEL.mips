@@ -1,0 +1,12 @@
+# -*- makefile -*-
+# vim:se ft=make:
+
+exception.o: $(TCBOFFSET)
+
+-include .kernel.mips.lds.d
+
+# $(1) = Additional $(OBJ_X), e.g. OBJ_<unittest>
+KERNEL_PREREQUISITES = kernel.mips.lds $$(CRT0) $$(OBJ_KERNEL) $(1) \
+                       $$(JDB) $$(LIBC) $$(LIBDISASM) $$(ABI) libdrivers.a \
+                       $$(LIBUART) $$(KERNEL_EXTRA_LIBS) $$(LIBK) $$(CXXLIB) \
+                       $$(LIBC) libgluedriverslibc.a

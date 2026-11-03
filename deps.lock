@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "otp",
+      "kind": "tar",
+      "version": "29.1.2",
+      "url": "https://github.com/erlang/otp/releases/download/OTP-29.1.2/otp_src_29.1.2.tar.gz",
+      "sha256": "c79966661e35fe4aff8ec003db63682e3b33b10b672220d51bf93c0a9244b049",
+      "directory": "otp_src_29.1.2",
+      "license": "Apache-2.0",
+      "status": "permanent"
+    },
+    {
+      "id": "musl",
+      "kind": "tar",
+      "version": "1.2.6",
+      "url": "https://musl.libc.org/releases/musl-1.2.6.tar.gz",
+      "sha256": "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a",
+      "directory": "musl-1.2.6",
+      "license": "MIT",
+      "status": "permanent"
+    },
+    {
+      "id": "tla-tools",
+      "kind": "file",
+      "version": "1.8.0-asset-692577622",
+      "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+      "sha256": "011267fca25d0752cf18894dd585cd28b96960c112ea8a20b823ea770e7e10cd",
+      "filename": "tla2tools.jar",
+      "license": "MIT",
+      "status": "permanent"
+    },
+    {
+      "id": "arm-registers",
+      "kind": "tar",
+      "version": "2026-09-schema-2.9.6",
+      "url": "https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-OS-Machine-Readable-Data/AARCHMRS_BSD/AARCHMRS_OPENSOURCE_A_profile_FAT-2026-09.tar.gz",
+      "sha256": "d5bf3f538663fb18be081ba8e9f08b188ed06f81dd19d4aa2da5b2795103a4ec",
+      "directory": ".",
+      "license": "BSD-3-Clause",
+      "status": "permanent"
+    },
+    {
+      "id": "oracle-toolchain",
+      "kind": "oci",
+      "version": "3.4.12-bookworm",
+      "repository": "docker.io/library/ruby",
+      "platform": "linux/arm64",
+      "sha256": "1b4ee3a2e4d38a7c0d31d8736133ddf76ef3bf0e9a3054c544863cbb199cdf7e",
+      "config_sha256": "93f9731928321cb869b2f977598b05ce53fb213f0ed9d87ea8b84688f16c8e44",
+      "license": "Various: Ruby, BSD-2-Clause, GPL/LGPL and Debian package licences; development tools only",
+      "status": "permanent"
+    }
+  ]
+}

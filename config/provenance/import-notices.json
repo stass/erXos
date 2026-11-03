@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "licenses": {
+    "Apache-2.0": [{"path": "otp/LICENSE.txt", "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"}],
+    "BSD-2-Clause": [{"path": "otp/LICENSES/BSD-2-Clause.txt", "sha256": "06413eaf2855d173db853258579d9f8013d1599c8d7340adc32383ce658352af"}],
+    "BSD-3-Clause": [{"path": "otp/LICENSES/BSD-3-Clause.txt", "sha256": "8fff43829a246bf63d422e0bde3ae6300ceed0be445a5d4d0a553f2781002d52"}],
+    "MIT": [{"path": "otp/LICENSES/MIT.txt", "sha256": "c181eed254a608399a1059ddf5cb72cb1f1a5841a083aaa30f3e6713853ddf9f"}],
+    "GPL-2.0-only": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
+    "GPL-2.0-or-later": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
+    "GPL-3.0-only": [{"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
+    "GPL-3.0-or-later": [{"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
+    "GPL-3.0-only WITH GCC-exception-3.1": [
+      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
+      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
+    ],
+    "GPL-3.0-or-later WITH GCC-exception-3.1": [
+      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
+      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
+    ]
+  },
+  "packages": [
+    {"path": "musl", "notices": [], "grants": {
+      "MIT": [{"path": "musl/COPYRIGHT", "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"}]
+    }},
+    {"path": "otp/erts/emulator/zstd", "notices": [], "grants": {
+      "BSD-3-Clause": [{"path": "otp/erts/emulator/zstd/LICENSE", "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"}],
+      "GPL-2.0-only": [{"path": "otp/erts/emulator/zstd/COPYING", "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505"}]
+    }},
+    {"path": "fiasco/kernel", "notices": [{"path": "fiasco/kernel/LICENSE.spdx", "sha256": "e37cecd652b8236b0f13f789e4039d25be28b0d28c04a12f2ad45f0380dcf301"}], "grants": {}},
+    {"path": "fiasco/bootstrap", "notices": [{"path": "fiasco/bootstrap/LICENSE.spdx", "sha256": "3c32105532f6401644a9286ae3ab893b86d5ba5772e0938e2f54659c9da48c6f"}], "grants": {}},
+    {"path": "fiasco/l4re-core", "notices": [{"path": "fiasco/l4re-core/LICENSE.spdx", "sha256": "551dd862b2d63b5bc6a920d40b02f359c7eaffca84037e01a35232013df30825"}], "grants": {}},
+    {"path": "fiasco/mk", "notices": [{"path": "fiasco/mk/LICENSE.spdx", "sha256": "5b801397513b4b8ae49f154dfe25064116bc25233853ef9c38203f80f49da5e2"}], "grants": {}},
+    {"path": "fiasco/libfdt", "notices": [{"path": "fiasco/libfdt/LICENSE.spdx", "sha256": "dd0991471a8a22455c8daa40b679d25fd85576f4e4c39a974c2a209bfd3470c3"}], "grants": {}},
+    {"path": "fiasco/drivers-frst", "notices": [{"path": "fiasco/drivers-frst/LICENSE.spdx", "sha256": "75e6ac7d0937f58a6009008a4d712a56b9299b0f50e9f83177471980b53b8af1"}], "grants": {}},
+    {"path": "fiasco/kernel/src/lib/libc", "notices": [], "grants": {
+      "MIT": [{"path": "fiasco/kernel/src/lib/libc/COPYRIGHT", "sha256": "f699f9ce43f98c3b09b3e194cf62f5237979a0e765bc079650e07e1e7c8334cb"}]
+    }},
+    {"path": "fiasco/l4re-core/libc/musl/contrib/musl", "notices": [], "grants": {
+      "MIT": [{"path": "fiasco/l4re-core/libc/musl/contrib/musl/COPYRIGHT", "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"}]
+    }}
+  ]
+}

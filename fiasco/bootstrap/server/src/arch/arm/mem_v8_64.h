@@ -1,0 +1,194 @@
+#pragma once
+
+#include "mem_v7plus.h"
+
+namespace Arm
+{
+class Internal
+{
+public:
+  static inline unsigned long get_clidr()
+  {
+    unsigned long clidr;
+    asm volatile("mrs %0, CLIDR_EL1" : "=r" (clidr));
+    return clidr;
+  }
+
+  static inline void dc_cisw(unsigned long v)
+  {
+    asm volatile("dc cisw, %0" : : "r" (v) : "memory");
+  }
+
+  static inline void dc_csw(unsigned long v)
+  {
+    asm volatile("dc csw, %0" : : "r" (v) : "memory");
+  }
+
+  static inline void dc_isw(unsigned long v)
+  {
+    asm volatile("dc isw, %0" : : "r" (v) : "memory");
+  }
+
+  static inline void ic_iallu()
+  {
+    asm volatile("ic iallu" : : : "memory");
+  }
+
+  static inline unsigned long get_ccsidr(unsigned long csselr)
+  {
+    unsigned long ccsidr;
+    asm volatile("msr CSSELR_EL1, %0" : : "r" (csselr));
+    Barrier::isb();
+    asm volatile("mrs %0, CCSIDR_EL1" : "=r" (ccsidr));
+    return ccsidr;
+  }
+
+  static unsigned current_el()
+  {
+    unsigned long c_el;
+    asm ("mrs %0, CurrentEL" : "=r" (c_el));
+    return (c_el >> 2) & 3;
+  }
+
+  static unsigned long sctlr()
+  {
+    unsigned long sctlr;
+    switch (current_el())
+      {
+#if __ARM_ARCH_PROFILE != 82
+      case 3:
+        asm volatile ("mrs %0, SCTLR_EL3" : "=r"(sctlr));
+        break;
+#endif
+      case 2:
+        asm volatile ("mrs %0, SCTLR_EL2" : "=r"(sctlr));
+        break;
+      case 1:
+        asm volatile ("mrs %0, SCTLR_EL1" : "=r"(sctlr));
+        break;
+      default:
+        sctlr = 0;
+      }
+    return sctlr;
+  }
+
+  static void sctlr(unsigned long sctlr)
+  {
+    switch (current_el())
+      {
+#if __ARM_ARCH_PROFILE != 82
+      case 3:
+        asm volatile ("msr SCTLR_EL3, %0" : : "r"(sctlr) : "memory");
+        break;
+#endif
+      case 2:
+        asm volatile ("msr SCTLR_EL2, %0" : : "r"(sctlr) : "memory");
+        break;
+      case 1:
+        asm volatile ("msr SCTLR_EL1, %0" : : "r"(sctlr) : "memory");
+        break;
+      default:
+        break;
+      }
+  }
+
+  static unsigned linesize_bytes()
+  {
+    return 1 << ((get_ccsidr(0 /* L1 data or unified */) & 7) + 4);
+  }
+};
+}
+
+
+bool Cache::Data::enabled()
+{
+  return Arm::Internal::sctlr() & (1 << 2);
+}
+
+void Cache::Data::enable()
+{
+  Barrier::dsb_system();
+  Arm::Internal::sctlr(Arm::Internal::sctlr() | (1UL << 2));
+  Barrier::isb();
+}
+
+void Cache::Data::disable()
+{
+  Barrier::dsb_system();
+  Arm::Internal::sctlr(Arm::Internal::sctlr() & ~(1UL << 2));
+  Barrier::isb();
+}
+
+void Cache::Data::clean()
+{
+  Arm_v7plus::set_way_full_loop(Arm::Internal::dc_csw,
+                                Arm::Internal::get_clidr,
+                                Arm::Internal::get_ccsidr,
+                                Arm_v7plus::set_way_dcache_noinfo_op());
+}
+
+void Cache::Data::clean(unsigned long addr)
+{
+  asm volatile("dc cvac, %0" : : "r" (addr) : "memory");
+  Barrier::dsb_system();
+}
+
+void Cache::Data::clean(unsigned long start, unsigned long size)
+{
+  unsigned cl_size = Arm::Internal::linesize_bytes();
+  unsigned long m = start & ~(cl_size - 1);
+  unsigned long e = (start + size + cl_size - 1) & ~(cl_size - 1);
+  asm volatile("" : : : "memory");
+  for (; m != e; m += cl_size)
+    asm volatile("dc cvac, %0" : : "r"(m));
+  Barrier::dsb_system();
+}
+
+void Cache::Data::inv()
+{
+  Arm_v7plus::set_way_full_loop(Arm::Internal::dc_isw,
+                                Arm::Internal::get_clidr,
+                                Arm::Internal::get_ccsidr,
+                                Arm_v7plus::set_way_dcache_noinfo_op());
+}
+
+void Cache::Data::inv(unsigned long addr)
+{
+  asm volatile("dc ivac, %0" : : "r" (addr) : "memory");
+  Barrier::dsb_system();
+}
+
+void Cache::Data::flush()
+{
+  Arm_v7plus::set_way_full_loop(Arm::Internal::dc_cisw,
+                                Arm::Internal::get_clidr,
+                                Arm::Internal::get_ccsidr,
+                                Arm_v7plus::set_way_dcache_noinfo_op());
+}
+
+void Cache::Data::flush(unsigned long addr)
+{
+  asm volatile("dc civac, %0" : : "r" (addr) : "memory");
+  Barrier::dsb_system();
+}
+
+void Cache::Insn::enable()
+{
+  inv();
+  Arm::Internal::sctlr(Arm::Internal::sctlr() | (1UL << 12));
+  Barrier::isb();
+}
+
+void Cache::Insn::disable()
+{
+  Arm::Internal::sctlr(Arm::Internal::sctlr() & ~(1UL << 12));
+  Barrier::isb();
+  inv();
+}
+
+void Cache::Insn::inv()
+{
+  asm volatile("ic iallu" : : : "memory");
+  Barrier::dsb_system();
+  Barrier::isb();
+}

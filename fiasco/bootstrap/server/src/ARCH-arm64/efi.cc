@@ -1,0 +1,26 @@
+/*
+ * Copyright (C) 2014-2021, 2023-2025 Kernkonzept GmbH.
+ * Author(s): Jan Klötzke <jan.kloetzke@kernkonzept.com>
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+#include "efi-support.h"
+#include "platform.h"
+#include "startup.h"
+#include "support.h"
+
+struct boot_args boot_args;
+
+extern "C" EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab);
+EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+{
+  ctor_init();
+  efi.init(image, systab);
+
+  // Do the usual platform iteration as done by head.cc.
+  Platform_base::iterate_platforms();
+  init_modules_infos();
+  startup(mod_header->mbi_cmdline());
+
+  return EFI_SUCCESS;
+}
