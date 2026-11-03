@@ -667,11 +667,26 @@ Four things make it hold in full on the fork:
   `reject_send`); the fork folds that into the one count: every such
   request is queued by one glue function, `Erx::request(target, func,
   object)`, which takes `erx_object_ref` on the object it names before
-  it queues and whose handler wrapper drops it when the handler returns,
-  so a destroy that wins while the request is queued runs its teardown,
-  and the record outlives the queue entry until the handler has run.
-  `Context::enqueue_drq` is private to `Context` with `Erx::request` and
-  `Context::drq` as its only friends, so no third way to queue exists.
+  it queues. That reference is the delivery's, not the queue entry's:
+  it goes with the record wherever the handler puts it, into the
+  receiver's sender list or an unbound gate's blocked list, and is
+  dropped by the one step that takes the record, the receive that
+  completes the send, or withdraws it, the receiver's death drain
+  forwarding it to the object's next binding or holding it at the gate
+  with the reference, the gate's destroy or the object's own teardown
+  dropping it; a handler that delivers at once drops it itself. So a
+  destroy that wins while the request is queued runs its teardown, and
+  the record outlives every queue the delivery sits in until the
+  delivery is taken or withdrawn, as Fiasco's `Irq_sender` outlives its
+  queued send by its own send reference
+  ([Posting and publishing](design-stopgap-scheduling.md#stop-and-exit)).
+  Both `Erx::request` and `Context::drq` refuse a thread past its dead
+  mark, which `do_kill` writes under the thread's request queue's lock
+  after its last drain and the enqueue reads under the same lock, so a
+  request is either run by that drain or refused, never left in a queue
+  nothing drains. `Context::enqueue_drq` is private to `Context` with
+  `Erx::request` and `Context::drq` as its only friends, so no third
+  way to queue exists.
   Since the stop binding's abort requests are eager and a queued
   delivery is not, an abort can run before the delivery it was meant to
   follow; no handler relies on their order: the delivery's handler
@@ -1247,10 +1262,15 @@ receiver's wait reserved ([Passing capabilities](design-kernel.md#passing-capabi
 M1's binding already runs the reservation step of every receive, with a
 buffer descriptor that asks for zero slots, and already has the install
 point, where it installs nothing; a message whose tag names items is
-refused with `ERX_EINVAL` in M1. M5 lifts that refusal, runs
-`erx_pass_plan` before the install and `erx_pass_apply` at it, and
-changes nothing in the handshake, the transfer's ownership or the
-request that ends it.
+refused with `ERX_EINVAL` in M1. M5 lifts that refusal and runs
+`erx_pass_plan` before the install and `erx_pass_apply` at it, under
+the ownership of a transfer with items that M5's design must fix
+first: the step that holds the receiver must stay one bounded step that
+no sender's scheduling controls, which Fiasco's item transfer in the
+sender's context does not give
+([Transfer ownership](design-stopgap-scheduling.md#stop-and-exit)).
+Whether the handshake and the request that ends the transfer stay as
+M1 has them follows from that design.
 
 **Executors.** Every IPC call that may wait is refused to an executor
 by the generated dispatch with `ERX_EWOULDBLOCK`, as is `erx_space_stop`,
