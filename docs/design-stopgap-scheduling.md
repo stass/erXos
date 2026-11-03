@@ -618,8 +618,8 @@ bounded parts through `erx_cap_slot_clear`; then the mapping teardown of
 wait for `EXITED`: each thread dies on its own path, the record posts at
 the last death, and the space's record stays until its last reference
 goes, as K26 lays down. A destroy made from the kernel's own context, a
-release list run by the reaper, names no finisher: those threads finish
-on their own paths.
+put run by the reaper that drops a last reference, names no finisher:
+those threads finish on their own paths.
 
 **Finishing priority and charging.** The finishing priority,
 `ERX_PRIO_FINISHING`, is one above the priority the highest urgency maps
@@ -807,8 +807,10 @@ objects on its `att_bound`, and withdraws its ready list's deliveries
 through `erx_irq_step` as unbinds; `erx_park` on a closed group returns
 at once and the caller dies at its return check ([Ownership and
 lifetime](design-scheduler.md#ownership-and-lifetime)). The group's
-record, its per-CPU records and its shared areas are freed by the reaper
-after the grace period and the last member's death.
+teardown releases its shared areas' pages through `erx_page_release`,
+so their charge ends there; the reaper frees them, the group's record
+and its per-CPU records after the grace period and the last member's
+death ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)).
 
 ### Server urgency and charging
 
