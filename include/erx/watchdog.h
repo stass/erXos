@@ -11,6 +11,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "erx/core/watchdog.h"
 
 /*
  * The kernel's watchdog guards the root task. The kernel arms it when it
@@ -62,20 +63,7 @@ typedef enum erx_watchdog_action {
 	ERX_WATCHDOG_END		/* end the machine; see erx_watchdog_end_t */
 } erx_watchdog_action_t;
 
-/* Why a value of erx.watchdog= was refused; the defaults are used instead. */
-typedef enum erx_watchdog_parse_status {
-	ERX_WATCHDOG_PARSE_OK = 0,
-	ERX_WATCHDOG_PARSE_FIELDS,	/* not three comma-separated fields */
-	ERX_WATCHDOG_PARSE_EMPTY,	/* a field without digits */
-	ERX_WATCHDOG_PARSE_DIGIT,	/* a byte other than a digit or comma */
-	ERX_WATCHDOG_PARSE_OVERFLOW,	/* a field beyond 32 bits */
-	ERX_WATCHDOG_PARSE_PERIOD,	/* P outside its bounds */
-	ERX_WATCHDOG_PARSE_DEADLINE,	/* D outside 2P to its maximum */
-	ERX_WATCHDOG_PARSE_BOOT		/* B outside D to its maximum */
-} erx_watchdog_parse_status_t;
-
 typedef struct erx_watchdog erx_watchdog_t;
-typedef struct erx_watchdog_config erx_watchdog_config_t;
 typedef struct erx_watchdog_end erx_watchdog_end_t;
 typedef struct erx_watchdog_event erx_watchdog_event_t;
 typedef struct erx_watchdog_step erx_watchdog_step_t;
@@ -90,13 +78,6 @@ struct erx_watchdog {
 	erx_watchdog_phase_t phase;
 	uint64_t	since_ns;	/* the root task's start or last pet */
 	uint64_t	deadline_ns;
-};
-
-/* erx.watchdog=P,D,B, in seconds; the machine page carries all three. */
-struct erx_watchdog_config {
-	uint32_t	period_s;
-	uint32_t	deadline_s;
-	uint32_t	boot_s;
 };
 
 struct erx_watchdog_event {
@@ -125,10 +106,6 @@ struct erx_watchdog_step {
 };
 
 erx_watchdog_t erx_watchdog_initial(void);
-erx_watchdog_config_t erx_watchdog_config_default(void);
-erx_watchdog_parse_status_t erx_watchdog_parse(const char *, size_t,
-    erx_watchdog_config_t *) ERX_WARN_UNUSED_RESULT;
-const char *erx_watchdog_parse_reason(erx_watchdog_parse_status_t);
 erx_watchdog_step_t erx_watchdog_step(const erx_watchdog_t *,
     const erx_watchdog_config_t *, erx_watchdog_mode_t,
     erx_watchdog_event_t);

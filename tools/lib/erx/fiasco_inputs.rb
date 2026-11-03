@@ -15,7 +15,14 @@ module Erx
   # One owner for the bytes consumed by kernel and user builds. The record
   # describes the private copy, never a later view of repository contents.
   class FiascoInputs
-    ROOTS = %w[fiasco config/fiasco].freeze
+    # The inherited parts and their configuration, and the erXos sources the
+    # stopgap kernel links: the C17 cores, their headers and the stack
+    # proof's declarations (CoreArchive).
+    ERXOS_ROOTS = %w[kernel include].freeze
+    ROOTS = (%w[fiasco config/fiasco] + ERXOS_ROOTS).freeze
+    # The inputs only the kernel build reads; every other input is the user
+    # build's. A change to one of them discards that build's outputs.
+    KERNEL_INPUTS = %w[fiasco/kernel config/fiasco/kernel.defconfig kernel include].freeze
     MAX_FILE = 64 * 1024 * 1024
     MAX_TOTAL = 1024 * 1024 * 1024
     MAX_FILES = 100_000
@@ -72,6 +79,12 @@ module Erx
       record
     rescue SystemCallError => error
       raise Error, "cannot verify Fiasco inputs: #{error.message}"
+    end
+
+    # The private copy's root, laid out as the repository is, which the
+    # cores' archive builds from.
+    def tree
+      @directory
     end
 
     def part(name)
@@ -133,7 +146,7 @@ module Erx
 
     def component_id(record, component:)
       selected = record.fetch('files').select do |relative, _entry|
-        kernel = relative.start_with?('fiasco/kernel/') || relative == 'config/fiasco/kernel.defconfig'
+        kernel = KERNEL_INPUTS.any? { |input| relative == input || relative.start_with?(input + '/') }
         component == 'kernel' ? kernel : !kernel
       end
       identity(selected)

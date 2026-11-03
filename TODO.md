@@ -340,15 +340,58 @@ it; git history is the record of completed work.
   undefined symbols, that way. The owner confirms the reading and the
   bullet says so.
 * [Medium] build, stack proof: the stopgap proof's entries are every
-  exported function of `kernel/core/`, `kernel/sched/` and
-  `kernel/generated/`, a superset of the ones the kernel image references
-  ([design-stopgap.md](docs/design-stopgap.md)), with `kernel/core/pack.c`
-  left out by the constant `BOOTSTRAP_SOURCES` of
-  `tools/lib/erx/stack_proof_run.rb` because the stopgap links it into
-  `bootstrap`. Once `tools/erx build fiasco` links the core archive, read
-  the entries from the image's references and run the proof on the
-  archive's own objects at the level they are built with, besides the
-  -O0 build.
+  exported function of the cores' archive (`tools/lib/erx/core_archive.rb`),
+  a superset of the ones the kernel image references
+  ([design-stopgap.md](docs/design-stopgap.md)). Read the entries from the
+  linked kernel's references to the archive instead, which needs the proof
+  to run after the link as well as before it.
+* [Medium] build, stopgap bootstrap: `kernel/core/pack.c` is left out of
+  the kernel's archive (`CoreArchive::BOOTSTRAP_SOURCES`) but is not yet
+  linked into `bootstrap`, since nothing there calls it until the boot
+  handoff ([design-stopgap.md](docs/design-stopgap.md#boot-handoff)) is
+  written. That package builds a second archive of `pack.c` and
+  `liberx/generated/abi_reader.c` for `bootstrap`'s position-independent
+  link (`-fPIE`, `-z text` in `fiasco/bootstrap/server/src/Make.rules`),
+  adds the seam header `include/erx/core/pack.h` (`erx/pack.h` reaches
+  `erx/abi.h`, which is C only), and audits `bootstrap`'s map like the
+  kernel's.
+* [Medium] build, cores' archive (`tools/lib/erx/core_archive.rb`): the
+  compile's argument vector is not recorded beside each object, so the
+  Fiasco audit sees a core object's sources (`.NAME.o.d`) but not its
+  flags; record it as Fiasco's `.cmd` files do and have the audit compare
+  it with `CoreArchive::FLAGS`.
+* [Medium] build, cores' compiler: `tools/erx build fiasco` takes
+  `ERX_CLANG` as given, without `host_environment`'s LLVM 23.1.3 version
+  check; the audit derives the LLVM installation from the driver's path
+  (`FiascoProvenance.llvm_registry`) while `tools/erx` derives it from
+  `-print-resource-dir`; and the recorded clang hash is the driver's, not
+  `libclang-cpp` and `libLLVM`, which hold the code generator. Share one
+  verified compiler identity and hash the linked libraries.
+* [Medium] build, glue seam: the glue's include path is a copy of
+  `include/erx/core/` under `build/fiasco/cores/seam/`, and the audit
+  (`FiascoProvenance#erxos_source`) maps any path below `seam/` back to
+  `include/`, wider than the copy. A layout whose seam directory is itself
+  captured (for example `include/seam/erx/core/`) would delete the copy and
+  the remap; at least restrict the remap to `erx/core/`.
+* [Medium] build, tests: the audit's erXos attribution
+  (`erxos_source`, `attribute_erxos`, `erxos_addition`), `llvm_registry`,
+  `StackProofRun.call(archive:)`'s mismatch refusal, and the archive's
+  replacement of an existing output have no host tests; the real build's
+  complete audit is their only check. `erxos_notice?` also accepts any
+  SPDX expression containing `BSD-2-Clause`; parse it with
+  `Attribution`'s parser instead.
+* [Medium] build, stopgap glue: the design compiles the glue with GCC's
+  `-fstack-usage` and checks it (B2, B3, B9, B11, the import allowlist);
+  `fiasco/kernel/src/erx/erx_probe.cpp`, the one glue module, gets only
+  `ERX_GLUE_CXXFLAGS` (`fiasco/kernel/src/Makeconf`). The glue checks
+  package adds the flag beside the include path.
+* [Medium] stopgap kernel, configuration: the resolved
+  `build/fiasco/kernel/globalconfig.out` has `CONFIG_LAZY_FPU=y` and
+  `CONFIG_ARM_SVE=y`, which the fork's configuration
+  ([design-stopgap.md](docs/design-stopgap.md), "Interfaces") forbids, and
+  `tools/check_fiasco_config.rb` does not exist. The FP and SIMD state
+  work removes `LAZY_FPU` from the fork's `Kconfig`, unsets `ARM_SVE` and
+  adds the check after the `fiasco-kernel-config` step.
 * [Medium] build, stack proof: `kernel/stack_targets.txt` declares no stack
   use of assembly routines, and the proof checks no declared use against
   the routine's stack-pointer adjustments

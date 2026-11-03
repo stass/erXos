@@ -11,6 +11,7 @@ require_relative 'toolchain_provenance'
 require_relative 'archive_member'
 require_relative 'fiasco_inputs'
 require_relative 'build_inputs'
+require_relative 'core_archive'
 
 module Erx
   # Audits the inherited build's recorded evidence. This is an evidence report,
@@ -25,10 +26,18 @@ module Erx
                    'users/pkg/l4re-core/sigma0/server/src/OBJ-arm64_armv8a-std-l4f/sigma0.map']
     }.freeze
 
-    def initialize(root:, runner:, external: [], archive_program: 'aarch64-elf-ar')
+    # The header line that attributes an erXos source, its own or one added
+    # to a fork part (Origin#check requires it of every added file).
+    ERXOS_NOTICE = 'SPDX-License-Identifier: BSD-2-Clause'
+    ERXOS_HEADER_LINES = 8
+
+    # compiler, when the build compiled the C17 cores, is the clang that
+    # did; the audit records its identity and that of its llvm-ar.
+    def initialize(root:, runner:, external: [], archive_program: 'aarch64-elf-ar', compiler: nil)
       @root = File.realpath(root)
       @build = File.join(@root, 'build/fiasco')
       @runner = runner
+      @compiler = compiler
       @archive_program = archive_program
       @archive_requested = archive_program
       @external = external.to_h { |entry| [File.realpath(entry.fetch('path')), entry] }
@@ -62,6 +71,11 @@ module Erx
       image = nil
       if @unresolved.empty?
         tools.concat(%w[gmake aarch64-elf-gcc aarch64-elf-g++ aarch64-elf-objcopy perl].map { |program| tool_identity(program) })
+        if @compiler
+          llvm = File.dirname(File.realpath(@compiler))
+          tools << tool_identity(File.realpath(@compiler), role: 'clang')
+          tools << tool_identity(File.join(llvm, 'llvm-ar'), role: 'llvm-ar')
+        end
         programs = tools.to_h { |tool| [tool.fetch('program'), tool.fetch('path')] }
         @image_objcopy = programs.fetch('aarch64-elf-objcopy')
         @image_perl = programs.fetch('perl')
@@ -107,7 +121,24 @@ module Erx
                 '.erx-archive-inputs', 'OBJS_libc_minimal_l4re.a', [])
     end
 
-    def self.external_registry(root:)
+    # The toolchain files a build may compile from: GCC's, and, when the
+    # C17 cores were built with clang (compiler), LLVM's resource headers.
+    # Each must match its reviewed profile byte for byte.
+    def self.external_registry(root:, compiler: nil)
+      gcc_registry(root: root) + llvm_registry(root: root, compiler: compiler)
+    end
+
+    def self.llvm_registry(root:, compiler:)
+      return [] unless compiler
+
+      installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
+      ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/llvm-23.1.3.json'),
+                                   installation: installation)
+    rescue SystemCallError => error
+      raise Error, "cannot find the C17 cores' clang installation: #{error.message}"
+    end
+
+    def self.gcc_registry(root:)
       compiler = ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, 'aarch64-elf-gcc') }
                     .find { |candidate| File.file?(candidate) && File.executable?(candidate) }
       raise Error, 'missing aarch64-elf-gcc' unless compiler
@@ -500,7 +531,7 @@ module Erx
         scope = import_scope(part, part_root)
         inventory = @origins[part] ||= scope.find_import(part_root)
         relative = source.delete_prefix(part_root + '/')
-        item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative]
+        item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative] || erxos_addition(source)
         raise Error, "missing imported provenance: #{label(source)}" unless item
         raise Error, "derived source differs from its origin: #{label(path)}" unless digest(source) == digest(path)
         @sources[path] = reference(path).merge('origin' => reference(File.join(part_root, 'ORIGIN.md')),
@@ -519,6 +550,8 @@ module Erx
         raise Error, 'external compiler input changed' unless digest(path) == item.fetch('sha256')
         @sources[path] = reference(path).merge('license' => item.fetch('license'), 'evidence' => item.fetch('evidence'),
                                               'status' => item.fetch('status'), 'notices' => item.fetch('notices'))
+      elsif (captured = erxos_source(path))
+        attribute_erxos(path, captured: captured)
       elsif path.start_with?(File.join(@build, 'kernel/auto/'))
         attribute_kernel_generated(path)
       elsif fixed_generation(path)
@@ -528,6 +561,49 @@ module Erx
         @sources[path] = reference(path).merge('state' => 'unresolved')
         @unresolved << "source has no origin or generator source record: #{label(path)}"
       end
+    end
+
+    # A file erXos added to a fork part, which no import record lists: its
+    # header names its licence, as Origin#check requires of every addition.
+    def erxos_addition(source)
+      return nil unless erxos_notice?(source)
+
+      { 'license' => 'BSD-2-Clause', 'evidence' => "erXos addition; #{ERXOS_NOTICE} in its header" }
+    end
+
+    # The captured erXos source behind path: a C17 core, a header or a
+    # stack-proof declaration of the private inputs, or the cores'
+    # archive's copy of include/erx/core/. nil for any other path.
+    def erxos_source(path)
+      return nil unless @inputs
+
+      seam = File.join(@build, 'cores', CoreArchive::SEAM) + '/'
+      captured = path.start_with?(seam) ? @inputs.path('include/' + path.delete_prefix(seam)) : path
+      tree = @inputs.tree + '/'
+      relative = captured.delete_prefix(tree)
+      return nil unless captured.start_with?(tree) &&
+                        FiascoInputs::ERXOS_ROOTS.any? { |root| relative.start_with?(root + '/') }
+
+      captured
+    end
+
+    def attribute_erxos(path, captured:)
+      relative = captured.delete_prefix(@inputs.tree + '/')
+      unless erxos_notice?(captured)
+        @sources[path] = reference(path).merge('state' => 'unresolved')
+        @unresolved << "erXos source has no #{ERXOS_NOTICE} header: #{relative}"
+        return
+      end
+      raise Error, "derived source differs from its origin: #{label(path)}" unless digest(captured) == digest(path)
+
+      @sources[path] = reference(path).merge('source' => label(captured), 'original_source' => relative,
+                                            'license' => 'BSD-2-Clause',
+                                            'evidence' => "erXos source; #{ERXOS_NOTICE} in its header",
+                                            'status' => 'erxos')
+    end
+
+    def erxos_notice?(path)
+      read(path).each_line.first(ERXOS_HEADER_LINES).any? { |line| line.include?(ERXOS_NOTICE) }
     end
 
     def attribute_kernel_generated(path)

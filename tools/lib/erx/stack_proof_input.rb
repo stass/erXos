@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative 'core_archive'
 require_relative 'error'
 require_relative 'runner'
 
@@ -32,7 +33,7 @@ module Erx
     # The only functions outside the cores a core may call: the undefined
     # symbols the cores' archive is allowed to keep (docs/design-stopgap.md,
     # "Build"). A leaf of any other name would make a Fiasco call free.
-    LEAF_NAME = /\A(?:erx_effect_[a-z0-9_]{1,1000}|memcpy|memset)\z/
+    LEAF_NAME = CoreArchive::UNDEFINED
     # The roles an entry can play, each with its own allowance, and the
     # name the report gives the entries of each: an entry called on a
     # thread's kernel path, and one the tick hook calls.

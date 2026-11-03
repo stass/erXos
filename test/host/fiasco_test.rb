@@ -21,6 +21,13 @@ class FiascoTest < Minitest::Test
     def record_provenance
       nil
     end
+
+    # The cores' archive has its own tests (core_archive_test.rb); here it
+    # is a fixed result whose paths the kernel make must receive.
+    def build_cores
+      Erx::CoreArchive::Built.new(archive: File.join(@build, 'cores/erx_cores.a'), objects: {},
+                                  seam: File.join(@build, 'cores/seam'))
+    end
   end
   def test_build_environment_explicitly_removes_ambient_image_hooks
     previous = ENV['L4IMAGE_EXTRA_OPTS']
@@ -69,10 +76,11 @@ class FiascoTest < Minitest::Test
   def setup
     @directory = Dir.mktmpdir('erx-fiasco-')
     @runner = RecordingRunner.new
-    @fiasco = FixtureBuild.new(root: @directory, runner: @runner)
+    @fiasco = FixtureBuild.new(root: @directory, runner: @runner, compiler: '/fixture/clang')
     %w[kernel mk l4re-core bootstrap libfdt drivers-frst].each do |name|
       FileUtils.mkdir_p(File.join(@directory, 'fiasco', name))
     end
+    %w[kernel include].each { |name| FileUtils.mkdir_p(File.join(@directory, name)) }
     File.write(File.join(@directory, 'fiasco/mk/Makefile'), '# inherited')
     FileUtils.mkdir_p(File.join(@directory, 'config/fiasco'))
     File.write(kernel_config, "CONFIG_ARM=y\n# CONFIG_CPU_VIRT is not set\n")
@@ -98,6 +106,10 @@ class FiascoTest < Minitest::Test
     assert @runner.commands.all? { |command| command.fetch(:options).fetch(:deadline).positive? }
     image = @runner.commands.find { |command| command.fetch(:argv).include?('elfimage') }
     assert_includes image.fetch(:argv), 'E=banner'
+    kernel = @runner.commands.find { |command| command.fetch(:options).fetch(:name) == 'fiasco-kernel-build' }
+    cores = File.join(@directory, 'build/fiasco/cores')
+    assert_includes kernel.fetch(:argv), "ERX_CORE_ARCHIVE=#{cores}/erx_cores.a"
+    assert_includes kernel.fetch(:argv), "ERX_CORE_INCLUDE=#{cores}/seam"
     assert_includes image.fetch(:argv), 'PT=arm_virt'
     assert_includes image.fetch(:argv), 'CROSS_COMPILE=aarch64-elf-'
   end

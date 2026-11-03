@@ -131,6 +131,10 @@ module Erx
       { name: 'fiasco-banner', pattern: /Welcome to the L4Re Microkernel!\r?\n/n,
         seconds: 30 }.freeze,
       { name: 'development-warning', pattern: /development build: trusted code only\r?\n/n,
+        seconds: 30 }.freeze,
+      # The kernel's call into the C17 cores' archive and the core's answer
+      # (fiasco/kernel/src/erx/erx_probe.cpp).
+      { name: 'core-probe', pattern: /erx: C17 core probe: erx\.watchdog=2,5,60 is valid: 2,5,60\r?\n/n,
         seconds: 30 }.freeze
     ].freeze
 

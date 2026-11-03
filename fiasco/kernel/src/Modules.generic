@@ -1,3 +1,4 @@
+# Modified by erXos: the glue modules of erx/ join the kernel.
 # -*- makefile -*-
 # vi:se ft=make:
 
@@ -104,6 +105,11 @@ ifeq ($(CONFIG_JDB),y)
 INTERFACES_KERNEL += \
 	jdb_tbuf jdb_tbuf_init tb_entry jdb_trace string_buffer
 endif
+
+# erXos's glue onto the C17 cores (Makeconf, ERX_CORE_ARCHIVE).
+VPATH			+= erx
+INTERFACES_KERNEL	+= erx_probe
+CXXFLAGS_erx_probe	+= $(ERX_GLUE_CXXFLAGS)
 
 #
 # ABI Subsystem

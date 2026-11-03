@@ -388,3 +388,13 @@ endif
 else
 DEPS    = /dev/null
 endif
+
+# erXos: the C17 cores' archive joins the kernel link. tools/erx build
+# fiasco builds it with LLVM and names it, and the glue's one erXos include
+# directory, the archive's copy of include/erx/core/, on the command line
+# (docs/design-stopgap.md, "Interfaces"). Only the glue's modules take
+# ERX_GLUE_CXXFLAGS, so no inherited module reaches a core's header.
+ERX_CORE_ARCHIVE ?=
+ERX_CORE_INCLUDE ?=
+KERNEL_EXTRA_LIBS += $(ERX_CORE_ARCHIVE)
+ERX_GLUE_CXXFLAGS = $(if $(ERX_CORE_INCLUDE),-I$(ERX_CORE_INCLUDE))

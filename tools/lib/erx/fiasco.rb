@@ -11,6 +11,8 @@ require_relative 'bounded_file'
 require_relative 'json_input'
 require_relative 'sources'
 require_relative 'fiasco_inputs'
+require_relative 'core_archive'
+require_relative 'stack_proof_run'
 require_relative 'output_directory'
 
 module Erx
@@ -61,9 +63,14 @@ module Erx
     # Upper bound of a record this tool writes into the build tree.
     BUILD_RECORD_BYTES = 65_536
 
-    def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')))
+    # compiler is the LLVM clang that builds the C17 cores' archive; the
+    # resource headers it compiles with must match
+    # config/provenance/llvm-23.1.3.json.
+    def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
+                   compiler: ENV.fetch('ERX_CLANG', ''))
       @root = File.expand_path(root)
       @runner = runner
+      @compiler = compiler
       @source = File.join(@root, 'fiasco')
       @build = File.join(@root, 'build/fiasco')
     end
@@ -97,6 +104,7 @@ module Erx
     def build(jobs: 4)
       @input_catalog = nil
       raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
+      raise Error, 'set ERX_CLANG to the installed LLVM 23.1.3 clang; see README.md' if @compiler.to_s.empty?
       required = %w[kernel mk l4re-core bootstrap libfdt drivers-frst]
       raise Error, 'imported Fiasco source root must not be a symlink' if File.symlink?(@source)
       required.each do |name|
@@ -105,7 +113,8 @@ module Erx
       end
       OutputDirectory.prepare(root: @root, path: @build)
       prepare_source_cache
-      kernel = build_kernel(jobs: jobs)
+      cores = build_cores
+      kernel = build_kernel(jobs: jobs, cores: cores)
       users = build_users(jobs: jobs)
       build_image(kernel: kernel, users: users)
       record_provenance
@@ -125,7 +134,8 @@ module Erx
     def record_provenance
       require_relative 'fiasco_provenance'
       auditor = FiascoProvenance.new(root: @root, runner: @runner,
-                                     external: FiascoProvenance.external_registry(root: @root))
+                                     external: FiascoProvenance.external_registry(root: @root, compiler: @compiler),
+                                     compiler: @compiler)
       auditor.capture_construction
       report = auditor.audit
       auditor.record_receipt(report)
@@ -139,7 +149,8 @@ module Erx
       @inputs = FiascoInputs.new(root: @root)
       captured = @inputs.prepare
       expected = {
-        'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'kernel')),
+        'kernel' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + CoreArchive::IMPLEMENTATION_SHA256 +
+                                             @inputs.component_id(captured, component: 'kernel')),
         'users' => Digest::SHA256.hexdigest(IMPLEMENTATION_SHA256 + @inputs.component_id(captured, component: 'users'))
       }
       marker = File.join(@build, '.erx-inputs.json')
@@ -220,12 +231,27 @@ module Erx
       FileUtils.remove_entry(selected) if selected && File.exist?(selected)
     end
 
-    def build_kernel(jobs:)
+    # The C17 cores, built with LLVM from the captured inputs. The stack
+    # proof reads the archive's own objects and must pass before the
+    # archive is installed, so no kernel links cores whose depth is
+    # unproven.
+    def build_cores
+      tree = @inputs.tree
+      proof = lambda do |objects|
+        StackProofRun.call(root: tree, compiler: @compiler, runner: @runner, project: @root,
+                           output: File.join(@build, 'stack-proof'), archive: objects)
+      end
+      CoreArchive.build(root: tree, compiler: @compiler, runner: @runner, project: @root,
+                        output: File.join(@build, 'cores'), check: proof)
+    end
+
+    def build_kernel(jobs:, cores:)
       directory = File.join(@build, 'kernel')
       configure(source: @inputs.part('kernel'), directory: directory,
                 input: @inputs.configuration('kernel.defconfig'),
                 output: 'globalconfig.out', name: 'fiasco-kernel-config')
-      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-'],
+      @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
+                   "ERX_CORE_ARCHIVE=#{cores.archive}", "ERX_CORE_INCLUDE=#{cores.seam}"],
                   name: 'fiasco-kernel-build', deadline: 600, env: build_environment)
       directory
     end

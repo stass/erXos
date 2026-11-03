@@ -156,16 +156,28 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
-  def boot_transcript(available:)
+  PROBE = "erx: C17 core probe: erx.watchdog=2,5,60 is valid: 2,5,60\r\n"
+
+  def boot_transcript(available:, probe: PROBE)
     "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000005fffffff: 512.0 MiB\r\n" \
       "  Total RAM: 512.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
-      "Welcome to the L4Re Microkernel!\r\ndevelopment build: trusted code only\r\n"
+      "Welcome to the L4Re Microkernel!\r\ndevelopment build: trusted code only\r\n#{probe}"
+  end
+
+  # A kernel whose link lost the cores' archive prints no probe line, and
+  # one whose core answered otherwise prints another; both boots fail.
+  def test_boot_without_the_core_probe_fails
+    [+'', "erx: C17 core probe: erx.watchdog=2,5,60 is a field has no digits: 1,5,60\r\n"].each do |probe|
+      qemu = Erx::Qemu.new(root: @directory,
+                           program: fake_guest(output: boot_transcript(available: '512.0 MiB', probe: probe)))
+      assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+    end
   end
 
   def test_boot_with_consistent_bootstrap_memory_passes
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
     report = qemu.run(accel: 'tcg', image: image)
-    assert_equal %w[bootstrap-memory fiasco-banner development-warning],
+    assert_equal %w[bootstrap-memory fiasco-banner development-warning core-probe],
                  report.fetch('checkpoints').map { |entry| entry.fetch('name') }
     assert_equal 'passed', report.fetch('state')
   end

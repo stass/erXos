@@ -1,4 +1,5 @@
-// Modified by erXos: the stopgap admits trusted code only.
+// Modified by erXos: the stopgap admits trusted code only, and the banner
+// runs the C17 cores' link probe.
 INTERFACE:
 
 #include "initcalls.h"
@@ -11,6 +12,7 @@ IMPLEMENTATION:
 
 #include <cstdio>
 #include "config.h"
+#include "erx_probe.h"
 
 PUBLIC static FIASCO_INIT
 void
@@ -20,6 +22,7 @@ Banner::init()
   extern char _initkip_start[];
   printf("\n%s\n", _initkip_start);
   printf("development build: trusted code only\n");
+  Erx_probe::run();
 
   if constexpr (Config::kernel_warn_config_string()
                 && *Config::kernel_warn_config_string())

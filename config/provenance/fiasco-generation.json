@@ -6,7 +6,7 @@
     "config/fiasco/user.defconfig": "975ea49277a430f70224de9335c8775aac26d02a932b2ae35aeecb6be2144235",
     "fiasco/bootstrap/server/src/Make.rules": "f15c49c595eeaa7c8ceb0cdf162c3cfef3034a69158b5c0d2a11c42ca2cfecfb",
     "fiasco/bootstrap/server/src/build.pl": "14dfbddca3e348880d5c3e82e1047f1afc1a806bb6d115917d222a2c5bdb1e0c",
-    "fiasco/kernel/src/Makeconf": "9f0a946d22de3a8825aa8a5d84f714ca329b424b4b6f9cf2a7ed9df4ac80a0e0",
+    "fiasco/kernel/src/Makeconf": "ad868ebd7877b7d22bfe8113d75aed69d6131c1b0b7f3495aea223149de2bdc4",
     "fiasco/kernel/src/Makefile": "945a0189969c7d57817a9ef340c850f8aa2035d0a8cfcbc9a37dc39f1bc1f3db",
     "fiasco/kernel/src/Makefile.sub1": "a7ab2a6b1f5c04f88ad6ba39af3b231c62df41fac0c7cd68b390f5e6ecc7f137",
     "fiasco/kernel/src/Makefile.sub2": "a717a2f669e4a5af1ad7fade3b3a6e6316b209002def978d06bad4157e1dd359",
@@ -400,7 +400,7 @@
     },
     "build/fiasco/kernel/.Modules.deps": {
       "mode": "text",
-      "sha256": "c7ea72554139022a4a0ccb4b4ccdb8ee5b5f18c45d5c9c3e583241a74123b6fd"
+      "sha256": "6c3aada70de382dd33675326a066d797b818ae7d7e6a925e0302b3e6f54e3552"
     },
     "build/fiasco/kernel/.dump_tcboffsets.cc.d": {
       "mode": "text",
@@ -412,7 +412,7 @@
     },
     "build/fiasco/kernel/.erx-vpath": {
       "mode": "text",
-      "sha256": "2e500a356b14354e40fd9089bc2e368887ee3861b3453540553634e37a76c8bf"
+      "sha256": "4b60a1f51c6ed6bc50066509e8029c5943874f03a569fe1915ff22e6269bcc5b"
     },
     "build/fiasco/kernel/Kconfig": {
       "mode": "text",
