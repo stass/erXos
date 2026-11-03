@@ -285,81 +285,133 @@ module Erx
         paths
       end
 
+      # The executor rule: allow, refuse, or private ARG, which admits an
+      # executor only on a word of its own private memory that ARG names.
+      EXECUTOR_RULES = %w[allow refuse private].freeze
+      UTCB_LAYOUT = 'erx_utcb'
+      UTCB_WORDS_FIELD = 'mr'
+
       def calls(declarations, types:, constants:, objects:, rights:)
-        calls = {}
-        declarations.each do |declaration|
+        calls = declarations.to_h do |declaration|
           Model.arity(declaration.line, 3)
-          name, number = declaration.args
-          properties = {}
-          arguments = []
-          results = []
-          bounds = {}
-          windows = []
-          declaration.members.each do |line|
-            line.fail!('call members cannot be nested') unless line.indent == 2
-            keyword, *words = line.words
-            case keyword
-            when 'waits', 'executor', 'effects', 'charges'
-              Model.arity(line, 2)
-              line.fail!('duplicate call property') if properties.key?(keyword)
-              properties[keyword] = words[0]
-            when 'bound'
-              Model.arity(line, 3)
-              unit, value = words
-              Syntax.identifier(unit, line: line)
-              line.fail!('duplicate work bound') if bounds.key?(unit)
-              bounds[unit] = Model.reference(value, constants, line)
-              line.fail!('work bound must be positive') unless bounds.fetch(unit).positive?
-            when 'arg', 'result'
-              parameter = call_parameter(words, line, types: types, objects: objects,
-                                         rights: rights, result: keyword == 'result')
-              (keyword == 'arg' ? arguments : results) << parameter
-            when 'window'
-              Model.arity(line, 7)
-              window_name, cap, offset, length, direction, maximum = words
-              line.fail!('invalid window direction') unless %w[read write].include?(direction)
-              windows << { name: window_name, cap: cap, offset: offset, length: length,
-                           direction: direction, maximum: Model.reference(maximum, constants, line), line: line }.freeze
-            else line.fail!("unknown call member #{keyword}")
-            end
-          end
-          declaration.fail!('call needs waits, executor, effects, charges and a bound') unless properties.keys.sort == %w[charges effects executor waits] && bounds.any?
-          { 'waits' => %w[yes no], 'executor' => %w[allow refuse], 'effects' => %w[reads changes] }.each do |key, allowed|
-            declaration.fail!("invalid #{key} property") unless allowed.include?(properties.fetch(key))
-          end
-          declaration.fail!('too many call arguments or results') if arguments.size > 6 || results.size > 2
-          [arguments, results].each do |parameters|
-            declaration.fail!('duplicate parameter name or location') unless parameters.map { |arg| arg.fetch(:name) }.uniq.size == parameters.size && parameters.map { |arg| [arg.fetch(:location), arg.fetch(:slot)] }.uniq.size == parameters.size
-            windows_in_utcb = parameters.select { |argument| argument.fetch(:location) == 'utcb' }
-                                        .sort_by { |argument| argument.fetch(:slot) }
-            windows_in_utcb.each_cons(2) do |left, right|
-              declaration.fail!('UTCB parameter extents overlap') if left.fetch(:slot) + left.fetch(:type).size > right.fetch(:slot)
-            end
-          end
-          if properties.fetch('waits') == 'yes'
-            declaration.fail!('waiting call must refuse executors and have no windows') unless properties.fetch('executor') == 'refuse' && windows.empty?
-          end
-          charge = properties.fetch('charges')
-          declaration.fail!('charged argument is not a capability') unless charge == 'none' || arguments.any? { |arg| arg.fetch(:name) == charge && arg[:object] }
-          windows.each do |window|
-            cap = arguments.find { |arg| arg.fetch(:name) == window.fetch(:cap) }
-            declaration.fail!('window needs a memory capability') unless cap && cap[:object] == 'memory'
-            %i[offset length].each do |field|
-              argument = arguments.find { |arg| arg.fetch(:name) == window.fetch(field) }
-              declaration.fail!('window offset/length is not an unsigned argument') unless argument && argument.fetch(:type).respond_to?(:integer) && !argument.fetch(:type).integer.signed
-            end
-            copy_max = constants['copy_max'] || declaration.fail!('window needs copy_max limit')
-            declaration.fail!('window exceeds copy_max') if window.fetch(:maximum) > copy_max.value
-            declaration.fail!('written window requires reads-only effects') if window.fetch(:direction) == 'write' && properties.fetch('effects') != 'reads'
-          end
-          calls[name] = { number: Model.positive(number, declaration.line, maximum: (1 << 32) - 1),
-                          properties: properties.freeze, arguments: arguments.freeze,
-                          results: results.freeze, bounds: bounds.freeze, windows: windows.freeze }.freeze
+          [declaration.args.first, call_contract(declaration, types: types, constants: constants,
+                                        objects: objects, rights: rights)]
         end
         if calls.any?
           Model.unique_values(calls.transform_values { |call| call.fetch(:number) }, label: 'call', line: declarations.first.line)
         end
         calls.sort.to_h
+      end
+
+      def call_contract(declaration, types:, constants:, objects:, rights:)
+        properties = {}
+        executor = nil
+        retry_lookup = false
+        arguments = []
+        results = []
+        bounds = {}
+        windows = []
+        declaration.members.each do |line|
+          line.fail!('call members cannot be nested') unless line.indent == 2
+          keyword, *words = line.words
+          case keyword
+          when 'waits', 'effects', 'charges'
+            Model.arity(line, 2)
+            line.fail!('duplicate call property') if properties.key?(keyword)
+            properties[keyword] = words[0]
+          when 'executor'
+            line.fail!('duplicate call property') if executor
+            unless EXECUTOR_RULES.include?(words[0]) && words.size == (words[0] == 'private' ? 2 : 1)
+              line.fail!('executor needs allow, refuse or private ARGUMENT')
+            end
+            executor = { rule: words[0], argument: words[1], line: line }
+          when 'retry'
+            Model.arity(line, 1)
+            line.fail!('duplicate retry member') if retry_lookup
+            retry_lookup = true
+          when 'bound'
+            Model.arity(line, 3)
+            unit, value = words
+            Syntax.identifier(unit, line: line)
+            line.fail!('duplicate work bound') if bounds.key?(unit)
+            bounds[unit] = Model.reference(value, constants, line)
+            line.fail!('work bound must be positive') unless bounds.fetch(unit).positive?
+          when 'arg', 'result'
+            parameter = call_parameter(words, line, types: types, objects: objects,
+                                       rights: rights, result: keyword == 'result')
+            (keyword == 'arg' ? arguments : results) << parameter
+          when 'window'
+            Model.arity(line, 7)
+            window_name, cap, offset, length, direction, maximum = words
+            line.fail!('invalid window direction') unless %w[read write].include?(direction)
+            windows << { name: window_name, cap: cap, offset: offset, length: length,
+                         direction: direction, maximum: Model.reference(maximum, constants, line), line: line }.freeze
+          else line.fail!("unknown call member #{keyword}")
+          end
+        end
+        unless properties.keys.sort == %w[charges effects waits] && executor && bounds.any?
+          declaration.fail!('call needs waits, executor, effects, charges and a bound')
+        end
+        { 'waits' => %w[yes no], 'effects' => %w[reads changes] }.each do |key, allowed|
+          declaration.fail!("invalid #{key} property") unless allowed.include?(properties.fetch(key))
+        end
+        waits = properties.fetch('waits') == 'yes'
+        [arguments, results].each { |parameters| validate_locations(parameters, declaration) }
+        validate_executor(executor, arguments, waits: waits)
+        if retry_lookup && !(waits && arguments.any? { |argument| argument[:object] })
+          declaration.fail!('retry needs a waiting call with a capability argument to look up again')
+        end
+        declaration.fail!('waiting call cannot have windows') if waits && windows.any?
+        charge = properties.fetch('charges')
+        declaration.fail!('charged argument is not a capability') unless charge == 'none' || arguments.any? { |arg| arg.fetch(:name) == charge && arg[:object] }
+        windows.each { |window| validate_window(window, arguments, properties, constants, declaration) }
+        { number: Model.positive(declaration.args[1], declaration.line, maximum: (1 << 32) - 1),
+          properties: properties.freeze, executor: executor.except(:line).freeze,
+          retry: retry_lookup, arguments: arguments.freeze, results: results.freeze,
+          bounds: bounds.freeze, windows: windows.freeze }.freeze
+      end
+
+      # The dispatch refuses an executor by its class only before a wait. A
+      # call that never waits is `allow`; one that an executor may not use in
+      # some form fails in its handler with that call's own status.
+      def validate_executor(executor, arguments, waits:)
+        line = executor.fetch(:line)
+        line.fail!('a call that does not wait must allow executors') if !waits && executor.fetch(:rule) != 'allow'
+        return unless executor.fetch(:rule) == 'private'
+        word = arguments.find { |argument| argument.fetch(:name) == executor.fetch(:argument) }
+        unless word && word.fetch(:location) == 'register' && !word[:object] && word.fetch(:type).integer == Model::BASE_TYPES.fetch('u64')
+          line.fail!('private executor rule must name a u64 register word that is not a capability')
+        end
+      end
+
+      # A register holds one parameter, so the register index bounds their
+      # count. A UTCB parameter owns whole message words that no other
+      # parameter of the same direction shares.
+      def validate_locations(parameters, declaration)
+        unless parameters.map { |parameter| parameter.fetch(:name) }.uniq.size == parameters.size
+          declaration.fail!('duplicate parameter name')
+        end
+        registers = parameters.select { |parameter| parameter.fetch(:location) == 'register' }
+        unless registers.map { |parameter| parameter.fetch(:slot) }.uniq.size == registers.size
+          declaration.fail!('duplicate parameter register')
+        end
+        parameters.select { |parameter| parameter.fetch(:location) == 'utcb' }
+                  .sort_by { |parameter| parameter.fetch(:slot) }
+                  .each_cons(2) do |left, right|
+          declaration.fail!('UTCB parameter words overlap') if left.fetch(:slot) + left.fetch(:words) > right.fetch(:slot)
+        end
+      end
+
+      def validate_window(window, arguments, properties, constants, declaration)
+        cap = arguments.find { |arg| arg.fetch(:name) == window.fetch(:cap) }
+        declaration.fail!('window needs a memory capability') unless cap && cap[:object] == 'memory'
+        %i[offset length].each do |field|
+          argument = arguments.find { |arg| arg.fetch(:name) == window.fetch(field) }
+          declaration.fail!('window offset/length is not an unsigned argument') unless argument && argument.fetch(:type).respond_to?(:integer) && !argument.fetch(:type).integer.signed
+        end
+        copy_max = constants['copy_max'] || declaration.fail!('window needs copy_max limit')
+        declaration.fail!('window exceeds copy_max') if window.fetch(:maximum) > copy_max.value
+        declaration.fail!('written window requires reads-only effects') if window.fetch(:direction) == 'write' && properties.fetch('effects') != 'reads'
       end
 
       def call_parameter(words, line, types:, objects:, rights:, result:)
@@ -384,14 +436,51 @@ module Erx
         line.fail!('exists is valid only on a capability') if existence && (existence != 'exists' || !object)
         if location == 'register'
           slot = Model.unsigned(slot, line, maximum: result ? 1 : 5)
-          line.fail!('register parameter is wider than a word') unless type.size <= 8 && !type.is_a?(Layout) && !type.is_a?(BytesType)
+          line.fail!('register parameter is not one integer word') unless type.respond_to?(:integer)
+          words = 1
         else
-          # UTCB members are byte offsets, pinned by the shared UTCB declaration.
-          slot = Model.unsigned(slot, line, maximum: 63 * 8)
-          line.fail!('UTCB argument is unaligned or extends beyond message words') unless (slot % type.alignment).zero? && type.size <= 63 * 8 - slot
+          slot, words = utcb_extent(slot, type, line, types: types)
         end
         { name: name, type: type, object: object, rights: mask,
-          location: location, slot: slot, exists: !!existence, line: line }.freeze
+          location: location, slot: slot, words: words, exists: !!existence, line: line }.freeze
+      end
+
+      # A UTCB parameter starts at message word INDEX of the declared UTCB
+      # layout, spelled mr[INDEX], and owns every word its type touches; all
+      # of them lie inside the message words.
+      def utcb_extent(field, type, line, types:)
+        utcb = types[UTCB_LAYOUT]
+        words = utcb.is_a?(Layout) && utcb.fields.find { |item| item.name == UTCB_WORDS_FIELD }
+        unless words && words.array? && words.type == Model::BASE_TYPES.fetch('u64') &&
+               words.atomic && words.atomic.fetch(:store) != 'none'
+          line.fail!("UTCB parameter needs layout #{UTCB_LAYOUT} with atomic u64 words #{UTCB_WORDS_FIELD}")
+        end
+        match = field&.match(/\A#{UTCB_WORDS_FIELD}\[(0|[1-9][0-9]{0,3})\]\z/o)
+        line.fail!("UTCB location must be #{UTCB_WORDS_FIELD}[INDEX]") unless match
+        index = Integer(match[1], 10)
+        validate_utcb_type(type, line)
+        count = (type.size + 7) / 8
+        line.fail!('UTCB parameter extends beyond the message words') unless index + count <= words.count
+        [index, count]
+      end
+
+      # An aggregate is decoded leaf by leaf from a kernel copy of its words,
+      # so every leaf is an integer or fixed bytes inside a wire layout.
+      def validate_utcb_type(type, line)
+        case type
+        when Layout
+          unless type.storage == 'wire_le' && !type.tail && !type.sequence
+            line.fail!('UTCB aggregate must be a fixed wire layout without a tail or sequence')
+          end
+          type.fields.each do |field|
+            line.fail!('UTCB aggregate field cannot be atomic or role-masked') if field.atomic || !field.input_masks.empty?
+            validate_utcb_type(field.type, line)
+          end
+        when BytesType
+          line.fail!('UTCB bytes cannot have a fixed value') if type.fixed
+        else
+          line.fail!('UTCB parameter must be an integer, fixed bytes or a layout') unless type.respond_to?(:integer)
+        end
       end
 
       def translations(declarations, types:)

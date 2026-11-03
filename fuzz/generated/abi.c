@@ -289,6 +289,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	}
 	{
 		uint64_t registers[6] = {0};
+		erx_utcb_t utcb = {0};
 		erx_sys_shape_t shape;
 		uint64_t number = 0;
 
@@ -296,9 +297,21 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 			registers[index / sizeof(uint64_t)] |= (uint64_t)bytes[index] << ((index % sizeof(uint64_t)) * 8);
 		for (size_t index = 0; index < length && index < sizeof(number); index++)
 			number |= (uint64_t)bytes[index] << (index * 8);
-		(void)erx_sys_decode_shape(number, registers, false, &shape);
-		(void)erx_sys_decode_shape(ERX_CALL_DEBUG_LOG, registers, false, &shape);
-		(void)erx_sys_decode_shape(ERX_CALL_DEBUG_LOG, registers, true, &shape);
+		/* The UTCB's message words take the bytes after the registers. */
+		for (size_t word = 0; word < 63; word++) {
+			uint64_t value = 0;
+
+			for (size_t byte = 0; byte < sizeof(value); byte++) {
+				size_t at = sizeof(registers) + word * sizeof(value) + byte;
+
+				if (at < length)
+					value |= (uint64_t)bytes[at] << (byte * 8);
+			}
+			(void)erx_utcb_mr_store(&utcb, word, value);
+		}
+		(void)erx_sys_decode_shape(number, registers, &utcb, false, &shape);
+		(void)erx_sys_decode_shape(ERX_CALL_DEBUG_LOG, registers, &utcb, false, &shape);
+		(void)erx_sys_decode_shape(ERX_CALL_DEBUG_LOG, registers, &utcb, true, &shape);
 	}
 	return (0);
 }

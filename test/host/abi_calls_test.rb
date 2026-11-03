@@ -112,6 +112,65 @@ class AbiCallsTest < Minitest::Test
     assert_equal 0, record.fetch('exit_status')
   end
 
+  # The marshalling fixture's schema with the shipped AArch64 binding, its
+  # outputs written beneath the scratch directory as the tree lays them out.
+  def marshal_outputs
+    sources = { 'abi/erx_abi.txt' => File.join(@root, 'test/fixtures/abi_call_marshal.txt'),
+                'abi/arch/aarch64.txt' => File.join(@root, 'abi/arch/aarch64.txt') }
+    texts = sources.transform_values { |path| File.binread(path).freeze }
+    declarations = texts.flat_map { |path, text| Erx::ABI::Syntax.parse(text, path: path) }
+    schema = Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations.freeze,
+                                                            inputs: texts.freeze))
+    outputs = Erx::ABI::CallEmitter.outputs(schema).merge(
+      'include/erx/abi.h' => Erx::ABI::CEmitter.header(schema),
+      'liberx/generated/calls.h' => Erx::ABI::CEmitter.call_header(schema)
+    )
+    outputs.each do |path, bytes|
+      destination = File.join(@directory, path)
+      FileUtils.mkdir_p(File.dirname(destination))
+      File.write(destination, bytes)
+    end
+    outputs
+  end
+
+  def marshal_flags
+    ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
+     '-I', File.join(@directory, 'include'), '-I', File.join(@root, 'include'), '-I', @directory]
+  end
+
+  def test_call_marshalling_under_sanitizers
+    marshal_outputs
+    output = File.join(@directory, 'marshal-probe')
+    run_command([@compiler, *marshal_flags, '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+                 '-fno-omit-frame-pointer', '-I', File.join(@directory, 'kernel/generated'),
+                 File.join(@directory, 'kernel/generated/abi_decode.c'),
+                 File.join(@root, 'test/fixtures/abi_call_marshal_probe.c'), '-o', output], name: 'compile-marshal-probe')
+    record = run_command([output], name: 'marshal-probe')
+    assert_equal "call marshalling checks passed\n", File.binread(record.fetch('log'))
+  end
+
+  def test_marshalled_wrappers_compile_for_every_backend
+    marshal_outputs
+    run_command([@compiler, *marshal_flags, '--target=aarch64-none-elf', '-ffreestanding', '-c',
+                 File.join(@directory, 'liberx/backend/erx/arch/aarch64/generated/calls.c'),
+                 '-o', File.join(@directory, 'marshal-trap.o')], name: 'marshal-trap')
+    %w[fiasco hosted].each do |backend|
+      run_command([@compiler, *marshal_flags, '-c',
+                   File.join(@directory, "liberx/backend/#{backend}/generated/calls.c"),
+                   '-o', File.join(@directory, "marshal-#{backend}.o")], name: "marshal-#{backend}")
+    end
+  end
+
+  # The decoder reaches the user-writable UTCB only through the one load of
+  # each word it copies; every decision reads the copy.
+  def test_decoder_reads_each_utcb_word_through_one_load
+    decoder = marshal_outputs.fetch('kernel/generated/abi_decode.c')
+    body = decoder[/^erx_sys_decode_shape\(.*?^\{\n(.*?)^\}\n/m, 1]
+    uses = body.lines.map(&:strip).grep(/\butcb\b/)
+    assert_equal ['if (utcb == NULL)', 'if (!erx_utcb_mr_load(utcb, 2 + index, &words[index]))',
+                  'if (!erx_utcb_mr_load(utcb, 6, &words[4]))'], uses
+  end
+
   def test_fixed_byte_strings_do_not_form_c_trigraphs
     declarations = Erx::ABI::Syntax.parse("abi 1\nbytes trigraph 3 value 3f3f2f\n")
     schema = Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations, inputs: {}))

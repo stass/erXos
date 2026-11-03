@@ -9,8 +9,9 @@
 #include "erx/cdefs.h"
 
 erx_status_t
-erx_sys_decode_shape(uint64_t number,
-    const uint64_t registers[6], bool executor ERX_UNUSED, erx_sys_shape_t *result)
+erx_sys_decode_shape(uint64_t number, const uint64_t registers[6],
+    const erx_utcb_t *utcb ERX_UNUSED, bool executor ERX_UNUSED,
+    erx_sys_shape_t *result)
 {
 	erx_sys_shape_t shape = {0};
 

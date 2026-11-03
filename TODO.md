@@ -507,6 +507,30 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] liberx, `erx` backend, `erx_utcb_self`: the generated trap
+  wrappers of calls with UTCB parameters
+  (`liberx/backend/erx/arch/aarch64/generated/calls.c`) reach the calling
+  thread's UTCB through `erx_utcb_self`, which nothing defines yet. On
+  AArch64 it reads `TPIDRRO_EL0`, so it lands as a listed
+  system-register function generated from the system-register source,
+  with the first shipped call that takes a UTCB parameter
+  ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
+* [Medium] fuzzing, UTCB call decoding: `fuzz/generated/abi.c` decodes
+  every shipped call with a UTCB built from the input, but no shipped call
+  takes a UTCB parameter yet, so the decoder's word copy, uncovered-byte
+  checks and aggregate field checks reach libFuzzer only through the
+  host probe of `test/fixtures/abi_call_marshal.txt`. Have `check-fuzz`
+  also build the generated harness against that fixture, or land the
+  first UTCB call with its fuzz run
+  ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
+* [Medium] kernel dispatch and stopgap send glue, the retry action: the
+  generator gives only a call declared `retry` a handler that takes
+  `erx_sys_action_t`. The generated dispatch loop that runs such a call
+  again from its capability lookup, and the build check that only the
+  send's glue returns `ERX_SYS_ACTION_RETRY`, with a seeded second
+  returner failing it, land with the dispatch and the IPC glue
+  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#the-wait-funnel)).
+
 * [High] kernel memory, file-backed memory objects with evictable clean
   pages, so that large-file `mmap` (LMDB, SQLite in mmap mode) and ML
   weights larger than free RAM work; needs a revised K6 (a fault may wait

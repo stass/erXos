@@ -39,9 +39,12 @@ module Erx
           end
           out << ''
         end
-        out.concat(['## Calls', '', '| Name | Number | Executor | Effects |', '| --- | ---: | --- | --- |'])
+        out.concat(['## Calls', '', '| Name | Number | Waits | Executor | Retry | Effects |',
+                    '| --- | ---: | --- | --- | --- | --- |'])
         schema.calls.each do |name, call|
-          out << "| `#{name}` | #{call.fetch(:number)} | #{call.fetch(:properties).fetch('executor')} | #{call.fetch(:properties).fetch('effects')} |"
+          executor = call.fetch(:executor).values_at(:rule, :argument).compact.join(' ')
+          out << "| `#{name}` | #{call.fetch(:number)} | #{call.fetch(:properties).fetch('waits')} | " \
+                 "#{executor} | #{call.fetch(:retry) ? 'lookup' : 'no'} | #{call.fetch(:properties).fetch('effects')} |"
         end
         (out + ['']).join("\n")
       end
@@ -71,16 +74,30 @@ module Erx
         end
         unless schema.calls.empty?
           count = schema.architecture.fetch(:registers).fetch('args').size
+          utcb = schema.types[Contracts::UTCB_LAYOUT]
+          raise SchemaError, "call fuzzing requires the #{Contracts::UTCB_LAYOUT} layout" unless utcb.is_a?(Layout)
+          words = utcb.fields.find { |field| field.name == Contracts::UTCB_WORDS_FIELD }.count
           out.concat(["\t{", "\t\tuint64_t registers[#{count}] = {0};",
+                      "\t\terx_utcb_t utcb = {0};",
                       "\t\terx_sys_shape_t shape;", "\t\tuint64_t number = 0;", '',
                       "\t\tfor (size_t index = 0; index < length && index < sizeof(registers); index++)",
                       "\t\t\tregisters[index / sizeof(uint64_t)] |= (uint64_t)bytes[index] << ((index % sizeof(uint64_t)) * 8);",
                       "\t\tfor (size_t index = 0; index < length && index < sizeof(number); index++)",
                       "\t\t\tnumber |= (uint64_t)bytes[index] << (index * 8);",
-                      "\t\t(void)erx_sys_decode_shape(number, registers, false, &shape);"])
+                      "\t\t/* The UTCB's message words take the bytes after the registers. */",
+                      "\t\tfor (size_t word = 0; word < #{words}; word++) {",
+                      "\t\t\tuint64_t value = 0;", '',
+                      "\t\t\tfor (size_t byte = 0; byte < sizeof(value); byte++) {",
+                      "\t\t\t\tsize_t at = sizeof(registers) + word * sizeof(value) + byte;", '',
+                      "\t\t\t\tif (at < length)",
+                      "\t\t\t\t\tvalue |= (uint64_t)bytes[at] << (byte * 8);",
+                      "\t\t\t}",
+                      "\t\t\t(void)erx_utcb_mr_store(&utcb, word, value);",
+                      "\t\t}",
+                      "\t\t(void)erx_sys_decode_shape(number, registers, &utcb, false, &shape);"])
           schema.calls.each_key do |name|
-            out << "\t\t(void)erx_sys_decode_shape(ERX_CALL_#{name.upcase}, registers, false, &shape);"
-            out << "\t\t(void)erx_sys_decode_shape(ERX_CALL_#{name.upcase}, registers, true, &shape);"
+            out << "\t\t(void)erx_sys_decode_shape(ERX_CALL_#{name.upcase}, registers, &utcb, false, &shape);"
+            out << "\t\t(void)erx_sys_decode_shape(ERX_CALL_#{name.upcase}, registers, &utcb, true, &shape);"
           end
           out << "\t}"
         end

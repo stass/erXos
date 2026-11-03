@@ -53,7 +53,9 @@ module Erx
            erx_abi_load_u64 erx_abi_fail erx_abi_zero erx_abi_utf8
            erx_abi_identifier erx_abi_path erx_abi_vector
            erx_sys_arguments erx_sys_arguments_t erx_sys_shape erx_sys_shape_t
-           erx_sys_context erx_sys_context_t erx_sys_decode_shape].each do |symbol|
+           erx_sys_context erx_sys_context_t erx_sys_decode_shape
+           erx_sys_action erx_sys_action_t erx_utcb_self erx_sys_word_get
+           erx_sys_word_put ERX_SYS_ACTION_DONE ERX_SYS_ACTION_RETRY].each do |symbol|
           reserve.call(symbol, 'generated interface')
         end
         constants.each_key { |name| reserve.call(macro(name), "constant #{name}") }
@@ -103,15 +105,20 @@ module Erx
           %W[erx_sys_#{name}_args erx_sys_#{name}_args_t].each do |symbol|
             reserve.call(symbol, "call arguments #{name}")
           end
+          if call.fetch(:executor).fetch(:rule) == 'private' && call.fetch(:arguments).any? { |argument| argument.fetch(:name) == 'executor' }
+            line.fail!("argument executor collides with the executor flag of #{name}")
+          end
           unless call.fetch(:results).empty?
-            %W[erx_sys_#{name}_results erx_sys_#{name}_results_t].each do |symbol|
+            %W[erx_sys_#{name}_results erx_sys_#{name}_results_t erx_sys_#{name}_store].each do |symbol|
               reserve.call(symbol, "call results #{name}")
             end
           end
           parameters = call.fetch(:arguments).map { |argument| argument.fetch(:name) }
           parameters += call.fetch(:results).map { |result| "out_#{result.fetch(:name)}" }
           line.fail!("generated parameter collision in #{name}") unless parameters.uniq.size == parameters.size
-          locals = %w[status raw_status] + architecture.fetch(:registers).fetch('args') +
+          # The trap wrapper's locals and the functions it calls by name.
+          locals = %w[status raw_status utcb words raw index byte erx_utcb_self erx_utcb_mr_load
+                      erx_utcb_mr_store erx_sys_word_get erx_sys_word_put] + architecture.fetch(:registers).fetch('args') +
                    architecture.fetch(:registers).fetch('number') + architecture.fetch(:registers).fetch('results')
           unless (parameters & locals).empty?
             line.fail!("call parameter collides with a trap local in #{name}")

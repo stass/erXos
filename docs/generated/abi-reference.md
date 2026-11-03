@@ -968,6 +968,6 @@ Storage: `wire_le`. Prefix size: 56. Alignment: 8.
 
 ## Calls
 
-| Name | Number | Executor | Effects |
-| --- | ---: | --- | --- |
-| `debug_log` | 1 | allow | changes |
+| Name | Number | Waits | Executor | Retry | Effects |
+| --- | ---: | --- | --- | --- | --- |
+| `debug_log` | 1 | no | allow | no | changes |

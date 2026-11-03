@@ -7843,10 +7843,14 @@ module Erx
             :number => 1,
             :properties => {
               "waits".b => "no".b,
-              "executor".b => "allow".b,
               "effects".b => "changes".b,
               "charges".b => "none".b
             }.freeze,
+            :executor => {
+              :rule => "allow".b,
+              :argument => nil
+            }.freeze,
+            :retry => false,
             :arguments => [
               {
                 :name => "len".b,
@@ -7855,6 +7859,7 @@ module Erx
                 :rights => 0,
                 :location => "register".b,
                 :slot => 0,
+                :words => 1,
                 :exists => false,
                 :line => source_line
               }.freeze

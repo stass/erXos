@@ -36,6 +36,42 @@ class AbiGenerationTest < Minitest::Test
     end
   end
 
+  # Each call rule refuses in the validated plan, before the first write, so
+  # a refused declaration leaves the published outputs byte for byte.
+  def test_refused_call_declaration_leaves_published_outputs_unchanged
+    Dir.mktmpdir('erx-abi-refused-') do |root|
+      FileUtils.cp_r(File.join(@root, 'abi'), root)
+      FileUtils.mkdir_p(File.join(root, 'tools/lib/erx'))
+      FileUtils.cp(File.join(@root, 'tools/gen_abi.rb'), File.join(root, 'tools'))
+      FileUtils.cp(Dir.glob(File.join(@root, 'tools/lib/erx/abi*.rb')), File.join(root, 'tools/lib/erx'))
+      Erx::ABI::Generator.publish(Erx::ABI::Generator.plan(root: root), root: root)
+      snapshot = Dir.glob('**/*', File::FNM_DOTMATCH, base: root).sort
+                    .select { |path| File.file?(File.join(root, path)) }
+                    .to_h { |path| [path, File.binread(File.join(root, path))] }
+      source = File.join(root, 'abi/erx_abi.txt')
+      refused = {
+        'overlap' => "  arg first u64 utcb mr[0]\n  arg second u64 utcb mr[0]\n",
+        'beyond' => "  arg late u64 utcb mr[63]\n",
+        'refuse' => "  arg value u64 register 0\n"
+      }
+      refused.each do |label, members|
+        rule = label == 'refuse' ? 'refuse' : 'allow'
+        File.write(source, snapshot.fetch('abi/erx_abi.txt') +
+                           "call refused 99\n  waits no\n  executor #{rule}\n  effects changes\n" \
+                           "  charges none\n  bound records 1\n#{members}")
+        assert_raises(Erx::ABI::SchemaError, label) do
+          Erx::ABI::Generator.publish(Erx::ABI::Generator.plan(root: root), root: root)
+        end
+        current = Dir.glob('**/*', File::FNM_DOTMATCH, base: root).sort
+                     .select { |path| File.file?(File.join(root, path)) }
+        assert_equal snapshot.keys, current, label
+        (snapshot.keys - ['abi/erx_abi.txt']).each do |path|
+          assert_equal snapshot.fetch(path), File.binread(File.join(root, path)), "#{label}: #{path}"
+        end
+      end
+    end
+  end
+
   def test_include_control_bytes_are_refused_before_filesystem_use
     Dir.mktmpdir('erx-abi-include-') do |root|
       FileUtils.mkdir_p(File.join(root, 'abi'))

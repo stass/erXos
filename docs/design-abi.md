@@ -216,14 +216,35 @@ adding a service-execution language.
 
 ### Kernel calls and bindings
 
-Each call declares `waits yes|no`, `executor allow|refuse`, a nonempty
-`bound` list of named work units and their limits, `effects reads|changes`,
-and `charges none|ARGUMENT`. A variable bound references a declared finite
-limit or a named, documented kernel work unit such as the mapping edge;
-free-form expressions are not bounds. Argument and result members name
-their types and their location, either a numbered argument/result register
-or a named UTCB field. The architecture binding supplies the registers,
-trap and preserved-register set.
+Each call declares `waits yes|no`, `executor allow|refuse|private ARG`, a
+nonempty `bound` list of named work units and their limits,
+`effects reads|changes`, and `charges none|ARGUMENT`. A variable bound
+references a declared finite limit or a named, documented kernel work unit
+such as the mapping edge; free-form expressions are not bounds. Argument
+and result members name their types and their location, either a numbered
+argument/result register or a message word of the declared `erx_utcb`
+layout. The architecture binding supplies the registers, trap and
+preserved-register set.
+
+The executor rule is the dispatch's class check, and it applies only
+before a wait. A call that does not wait declares `executor allow`; one
+that an executor may not use in some form, as `erx_ipc_reply` or
+`erx_vcpu_control`, fails in its handler with that call's own status. A
+call that may wait declares `refuse`, which the generated dispatch answers
+with `ERX_EWOULDBLOCK` before it decodes anything; `allow`, which admits
+an executor, as `erx_park` does; or `private ARG`, which admits an
+executor whose word, the `u64` register argument `ARG`, lies in the caller's own
+private memory: the generated shape carries an `executor` flag, and the
+handler refuses an executor with `ERX_EWOULDBLOCK` once the word's key
+names a shared object, as `erx_umtx_wait` does. A test pins the shipped
+waiting calls that admit an executor to exactly those two.
+
+A call marked `retry` may ask the dispatch to run it again from its
+capability lookup with the same arguments, as a send woken at an unbound
+gate does. Only such a call's generated handler prototype takes the
+`erx_sys_action_t` out-parameter that asks for it, so no other handler can,
+and the action is never a status or a result register. Only a call that
+may wait and takes a capability can be marked `retry`.
 
 A capability argument names an object type and its required rights. The
 `exists` property names the argument whose existence lock the call holds.
@@ -236,10 +257,20 @@ types such as a mapping address or a umtx word retain their distinct
 meaning and never become a C pointer parameter.
 
 Registers hold at most six argument words and two result words in
-addition to status. A word's location is unique, its type fits the word,
-and UTCB fields remain inside the declared 63 message words. Aggregate
-arguments name a declared UTCB layout; the declaration does not silently
-spill a seventh argument or infer an ABI from a C prototype. The model
+addition to status; the limit counts register parameters, each one integer
+word, and a parameter in the UTCB takes no register. A register's
+parameter is unique and its type fits the word. A UTCB parameter starts at
+a message word and owns every word its type touches, all inside the
+declared 63 message words, and no two arguments, or two results, share a
+word; an argument and a result may. Its type is an integer, fixed bytes without a fixed value or
+an aggregate, a fixed `wire_le` layout without a tail, sequence, atomic
+field or input mask. Byte `OFFSET` of a parameter's words is byte
+`OFFSET % 8` of word `OFFSET / 8`, least significant first, on both sides
+of the trap. The kernel loads each owned word once into kernel memory and
+decodes only that copy, checking each field as it checks a register
+argument and refusing a nonzero byte that no field covers; it stores a
+UTCB result's words once each. The declaration does not silently spill a
+seventh argument or infer an ABI from a C prototype. The model
 validates every right against the capability's type, every charged
 argument against the owning budget contract, and every backend's complete
 declaration set before deriving stubs or handler tables.
@@ -251,15 +282,20 @@ register names and widths, so a spelling that the selected architecture
 does not define fails generation.
 
 The native trap wrapper, Fiasco backend declaration and hosted backend
-declaration share a generated typed signature. A declaration does not
+declaration share a generated typed signature, which passes an integer
+argument by value, an aggregate or fixed bytes by pointer and each result
+through an out pointer; the native wrapper reaches the calling thread's
+UTCB through `erx_utcb_self`, which the `erx` backend provides. A declaration does not
 supply an implementation or fabricate success for an unsupported call.
 Raw wrappers return kernel status and do not set `errno`.
 
 Call members use these exact token forms, at two-space indentation:
-`waits VALUE`, `executor VALUE`, `effects VALUE`, `charges VALUE`,
+`waits VALUE`, `executor allow`, `executor refuse`, `executor private ARG`,
+`retry`, `effects VALUE`, `charges VALUE`,
 `bound UNIT LIMIT`, `arg NAME TYPE register INDEX`,
-`arg NAME TYPE utcb FIELD`, `result NAME TYPE register INDEX` and
-`result NAME TYPE utcb FIELD`. A capability argument replaces `TYPE`
+`arg NAME TYPE utcb mr[INDEX]`, `result NAME TYPE register INDEX` and
+`result NAME TYPE utcb mr[INDEX]`, where `INDEX` is a decimal message-word
+index without leading zeros. A capability argument replaces `TYPE`
 with `cap OBJECT_TYPE RIGHTS`, where rights are a comma-separated list
 of declared rights or `none`; optional `exists` follows its location.
 `window NAME CAP_ARG OFFSET_ARG LENGTH_ARG DIRECTION MAXIMUM` relates

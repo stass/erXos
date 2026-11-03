@@ -143,10 +143,157 @@ class AbiSchemaTest < Minitest::Test
     end
   end
 
-  def test_utcb_fields_cannot_overlap
-    assert_raises(Erx::ABI::SchemaError) do
-      schema(call_source("  arg whole u64 utcb 0\n  arg half u32 utcb 4"), architecture: architecture)
+  # The UTCB layout, an aggregate and a capability type that the call rules
+  # below are checked against.
+  CALL_CONTEXT = <<~ABI
+    limit msg_words u32 63
+    scalar cap u64
+    right stop 0 "stop a space"
+    type space 1
+      rights stop
+      default stop
+      pass none
+    layout erx_utcb 1 shared 8 512
+      field mr u64 0 count @msg_words
+      field self u64 504
+      atomic mr[] load acquire store release
+      atomic self load acquire store none
+      writer mr[] thread_context
+      writer self kernel_boot
+      owner mr[] caller all
+      owner self kernel all
+      visibility mr[] development
+      visibility self internal
+    layout pair 1 wire_le 8 16
+      field low u64 0
+      field high u32 8
+      padding 12 4
+    layout tailed 1 wire_le 8 8
+      field count u32 0
+      padding 4 4
+      tail items u64 count 4
+  ABI
+
+  def call_model(members, waits: 'no', executor: 'allow', context: CALL_CONTEXT)
+    lines = [context, 'call probe 1', "  waits #{waits}"]
+    lines << "  executor #{executor}" if executor
+    lines.concat(['  effects changes', '  charges none', '  bound records 1', members])
+    schema(lines.join("\n") + "\n", architecture: architecture).calls.fetch('probe')
+  end
+
+  def assert_call_refused(members, pattern, **properties)
+    error = assert_raises(Erx::ABI::SchemaError) { call_model(members, **properties) }
+    assert_match(pattern, error.message)
+  end
+
+  def test_waiting_call_may_admit_executors_as_park_does
+    call = call_model('  arg deadline u64 register 0', waits: 'yes', executor: 'allow')
+    assert_equal({ rule: 'allow', argument: nil }, call.fetch(:executor))
+  end
+
+  def test_private_executor_rule_names_a_register_word
+    call = call_model("  arg addr u64 register 0\n  arg expected u32 register 1",
+                      waits: 'yes', executor: 'private addr')
+    assert_equal({ rule: 'private', argument: 'addr' }, call.fetch(:executor))
+    assert_call_refused('  arg addr u64 register 0', /private executor rule must name/,
+                        waits: 'yes', executor: 'private missing')
+    assert_call_refused('  arg space cap space stop register 0', /private executor rule must name/,
+                        waits: 'yes', executor: 'private space')
+    assert_call_refused('  arg addr u64 utcb mr[0]', /private executor rule must name/,
+                        waits: 'yes', executor: 'private addr')
+    assert_call_refused('  arg addr u64 register 0', /executor needs allow, refuse or private/,
+                        waits: 'yes', executor: 'private')
+    assert_call_refused('  arg flag u8 register 0', /private executor rule must name a u64/,
+                        waits: 'yes', executor: 'private flag')
+  end
+
+  # The dispatch refuses an executor by class only before a wait; a call
+  # that never waits leaves any refusal to its handler's own status.
+  def test_call_that_does_not_wait_cannot_refuse_executors
+    ['refuse', 'private addr'].each do |rule|
+      assert_call_refused('  arg addr u64 register 0', /does not wait must allow executors/,
+                          waits: 'no', executor: rule)
     end
+  end
+
+  def test_call_without_an_executor_rule_is_refused
+    %w[yes no].each do |waits|
+      assert_call_refused('  arg value u64 register 0', /needs waits, executor/, waits: waits, executor: nil)
+    end
+    assert_call_refused('  arg value u64 register 0', /executor needs allow, refuse or private/,
+                        waits: 'yes', executor: 'sometimes')
+  end
+
+  def test_register_limits_count_register_words_not_parameters
+    registers = (0..5).map { |index| "  arg r#{index} u64 register #{index}" }
+    call = call_model((registers + ['  arg extra pair utcb mr[0]', '  result first u64 register 0',
+                                    '  result second u64 register 1', '  result third pair utcb mr[2]']).join("\n"))
+    assert_equal 7, call.fetch(:arguments).size
+    assert_equal 3, call.fetch(:results).size
+    assert_call_refused('  arg late u64 register 6', /outside 0..5/)
+    assert_call_refused('  result late u64 register 2', /outside 0..1/)
+    assert_call_refused("  arg one u64 register 0\n  arg two u32 register 0", /duplicate parameter register/)
+    assert_call_refused('  arg wide pair register 0', /not one integer word/)
+  end
+
+  def test_utcb_aggregates_stay_inside_the_message_words
+    call = call_model('  arg last pair utcb mr[61]')
+    assert_equal [61, 2], call.fetch(:arguments).first.values_at(:slot, :words)
+    assert_call_refused('  arg late pair utcb mr[62]', /beyond the message words/)
+    assert_call_refused('  arg late u64 utcb mr[63]', /beyond the message words/)
+    assert_call_refused('  arg late u64 utcb mr[99999]', /mr\[INDEX\]/)
+  end
+
+  def test_utcb_parameters_cannot_share_a_word
+    call = call_model("  arg first pair utcb mr[0]\n  arg second pair utcb mr[2]\n  result back pair utcb mr[1]")
+    assert_equal [0, 2], call.fetch(:arguments).map { |argument| argument.fetch(:slot) }
+    assert_call_refused("  arg first pair utcb mr[0]\n  arg second u32 utcb mr[1]", /UTCB parameter words overlap/)
+    assert_call_refused("  arg first u32 utcb mr[4]\n  arg second u32 utcb mr[4]", /UTCB parameter words overlap/)
+    assert_call_refused("  result first pair utcb mr[3]\n  result second pair utcb mr[4]", /UTCB parameter words overlap/)
+  end
+
+  def test_utcb_location_names_a_message_word_of_the_declared_utcb
+    assert_call_refused('  arg value u64 utcb 0', /mr\[INDEX\]/)
+    assert_call_refused('  arg value u64 utcb self', /mr\[INDEX\]/)
+    assert_call_refused('  arg value u64 utcb mr[01]', /mr\[INDEX\]/)
+    without_utcb = CALL_CONTEXT.sub(/^layout erx_utcb.*?(?=^layout pair)/m, '')
+    assert_call_refused('  arg value u64 utcb mr[0]', /needs layout erx_utcb/, context: without_utcb)
+  end
+
+  def test_utcb_aggregate_must_be_a_fixed_wire_layout
+    assert_call_refused('  arg rows tailed utcb mr[0]', /fixed wire layout/)
+    assert_call_refused('  arg words erx_utcb utcb mr[0]', /fixed wire layout/)
+  end
+
+  # The decoder checks a UTCB field as it checks a register argument, and
+  # has no comparison for a fixed byte value, so the schema refuses one.
+  def test_utcb_bytes_cannot_carry_a_fixed_value
+    context = CALL_CONTEXT + "bytes magic 2 value 4552\n"
+    assert_call_refused('  arg tag magic utcb mr[0]', /fixed value/, context: context)
+  end
+
+  def test_retry_needs_a_waiting_call_with_a_capability_to_look_up
+    call = call_model("  retry\n  arg space cap space stop register 0", waits: 'yes', executor: 'refuse')
+    assert call.fetch(:retry)
+    assert_call_refused("  retry\n  arg space cap space stop register 0", /retry needs a waiting call/)
+    assert_call_refused("  retry\n  arg value u64 register 0", /retry needs a waiting call/,
+                        waits: 'yes', executor: 'refuse')
+    assert_call_refused("  retry\n  retry\n  arg space cap space stop register 0", /duplicate retry/,
+                        waits: 'yes', executor: 'refuse')
+  end
+
+  # A pinned answer, not one the generator derives: the waiting calls an
+  # executor may make are erx_park and erx_umtx_wait on private memory
+  # (design-scheduler.md, Executor class enforcement). A new waiting call
+  # left admissible to executors fails here until this list is changed.
+  def test_shipped_waiting_calls_admit_executors_only_where_the_design_does
+    root = File.expand_path('../..', __dir__)
+    model = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
+    admitted = model.calls.select { |_name, call| call.fetch(:properties).fetch('waits') == 'yes' }
+                    .reject { |_name, call| call.fetch(:executor).fetch(:rule) == 'refuse' }
+                    .transform_values { |call| call.fetch(:executor).fetch(:rule) }
+    allowed = { 'park' => 'allow', 'umtx_wait' => 'private' }
+    admitted.each { |name, rule| assert_equal allowed[name], rule, "waiting call #{name} admits executors" }
   end
 
   def test_architecture_rejects_a_nonexistent_register

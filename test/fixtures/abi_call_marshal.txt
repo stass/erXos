@@ -1,0 +1,99 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# Calls that exercise every executor rule, the retry action and UTCB
+# aggregates, for abi_call_marshal_probe.c.
+abi 1
+limit msg_words u32 63
+status ok 0 "success"
+status inval -1 "invalid argument"
+status notsup -12 "unsupported operation or version"
+status wouldblock -14 "executor made a call that would wait"
+right stop 0 "stop a space"
+right call 1 "send through a gate"
+scalar cap u64
+scalar deadline u64
+scalar uword u64 align 4
+type space 1
+  rights stop
+  default stop
+  pass none
+type gate 2
+  rights call
+  default call
+  pass none
+enum probe_mode u32
+  value fast 1
+  value slow 2
+bytes probe_tag 3
+layout erx_utcb 1 shared 8 512
+  field mr u64 0 count @msg_words
+  field self u64 504
+  atomic mr[] load acquire store release
+  atomic self load acquire store none
+  writer mr[] thread_context
+  writer self kernel_boot
+  owner mr[] caller all
+  owner self kernel all
+  visibility mr[] development
+  visibility self internal
+layout probe_regs 1 wire_le 8 32
+  field pc u64 0
+  field mode probe_mode 8
+  field flags u16 12
+  padding 14 2
+  field gpr u64 16 count 2
+layout probe_grant 1 wire_le 8 8
+  field tag probe_tag 0
+  padding 3 1
+  field share i32 4
+
+call park 1
+  waits yes
+  executor allow
+  effects changes
+  charges none
+  bound waits 1
+  arg deadline deadline register 0
+call umtx_wait 2
+  waits yes
+  executor private addr
+  effects changes
+  charges none
+  bound waits 1
+  arg addr uword register 0
+  arg expected u32 register 1
+call space_stop 3
+  waits yes
+  executor refuse
+  effects changes
+  charges none
+  bound spaces 1
+  arg space cap space stop register 0
+  arg code u32 register 1
+call thread_write 4
+  waits no
+  executor allow
+  effects changes
+  charges none
+  bound words 4
+  arg set u32 register 0
+  arg regs probe_regs utcb mr[2]
+  arg grant probe_grant utcb mr[6]
+call thread_read 5
+  waits no
+  executor allow
+  effects reads
+  charges none
+  bound words 4
+  arg set u32 register 0
+  result count u16 register 0
+  result regs probe_regs utcb mr[59]
+call ipc_send 6
+  waits yes
+  executor refuse
+  retry
+  effects changes
+  charges none
+  bound turns 1
+  arg gate cap gate call register 0
+  arg send_by deadline register 1

@@ -354,12 +354,22 @@ module Erx
         end
       end
 
+      # The typed parameters every backend's wrapper of a call shares: an
+      # integer argument by value, an aggregate by pointer, each result
+      # through an out pointer.
+      def call_parameters(call)
+        arguments = call.fetch(:arguments).map do |argument|
+          type = argument.fetch(:type)
+          type.respond_to?(:integer) ? "#{c_type(type)} #{argument.fetch(:name)}" : "const #{c_type(type)} *#{argument.fetch(:name)}"
+        end
+        arguments + call.fetch(:results).map { |result| "#{c_type(result.fetch(:type))} *out_#{result.fetch(:name)}" }
+      end
+
       def call_header(schema)
         out = [NOTICE, '#ifndef ERX_GENERATED_CALLS_H', '#define ERX_GENERATED_CALLS_H', '',
                '#include "erx/abi.h"', '']
         schema.calls.each do |name, call|
-          arguments = call.fetch(:arguments).map { |argument| "#{c_type(argument.fetch(:type))} #{argument.fetch(:name)}" }
-          call.fetch(:results).each { |result| arguments << "#{c_type(result.fetch(:type))} *out_#{result.fetch(:name)}" }
+          arguments = call_parameters(call)
           out << "erx_status_t erx_#{name}(#{arguments.empty? ? 'void' : arguments.join(', ')});"
         end
         out.concat(['', '#endif /* ERX_GENERATED_CALLS_H */', ''])

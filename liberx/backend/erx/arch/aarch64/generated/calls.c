@@ -10,6 +10,9 @@
 erx_status_t
 erx_debug_log(erx_utcb_length_t len)
 {
+	uint32_t raw_status;
+	erx_status_t status;
+
 	register uint64_t x0 __asm__("x0") = (uint64_t)(uint32_t)len.raw;
 	register uint64_t x1 __asm__("x1") = 0;
 	register uint64_t x2 __asm__("x2") = 0;
@@ -17,9 +20,6 @@ erx_debug_log(erx_utcb_length_t len)
 	register uint64_t x4 __asm__("x4") = 0;
 	register uint64_t x5 __asm__("x5") = 0;
 	register uint64_t x8 __asm__("x8") = ERX_CALL_DEBUG_LOG;
-	uint32_t raw_status;
-	erx_status_t status;
-
 	__asm__ volatile("svc #0x4552"
 	    : "+r"(x0), "+r"(x1), "+r"(x2)
 	    : "r"(x8), "r"(x3), "r"(x4), "r"(x5)

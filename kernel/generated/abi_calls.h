@@ -27,9 +27,12 @@ struct erx_sys_shape {
 	erx_sys_arguments_t	 arguments;
 };
 
-/* Registers are a private trap snapshot, never a user mapping. */
+/* Registers are a private trap snapshot, never a user mapping. The
+ * UTCB is the caller's, through the kernel's own mapping; user mode may
+ * rewrite it meanwhile, so each word a call reads is loaded once. */
 erx_status_t erx_sys_decode_shape(uint64_t number,
-    const uint64_t registers[6], bool executor, erx_sys_shape_t *result);
+    const uint64_t registers[6], const erx_utcb_t *utcb, bool executor,
+    erx_sys_shape_t *result);
 
 /* Only the kernel admission funnel creates this opaque context. */
 typedef struct erx_sys_context erx_sys_context_t;
