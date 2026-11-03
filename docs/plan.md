@@ -464,9 +464,10 @@ kernel or root-task fault; the park protocol's exhaustive host model
 passes (S2); every call that may wait refuses an executor, umtx waits on
 private memory excepted (S3); a space stopped while its threads run, fault
 and call on every CPU posts exactly one exit record, after its last thread
-has finished its call or left its wait and died (K18); a server called by
-a thread of ceiling 15 runs at most at 15, and runs on its own group's
-grant from its next scheduling decision (S5); the host test of
+has finished its call or left its wait and died (K18); a server whose
+group's ceiling is 15 runs at most at 15 while serving a caller at 40, and
+runs on its own group's grant from its next scheduling decision (S5); the
+host test of
 `erx_tlb_plan` finds every removal invalidating what it made stale, each
 cleared table entry over its span in the walk caches and with the IOMMU's
 every-level form (K9); a pet from a thread without `POWER` is refused, and
