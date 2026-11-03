@@ -74,8 +74,8 @@ module Erx
   # libFuzzer entry in tools/fuzz/KIND_fuzz.c: the boot-path parsers of the
   # ERXPACK boot image, ELF executable headers and the erx.watchdog= boot
   # argument; the capability core, fed the values, masks and counts a
-  # domain controls; and SHA-256, ChaCha20 and the entropy generator built
-  # on them.
+  # domain controls; SHA-256, ChaCha20 and the entropy generator built on
+  # them; and BLAKE3.
   module PackFuzz
     module_function
 
@@ -84,7 +84,8 @@ module Erx
     SOURCES = { 'pack' => ['kernel/core/pack.c'], 'elf' => ['liberx/elf_plan.c'],
                 'watchdog' => ['kernel/core/watchdog.c'], 'cap' => ['kernel/core/cap.c'],
                 'sha256' => [SHA256], 'chacha20' => [CHACHA20],
-                'rng' => ['kernel/core/rng.c', CHACHA20, SHA256] }.freeze
+                'rng' => ['kernel/core/rng.c', CHACHA20, SHA256],
+                'blake3' => ['kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c'] }.freeze
     # Accepted values at the bounds and one of each refusal, so mutations
     # start on both sides of every check.
     WATCHDOG_SEEDS = %w[1,5,60 60,120,600 1,2,2 0,5,60 1,1,60 1,5,4 1,5 1,5,60,
@@ -135,8 +136,13 @@ module Erx
       return WATCHDOG_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value] } if kind == 'watchdog'
       return CAP_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value.b] } if kind == 'cap'
       return primitive_seeds(kind) if %w[sha256 chacha20 rng].include?(kind)
+      return blake3_seeds if kind == 'blake3'
 
-      bytes = kind == 'pack' ? PackFixture.valid : ElfFixture.valid
+      bytes = case kind
+              when 'pack' then PackFixture.valid
+              when 'elf' then ElfFixture.valid
+              else raise Error, "no seeds for fuzz kind #{kind}"
+              end
       # Every prefix of a valid wire header reaches a different truncation
       # boundary; mutations then start from both accepted and rejected seeds.
       prefixes = [0, 1, 7, 31, 55, 63, 127, 511, 4095].to_h do |length|
@@ -162,6 +168,15 @@ module Erx
       end
     end
     private_class_method :primitive_seeds
+
+    # A cut seed byte, then messages ending at and around the block and
+    # chunk boundaries, up to a little over four chunks.
+    def blake3_seeds
+      [0, 1, 63, 64, 65, 1023, 1024, 1025, 2048, 4097].to_h do |length|
+        ["length-#{length}", ([length % 251].pack('C') + Array.new(length) { |index| index % 251 }.pack('C*')).b]
+      end
+    end
+    private_class_method :blake3_seeds
   end
 end
 

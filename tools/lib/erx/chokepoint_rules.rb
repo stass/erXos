@@ -90,6 +90,32 @@ module Erx
     # The capability slot's generated header, which the rules below name.
     CAP_SLOT_IMPL = ABI::Generated::SCHEMA.types.fetch('erx_cap_slot').private_header
 
+    # The cores' private headers among paths: every header named *_impl.h,
+    # in any case, anywhere below kernel/ (a core's hand-written header in
+    # kernel/core, kernel/sched or any later core directory, and each
+    # private layout's generated header in kernel/generated), except in an
+    # import, a directory below kernel/ with an ORIGIN.md. An import's own
+    # header of the same suffix (kernel/crypto/blake3/blake3_impl.h) is
+    # not one of them.
+    def self.private_headers(paths)
+      imports = paths.filter_map { |path| "#{File.dirname(path)}/" if File.basename(path) == 'ORIGIN.md' }
+      paths.select { |path| File.fnmatch?('kernel/**/*_impl.h', path, File::FNM_PATHNAME | File::FNM_CASEFOLD) }
+           .reject { |path| imports.any? { |import| path.start_with?(import) } }
+    end
+
+    # The private headers of this checkout, read once at load so a new one
+    # is covered without an entry here, with each private layout's header
+    # named even before it is generated. The checks run on this checkout,
+    # so the set is the checked tree's.
+    REPOSITORY = File.expand_path('../../..', __dir__)
+    PRIVATE_HEADERS = (private_headers(Dir.glob('kernel/**/*', base: REPOSITORY)) |
+                       PRIVATE_LAYOUTS.map(&:private_header)).sort.freeze
+    raise Error, "no private core header below #{REPOSITORY}/kernel" if (PRIVATE_HEADERS & [BUDGET_IMPL, CAP_IMPL]).empty?
+
+    # An include of any of them, by any path ending in its file name, in
+    # any case.
+    PRIVATE_HEADER_INCLUDE = Regexp.union(PRIVATE_HEADERS.map { |header| include_of(header) })
+
     # A private layout's rule, built from the ABI file: only the layout's
     # owner and the owner's host tests include its generated header, and no
     # other file names its record's tag but to refer to it. Everywhere else
@@ -185,11 +211,12 @@ module Erx
       ),
       Chokepoints::Forbidden.new(
         name: 'core-records-private',
-        rule: "the cores' private headers (kernel/core/*_impl.h, and each private ABI layout's generated " \
-              'header) are included only by the cores (B4), and each by its own core\'s host tests',
+        rule: "the cores' private headers (each *_impl.h below kernel/ outside an import: a core's own, " \
+              'and each private ABI layout\'s generated header) are included only by the cores (B4), ' \
+              'and each by its own core\'s host tests',
         design: "#{STOPGAP}#invariants",
         scope: ERXOS_C,
-        pattern: /#{INCLUDE}[<"][^>"]*_impl\.h[>"]/i,
+        pattern: PRIVATE_HEADER_INCLUDE,
         sites: [Chokepoints::Site.new(glob: 'kernel/core/*'),
                 Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE),
                 *host_tests(CAP_CORE).map { |test| Chokepoints::Site.new(glob: test, permits: CAP_IMPL_INCLUDE) },

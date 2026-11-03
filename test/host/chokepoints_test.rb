@@ -150,6 +150,38 @@ class ChokepointsTest < Minitest::Test
     end
   end
 
+  # The rule names the cores' private headers, not every header whose name
+  # ends in _impl.h: an import below kernel/, which the rules read as
+  # erXos's own C, may include its own (BLAKE3's blake3_impl.h) and is
+  # refused a core's, by any path and in any case.
+  def test_core_records_private_names_only_the_cores_headers
+    private_rule = rule('core-records-private')
+    blake3 = 'kernel/crypto/blake3/blake3.c'
+    assert_empty evaluate([private_rule], { blake3 => "#include \"blake3_impl.h\"\n" })
+    assert_empty evaluate([private_rule], { 'liberx/x.c' => "#include <vendor/other_impl.h>\n" })
+    refute_empty evaluate([private_rule], { blake3 => "#include \"cap_impl.h\"\n" })
+    refute_empty evaluate([private_rule], { blake3 => "#include \"kernel/generated/cap_slot_impl.h\"\n" })
+    refute_empty evaluate([private_rule], { 'liberx/x.c' => "#include <core/BUDGET_impl.h>\n" })
+    # Every hand-written private header and every private layout's
+    # generated header is among those the rule names; the import's is not.
+    known = [Rules::BUDGET_IMPL, Rules::CAP_IMPL, *Rules::PRIVATE_LAYOUTS.map(&:private_header)]
+    assert_empty known - Rules::PRIVATE_HEADERS
+    refute_includes Rules::PRIVATE_HEADERS, 'kernel/crypto/blake3/blake3_impl.h'
+  end
+
+  # A private header is any *_impl.h below kernel/ outside an import, so a
+  # core directory added later (kernel/sched) is covered with no entry,
+  # and a header in a directory with an ORIGIN.md is the import's own.
+  def test_private_headers_are_every_core_impl_header_outside_imports
+    listing = %w[kernel/core/cap_impl.h kernel/sched/run_IMPL.h kernel/generated/cap_slot_impl.h
+                 kernel/arch/aarch64/deep/x_impl.h kernel/crypto/blake3/ORIGIN.md
+                 kernel/crypto/blake3/blake3_impl.h kernel/crypto/blake3/sub/y_impl.h
+                 kernel/crypto/blake3x/z_impl.h liberx/w_impl.h kernel/core/cap.h]
+    assert_equal %w[kernel/arch/aarch64/deep/x_impl.h kernel/core/cap_impl.h kernel/crypto/blake3x/z_impl.h
+                    kernel/generated/cap_slot_impl.h kernel/sched/run_IMPL.h],
+                 Rules.private_headers(listing).sort
+  end
+
   # The budget core's records reach only the core, its header and its
   # driver: the tree's own spellings pass, and a near name, a forward
   # declaration, a typedef, a pointer, a reference or a sizeof only refers

@@ -25,7 +25,7 @@ module Erx
   class Checks
     IMPORTS = %w[otp musl fiasco/kernel fiasco/mk fiasco/l4re-core fiasco/bootstrap
                  fiasco/libfdt fiasco/drivers-frst kernel/crypto/sha2 kernel/crypto/chacha20
-                 test/oracle/common_test].freeze
+                 kernel/crypto/blake3 test/oracle/common_test].freeze
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/
@@ -130,7 +130,7 @@ module Erx
     end
 
     # What the chokepoint rules treat as upstream code. An import below
-    # kernel/ (kernel/crypto) is compiled into the cores' archive and linked
+    # kernel/ (kernel/crypto/*) is compiled into the cores' archive and linked
     # into the kernel as kernel/core is, so every rule over erXos's own C
     # reads it too.
     def chokepoint_upstream?(relative) = imported?(relative) && !relative.start_with?('kernel/')

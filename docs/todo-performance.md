@@ -28,6 +28,19 @@ block a milestone's numbers.
   current thread's FP state, hashes with NEON and restores it, as the only
   exception to K10's scan; or checking the largest files in `bootstrap`,
   which may use NEON.
+* **[Low] kernel, BLAKE3's round function out of line.** The imported
+  BLAKE3 (`kernel/crypto/blake3/blake3_impl.h`) defines `INLINE` as plain
+  `static inline`, not upstream's `always_inline`, because
+  `always_inline` made a 5280-byte frame at -O0 that the stack proof
+  refuses. At -O2 for the target, clang then keeps `round_fn` out of
+  line: `erx_blake3_compress_in_place` calls it seven times per
+  compression, with its state passed through memory. The throughput cost
+  against the inlined form is unmeasured. Measure: portable BLAKE3
+  throughput at -O2, `static inline` against `always_inline`, over the
+  boot image's file sizes on QEMU `virt` (HVF), with the -O0 and -O2
+  frames the stack proof reports for each. Fixes: `always_inline` at -O2
+  alone, if the stack proof's -O0 build can keep plain `static inline`;
+  or the seven rounds unrolled by hand in `erx_blake3_compress_in_place`.
 * **[Low] kernel, eager FP and SIMD switch.** Every switch saves and
   restores the full FP and SIMD state. Its cost is unmeasured; the
   `TODO.md` item on the eager switch's missing cases tracks the

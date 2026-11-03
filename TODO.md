@@ -510,7 +510,9 @@ it; git history is the record of completed work.
   as erXos source, `BSD-2-Clause`, whenever its first eight lines carry
   the SPDX line, so FreeBSD's SHA-256 and ChaCha20 in `kernel/crypto/`
   enter the build record without their `ORIGIN.md` files, their recorded
-  licences (ChaCha20's public domain) or Colin Percival's notice. Attribute
+  licences (ChaCha20's public domain) or Colin Percival's notice, and
+  BLAKE3 (`Apache-2.0 WITH LLVM-exception`, no BSD-2-Clause line) blocks
+  the record as soon as the stopgap kernel links it. Attribute
   every file under a directory with an `ORIGIN.md` through that origin's
   inventory, as the fork parts are, never through the header rule, and
   test it with a captured-inputs fixture.
@@ -618,6 +620,15 @@ it; git history is the record of completed work.
   credential files whose directory is not on the list.
 
 ## Security residuals
+
+* [Medium] BLAKE3 stack residue (`kernel/crypto/blake3/`): after
+  `erx_blake3_update` and `erx_blake3_final` return, message words and
+  chaining values remain in their dead frames (`block_words` and `state`
+  in `erx_blake3_compress_in_place`, `output_t.block`, `parent_block`,
+  `chunk_cv`); only the context is erased. Harmless for the boot image's
+  public files; before the entropy pool mixes secrets with BLAKE3, give
+  it one shared stack-burn function (the entropy generator's
+  `erx_rng_burn_stack` generalised) or an erasing compression, measured.
 
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in

@@ -186,7 +186,7 @@ module Erx
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       generated(runner: runner)
       runtime.call(runner: runner) do |environment|
-        paths = %w[abi_calls manifest_reader elf_plan pack tlb_plan watchdog budget cap crypto rng].map do |name|
+        paths = %w[abi_calls manifest_reader elf_plan pack tlb_plan watchdog budget cap crypto rng blake3].map do |name|
           File.join(ROOT, "test/host/#{name}_test.rb")
         end
         paths.concat(%w[terminal_tables structural_pack sanitizer_gate].map do |name|
@@ -196,7 +196,7 @@ module Erx
                   environment: environment.merge('ERX_SANITIZERS' => 'address,undefined'))
       end
       Terminal.puts('implemented host C parsers, the invalidation planner, the watchdog, budget and capability cores, ' \
-                    'SHA-256, ChaCha20 and the entropy generator passed ASan/UBSan; ' \
+                    'SHA-256, ChaCha20, the entropy generator and BLAKE3 passed ASan/UBSan; ' \
                     'atomic accessor and capability lookup checks and the budget chain race passed TSan')
       if RbConfig::CONFIG.fetch('host_os').include?('darwin')
         Terminal.puts('LeakSanitizer and ASan initialization-order checks: unsupported on macOS; Linux run required')
@@ -228,9 +228,9 @@ module Erx
       end
       Terminal.puts('implemented ABI, manifest, ERXPACK, ELF, erx.watchdog=, capability core and host metadata parser ' \
                     'fuzz targets passed')
-      Terminal.puts('SHA-256, ChaCha20 and entropy generator fuzz targets passed')
+      Terminal.puts('SHA-256, ChaCha20, entropy generator and BLAKE3 fuzz targets passed')
       Terminal.puts('pack/terminal/export Ruby targets: fixed 20000 iterations, seed 1; ' \
-                    'pack/ELF/watchdog/capability/SHA-256/ChaCha20/generator C seeds are recorded in logs')
+                    'pack/ELF/watchdog/capability/SHA-256/ChaCha20/generator/BLAKE3 C seeds are recorded in logs')
       Terminal.puts('root-startup and target runtime/service parsers: unsupported until their implementations land')
       0
     end

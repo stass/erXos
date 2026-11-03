@@ -17,9 +17,11 @@ class StackGraphTest < Minitest::Test
   TARGET_FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                     -mgeneral-regs-only -mno-outline-atomics -fstack-usage].freeze
   # The cores, the imported SHA-256 and ChaCha20 the entropy generator
-  # calls, and the generated ABI reader the pack validator calls.
+  # calls, the imported BLAKE3, and the generated ABI reader the pack
+  # validator calls.
   CORE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
                     kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
+                    kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                     liberx/generated/abi_reader.c].freeze
   Name = Erx::StackGraph::Name
 
@@ -138,7 +140,8 @@ class StackGraphTest < Minitest::Test
       end
       graph = Erx::StackGraph.extract(inputs: inputs, tools: @tools, runner: @runner)
       %w[erx_pack_open erx_tlb_plan erx_watchdog_step erx_watchdog_parse erx_manifest_open erx_rng_read
-         erx_rng_mix erx_chacha20_xor erx_sha256_final].each do |entry|
+         erx_rng_mix erx_chacha20_xor erx_sha256_final
+         erx_blake3_update erx_blake3_final erx_blake3_compress_in_place].each do |entry|
         function = graph.fetch_function(Name.new(name: entry, object: nil))
         assert_kind_of Integer, function.frame_bytes, "#{entry} #{level}"
       end
