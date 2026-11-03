@@ -14,6 +14,12 @@ it; git history is the record of completed work.
   on the scheduler's target configuration.
   Scheduled experiments live in the roadmap; these proposals do not
   silently replace established design decisions.
+* [Medium] performance: measure the suspected costs on the
+  [performance watch list](docs/todo-performance.md), each with the
+  workload it names, and remove each item once a recorded number settles
+  it: the kernel's portable-code hash of large boot image files at first
+  use, the eager FP switch, and the stopgap's machine-wide release and
+  grace lists.
 
 ## Stopgap replacements
 
