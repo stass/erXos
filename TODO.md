@@ -56,6 +56,15 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] stopgap bootstrap, overlapping RAM regions:
+  `Region_list::optimize` (`fiasco/bootstrap/server/src/region.cc`)
+  merges a region into its predecessor by setting the predecessor's end to
+  the region's end, so a region wholly inside its predecessor shrinks the
+  predecessor and drops RAM. Only the EFI memory-map path adds RAM with
+  overlaps allowed (`efi-support.cc`, `ram->add(..., true)`), so QEMU
+  `virt` booted from a device tree is unaffected. Found by reading, not
+  reproduced; fix with a regression test before any EFI boot path is used.
+
 * [High] storage and platforms, the Pi 4's boot image: the Pi 4's secure
   boot checks `boot.img` at about 2.6 MB/s under a firmware watchdog fixed
   at 4 s, and the boot image holds the kernel, the runtime image and the

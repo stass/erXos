@@ -231,8 +231,14 @@ The invocation fixes the machine and interrupt-controller configuration,
 memory, CPU count and accelerator; the CPU model is the platform's
 declared TCG model or `host` for HVF. No guest network device is present
 unless the test requests one. A transcript plan gives ordered expected
-lines and deadlines by checkpoint name. The matcher consumes complete
-serial lines and preserves raw bytes in the log; it does not render guest
+lines and deadlines by checkpoint name; a checkpoint may also verify the
+content of its line. The boot transcript first checks bootstrap's memory
+summary against the guest's RAM: bootstrap gets neither `-mem=` nor
+`-sysalloc=`, so both its total and the memory it reports available for
+itself, the kernel and `sigma0` must be exactly the RAM given to QEMU. A
+missing, malformed or different summary fails the boot, and the
+diagnostic quotes the guest's line only escaped and truncated. The
+matcher consumes complete serial lines and preserves raw bytes in the log; it does not render guest
 output directly to the host terminal. A matched prefix is insufficient
 when a later checkpoint is missing. Reports include the guest image hash,
 QEMU identity, resolved invocation and observed checkpoints.
@@ -355,9 +361,10 @@ path failures, missing provenance, changed imported files without notices,
 excluded licences, stale/missing/orphaned generated outputs and unsupported
 tools. Oracle fixtures cover repeated and grouped cases, both skip kinds,
 fixture failures, interrupted runs and inconsistent totals. Harness
-fixtures cover split serial reads, checkpoint order, early guest exit and
-timeout. TLC fixtures cover wrong properties, parser errors, resource
-failure, incomplete searches, cache invalidation and empty filters.
+fixtures cover split serial reads, checkpoint order, early guest exit,
+timeout and a bootstrap memory summary that disagrees with the guest's
+RAM. TLC fixtures cover wrong properties, parser errors, resource failure,
+incomplete searches, cache invalidation and empty filters.
 
 Acceptance also uses the real tools: both stock OTP flavours and their
 required suites, the frozen stopgap banner under TCG and HVF, clean

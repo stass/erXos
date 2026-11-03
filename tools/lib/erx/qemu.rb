@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'bootstrap_memory'
 require_relative 'runner'
 
 module Erx
@@ -35,25 +36,24 @@ module Erx
   end
 
   # The matcher consumes complete serial lines exactly once. It retains a
-  # bounded unfinished line so serial splits cannot lose a checkpoint.
+  # bounded unfinished line so serial splits cannot lose a checkpoint. A
+  # checkpoint may also name a verifier, called with the matching line, which
+  # raises Erx::Error when that line's content must fail the boot.
   class Transcript
     MAX_LINE_BYTES = 65_536
+    REQUIRED_KEYS = %i[name pattern seconds].freeze
+    OPTIONAL_KEYS = %i[verify].freeze
     attr_reader :observed
 
     def initialize(checkpoints:)
       unless checkpoints.is_a?(Array) && !checkpoints.empty? &&
-             checkpoints.all? { |point| point.is_a?(Hash) && point.keys.sort == %i[name pattern seconds] }
+             checkpoints.all? { |point| point.is_a?(Hash) && checkpoint_keys?(point) }
         raise Error, 'invalid transcript checkpoint plan'
       end
       names = checkpoints.map { |point| point.fetch(:name) }
       raise Error, 'duplicate transcript checkpoint name' unless names.uniq == names
-      checkpoints.each do |point|
-        unless point.fetch(:name).is_a?(String) && !point.fetch(:name).empty? &&
-               point.fetch(:pattern).is_a?(Regexp) && point.fetch(:seconds).is_a?(Integer) &&
-               point.fetch(:seconds).positive?
-          raise Error, 'invalid transcript checkpoint'
-        end
-      end
+      raise Error, 'invalid transcript checkpoint' unless checkpoints.all? { |point| valid_checkpoint?(point) }
+
       @checkpoints = checkpoints.map(&:dup).each(&:freeze).freeze
       @observed = []
       @pending = ''.b
@@ -91,6 +91,17 @@ module Erx
 
     private
 
+    def checkpoint_keys?(point)
+      (REQUIRED_KEYS - point.keys).empty? && (point.keys - REQUIRED_KEYS - OPTIONAL_KEYS).empty?
+    end
+
+    def valid_checkpoint?(point)
+      point.fetch(:name).is_a?(String) && !point.fetch(:name).empty? &&
+        point.fetch(:pattern).is_a?(Regexp) &&
+        point.fetch(:seconds).is_a?(Integer) && point.fetch(:seconds).positive? &&
+        point.fetch(:verify, -> {}).respond_to?(:call)
+    end
+
     def check_deadline(elapsed:)
       return if done?
       point = @checkpoints.fetch(@observed.size)
@@ -107,6 +118,7 @@ module Erx
         point = @checkpoints.fetch(@observed.size)
         next unless point.fetch(:pattern).match?(line)
 
+        point[:verify]&.call(line)
         @observed << { 'name' => point.fetch(:name), 'elapsed_seconds' => elapsed }.freeze
         @checkpoint_started = elapsed
       end
@@ -122,6 +134,14 @@ module Erx
         seconds: 30 }.freeze
     ].freeze
 
+    # The default guest transcript: bootstrap's memory summary, checked
+    # against the RAM QEMU is given, then the kernel banner lines.
+    def self.boot_transcript(memory_mib:)
+      raise Error, 'guest memory must be a whole number of MiB' unless memory_mib.is_a?(Integer)
+
+      [BootstrapMemory.checkpoint(ram_bytes: memory_mib << 20), *BANNER].freeze
+    end
+
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                    program: 'qemu-system-aarch64')
       @root = File.expand_path(root)
@@ -129,7 +149,8 @@ module Erx
       @program = program
     end
 
-    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: BANNER)
+    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil)
+      checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
       matcher = Transcript.new(checkpoints: checkpoints)

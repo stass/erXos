@@ -156,6 +156,41 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
+  def boot_transcript(available:)
+    "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000005fffffff: 512.0 MiB\r\n" \
+      "  Total RAM: 512.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
+      "Welcome to the L4Re Microkernel!\r\ndevelopment build: trusted code only\r\n"
+  end
+
+  def test_boot_with_consistent_bootstrap_memory_passes
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
+    report = qemu.run(accel: 'tcg', image: image)
+    assert_equal %w[bootstrap-memory fiasco-banner development-warning],
+                 report.fetch('checkpoints').map { |entry| entry.fetch('name') }
+    assert_equal 'passed', report.fetch('state')
+  end
+
+  def test_boot_summary_must_match_guest_ram
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
+    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image, memory_mib: 1024) }
+    assert_match(/expected '.*Kernel: 1024\.0 MiB'/, error.message)
+  end
+
+  def test_boot_reporting_more_available_than_total_memory_fails
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '16.0 EiB')))
+    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+    assert_match(/Kernel: 16\.0 EiB/, error.message)
+    path = Dir.glob(File.join(@directory, 'build/qemu/*/report.json')).fetch(0)
+    report = JSON.parse(File.read(path))
+    assert_equal 'failed', report.fetch('state')
+    assert_empty report.fetch('checkpoints')
+  end
+
+  def test_checkpoint_verifier_must_be_callable
+    point = { name: 'first', pattern: /^first\n/n, seconds: 1, verify: 'not callable' }
+    assert_raises(Erx::Error) { Erx::Transcript.new(checkpoints: [point]) }
+  end
+
   def test_malformed_checkpoint_is_a_domain_error
     assert_raises(Erx::Error) { Erx::Transcript.new(checkpoints: [nil]) }
   end

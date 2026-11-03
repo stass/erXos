@@ -1,4 +1,6 @@
 /*
+ * Modified by erXos: the RAM summary counts RAM inside the sysalloc window.
+ *
  * Copyright (C) 2004-2009 Technische Universität Dresden.
  * Author(s): Torsten Frenzel <frenzel@os.inf.tu-dresden.de>
  *            Frank Mehnert <fm3@os.inf.tu-dresden.de>
@@ -408,15 +410,20 @@ dump_ram_map(bool show_total = false)
       char s_ram[64];
       l4util_human_readable_size(s_ram, sizeof(s_ram), sum_ram);
 
+      // Bootstrap allocates only from RAM inside a sysalloc region (see
+      // Memory::find_free_ram), so the available figure is the size of
+      // RAM intersected with sysalloc. Without '-sysalloc=' the one
+      // sysalloc region spans the whole address space and must not be
+      // counted as memory. Sysalloc regions never overlap
+      // (Region_list::add refuses overlaps), so no RAM byte is counted
+      // twice and the result never exceeds the total.
       unsigned long long sum_sysalloc = 0;
-      for (Region const &r : sysalloc)
-        sum_sysalloc += r.size();
+      for (Region const &r : ram)
+        for (Region const &s : sysalloc)
+          if (r.overlaps(s))
+            sum_sysalloc += r.intersect(s).size();
       char s_sysalloc[64];
-      // unfortunately this special case is required for 64-bit hosts
-      if (!sysalloc.empty() && sum_sysalloc == 0)
-        l4util_human_readable_size_region(s_sysalloc, sizeof(s_sysalloc), 0, ~0UL);
-      else
-        l4util_human_readable_size(s_sysalloc, sizeof(s_sysalloc), sum_sysalloc);
+      l4util_human_readable_size(s_sysalloc, sizeof(s_sysalloc), sum_sysalloc);
 
       printf("  Total RAM: %s; available for Bootstrap/Sigma0/Kernel: %s\n",
              s_ram, s_sysalloc);

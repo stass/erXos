@@ -22,6 +22,8 @@ begin
   random = Random.new(options.fetch(:seed))
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options.fetch(:seconds)
   cases = 0
+  checkpoints = Erx::Qemu.boot_transcript(memory_mib: 512)
+  summary = Erx::BootstrapMemory.summary(ram_bytes: 512 << 20).b.freeze
   Dir.mktmpdir('erx-qemu-fuzz-') do |directory|
     serial = File.join(directory, 'serial.log')
     until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
@@ -30,13 +32,20 @@ begin
         payload = "Welcome to the L4Re Microkernel!\n".b + payload
       end
       if random.rand(2).zero?
+        # The memory summary opens the boot transcript; a mutated copy
+        # drives its verifier's rejection path.
+        line = summary.dup
+        line.setbyte(random.rand(line.bytesize), random.rand(256)) if random.rand(2).zero?
+        payload = line + "\r\n".b + payload
+      end
+      if random.rand(2).zero?
         payload += "development build: trusted code only\n".b
       end
       File.binwrite(serial, payload)
-      transcript = Erx::Transcript.new(checkpoints: Erx::Qemu::BANNER)
+      transcript = Erx::Transcript.new(checkpoints: checkpoints)
       begin
-        # Production consumes at most64KiB per poll. Four polls include EOF
-        # for this corpus, including its two injected checkpoint lines.
+        # Production consumes at most 64 KiB per poll. Four polls include EOF
+        # for this corpus, including its three injected checkpoint lines.
         4.times { transcript.consume(serial, elapsed: 0.0) }
       rescue Erx::Error
         # A bounded rejection is a valid parser result, not a fuzzer failure.
