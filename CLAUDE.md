@@ -162,15 +162,16 @@ scripts live in `~/erxos-scratch/tools/`.
   and reference it from `docs/design.md` before implementation. The document
   explains the contract, invariants, authority and ownership, failure paths,
   interfaces and verification approach.
-* **Use design subagents at the appropriate depth.** For normal designs,
-  use `gpt-6.1-sol` subagents at `xhigh` reasoning effort; uncomplicated
-  designs may also use `gpt-6.1-sol` at `high`. For complicated
-  or critical designs, use a `gpt-6-astra` subagent at `xhigh`. Reserve
-  `gpt-6-astra` at `max` for exceptionally difficult designs. Give the agent
-  the goal, context and the user's constraints as required by the delegation
-  rule above; invite it to challenge the approach. These are design-work
-  settings; they do not change the separate code-review and external-review
-  requirements.
+* **Use design subagents at the appropriate depth.** A Claude design
+  subagent writes the design: Opus 5.5 at `high` reasoning effort for
+  normal designs, at `xhigh` for complicated or critical ones. A Codex
+  `gpt-6-astra` review at `xhigh`, in a read-only sandbox and with the
+  security pass framed explicitly, then reviews the design, and its
+  CRITICAL and HIGH findings are fixed before implementation starts. Give
+  the design agent the goal, context and the user's constraints as
+  required by the delegation rule above; invite it to challenge the
+  approach. These are design-work settings; they do not change the
+  separate code-review and external-review requirements.
 * **Human readability is a requirement.** Follow the
   [readability standard](docs/style.md#readability-standard): another
   developer must understand purpose, data flow, invariants and failure paths
