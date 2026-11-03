@@ -300,6 +300,22 @@ it; git history is the record of completed work.
   flags, which CLAUDE.md requires of every performance number; re-measure
   them with the flags recorded, in a new dated record.
 
+* [Medium] host tooling, the source check (`tools/lib/erx/checks.rb`):
+  `Runner` writes a child's stdout and stderr to one log, so the check
+  finds a git warning only because it breaks the NUL-terminated listing.
+  That catches every warning git prints, but a git that skipped an
+  unreadable directory without a warning would shrink the file set
+  silently; git 2.50 warns, and the oldest git that does is unconfirmed.
+  Give `Runner` a separate stderr log and require it to be empty, so the
+  guarantee holds whatever git version is installed.
+* [Low] host tooling, the pack-tool recipe (`tools/lib/erx/pack_tool_recipe.rb`):
+  project inputs are refused by private directory name
+  (`Erx::PrivateState`). Requiring each to be a file the source check's git
+  listing names would make that hold by construction. Compiler metadata
+  outside the project is likewise judged by name; checking it against the
+  compiler's own roots (SDK path, resource directory) would also refuse
+  credential files whose directory is not on the list.
+
 ## Security residuals
 
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU

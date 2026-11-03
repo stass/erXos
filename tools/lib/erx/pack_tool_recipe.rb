@@ -10,6 +10,7 @@ require_relative 'runner'
 require_relative 'bounded_file'
 require_relative 'pack_provenance'
 require_relative 'output_directory'
+require_relative 'private_state'
 
 module Erx
   # Producer and verifier share the complete project-input recipe. A record
@@ -77,7 +78,9 @@ module Erx
     # The configured compiler, not the receipt, determines implicit inputs such
     # as Darwin SDKSettings.json. An empty source isolates those driver inputs
     # from project includes. Their exact bounded bytes are recorded separately.
-    def compiler_profile(compiler:, runner:, directory:, owner_root:)
+    # None may lie in private state: below the project root for a file inside
+    # the project, anywhere on its path for one outside (PrivateState.inside?).
+    def compiler_profile(compiler:, runner:, directory:, owner_root:, root:)
       raise Error, 'host parser verification needs a command runner' unless runner.respond_to?(:run)
       directory = OutputDirectory.prepare(root: owner_root, path: directory)
       Dir.mktmpdir('.compiler-profile-', directory) do |temporary|
@@ -93,9 +96,7 @@ module Erx
         end
         references = inputs.reject { |path| path == source }.map do |path|
           canonical = File.realpath(path)
-          if canonical.split('/').any? { |part| %w[.git .codex .agents .aws .ssh .gnupg].include?(part) }
-            raise Error, 'compiler metadata names private state'
-          end
+          raise Error, 'compiler metadata names private state' if PrivateState.inside?(canonical, project_root: root)
           { 'path' => canonical.freeze,
             'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(canonical, maximum: 1024 * 1024)).freeze }.freeze
         end.sort_by { |file| file.fetch('path') }.freeze
@@ -109,10 +110,11 @@ module Erx
       end
     end
 
+    # A recipe source is a canonical path inside the project and outside its
+    # private state.
     def source_path(root, relative)
       path = File.realpath(File.expand_path(relative, root))
-      unless path.start_with?(File.realpath(root) + '/') &&
-             path.split('/').none? { |part| %w[.git .codex .agents .aws .ssh .gnupg].include?(part) }
+      unless path.start_with?(File.realpath(root) + '/') && !PrivateState.inside?(path, project_root: root)
         raise Error, "host parser recipe source is outside the authorized project: #{Terminal.escape(path)}"
       end
       path

@@ -80,9 +80,9 @@ module Erx
       OptionParser.new.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-      checks_class.new(root: ROOT).run
-      arch_terms.check(root: ROOT)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      checks_class.new(root: ROOT, runner: runner).run
+      arch_terms.check(root: ROOT)
       generated(runner: runner)
       runtime.call(runner: runner) do |environment|
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
@@ -294,9 +294,10 @@ module Erx
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
     end
 
-    def self.check_sources(arguments)
+    def self.check_sources(arguments, runner_class: Runner, checks_class: Checks)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
-      Checks.new(root: ROOT).run
+      runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      checks_class.new(root: ROOT, runner: runner).run
       Terminal.puts('source ASCII and imported provenance checks passed')
       0
     end

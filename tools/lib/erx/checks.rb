@@ -2,14 +2,31 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'set'
+require_relative 'bounded_file'
 require_relative 'origin'
+require_relative 'runner'
 require_relative 'source_text'
 
 module Erx
+  # Checks erXos's own sources (ASCII-only, JSON read only through JsonInput)
+  # and each import's recorded provenance.
+  #
+  # The project's files are the ones git lists: every tracked file, and every
+  # untracked file that no exclude rule (.gitignore, .git/info/exclude, the
+  # user's excludes file) ignores, which is every file a plain `git add` could
+  # stage. Build output, agent state and agent worktrees under .claude/ are
+  # not sources because .gitignore says so; nothing here lists them. A project
+  # that is not the top of a git checkout, or whose listing is empty, has no
+  # such file set, so the check refuses it rather than checking nothing.
+  #
+  # Diagnostics carry raw names; the CLI's sink escapes them (Terminal.puts).
   class Checks
     IMPORTS = %w[otp musl fiasco/kernel fiasco/mk fiasco/l4re-core fiasco/bootstrap
                  fiasco/libfdt fiasco/drivers-frst test/oracle/common_test].freeze
-    PRIVATE_DIRECTORIES = %w[.git .codex .agents .aws build].freeze
+    LISTING_BYTES = 64 * 1024 * 1024
+    LISTING_DEADLINE = 120
+    LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/
     # Host tooling reads JSON only through JsonInput, which bounds size and
     # depth and refuses duplicate keys; any other parse would bypass those.
     # Rather than list json's many ways to parse, the check allows the two
@@ -29,30 +46,137 @@ module Erx
       | [.]from_json\b                                    # json's core additions
     /x
 
-    def initialize(root:, required_imports: IMPORTS)
+    # Unsets every GIT_ variable of the caller's environment, for a git child
+    # that must act on the repository it names and on nothing else.
+    def self.isolated_git_environment = ENV.keys.grep(/\AGIT_/).to_h { |key| [key, nil] }
+
+    # Decides what the log of `git ls-files -z` says: the sorted, distinct
+    # names it lists, or a refusal. git ends each name with NUL and shares the
+    # log with its warnings, which end in a newline. Every name must be valid
+    # UTF-8 with no C0 control or DEL character, and the log must end in NUL,
+    # so no git warning (an unreadable directory it skipped, for one) passes
+    # as names; a tracked name holding such a character is refused with it.
+    # Unmerged entries repeat a name, once per stage.
+    def self.listed_names(bytes, log:)
+      raise Error, "git listed no project files; log: #{log}" if bytes.empty?
+      names = bytes.split("\0").map { |name| name.force_encoding(Encoding::UTF_8) }
+      unless bytes.end_with?("\0") && names.all? { |name| name.valid_encoding? && LISTED_NAME.match?(name) }
+        raise Error, "git reported a problem while listing sources, or listed a name that is not " \
+                     "printable UTF-8; log: #{log}"
+      end
+      names.uniq.sort.freeze
+    end
+
+    def initialize(root:, runner:, required_imports: IMPORTS)
       @root = File.expand_path(root)
+      @runner = runner
       @required_imports = required_imports
     end
 
     def run
-      imports = @required_imports.map do |relative|
+      @required_imports.each do |relative|
         path = File.join(@root, relative)
         marker = File.join(path, 'ORIGIN.md')
         unless File.directory?(path) && File.file?(marker) && !File.symlink?(path) && !File.symlink?(marker)
           raise Error, "missing imported source provenance: #{relative}/ORIGIN.md"
         end
         Origin.new(root: path).check
-        path
       end
-      check_own_sources(imports: imports)
-      check_json_parsing
+      listed = project_files
+      listed_set = listed.to_set
+      own_sources = listed.reject { |relative| imported?(relative) }
+      own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
+      check_json_parsing(own_sources)
       true
     end
 
     private
 
-    def check_json_parsing
-      Dir.glob('tools/**/*', base: @root).sort.each do |relative_path|
+    # Lists the project's files with git (see the class comment), relative to
+    # the root. Nested repositories appear with a trailing slash.
+    def project_files
+      git = File.join(@root, '.git')
+      unless File.directory?(git) || File.file?(git)
+        raise Error, "the source check lists its files with git, and #{@root} is not the top of a git checkout"
+      end
+      # --git-dir and --work-tree name the checkout and no GIT_ variable of the
+      # caller's environment reaches git, so the repository, work tree and
+      # index are the checkout's own; the user's and system git config and the
+      # user's excludes file still apply. ls-files runs no hook, filter or
+      # pager; the one configured program it would start is core.fsmonitor,
+      # which -c turns off.
+      result = begin
+        @runner.run(['git', '-c', 'core.fsmonitor=false', "--git-dir=#{git}", "--work-tree=#{@root}",
+                     'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+                    name: 'list-own-sources', deadline: LISTING_DEADLINE, chdir: @root,
+                    env: self.class.isolated_git_environment,
+                    output_limit: LISTING_BYTES)
+      rescue CommandError => error
+        raise Error, "git could not list the project's files; log: #{error.result.fetch('log')}"
+      end
+      listing = BoundedFile.read(result.fetch('log'), maximum: LISTING_BYTES)
+      self.class.listed_names(listing, log: result.fetch('log'))
+    end
+
+    def imported?(relative)
+      @required_imports.any? { |import| relative == import || relative.start_with?(import + '/') }
+    end
+
+    # A listed name must reach, through no directory alias, a regular file or
+    # a link to another listed regular file. A tracked file deleted from the
+    # checkout has no bytes to check.
+    def check_own_source(name, listed:)
+      relative = name.delete_suffix('/')
+      stat = find_stat(relative)
+      return if stat.nil?
+      parent = File.dirname(relative)
+      expected_parent = parent == '.' ? canonical_root : File.join(canonical_root, parent)
+      unless File.realpath(File.join(@root, parent)) == expected_parent
+        raise Error, "own source directory aliases are unsupported: #{parent}"
+      end
+      if stat.symlink?
+        check_link(relative, listed: listed)
+      elsif stat.directory?
+        raise Error, "listed directory (a nested repository, a submodule, or a tracked file replaced by a " \
+                     "directory) is unsupported in the source tree: #{relative}"
+      elsif stat.file?
+        check_ascii(relative)
+      else
+        raise Error, "special file in source tree: #{relative}"
+      end
+    end
+
+    # Returns the entry's own status, or nil when nothing is at the path.
+    def find_stat(relative)
+      File.lstat(File.join(@root, relative))
+    rescue Errno::ENOENT, Errno::ENOTDIR
+      nil
+    end
+
+    # A link's target must be a regular file that git lists too, so the check
+    # never reads build output, private state or a device through a link.
+    def check_link(relative, listed:)
+      path = File.join(@root, relative)
+      begin
+        target = File.realpath(path)
+      rescue Errno::ENOENT, Errno::ENOTDIR, Errno::ELOOP
+        raise Error, "unresolved source link: #{relative}"
+      end
+      raise Error, "source link leaves the project: #{relative}" unless target.start_with?(canonical_root + '/')
+      raise Error, "own source directory aliases are unsupported: #{relative}" if File.directory?(target)
+      unless File.file?(target) && listed.include?(target.delete_prefix(canonical_root + '/'))
+        raise Error, "source link names no listed project file: #{relative}"
+      end
+      check_ascii(relative)
+    end
+
+    def canonical_root
+      @canonical_root ||= File.realpath(@root)
+    end
+
+    def check_json_parsing(own_sources)
+      own_sources.each do |relative_path|
+        next unless relative_path.start_with?('tools/')
         path = File.join(@root, relative_path)
         next if relative_path == JSON_PARSER || !ruby_source?(path)
         File.binread(path).each_line.with_index(1) do |line, number|
@@ -67,49 +191,15 @@ module Erx
         (File.extname(path) == '.rb' || (File.binread(path, 32) || '').start_with?('#!/usr/bin/env ruby'))
     end
 
-    def check_own_sources(imports:)
-      pending = [@root]
-      until pending.empty?
-        directory = pending.pop
-        Dir.each_child(directory) do |name|
-          next if directory == @root && PRIVATE_DIRECTORIES.include?(name)
-          path = File.join(directory, name)
-          next if imports.include?(path)
-          stat = File.lstat(path)
-          if stat.symlink?
-            resolved = File.realpath(path)
-            unless resolved.start_with?(@root + '/')
-              raise Error, "source link leaves the project: #{relative(path)}"
-            end
-            if File.directory?(path)
-              raise Error, "own source directory aliases are unsupported: #{relative(path)}"
-            end
-            check_ascii(path)
-          elsif stat.directory?
-            pending << path
-          elsif stat.file?
-            check_ascii(path)
-          else
-            raise Error, "special file in source tree: #{relative(path)}"
-          end
-        end
-      end
-    rescue Errno::ENOENT, Errno::ELOOP => error
-      raise Error, "unresolved source link: #{error.message}"
-    end
-
-    def check_ascii(path)
-      return if File.extname(path) == '.md'
+    def check_ascii(relative)
+      return if File.extname(relative) == '.md'
+      path = File.join(@root, relative)
       prefix = File.binread(path, 2) || ''.b
-      return unless SourceText.source?(relative(path), bytes: prefix)
+      return unless SourceText.source?(relative, bytes: prefix)
       bytes = File.binread(path)
       return if bytes.ascii_only?
       line = bytes.lines.each_with_index.find { |text, _index| !text.ascii_only? }.last + 1
-      raise Error, "non-ASCII erXos source: #{relative(path)}:#{line}"
-    end
-
-    def relative(path)
-      path.delete_prefix(@root + '/')
+      raise Error, "non-ASCII erXos source: #{relative}:#{line}"
     end
   end
 end

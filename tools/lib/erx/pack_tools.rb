@@ -41,7 +41,8 @@ module Erx
       raise Error, 'invalid host parser sanitizer' unless (sanitizers - %w[address undefined]).empty?
       root = File.realpath(root)
       directory = OutputDirectory.prepare(root: owner_root, path: directory)
-      compiler_profile = PackToolRecipe.compiler_profile(compiler: compiler, runner: runner, directory: directory, owner_root: owner_root)
+      compiler_profile = PackToolRecipe.compiler_profile(compiler: compiler, runner: runner, directory: directory,
+                                                         owner_root: owner_root, root: root)
       PackToolRecipe::PROGRAMS.keys.to_h do |key|
         recipe = PackToolRecipe.plan(root: root, tool: key, sanitizers: sanitizers, compiler_profile: compiler_profile)
         name = recipe.fetch('name')
