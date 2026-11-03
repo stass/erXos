@@ -6,7 +6,7 @@
     "abi/erx_abi.txt": "c453537a5ce11bf25e6db274330e632ba6d486b5ca43fc164ec369590ac62b17",
     "abi/formats/elf64.txt": "1594378a9e8e52f3d0ae0df6fb4a0d94a750d72f2da32baa30e6e265419e1fa7",
     "abi/inspection.txt": "562dd4cf5e7a97ea7fa7b9a185abc328dbbef6ebae0920997a572007302fada0",
-    "abi/kernel.txt": "6181131d40c9465eb347a86524d4302be3290d0180c912122c490b0f76e4e020",
+    "abi/kernel.txt": "f3dea43f89722c79892f483304fcae453610f339eee5e74cd531c976373be054",
     "abi/manifest.txt": "7ec1b83f34d2124fbc7f25f2c6277e1e4a18134eb09eb10205b4148e927794ee",
     "abi/services/console.txt": "67df2f5a331a042ca54edbab1a625f18d6eab48ce0c5274158a50edf875b9152",
     "tools/gen_abi.rb": "a67ea4c1fe8648248e2e1b3260211e42723a4f52a49d88ee67bd5603f394ee7b",

@@ -70,26 +70,29 @@ module Erx
     private_class_method :retain_crashes
   end
 
+  # The native boot-path parsers, each built from its own source with its
+  # libFuzzer entry in tools/fuzz/KIND_fuzz.c: the ERXPACK boot image, ELF
+  # executable headers and the erx.watchdog= boot argument.
   module PackFuzz
     module_function
+
+    SOURCES = { 'pack' => 'kernel/core/pack.c', 'elf' => 'liberx/elf_plan.c',
+                'watchdog' => 'kernel/core/watchdog.c' }.freeze
+    # Accepted values at the bounds and one of each refusal, so mutations
+    # start on both sides of every check.
+    WATCHDOG_SEEDS = %w[1,5,60 60,120,600 1,2,2 0,5,60 1,1,60 1,5,4 1,5 1,5,60,
+                        4294967296,5,60 1,,60 off].freeze
 
     def run(root:, runner:, compiler: 'clang', runs: 20_000)
       unless runs.is_a?(Integer) && runs.between?(1, 10_000_000)
         raise Error, 'invalid pack fuzz run bound'
       end
       FuzzWorkspace.run(root: root, name: 'pack', maximum_input: 32_768) do |directory, artifacts|
-        %w[pack elf].map do |kind|
+        SOURCES.map do |kind, source|
           corpus = File.join(directory, "#{kind}-corpus")
           Dir.mkdir(corpus, 0o700)
-          bytes = kind == 'pack' ? PackFixture.valid : ElfFixture.valid
-          File.binwrite(File.join(corpus, 'valid'), bytes)
-          # Every prefix of a valid wire header reaches a different truncation
-          # boundary; mutations then start from both accepted and rejected seeds.
-          [0, 1, 7, 31, 55, 63, 127, 511, 4095].each do |length|
-            File.binwrite(File.join(corpus, "prefix-#{length}"), bytes.byteslice(0, length))
-          end
+          seeds(kind).each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
           program = File.join(directory, "#{kind}-fuzz")
-          source = kind == 'pack' ? 'kernel/core/pack.c' : 'liberx/elf_plan.c'
           runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
                       '-I', File.join(root, 'include'), File.join(root, source),
@@ -102,6 +105,19 @@ module Erx
         end
       end
     end
+
+    def seeds(kind)
+      return WATCHDOG_SEEDS.each_with_index.to_h { |value, index| ["seed-#{index}", value] } if kind == 'watchdog'
+
+      bytes = kind == 'pack' ? PackFixture.valid : ElfFixture.valid
+      # Every prefix of a valid wire header reaches a different truncation
+      # boundary; mutations then start from both accepted and rejected seeds.
+      prefixes = [0, 1, 7, 31, 55, 63, 127, 511, 4095].to_h do |length|
+        ["prefix-#{length}", bytes.byteslice(0, length)]
+      end
+      { 'valid' => bytes }.merge(prefixes)
+    end
+    private_class_method :seeds
   end
 end
 
