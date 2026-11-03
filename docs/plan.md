@@ -397,7 +397,11 @@ as its partial boot, `liberx`'s root-task entry builds two native domains
 through the domain library instead of starting ERTS, each with threads
 pinned to every online CPU; in each of TCG and HVF with one and four CPUs,
 they attack every call for ten minutes with malformed arguments, stale and
-wrong-rights capabilities, faults and floods, each domain reporting
+wrong-rights capabilities, faults and floods (but no stream of thread
+kills, whose starvation of a CPU is a residual of the stopgap that
+erXos's kernel bounds and its own milestone tests;
+[design-stopgap-scheduling.md](design-stopgap-scheduling.md#security)),
+each domain reporting
 per-CPU progress counters on the console; the harness checks that every
 CPU of every domain makes progress through the whole run and that the root
 task keeps petting the watchdog, since nothing else in a partial boot holds
