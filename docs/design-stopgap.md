@@ -213,7 +213,7 @@ one owner:
 | `type`, `state`, `ncaps`, `att_slots`, `oid`, `name` | the capability and deletion cores | written only in `kernel/core/` |
 | `refs` | the object core | the one reference count; Fiasco's `inc_ref` and `dec_ref` call sites that remain (the kill path's hold on a thread across its request) call `erx_object_ref` and `erx_object_put` |
 | `lock`, `existence` | the core decides when; the backend's lock effects act | `erx_hlock_t` is opaque storage of the backend-declared size and alignment (`abi/backend/fiasco.txt`); the glue constructs a `Helping_lock` in `lock` and a `Switch_lock` in `existence` and `static_assert`s that both fit |
-| `rcu` | the reaper core | the reap link; Fiasco's reap lists link through it |
+| `rcu` | the reaper core | the grace item, a link, a stamp and a callback; the stamped list links through it, and a thread's `Context` embeds the same item, in place of Fiasco's `Rcu_item` base, for its grace-period wait |
 | `budget`, `in_budget` | the budget core | the `Erx_budget` that paid for the object and its place on that budget's `att_charged` |
 
 The glue sees `erx_object_t` as an embeddable opaque type: outside
@@ -721,9 +721,10 @@ Four things make it hold in full on the fork:
   ([Posting and publishing](design-stopgap-scheduling.md#stop-and-exit)).
   Both `Erx::request` and `Context::drq` refuse a thread past its dead
   mark, which `do_kill` writes under the thread's request queue's lock
-  after its last drain and the enqueue reads under the same lock, so a
-  request is either run by that drain or refused, never left in a queue
-  nothing drains. `Context::enqueue_drq` is private to `Context` with
+  before it drains the queue, and which the enqueue reads under the
+  same lock, so a request queued before the mark is run by that drain
+  and one sent after it is refused, and none is left in a queue nothing
+  drains. `Context::enqueue_drq` is private to `Context` with
   `Erx::request` and `Context::drq` as its only friends, so no third
   way to queue exists.
   Since the stop binding's abort requests are eager and a queued
@@ -826,11 +827,11 @@ when it is charged, a charge ends when the page is released, not when it
 is freed, and a fault never allocates: the funnel meets the six-entry
 interface the kernel design fixes for every implementation
 ([The reaper](design-kernel.md#the-reaper)), over Fiasco's buddy
-allocator and its RCU batch numbers, under the core's own ticket locks,
-since Fiasco's `Spin_lock` races for ownership without a queue
-(`arm/64/spin_lock-arm-64.cpp`) and the kernel design's bounds need a
-lock served in order (K13); the fork provides the core's locks with
-interrupt masking alone.
+allocator and its RCU batch numbers, under the core's ticket lock,
+since the kernel design's bounds need a lock served in order (K13); on
+the fork every Fiasco `Spin_lock` is built on that lock (**Locks**
+below), and the fork provides the core's locks with interrupt masking
+alone.
 
 * **The source.** `erx_reserve_charge(reserve, n)` is the one source of
   pages. It charges the reserve's budget `n` pages through the core,
@@ -916,16 +917,13 @@ interrupt masking alone.
   progress and otherwise leaves it to begin when the one in progress
   completes, in `cpu_quiet`; that is what `Rcu_data::process_callbacks`
   does for a callback it moves to its current list (`rcupdate.cpp`).
-  `Rcu_glbl::_lock` is a native `Spin_lock<>` on stock Fiasco
-  (`rcupdate.cpp`), which races for ownership without a queue
-  (`arm/64/spin_lock-arm-64.cpp`); the fork rebuilds it as the core's
-  ticket lock behind `Erx_ticket_lock`, a wrapper `lock_guard` takes,
-  at level 9 of the kernel design's lock order, since the retire takes
-  it inside the released list's lock and a release holding that lock
-  must be behind at most `ncpus - 1` of the tracker lock's other
-  takers, the tick's quiescent-state report in
-  `Rcu_data::check_quiescent_state`, `start_batch` from
-  `process_callbacks` and `~Rcu_data` ([Execution model and
+  `Rcu_glbl::_lock` is a `Spin_lock<>` (`rcupdate.cpp:125`), on the
+  fork a ticket lock like every other (**Locks** below), at level 9 of
+  the kernel design's lock order, since the retire takes it inside the
+  released list's lock and a release holding that lock must be behind
+  at most `ncpus - 1` of the tracker lock's other takers, the tick's
+  quiescent-state report in `Rcu_data::check_quiescent_state` and the
+  retires of the other CPUs ([Execution model and
   locking](design-kernel.md#execution-model-and-locking)). The stamp
   `_current` itself would be wrong, since a batch in progress may
   already have heard from a CPU that took a translation of the page
@@ -953,56 +951,116 @@ interrupt masking alone.
   call's bound. The backing of a charge takes pages off the list
   through the same `erx_released_take` and keeps them; it is the list's
   only other caller.
-* **Native locks.** The funnel's parts reach two of Fiasco's native
-  locks and no other: `Kmem_alloc::lock`, inside the allocator's ticket
-  lock, where it is never contended, since every call of the raw entry
-  once the root budget exists is under that lock (**Inherited
-  allocation**, B9), and `Rcu_glbl::_lock`, rebuilt as above. The
-  call-site check of the verification table proves it for every build:
-  from `erx_reserve_charge`, `erx_page_release`, `erx_released_take`,
-  `erx_page_free` and `erx_grace_retire`, the linked kernel reaches
-  `Spin_lock<>::lock_arch` only through `Kmem_alloc::alloc` and
-  `Kmem_alloc::free`. The CPU lock is interrupt masking on one CPU, not
-  a lock between CPUs, and needs no queue. Fiasco's other native locks,
-  the ASID allocator's, the IRQ chips', the priority lists' and the
-  request queues', are outside the funnel and belong to the fork's own
-  lock-order check
+* **Locks.** Stock Fiasco's `Spin_lock<Lock_t>` (`spin_lock.cpp`)
+  races for ownership: `lock_arch` on AArch64 retries an exclusive
+  store of a flag bit until it wins, with no order among the losers
+  (`arm/64/spin_lock-arm-64.cpp:25`), so one CPU could be passed over
+  for as long as the others keep winning, and a bound in steps on a
+  path that takes such a lock would be no bound in time. The fork
+  keeps the class, its guards and every use, and rebuilds its two
+  architecture functions on the core's ticket lock, `erx_spinlock_t`
+  of `kernel/core/spinlock.h`, the lock the kernel design gives every
+  spinlock of erXos's kernel ([Execution model and
+  locking](design-kernel.md#execution-model-and-locking)): `lock_arch`
+  is `erx_spinlock_lock` and `unlock_arch` is `erx_spinlock_unlock`,
+  called through the C seam as every core function is, and the lock
+  word `_lock` is the core's word whatever `Lock_t` names, a 32-bit
+  word of two 16-bit halves, the next ticket and the serving one. A
+  taker draws the next ticket with one atomic add and waits until the
+  serving half equals its ticket; a release adds one to the serving
+  half with a release store; the lock is held exactly while the halves
+  differ, which is what `test` and `is_locked` report. The wait loop
+  and the release each use one hint from the architecture layer, `wfe`
+  to wait and `sev` after the release, so the protocol is C17 and
+  builds for the host, where its order is tested under
+  ThreadSanitizer. A CPU holds a lock at most once and waits for at
+  most one lock at a time, so a taker is behind at most `ncpus - 1`
+  holders, each in one bounded critical section with interrupts
+  masked; the time a part spends taking a lock is `ncpus - 1` critical
+  sections of that lock, each of which may take a lock below it in the
+  order, which the fork's lock-order check keeps acyclic and so keeps
+  the recursion finite, and that is the lock term of every part's bound
+  ([Concurrency](design-stopgap-scheduling.md#concurrency-and-failure-behavior)).
+  `Spin_lock_coloc<T>`, Fiasco's lock with a pointer kept in the bits
+  above its flag, keeps its value in a word of its own beside the lock
+  word instead, which its two accessors, `get_unused` and `set_unused`,
+  read and write; its two users, the request queues' heads
+  (`Queue::Lock_n_ptr`, `queue.cpp:14`) and a context's space pointer
+  (`Context::Space_n_lock`, `context.cpp:82`), use those accessors and
+  nothing else, so they compile unchanged, one word larger each. The
+  flag bit's name, `Arch_lock`, is deleted from the multiprocessor
+  interface, so an inherited reader of the lock word's bits fails to
+  compile; the tree has none outside `spin_lock.cpp` but the
+  application CPUs' boot trampoline, whose assembly copy of the take,
+  made because it runs before the CPU has a stack
+  (`arm/64/tramp-mp.S:273`), draws a ticket the same way, and
+  `App_cpu_thread` releases it through `set` as before
+  (`app_cpu_thread.cpp:85`). The uniprocessor build, where `Spin_lock`
+  is the CPU lock alone, is untouched. So every lock the fork takes,
+  Fiasco's own and the glue's, the request queues', the ready queues',
+  the priority lists', the IRQ chips', the ASID allocator's,
+  `Kmem_alloc::lock` and `Rcu_glbl::_lock`, is fair by construction,
+  and no path has to be audited for the locks it reaches; the funnel's
+  parts reach `Kmem_alloc::lock`, never contended once the root budget
+  exists, since every call of the raw entry is then under the
+  allocator's lock (**Inherited allocation**, B9), and
+  `Rcu_glbl::_lock`. The CPU lock is interrupt masking on one CPU, not
+  a lock between CPUs, and needs no queue. What remains is the order,
+  which the fork's lock-order check holds
   ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#concurrency-and-failure-behavior)).
-* **Puts and record frees.** They are retired through the same
-  `erx_grace_retire`, which stamps each at its retirement, and wait on
-  a **stamped list** the fork adds to each CPU's `Rcu_data`, chained
-  through the header's `rcu` link with the stamp beside it, appended by
-  the CPU that queues them under the CPU lock, in queue order; stamps
-  never decrease along it, since `_current` never decreases. Fiasco's
-  own three lists do not carry them: `Rcu::call` appends to `_n`, and
-  an item is stamped only when `process_callbacks` moves `_n` to `_c`,
-  which it does once `_c` is empty, so an item queued while `_c` waits
-  for a batch is stamped a batch after its retirement and matures up to
-  three batches after it, past the two the kernel design bounds
-  (`rcupdate.cpp`). The three lists stay for the one callback Fiasco
-  still queues, `Context::rcu_wait`'s in the kill path
-  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
-  The core's record step runs at most 64 items from the head of the
-  stamped list whose stamp `_completed` has reached, in their order,
-  leaving the rest, which `Rcu_data::pending` and
-  `Rcu::has_pending_work` report; the timer tick
-  runs it once per tick (`Rcu::do_pending_work` from
-  `Thread::handle_timer_interrupt`, `thread.cpp`), so the tick is the
+* **Grace items.** Puts, record frees and a dying thread's grace-period
+  wait are retired through the same `erx_grace_retire`, which stamps
+  each at its retirement, and wait on one **stamped list** per CPU,
+  which the fork adds to `Rcu_data`. The item is the core's, a link, a
+  stamp and a callback, embedded in the opaque header as its `rcu`
+  field and in `Context` in place of Fiasco's `Rcu_item` base; it is
+  appended by the CPU that queues it, under the CPU lock, in queue
+  order, and stamps never decrease along the list, since `_current`
+  never decreases. Fiasco's own three lists, `_n`, `_c` and `_d`, with
+  `Rcu::call`, `Rcu_data::enqueue`, `move_batch`, `do_batch` and the
+  `_len` count, are not built, for two reasons: `Rcu::call` appended to
+  `_n`, and an item was stamped only when `process_callbacks` moved
+  `_n` to `_c`, which it did once `_c` was empty, so an item queued
+  while `_c` waited for a batch was stamped a batch after its
+  retirement and matured up to three batches after it, past the two
+  the kernel design bounds; and `do_batch` ran every callback of a
+  completed batch in one loop under the CPU lock (`rcupdate.cpp:262`),
+  unbounded, so a cohort of a thousand dying threads would have cost
+  their CPU one masked pass over the thousand. What remains of
+  `process_callbacks` is the quiescent-state report,
+  `check_quiescent_state`, and the record step. The core's record
+  step runs at most 64 items from the head of the stamped list whose
+  stamp `_completed` has reached, in their order, each by its callback,
+  a put's and a record free's the reaper's and a dying thread's
+  `rcu_unblock`, which readies it on its own CPU (`context.cpp:2501`),
+  and leaves the rest, which `Rcu_data::pending` and
+  `Rcu::has_pending_work` report; the timer tick and the request
+  interrupt each run it once (`Rcu::do_pending_work` from
+  `Thread::handle_timer_interrupt`, `thread.cpp:479`, and from
+  `handle_remote_requests_irq`, `thread.cpp:1299`), so the tick is the
   kernel design's reap deadline on the fork, one step per tick, and a
-  mature put runs within its grace period, fewer than two batches after
-  its retirement, plus the ticks its CPU's backlog needs, one per 64
-  items queued ahead of it. Fiasco's `Rcu_data::do_batch`, which runs
-  every callback of a completed batch in one loop under the CPU lock
-  (`rcupdate.cpp`), unbounded, runs none of them.
-  `Context::enter_tickless_idle` runs nothing:
-  it refuses tickless idle while `Rcu::has_pending_work` holds, a
-  non-empty stamped list included (`context.cpp`), and the fork's idle
-  thread runs steps, with the CPU lock dropped between them, until no
-  list has work before it enters idle, as the kernel design's idle
-  thread does. `Context::rcu_wait`, through which Fiasco's
-  `Reap_list::del` waits for a grace period in the deleting thread
-  (`kobject.cpp`), is not used: a deletion queues its put. No charge
-  depends on when any of them runs.
+  mature item runs within its grace period, fewer than two batches
+  after its retirement, plus the ticks its CPU's backlog needs, one per
+  64 items queued ahead of it. `~Rcu_data`, which moved an offlined
+  CPU's three lists to the current CPU's, has nothing to move and no
+  caller: `take_cpu_offline` is reached only from the x86 sleep code
+  (`platform_control-acpi_sleep.cpp`), and the fork takes no CPU
+  offline. `Context::enter_tickless_idle` runs nothing: it refuses
+  tickless idle while `Rcu::has_pending_work` holds, a non-empty
+  stamped list included (`context.cpp`), and the fork's idle thread
+  runs steps, with the CPU lock dropped between them, until no list
+  has work before it enters idle, as the kernel design's idle thread
+  does. Of stock Fiasco's three callers of `Context::rcu_wait`, the
+  sleep until the next grace period, the fork keeps one, `do_kill`'s
+  (`thread.cpp:633`), bounded as the scheduling binding states ([Death
+  and the death edge](design-stopgap-scheduling.md#stop-and-exit)).
+  `Reap_list::del`'s (`kobject.cpp:231`) is not built, since a deletion
+  queues its put; and `Ipc_gate::bind_thread`'s (`ipc_gate.cpp:338`),
+  which let a sender that had read the old binding without a lock
+  finish blocking before a second `unblock_all`, is not built either,
+  since the fork writes a gate's binding and wakes its blocked senders
+  under the gate's lock, where no such window exists. No charge depends
+  on when any item runs.
 * **Page records.** The released list and the reserves' pools chain
   pages through their page records, as on erXos's kernel ([Virtual
   memory](design-kernel.md#virtual-memory)); Fiasco has none, its buddy
@@ -1881,7 +1939,7 @@ ran.
 | --- | --- | --- |
 | the vector route (B1) | every user-mode vector entry is one direct branch to one of the three stubs, each stub's body holds the prologue, its one named first call and no indirect branch, and `erx_user_sync_entry` calls `erx_fault_classify` first | a vector entry pointed at a revived `arm_esr_entry` fails; an asynchronous-error entry restored to Fiasco's `ENTRY` template fails; an inlined decode of the syndrome ahead of the classify call fails; a `blr` seeded into a stub fails; a revived `do_syscall` called from `entry.cpp` after the classification fails the per-file allowlist |
 | every exception class | the hostile suite raises a foreign trap, a breakpoint, an undefined instruction, an SVE instruction, an alignment fault and both memory-fault kinds on every CPU and sees each as its fault record or populate; an FP instruction in a fresh thread runs without a trap, and FP values survive a switch between two threads of different spaces on one CPU and a migration between CPUs | a class routed to Fiasco's slow trap ends with a kernel panic and fails; a build with `CONFIG_LAZY_FPU` set fails the configuration check, and, run anyway, turns the first FP instruction into a fault record and fails the FP case |
-| the fork's configuration | `tools/check_fiasco_config.rb` over the resolved `globalconfig.out` of every kernel build finds `CONFIG_FPU`, `CONFIG_PERFORMANCE` and `CONFIG_PERF_CNT_USER` set and `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and `CONFIG_CPU_VIRT` unset; a host test runs the check over a resolved file with each required line present and each forbidden one absent | a resolved file with `CONFIG_LAZY_FPU=y`, the case a `select` would produce, fails the check; a resolved file with `CONFIG_CPU_VIRT=y` fails it; a `LAZY_FPU` option seeded back into the fork's `Kconfig` with its `select` restored makes the real build's resolved file fail the same way |
+| the fork's configuration | `tools/check_fiasco_config.rb` over the resolved `globalconfig.out` of every kernel build finds `CONFIG_FPU`, `CONFIG_PERFORMANCE`, `CONFIG_PERF_CNT_USER` and `CONFIG_SYNC_CLOCK` set and `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and `CONFIG_CPU_VIRT` unset, `CONFIG_SYNC_CLOCK` because the finishing share is measured by `Timer::system_clock()`, which reads the counter only with it ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)); a host test runs the check over a resolved file with each required line present and each forbidden one absent | a resolved file with `CONFIG_LAZY_FPU=y`, the case a `select` would produce, fails the check; a resolved file with `CONFIG_CPU_VIRT=y` fails it; one with `CONFIG_SYNC_CLOCK` unset fails it; a `LAZY_FPU` option seeded back into the fork's `Kconfig` with its `select` restored makes the real build's resolved file fail the same way |
 | the import allowlist | the glue's undefined symbols are all listed for their files | a glue call of `Kmem_alloc::q_alloc`, of `L4_timeout::microsecs_abs` or of a deleted path fails the build; a Fiasco internal called from `entry.cpp` fails |
 | inherited allocation (B9) | the linked kernel's call sites of the raw page allocator are the funnel and the listed boot-time functions; no slab symbol is defined | a revived `Fpu_alloc::alloc_state` fails the link; an inherited runtime function given a direct `Kmem_alloc::alloc` fails the call-site check; a listed function moved out of its initialization section fails |
 | the glue's signatures and fields | no glue function takes a capability value, a `Utcb *`, a `Syscall_frame *`, an `erx_regs_t` or an `erx_uframe_t` but `erx_syscall`'s frame, no glue source names a header field or a UTCB field, and the frame's state word is written only in `Erx::regs_load` | a seeded parameter, a seeded field access and a seeded state-word write each fail |
@@ -1906,10 +1964,10 @@ ran.
 | one close winner (B10) | two threads call `erx_object_destroy` on one object at once, on the hosted kernel under ASan and on QEMU with four CPUs: one succeeds, one gets `ERX_ESTALE`, the object is freed once | `invalidate` returning no old value lets both proceed and ASan reports the double free |
 | attachment teardown | a thread deleted while bound gates have queued senders wakes each sender with `ERX_EDEAD`, and the gates outlive the thread with no bound thread | a teardown that skips `att_gates` leaves a dangling pointer, which ASan reports in the hosted run |
 | space teardown | a space with mappings of several objects is destroyed; every object's reverse map is empty, every translation table but the root directory is on the released list, the root directory holds no valid entry and stays held, and the space's budget's `used` is down to its records and that one page before the destroy returns; a page of a destroyed mapping is not reused until the invalidation completed and its grace period ended, checked by the host test of `erx_tlb_plan` and the released list's stamps; the root directory is released at the record's free, and a finishing thread of the space, preempted on another CPU through the destroy, is switched to and dies with the directory still held, on QEMU with four CPUs | the mapping-database unmap retained in place of the space teardown leaves translations behind, which the hosted kernel's table check finds; a teardown seeded to release only at the put leaves `used` high until the grace period, which the counter check catches; a teardown seeded to release the root directory at the destroy lets the switch to the finishing thread load a released page, which the debug assertion in `make_current` that the page `_dir_phys` names is held catches, with released pages poisoned; `Mem_space`'s stock destructor body restored frees the lower tables a second time at the put, which the released list's host model and ASan report |
-| the retire | a page released while no batch is in progress, and one released after one CPU has reported its quiescent state for the batch in progress, each stay on the list until a batch that began after the release has heard from every active CPU, on the hosted kernel's model of `Rcu_glbl`; a put queued while `_c` waits for a batch matures fewer than two batches after its retirement | a release stamped `_current` lets the first page mature at once and the second while that CPU still holds its pointer, which the model's check catches; a put queued through Fiasco's `Rcu::call` is stamped at its promotion, a batch late, which the model's bound on maturity catches |
-| the tracker's lock | the linked kernel's `Rcu_glbl::_lock` is an `Erx_ticket_lock`, and the funnel's five functions reach `Spin_lock<>::lock_arch` only through `Kmem_alloc::alloc` and `Kmem_alloc::free`, by the call-site check; on the hosted kernel under TSan, three CPUs report quiescent states without pause while a fourth releases pages, and no release waits longer than `ncpus - 1` critical sections of the tracker's lock | the stock `Spin_lock<>` restored on `Rcu_glbl` fails the call-site check, and, run anyway, lets the releasing CPU lose the lock without bound, which the hosted timing check catches; a native lock seeded into the retire fails the check |
+| the retire | a page released while no batch is in progress, and one released after one CPU has reported its quiescent state for the batch in progress, each stay on the list until a batch that began after the release has heard from every active CPU, on the hosted kernel's model of `Rcu_glbl`; a put retired while a batch is in progress matures fewer than two batches after its retirement | a release stamped `_current` lets the first page mature at once and the second while that CPU still holds its pointer, which the model's check catches; a put stamped at a later promotion rather than at its retirement, as Fiasco's `_n` list stamped its items, is a batch late, which the model's bound on maturity catches |
+| every lock a ticket lock | the core's `erx_spinlock_t` on the host under ThreadSanitizer: eight threads take and release one lock in a loop for a minute, each counting the releases between its draw and its take, which never exceeds seven; the linked kernel's `Spin_lock<>::lock_arch` and `unlock_arch` call `erx_spinlock_lock` and `erx_spinlock_unlock`, by the disassembly check, and `Arch_lock` is absent from the multiprocessor interface; the conformance boot brings four CPUs up through the trampoline's ticket-drawing copy of the take; on the hosted kernel under TSan, three CPUs report quiescent states without pause while a fourth releases pages, and no release waits longer than `ncpus - 1` critical sections of the tracker's lock | the stock flag protocol restored in `lock_arch` lets a thread count more than seven releases passing it, which the host test reports, and lets the releasing CPU lose the tracker's lock without bound, which the hosted timing check catches; the trampoline's copy left at the flag protocol takes the lock by its flag bit while the C++ side releases by its serving half, so the second application CPU waits forever and the four-CPU boot fails the harness's CPU count |
 | a thread's construction (B9) | a budget destroyed while a thread of it is being created, at each step of the creation on the hosted kernel: the creation returns `ERX_ESTALE`, the block's two pages and the kernel-user page are released and refunded at the dead budget, the slot is returned and the budget's tombstone is freed; the same for a memory object and a task | a creation seeded to take the thread's existence lock before its block exists reads unmapped memory, which the hosted kernel's ASan reports; one seeded to join the task's thread list before its backing leaves a teardown that finds `charged` above `backed`, which the debug assertion catches |
-| the record step | a thousand gates destroyed on one CPU are reaped at 64 per tick, each tick's handler running one bounded step, and the idle thread drains the rest in steps when the CPU idles | `Rcu_data::do_batch` restored runs the thousand in one tick handler, which the timing test's bound on a stretch with interrupts masked catches; `enter_tickless_idle` entered with a non-empty stamped list leaves them unreaped, which the test catches |
+| the record step | a thousand gates destroyed and a thousand threads killed on one CPU are served at 64 items a step, the gates' puts and the threads' wakes in one order, each tick's handler running one bounded step, and the idle thread drains the rest in steps when the CPU idles; `Rcu::call`, `Rcu_data::do_batch` and the `_n`, `_c` and `_d` lists are absent from the image | the step's limit removed runs the thousand in one tick handler, which the timing test's bound on a stretch with interrupts masked catches; a dying thread's wait queued on a list of its own, promoted and run as Fiasco's `_d` was, fails the image check and, run anyway, matures a batch late and wakes the thousand in one pass, which the same bound catches; `enter_tickless_idle` entered with a non-empty stamped list leaves them unreaped, which the test catches |
 | the page records | the boot carves the record array from the top of the highest heap region before the buddy allocator receives the heap, at 512 MiB and at `memory_min`, and every page of the span has a record | the array taken from the raw entry fails the allocator's 1 MiB maximum at 512 MiB, which the boot test reports |
 | the table adapter | `Mem_space::v_insert` at a fault builds a table from the space's pool through `Erx_table_alloc`, with the raw entry's take counter unchanged | `Kmem_alloc::q_allocator` restored fails the call-site check; a `v_insert` seeded to take from the raw entry fails it too |
 | one owner per page (B9) | the accounting check, held plus released plus free equal to the root budget's guarantee, holds at the end of the conformance and hostile runs and again after the idle threads have drained the released list; the exhaustion tests through every object type succeed and release | a seeded uncharged page taken by the glue fails the accounting check; a seeded release that refunds before it appends fails the chokepoint check |
@@ -2068,6 +2126,7 @@ None beyond the imported Fiasco set
 | the window's region limit of 8 | low | a fragmented memory map is refused | the plan counts the free map's ranges and refuses, on the host over the platform's table before placement and at boot over the actual map with a diagnostic naming the count; QEMU `virt` has one RAM range and no `/reserved-memory`, so its four reservations (the kernel image, the archive, `bootstrap`, the device tree) split it into at most five ranges; a platform that needs more raises `Mem_layout::Max_pmem_regions` and `pool_regions_max` together, which is one array's size |
 | an inherited use of a thread block's physical address (`Kmem::virt_to_phys` on a context or its stack), which the thread region does not have | low | a wrong physical address for a block in a slot | no thread or context code of Fiasco's needs one once the kernel-user page is out of `Task::alloc_ku_mem`; Fiasco's converter has no assertion to catch one, `Mem_layout::pmem_to_phys` answers `~0UL` for an address outside every registered region (`arm/mem_layout-arm.cpp`), so the fork's call-site check lists every caller of `Mem_layout::pmem_to_phys`, `Mem_layout::phys_to_pmem` and `Kmem::kdir->virt_to_phys` in the linked kernel (`Mem_space`'s directory address and the page allocator's own use) and fails the build on a new site, with a seeded call in a context path proving it; the conformance suite runs every call on threads in slots |
 | `boot_reserve`'s per-heap-page term, the page records and the thread region's tables, drifts from what boot takes | low | a refused start | the term is a formula of the heap, checked by the pool-bound test at 512 MiB and at `memory_min`, with the kernel printing both figures |
+| an inherited reader of a `Spin_lock`'s word outside `spin_lock.cpp`, written for the flag bit (**Locks**) | low | a lock misread as free or held | `Arch_lock` is deleted from the multiprocessor interface, so such a reader fails to compile; the one assembly copy, the boot trampoline's, draws a ticket and is exercised by every four-CPU boot |
 
 The thread region's range (**Thread blocks**), the previous crash
 record's rights (the memory table of
