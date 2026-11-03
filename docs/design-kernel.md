@@ -508,7 +508,7 @@ machine's action list names them, and one function applies them.
 | **K15.** Every piece of processor state user mode can read or write is saved per thread or trapped | each kernel-mode control register is written from zero plus the enables the architecture binding lists, so a feature whose user-mode access an enable bit controls stays trapped; a thread record saves exactly the enabled state, which the binding lists: the general registers, the user stack pointer, the FP and SIMD registers with their control and status, and the thread-pointer registers, one of which holds the address of the thread's kernel-user page and is read-only in user mode ([Port contract](#port-contract)) | a control register written by read-modify-write; a feature whose user-mode state needs no enable bit | the boot code's audit of the CPU's feature registers; a test domain that writes every register user mode can write and another that checks it never sees the values |
 | **K16.** The boot image never changes after validation, and no user mapping reaches its index; only a `SYSTEM` holder slices a system file | its pages are excluded from the direct map and mapped read-only in the kernel; no call writes them, and its capability carries no `WRITE`; the whole image's object has an empty ceiling, so no mapping of it can be made whatever its capability carries (K4), and it is not one of the immutable objects that parent copy-on-write children; `erx_image_slice` covers only whole pages of a run of entries, and refuses a run with a system file unless the capability carries `SYSTEM` | a direct map that covers the initrd range; a writable mapping; a slice that covers the index; any access in the whole image's ceiling | the kernel-table walk also checks the boot image's range; host tests of the slice arithmetic; a domain test that tries to map the whole image, to make a child of it, to slice a system file without the right, and to map the index |
 | **K17.** Every capability is in a table, and enters a table only by that space's own call or its creator's | a message's capabilities move only at the rendezvous, into slots its receiver reserved in its own call, and every other install needs the caller's own table or `CAPS` on the target, which only the space itself and its creator hold, since a space's capability leaves its creator's table with `INSPECT` alone ([Passing capabilities](#passing-capabilities)) | a message or ring format that carries a capability; a pass that fills a slot its receiver did not reserve; a pass split across two operations; an installer that ignores the emptied flag; a pass of a space's capability with more than `INSPECT` | a source check that the table's fill is referenced only from the creation calls, `erx_cap_dup`, `erx_pass_apply` and `erx_space_copy`; the pass core's exhaustive host model with timeouts, deaths, closes and emptying; domain tests that a receive with no room receives nothing, that a pass to a space that has just ended drops what it carried, and that a space's capability passed into a sub-space carries `INSPECT` alone |
-| **K18.** A stopped space's threads never return to user mode, and its exit record arrives only when none of them can act | every path to user mode passes `erx_return_check`, where a thread of a stopped space dies once its call is finished, no thread is created or started in a stopped space, and the exit record waits until the space's active count, which holds every thread that runs or is preempted inside a call, reaches zero, which each finishing thread reaches on its own CPU, finishing its call at the finishing level above every urgency, within that CPU's finishing share and outside every quota ([Execution model and locking](#execution-model-and-locking), [Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a thread that runs without entering the count; a call abandoned at a preemption point; a finishing thread throttled by any grant, its own group's or its killer's; a finishing thread below a user urgency, or held past its share; a finisher path dropped before the thread's last switch, which the accounting still charges | a test that stops a domain whose threads run on every CPU, some inside long calls and deletions, and creates and starts threads while it is stopped, and checks that the exit record comes only after the last of them is dead or asleep and that every deletion it started completed; a test that sets a group's quota to zero while its thread is preempted inside a long range call, then stops the thread's space from a group whose quota is zero as well, and sees the call complete within the share's bound and the exit record come; a test that stops such a space from a thread whose cpuset excludes the dying thread's CPU, then deletes the stopper's thread while the target is preempted inside its call behind a spinner above every user urgency on its CPU, and sees the call complete and the record come; the exhaustive model of the count against concurrent switches; a seeded kill that throttles the thread on its killer's grant, which the finishing model catches as a thread never dying while that grant is zero, and a seeded finishing level placed below a user urgency, which the spinner case catches as a record that never comes |
+| **K18.** A stopped space's threads never return to user mode, and its exit record arrives only when none of them can act | every path to user mode passes `erx_return_check`, where a thread of a stopped space dies once its call is finished, no thread is created or started in a stopped space, and the exit record waits until the space's active count, which holds every thread that runs or is preempted inside a call, reaches zero, which each finishing thread reaches on its own CPU, finishing its call at the finishing level above every urgency, within that CPU's finishing share and outside every quota ([Execution model and locking](#execution-model-and-locking), [Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a thread that runs without entering the count; a call abandoned at a preemption point; a finishing thread throttled by any grant, its own group's or its killer's; a finishing thread below a user urgency, or held past its share; a group of the thread's own path dropped before its last switch, which the accounting still charges | a test that stops a domain whose threads run on every CPU, some inside long calls and deletions, and creates and starts threads while it is stopped, and checks that the exit record comes only after the last of them is dead or asleep and that every deletion it started completed; a test that sets a group's quota to zero while its thread is preempted inside a long range call, then stops the thread's space from a group whose quota is zero as well, and sees the call complete within the share's bound and the exit record come; a test that stops such a space from a thread whose cpuset excludes the dying thread's CPU, then deletes the stopper's thread while the target is preempted inside its call behind a spinner above every user urgency on its CPU, and sees the call complete and the record come; the exhaustive model of the count against concurrent switches; a seeded kill that throttles the thread on its killer's grant, which the finishing model catches as a thread never dying while that grant is zero, and a seeded finishing level placed below a user urgency, which the spinner case catches as a record that never comes |
 | **K19.** While a machine lease is held, the machine ends only in a reset | one funnel, `erx_machine_end_effect`, performs every end, the panic path's included, and maps every end to a reset while the lease word is set; the deadline is checked from the kernel's own timer, and the board's watchdog covers a kernel that stops taking interrupts | an end path that bypasses the funnel; a watchdog stopped while a lease is held | the funnel's host tests over every end and lease state; a QEMU test of each end with and without a lease; on each board, a trial that panics, hangs in the kernel with interrupts masked, or calls `halt/0`, each booting the committed slot |
 | **K20.** Preemption never runs runtime code: no executor receives an upcall | `erx_vcpu_control` refuses an executor, a thread's class is fixed when it is created, and only an armed thread receives upcalls ([vCPU upcalls](#vcpu-upcalls)) | an arming path without the class check, or a call that changes a thread's class | host tests of the arming rules over every class; a domain test that arming an executor fails with `ERX_ETYPE` |
 | **K21.** An object's release happens once, and only once, after the last capability to it has gone | every slot is cleared by `erx_cap_slot_clear` under the object's capability lock, a move hands its count from slot to slot without passing through zero, and the decrement to zero closes the slot list to inserts, so nothing makes a capability after the release ([Objects and capabilities](#objects-and-capabilities)) | a slot cleared without the decrement or outside the object's capability lock; a move split across two operations; a copy inserted after the release; a call that names an object by anything but a capability | the release core's exhaustive host model over closes, moves, deletions and table emptying, with copies and moves whose lookups raced the last close, which checks that every slot is freed once, that no copy follows a release, and that the last close of a deleted object leaves it deleted; a domain test in which a domain passes a gate to its sub-space at a rendezvous, closes its own capability, and sees the gate released only when the sub-space closes it; a test that stops the sub-space and empties its table and sees the release then |
@@ -607,9 +607,8 @@ the object's own reference, held from its creation until its put, and
 the references threads hold, which are of three kinds and never a
 call's across a wait (K33): the references a thread holds for its
 lifetime, on every group of its path, at most eight, from its creation
-until it dies, so a destroyed group's record lives until its killed
-members are dead, and on the groups of its finisher path from its
-kill until its last switch; the reference a call takes before it works
+until its last switch, so a destroyed group's record lives until its
+killed members are dead; the reference a call takes before it works
 through an object in parts across preemption points, a range call's or
 an existence lock's taker's, dropped before any wait; and the reference
 a posted delivery, an exit record's or an IRQ object's, holds on its
@@ -619,10 +618,9 @@ the gate's teardown empties, and starts its send over from its
 capability when it wakes ([Execution model and
 locking](#execution-model-and-locking)). A killed thread, a stopped
 space's or a destroyed group's member, finishes its call at the
-finishing level, and its time is charged, for the accounting alone, to
-its **finisher path**, the path of the thread that killed it, every
-group of which it holds from the kill until its last switch ([Execution
-model and locking](#execution-model-and-locking),
+finishing level, and its time is added, for the accounting alone, to
+the `finishing_ns` of its own path, which it holds until its last
+switch ([Execution model and locking](#execution-model-and-locking),
 [design-scheduler.md](design-scheduler.md#charging-and-quota)). A
 capability lookup takes no reference ([Execution model and
 locking](#execution-model-and-locking)). Objects never hold counted
@@ -2980,9 +2978,9 @@ space still inside a call is **finishing**. The rule holds for every
 stop, whoever makes it: a parent's stop walk, the stop a release makes
 and the stop a last thread's exit makes each post their tree's kills
 from the call that stopped it, and the tree's finishing is charged to
-that caller's path.
+the finishing threads' own paths.
 
-*The kill and the finisher path.* `erx_space_stop` is one **walk** in
+*The kill.* `erx_space_stop` is one **walk** in
 the stopper's call: in bounded parts it sets the stopped words of the
 tree, sends its interrupts, and posts one **kill** to every thread of
 the tree, which ends the thread's wait if it is in one; when the walk
@@ -2992,46 +2990,45 @@ thread runs on its own CPU and its own stack, as any ready thread does,
 at the **finishing level**, one level above the highest urgency, which
 no user thread reaches, within its CPU's **finishing share**,
 `ERX_FINISHING_TICKS` (4) of every `ERX_FINISHING_PERIOD` (8) ticks of
-that CPU's clock, and outside every quota: no grant, its own group's or
-its killer's, is drawn for it, throttles it or places it, so a thread
-whose own group has no time left finishes all the same, and so does one
-whose killer's group has none, or whose killer's cpuset excludes the
-thread's CPU ([design-scheduler.md](design-scheduler.md#pick-and-dispatch)).
+that CPU's clock, and outside every quota: no grant is drawn for it,
+throttles it or places it, so a thread whose own group has no time left
+finishes all the same, and nothing of its killer, neither grant nor
+cpuset, is read
+([design-scheduler.md](design-scheduler.md#pick-and-dispatch)).
 Nobody runs it in anyone's place: helping is for locks alone (**Locks**
-below). A kill names the killer's **finisher path**, the groups of the
-killing thread's own path, on each of which the kill takes a counted
-reference that the killed thread holds until its last switch: the
-thread's finishing time is charged to that path for the accounting, the
-`finishing_ns` of each group on it that the inspector reports, and for
-nothing else; the charge admits nothing and holds nothing back
+below). A kill names no group: the thread's finishing time is added,
+for the accounting alone, to the `finishing_ns` of each group on its
+own path, which the inspector reports apart from the groups' usage, so
+a stopped domain's finishing shows on the stopped domain's groups; the
+charge admits nothing and holds nothing back, and the thread holds that
+path's groups as it always has, until its last switch
 ([design-scheduler.md](design-scheduler.md#charging-and-quota)). A kill
-of a thread that is dying already changes nothing: its level, its share
-and its path were set by its first kill, none of them depends on who
-kills it next, and the first killer is the party that started the
-finishing, which is what the accounting records. A stop of a space that
+of a thread that is dying already changes nothing: its level and its
+share were set by its first kill, its path at its creation, and none of
+them depends on who kills it next. A stop of a space that
 has stopped already is not refused: it posts no kill, since the walk
 that stopped the space posted one to every thread, and waits as a first
 stop does. Each finishing thread keeps its original call stack, locks
 and completion path, and no second protocol replays or takes over its
 effects. The destroy of a group kills its members the same way, each
-charged to the destroying call's path, and so does the deletion or
-release of a thread ([Closing and deleting](#closing-and-deleting)).
+charged to its own path, and so does the deletion or release of a
+thread ([Closing and deleting](#closing-and-deleting)).
 
 *Who owns unfinished work.* The finishing thread itself, which is a
 fact about the thread's own record and not about any other thread: the
 killer may be deleted, descheduled, throttled or killed in turn, and the
-path's groups may be destroyed, and the finishing thread goes on as
-before, since its service depends on its CPU's share alone, and it holds
-every group of the path it charges, whose records take charges until
-their last holder is gone
+thread's own groups may be destroyed, and the finishing thread goes on
+as before, since its service depends on its CPU's share alone, and it
+holds every group of the path it charges, whose records take charges
+until their last holder is gone
 ([design-scheduler.md](design-scheduler.md#ownership-and-lifetime)). A
 ring of stops, two spaces each stopping the other or any longer one,
 ends: every thread of the ring finishes at its own CPU's finishing
 level, each death takes its own space's count down, and each record is
 posted by its space's last death, which needs nothing of any stopper.
 No grant keeps a finishing thread unfinished: a zero quota on its own
-group, on its killer's or on any group above either leaves it running
-at the finishing level. What bounds its finishing is its CPU's share and
+group or on any group above it leaves it running at the finishing
+level, and its killer's grant is never read. What bounds its finishing is its CPU's share and
 the parts its call has left, and what bounds the finishing of a tree is
 the share on each CPU its threads are on and the records the tree's
 budgets paid for; [design-scheduler.md](design-scheduler.md#pick-and-dispatch)
@@ -3053,13 +3050,15 @@ case: the walk kills the stopper among its space's threads, and the
 stopper dies at its boundary. Nothing of the stopped tree depends on
 the stopper after its walk, so no death waits on a death.
 
-*Charging.* A finishing thread's remaining work is charged to the
-caller of the stop for the accounting: the `finishing_ns` of every group
-on the stopper's path, which names who started the finishing, the system
-domain for a domain, a session for its programs. The charge admits
-nothing and holds nothing back: a finishing thread draws from no quota
-and no grant throttles it, so a stop completes however little time the
-stopped group or the stopper's has left, and what a stop costs is
+*Charging.* A finishing thread's remaining work is charged, for the
+accounting alone, to the thread's own path: the `finishing_ns` of every
+group on it, kept apart from the groups' `used_ns` and `total_ns`, so
+the inspector shows a stopped domain's finishing time on the stopped
+domain's own groups, separately from the time its threads ran before the
+stop, and attributes none of it to the party that stopped it. The
+charge admits nothing and holds nothing back: a finishing thread draws
+from no quota and no grant throttles it, so a stop completes however
+little time the stopped group or the stopper's has left, and what a stop costs is
 bounded on each CPU by the finishing share and in all by the records the
 stopped tree's budgets paid for ([Security](#security)). The walk
 itself, the emptying of a stopped space's table and its destroy are
@@ -3326,9 +3325,8 @@ CPU that has not moved since. Reference counts are kept only for a thread
 that keeps an object across a preemption point, never across a wait
 (K33): every taker of an existence lock takes one first, a range call
 working through a space in parts among them; the groups of a thread's
-path are the thread's for its lifetime, and those of its finisher path
-from its kill until its last switch ([Objects and
-capabilities](#objects-and-capabilities)); and a posted delivery holds
+path are the thread's from its creation until its last switch ([Objects
+and capabilities](#objects-and-capabilities)); and a posted delivery holds
 its object until it is taken or withdrawn. A
 sender blocked on a gate, a waiter on a umtx word and a parked executor
 hold none: each is linked on a list its owner's teardown empties, touches
@@ -3652,8 +3650,7 @@ sleeps until the tree's last record is posted, so its caller makes it from a thr
 else waits on, never from one that serves others or holds what others
 wait for, and never from an executor, which the dispatch refuses with
 `ERX_EWOULDBLOCK`. Once its walk has set every `stopped` word, sent
-every interrupt and posted every kill, each naming the stopper's path
-as the path the thread's finishing is charged to, the stopper waits in an `ERX_WAIT_STOP`
+every interrupt and posted every kill, the stopper waits in an `ERX_WAIT_STOP`
 wait, holding nothing (K33), until it reads `EXITED` (**The stopper's
 wait** under [Execution model and locking](#execution-model-and-locking));
 its own kill ends that wait: a stopper whose own space is stopped while
@@ -3662,8 +3659,8 @@ returns to user mode, and dies at its own return check. Nothing of its
 target depends on it: the target's record is posted by the target's
 last death, which needs no stopper, and what the target's threads have
 left to finish runs at the finishing level within each CPU's share,
-whether the stopper lives or not; its path they hold for the accounting
-alone. So two spaces stopping each other, or any ring of stops, end:
+whether the stopper lives or not, charged to the threads' own paths.
+So two spaces stopping each other, or any ring of stops, end:
 each stopper's wait ends at its own kill, each thread finishes within
 its CPU's share, each death takes its own space's count down, and no
 death waits on a death (**Who owns unfinished work** under [Execution
@@ -3825,7 +3822,7 @@ waits for exactly the one it needs:
 | user execution prohibited | no thread of the space runs in user mode, and none can go back there | `erx_space_pause`, before it returns | the interrupts the hold sent being taken, within the longest stretch with interrupts masked |
 | kernel mutation quiesced | the first state, and the space's active count (K18) has reached zero since the pause began: none of its threads runs, or is preempted inside a call, and the `quiesced` mark says so | `erx_space_quiesce`, before it returns; `erx_space_copy` requires the mark and waits for nothing | the space's own threads finishing the bounded parts of calls they started, on their own groups' time or a helper's |
 | outside writes resolved | nothing another party does changes what a copy reads, except a whole item at a time, and memory the program gave another party or a device, which may change within a page, as it may under the program's own threads | no one: it holds by construction, below | nothing |
-| terminating | the space has stopped, which is final: its threads die at their return to user mode, a death coming before any hold, and their waits are cut short | its exit record, which also waits for its children's (K18, K27) | the space's own threads finishing their calls, on the stopper's path |
+| terminating | the space has stopped, which is final: its threads die at their return to user mode, a death coming before any hold, and their waits are cut short | its exit record, which also waits for its children's (K18, K27) | the space's own threads finishing their calls, at the finishing level, charged to their own paths' `finishing_ns` |
 
 **Outside writes.** Private memory, which a copy copies, has no
 capability, so no other party, no device and no call made for another
@@ -4803,12 +4800,12 @@ closing removes one slot and nothing else.
   deletion kills it, unbinds its IRQ objects and withdraws the deliveries
   waiting on its ready list, since a thread whose group is gone has
   nothing to run on; each killed member keeps its counted reference on
-  every group of its path until it dies, so the records outlive the
-  destroy only as long as their members' remaining calls, which run at
-  the finishing level on their own CPUs, within each CPU's finishing
+  every group of its path until its last switch, so the records outlive
+  the destroy only as long as their members' remaining calls, which run
+  at the finishing level on their own CPUs, within each CPU's finishing
   share and outside every quota, charged for the accounting to the
-  destroying call's path, as a stop's finishing threads are to the
-  stopper's ([Execution model and locking](#execution-model-and-locking)),
+  `finishing_ns` of those same groups, as a stop's finishing threads are
+  to theirs ([Execution model and locking](#execution-model-and-locking)),
   so a zero grant, the destroyed group's or the destroyer's, holds
   nothing back; deleting a memory object
   deletes its copy-on-write children; deleting a budget deletes every
@@ -4890,8 +4887,9 @@ faults](#threads-and-faults)). It wakes the senders queued at it with
 caller is woken with `ERX_EDEAD`, where Fiasco's dying thread leaves the
 caller waiting ([L4 lineage](#l4-lineage)); withdraws the deliveries
 waiting at it, each fed to `erx_irq_step` as an unbind ([IRQ
-objects](#irq-objects)); leaves its group, which frees its executor slot
-if it still holds one
+objects](#irq-objects)); leaves its group's member list, which frees its
+executor slot if it still holds one and keeps its references on the
+groups of its path, which its remaining time is still charged to
 ([design-scheduler.md](design-scheduler.md#park-and-wake)); and drops its
 reference to its space, whose thread count falls there ([Threads and
 faults](#threads-and-faults)). It unbinds what is bound to it: each gate
@@ -4911,9 +4909,10 @@ deletion, a release and its space's stop comes first, as Fiasco's
 that ends the deletion's own grace period never frees a thread that is
 still finishing its call, tearing itself down or waiting out its second
 grace period. After its last switch away, the CPU drops the dying
-reference from its own context, never on the dead thread's stack, as
-Fiasco's `handle_kill_helper` does from the kernel's context, and
-releases the stack; the record goes to the reaper once the last counted
+reference and the references on the groups of the thread's path from
+its own context, never on the dead thread's stack, as Fiasco's
+`handle_kill_helper` does from the kernel's context, and releases the
+stack; the record goes to the reaper once the last counted
 reference has gone. A thread released, when its last capability goes, and a thread of a
 stopped space run the same second part.
 
@@ -6893,7 +6892,7 @@ same property on the other:
 | budgets as space banks: destroying a budget deletes every object charged to it and every budget carved from it; guarantees, caps, the borrowing chain, `erx_budget_resize` and `erx_budget_watch` | in full | replaced: Fiasco's `Ram_quota`, which accounts bytes at each allocation, and its allocation adapters are not built; an `Erx_budget` is the C17 core's `erx_budget_t` behind the glue's opaque header, with its kind, guarantee, cap, counters, watch and `att_charged` list, whose destroy deletes every object on the list, child budgets included, through the C17 deletion walk, and the charges that remain pass to its nearest live ancestor; every change of its counters is the C17 `erx_budget_adjust` shared with erXos's kernel, so the chain, the walls, the caps, the close of a destroyed budget and the watch's crossing are the same code on both; the only thing the fork charges is a whole page, through `erx_reserve_charge`, which backs what it admits, and `erx_page_release`, at which a charge ends, before the page is freed; tables come through `Erx_table_alloc` over the space's reserve and records from the budget's caches, so no allocation of the fork is accounted outside the funnel ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)); deleting a Fiasco factory leaves the objects it made, and a Fiasco quota is fixed at its creation | | M1, M5 |
 | kernel memory | in full | modified: memory objects' pages come from Fiasco's kernel allocator through the budget-charging funnel, which charges a reserve and backs it with whole single pages in the same call; a page comes into use only from its reserve's pool, leaves its reserve only through `erx_page_release`, onto the machine-wide released list, retired to the batch after Fiasco's current one and chained through page records the fork adds for the heap, and reaches Fiasco's free lists only through the reaper's free step once that batch has completed, unless the backing of a charge takes it off the list and waits for the batch itself, as [The reaper](#the-reaper) says, so an admitted charge is always backed and a fault never allocates; a thread block is two single pages mapped into an 8 KiB-aligned slot of a thread region the fork adds, as this kernel's stacks are, so no allocation on the fork is above order zero; `bootstrap` passes Fiasco's `kmemsize` option, computed by the pool plan that the kernel recomputes at boot, to give that allocator all of RAM but the regions `bootstrap` placed and the boot image, within the kernel's 1 GiB physical-memory window, where Fiasco's default is 6 per cent of RAM on 64-bit builds (`config.cpp`, `kmem_alloc.cpp`); the root budget, from which every other budget is carved, is a wall whose guarantee and cap are that pool ([design-stopgap.md](design-stopgap.md#kernel-memory-and-the-root-budget)) | the root budget is what Fiasco's allocator holds once Fiasco's own boot is done, less the page records and the thread region's tables, not every page left, and RAM beyond the window is unusable | M5, G6's many domains |
 | spaces with their parents, created by any holder of `SPACES`, and sub-spaces | in full | modified: Fiasco tasks, constructed by the glue's installer from `erx_space_create`'s validated plan and never through Fiasco's factory, which is not built, with the parent and the wait for children's exit records from the C17 stop core shared with erXos's kernel | | M1, M5 (K27) |
-| stops of spaces and threads, `CONTROL` stops, and exit records (K18) | in full | added: a list of each task's threads, which Fiasco's tasks lack, joined at a thread's creation under the task's lock; one run word per task holding the stop state and the count of its live threads, written only under the task's lock by the C17 stop core, which a thread enters at its creation and leaves at its death edge, before Fiasco's `unbind()`; one kill request per thread, carried by Fiasco's eager cross-CPU request, which ends its wait, marks it dying and raises it to the finishing priority; every return to user mode passes `erx_return_check` in Fiasco's common return path, where a killed thread dies through `Thread::do_kill` and a thread of a stopped task holds until its kill; the IRQ shortcut is off; a `CONTROL` stop sleeps the thread at that check, its registers kept, until `erx_thread_start`; the death edge that takes the count to zero posts the exit record to the fault gate, publishes `EXITED` and wakes every waiting stopper, once every child's record has been posted ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)) | the count is of live threads, created to dead, where erXos's kernel counts the threads active inside calls, both zero exactly when no thread can act; finishing threads run on their own CPUs at the finishing priority above every urgency, within the finishing share, charged for the accounting to the killing call's path, as on erXos's kernel, with the share's step asked at Fiasco's tick where erXos's kernel arms the step's deadline; a thread of a stopped space that reaches its return boundary before its kill holds there rather than dying at once, with the same observable contract | M1 (K18), M5 (K27) |
+| stops of spaces and threads, `CONTROL` stops, and exit records (K18) | in full | added: a list of each task's threads, which Fiasco's tasks lack, joined at a thread's creation under the task's lock; one run word per task holding the stop state and the count of its live threads, written only under the task's lock by the C17 stop core, which a thread enters at its creation and leaves at its death edge, before Fiasco's `unbind()`; one kill request per thread, carried by Fiasco's eager cross-CPU request, which ends its wait, marks it dying and raises it to the finishing priority; every return to user mode passes `erx_return_check` in Fiasco's common return path, where a killed thread dies through `Thread::do_kill` and a thread of a stopped task holds until its kill; the IRQ shortcut is off; a `CONTROL` stop sleeps the thread at that check, its registers kept, until `erx_thread_start`; the death edge that takes the count to zero posts the exit record to the fault gate, publishes `EXITED` and wakes every waiting stopper, once every child's record has been posted ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)) | the count is of live threads, created to dead, where erXos's kernel counts the threads active inside calls, both zero exactly when no thread can act; finishing threads run on their own CPUs at the finishing priority above every urgency, within the finishing share, charged for the accounting to the `finishing_ns` of their own paths, as on erXos's kernel, with the share's step asked at Fiasco's tick where erXos's kernel arms the step's deadline; a thread of a stopped space that reaches its return boundary before its kill holds there rather than dying at once, with the same observable contract | M1 (K18), M5 (K27) |
 | emptying a stopped space's table | in full | added: the emptying walk of a stopped task's table and of every task below it, in bounded parts, each slot cleared through the C17 capability core's `erx_cap_slot_clear`, shared with erXos's kernel ([design-stopgap.md](design-stopgap.md#deletion)) | | M1 (the walk, run by a space's destroy), M5 (`erx_space_clear_caps`) |
 | pauses of spaces, in their named states | erXos's kernel alone | | `erx_space_pause` fails with `ERX_ENOTSUP`; `Ctrl-Z` stops a job's Erlang commands, and the shell names the job's programs, which run on | track S, after M7 |
 | memory objects (private, shared, contiguous and physical), private memory, ceilings, reserves, `erx_space_protect`, `erx_mem_grow` and `erx_mem_copy` | in full | added: a memory-object kernel object whose pages come from Fiasco's kernel allocator charged to the quota, a contiguous object's as one physical range and a physical object's from a resource's device memory; mappings inserted into the task's address space directly, without the mapping database, each attached to its object's reverse map; per-task mapping records from the same C17 planning core as erXos's kernel, with a deleted object's records kept so an access to them faults as `ERX_FAULT_DELETED`; the fault decision's populate results resolved in the kernel before any page-fault message; `erx_mem_copy` as an invocation that copies through Fiasco's kernel mapping of both objects' pages; every invocation's arguments in registers and UTCB words, with windows as erXos defines them ([Arguments and results](#arguments-and-results)) | | M1 (private and shared objects and kernel-made physical objects), M5; contiguous objects and physical objects from device resources with the resource rows' milestones |
@@ -7101,7 +7100,7 @@ errors). Calls that may wait are marked with the executor rule.
 | --- | --- | --- |
 | capabilities | `erx_cap_dup(c (DUP), mask)`, `erx_cap_close(c)`, `erx_object_destroy(c (DESTROY))`, `erx_cap_pass(from (CAPS), to (CAPS), n)`, `erx_object_info(c, topic, index, window)` | every copy is a slot of its own; a close removes one slot, and a deletion every slot and mapping, in parts ([Closing and deleting](#closing-and-deleting)); `erx_cap_pass` passes at most four from one table to another, its items and their results in the caller's UTCB, as a rendezvous does; into a space the caller created the pass sets do not bind, except that a space's capability goes with `INSPECT` alone and `CODE` never goes (K17, K24, [Passing capabilities](#passing-capabilities)); `erx_object_info` writes into a memory window ([Arguments and results](#arguments-and-results)) |
 | budgets | `erx_budget_create(parent (CARVE), kind, guarantee, cap)`, `erx_budget_resize(budget (DESTROY), guarantee, cap)`, `erx_budget_watch(budget (ALLOC), irq (TRIGGER) or ERX_CAP_NULL, threshold)` | a child's guarantee is charged to its parent, which may borrow for it, and its capability carries `DESTROY`; its kind, a wall whose cap stays equal to its guarantee or an elastic budget, is fixed at carving; a cap below the guarantee, or for a wall other than it, fails with `ERX_EINVAL`, a parent at depth `ERX_BUDGET_DEPTH_MAX - 1` with `ERX_ELIMIT`; the carver, or whoever it passed `DESTROY` to, resizes both values in one step, a shrink of the guarantee never failing and a cap below the spending refusing every charge that would raise the spending until it falls; a watch triggers its IRQ object once when the spending reaches the threshold, at once if it is already there, and an IRQ object is the watch of one budget; destroying a budget deletes every object charged to it and every budget carved from it, and returns its guarantee and its borrowing to its parent ([Budgets](#budgets)) |
-| spaces | `erx_space_create(budget (ALLOC, SPACES), parent (CAPS), fault (SERVE), label, flags, cap_limit)`, `erx_space_stop(space (STOP), status)` (executor: refuse), `erx_space_pause(space (STOP))`, which returns the hold's ticket, `erx_space_resume(space (STOP), ticket)`, `erx_space_clear_caps(space (CAPS))`, `erx_space_quiesce(space (STOP), ticket)` (executor: refuse), `erx_space_copy(from (MAP, STOP), to (MAP, CAPS), ticket)` | the parent, the fault gate and the label are fixed at creation, and the parent is the caller's own space or one below it; `ERX_SPACE_JIT` needs `CODE` on the budget or a JIT space as the caller's own ([Creating spaces](#creating-spaces)); `ERX_CAP_SELF` carries `STOP`; stopping walks the spaces below and kills their threads, each finishing on its own CPU on the caller's path, and waits for the tree's exit record ([Execution model and locking](#execution-model-and-locking)); `erx_space_copy` is a sub-space creator's, for `fork`; pausing, resuming, quiescing and copying refuse the caller's own space, a hold is a ticket that names what runs under it, and a hold keeps a space's threads only from returning to user mode; emptying a table and copying a space proceed in parts; quiescing waits, under one hold, until the space's threads have finished the calls they were in, and a copy under that hold requires that and waits for nothing |
+| spaces | `erx_space_create(budget (ALLOC, SPACES), parent (CAPS), fault (SERVE), label, flags, cap_limit)`, `erx_space_stop(space (STOP), status)` (executor: refuse), `erx_space_pause(space (STOP))`, which returns the hold's ticket, `erx_space_resume(space (STOP), ticket)`, `erx_space_clear_caps(space (CAPS))`, `erx_space_quiesce(space (STOP), ticket)` (executor: refuse), `erx_space_copy(from (MAP, STOP), to (MAP, CAPS), ticket)` | the parent, the fault gate and the label are fixed at creation, and the parent is the caller's own space or one below it; `ERX_SPACE_JIT` needs `CODE` on the budget or a JIT space as the caller's own ([Creating spaces](#creating-spaces)); `ERX_CAP_SELF` carries `STOP`; stopping walks the spaces below and kills their threads, each finishing on its own CPU, charged to its own path's `finishing_ns`, and waits for the tree's exit record ([Execution model and locking](#execution-model-and-locking)); `erx_space_copy` is a sub-space creator's, for `fork`; pausing, resuming, quiescing and copying refuse the caller's own space, a hold is a ticket that names what runs under it, and a hold keeps a space's threads only from returning to user mode; emptying a table and copying a space proceed in parts; quiescing waits, under one hold, until the space's threads have finished the calls they were in, and a copy under that hold requires that and waits for nothing |
 | threads | `erx_thread_create(budget (ALLOC), space (THREADS), group (ATTACH), class)`, with its starting registers in the caller's UTCB, `erx_thread_start`, `erx_thread_stop`, `erx_thread_read(thread (CONTROL), set)`, `erx_thread_write(thread (CONTROL), set)`, each moving one register set through the caller's UTCB, `erx_thread_set_affinity`, `erx_thread_set_urgency` (thread (CONFIGURE)), `erx_thread_exit()` | `erx_thread_stop` returns once the thread's home CPU has applied the stop, without waiting for the thread to reach it, and `erx_thread_create` once any handover of its executor slot has been applied, each by a bounded spin that never waits ([design-scheduler.md](design-scheduler.md#park-and-wake)); registers are read and written only while the thread is stopped, and `erx_thread_read` and `erx_thread_write` refuse one that has not stopped yet (`ERX_EBUSY`) ([Threads and faults](#threads-and-faults)) |
 | vCPU | `erx_vcpu_control(thread (CONFIGURE), flags)`, `erx_vcpu_resume()` | an executor cannot be armed ([vCPU upcalls](#vcpu-upcalls)) |
 | groups | `erx_group_create(budget (ALLOC), parent (CONFIGURE))` returning group, control and status capabilities, with the grant read from the caller's UTCB, `erx_group_configure(group (CONFIGURE))`, `erx_group_info(group (INSPECT))`, `erx_group_take_ready(max)` taking at most `ERX_MSG_WORDS` (63) labels into the caller's UTCB, `erx_park(group_epoch, slot_epoch, deadline)` (executor: allow), `erx_executor_wake(slot)`, `erx_yield` | [design-scheduler.md](design-scheduler.md#kernel-calls) |
@@ -7555,8 +7554,9 @@ object, paid for; and a stopped space creates no thread and starts no
 call, so the work is fixed at the stop. A killer can therefore make a
 CPU's user threads lose at most the share, makes them lose nothing on a
 CPU where none of its target's threads is, and gains nothing from its
-own grant: the accounting charges its path, and no grant on that path,
-zero included, changes what runs. What it can do is spend the share of
+own grant, which nothing of the finishing reads: the accounting adds
+the time to the `finishing_ns` of the target's own groups, apart from
+their usage, and no grant, zero included, changes what runs. What it can do is spend the share of
 every CPU its target's threads are on for as long as their remaining
 parts last, which is what its target's budgets bought.
 
@@ -7633,7 +7633,7 @@ the host exploration and conformance requirements below.
 
 | Layer | What | Where |
 | --- | --- | --- |
-| Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner, or an enclosing lock its thread holds, is closed at every part boundary, and a construction whose budget is destroyed at every step and between every insert of its publication, which must leave the object wholly attached and then wholly detached, or never attached, with a seeded publication that inserts without the object's existence lock, which the model catches as a child attached to its parent after the parent's budget tore it down, and a seeded backing that reads only its owner's lock, which the model catches as a child backed to its full size after its copy's target was destroyed, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, with the inspector's figure for a destroy compared against what each destroy gives back, after pins at every depth, and a seeded pin that marks a tombstone's cache page at the close instead, which the comparison catches at the first destroy after a pin, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the kills with their finisher paths over a stopper deleted, descheduled behind a spinner and killed in turn, a finisher path at zero grant and a second stop of the stopped space, with a seeded kill that keeps the old path, which the model catches as a finishing thread of a zero-grant path never dying after the second stop, the stopper's wait, the wait for children's records and the holds, with two holds on one space and a resume of either while a quiesce and a copy run under the other, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
+| Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner, or an enclosing lock its thread holds, is closed at every part boundary, and a construction whose budget is destroyed at every step and between every insert of its publication, which must leave the object wholly attached and then wholly detached, or never attached, with a seeded publication that inserts without the object's existence lock, which the model catches as a child attached to its parent after the parent's budget tore it down, and a seeded backing that reads only its owner's lock, which the model catches as a child backed to its full size after its copy's target was destroyed, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, with the inspector's figure for a destroy compared against what each destroy gives back, after pins at every depth, and a seeded pin that marks a tombstone's cache page at the close instead, which the comparison catches at the first destroy after a pin, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the kills over a stopper deleted, descheduled behind a spinner and killed in turn, a killed thread whose own path is at zero grant and a second stop of the stopped space, with a seeded kill that throttles the thread on its own zero-grant path, which the model catches as a finishing thread that never dies, and a seeded charge of the finishing time to the stopper's path, which the model's `finishing_ns` counters catch, the stopper's wait, the wait for children's records and the holds, with two holds on one space and a resume of either while a quiesce and a copy run under the other, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
 | Fuzzing | the device tree, the boot image and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
 | Conformance | every kernel call's contract, from test domains: arguments at and beyond their limits, every error, every right missing, every outcome; run identically on erXos's kernel and the stopgap, among them a stop of a space whose thread waits on an IRQ object while the IRQ fires, and of one whose thread is inside a vCPU resume, each posting its exit record only after the thread has died and running none of its user code after it, and a memory-object map and the range calls racing the destroy of their space, which add no record to it (K26's container test); a store to a shared object's page followed by an unmap of the mapping, or by a stop and destroy of the storing space, and then `erx_mem_dirty`, which reports the page stored; umtx waits on a word of a boot-image slice and of a device's register window, each refused with `ERX_EFAULT` before any load; `erx_mem_copy` from a child of a sealed paged object, which returns the parent's bytes for every page the child does not own and the child's for the pages it owns, against the same copy with the child's pages seeded with a marker; a thread parked inside `erx_mem_copy` between two parts while the source's budget is destroyed, whose next part fails with `ERX_ESTALE`, after which the reaper frees the budget's tombstone last and the parent's free capacity is whole again, under ASan on the hosted kernel; a stop of a space from a thread whose group's grant is then set to zero, then from a thread with quota, after which the record comes; a fork given up by resuming the copy's hold while the job's hold remains, which leaves the parent held and the copier reporting `ERX_EBUSY`, and the same fork given up while the copier is between two parts of a child's backing, which leaves nothing charged to the child's budget once the child is destroyed | QEMU, TCG and HVF |
 | Hostile domains | random calls, closed and foreign capabilities, rights probing, passes of stale, duplicated, unpassable and surplus capabilities, of two copies of one object, and receivers that end mid-pass, writes racing a seal, stores racing a store report, windows whose objects are deleted mid-copy, umtx waits on words unmapped, remapped and freed by other threads during the wait, budgets destroyed while other spaces map their objects, deletions racing lookups, copies, moves and mappings, accesses to deleted memory, mapping probes, threads that fault in every exception class, executors calling every blocking call, groups that spin, servers that never reply or drop their callers, doorbells and gates deleted under their waiters, UTCBs, vCPU frames and windows rewritten while the kernel reads them, calls that pass kernel addresses wherever an argument is an integer, sub-spaces created to the depth limit and churned, devices that flood interrupts and devices that fault through the IOMMU without pause | QEMU |
@@ -7915,7 +7915,7 @@ the user*. No departure rests on taste alone.
 
 | Mechanism | Fiasco | erXos | Why | What keeping Fiasco's way would lose | Basis |
 | --- | --- | --- | --- | --- | --- |
-| Finishing a stopped space's calls | kernel calls keep their original stacks through preemption and helping, a dying thread completes its kernel work before its return path ends it, and that work runs on the thread's own scheduling context | the same continuation model, with the work run at a finishing level above every urgency on the thread's own CPU, within that CPU's finishing share and outside every quota, charged for the accounting to the killer's path, which the thread holds until its last switch, and `erx_space_stop` sleeps, holding nothing, until the tree's record is posted | a stopped group may have no time left, and so may its stopper's, and no grant may hold an exit record back; the share, a few words per CPU, bounds what finishing takes from a CPU's user threads, with no reservation, sponsor or queue | with Fiasco's way, a thread of a group at zero quota could keep its exit record from ever arriving, or a reservation outside the groups would have to run it | needed by erXos; a scheduling change, not a second teardown protocol |
+| Finishing a stopped space's calls | kernel calls keep their original stacks through preemption and helping, a dying thread completes its kernel work before its return path ends it, and that work runs on the thread's own scheduling context | the same continuation model, with the work run at a finishing level above every urgency on the thread's own CPU, within that CPU's finishing share and outside every quota, charged for the accounting to the `finishing_ns` of the thread's own path, apart from its usage, and `erx_space_stop` sleeps, holding nothing, until the tree's record is posted | a stopped group may have no time left, and no grant may hold an exit record back; the share, a few words per CPU, bounds what finishing takes from a CPU's user threads, with no reservation, sponsor or queue | with Fiasco's way, a thread of a group at zero quota could keep its exit record from ever arriving, or a reservation outside the groups would have to run it | needed by erXos; a scheduling change, not a second teardown protocol |
 | Capability values | the holder chooses each capability's index, through a user-level allocator; slots carry no generation, and Fiasco's object locking notes that an object replaced in the same slot cannot be told apart | the kernel assigns the slot, and the value carries the slot's generation; a slot retires before its generation wraps (K1) | a stale capability never names another object, whatever a domain's code does | the guarantee would rest on every domain's slot allocator | needed by erXos |
 | Rights | object capabilities carry read, write, special and delete, three object-specific bits and a weak-reference flag, whose meaning each interface defines; memory carries read, write and execute | a closed set of named rights per type, declared in the ABI file and checked by the one lookup; copying (`DUP`) and leaving a space (`GIVE`) are rights | each operation names exactly the right it needs, and the generator closes the sets; memory alone needs more than a dozen | rights such as "may map but not supply" or "may move but not copy" would move into each object's protocol checks | defensible |
 | Quotas and creating spaces | a factory is a quota: creating an object charges the factory used, a child factory's limit is charged to its parent, and a quota lives until its last charge is freed; any holder of a factory may create tasks | budgets form the same hierarchy, each allocating call naming the budget that pays, and any holder of a budget with `SPACES` creates spaces; an executable paged object or a JIT space needs `CODE`, which never leaves the system domain's table | creating spaces follows Fiasco; `SPACES` lets the system domain withhold space creation from a domain without withholding its allocations; the right to make code follows from the image (K8) | with no `SPACES`, every domain that can allocate could build spaces; with no `CODE`, any domain could make objects whose pages programs execute | follows Fiasco for creating spaces; defensible for `SPACES`; needed by erXos for `CODE` |
@@ -8221,8 +8221,9 @@ Fiasco's scheduling:
   hold a death back, and drop the rest: the level reserves nothing and
   admits nothing, it caps what finishing may take from a CPU's user
   threads, in a few words per CPU; the reaper keeps its own rule, idle
-  time and the reap deadline; and the accounting charges the caller of
-  the stop, so there is no sponsor to size ([Execution model and
+  time and the reap deadline; and the accounting adds the finishing
+  time to the stopped threads' own groups, apart from their usage, so
+  there is no sponsor to size ([Execution model and
   locking](#execution-model-and-locking)).
 
 **A release signal and tokens.**
@@ -8511,13 +8512,14 @@ inspected by nobody, since its capabilities fail the lookup from its
 close, what it still holds showing in its nearest live ancestor's `used`
 and `pinned` ([Budgets](#budgets)); a stopped tree finishes at the
 finishing level on its threads' own CPUs, within each CPU's finishing
-share of 4 of every 8 ticks and outside every quota, charged for the
-accounting to its killer's path, with the stopper sleeping until the
-record, where a helping phase would have run the finishing threads on
-the stopper's CPU and passed their ownership along a chain of stops, and
-a grant-funded finishing would have let a killer's exhausted, frozen or
-misplaced grant hold a death back (**The kill and the finisher path**,
-[Execution model and locking](#execution-model-and-locking)); an object
+share of 4 of every 8 ticks and outside every quota, its time added for
+the accounting to a separate `finishing_ns` counter of the finishing
+threads' own groups, never to the killer's, with the stopper sleeping
+until the record, where a helping phase would have run the finishing
+threads on the stopper's CPU and passed their ownership along a chain of
+stops, and a grant-funded finishing would have let an exhausted, frozen
+or misplaced grant hold a death back (**The kill**, [Execution model and
+locking](#execution-model-and-locking)); an object
 under construction is owned by a construction record on its budget's
 list from its first charge, whose existence lock its creator holds, so a
 budget's destroy cancels and helps it as it drains any charged object,
@@ -8535,7 +8537,8 @@ wait; `CODE` travels only with budgets the system domain carves;
 the system domain is the root task, its fault, halt and missed watchdog
 deadline each ending the machine after a crash record; no call lends CPU
 time, and a stop's tree finishes at the finishing level within each
-CPU's share, charged for the accounting to the stopper's path;
+CPU's share, charged for the accounting to its own groups'
+`finishing_ns`;
 budgets are space banks, so destroying one deletes everything charged to
 it; `ERX_BUDGET_DEPTH_MAX` is 16, since programs' budgets do not nest and
 the chain's locks are held together; `erx_budget_watch` stays, since

@@ -423,13 +423,10 @@ it; git history is the record of completed work.
   validator calls the first, so wherever it runs on a proven stack the
   1 KiB frame cap refuses it. Decode into caller-supplied scratch instead
   of stack locals.
-* [Low] build, stack proof: the allowances in `kernel/stack_fiasco.txt`
-  (2048 bytes for call entries, 1024 for the tick hook) and the declared
-  costs of Fiasco's `memcpy` and `memset` (64 bytes each; GCC 16.2.0
-  measures 0 at -O2) are proposals awaiting the owner's numbers. The glue's
-  `static_assert` and the conformance suite's watermark check read them
-  from that file once they are built. Its `tick` entries are listed by
-  hand; derive them from the glue's tick hook once the glue exists.
+* [Low] build, stack proof: `kernel/stack_fiasco.txt` lists its `tick`
+  entries by hand; derive them from the glue's tick hook once the glue
+  exists, and have the glue's `static_assert` and the conformance suite's
+  watermark check read the allowances from that file.
 * [Medium] build, stack proof: frames and tail jumps are taken as the
   compiler made them; inline assembly that writes the stack pointer or the
   link register is not accounted for. The inline-assembly chokepoint must
