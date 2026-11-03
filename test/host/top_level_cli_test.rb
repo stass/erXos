@@ -50,13 +50,13 @@ class TopLevelCliTest < Minitest::Test
     runtime = proc do |**_options, &block|
       block.call('ERX_ERL' => '/verified/erl', 'ERX_ERLC' => '/verified/erlc')
     end
-    yield runner: Factory.new(recording_runner(commands, fail_name: fail_name)),
-          checks: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
+    yield runner_class: Factory.new(recording_runner(commands, fail_name: fail_name)),
+          checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
   end
 
   def test_check_runs_every_generation_gate_and_real_renderer_integration
     commands = []
-    with_checks(commands) do |**collaborators|
+    with_checks(commands) do |collaborators|
       status, output = run_cli('check', **collaborators)
       assert_equal 0, status, output
     end
@@ -76,7 +76,7 @@ class TopLevelCliTest < Minitest::Test
 
   def test_failed_renderer_integration_fails_the_aggregate_gate
     commands = []
-    with_checks(commands, fail_name: 'native-integration') do |**collaborators|
+    with_checks(commands, fail_name: 'native-integration') do |collaborators|
       status, output = run_cli('check', **collaborators)
       assert_equal 1, status
       assert_includes output, '/evidence/failure.log'
@@ -87,10 +87,10 @@ class TopLevelCliTest < Minitest::Test
   def test_unbuilt_native_jit_does_not_start_host_tests
     commands = []
     runtime = lambda do |runner:, &block|
-      Erx::CLI.send(:with_test_runtime, runner: runner, oracle: Factory.new(UnbuiltOracle.new),
-                    environment: ->(**) { {} }, &block)
+      Erx::CLI.send(:with_test_runtime, runner: runner, oracle_class: Factory.new(UnbuiltOracle.new),
+                    host_environment: ->(**) { {} }, &block)
     end
-    with_checks(commands) do |**collaborators|
+    with_checks(commands) do |collaborators|
       status, output = run_cli('check', **collaborators.merge(runtime: runtime))
       assert_equal 1, status
       assert_includes output, 'not built'
@@ -104,10 +104,16 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, 'unsupported root_startup'
   end
 
+  def test_commands_refuse_unsupported_collaborators
+    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle --help -h].each do |command|
+      assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
+    end
+  end
+
   def test_sanitizer_gate_instruments_the_pack_and_elf_regression_corpora
     commands = []
-    with_checks(commands) do |runner:, runtime:, **|
-      status, output = run_cli('check-sanitizers', runner: runner, runtime: runtime)
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check-sanitizers', **collaborators.slice(:runner_class, :runtime))
       assert_equal 0, status, output
     end
     tests = commands.find { |_argv, options| options.fetch(:name) == 'sanitizer-tests' }
@@ -117,13 +123,13 @@ class TopLevelCliTest < Minitest::Test
   end
 
   def test_fuzz_limits_are_checked_before_starting_commands
-    status, output = run_cli('check-fuzz', '--runs', '0', runner: UnexpectedRunner)
+    status, output = run_cli('check-fuzz', '--runs', '0', runner_class: UnexpectedRunner)
     assert_equal 2, status
     assert_includes output, 'outside bounds'
   end
 
   def test_generation_gate_refuses_trailing_arguments
-    status, output = run_cli('check-generated', 'ignored', runner: UnexpectedRunner)
+    status, output = run_cli('check-generated', 'ignored', runner_class: UnexpectedRunner)
     assert_equal 2, status
     assert_includes output, 'unexpected arguments'
   end
@@ -168,9 +174,9 @@ class TopLevelCliTest < Minitest::Test
     observed = []
     c = proc { |**options| observed << [:c, options.fetch(:runs), options.fetch(:seed)] }
     ruby = proc { |**options| observed << [:ruby, options.fetch(:seconds), options.fetch(:seed)] }
-    with_checks(commands) do |runner:, runtime:, **|
+    with_checks(commands) do |collaborators|
       status, output = run_cli('check-fuzz', '--seconds', '7', '--runs', '1234', '--seed', '19',
-                               runner: runner, runtime: runtime, c_fuzzer: c, ruby_fuzzer: ruby)
+                               **collaborators.slice(:runner_class, :runtime), c_fuzzer: c, ruby_fuzzer: ruby)
       assert_equal 0, status
       assert_includes output, 'fixed 20000 iterations, seed 1'
     end

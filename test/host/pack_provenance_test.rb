@@ -7,22 +7,19 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/pack_provenance'
 
 class PackProvenanceTest < Minitest::Test
-  class HashTrackingInputs < Erx::BuildInputs
-    attr_reader :hashed_paths
+  # Each catalog class closes over the caller's record, including instances
+  # built by BuildInputs#merge. Both read operations record their requests.
+  def tracking_inputs_class(requested_paths)
+    Class.new(Erx::BuildInputs) do
+      define_method(:read) do |path, **options|
+        requested_paths << File.realpath(path)
+        super(path, **options)
+      end
 
-    def initialize(**options)
-      @hashed_paths = []
-      super
-    end
-
-    def read(path, **options)
-      hashed_paths << File.realpath(path)
-      super
-    end
-
-    def verify(path)
-      hashed_paths << File.realpath(path)
-      super
+      define_method(:verify) do |path|
+        requested_paths << File.realpath(path)
+        super(path)
+      end
     end
   end
 
@@ -218,8 +215,17 @@ class PackProvenanceTest < Minitest::Test
     path
   end
 
-  def build_catalog(inputs: Erx::BuildInputs)
-    inputs.pack(root: @root, paths: @produced)
+  def build_catalog(inputs_class: Erx::BuildInputs)
+    inputs_class.pack(root: @root, paths: @produced)
+  end
+
+  def test_hash_tracking_survives_catalog_merge
+    requested_paths = []
+    catalog = build_catalog(inputs_class: tracking_inputs_class(requested_paths))
+    merged = catalog.merge(build_catalog)
+    merged.verify(@artifact)
+    merged.read(@object, maximum: 1024 * 1024)
+    assert_equal [File.realpath(@artifact), File.realpath(@object)], requested_paths
   end
 
   def reference(path)
@@ -296,14 +302,15 @@ class PackProvenanceTest < Minitest::Test
       File.binwrite(path, 'outside bytes')
       @receipt['artifact'] = { 'path' => path, 'sha256' => Digest::SHA256.file(path).hexdigest }
       receipt = write('receipt.json', JSON.generate(@receipt))
-      catalog = build_catalog(inputs: HashTrackingInputs)
+      requested_paths = []
+      catalog = build_catalog(inputs_class: tracking_inputs_class(requested_paths))
       resolver = Erx::PackProvenance.new(root: @root, catalog: catalog)
       begin
         resolver.resolve(receipt: receipt, artifact: path, build_kind: 'development')
       rescue Erx::Error
         nil
       end
-      refute_includes catalog.hashed_paths, File.realpath(path)
+      refute_includes requested_paths, File.realpath(path)
     end
   end
 
@@ -317,12 +324,13 @@ class PackProvenanceTest < Minitest::Test
       @receipt.fetch('compiles').first['dependency'] = reference(@dependency)
       @receipt.fetch('compiles').first['sources'] = [{ 'path' => link, 'sha256' => Digest::SHA256.file(secret).hexdigest }]
       receipt = write('receipt.json', JSON.generate(@receipt))
-      catalog = build_catalog(inputs: HashTrackingInputs)
+      requested_paths = []
+      catalog = build_catalog(inputs_class: tracking_inputs_class(requested_paths))
       resolver = Erx::PackProvenance.new(root: @root, catalog: catalog)
       assert_raises(Erx::Error) do
         resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'development')
       end
-      refute_includes catalog.hashed_paths, File.realpath(secret)
+      refute_includes requested_paths, File.realpath(secret)
       private_root = File.join(@root, '.git')
       Dir.mkdir(private_root)
       receipt = File.join(private_root, 'receipt.json')

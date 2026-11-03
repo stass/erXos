@@ -8,15 +8,6 @@ require 'rbconfig'
 require_relative '../../tools/lib/erx/oracle'
 
 class OracleTest < Minitest::Test
-  class RefusingJson
-    attr_reader :parsed
-
-    def parse(*, **)
-      @parsed = true
-      raise Erx::Error, 'fixture parser refusal'
-    end
-  end
-
   def setup
     @root = Dir.mktmpdir('erx-oracle-')
     FileUtils.copy_file(File.expand_path('../../deps.lock', __dir__), File.join(@root, 'deps.lock'))
@@ -39,10 +30,8 @@ class OracleTest < Minitest::Test
     directory = File.join(@root, 'build/oracle/emu')
     FileUtils.mkdir_p(directory)
     File.binwrite(File.join(directory, 'build.json'), 'x' * (1024 * 1024 + 1))
-    json = RefusingJson.new
-    oracle = Erx::Oracle.new(root: @root, json: json)
-    assert_raises(Erx::Error) { oracle.verify('emu') }
-    refute json.parsed, 'oversized receipt reached the JSON parser after an unbounded file read'
+    error = assert_raises(Erx::Error) { @oracle.verify('emu') }
+    assert_match(/input is not a bounded regular file/, error.message)
   end
 
   def test_matching_marker_does_not_admit_mutated_stock_sources

@@ -44,7 +44,7 @@ class OracleCliTest < Minitest::Test
     end
     status, output = run_cli('oracle', 'run', 'kernel', '--docker-context', 'owned',
                              '--flavour', 'jit', '--jobs', '2', '--deadline', '60',
-                             '--suite', 'basic_SUITE', '--case', 'simple', container: BackendFactory.new(backend))
+                             '--suite', 'basic_SUITE', '--case', 'simple', container_class: BackendFactory.new(backend))
     assert_equal 1, status
     assert_includes output, 'Linux host oracle: failed'
     assert_equal [['kernel', { flavour: 'jit', jobs: 2, deadline: 60,
@@ -56,7 +56,7 @@ class OracleCliTest < Minitest::Test
     backend = Object.new
     backend.define_singleton_method(:build) { |**options| calls << options }
     status, output = run_cli('oracle', 'build', '--backend', 'native', '--flavour', 'jit', '--clean',
-                             native: BackendFactory.new(backend))
+                             native_class: BackendFactory.new(backend))
     assert_equal 0, status
     assert_includes output, 'native stock OTP bootstrap jit ready'
     assert_equal [{ flavours: ['jit'], jobs: 4, clean: true }], calls

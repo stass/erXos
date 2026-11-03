@@ -342,12 +342,14 @@ class OracleContainerTest < Minitest::Test
 
   def test_guest_result_records_startup_marker_presence_after_the_operation
     job = CompletedJob.new
-    assert_equal true, job.call(files: GuestEvidence.new).fetch('operator_startup_marker')
+    assert_equal true, job.call(startup_marker_exists: GuestEvidence.new.method(:exist?),
+                          read_memory_events: GuestEvidence.new.method(:binread)).fetch('operator_startup_marker')
   end
 
   def test_guest_result_keeps_kernel_memory_events_as_bounded_evidence
     job = CompletedJob.new
-    evidence = job.call(files: GuestEvidence.new).fetch('memory_events')
+    evidence = job.call(startup_marker_exists: GuestEvidence.new.method(:exist?),
+                          read_memory_events: GuestEvidence.new.method(:binread)).fetch('memory_events')
     assert_equal 'available', evidence.fetch('status')
     assert_equal "oom 2\noom_kill 1\n", evidence.fetch('contents')
   end

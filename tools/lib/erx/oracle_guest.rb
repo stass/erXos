@@ -44,17 +44,17 @@ module Erx
       @install = '/tmp/erx-oracle/install'
     end
 
-    def call(files: File)
+    def call(startup_marker_exists: File.method(:exist?), read_memory_events: File.method(:binread))
       result = execute_plan
-      result.merge('operator_startup_marker' => files.exist?('/tmp/erx-oracle/operator-startup-executed'),
-                   'memory_events' => memory_events(files: files))
+      result.merge('operator_startup_marker' => startup_marker_exists.call('/tmp/erx-oracle/operator-startup-executed'),
+                   'memory_events' => memory_events(read_memory_events))
     end
 
     private
 
-    def memory_events(files: File)
+    def memory_events(read_memory_events)
       path = '/sys/fs/cgroup/memory.events'
-      contents = files.binread(path, 4097)
+      contents = read_memory_events.call(path, 4097)
       raise Error, 'memory event evidence is empty or exceeds its bound' unless contents && contents.bytesize.between?(1, 4096)
       { 'status' => 'available', 'source' => path, 'contents' => contents }
     rescue Error, SystemCallError => error

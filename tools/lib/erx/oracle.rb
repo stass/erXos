@@ -29,8 +29,7 @@ module Erx
       'CFLAGS' => nil, 'CXXFLAGS' => nil, 'CPPFLAGS' => nil, 'LDFLAGS' => nil
     }.freeze
 
-    def initialize(root:, runner: nil, json: JsonInput)
-      @json = json
+    def initialize(root:, runner: nil)
       @root = File.realpath(root)
       @runner = runner || Runner.new(owner_root: @root, log_dir: File.join(@root, 'build/logs'))
       @build = File.join(@root, 'build/oracle')
@@ -60,7 +59,7 @@ module Erx
       unless File.file?(receipt) && !File.symlink?(receipt)
         raise Error, "oracle #{flavour} has no completed build receipt"
       end
-      report = @json.parse(BoundedFile.read(receipt, maximum: 1024 * 1024), label: 'native oracle build receipt')
+      report = JsonInput.parse(BoundedFile.read(receipt, maximum: 1024 * 1024), label: 'native oracle build receipt')
       expected_source = @dependencies.sources.find { |source| source.fetch('id') == 'otp' }
       unless report.is_a?(Hash) && report['state'] == 'ready' &&
              report['version'] == '29.1.2' && report['flavour'] == flavour &&
@@ -82,7 +81,7 @@ module Erx
         raise Error, "oracle #{flavour} is already in use" unless lock.flock(File::LOCK_EX | File::LOCK_NB)
         verify(flavour)
         yield({ 'erl' => erl_path(flavour), 'erlc' => File.join(directory, 'install/bin/erlc'),
-                'build' => @json.parse(BoundedFile.read(File.join(directory, 'build.json'), maximum: 1024 * 1024), label: 'native oracle build receipt') })
+                'build' => JsonInput.parse(BoundedFile.read(File.join(directory, 'build.json'), maximum: 1024 * 1024), label: 'native oracle build receipt') })
       end
     end
 

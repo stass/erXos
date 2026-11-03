@@ -24,9 +24,10 @@ module Erx
     CHUNK_BYTES = 65_536
     module_function
 
-    def call(source:, destination:, operation:, suite: nil, limits: DEFAULT_LIMITS, files: File, directories: Dir)
+    def call(source:, destination:, operation:, suite: nil, limits: DEFAULT_LIMITS,
+             open_destination: File.method(:open), list_source_directory: Dir.method(:each_child))
       Export.new(source: source, destination: destination, operation: operation, suite: suite, limits: limits,
-                 files: files, directories: directories).call
+                 open_destination: open_destination, list_source_directory: list_source_directory).call
     end
 
     def verify(destination:, limits: DEFAULT_LIMITS)
@@ -131,9 +132,10 @@ module Erx
     private_constant :Rules
 
     class Export
-      def initialize(source:, destination:, operation:, suite:, limits:, files: File, directories: Dir)
-        @files = files
-        @directories = directories
+      def initialize(source:, destination:, operation:, suite:, limits:,
+                     open_destination: File.method(:open), list_source_directory: Dir.method(:each_child))
+        @open_destination = open_destination
+        @list_source_directory = list_source_directory
         @source = File.expand_path(source)
         @destination = Rules.root(destination)
         @limits = Rules.limits(limits)
@@ -236,7 +238,7 @@ module Erx
               collision(path)
               names = []
               available = @limits.fetch('entries') - @entries - pending.size
-              @directories.each_child(File.join(@source, path)) do |name|
+              @list_source_directory.call(File.join(@source, path)) do |name|
                 names << name.b
                 break if names.size > available
               end
@@ -332,7 +334,7 @@ module Erx
               raise Error, 'oracle artifact changed after planning'
             end
             destination_parents(path)
-            @files.open(target, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
+            @open_destination.call(target, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
               created = true
               remaining = file.fetch('size')
               while remaining.positive?

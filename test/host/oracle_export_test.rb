@@ -238,7 +238,7 @@ class OracleExportTest < Minitest::Test
     path = CT_ROOT + '/attachment/broken'
     write(path, 'ordinary source bytes')
     target = File.join(@destination, path)
-    result = export(files: FailingFiles.new(target))
+    result = export(open_destination: FailingFiles.new(target).method(:open))
     assert result.fetch('omissions').any? { |issue| issue.fetch('path') == path && issue.fetch('reason') == 'copy_failed' }, result.inspect
     refute File.exist?(target)
     refute File.exist?(File.dirname(target))
@@ -346,7 +346,7 @@ class OracleExportTest < Minitest::Test
       FileUtils.mkdir_p(File.join(@source, parent))
     end
     directories = CountingDirectories.new
-    result = export(changes: { 'entries' => 20 }, directories: directories)
+    result = export(changes: { 'entries' => 20 }, list_source_directory: directories.method(:each_child))
     assert_operator directories.visited, :<=, 21
     assert_equal 'partial', result.fetch('state')
   end
