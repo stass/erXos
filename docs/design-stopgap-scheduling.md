@@ -1638,7 +1638,7 @@ Each documented, tested, and gone with the stopgap:
 | Difference | On the fork | On erXos's kernel |
 | --- | --- | --- |
 | the count that gates the exit record | the live count: every thread from its creation to its death edge, with no pauses or copies to serve | the active count: every thread running or preempted inside a call, which pauses and copies also wait on; both are zero exactly when no thread of the space can act |
-| finishing threads | at the fixed finishing priority, above every urgency, on their own CPUs, charged to the killing call's group and throttled with its grant in C1 | on their own CPUs, charged to the killer's finisher path and throttled with its grant, at the urgency resolved on that path, with no finishing share ([design-scheduler.md](design-scheduler.md#finishing-and-reclamation)) |
+| finishing threads | at the fixed finishing priority, above every urgency, on their own CPUs, charged to the killing call's group and throttled with its grant in C1 | on their own CPUs, charged to the killer's finisher path and throttled with its grant, at the urgency resolved on that path, with no finishing share ("Finishing and reclamation" in [design-scheduler.md](design-scheduler.md#charging-and-quota)) |
 | a thread of a stopped space at its return boundary before its kill | holds in a boundary wait until the stop's kill reaches it | dies there at once |
 | the stopper's call | sleeps until `EXITED` or its own kill, whichever comes first | busy until the record is posted |
 | urgency resolution | stored and refreshed by every change before that call returns | derived at every decision |
