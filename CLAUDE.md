@@ -166,7 +166,8 @@ scripts live in `~/erxos-scratch/tools/`.
   subagent writes the design: Opus 5.5 at `high` reasoning effort for
   normal designs, at `xhigh` for complicated or critical ones, and at
   `max` for exceptionally complex ones. A Codex
-  `gpt-6-astra` review at `xhigh`, in a read-only sandbox and with the
+  `gpt-6-astra` review at `xhigh` (at `max` for the most complex designs),
+  in a read-only sandbox and with the
   security pass framed explicitly, then reviews the design, and its
   CRITICAL and HIGH findings are fixed before implementation starts. Give
   the design agent the goal, context and the user's constraints as
@@ -597,8 +598,10 @@ within about 20 percent of the length, write plain code.
     findings in `TODO.md` or the commit message if not fixed.
 * **External review.** Designs and complex code changes also get an external
   review once the internal reviews pass:
-  - Run it with the Codex CLI, model `gpt-6.1-sol` at xhigh reasoning effort,
-    in a read-only sandbox:
+  - A design's external review is the `gpt-6-astra` review of the design
+    subagent rule above. A code change's external review runs with the Codex
+    CLI, model `gpt-6.1-sol` at xhigh reasoning effort, in a read-only
+    sandbox:
     `codex exec -m gpt-6.1-sol -c model_reasoning_effort='"xhigh"' -s read-only -C <tree> "<prompt>" < /dev/null > review.log 2>&1`.
     Frame the security pass explicitly, as for internal reviews.
   - Close its standard input: without `< /dev/null`, `codex exec` in the
