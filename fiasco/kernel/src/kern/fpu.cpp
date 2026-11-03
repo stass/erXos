@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 /*
  * Fiasco
  * Floating point unit code
@@ -31,20 +33,6 @@ public:
 };
 
 // ----------------------------------------------------------------------
-INTERFACE [fpu && lazy_fpu]:
-
-EXTENSION class Fpu
-{
-public:
-  Context *owner() const { return _owner; }
-  void set_owner(Context *owner) { _owner = owner; }
-  bool is_owner(Context *owner) const { return _owner == owner; }
-
-private:
-  Context *_owner;
-};
-
-//---------------------------------------------------------------------------
 IMPLEMENTATION:
 
 DEFINE_PER_CPU Per_cpu<Fpu> Fpu::fpu;

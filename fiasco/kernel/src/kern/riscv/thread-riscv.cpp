@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [riscv]:
 
 EXTENSION class Thread
@@ -682,21 +684,7 @@ Thread::handle_hyp_ext_trap(Mword cause, Mword val, Trap_state *ts)
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [riscv && cpu_virt && fpu && lazy_fpu]:
-
-PRIVATE inline
-bool
-Thread::handle_hyp_ext_fpu_trap()
-{
-  // FPU is enabled, so it can't be an FPU trap.
-  if (Fpu::is_enabled())
-    return false;
-
-  return switchin_fpu();
-}
-
-//----------------------------------------------------------------------------
-IMPLEMENTATION [riscv && cpu_virt && (!fpu || !lazy_fpu)]:
+IMPLEMENTATION [riscv && cpu_virt]:
 
 PRIVATE inline
 bool

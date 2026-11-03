@@ -1832,9 +1832,10 @@ measured with `tools/erx bench irq` when resources land.
   (the `fiasco-kernel-config` step of `tools/lib/erx/fiasco.rb`), not
   the defconfig itself, since a `select` can set what the defconfig
   leaves unset. `tools/check_fiasco_config.rb` reads that file and
-  requires `CONFIG_FPU=y`, `CONFIG_PERFORMANCE=y` and
-  `CONFIG_PERF_CNT_USER=y`, and `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and
-  `CONFIG_CPU_VIRT` absent or `is not set`; the fork's `Kconfig` has no
+  requires `CONFIG_FPU=y`, `CONFIG_PERFORMANCE=y`,
+  `CONFIG_PERF_CNT_USER=y` and `CONFIG_SYNC_CLOCK=y`, and
+  `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` and `CONFIG_CPU_VIRT` absent or
+  `is not set`; the fork's `Kconfig` has no
   `LAZY_FPU` option at all (**FP and SIMD state**), so that line of the
   check holds by construction and guards against the option being
   reintroduced. `CONFIG_CPU_VIRT` is pinned because the thread region's

@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 //------------------------------------------------------------------------
 INTERFACE [arm_v8]:
 
@@ -290,26 +292,12 @@ Fpu::state_align()
 { return 16; }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [arm && fpu && lazy_fpu]:
-
-PRIVATE inline
-void
-Fpu::finish_init()
-{
-  disable();
-  set_owner(nullptr);
-}
-
-//-------------------------------------------------------------------------
-IMPLEMENTATION [arm && fpu && !lazy_fpu]:
+IMPLEMENTATION [arm && fpu]:
 
 PRIVATE inline
 void
 Fpu::finish_init()
 {}
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [arm && fpu]:
 
 PRIVATE static
 void

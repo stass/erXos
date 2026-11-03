@@ -1,9 +1,9 @@
+# Modified by erXos: no architecture selects lazy FP switching.
 # ARCH:           RISCV riscv
 # ARCHDESCR:      RISC-V processor family
 #
 # ARCHSELECT:     HAS_SERIAL_OPTION
 # ARCHSELECT:     HAS_JDB_DISASM_OPTION
-# ARCHSELECT:     HAS_LAZY_FPU
 # ARCHSELECT:     HAS_SYNC_CLOCK
 # ARCHSELECT:     HAS_ONE_SHOT if SYNC_CLOCK
 # ARCHSELECT:     HAS_TICKLESS_IDLE

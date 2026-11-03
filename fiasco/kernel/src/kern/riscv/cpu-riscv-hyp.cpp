@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [riscv && cpu_virt && 32bit]:
 
 EXTENSION
@@ -95,11 +97,7 @@ public:
 
   enum : Mword
   {
-    // With lazy FPU switching we cannot delegate illegal instruction exception,
-    // as we need it to detect usage of disabled FPU, i.e. the case that
-    // currently someone else is the FPU owner.
-    Hedeleg_mask = TAG_ENABLED(fpu && lazy_fpu)
-                   ? ~(1UL << Exc_illegal_inst) : ~0UL,
+    Hedeleg_mask = ~0UL,
   };
 };
 

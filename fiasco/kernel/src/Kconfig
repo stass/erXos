@@ -1,11 +1,10 @@
+# Modified by erXos: lazy FP switching is not an option; FP state is
+# switched eagerly (docs/design-stopgap.md, "FP and SIMD state").
 
 mainmenu "Fiasco configuration"
 
 # generic options that might be selected by platforms etc.
 config HAS_FPU_OPTION
-	bool
-
-config HAS_LAZY_FPU
 	bool
 
 config HAS_SERIAL_OPTION
@@ -107,18 +106,6 @@ config FPU
 	default y if HAS_FPU_OPTION
 	help
 	  Enable this if your platform has hardware floating point support.
-
-config LAZY_FPU
-	bool "Enable lazy FPU switching" if HAS_LAZY_FPU && FPU
-	depends on FPU && HAS_LAZY_FPU
-	default y if !AMD64
-	help
-	  Enable this option to allow lazy context switching of FPU / SIMD
-	  processor state. This removes the overhead incurred by eagerly
-	  switching the FPU / SIMD state which is needed to mitigate the lazy
-	  FPU restore side-channel attack found on Intel processors.
-
-	  It is safe to enable this option on AMD CPUs.
 
 choice
 	prompt "Default CPU performance profile"
@@ -631,7 +618,6 @@ config PERFORMANCE
 	select INLINE
 	select NDEBUG
 	select NO_FRAME_PTR
-	select LAZY_FPU if FPU && HAS_LAZY_FPU
 	help
 	  Setup the kernel such that performance is chosen over
 	  being friendly for debugging. With this option, no
@@ -707,7 +693,7 @@ config BEFORE_IRET_SANITY
 	    - Is the thread locked by any other thread?
 	    - Does the thread have the right state:
 	      * Thread_ready must be set.
-	      * Thread_cancel and Thread_fpu_owner might be set.
+	      * Thread_cancel might be set.
 	      * Any other state bit must not be set.
 	  Don't use Fiasco compiled with this option for performance analysis!
 

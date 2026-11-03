@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [mips && fpu]:
 
 #include <cxx/bitfield>
@@ -147,18 +149,7 @@ Fpu::set_mipsr2_fp64()
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [mips && fpu && lazy_fpu]:
-
-PRIVATE inline
-void
-Fpu::finish_init()
-{
-  disable();
-  set_owner(0);
-}
-
-//-------------------------------------------------------------------------
-IMPLEMENTATION [mips && fpu && !lazy_fpu]:
+IMPLEMENTATION [mips && fpu]:
 
 PRIVATE inline
 void

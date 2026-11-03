@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE:
 
 #include "vcpu.h"
@@ -88,19 +90,7 @@ Context::vcpu_enable_fpu_if_disabled(Mword)
 {}
 
 // ---------------------------------------------------------------------
-IMPLEMENTATION [fpu && lazy_fpu]:
-
-PROTECTED inline
-void
-Context::vcpu_enable_fpu_if_disabled(Mword thread_state)
-{
-  if ((thread_state & (Thread_fpu_owner | Thread_vcpu_fpu_disabled))
-      == (Thread_fpu_owner | Thread_vcpu_fpu_disabled))
-    Fpu::fpu.current().enable();
-}
-
-// ---------------------------------------------------------------------
-IMPLEMENTATION [fpu && !lazy_fpu]:
+IMPLEMENTATION [fpu]:
 
 PROTECTED inline
 void

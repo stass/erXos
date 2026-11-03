@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [riscv && fpu && riscv_fpu_single]:
 
 EXTENSION class Fpu
@@ -199,18 +201,7 @@ Fpu::show(Cpu_number)
 {}
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [riscv && fpu && lazy_fpu]:
-
-PRIVATE inline
-void
-Fpu::finish_init()
-{
-  disable();
-  set_owner(nullptr);
-}
-
-//-------------------------------------------------------------------------
-IMPLEMENTATION [riscv && fpu && !lazy_fpu]:
+IMPLEMENTATION [riscv && fpu]:
 
 PRIVATE inline
 void

@@ -1,3 +1,5 @@
+// Modified by erXos: FP state is switched eagerly, so no thread owns the
+// FPU (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [arm_em_tz]:
 
 #include "task.h"
@@ -250,26 +252,10 @@ register_factory()
 }
 
 // --------------------------------------------------------------------------
-IMPLEMENTATION [arm && arm_em_tz && fpu]:
+IMPLEMENTATION [arm && arm_em_tz]:
 
-PUBLIC
-bool
-Vm::get_fpu()
-{
-  if (!(current()->state() & Thread_fpu_owner))
-    {
-      if (!current_thread()->switchin_fpu())
-        {
-          printf("tz: switchin_fpu failed\n");
-          return false;
-        }
-    }
-  return true;
-}
-
-// --------------------------------------------------------------------------
-IMPLEMENTATION [arm && arm_em_tz && !fpu]:
-
+// FP state is switched eagerly, so the current thread's state is always
+// loaded and a world switch needs nothing from the FPU.
 PUBLIC
 bool
 Vm::get_fpu()

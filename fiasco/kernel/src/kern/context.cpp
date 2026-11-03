@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE:
 
 #include "types.h"
@@ -2758,94 +2760,7 @@ Context::release_owned_pi_mutexes()
 }
 
 //----------------------------------------------------------------------------
-IMPLEMENTATION [fpu && lazy_fpu]:
-
-#include "fpu.h"
-
-PUBLIC inline NEEDS ["fpu.h"]
-void
-Context::spill_fpu()
-{
-  // If we own the FPU, we should never be getting an "FPU unavailable" trap
-  assert (Fpu::fpu.current().owner() == this);
-  assert (state() & Thread_fpu_owner);
-  assert (fpu_state().valid());
-
-  // Save the FPU state of the previous FPU owner (lazy) if applicable
-  Fpu::save_state(fpu_state().get());
-  state_del_dirty(Thread_fpu_owner);
-}
-
-/**
- * When switching away from the FPU owner, disable the FPU to cause
- * the next FPU access to trap.
- * When switching back to the FPU owner, enable the FPU so we don't
- * get an FPU trap on FPU access.
- */
-IMPLEMENT inline NEEDS ["fpu.h"]
-void
-Context::switch_fpu(Context *t)
-{
-  Fpu &f = Fpu::fpu.current();
-  if (f.is_owner(this))
-    f.disable();
-  else if (f.is_owner(t) && !(t->state() & Thread_vcpu_fpu_disabled))
-    f.enable();
-}
-
-PUBLIC inline NEEDS["fpu.h"]
-void
-Context::spill_fpu_if_owner()
-{
-  // spill FPU state into memory before migration
-  if (!(state() & Thread_fpu_owner))
-    return;
-
-  Fpu &f = Fpu::fpu.current();
-
-  if (current() != this)
-    f.enable();
-
-  spill_fpu();
-  f.set_owner(nullptr);
-  f.disable();
-}
-
-PUBLIC static
-void
-Context::spill_current_fpu()
-{
-  Fpu &f = Fpu::fpu.current();
-  if (f.owner())
-    {
-      f.enable();
-      f.owner()->spill_fpu();
-      f.set_owner(nullptr);
-      f.disable();
-    }
-}
-
-
-PUBLIC inline NEEDS["fpu.h"]
-void
-Context::release_fpu_if_owner()
-{
-  // If this context owns the FPU, no one owns it now
-  Fpu &f = Fpu::fpu.current();
-  if (f.is_owner(this))
-    {
-      f.set_owner(nullptr);
-      f.disable();
-    }
-}
-
-IMPLEMENT inline
-void
-Context::restore_fpu_on_resume()
-{}
-
-//----------------------------------------------------------------------------
-IMPLEMENTATION [fpu && !lazy_fpu]:
+IMPLEMENTATION [fpu]:
 
 #include "fpu.h"
 
@@ -2875,21 +2790,34 @@ Context::switch_fpu(Context *t)
     f.disable();
 }
 
-PUBLIC inline
+/**
+ * Save the registers the FPU holds for this context when it is the current
+ * one. A vCPU that disabled its FPU runs with the unit off, which would trap
+ * the kernel's own save as well, so the unit is on for the save only.
+ */
+PUBLIC inline NEEDS ["fpu.h"]
 void
 Context::spill_fpu_if_owner()
 {
   if (current() != this)
     return;
 
+  bool unit_off = state() & Thread_vcpu_fpu_disabled;
+  Fpu &f = Fpu::fpu.current();
+  if (unit_off)
+    f.enable();
+
   spill_fpu();
+
+  if (unit_off)
+    f.disable();
 }
 
 PUBLIC static
 void
 Context::spill_current_fpu()
 {
-  current()->spill_fpu();
+  current()->spill_fpu_if_owner();
 }
 
 PUBLIC inline

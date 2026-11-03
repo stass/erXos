@@ -74,6 +74,7 @@ class TopLevelCliTest < Minitest::Test
     integration = commands.find { |_argv, options| options.fetch(:name) == 'native-integration' }
     assert integration.first.any? { |argument| argument.end_with?('/terminal_tables_test.rb') }
     assert integration.first.any? { |argument| argument.end_with?('/structural_pack_test.rb') }
+    assert integration.first.any? { |argument| argument.end_with?('/fiasco_config_test.rb') }
     assert_equal '/verified/erl', integration.last.fetch(:env).fetch('ERX_ERL')
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
   end

@@ -385,13 +385,32 @@ it; git history is the record of completed work.
   `fiasco/kernel/src/erx/erx_probe.cpp`, the one glue module, gets only
   `ERX_GLUE_CXXFLAGS` (`fiasco/kernel/src/Makeconf`). The glue checks
   package adds the flag beside the include path.
-* [Medium] stopgap kernel, configuration: the resolved
-  `build/fiasco/kernel/globalconfig.out` has `CONFIG_LAZY_FPU=y` and
-  `CONFIG_ARM_SVE=y`, which the fork's configuration
-  ([design-stopgap.md](docs/design-stopgap.md), "Interfaces") forbids, and
-  `tools/check_fiasco_config.rb` does not exist. The FP and SIMD state
-  work removes `LAZY_FPU` from the fork's `Kconfig`, unsets `ARM_SVE` and
-  adds the check after the `fiasco-kernel-config` step.
+* [Medium] stopgap kernel, FP state: the fork switches FP state eagerly,
+  and nothing runs it. No QEMU case holds distinct vector registers in two
+  threads of different spaces across switches and a migration, or reads a
+  fresh thread's registers as zero (the FP case of the "every exception
+  class" row of [design-stopgap.md](docs/design-stopgap.md)), and no
+  `tools/erx bench` workload times the kernel's context switch, so the
+  eager switch's cost is unmeasured. `Context::spill_fpu_if_owner`
+  (`context.cpp`), which turns the unit on to save a current vCPU that
+  disabled its FPU, has no case that reaches it, and the eager
+  `Thread::transfer_fpu` (`thread.cpp`) still saves and restores the
+  current thread's registers without turning the unit on; the design
+  does not build it.
+* [Low] host tooling, runner: `Runner#terminate_group`
+  (`tools/lib/erx/runner.rb`) treats only `ESRCH` from signalling the
+  child's process group as "already gone"; on macOS the group's signal can
+  fail with `EPERM` instead after the child aborted, and the run then
+  fails with "command cleanup failed: Operation not permitted". Seen once
+  in `make check` (2026-11-03, `SanitizerGateTest`, whose child aborts
+  under UBSan); the test passes alone. Find what holds the group and
+  decide whether `EPERM` there means "gone".
+* [Low] build, configuration check: `tools/lib/erx/fiasco.rb` checks the
+  resolved `globalconfig.out` before the kernel make, whose own rules can
+  rerun `oldconfig` or `syncconfig` (`fiasco/kernel/src/Makefile`). Today
+  a changed source recreates the build directory, so nothing rewrites the
+  checked file; check the configuration the built kernel embeds
+  (`.debug.fiasco_config`, `Makeconf`) after the make as well.
 * [Medium] build, stack proof: `kernel/stack_targets.txt` declares no stack
   use of assembly routines, and the proof checks no declared use against
   the routine's stack-pointer adjustments

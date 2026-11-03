@@ -10,6 +10,11 @@ require 'zlib'
 require_relative '../../tools/lib/erx/fiasco'
 
 class FiascoTest < Minitest::Test
+  # The recording runner resolves a configuration by copying it, so the
+  # fixture is already in the shape the configuration check accepts.
+  KERNEL_CONFIG = "CONFIG_ARM=y\n# CONFIG_CPU_VIRT is not set\nCONFIG_FPU=y\nCONFIG_SYNC_CLOCK=y\n" \
+                  "CONFIG_PERFORMANCE=y\nCONFIG_PERF_CNT_USER=y\n"
+
   def test_build_environment_supplies_the_host_temporary_directory
     assert_equal File.realpath(Dir.tmpdir), Erx::Fiasco.build_environment.fetch('TMPDIR')
   end
@@ -83,7 +88,7 @@ class FiascoTest < Minitest::Test
     %w[kernel include].each { |name| FileUtils.mkdir_p(File.join(@directory, name)) }
     File.write(File.join(@directory, 'fiasco/mk/Makefile'), '# inherited')
     FileUtils.mkdir_p(File.join(@directory, 'config/fiasco'))
-    File.write(kernel_config, "CONFIG_ARM=y\n# CONFIG_CPU_VIRT is not set\n")
+    File.write(kernel_config, KERNEL_CONFIG)
     File.write(user_config, "CONFIG_BUILD_ARCH_arm64=y\n")
     File.write(File.join(@directory, 'config/fiasco/modules.list'), 'fixture')
   end
@@ -140,6 +145,19 @@ class FiascoTest < Minitest::Test
     File.write(kernel_config, changed)
     @fiasco.build
     assert_equal changed, File.read(File.join(@directory, 'build/fiasco/kernel/globalconfig.out'))
+  end
+
+  # The check runs before the kernel make on every kernel build, also the
+  # second one here, which reuses its configuration step.
+  def test_resolved_kernel_config_breaking_the_forks_rules_stops_the_build
+    File.write(kernel_config, KERNEL_CONFIG + "CONFIG_LAZY_FPU=y\n")
+    2.times do
+      @runner.commands.clear
+      error = assert_raises(Erx::Error) { @fiasco.build }
+      assert_includes error.message, 'CONFIG_LAZY_FPU must be unset'
+      refute(@runner.commands.any? { |command| command.fetch(:options).fetch(:name) == 'fiasco-kernel-build' })
+    end
+    refute(@runner.commands.any? { |command| command.fetch(:options).fetch(:name) == 'fiasco-kernel-config' })
   end
 
   def test_changed_user_config_is_applied_to_incremental_build

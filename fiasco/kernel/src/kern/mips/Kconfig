@@ -1,10 +1,10 @@
+# Modified by erXos: no architecture selects lazy FP switching.
 # ARCH:           MIPS mips
 # ARCHDESCR:      MIPS processor family
 #
 # ARCHSELECT:     HAS_FPU_OPTION
 # ARCHSELECT:     HAS_SERIAL_OPTION
 # ARCHSELECT:     HAS_CPU_VIRT
-# ARCHSELECT:     HAS_LAZY_FPU
 # ARCHSELECT:     HAS_JDB_DISASM_OPTION
 #
 # ARCHDEFAULTPF:  PF_MALTA

@@ -1,3 +1,5 @@
+// Modified by erXos: FP state is switched eagerly, so no thread owns the
+// FPU (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [arm]:
 
 EXTENSION class Context
@@ -213,6 +215,8 @@ void
 Context::save_fpu_state_to_utcb(Trap_state const *ts, Utcb *u)
 {
   auto *esu = reinterpret_cast<Fpu::Exception_state_user *>(&u->values[21]);
-  Fpu::save_user_exception_state(state() & Thread_fpu_owner, fpu_state().get(),
-                                 ts, esu);
+  // FP state is switched eagerly: the unit holds the current thread's
+  // registers unless it is a vCPU that disabled its FPU.
+  bool live = current() == this && !(state() & Thread_vcpu_fpu_disabled);
+  Fpu::save_user_exception_state(live, fpu_state().get(), ts, esu);
 }

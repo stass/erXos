@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE[ia32 || amd64]:
 
 EXTENSION class Fpu
@@ -172,18 +174,6 @@ Fpu::restore_state(Fpu_state const *s)
       break;
 
     case Variant_fpu:
-#ifdef CONFIG_LAZY_FPU
-      /* this should be handled in the cases where we release the FPU and it has
-       * no owner anymore...
-       * frstor is a waiting instruction and we must make sure no FPU exceptions
-       * are pending here. We distinguish two cases:
-       * 1) If we had a previous FPU owner, we called save_state before and
-       *    invoked fnsave which re-initialized the FPU and cleared exceptions
-       * 2) Otherwise we call fnclex instead to clear exceptions. */
-      if (!f.owner())
-        asm volatile ("fnclex");
-#endif
-
       asm volatile ("frstor (%0)" : : "r" (s));
       break;
     }
@@ -332,18 +322,7 @@ Fpu::state_align()
 }
 
 //----------------------------------------------------------------
-IMPLEMENTATION [fpu && lazy_fpu]:
-
-PRIVATE inline
-void
-Fpu::finish_init()
-{
-  set_owner(nullptr);
-  disable();
-}
-
-//----------------------------------------------------------------
-IMPLEMENTATION [fpu && !lazy_fpu]:
+IMPLEMENTATION [fpu]:
 
 PRIVATE inline
 void

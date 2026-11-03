@@ -1,4 +1,10 @@
+// Modified by erXos: FP state is switched eagerly, so no thread owns the
+// FPU (docs/design-stopgap.md, "FP and SIMD state"). The notice makes this
+// file's implementation part non-empty, so its header includes what it
+// names.
 INTERFACE:
+
+#include "types.h"
 
 enum Thread_state : Mword
 {
@@ -56,10 +62,8 @@ enum Thread_state : Mword
   Thread_need_resched         = 0x2000,
   Thread_switch_hazards       = Thread_finish_migration | Thread_need_resched,
 
-  // 0x4000 is free
+  // 0x4000 and 0x8000 are free
 
-  /// Thread currently owns the FPU.
-  Thread_fpu_owner            = 0x8000,
   /// Thread is an alien -- not allowed to do system calls.
   Thread_alien                = 0x10000,
   /// Thread is an alien, however, the next system call is allowed.

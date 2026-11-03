@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE:
 
 #include "l4_types.h"
@@ -889,99 +891,7 @@ Thread::finish_migration() override
 { enqueue_timeout_again(); }
 
 //---------------------------------------------------------------------------
-IMPLEMENTATION [fpu && lazy_fpu]:
-
-#include "fpu.h"
-#include "fpu_alloc.h"
-#include "fpu_state_ptr.h"
-
-/*
- * Handle FPU trap for this context. Assumes disabled interrupts
- */
-PUBLIC inline NEEDS ["fpu_alloc.h","fpu_state_ptr.h"]
-int
-Thread::switchin_fpu(bool alloc_new_fpu = true)
-{
-  if (state() & Thread_vcpu_fpu_disabled)
-    return 0;
-
-  Fpu &f = Fpu::fpu.current();
-  // If we own the FPU, we should never be getting an "FPU unavailable" trap
-  assert (f.owner() != this);
-
-  // Allocate FPU state slab if we didn't already have one
-  if (!fpu_state().valid())
-    {
-      if (!alloc_new_fpu
-          || !Fpu_alloc::alloc_state(_quota, fpu_state())) [[unlikely]]
-        return 0;
-    }
-
-  // Enable the FPU before accessing it, otherwise recursive trap
-  f.enable();
-
-  // Save the FPU state of the previous FPU owner (lazy) if applicable
-  if (f.owner())
-    f.owner()->spill_fpu();
-
-  // Become FPU owner and restore own FPU state
-  f.restore_state(fpu_state().get());
-
-  state_add_dirty(Thread_fpu_owner);
-  f.set_owner(this);
-  return 1;
-}
-
-PUBLIC [[nodiscard]] inline
-bool
-Thread::alloc_eager_fpu_state()
-{ return true; }
-
-PUBLIC inline NEEDS["fpu.h", "fpu_alloc.h"]
-void
-Thread::transfer_fpu(Thread *to) //, Trap_state *trap_state, Utcb *to_utcb)
-{
-  if (to->fpu_state().valid())
-    Fpu_alloc::free_state(to->fpu_state());
-
-  to->fpu_state().set(fpu_state().get());
-  fpu_state().set(nullptr);
-
-  if (home_cpu() != to->home_cpu())
-    {
-      assert (!(to->state() & Thread_fpu_owner));
-      assert (!(state() & Thread_fpu_owner));
-      return;
-    }
-
-  assert (current() == this || current() == to);
-
-  Fpu &f = Fpu::fpu.current();
-
-  f.disable(); // it will be reenabled in switch_fpu
-
-  if (f.owner() == to) [[unlikely]]
-    {
-      assert (to->state() & Thread_fpu_owner);
-
-      f.set_owner(nullptr);
-      to->state_del_dirty(Thread_fpu_owner);
-    }
-  else if (f.owner() == this)
-    {
-      assert (state() & Thread_fpu_owner);
-
-      state_del_dirty(Thread_fpu_owner);
-
-      to->state_add_dirty (Thread_fpu_owner);
-      f.set_owner(to);
-      if (current() == to) [[unlikely]]
-        f.enable();
-    }
-}
-
-//---------------------------------------------------------------------------
-IMPLEMENTATION [fpu && !lazy_fpu]:
+IMPLEMENTATION [fpu]:
 
 #include "fpu.h"
 #include "fpu_alloc.h"

@@ -11,6 +11,7 @@ require_relative 'bounded_file'
 require_relative 'json_input'
 require_relative 'sources'
 require_relative 'fiasco_inputs'
+require_relative 'fiasco_config'
 require_relative 'core_archive'
 require_relative 'stack_proof_run'
 require_relative 'output_directory'
@@ -250,6 +251,9 @@ module Erx
       configure(source: @inputs.part('kernel'), directory: directory,
                 input: @inputs.configuration('kernel.defconfig'),
                 output: 'globalconfig.out', name: 'fiasco-kernel-config')
+      # The resolved file, not the defconfig: a select can set an option the
+      # defconfig leaves unset.
+      FiascoConfig.check(File.join(directory, 'globalconfig.out'))
       @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
                    "ERX_CORE_ARCHIVE=#{cores.archive}", "ERX_CORE_INCLUDE=#{cores.seam}"],
                   name: 'fiasco-kernel-build', deadline: 600, env: build_environment)

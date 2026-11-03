@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 IMPLEMENTATION [arm && 64bit]:
 
 #include "fpu.h"
@@ -259,29 +261,7 @@ Thread::alloc_sve_state(bool inherit_simd_state)
 }
 
 // ------------------------------------------------------------------------
-IMPLEMENTATION [arm && 64bit && lazy_fpu && arm_sve]:
-
-IMPLEMENT_OVERRIDE
-bool
-Thread::handle_sve_trap(Trap_state *)
-{
-  assert(Fpu::has_sve());
-
-  bool inherit_simd_state = fpu_state().valid();
-
-  // If we do not own the FPU, become the FPU owner.
-  if (Fpu::fpu.current().owner() != this && !switchin_fpu())
-    return false;
-
-  // Thread already has SVE enabled, so this was just a lazy FPU trap.
-  if (fpu_state().get()->type() == Fpu::State_type::Sve)
-    return true;
-
-  return alloc_sve_state(inherit_simd_state);
-}
-
-// ------------------------------------------------------------------------
-IMPLEMENTATION [arm && 64bit && !lazy_fpu && arm_sve]:
+IMPLEMENTATION [arm && 64bit && arm_sve]:
 
 IMPLEMENT_OVERRIDE
 bool

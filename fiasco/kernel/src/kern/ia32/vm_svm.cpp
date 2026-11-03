@@ -1,3 +1,5 @@
+// Modified by erXos: lazy FP switching is deleted; FP state is switched
+// eagerly (docs/design-stopgap.md, "FP and SIMD state").
 INTERFACE [svm]:
 
 #include "config.h"
@@ -379,18 +381,6 @@ Vm_svm::do_resume_vcpu(Context *ctxt, Vcpu_state *vcpu, Vmcb *vmcb_s)
   if(vmcb_s->state_save_area.cr4 & 0x20)
     return -L4_err::EInval;
 #endif
-  if constexpr (TAG_ENABLED(lazy_fpu))
-    {
-      // XXX: This generates a circular dependency between thread<->task!
-      if (!(ctxt->state() & Thread_fpu_owner))
-        {
-          if (!static_cast<Thread*>(ctxt)->switchin_fpu())
-            {
-              WARN("svm: switchin_fpu failed\n");
-              return -L4_err::EInval;
-            }
-        }
-    }
 
 #if 0  //should never happen
   host_cr0 = Cpu::get_cr0();
