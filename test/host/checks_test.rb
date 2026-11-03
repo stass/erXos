@@ -53,6 +53,22 @@ class ChecksTest < Minitest::Test
     assert_match(%r{fiasco-headers-in-backend: kernel/core/b.c:1}, error.message)
   end
 
+  # An import below kernel/ is linked into the kernel with the cores, so the
+  # rules read it as they read kernel/core; an import elsewhere reaches only
+  # the rules whose globs name it.
+  def test_chokepoint_rules_read_kernel_imports
+    { 'kernel/crypto/sha2' => 'kernel/crypto/sha2/a.c', 'vendor' => 'vendor/a.c' }.each do |import, source|
+      write(source, "#include <l4/sys/ipc.h>\n")
+      Erx::Origin.new(root: File.join(@root, import)).write(
+        repository: 'https://example.org/source', revision: '1', archive_sha256: 'a' * 64,
+        review: { 'default_license' => 'MIT', 'default_evidence' => 'reviewed fixture', 'rules' => [] }
+      )
+    end
+    error = assert_raises(Erx::Error) { checks(imports: %w[kernel/crypto/sha2 vendor]).run }
+    assert_match(%r{fiasco-headers-in-backend: kernel/crypto/sha2/a.c:1}, error.message)
+    refute_match(%r{vendor/a.c}, error.message)
+  end
+
   def write(relative, bytes)
     path = File.join(@root, relative)
     FileUtils.mkdir_p(File.dirname(path))

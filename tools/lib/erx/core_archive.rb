@@ -30,12 +30,12 @@ module Erx
     # The recipe is part of what the archive's bytes depend on, so a
     # change to it discards the kernel build as a source change does.
     IMPLEMENTATION_SHA256 = Digest::SHA256.file(__FILE__).hexdigest.freeze
-    PATTERNS = %w[kernel/core/*.c kernel/sched/*.c kernel/generated/*.c].freeze
+    PATTERNS = %w[kernel/core/*.c kernel/crypto/*/*.c kernel/sched/*.c kernel/generated/*.c].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
     BOOTSTRAP_SOURCES = %w[kernel/core/pack.c].freeze
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections
-               -I include -I kernel/generated].freeze
+               -I include -I kernel/generated -I kernel/crypto].freeze
     LEVEL = '-O2'
     ARCHIVE = 'erx_cores.a'
     MEMBERS = '.erx-archive-inputs'

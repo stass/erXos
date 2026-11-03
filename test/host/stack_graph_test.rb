@@ -16,8 +16,10 @@ class StackGraphTest < Minitest::Test
   FIXTURES = File.expand_path('../fixtures/stack_graph', __dir__)
   TARGET_FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                     -mgeneral-regs-only -mno-outline-atomics -fstack-usage].freeze
-  # The three cores and the generated ABI reader the pack validator calls.
-  CORE_SOURCES = %w[kernel/core/pack.c kernel/core/tlb_plan.c kernel/core/watchdog.c
+  # The cores, the imported SHA-256 and ChaCha20 the entropy generator
+  # calls, and the generated ABI reader the pack validator calls.
+  CORE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
+                    kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                     liberx/generated/abi_reader.c].freeze
   Name = Erx::StackGraph::Name
 
@@ -135,7 +137,8 @@ class StackGraphTest < Minitest::Test
         compile(File.join(@root, source), "#{File.basename(source, '.c')}#{level}", level)
       end
       graph = Erx::StackGraph.extract(inputs: inputs, tools: @tools, runner: @runner)
-      %w[erx_pack_open erx_tlb_plan erx_watchdog_step erx_watchdog_parse erx_manifest_open].each do |entry|
+      %w[erx_pack_open erx_tlb_plan erx_watchdog_step erx_watchdog_parse erx_manifest_open erx_rng_read
+         erx_rng_mix erx_chacha20_xor erx_sha256_final].each do |entry|
         function = graph.fetch_function(Name.new(name: entry, object: nil))
         assert_kind_of Integer, function.frame_bytes, "#{entry} #{level}"
       end
@@ -189,7 +192,8 @@ class StackGraphTest < Minitest::Test
   def compile(source, stem, level, function_sections: true)
     object = File.join(@directory, "#{stem}.o")
     @runner.run([@compiler, *TARGET_FLAGS, level, *(function_sections ? ['-ffunction-sections'] : []),
-                 '-I', File.join(@root, 'include'), '-c', source, '-o', object],
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'), '-c', source,
+                 '-o', object],
                 name: 'compile-stack-graph', deadline: 60)
     Erx::StackGraph::Input.beside(object)
   end

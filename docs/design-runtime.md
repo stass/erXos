@@ -1699,8 +1699,13 @@ done once per packet, per block and per file around them.
   CPU's CRC and SHA-256 instructions behind the architecture layer where
   the CPU has them, beside portable C, which is their oracle in the same
   test; `erlang:crc32/2` gains them only if `tools/erx bench fs` asks.
-* **Provenance.** The primitives are erXos's own code. LZ4's decompressor,
-  BSD-2-Clause, joins them only if EROFS images need compression
+* **Provenance.** The primitives are erXos's own code, except that the
+  portable SHA-256 is FreeBSD's, BSD-2-Clause, imported once as erXos's
+  code into `kernel/crypto/sha2/` with an `ORIGIN.md`, and built by the kernel's
+  entropy generator as well
+  ([design-kernel.md](design-kernel.md#interrupts-time-and-entropy)).
+  LZ4's decompressor, BSD-2-Clause, joins them only if EROFS images need
+  compression
   ([design-storage.md](design-storage.md#data-model)).
 
 ### BeamAsm

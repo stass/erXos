@@ -1556,7 +1556,9 @@ kernel/           erXos's kernel, C17 and assembly; files derived
                   from Fiasco carry its notice (kernel/NOTICE-fiasco)
   core/           the functional core shared with the stopgap: scheduler,
                   park and defer machines, budgets, mapping plans, decoders,
-                  the boot-image validator
+                  the boot-image validator, the entropy generator
+  crypto/         FreeBSD's SHA-256 and ChaCha20 as erXos's code, with an
+                  ORIGIN.md; the cores and the per-byte primitives build them
   arch/<arch>/    the architecture layer, a directory per architecture
   platform/       the platform layer: device-tree discovery and the
                   devices the kernel drives
@@ -1821,6 +1823,7 @@ trial request, is in
 | Code translated from Fiasco into erXos's kernel | the kernel's design and know-how | MIT, notice kept per file and in `kernel/NOTICE-fiasco`; translated or copied only from files whose effective licence is permissive: the licence Fiasco's `LICENSE.spdx` declares for the file's package, MIT for the kernel, unless the file's own notice says otherwise, checked against the file's upstream history, which the import records; the GPL-2.0 files `kobject_rpc.h` and `jdb_object.cpp` are needed by nothing erXos's kernel does, since its dispatch is generated from the ABI file and it has no kernel debugger (provisional, for the user to confirm) | permanent | written in `kernel/` |
 | libfdt `5756062b` | device-tree parsing in the kernel and the stopgap | BSD-2-Clause (dual GPL-2.0-or-later) | permanent | imported with the stopgap; kept by erXos's kernel |
 | BLAKE3, the official C implementation (the `c/` directory of `BLAKE3-team/BLAKE3`) | the boot image's index and file hashes: its portable code in the kernel and `bootstrap`, its SIMD code in the host tools ([design-kernel.md](design-kernel.md#the-boot-image)) | CC0-1.0, or Apache-2.0, used under Apache-2.0 | permanent | imported at a pinned release with an origin file; the kernel's and `bootstrap`'s builds take its portable C alone |
+| FreeBSD's SHA-256 (`sys/crypto/sha2/sha256c.c`, `sha256.h`) and ChaCha20 (`sys/crypto/chacha20/chacha.c`, `chacha.h`) at `release/15.1.0-p6` (`95719d8a`) | the entropy generator's ChaCha20 and its SHA-256 mixing, and the C SHA-256 of the per-byte primitives | SHA-256 BSD-2-Clause (Colin Percival); ChaCha20 public domain (D. J. Bernstein, via OpenBSD); erXos's changes BSD-2-Clause | permanent | imported into `kernel/crypto/sha2/` and `kernel/crypto/chacha20/` as erXos's code, each directory with an origin file recording each file's SHA-256 |
 | `drivers-frst` `6459d70997da1a2ad97775c8772b4a41284b0a9e`, PL011 UART subset | `bootstrap`'s console during the stopgap boot | MIT, from its package `LICENSE.spdx` and each retained file's notice | **stopgap**, replaced with the stopgap boot path | only the PL011 source and its required headers and build support are imported into `fiasco/`, with their own origin inventory; other drivers are excluded |
 | Arm's machine-readable architecture specification (BSD package) | the source of the AArch64 port's `hw/sysreg/aarch64.json` | BSD-3-Clause | permanent, as a pinned generator input | fetched with a pinned SHA-256; only the extracted file is checked in |
 | LLVM libc++, libc++abi, compiler-rt builtins 23.1.x | BeamAsm's C++ runtime, in the BeamAsm image alone, never in the system domain's; compiler support routines | Apache-2.0 WITH LLVM-exception | permanent | fetched and built out of tree |

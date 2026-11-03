@@ -504,6 +504,16 @@ it; git history is the record of completed work.
   Fiasco audit sees a core object's sources (`.NAME.o.d`) but not its
   flags; record it as Fiasco's `.cmd` files do and have the audit compare
   it with `CoreArchive::FLAGS`.
+* [Medium] build, Fiasco audit of imported cores
+  (`tools/lib/erx/fiasco_provenance.rb`, `erxos_source` and
+  `attribute_erxos`): a file under `kernel/` or `include/` is attributed
+  as erXos source, `BSD-2-Clause`, whenever its first eight lines carry
+  the SPDX line, so FreeBSD's SHA-256 and ChaCha20 in `kernel/crypto/`
+  enter the build record without their `ORIGIN.md` files, their recorded
+  licences (ChaCha20's public domain) or Colin Percival's notice. Attribute
+  every file under a directory with an `ORIGIN.md` through that origin's
+  inventory, as the fork parts are, never through the header rule, and
+  test it with a captured-inputs fixture.
 * [Medium] build, cores' compiler: `tools/erx build fiasco` takes
   `ERX_CLANG` as given, without `host_environment`'s LLVM 23.1.3 version
   check; the audit derives the LLVM installation from the driver's path

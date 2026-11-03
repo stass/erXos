@@ -24,7 +24,8 @@ module Erx
   # Diagnostics carry raw names; the CLI's sink escapes them (Terminal.puts).
   class Checks
     IMPORTS = %w[otp musl fiasco/kernel fiasco/mk fiasco/l4re-core fiasco/bootstrap
-                 fiasco/libfdt fiasco/drivers-frst test/oracle/common_test].freeze
+                 fiasco/libfdt fiasco/drivers-frst kernel/crypto/sha2 kernel/crypto/chacha20
+                 test/oracle/common_test].freeze
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/
@@ -90,8 +91,9 @@ module Erx
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_json_parsing(own_sources)
       # The chokepoint rules read the same listing, imports included, since
-      # the glue lives inside the stopgap kernel's imported tree.
-      Chokepoints.enforce(@chokepoints, root: @root, names: listed, imported: method(:imported?))
+      # the glue lives inside the stopgap kernel's imported tree; an import
+      # below kernel/ they read as erXos's own C (chokepoint_upstream?).
+      Chokepoints.enforce(@chokepoints, root: @root, names: listed, imported: method(:chokepoint_upstream?))
       true
     end
 
@@ -126,6 +128,12 @@ module Erx
     def imported?(relative)
       @required_imports.any? { |import| relative == import || relative.start_with?(import + '/') }
     end
+
+    # What the chokepoint rules treat as upstream code. An import below
+    # kernel/ (kernel/crypto) is compiled into the cores' archive and linked
+    # into the kernel as kernel/core is, so every rule over erXos's own C
+    # reads it too.
+    def chokepoint_upstream?(relative) = imported?(relative) && !relative.start_with?('kernel/')
 
     # A listed name must reach, through no directory alias, a regular file or
     # a link to another listed regular file. A tracked file deleted from the

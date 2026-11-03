@@ -48,6 +48,10 @@ class CoreArchiveTest < Minitest::Test
     sources = Erx::CoreArchive.sources(File.expand_path('../..', __dir__))
     refute_includes sources, 'kernel/core/pack.c'
     assert_includes sources, 'kernel/core/watchdog.c'
+    # The generator's imported primitives link with it.
+    assert_includes sources, 'kernel/core/rng.c'
+    assert_includes sources, 'kernel/crypto/chacha20/chacha.c'
+    assert_includes sources, 'kernel/crypto/sha2/sha256c.c'
     assert_equal sources.sort, sources
   end
 
