@@ -56,6 +56,13 @@ supervision and inspection span them all.
   them as written. That milestone is reached on erXos's own kernel: the
   stopgap Fiasco is never hardened, though bugs found in it are fixed as
   anywhere else.
+* **A stopgap promises little.** Its design commits only to what the
+  milestone using it needs and its tests check: no memory errors, no
+  deadlock, the interface's results, and exact accounting, for trusted
+  workloads. Latency bounds, fairness and progress against hostile load
+  belong to the component that replaces it; on the stopgap they are
+  recorded as residuals, not engineered into inherited code. Its reviews
+  check those commitments, not the target design's.
 * **No backward compatibility in development.** Until a release promises
   compatibility, nothing erXos defines owes any to its own earlier forms.
   A change to a format, protocol, interface or stored state replaces the
