@@ -1118,8 +1118,8 @@ typedef struct erx_budget {
 	erx_spinlock_t	 lock;		/* the counters, dead, the watch and caches */
 	erx_budget_kind_t kind;		/* ERX_BUDGET_WALL or ERX_BUDGET_ELASTIC;
 					 * fixed at carving */
-	uint64_t	 guarantee;	/* bytes carved from the parent: its floor */
-	uint64_t	 cap;		/* bytes its tree may spend: its ceiling;
+	uint64_t	 guarantee;	/* pages carved from the parent: its floor */
+	uint64_t	 cap;		/* pages its tree may spend: its ceiling;
 					 * never below guarantee, equal to it for
 					 * a wall */
 	uint64_t	 used;		/* pages charged here and not yet released:

@@ -78,7 +78,7 @@ class StackProofInputTest < Minitest::Test
     budget = Input.budget(File.read(File.join(ROOT, 'kernel/stack_fiasco.txt')), path: 'kernel/stack_fiasco.txt')
     assert_equal 8192, budget.block_bytes
     assert_includes budget.tick_entries, 'erx_watchdog_step'
-    assert_equal %w[memcpy memset], budget.leaves.keys.sort
+    assert_equal %w[erx_effect_budget_lock erx_effect_budget_unlock memcpy memset], budget.leaves.keys.sort
     targets = Input.targets(File.read(File.join(ROOT, 'kernel/stack_targets.txt')), path: 'kernel/stack_targets.txt')
     assert_empty targets.callers
   end

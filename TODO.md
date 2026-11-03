@@ -64,6 +64,35 @@ it; git history is the record of completed work.
   overlaps allowed (`efi-support.cc`, `ram->add(..., true)`), so QEMU
   `virt` booted from a device tree is unaffected. Found by reading, not
   reproduced; fix with a regression test before any EFI boot path is used.
+* [Medium] Kernel budget core, `kernel/core/budget.c` and
+  `kernel/core/budget_impl.h`: the record carries its own `parent`
+  pointer and takes its lock through `erx_effect_budget_lock`, standing
+  in for the object header's budget field and the core's ticket lock
+  (`erx_spinlock_t`), and the reserve record holds the pool's count but
+  not its chain of page records. When the object header, the ticket lock
+  and the page core (`kernel/core/page.c`) land, embed them in the
+  records, drop the lock effect, give `page.c` the pool chain (adding it
+  to the `budget-records-private` chokepoint of
+  `tools/lib/erx/chokepoint_rules.rb`), and compose
+  `erx_reserve_charge`, `erx_reserve_take` and `erx_page_release` there
+  from `erx_reserve_admit`, `erx_reserve_fill`, `erx_reserve_cancel`,
+  `erx_reserve_use` and `erx_reserve_refund`. The record cache, the lists
+  of charged objects and the destroy's walk over them are the stopgap
+  integration's (WP14), which `test/fixtures/budget_driver.c` stands in
+  for. A pin returns the budgets whose `pinned` rose from zero for a
+  follow-up pin of their records' cache pages, where the design pins
+  them in the same adjustment; fold that in with the cache.
+* [Medium] Budget core tests, `test/host/budget_test.rb`: the TSan race
+  only charges and releases leaf reserves; K32 asks for resizes, carves
+  and destroys racing too, with spending checked against every cap no
+  resize lowered. Two of K32's seeded failures are missing: a chain
+  applied one level at a time, and a dead or doomed budget's `used`
+  counted toward the machine. The counters' chokepoint is enforced by the
+  `budget-records-private` text rule of `tools/lib/erx/chokepoint_rules.rb`
+  (the header included and the records defined nowhere else), not by the
+  syntax-tree check the design's row names, which stays the pending
+  `budget-counters` rule; a layout-compatible record under another name,
+  cast from an `erx_budget_t` pointer, escapes the text rule.
 * [Medium] Kernel invalidation planner, `kernel/core/tlb_plan.c`: a
   cleared table entry carries its span in bytes, and the planner accepts
   any aligned power of two of at least two pages, so a range call that
@@ -540,7 +569,10 @@ document's "residual risks accepted" paragraph.
   the glue's GCC objects (`erx_probe.cpp` already exists, and its imports
   are unchecked until then); the vector route; and the syntax-tree rules of
   the capability table and budgets. Each fails the check as soon as a file
-  it awaits lands ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
+  it awaits lands, except the files it lists as existing: the budgets' rule
+  exempts `kernel/core/budget.c` and `kernel/core/budget_impl.h`, which the
+  active `budget-records-private` text rule covers until then
+  ([design-kernel.md](docs/design-kernel.md#chokepoint-checks)).
 * [Medium] chokepoints, gaps of the text rules until the object leg
   closes them (`tools/lib/erx/chokepoints.rb`): rules match names, so they
   do not follow includes (a `kernel/core/cap.h` allowed to include
@@ -549,8 +581,14 @@ document's "residual risks accepted" paragraph.
   scanned though a build file could name them; the glue, inside an
   imported tree, gets no directory-alias or link-name check; and an
   Elsewhere rule checks only that its test file exists, not its named
-  check or seeded case. A differential test of the C view against
-  `clang -E` would prove that it never drops code.
+  check or seeded case. `include-form` reads only erXos's files and the
+  glue, so in Fiasco's inherited kernel sources, which
+  `budget-records-private` and `seam-only-from-glue` also read, a computed
+  include, a climbing path (`../../../../kernel/core/budget.c`) or a
+  header outside the C-family extensions passes them. The C view keeps the
+  comments of `.S` files, so `# /**/ include "x_impl.h"` there hides the
+  directive from every include rule. A differential test of the C view
+  against `clang -E` would prove that it never drops code.
 * [Low] conformance harness details (`tools/lib/erx/conformance.rb`): hash
   and boot one copy of the image, so a rebuild during the matrix cannot
   mix images; show each failed configuration's reasons on the terminal,

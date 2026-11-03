@@ -16,6 +16,9 @@
 -define(ERX_BOOT_ROOT, 4).
 -define(ERX_BOOT_STRINGS_MAX, 2048).
 -define(ERX_BOOT_VERSION, 1).
+-define(ERX_BUDGET_DEPTH_MAX, 16).
+-define(ERX_BUDGET_ELASTIC, 2).
+-define(ERX_BUDGET_WALL, 1).
 -define(ERX_CALL_DEBUG_LOG, 1).
 -define(ERX_COPY_MAX, 1048576).
 -define(ERX_CRASH_CAUSE_FAULT, 1).

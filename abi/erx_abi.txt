@@ -46,6 +46,7 @@ limit boot_strings_max u32 2048
 limit crash_version u32 1
 limit crash_size u32 16384
 limit crash_magic u64 0x4853415243585245
+limit budget_depth_max u32 16
 
 status ok 0 "success"
 status inval -1 "invalid argument"
@@ -94,6 +95,9 @@ flags boot_flags u32
   bit det 0
   bit installed_only 1
   bit root 2
+enum budget_kind u32
+  value wall 1
+  value elastic 2
 enum crash_form u32
   value brief 1
   value full 2

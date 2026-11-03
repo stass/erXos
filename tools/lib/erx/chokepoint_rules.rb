@@ -31,6 +31,25 @@ module Erx
     TRAP = /\b(?:svc|hvc|smc)\b(?:[ \t]+#?[0-9A-Fa-fx]+)?|\.(?:inst|word|long|[248]?byte|hword|quad|include|incbin)\b/i
     ERX_TRAP = /\A#{Regexp.escape(TRAP_OPCODE)}[ \t]+##{Regexp.escape(TRAP_IMMEDIATE)}\z/
 
+    INCLUDE = Chokepoints::INCLUDE_PREFIX
+
+    # The budget core's private header, which only the core and this host
+    # driver include.
+    BUDGET_IMPL = 'kernel/core/budget_impl.h'
+    BUDGET_DRIVER = 'test/fixtures/budget_driver.c'
+    # An include of that header by any path ending in its name, in any
+    # case, as a case-insensitive file system resolves it.
+    BUDGET_IMPL_INCLUDE = %r{#{INCLUDE}[<"](?:[^>"]*/)?budget_impl\.h[>"]}i
+    # A use of a record's tag that is not one of the forms that only refer
+    # to the record: a pointer or reference (*, &), the end of a
+    # declaration or argument (; , )), or a declarator named after it
+    # (typedef struct erx_budget erx_budget_t;). Every definition puts
+    # something else after the tag (a brace, a base clause, final, an
+    # attribute) or a line break, so any spelling of one is refused,
+    # including those through a macro, and a declaration split after the
+    # tag is refused too, on the safe side.
+    BUDGET_RECORD_USE = /\berx_(?:budget|reserve)\b(?!\s*(?:[*&;),]|[A-Za-z_]\w*\s*[;,)]))/
+
     STOPGAP = 'docs/design-stopgap.md'
     KERNEL = 'docs/design-kernel.md'
 
@@ -91,19 +110,53 @@ module Erx
       ),
       Chokepoints::Forbidden.new(
         name: 'core-records-private',
-        rule: "the cores' record definitions (kernel/core/*_impl.h) are included only by the cores (B4)",
+        rule: "the cores' record definitions (kernel/core/*_impl.h) are included only by the cores (B4), " \
+              "and the budget core's by its host driver too",
         design: "#{STOPGAP}#invariants",
         scope: ERXOS_C,
-        pattern: /\A\s*(?:#|%:)\s*include\w*\s*[<"][^>"]*_impl\.h[>"]/,
-        sites: [Chokepoints::Site.new(glob: 'kernel/core/*')],
-        seed: { 'fiasco/kernel/src/erx/seeded.cpp' => "#include \"kernel/core/cap_impl.h\"\n" }
+        pattern: /#{INCLUDE}[<"][^>"]*_impl\.h[>"]/i,
+        sites: [Chokepoints::Site.new(glob: 'kernel/core/*'),
+                Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE)],
+        seed: { 'fiasco/kernel/src/erx/seeded.cpp' => "#include \"kernel/core/cap_impl.h\"\n",
+                'liberx/seeded.c' => "#import \"kernel/core/cap_IMPL.h\"\n" }
+      ),
+      # The budget core's counters are written only in kernel/core/budget.c
+      # (K3, K32): its records are defined only in its private header, which
+      # only the core and its host driver include, and every other file
+      # names a record's tag only to refer to it. This text rule stands in
+      # for the syntax-tree check of the counters' writes, budget-counters
+      # below. It reads the stopgap kernel's tree, glue and inherited
+      # sources alike.
+      Chokepoints::Forbidden.new(
+        name: 'budget-records-private',
+        rule: "only kernel/core/budget.c and its host driver include #{BUDGET_IMPL}, and no other file " \
+              'names struct erx_budget or struct erx_reserve but to refer to it',
+        design: "#{KERNEL}#chokepoint-checks",
+        scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
+        pattern: Regexp.union(BUDGET_IMPL_INCLUDE, BUDGET_RECORD_USE),
+        sites: [Chokepoints::Site.new(glob: 'kernel/core/budget.c', permits: BUDGET_IMPL_INCLUDE),
+                Chokepoints::Site.new(glob: BUDGET_DRIVER, permits: BUDGET_IMPL_INCLUDE),
+                Chokepoints::Site.new(glob: BUDGET_IMPL, permits: BUDGET_RECORD_USE)],
+        seed: { 'kernel/core/kalloc.c' => "#include \"erx/x.h\"\n  #  include \"budget_impl.h\"\nb->used++;\n",
+                'kernel/core/budget_view.c' => "#include \"Budget_Impl.h\"\n",
+                'fiasco/kernel/src/erx/budget.cpp' => "#include <kernel/core/budget_impl.h>\n",
+                'fiasco/kernel/src/erx/erx_budget.h' => "struct erx_reserve { long charged; };\n",
+                'fiasco/kernel/src/kern/erx_split.h' => "struct erx_reserve\n{\n\tlong charged;\n};\n",
+                'kernel/core/watchdog.c' => "union erx_budget {\n\tint used;\n};\n",
+                'kernel/core/budget.c' => "class erx_budget : base {};\n",
+                'kernel/core/aligned.c' => "struct __attribute__((aligned(8))) erx_budget { int used; };\n",
+                'kernel/core/split.c' => "struct\nerx_budget { int used; };\n",
+                'kernel/core/after.c' => "struct erx_budget __attribute__((packed)) { int used; };\n",
+                'kernel/core/macro.c' => "#define B erx_budget\nstruct B { int used; };\n",
+                'fiasco/kernel/src/erx/qualified.cpp' => "struct alignas(8) ::erx_reserve { long charged; };\n",
+                'fiasco/kernel/src/erx/final.cpp' => "struct erx_reserve final { long charged; };\n" }
       ),
       Chokepoints::Forbidden.new(
         name: 'seam-only-from-glue',
         rule: "the glue alone of the stopgap kernel's sources includes erXos's headers",
         design: "#{STOPGAP}#interfaces",
         scope: Chokepoints::Scope.new(own: false, extra: ['fiasco/kernel/**/*'], except: [GLUE]),
-        pattern: %r{\A\s*(?:#|%:)\s*include\w*\s*[<"]erx/},
+        pattern: %r{#{INCLUDE}[<"]erx/}i,
         seed: { 'fiasco/kernel/src/kern/seeded.cpp' => "#include \"erx/core/watchdog.h\"\n" }
       )
     ].freeze
@@ -191,11 +244,14 @@ module Erx
         awaits: ['kernel/core/cap*', 'include/erx/core/cap*'],
         reason: "reads clang's syntax trees and the cores' relocations"
       ),
+      # The core's own files are exempt: budget-records-private keeps their
+      # records out of every other file until the syntax trees are read.
       Chokepoints::Pending.new(
         name: 'budget-counters', rule: "only erx_budget_adjust changes a budget's counters, and kernel memory " \
                                        'is allocated only through the budget-charging funnel (K3, K32)',
         design: "#{KERNEL}#chokepoint-checks",
         awaits: ['kernel/core/budget*', 'include/erx/core/budget*'],
+        existing: ['kernel/core/budget.c', BUDGET_IMPL],
         reason: "reads clang's syntax trees and the cores' relocations"
       ),
       Chokepoints::Pending.new(

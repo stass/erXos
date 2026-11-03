@@ -30,6 +30,9 @@ struct erx_rights {
 #define ERX_BOOT_ROOT UINT32_C(4)
 #define ERX_BOOT_STRINGS_MAX UINT32_C(2048)
 #define ERX_BOOT_VERSION UINT32_C(1)
+#define ERX_BUDGET_DEPTH_MAX UINT32_C(16)
+#define ERX_BUDGET_ELASTIC UINT32_C(2)
+#define ERX_BUDGET_WALL UINT32_C(1)
 #define ERX_CALL_DEBUG_LOG UINT32_C(1)
 #define ERX_COPY_MAX UINT32_C(1048576)
 #define ERX_CRASH_CAUSE_FAULT UINT32_C(1)
@@ -258,6 +261,8 @@ typedef uint8_t erx_abi_note_section_t[13];
 #define ERX_ABI_NOTE_SECTION_STRING ".note.erx.abi"
 
 typedef uint32_t erx_boot_flags_t;
+
+typedef uint32_t erx_budget_kind_t;
 
 typedef struct erx_cap erx_cap_t;
 struct erx_cap {

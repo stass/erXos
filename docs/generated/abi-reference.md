@@ -24,6 +24,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_BOOT_ROOT` | 4 |
 | `ERX_BOOT_STRINGS_MAX` | 2048 |
 | `ERX_BOOT_VERSION` | 1 |
+| `ERX_BUDGET_DEPTH_MAX` | 16 |
+| `ERX_BUDGET_ELASTIC` | 2 |
+| `ERX_BUDGET_WALL` | 1 |
 | `ERX_CALL_DEBUG_LOG` | 1 |
 | `ERX_COPY_MAX` | 1048576 |
 | `ERX_CRASH_CAUSE_FAULT` | 1 |

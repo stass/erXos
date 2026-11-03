@@ -34,6 +34,16 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["budget_kind"] = EnumType.new(
+        name: "budget_kind".b,
+        base: types.fetch("u32"),
+        members: {
+          "elastic".b => 2,
+          "wall".b => 1
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       types["cap"] = ScalarType.new(
         name: "cap".b,
         base: types.fetch("u64"),
@@ -6359,6 +6369,7 @@ module Erx
           "abi_note_owner".b,
           "abi_note_section".b,
           "boot_flags".b,
+          "budget_kind".b,
           "cap".b,
           "erx_boot_connection".b,
           "erx_msg_item".b,
@@ -6501,6 +6512,24 @@ module Erx
           ).freeze,
           "boot_version".b => Constant.new(
             name: "boot_version".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "budget_depth_max".b => Constant.new(
+            name: "budget_depth_max".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "budget_elastic".b => Constant.new(
+            name: "budget_elastic".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "budget_wall".b => Constant.new(
+            name: "budget_wall".b,
             value: 1,
             type: types.fetch("u32"),
             description: nil

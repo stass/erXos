@@ -40,7 +40,10 @@ module Erx
     def self.extension(path) = File.extname(path).downcase
     MAX_FILE_BYTES = 16 * 1024 * 1024
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
-    DIRECTIVE = /\A\s*(?:#|%:)\s*(?:include|include_next|import)\b(?<operand>.*)\z/m
+    # The opening of an include directive in every spelling a compiler
+    # accepts, up to its operand; every rule about includes starts here.
+    INCLUDE_PREFIX = /\A\s*(?:#|%:)\s*(?:include|include_next|import)\b\s*/
+    DIRECTIVE = /#{INCLUDE_PREFIX}(?<operand>.*)\z/m
     # A header by name: a quoted or bracketed path of plain segments ending
     # in .h; C++ files may also name one of the listed standard headers,
     # whose files are the toolchain's, not the tree's.

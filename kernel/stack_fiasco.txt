@@ -32,3 +32,10 @@ tick erx_watchdog_step
 # catches a cost declared too low.
 leaf memcpy 64
 leaf memset 64
+
+# The budget core's lock effects (include/erx/budget.h), which the glue
+# provides over the core's ticket lock with interrupt masking. Not yet
+# measured: the declared cost is the budget the glue's two functions must
+# meet, and the watermark run catches a cost declared too low.
+leaf erx_effect_budget_lock 128
+leaf erx_effect_budget_unlock 128
