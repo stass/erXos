@@ -232,7 +232,7 @@ since the one installer takes an `erx_object_t`.
 
 | erXos type | Fork object | Fiasco mechanism inside it |
 | --- | --- | --- |
-| budget | `Erx_budget`, added | a `Ram_quota` whose `alloc` is the funnel's charge and backing and whose `free` is `erx_page_release`, the release that ends a page's charge, never the free; with the kind, guarantee, cap, counters, watch, `att_charged` list and caches of [Budgets](design-kernel.md#budgets); Fiasco's factories are not built |
+| budget | `Erx_budget`, added | the core's `erx_budget_t` behind the opaque header, charged and refunded only through the funnel, whose `erx_reserve_charge` backs a reserve as it charges it and whose `erx_page_release` ends a page's charge, never the free; with the kind, guarantee, cap, counters, watch, `att_charged` list and caches of [Budgets](design-kernel.md#budgets); Fiasco's `Ram_quota`, its allocator adapters and its factories are not built |
 | space | `Task`, modified | the task, its `Mem_space`, the capability table facade, the erXos space state: parent, fault gate, label, the run word holding its run state and live count, the thread list, the mapping records; constructed by the glue's installer, never through `Task::create`'s protocol form |
 | thread | `Thread_object`, modified | the thread, its kernel stack, its FP state inline and its one kernel-user page holding the `erx_kupage`; the class, group path, executor slot, `CONTROL` state, the admitted register record and the scheduling binding's record (the one wait record, the kill and dying flags and the finisher) added |
 | group | `Erx_group`, added | the scheduler core's group record, the park lock and FIFO, the shared areas as kernel-user memory |
@@ -713,8 +713,10 @@ Four things make it hold in full on the fork:
   the free leaves it empty; a thread's record is its block, whose two
   pages the free releases (**Budgets and the ownership of pages**).
   The object's other pages were released by its teardown, their charge
-  ending there, before the grace period began, and the free touches no
-  budget. `Kobject::put` on the fork is that drop, one implementation
+  ending there, before the grace period began. The free of a record
+  returns a slot and refunds nothing; only when it leaves the cache page
+  holding no record is that page released, which refunds the page to
+  its budget as any release does. `Kobject::put` on the fork is that drop, one implementation
   for every type; the per-type `put` overrides that freed a thread or
   dropped a gate's thread are deleted.
 
@@ -733,40 +735,74 @@ detached from its object's reverse map and its translation entries
 cleared through `erx_tlb_plan`, applied by `Mem_unit`; the plan's last
 step, after every invalidation has completed, releases the detached
 tables and the pages of the space's private memory, pooled or in use,
-through `erx_page_release`, as `erx_vm_unmap` does; the table levels
-`Mem_space`'s destructor frees go through its table allocator's
-`free`, which is `erx_page_release` as well. So every page the space
-held is on the released list, its charge ended, before the destroy
-returns, and only the reaper's free step turns it free. The destroy
+through `erx_page_release`, as `erx_vm_unmap` does, and last, once the
+space's ASID has been invalidated, the root directory, through the same
+release, setting `_dir` to null. `Mem_space::~Mem_space`, which on
+stock Fiasco walks the user and kernel levels and frees them and the
+root directory at record reclamation (`mem_space-arm.cpp`), has no body
+on the fork: every table and the directory are the teardown's, released
+before the destroy returns, and the destructor, which runs a grace
+period later from the reaper's put, finds nothing to do. So every page
+the space held is on the released list, its charge ended, before the
+destroy returns, and only the reaper's free step turns it free. The destroy
 does not wait for the exit record, which the stop binding posts at the
 last thread's death.
 
 ### Budgets and the ownership of pages
 
-An `Erx_budget` is a Fiasco `Ram_quota` whose `alloc` is the funnel's
-charge and backing and whose `free` is the release, with the kernel
-design's kind, guarantee, cap, counters, watch and `att_charged` list
-([Budgets](design-kernel.md#budgets)). Every change of its counters is
-the C17 `erx_budget_adjust`, so guarantees, caps, the borrowing chain,
-walls, resizing, the watch and the close of a destroyed budget are the
-same code as on erXos's kernel, and the only thing the fork charges is
-a **whole page**, held by a reserve. A reserve is backed when it is
-charged, a charge ends when the page is released, not when it is freed,
-and a fault never allocates: the funnel meets the five-entry interface
-the kernel design fixes for every implementation
+An `Erx_budget` is the core's `erx_budget_t` behind the glue's opaque
+header, with the kernel design's kind, guarantee, cap, counters, watch
+and `att_charged` list ([Budgets](design-kernel.md#budgets)); Fiasco's
+`Ram_quota`, which accounts bytes at each allocation, is not built, and
+nor are its two allocation adapters, `Kmem_q_alloc`, which allocates and
+frees raw blocks around a quota, and `Kmem_alloc::q_allocator`, which
+hands it to `Mem_space` for its tables (`kmem_alloc.cpp`): what remains
+of them is replaced below, not wrapped. Every change of a budget's
+counters is the C17 `erx_budget_adjust`, so guarantees, caps, the
+borrowing chain, walls, resizing, the watch and the close of a destroyed
+budget are the same code as on erXos's kernel, and the only thing the
+fork charges is a **whole page**, held by a reserve. A reserve is backed
+when it is charged, a charge ends when the page is released, not when it
+is freed, and a fault never allocates: the funnel meets the six-entry
+interface the kernel design fixes for every implementation
 ([The reaper](design-kernel.md#the-reaper)), over Fiasco's buddy
-allocator and its RCU batch numbers.
+allocator and its RCU batch numbers, under the core's own ticket locks,
+since Fiasco's `Spin_lock` races for ownership without a queue
+(`arm/64/spin_lock-arm-64.cpp`) and the kernel design's bounds need a
+lock served in order (K13); the fork provides the core's locks with
+interrupt masking alone.
 
 * **The source.** `erx_reserve_charge(reserve, n)` is the one source of
   pages. It charges the reserve's budget `n` pages through the core,
   which admits or refuses the charge against the budget's chain, and
-  then backs them: in parts of at most 64 pages, under the released
-  list's lock and then `Kmem_alloc`'s, it takes what it still needs,
-  free pages through the raw entry (`Kmem_alloc::alloc`, order zero)
-  first and then pages off the head of the released list; waits at a
-  preemption point, holding no lock, until Fiasco's completed batch
-  number reaches the newest stamp among them; and puts them in the
-  reserve's pool under the owner's lock. A charge the core refuses
+  then backs them, holding the owner's existence lock throughout as the
+  kernel design requires, so that the owner's destroy drains it before
+  any teardown: in parts of at most 64 pages, under the core's released
+  list lock and then its allocator lock, both ticket locks, inside which
+  `Kmem_alloc::lock` is never contended, it takes what it still needs,
+  free pages through the raw entry first, one page at a time
+  (`Kmem_alloc::alloc(Bytes(Config::PAGE_SIZE))`: `Kmem_alloc`'s
+  `Order` is a byte exponent, so `Order(0)` would ask for one byte,
+  `kmem_alloc.cpp`), and then pages off the head of the released list;
+  waits until Fiasco's completed batch number reaches the newest stamp
+  among them; and puts them in the reserve's pool under the owner's
+  lock. The wait is a poll: the backing passes preemption points
+  (`Proc::preemption_point`), holding no spinlock, and reads
+  `Rcu_glbl::_completed` at each, never `Context::rcu_wait`, which puts
+  the thread to sleep with a state change and a callback of its own
+  (`context.cpp`) and so would hold the existence lock and the hand
+  across a sleep (K33). A preemption point lets the tick in, and the
+  tick is where Fiasco reports a CPU's quiescent state
+  (`Rcu::do_pending_work` from `Thread::handle_timer_interrupt`,
+  `thread.cpp`), on a CPU with callbacks of its own and on one without,
+  since `Rcu_data::pending` answers for a batch the CPU has not yet
+  reported (`rcupdate.cpp`); so the batch the backing waits for
+  completes once every active CPU has taken a tick after it started,
+  about two ticks, and a backing's part waits at most the rest of the
+  batch in progress and one whole batch, as the kernel design bounds it.
+  A backing that finds its owner closed between parts fills what it has
+  taken, cancels the rest through `erx_reserve_cancel` and returns
+  `ERX_ESTALE`, releasing nothing itself. A charge the core refuses
   takes nothing, and that refusal, `ERX_ENOMEM`, is the funnel's only
   refusal. The raw entry returning nothing is not one: it says the free
   lists are empty, and the backing then takes from the released list,
@@ -782,66 +818,104 @@ allocator and its RCU batch numbers.
   the C17 function erXos's kernel runs, and the one way a page comes
   into use. A populate or a copy on write in `erx_user_sync_entry`'s
   fault path takes from the space's or the object's pool
-  (**Faults, and the fault of the root task** below); `Mem_space`'s
-  table allocator (`Kmem_alloc::q_allocator`, `mem_space-arm.cpp`) is
-  given it, on the space's reserve, as its `alloc`, so a table that
-  `Mem_space::v_insert` builds at a fault comes from the pool the
-  commit backed; and the record core takes a cache page from the
-  budget's own reserve. A pool is never empty when a committed page or
-  its table needs one, since the core charged and backed one table for
-  every region a committed mapping touches, and a page for every
-  committed page (K6).
+  (**Faults, and the fault of the root task** below); the walk of
+  `Mem_space::v_insert` and the space teardown take their tables
+  through `Erx_table_alloc`, the fork's allocator adapter over the
+  space's reserve, which replaces the `Kmem_q_alloc` that
+  `Kmem_alloc::q_allocator` returned (`mem_space-arm.cpp`,
+  `kmem_alloc.cpp`): its `alloc` is `erx_reserve_take` on the space's
+  reserve and its `free` is `erx_page_release` to it, so a table that
+  `v_insert` builds at a fault comes from the pool the commit backed,
+  and the adapter has no rollback path, since a take never fails and
+  `Insert_err_nomem` is unreachable; and the record core takes a cache
+  page from the budget's own reserve. A pool is never empty when a
+  committed page or its table needs one, since the core charged and
+  backed one table for every region a committed mapping touches, and a
+  page for every committed page (K6).
 * **The release.** `erx_page_release(reserve, pages)` is the one way a
   held page's charge ends and the one way a page leaves its reserve; it
-  is the C17 function erXos's kernel runs, and it is what
-  `Erx_budget::free`, the `free` Fiasco's `Kmem_q_alloc` calls, and the
-  table allocator's `free` do. A teardown, a range call, a cache whose
-  page holds no record and the reaper's free of a thread's record call
-  it from a part that holds no spinlock, existence locks aside. It
-  appends the pages the part releases to the machine-wide released list
-  as one batch, chained through their page records and stamped with the
-  current RCU batch number (`Rcu_glbl::_current`, `rcupdate.cpp`),
-  under the list's lock; then it takes them out of the reserve's
-  `backed` and `charged` and refunds their charge through
-  `erx_budget_adjust`, in the same bounded part, so the budget's `used`
-  falls, and through the chain the `lent` of every ancestor the pages
-  were borrowed through, before the part reaches its next preemption
-  point. A released page belongs to no reserve and no budget. The
-  batch's grace period has ended when the completed batch number
-  (`Rcu_glbl::_completed`) reaches its stamp, which Fiasco advances
-  from the tick and from idle once every CPU has passed a quiescent
-  state; the list is in append order, so the head's period ends first.
-  Fiasco compares batch numbers by signed difference (`Rcu_batch`),
-  which orders a stamp correctly while no stamp on the list is 2^63
-  batches old; a batch number advances at most once per pass of every
-  CPU through a quiescent state, so that age is unreachable within a
-  boot, and the fork panics at the last value, as the kernel design's
-  tracker does.
+  is the C17 function erXos's kernel runs, and it is what every owner's
+  teardown and `Erx_table_alloc::free` call. A teardown, a range call,
+  a cache whose page holds no record and the reaper's free of a
+  thread's record call it from a part that holds no spinlock, existence
+  locks aside. It appends the pages the part releases to the
+  machine-wide released list as one batch, chained through their page
+  records and stamped by the fork's retire, under the list's lock; then
+  it takes them out of the reserve's `backed` and `charged` and refunds
+  their charge through `erx_budget_adjust`, in the same bounded part,
+  so the budget's `used` falls, and through the chain the `lent` of
+  every ancestor the pages were borrowed through, before the part
+  reaches its next preemption point. A released page belongs to no
+  reserve and no budget. The retire is the kernel design's
+  `erx_grace_retire` over `Rcu_glbl`: under `Rcu_glbl::_lock` it stamps
+  the batch `_current + 1`, sets `_next_pending` and calls
+  `start_batch`, which begins that batch at once when none is in
+  progress and otherwise leaves it to begin when the one in progress
+  completes, in `cpu_quiet`; that is what `Rcu_data::process_callbacks`
+  does for a callback it moves to its current list (`rcupdate.cpp`),
+  and `_current` itself would be wrong, since a batch in progress may
+  already have heard from a CPU that took a translation of the page
+  after reporting, and `_current == _completed` would make the page
+  mature at once. The batch's grace period has ended when the completed
+  batch number (`Rcu_glbl::_completed`) reaches its stamp, which Fiasco
+  advances from the tick and from idle once every active CPU has
+  reported a quiescent state since the batch began; the list is in
+  append order and stamps never decrease along it, so the head's period
+  ends first. Fiasco compares batch numbers by signed difference
+  (`Rcu_batch`), which orders a stamp correctly while no stamp on the
+  list is 2^63 batches old; a batch number advances at most once per
+  pass of every CPU through a quiescent state, so that age is
+  unreachable within a boot, and the fork panics at the last value, as
+  the kernel design's tracker does.
 * **The sink.** `erx_page_free` returns a page to the buddy allocator
   (`Kmem_alloc::free`) and touches no budget. It is called from the
   reaper's free step alone, for up to 64 mature pages off the head of
   the released list, taken through `erx_released_take` under the list's
   lock and returned under the allocator's: from each CPU's idle thread
-  before it waits for an interrupt, so with idle time the released list
-  holds only the last grace period's releases; and from the end of
-  `erx_space_stop` and of capability closes, within the call's bound.
-  The backing of a charge takes pages off the list through the same
-  `erx_released_take` and keeps them; it is the list's only other
-  caller. Puts and record frees wait on Fiasco's per-CPU RCU lists, as
-  Fiasco's own do, through the header's `rcu` link, and run where
-  Fiasco runs them: in the timer tick's handler (`Rcu::do_pending_work`
-  from `Thread::handle_timer_interrupt`, `thread.cpp`) and before idle
-  (`Context::enter_tickless_idle`, `context.cpp`), so a mature put runs
-  within one tick, which is the
-  kernel design's reap deadline on the fork; no charge depends on when
-  they run.
+  before it waits for an interrupt, in steps with the CPU lock dropped
+  between them until the head is immature, so that after such a pass
+  the released list holds only batches whose period has not ended; and
+  from the end of `erx_space_stop` and of capability closes, within the
+  call's bound. The backing of a charge takes pages off the list
+  through the same `erx_released_take` and keeps them; it is the list's
+  only other caller. Puts and record frees wait on Fiasco's per-CPU RCU
+  lists, as Fiasco's own do, through the header's `rcu` link, retired
+  to `_current + 1` as `Rcu_data::process_callbacks` retires them, and
+  run by the core's record step, not by Fiasco's `Rcu_data::do_batch`,
+  which runs every callback of a completed batch in one loop under the
+  CPU lock (`rcupdate.cpp`), unbounded. The fork's `process_callbacks`
+  moves a completed batch to the done list as before and then runs at
+  most 64 of the done list's callbacks, in their order, leaving the rest
+  there, where `Rcu_data::pending` still reports them; the timer tick
+  runs it once per tick (`Rcu::do_pending_work` from
+  `Thread::handle_timer_interrupt`, `thread.cpp`), so the tick is the
+  kernel design's reap deadline on the fork, one step per tick, and a
+  mature put runs within the ticks its CPU's backlog needs, one per 64
+  items queued ahead of it. `Context::enter_tickless_idle` runs nothing:
+  it refuses tickless idle while `Rcu::has_pending_work` holds, a
+  non-empty done list included (`context.cpp`), and the fork's idle
+  thread runs steps, with the CPU lock dropped between them, until no
+  list has work before it enters idle, as the kernel design's idle
+  thread does. `Context::rcu_wait`, through which Fiasco's
+  `Reap_list::del` waits for a grace period in the deleting thread
+  (`kobject.cpp`), is not used: a deletion queues its put. No charge
+  depends on when any of them runs.
 * **Page records.** The released list and the reserves' pools chain
   pages through their page records, as on erXos's kernel ([Virtual
   memory](design-kernel.md#virtual-memory)); Fiasco has none, its buddy
   allocator keeping only a free map. The fork adds an array of the
-  core's page records, one per page of the heap, indexed by the page's
-  offset in the heap, taken at boot from the raw entry before the root
-  budget exists and counted in `boot_reserve`'s per-heap-page term. The
+  core's page records, 16 bytes each, the owner, a page-index link, the
+  count and the flags, one for every page of the span from the lowest
+  heap address to the highest, holes included, indexed by the page's
+  offset from the span's base. The array cannot come from the raw
+  entry: `Buddy_alloc` is `Buddy_t_base<10, 11>`, so one block is at
+  most 1 MiB (`buddy_alloc.cpp`), and a 512 MiB heap needs 2 MiB of
+  records. `Kmem_alloc`'s constructor carves it instead, before it hands
+  the heap's regions to the buddy allocator (`add_mem`,
+  `kmem_alloc.cpp`): it takes the whole pages the records need from the
+  top of the highest region, so the allocator never sees them, and that
+  carve is `boot_reserve`'s per-heap-page term, outside the root
+  budget's identity as every boot carve-out is. The
   link lives in the record, never in the page: nothing writes a page
   between its release and its free, which is what the grace period is
   for, and a pooled page is zeroed only when it is taken into use.
@@ -879,9 +953,10 @@ allocator and its RCU batch numbers.
   is released when that free leaves it empty, as the kernel design's
   rule says. What that keeps from a budget is what the kernel design
   bounds: the cache pages whose every record its tree destroyed, kernel
-  records alone, for a grace period and a tick when no call holds those
-  records counted, and otherwise until the holding calls run
-  ([Security](design-kernel.md#security)).
+  records alone, for their grace period and the ticks their CPU's
+  backlog needs, one per 64 records queued ahead of them, when no call
+  holds those records counted, and otherwise until the holding calls
+  run ([Security](design-kernel.md#security)).
 * **Owners.** Every held page is reachable from exactly one reserve and
   its owner's record: a cache page from its budget's reserve; a
   thread's two block pages and its kernel-user page from the thread's;
@@ -957,11 +1032,12 @@ allocator and its RCU batch numbers.
 
 The core alone decides whether a charge fits, and the core alone moves
 a page between a reserve's pool, use, a backing's hand, the released
-list and the free lists. The mechanism gives it the page source and
-sink, the one locked take over the list and the allocator, the RCU
-batch numbers, the page records and the owner record of every page; the
-kinds, caps, borrowing, resizing and the watch are the core's, so a
-change of budget policy changes nothing here.
+list and the free lists. The mechanism gives it the raw page source and
+sink, interrupt masking for the core's ticket locks, the RCU batch
+numbers with the request of the next batch, the page records and the
+owner record of every page; the kinds, caps, borrowing, resizing and
+the watch are the core's, so a change of budget policy changes nothing
+here.
 
 ### Rights by creation kind
 
@@ -1083,8 +1159,9 @@ design makes them ([Budgets](design-kernel.md#budgets)): what the heap
 holds free at the moment the kernel creates it, after Fiasco's own boot,
 read from the allocator's free map, a verified figure, not `bootstrap`'s
 report. The root is a wall that borrows from no one, and its guarantee
-is the right-hand side of B9's identity: pages held plus pages released
-plus pages free is that figure from then on. The kernel checks it
+is the right-hand side of B9's identity: pages held plus pages in
+backings' hands plus pages released plus pages free is that figure
+from then on. The kernel checks it
 against the model: `free >= heap - boot_reserve(cpus, heap)`, and a
 shortfall refuses to start the root task with a crash record of cause
 `PANIC` that names both figures, so the bound the packer admitted
@@ -1455,9 +1532,9 @@ measured with `tools/erx bench irq` when resources land.
 * **`include/erx/core/`**, the seam: one header per core with its opaque
   types and exported functions, `object.h` with the embeddable opaque
   header, and `effects.h`, the prototypes of the effects a host of the
-  cores provides: the page source and sink, the one locked
-  return-and-take over the allocator, the RCU batch numbers, the page
-  records, translation-entry writes and
+  cores provides: the raw page source and sink, interrupt masking for
+  the core's ticket locks, the RCU batch numbers and the request of the
+  next batch, the page records, translation-entry writes and
   TLB maintenance, the lock operations, readying and requesting a CPU,
   arming a timeout, the console writer, the firmware's end. Record
   definitions are in `kernel/core/*_impl.h`, which only the cores
@@ -1521,7 +1598,8 @@ measured with `tools/erx bench irq` when resources land.
   lookup (B2: no capability-valued parameter and no lookup reference),
   allocation (B9: no raw allocator or slab reference in the glue, and
   over the linked kernel, since inherited callees allocate below the
-  glue, every call site of the `noinline` raw entries is the funnel or
+  glue, every call site of the `noinline` raw entries is the funnel's
+  backing, the reaper's free step through `erx_page_free`, the sink, or
   a function of `fiasco/erx_boot_allocators.txt`, each in an
   initialization section; the slab layer is not built, so a slab
   reference anywhere fails the link), registers (B11: no `erx_regs_t`
@@ -1618,9 +1696,9 @@ nothing about what another freed or when; what the budgets do not wall
 off is the one physical free pool, Fiasco's buddy allocator on the
 fork, and the backing of a charge that finds it empty takes released
 pages off the list itself, whoever released them, and waits out their
-grace period, at most one per part of 64 pages, only while the machine
-has no free page, the bound the kernel design states; a fault takes
-from its own pool and never waits
+grace period, fewer than two periods per part of 64 pages, only while
+the machine has no free page, the bound the kernel design states; a
+fault takes from its own pool and never waits
 ([Security](design-kernel.md#security)). User-mode
 access to the performance counters stays enabled on the stopgap for
 profiling, a side channel between domains that the boot audit lists
@@ -1664,11 +1742,15 @@ ran.
 | a gate-less ordinary space | a parent destroys its child's fault gate and provokes a fault in the child: the thread is stopped, the space's inspection counts one dropped record, the machine runs on | the rule keyed on the absence of a gate ends the machine and fails |
 | one close winner (B10) | two threads call `erx_object_destroy` on one object at once, on the hosted kernel under ASan and on QEMU with four CPUs: one succeeds, one gets `ERX_ESTALE`, the object is freed once | `invalidate` returning no old value lets both proceed and ASan reports the double free |
 | attachment teardown | a thread deleted while bound gates have queued senders wakes each sender with `ERX_EDEAD`, and the gates outlive the thread with no bound thread | a teardown that skips `att_gates` leaves a dangling pointer, which ASan reports in the hosted run |
-| space teardown | a space with mappings of several objects is destroyed; every object's reverse map is empty, every translation table is on the released list and the space's budget's `used` is down to its records before the destroy returns, and a page of a destroyed mapping is not reused until the invalidation completed and its grace period ended, checked by the host test of `erx_tlb_plan` and the released list's stamps | the mapping-database unmap retained in place of the space teardown leaves translations behind, which the hosted kernel's table check finds; a teardown seeded to release only at the put leaves `used` high until the grace period, which the counter check catches |
+| space teardown | a space with mappings of several objects is destroyed; every object's reverse map is empty, every translation table and the root directory are on the released list, `_dir` is null and the space's budget's `used` is down to its records before the destroy returns, and a page of a destroyed mapping is not reused until the invalidation completed and its grace period ended, checked by the host test of `erx_tlb_plan` and the released list's stamps | the mapping-database unmap retained in place of the space teardown leaves translations behind, which the hosted kernel's table check finds; a teardown seeded to release only at the put leaves `used` high until the grace period, which the counter check catches; `Mem_space`'s stock destructor body restored frees the directory a second time at the put, which the released list's host model and ASan report |
+| the retire | a page released while no batch is in progress, and one released after one CPU has reported its quiescent state for the batch in progress, each stay on the list until a batch that began after the release has heard from every active CPU, on the hosted kernel's model of `Rcu_glbl` | a release stamped `_current` lets the first page mature at once and the second while that CPU still holds its pointer, which the model's check catches |
+| the record step | a thousand gates destroyed on one CPU are reaped at 64 per tick, each tick's handler running one bounded step, and the idle thread drains the rest in steps when the CPU idles | `Rcu_data::do_batch` restored runs the thousand in one tick handler, which the timing test's bound on a stretch with interrupts masked catches; `enter_tickless_idle` entered with a non-empty done list leaves them unreaped, which the test catches |
+| the page records | the boot carves the record array from the top of the highest heap region before the buddy allocator receives the heap, at 512 MiB and at `memory_min`, and every page of the span has a record | the array taken from the raw entry fails the allocator's 1 MiB maximum at 512 MiB, which the boot test reports |
+| the table adapter | `Mem_space::v_insert` at a fault builds a table from the space's pool through `Erx_table_alloc`, with the raw entry's take counter unchanged | `Kmem_alloc::q_allocator` restored fails the call-site check; a `v_insert` seeded to take from the raw entry fails it too |
 | one owner per page (B9) | the accounting check, held plus released plus free equal to the root budget's guarantee, holds at the end of the conformance and hostile runs and again after the idle threads have drained the released list; the exhaustion tests through every object type succeed and release | a seeded uncharged page taken by the glue fails the accounting check; a seeded release that refunds before it appends fails the chokepoint check |
-| the funnel on a full machine | on QEMU with four CPUs, one domain releases and commits its whole guarantee without pause on three CPUs while another creates objects, commits and touches fresh ranges on the fourth, with no idle CPU: every creation and every commit succeeds, no part of a backing waiting longer than one grace period, and every touch succeeds without a call of the raw entry; the same on the hosted kernel under TSan | the backing seeded to take nothing off the released list turns the raw entry's empty answer into a wait past the bound, which the test catches; a fault path seeded to call the raw entry fails the call-site check |
+| the funnel on a full machine | on QEMU with four CPUs, one domain releases and commits its whole guarantee without pause on three CPUs while another creates objects, commits and touches fresh ranges on the fourth, with no idle CPU: every creation and every commit succeeds, no part of a backing waiting longer than two grace periods, and every touch succeeds without a call of the raw entry; the same on the hosted kernel under TSan | the backing seeded to take nothing off the released list turns the raw entry's empty answer into a wait past the bound, which the test catches; a fault path seeded to call the raw entry fails the call-site check |
 | thread blocks under fragmentation | a domain commits a run of pages as large as its guarantee allows, releases every other page, waits a grace period, and creates threads until its budget is spent: every creation succeeds, while the hosted kernel's allocator check finds no order-1 block free throughout | thread blocks seeded to come from the window as order-1 blocks make a creation fail with `ERX_ENOMEM`, which the test catches |
-| a record's cache page through the grace period | a domain at its cap destroys a thousand gates and creates a thousand at once: refused with `ERX_ENOMEM` while the destroyed records wait and admitted once a grace period and a tick have passed, the kernel design's case run on the fork | a cache page seeded to be released at the destroy lets a parked call read a freed record on the hosted kernel, which ASan reports |
+| a record's cache page through the grace period | a domain at its cap destroys a thousand gates and creates a thousand at once: refused with `ERX_ENOMEM` while the destroyed records wait and admitted once their grace period and the ticks their backlog needs, one per 64 records queued on a CPU, have passed, the kernel design's case run on the fork | a cache page seeded to be released at the destroy lets a parked call read a freed record on the hosted kernel, which ASan reports |
 | the kernel-user page's owner | a thread deleted while its space lives releases its page; a space deleted with its threads releases every thread's page once | a page released by both teardowns is appended twice, which the released list's host model and ASan report |
 | the rendezvous without items | a message with items is refused `ERX_EINVAL` | the refusal removed passes items and fails |
 | executors and reply | `erx_ipc_reply` from an executor returns `ERX_ENOCALLER`; every waiting IPC call returns `ERX_EWOULDBLOCK` | a call declared without its attribute fails the generator |

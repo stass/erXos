@@ -1114,8 +1114,8 @@ the path into one of four images:
   `erx_exec` maps each executable segment
   from the object, read-only and executable, so its pages are shared with
   every program that runs the same file; maps each writable segment as a
-  copy-on-write child of the object, so only the pages a program writes are
-  its own; and zeroes the rest in private memory. It then starts a worker at
+  copy-on-write child of the object, so only the pages a program touches
+  are copied into its own; and zeroes the rest in private memory. It then starts a worker at
   the executable's entry, passing the channel's values and a block holding
   the startup message's bytes and the ranges `erx_exec` occupies, and its
   own threads exit. The executable's own `liberx` decodes the startup
@@ -1610,7 +1610,8 @@ Unix process:
 * **Shared code.** A program of the boot image maps its code from the
   boot image's slice, and an executable or library from a code object,
   read-only and executable, so every program running the same file shares
-  its code pages, and only the pages a program writes become its own.
+  its code pages, and only the data pages a program touches are copied
+  into its own.
 * **No domain.** A program has no connection, no export table, no node
   name and no record anywhere but in its session: its channel is two
   lanes of 16 KiB, and its handler's record a few Erlang terms.
@@ -1828,12 +1829,14 @@ is recorded and decided as at any other time.
 3. **Copy.** The child's handler has the port driver carve the child's
    budget, create its group, its anchor below the parent's anchor and its
    image, empty, and then a **copier**, a worker thread of the session's
-   space in the parent's group, which copies the parent's image into the
-   child's with `erx_space_copy`, so the copy is charged to the parent's
-   CPU grant and runs at its urgency. The copy holds the parent while it
-   copies, so it is one moment of the parent, and charges the child's
-   budget for the child's memory as it goes; one parent has one copy at a
-   time
+   space in the parent's group, which pauses the parent's image with
+   `erx_space_pause`, waits with `erx_space_quiesce` until its threads
+   have finished the calls they were in, copies it into the child's with
+   `erx_space_copy` and resumes it with `erx_space_resume`, so the copy
+   is charged to the parent's CPU grant and runs at its urgency. The
+   pause holds the parent while it is copied, so the copy is one moment
+   of the parent, and the copy charges the child's budget for the
+   child's memory as it goes; one parent has one copy at a time
    ([design-kernel.md](design-kernel.md#copy-on-write-children-and-copies-of-spaces)).
    The kernel's copy table decides what crosses: the child's private
    memory is a copy of its own, the code and libraries the parent mapped
@@ -2072,13 +2075,18 @@ initialisers. A library with text relocations is refused with `ENOEXEC`,
 since its code pages are never writable, and `RELRO` segments become
 read-only after relocation, beneath their mapping's ceiling. So a
 library's code is shared by every program of the session that maps it, and
-its data is copied page by page as each program writes it: the memory
+its data is copied page by page as each program touches it: the memory
 model of QNX's shared libraries.
 
 **Mappings of files.** `mmap` of a file with `MAP_PRIVATE` maps a
 copy-on-write child of the file's sealed data object, read-write, or the
-object itself when the mapping is read-only, so a private mapping costs
-nothing until it is written. A copy-on-write child's parent is always
+object itself when the mapping is read-only. A child is charged and
+backed at its full size when it is made, so a writable private mapping
+costs its program the mapping's size in memory at the `mmap`, admitted
+or refused there, and the allocator's work of backing it; what is
+deferred is the copying, one page at the first touch of each
+([design-kernel.md](design-kernel.md#copy-on-write-children-and-copies-of-spaces)).
+A copy-on-write child's parent is always
 immutable, so a private mapping shows the file as it was when its object
 was filled, from the server or, while the session maps the file shared for
 writing, from the session's shared object ([File objects](#file-objects)),
