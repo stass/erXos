@@ -164,7 +164,8 @@ scripts live in `~/erxos-scratch/tools/`.
   interfaces and verification approach.
 * **Use design subagents at the appropriate depth.** A Claude design
   subagent writes the design: Opus 5.5 at `high` reasoning effort for
-  normal designs, at `xhigh` for complicated or critical ones. A Codex
+  normal designs, at `xhigh` for complicated or critical ones, and at
+  `max` for exceptionally complex ones. A Codex
   `gpt-6-astra` review at `xhigh`, in a read-only sandbox and with the
   security pass framed explicitly, then reviews the design, and its
   CRITICAL and HIGH findings are fixed before implementation starts. Give
