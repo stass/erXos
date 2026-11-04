@@ -1920,9 +1920,9 @@ layers:
   ([design-kernel.md](design-kernel.md#calling-convention-and-status-codes)).
   The `erx` backend is a trap stub per call, in the system-call
   convention of the architecture's `abi/arch/<arch>.txt`.
-  The `fiasco` backend maps each call onto the modified Fiasco's
-  invocations
-  ([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
+  The `fiasco` backend maps each call onto the near-stock Fiasco's
+  invocations from user mode, and refuses what Fiasco cannot offer
+  ([design-stopgap.md](design-stopgap.md)).
   The `hosted` backend implements the interface inside a macOS process:
   spaces are the process, threads are pthreads, memory objects are
   `mmap`ped regions, umtx waits are `os_sync_wait_on_address`, groups and

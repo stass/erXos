@@ -18,13 +18,12 @@ it; git history is the record of completed work.
   [performance watch list](docs/todo-performance.md), each with the
   workload it names, and remove each item once a recorded number settles
   it: the kernel's portable-code hash of large boot image files at first
-  use, the eager FP switch, and the stopgap's machine-wide release and
-  grace lists.
+  use, the eager FP switch, and Phase 1's one service thread.
 
 ## Stopgap replacements
 
-* [High] kernel: replace the modified Fiasco with erXos's own C17 kernel
-  once it boots the slice and passes the conformance suite, at milestone
+* [High] kernel: replace the stopgap Fiasco with erXos's own C17 kernel
+  once it boots Phase 1's system and passes the conformance suite, at milestone
   M7 (gate GK3), before the security closure of M11
   ([plan.md](docs/plan.md)). Every stopgap build carries GPL-2.0 code,
   Fiasco's `kobject_rpc.h`, without which the kernel does not build, and
@@ -33,6 +32,14 @@ it; git history is the record of completed work.
   ([design.md](docs/design.md#dependencies)). The import also records
   the link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
   UART support, and the licence of each library in it.
+* [Medium] kernel, Track K, shelved Phase 1 work: three pieces of code
+  written for the earlier plan, which put erXos's kernel semantics inside
+  the Fiasco fork, stay on branch `shelved-phase2-cores` for Track K: the capability
+  binding into Fiasco with the first capability calls (12a, commit
+  `e2492a64`), the entry classification core (R-a, commit `e90fe78b`) and
+  the quota pool's pure core (WP58, commit `c38b3ada`). Phase 1 on a
+  near-stock Fiasco does not use them. Track K reviews each against
+  erXos's kernel's design and lands what it keeps.
 * [Medium] storage: replace littlefs, which runs as a sub-space port of
   the storage domains of the data partition and of the vault's partition,
   with erXos's F2FS, written in Erlang, at parity over the file-semantics
@@ -60,16 +67,13 @@ it; git history is the record of completed work.
   go with the stopgap at M7, or earlier once the profiling feature under
   Planned features gives a confined way to count.
 
-* [High] stopgap, the one route from user mode: only erXos's trap immediate
-  reaches `erx_dispatch` (`Erx_syscall::enter`, called from the system-call
-  case of `Thread::arm_esr_entry`); Fiasco's own calls, its exception path
-  and its vector table stand as imported, so requirement 1 of
-  [design-stopgap.md](docs/design-stopgap.md#transport) does not hold yet
-  and a program can still reach Fiasco's protocol. Sigma0 is the only user
-  of it in the images built today. Remaining: `erx_user_sync_entry` with
-  `erx_fault_classify` and `erx_entry_step`, the stubs, the deletions the
-  section lists, `tools/check_vectors.rb` (the pending `vector-route` rule),
-  and folding `fiasco/kernel/src/erx/erx_syscall.cpp` into `entry.cpp`.
+* [High] kernel, Track K, the one route from user mode: in erXos's kernel
+  only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
+  and the exception vectors and the synchronous entry from user mode are
+  the kernel's own: `erx_user_sync_entry` over `erx_fault_classify` and
+  `erx_entry_step` (`docs/design-kernel.md`), with a build check that no
+  other route into the kernel exists (the pending `vector-route` rule).
+  Phase 1 uses Fiasco's own routes and has none of this.
 * [Medium] stopgap, untested glue paths: `erx_log_lock` has never run under
   contention, since the probe has one thread and no call makes another, and
   nothing exercises the alien and vCPU-user guard in `Thread::arm_esr_entry`.
@@ -80,11 +84,6 @@ it; git history is the record of completed work.
 * [Low] stopgap, `tools/lib/erx/glue_imports.rb` reads what the compiler left
   out of line: a change of inlining can move a symbol such as
   `_ZN13Irq_chip_soft7sw_chipE` on or off the list and fail the build.
-* [Medium] stopgap, console ownership: `erx_effect_console_write` writes every
-  log record for the whole run, which is the kernel half of
-  `erx_console_owner_step`; the core and its host test
-  ([design-stopgap.md](docs/design-stopgap.md#observation-ends-the-pet-stop-hook-and-the-benchmarks)
-  and the row in its verification table) are still to land.
 * [Medium] stopgap, the debug-log probe's report: `tools/erx check-debug-log`
   compares its own transcript, because the conformance guest's protocol
   needs lines that start with `erx-test:` and a guest that ends the machine,
@@ -170,6 +169,18 @@ it; git history is the record of completed work.
   place, and must do so through the table step of the edge rule, one table
   between preemption points, since the core's part spans a whole record. A
   deletion's table step is what the core's `ERX_MAP_DELETED` record assumes.
+* [Critical] Kernel memory design, `docs/design-kernel.md` ("Virtual
+  memory"): the map core's design review (branch
+  `worktree-agent-a613090776683a3d8`, commits `8f893069` and `58d89236`,
+  not landed) left three findings open for Phase 2's memory design.
+  (Critical) A release's private pages leave the page tree after the
+  range is reusable, so a racing commit can map a page that the release
+  then frees. (High) The step machine plans outside the lock and has no
+  result for a stale plan. (High) The deletion walk's lookup of a
+  record's space is not designed. The reviewing agent recommends that a
+  fragment inherit its origin's attachment, which removes most of the
+  mechanism of the core's third item, and that the boot-image slice's
+  rights become (MAP, READ); both still need checking.
 * [Low] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_check` judges
   a node's summary with the core's own `map_update`, so a bug in that function
   shows only through the behaviour tests, not the check; and `MapModel` shares
@@ -445,11 +456,6 @@ it; git history is the record of completed work.
   Fiasco's `Pending_rqq::handle_requests`, `Context::drq`, `migrate_away`,
   `migrate_to`, `kernel_context_drq` and the kill's request wait into C17
   against it.
-* [Medium] stopgap scheduling, the charge at switches
-  ([design-stopgap.md](docs/design-stopgap.md#scheduling)):
-  the work that writes `erx_sched_charge` calls it from
-  `Sched_context::Ready_queue::activate` as well as from the tick hook. It needs no change to `config/fiasco/kernel.defconfig`, and
-  `FINE_GRAINED_CPUTIME` stays unset.
 * [Medium] scheduler, `erx_sched_thread_init` and `erx_sched_root_init` on a
   live record (`kernel/sched/sched.c`): a second call re-parents a thread,
   changing the group it is charged to (S6), or clears a group's parent,
@@ -714,20 +720,25 @@ it; git history is the record of completed work.
   though [design-kernel.md](docs/design-kernel.md#the-bootable-file) counts it as
   refused. `tools/erx pack` stays refused until the M1 root startup, so
   `--two-file` and the slot refusal wait for it.
-* [Medium] stopgap boot, `kernel/core/boot_place.c`: `bootstrap` places two
-  entries the target design does not have, `boot/sigma0` and `boot/stopgap-root`,
-  because the kernel still starts sigma0 and a root task from its information
-  page; sigma0 pages that stand-in root with read, write and execute over its
-  whole range, since one range cannot tell its segments apart, gaps between
-  segments included, which nothing zeroes. Delete both roles, their ABI paths and the record of the recipe in
-  `tools/lib/erx/boot_image.rb` when the kernel maps the root task from the
-  startup plan. `tools/lib/erx/boot_image.rb` builds on the structural fixture's
-  unadmitted manifest until production packing lands.
-* [Medium] stopgap boot, `kernel/core/boot_place.c`: the handoff record's
-  `pool_usable`, `pool_heap` and `pool_regions` are zero and `kmemsize` keeps
-  Fiasco's default until `erx_pool_plan` and `abi/backend/fiasco.txt` land; the
-  kernel does not read them yet. `kip_size` and the kernel's alignment are limits
-  of `abi/erx_abi.txt` until that backend file exists to hold them.
+* [Medium] boot image, `kernel/core/boot_place.c`: Phase 1 keeps the two
+  roles `boot/sigma0` and `boot/stopgap-root`, since Fiasco starts sigma0
+  and a root task from its information page, and sigma0 pages that root
+  with read, write and execute over its whole range, gaps between segments
+  included, which nothing zeroes; Phase 1 accepts this
+  ([design-stopgap.md](docs/design-stopgap.md#boot-handoff)). erXos's
+  kernel maps the root task from the startup plan, so Track K decides
+  whether the image keeps the two entries, which that kernel would ignore,
+  or drops them with their ABI paths and the recipe in
+  `tools/lib/erx/boot_image.rb`. `tools/lib/erx/boot_image.rb` builds on
+  the structural fixture's unadmitted manifest until production packing
+  lands.
+* [Medium] kernel boot, `kernel/core/boot_place.c`: the handoff record's
+  `pool_usable`, `pool_heap` and `pool_regions` are zero in Phase 1, which
+  has no reader for them
+  ([design-stopgap.md](docs/design-stopgap.md#boot-handoff)). Track K
+  gives them values from `erx_pool_plan` (`docs/design-kernel.md`) and a
+  reader in erXos's kernel, and settles where `kip_size` and the kernel's
+  alignment live; they are limits of `abi/erx_abi.txt` today.
 * [Medium] stopgap boot, `fiasco/bootstrap/server/src/init_kip.cc`: `init_kip_md`
   writes the memory descriptors at the offset the kernel image's information page
   names, unchecked against the view's size or its count, though
@@ -941,16 +952,6 @@ it; git history is the record of completed work.
   error-injection test on each board before drivers run on it. M12, which
   brings the boards, closes this or records the user's acceptance
   ([design-kernel.md](docs/design-kernel.md#interrupts-time-and-entropy)).
-* [Medium] stopgap kernel, finishing without a share: the modified Fiasco
-  runs a killed thread at the fixed finishing priority above every user
-  urgency on its own CPU, outside every quota, with no finishing share,
-  so a domain that creates threads homed on one CPU and kills them holds
-  that CPU's user threads back, the root task's petting thread among
-  them, for as long as the stream lasts; the bound is the stopped
-  spaces' remaining work, paid for by their budgets. Acceptable only
-  while development builds run trusted code; erXos's kernel bounds it
-  with the finishing share, and it goes with the stopgap at M7
-  ([design-stopgap.md](docs/design-stopgap.md#deletion)).
 * [Low] platforms, QEMU `virt`'s fw-cfg device: check whether its node,
   `qemu,fw-cfg-mmio`, offers the DMA interface on the pinned QEMU. If it
   does, list it among the bus masters of the DMA contract; the system
@@ -1020,13 +1021,12 @@ document's "residual risks accepted" paragraph.
   page or references its slot
   ([design-kernel.md](docs/design-kernel.md#the-root-task),
   [design.md](docs/design.md)).
-* [Medium] kernel dispatch and stopgap send glue, the retry action: the
-  generator gives only a call declared `retry` a handler that takes
-  `erx_sys_action_t`. The generated dispatch loop that runs such a call
-  again from its capability lookup, and the build check that only the
-  send's glue returns `ERX_SYS_ACTION_RETRY`, with a seeded second
-  returner failing it, land with the dispatch and the IPC glue
-  ([design-stopgap.md](docs/design-stopgap.md#ipc-gates-and-where-transfer-fits)).
+* [Medium] kernel dispatch, the retry action: the generator gives only a
+  call declared `retry` a handler that takes `erx_sys_action_t`. The
+  generated dispatch loop that runs such a call again from its capability
+  lookup, and the build check that only the send's path returns
+  `ERX_SYS_ACTION_RETRY`, with a seeded second returner failing it, land
+  with erXos's kernel's dispatch and IPC send path (Track K).
 * [High] chokepoints, the pending M1 rules of
   `tools/lib/erx/chokepoint_rules/`: the object leg (no liberx target
   object outside the fiasco backend references an `l4_` symbol or holds a

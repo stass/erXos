@@ -91,13 +91,23 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   restores the full FP and SIMD state. Its cost is unmeasured; the
   `TODO.md` item on the eager switch's missing cases tracks the
   `tools/erx bench` workload that times it.
-* **[Low] stopgap, machine-wide lists.** The stopgap's budget funnel keeps
-  one machine-wide released list, and its RCU keeps one grace list
-  ([design-stopgap.md](design-stopgap.md)), each behind one lock. With many
-  CPUs releasing pages or retiring records at once they may contend.
-  Measure lock hold and wait times under a page-churn workload at 4 CPUs
-  before G1's numbers are taken; per-CPU lists belong to erXos's own kernel
-  if the contention is real.
+* **[Medium] stopgap, one service thread for every call.** In Phase 1 the
+  root's one service thread serves every memory, thread and log call of
+  every task and receives their faults
+  ([design-stopgap.md](design-stopgap.md#helper-threads)), so the calls
+  of all tasks queue on it. Of these `erx_irq_trigger` is the one to
+  watch, since ERTS's scheduler wakes use it. Measure the service
+  thread's queue depth and per-call time, and the wake latency of
+  `erx_irq_trigger`, once ERTS boots. Fixes: serve the hot calls in the
+  caller (a wake needs no root state) or add service threads; erXos's
+  kernel serves these calls itself.
+* **[Low] stopgap, the condition variable's extra wake.** The port always
+  takes `unlock_requeue`'s branch that wakes the next waiter instead of
+  requeueing it, and deletes `FUTEX_REQUEUE`
+  ([design-stopgap.md](design-stopgap.md#thread-exit)), so a
+  broadcast wakes each waiter once more than a requeue would. Measure a
+  `pthread_cond_broadcast` over many waiters once ERTS boots; keep the
+  wake unless it shows in ERTS's numbers.
 * **[Low] kernel, a part of a range call goes through a tree split and join.**
   `erx_map_apply` (`kernel/core/map.c`) takes every edit out of the tree by two
   splits and puts it back by joins, up to about ten walks of a path of at most
@@ -116,11 +126,3 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   dispatch loop lands, against the same call with the admission inlined.
   Fixes: let the dispatch loop and the core share a translation unit at
   -O2, or emit the per-call steps from the plan as straight-line code.
-
-* [Low] stopgap, the system-call case of `Thread::arm_esr_entry`: every
-  Fiasco system call also pays one out-of-line `Erx_syscall::is_call`, and
-  an erXos call a frame copy and the admission's calls, with interrupts masked
-  for the whole call, its console write included. No `tools/erx bench`
-  workload covers kernel entry on the stopgap: the `null` workload named
-  above is the one to measure them with. Fixes: compare the immediate in
-  place, and drain the console after unmasking interrupts.

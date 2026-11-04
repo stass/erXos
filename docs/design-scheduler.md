@@ -720,9 +720,10 @@ decision or the next state and the actions to perform. The effect layer
 reads the clock and the shared areas, calls the core, and performs what
 it returns: queue operations, timer programming, context switches,
 cross-CPU requests and stores to the status area. The core lives in
-`kernel/sched/`, builds for the host, for erXos's kernel and for the
-stopgap, and is the same file in all three
-([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
+`kernel/sched/` and builds for the host and for erXos's kernel. The
+stopgap does not run it: Fiasco schedules itself, and a group on the
+stopgap is a backend record that gives readiness only
+([design-stopgap.md](design-stopgap.md#the-call-table)).
 
 **What each section binds.** A configuration names the rung of the ladder
 that needs the mechanism. A frozen section's shape is decided and it is
@@ -2039,7 +2040,7 @@ reading that lane and tell the system domain, which takes the connection down
 | Runtimes | ERTS's adapter and the test runtime against the contract: wakeups under storms, capacity changes, yield requests | the runtimes' own tests and OTP's suites |
 | Runtimes | runs: four ERTS domains on eight CPUs with the same cpuset and a capacity of two each, normal and dirty CPU schedulers busy, runs placed by the policy | each domain's executors only on its own run; no CPU shared by two domains' executors in steady state |
 | Runtimes | attribution: a service serving three clients with known work per request, its per-client report against a cycle-counter ground truth | the report within the budget E-S5 sets; shown as runtime-reported in the inspector, with a seeded misreport changing nothing outside the service: its group's usage stays within its quota |
-| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick among them, and its documented scheduling differences: finishing with no share, and Fiasco's placement of a woken thread at the head of its level |
+| Parity | the stopgap and erXos's kernel run the same group-readiness tests (create, bind, trigger, take ready, park, wake); the decisions of C0 and C1 are tested on erXos's kernel alone | identical readiness results on both; quotas, urgency, charging, shares and the finishing share answer unsupported on the stopgap, each by a test, and Fiasco's placement of a woken thread at the head of its level is the one documented scheduling difference |
 
 Every test runs under TCG and HVF; a test that passes under only one is a
 bug until explained. The host builds run under ASan and UBSan, and the
@@ -2094,7 +2095,7 @@ each where it gates work.
 | E-S4, wake latency | idle-first wake placement lowers wake latency on a loaded machine | trigger an IRQ object bound to a group with parked executors while other groups load some CPUs, FIFO against `ERX_GROUP_PLACE` | trigger to first instruction of the woken executor, p50 and p99 | whether `ERX_GROUP_PLACE` stays; the wake budget |
 | E-S5, shared services | a flooding client slows a capped service's other clients by no more than its admitted share, a service never exceeds its grant, its per-client report tracks a cycle-counter ground truth, and a doorbell ring that finds nothing costs the receiver at most one pass | one client flooding and one sending one request per period against a service at several quotas and admissions; ground truth from the cycle counter around each unit of work; a domain ringing a lane's doorbell with an empty lane at controlled rates | the second client's latency p50 and p99 against the service's quota and the flooder's admission; the service's usage per period; attribution error per client; the receiver's cost per empty ring against the one trigger the ringer pays | the policy's rule for sizing a service's grant and admissions; the attribution budget; whether a receiver needs a limit on empty rings |
 | E-S6, lock holders | deferred preemption reduces lock-holder preemption under oversubscription | two ERTS domains on four CPUs, each with four executors, hammering a shared ETS table and process locks, with and without `ERX_GROUP_DEFER` | spin time, umtx waits, throughput, overruns | whether `ERX_GROUP_DEFER` stays |
-| E-S7, quota accuracy | quotas are enforced within one draw quantum per CPU per period, with replenishment per period sufficient | a spinning group capped at 10% and 30% on one and four CPUs; periods of 10 and 100 ms on the stopgap, whose 1 ms tick bounds its resolution, and of 1, 10 and 100 ms on erXos's kernel; bursts that straddle a period boundary; a group that leaves CPUs holding local quota | usage per 10 ms, 100 ms and 1 s window, and in any window of one period; quota stranded on CPUs a group left; overhead | the default period and draw quantum; whether idle CPUs hand local quota back to the pool, and whether sporadic replenishment replaces refill per period |
+| E-S7, quota accuracy | quotas are enforced within one draw quantum per CPU per period, with replenishment per period sufficient | a spinning group capped at 10% and 30% on one and four CPUs; periods of 1, 10 and 100 ms; bursts that straddle a period boundary; a group that leaves CPUs holding local quota | usage per 10 ms, 100 ms and 1 s window, and in any window of one period; quota stranded on CPUs a group left; overhead | the default period and draw quantum; whether idle CPUs hand local quota back to the pool, and whether sporadic replenishment replaces refill per period |
 | E-S8, a busy service | an urgent client's latency through a busy or throttled service stays within the policy's bound when the service's grant is sized by the policy's rule, and the rule's headroom is enough | the worked example: an ERTS file service with one flooding client and one urgent client, its grant sized by the rule and undersized, busy and throttled | the urgent client's request latency p50 and p99; the service's own throughput; time spent throttled | the sizing rule's headroom, and whether a service needs a child group per client class ([Risks and open questions](#risks-and-open-questions)) |
 | E-S9, capacity | capacity and runs keep several runtimes from oversubscribing the machine or crowding onto the same CPUs | four ERTS domains on eight CPUs with the same cpuset, each started with eight schedulers and busy on normal and dirty CPU schedulers together, with and without capacity advice, and with runs placed by the policy against runs all at position 0 | throughput, context switches, run-queue lengths, each CPU's occupancy by domain and the time each domain's executors wait behind another's, time for a runtime to adapt | the policy's capacity and placement rules |
 | E-S10, blocking refusal | refusing blocking calls on executors breaks no OTP application erXos ships | run OTP's suites with the refusal and count refusals by call site | refusals per NIF and BIF | which NIFs must move to dirty schedulers, recorded as documented differences |
@@ -2235,8 +2236,7 @@ client's.**
 * *Why it lost.* The user chose Fiasco's process model, and the scheduler
   is simpler for it: a wait sleeps on the thread's own stack and continues
   where it stopped, so no call needs a restart protocol and no decision
-  unwinds one, and the stopgap and erXos's kernel run the same model, so
-  the core's effects are the same on both. Latency favours the process
+  unwinds one, and erXos's kernel keeps the model the stopgap Fiasco runs. Latency favours the process
   model too: Fluke's fully preemptible process model kept a periodic
   thread's worst latency at 19.6 microseconds, against 7.4 ms in either
   model without preemption points, at 5 to 20% of throughput (cited, on a
@@ -2296,7 +2296,7 @@ client's.**
   groups.
 * *Why it lost.* That is close to C1 already. erXos's own kernel owns its
   scheduler, so the group tree is a first-class object rather than an
-  encoding, and the stopgap carries the same core.
+  encoding; the stopgap's groups give readiness only.
 
 **One scheduler for every process, with ERTS as the kernel.**
 
@@ -2361,7 +2361,7 @@ client's.**
   thread, and that needs an eager requeue anyway. The repositioning needs moves
   and a retry in the pick, and hands a runtime that rewrites its published
   values from another CPU a way to keep a CPU repositioning. Stored urgency
-  costs a configure O(m) requests in bounded parts, which the stopgap pays too,
+  costs a configure O(m) requests in bounded parts,
   and two listed writers replace those mechanisms.
 
 ## Risks and open questions

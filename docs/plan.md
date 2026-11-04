@@ -408,8 +408,9 @@ objects bound to a group's dispatcher with the ready ring and
 `erx_group_take_ready`, threads with one semaphore each and TLS set by the
 start trampoline, park and wake under the group's park lock, the umtx
 table, exit through each task's reaper, the test-task launcher over
-`elf_plan.c` with the root service that serves a task's calls, the handler
-thread with the crash record and the machine's end, the watchdog thread,
+`elf_plan.c` with the root service, one thread that serves a task's calls
+and receives its faults, the crash record and the machine's end, the
+watchdog thread,
 the time page, entropy and the debug log over the log capability; the
 generated encoder and decoder of the root service, with the decoder's fuzz
 target; the Phase 1 manifest check in the packer
