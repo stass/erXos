@@ -10,7 +10,7 @@
     "abi/manifest.txt": "291e1e96e451b088937624fc56d8fce9c4ead26ce4643685ebdf53c0d4c29862",
     "abi/services/console.txt": "67df2f5a331a042ca54edbab1a625f18d6eab48ce0c5274158a50edf875b9152",
     "tools/gen_abi.rb": "a67ea4c1fe8648248e2e1b3260211e42723a4f52a49d88ee67bd5603f394ee7b",
-    "tools/lib/erx/abi.rb": "3dcfcb99c7bff4d1ad77ff8db9f75a5cc6de07de51d8051fcfc81477a0aadcd2",
+    "tools/lib/erx/abi.rb": "631ddfbb2f630d0b8118504f66cf5a8c338ba783766c70a0cb6263c8c60c8538",
     "tools/lib/erx/abi_binary.rb": "4353d2e34b76269c7b3f381d6f33b6b537d265c7020b93b52d558b514b684a5b",
     "tools/lib/erx/abi_contracts.rb": "e198dc626ad54178d48459c3e96a176e4b5b2a16f1ec07e651da236d1920cf3d",
     "tools/lib/erx/abi_emit_c.rb": "4e4aafd6928fb31bf2bf5979f083ff565152efe0b39d162774a9c2b9f31a3d65",

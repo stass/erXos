@@ -51,7 +51,11 @@ class CrashTest < Minitest::Test
     FileUtils.remove_entry(@directory) if passed? && File.directory?(@directory)
   end
 
-  def core_sources = %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c].map { |file| File.join(@root, file) }
+  # Full paths: the sanitizer gate looks for each core source's path in this file's text.
+  def core_sources
+    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c]
+      .map { |file| File.join(@root, file) }
+  end
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 

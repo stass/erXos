@@ -45,6 +45,7 @@ module Erx
           'fuzz/generated/abi.c' => SupportEmitter.fuzz(schema)
         }
         files.merge!(CEmitter.private_headers(schema))
+        # Here and not in CallEmitter.outputs, whose marshalling fixture declares no crash types.
         files['include/erx/core/abi_crash.h'] = CallEmitter.crash_seam(schema)
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
