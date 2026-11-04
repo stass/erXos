@@ -28,6 +28,9 @@ module Erx
         liberx/backend/fiasco/end.c
         liberx/backend/fiasco/generated/calls.c
         liberx/backend/fiasco/generated/calls.h
+        liberx/backend/fiasco/group.c
+        liberx/backend/fiasco/group.h
+        liberx/backend/fiasco/irq.c
         liberx/backend/fiasco/lock.h
         liberx/backend/fiasco/log.c
         liberx/backend/fiasco/log.h
@@ -48,6 +51,10 @@ module Erx
         liberx/backend/fiasco/service_wire.h
         liberx/backend/fiasco/thread.c
         liberx/backend/fiasco/thread.h
+        liberx/backend/fiasco/time.c
+        liberx/backend/fiasco/time.h
+        liberx/backend/fiasco/time_table.c
+        liberx/backend/fiasco/time_table.h
         liberx/backend/fiasco/thread_claim.c
         liberx/backend/fiasco/thread_claim.h
         liberx/backend/fiasco/thread_offsets.h
@@ -101,10 +108,12 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_park_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_claim_driver.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_time_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/service_wire_fuzz.c')],
           seed: { 'kernel/core/seeded.c' => "#include \"liberx/backend/fiasco/generated/calls.h\"\n" }
         ),
@@ -123,7 +132,7 @@ module Erx
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
                 "the root's memory effects' fixed refusals, the end path's crash frame, the service's and the reaper's fixed refusals, " \
-                "the memory, thread, crash and watchdog transcripts and the debug log call it",
+                "the memory, thread, crash, watchdog and interrupt transcripts and the debug log call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
           pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
@@ -138,7 +147,8 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
         ),

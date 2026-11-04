@@ -1960,6 +1960,174 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_fiasco_irq_bind_request"] = Layout.new(
+        name: "erx_fiasco_irq_bind_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 32,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "irq".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "record".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_fiasco_irq_create_request"] = Layout.new(
+        name: "erx_fiasco_irq_create_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 24,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "kind".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "selector".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_fiasco_irq_request"] = Layout.new(
+        name: "erx_fiasco_irq_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "irq".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_machine_end_request"] = Layout.new(
         name: "erx_fiasco_machine_end_request".b,
         version: 1,
@@ -2291,6 +2459,48 @@ module Erx
           ).freeze,
           Field.new(
             name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_fiasco_time_set_wall_request"] = Layout.new(
+        name: "erx_fiasco_time_set_wall_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "wall_ns".b,
             type: types.fetch("u64"),
             offset: 8,
             count: nil,
@@ -5203,12 +5413,17 @@ module Erx
         name: "fiasco_call".b,
         base: types.fetch("u32"),
         members: {
+          "irq_ack".b => 34,
+          "irq_bind".b => 33,
+          "irq_create".b => 32,
+          "irq_trigger".b => 35,
           "machine_end".b => 9,
           "space_protect".b => 8,
           "thread_create".b => 2,
           "thread_reap".b => 11,
           "thread_set_affinity".b => 10,
           "thread_start".b => 3,
+          "time_set_wall".b => 36,
           "vm_commit".b => 5,
           "vm_decommit".b => 6,
           "vm_release".b => 7,
@@ -5237,6 +5452,16 @@ module Erx
           "jit".b => 2
         }.freeze,
         flags: true,
+        allowed: nil
+      ).freeze
+      types["irq_kind"] = EnumType.new(
+        name: "irq_kind".b,
+        base: types.fetch("u32"),
+        members: {
+          "line".b => 1,
+          "soft".b => 0
+        }.freeze,
+        flags: false,
         allowed: nil
       ).freeze
       types["log_level"] = EnumType.new(
@@ -8649,12 +8874,16 @@ module Erx
           "erx_elf64_phdr".b,
           "erx_exec_stat".b,
           "erx_group_stat".b,
+          "erx_fiasco_irq_bind_request".b,
+          "erx_fiasco_irq_create_request".b,
+          "erx_fiasco_irq_request".b,
           "erx_fiasco_machine_end_request".b,
           "erx_fiasco_reply".b,
           "erx_fiasco_thread_create_request".b,
           "erx_fiasco_thread_reap_request".b,
           "erx_fiasco_thread_set_affinity_request".b,
           "erx_fiasco_thread_start_request".b,
+          "erx_fiasco_time_set_wall_request".b,
           "erx_fiasco_vm_flagged_request".b,
           "erx_fiasco_vm_range_request".b,
           "erx_frame_header".b,
@@ -8694,6 +8923,7 @@ module Erx
           "fiasco_call".b,
           "group_flags".b,
           "image_flags".b,
+          "irq_kind".b,
           "log_level".b,
           "log_record_flags".b,
           "erx_log_record".b,
@@ -9523,6 +9753,30 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "fiasco_call_irq_ack".b => Constant.new(
+            name: "fiasco_call_irq_ack".b,
+            value: 34,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_irq_bind".b => Constant.new(
+            name: "fiasco_call_irq_bind".b,
+            value: 33,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_irq_create".b => Constant.new(
+            name: "fiasco_call_irq_create".b,
+            value: 32,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_irq_trigger".b => Constant.new(
+            name: "fiasco_call_irq_trigger".b,
+            value: 35,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "fiasco_call_machine_end".b => Constant.new(
             name: "fiasco_call_machine_end".b,
             value: 9,
@@ -9556,6 +9810,12 @@ module Erx
           "fiasco_call_thread_start".b => Constant.new(
             name: "fiasco_call_thread_start".b,
             value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_time_set_wall".b => Constant.new(
+            name: "fiasco_call_time_set_wall".b,
+            value: 36,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -9875,6 +10135,18 @@ module Erx
             name: "image_writable_max".b,
             value: 67108864,
             type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "irq_line".b => Constant.new(
+            name: "irq_line".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "irq_soft".b => Constant.new(
+            name: "irq_soft".b,
+            value: 0,
+            type: types.fetch("u32"),
             description: nil
           ).freeze,
           "k_budget" => Constant.new(

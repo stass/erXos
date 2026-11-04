@@ -249,8 +249,8 @@ seeds Track K's conformance roster.
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | the device NIF: UART (M3), virtio-mmio block (M6) | service: `l4sigma0_map_iomem` into the root at a reserved address, from the manifest's device entry; for the console UART also [the handoff](#the-console) | a second `erx_vm_map` `ERX_ENOTSUP` | any count, within rights |
 | `erx_mem_create_contiguous`, `erx_mem_dma_addr` | the device NIF's buffers and rings (M6) | service: first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, cached. `dma_addr` is physical address plus offset | unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
-| `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | console (M3), block (M6), `{erx_irq, Device, Line}` sinks; ERTS's wakes | service: `l4_factory_create_irq` and, for a line, `l4_icu_bind`; `l4_rcv_ep_bind_thread(irq, dispatcher, record)`; `l4_irq_unmask`; `l4_irq_trigger` | each label once, the line masked until acked; `erx_irq_route` `ERX_ENOTSUP` | by capability, without the root; route applied |
-| `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3) | local: [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set, which `info` reports as capacity | correct readiness; everything else `unsupported`; no guarantee, quota or throttling | grants enforced, usage reported |
+| `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | console (M3), block (M6), `{erx_irq, Device, Line}` sinks; ERTS's wakes | service: `l4_factory_create_irq` and, for a line, `l4_icu_bind`; `l4_rcv_ep_bind_thread(irq, dispatcher, record)`; `l4_irq_unmask`; `l4_irq_trigger` | each label once, the line masked until acked; a second bind of an object and `erx_irq_route` `ERX_ENOTSUP`; a target other than the task's group `ERX_EINVAL`; a line's second object `ERX_EBUSY`; budget and resource ignored | by capability, without the root; route applied |
+| `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3) | local: [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set, which `info` reports as capacity | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; one group per task, so a second create `ERX_ELIMIT`, and budget and parent ignored | grants enforced, usage reported |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
 | `erx_umtx_wait`, `erx_umtx_wake` | musl's futexes | local: [The umtx table](#the-umtx-table) | correct within a task | across spaces; `ERX_EFAULT`, `ERX_ESTALE`, `ERX_EINTR` |
 | `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; an empty mask, or one naming no CPU, `ERX_EINVAL`; affinity runs the thread on one CPU of the mask, its own if the mask holds it; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; those calls work; the thread may run on any CPU of its mask |
@@ -442,8 +442,9 @@ word between tasks.
 
 A deadline is absolute monotonic nanoseconds. The backend reads the architecture's user-mode counter directly, through
 `erx_fiasco_clock_ns` in the architecture layer's `clock.c`, and not the time page, which only a caller of
-`erx_time_page` needs. It takes the remainder, rounds it up to
-microseconds and passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
+`erx_time_page` needs; the page's scale gives the same nanosecond for five years of counting, since `time_table.c` rounds its
+multiplier up at the largest shift that fits. `erx_fiasco_time_wait_us` takes the remainder, rounds it up to
+microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
 wait is never early, and is late by up to Fiasco's timer granularity plus one part in 512. A deadline already past
 returns without a kernel call.
 
@@ -511,11 +512,13 @@ dispatcher thread.
 * **The dispatcher** blocks in `l4_ipc_wait`. Every message is one IRQ object firing, whose label is the index of its record
   in the group, which the `erx_irq_bind` stub chose. It runs a trigger for that record and waits again, for a device line and
   a software `l4_irq_trigger` alike.
-* **The ready ring** has one entry per bound object, and an object is on it at most once, by its listed flag, so it cannot
-  overflow and a trigger allocates nothing.
+* **The ready ring** has one entry per bound object, of at most 64, and an object is on it at most once, by its listed flag, so it
+  cannot overflow and a trigger allocates nothing. A fire the dispatcher has not received yet is one delivery however often it
+  repeats (`Irq_sender::queue`, `irq.cpp:984`), which the listed flag would report as one anyway.
 * **`erx_group_take_ready(max)`** drains up to `max` entries, at most `ERX_MSG_WORDS`, under the park lock, clears their flags
   and mirrors `ready`.
-* **Ack.** A device line stays masked from delivery until `erx_irq_ack`, Fiasco's own behaviour for a bound IRQ object.
+* **Ack.** A device line stays masked from delivery until `erx_irq_ack`, Fiasco's own behaviour for a bound level IRQ object
+  (`irq.cpp:1013-1037`). A software object has no line to mask, so its ack does nothing.
 
 ### The park protocol
 
@@ -765,7 +768,7 @@ the tests.
 | **Task exit**: a spinning thread's count on a shared page freezes; `l4_task_cap_valid` is 0 for every recorded thread; the pool's count returns | thread deletion skipped: the capability stays valid (the count alone can still freeze). Memory step skipped: the pool is short |
 | **Request against exit**: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the dead-label counter stays 0 | thread and gate deletion skipped: requests arrive for a freed label and the counter moves |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
-| **Interrupt**: a UART receive and a software object wake a parked executor; `erx_group_take_ready` returns each label once; ack lets the next through | ack removed: the second character never arrives. Listed flag ignored: a label twice |
+| **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ring and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
 | **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
 | **A semaphore's wake across CPUs**, the `native_semaphore_race` suite, on a test kernel whose up holds itself between the dequeue and the activation until the waiter is queued again or half a second passes: at least three raced downs each, followed by an IPC wait that lasts its whole length and by a down that times out; too few raced downs fail the case | the bit's wait removed: the IPC wait ends early and the second down reports an up that never came |
@@ -814,11 +817,11 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
 * Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.
 
+The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
+
 **Later packages:**
 
 * `l4sys` links beside musl, in the root's start path: `ipc.h:25-26`.
-* The UART's receive line stays free for the driver without `-serial_esc`: `config.cpp:278-282`, `irq_chip_generic.cpp:77-81`.
-* A bound line stays masked until `l4_irq_unmask`, and a software trigger arrives with the bound label: `irq.h` only; `irq.cpp` not read.
 * `enif_send` from a dirty NIF's callback, and its report of a dead receiver: `erl_nif.c:883`.
 * Fiasco's boot is deterministic under instruction counting, with medium confidence: its delay calibration and timer setup are unread.
 * The size estimates: backend packages 1 to 6, 3,000 to 4,500 lines of C17; the musl port 1,000 to 2,000; NIF glue about 500.

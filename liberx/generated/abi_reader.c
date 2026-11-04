@@ -289,6 +289,57 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_irq_bind_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_bind_request_t *result)
+{
+	erx_fiasco_irq_bind_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_IRQ_BIND_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.irq = erx_abi_load_u64(bytes + 8);
+	value.thread = erx_abi_load_u64(bytes + 16);
+	value.record = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_irq_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_create_request_t *result)
+{
+	erx_fiasco_irq_create_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_IRQ_CREATE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.kind = erx_abi_load_u64(bytes + 8);
+	value.selector = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_irq_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_request_t *result)
+{
+	erx_fiasco_irq_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_IRQ_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.irq = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_machine_end_request_t *result)
 {
@@ -391,6 +442,22 @@ erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
 
 	value.caller = erx_abi_load_u64(bytes + 0);
 	value.thread = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_time_set_wall_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_time_set_wall_request_t *result)
+{
+	erx_fiasco_time_set_wall_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_TIME_SET_WALL_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.wall_ns = erx_abi_load_u64(bytes + 8);
 
 	*result = value;
 	return (true);

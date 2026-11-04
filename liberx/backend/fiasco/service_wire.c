@@ -41,6 +41,15 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_vm_range_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_MACHINE_END:
 		return (sizeof(erx_fiasco_machine_end_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_IRQ_CREATE:
+		return (sizeof(erx_fiasco_irq_create_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_IRQ_BIND:
+		return (sizeof(erx_fiasco_irq_bind_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_IRQ_ACK:
+	case ERX_FIASCO_CALL_IRQ_TRIGGER:
+		return (sizeof(erx_fiasco_irq_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_TIME_SET_WALL:
+		return (sizeof(erx_fiasco_time_set_wall_request_t) / sizeof(uint64_t));
 	default:
 		return (0);
 	}

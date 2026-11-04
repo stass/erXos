@@ -22,7 +22,8 @@ module Erx
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
     SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_wire.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
-                 #{BACKEND}/park.c #{BACKEND}/park_table.c #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
+                 #{BACKEND}/park.c #{BACKEND}/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
+                 #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c].freeze
     # The system's root task. The archive's core comes from Fiasco's boot archive,

@@ -30,6 +30,7 @@
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/thread_claim.h"
 #include "liberx/backend/fiasco/thread_offsets.h"
+#include "liberx/backend/fiasco/time_table.h"
 #include "liberx/backend/fiasco/umtx.h"
 #include "liberx/backend/fiasco/vm.h"
 
@@ -43,7 +44,6 @@
 #define THREAD_UTCB_ORDER	17u
 /* A capability slot past the fixed ones: semaphores, then threads. */
 #define THREAD_SLOT(n)		(L4_BASE_CAPS_LAST + (((uint64_t)(n) + 1) << L4_CAP_SHIFT))
-#define THREAD_NS_PER_US	UINT64_C(1000)
 #define REAPER_STACK_BYTES	16384u
 
 _Static_assert(sizeof(erx_fiasco_start_t) <= sizeof(((erx_utcb_t *)0)->mr), "the starting registers fit the public UTCB");
@@ -293,16 +293,14 @@ bool
 erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline)
 {
 	l4_timeout_t timeout = L4_IPC_NEVER;
-	uint64_t now, remainder;
+	uint64_t wait_us;
 
 	for (;;) {
 		if (deadline != ERX_FIASCO_UMTX_FOREVER) {
-			now = erx_fiasco_clock_ns();
-			if (now >= deadline)
+			wait_us = erx_fiasco_time_wait_us(erx_fiasco_clock_ns(), deadline, L4_TIMEOUT_US_MAX);
+			if (wait_us == 0)
 				return (false);
-			remainder = (deadline - now - 1) / THREAD_NS_PER_US + 1;
-			timeout = l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(
-			    remainder < L4_TIMEOUT_US_MAX ? remainder : L4_TIMEOUT_US_MAX));
+			timeout = l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(wait_us));
 		}
 		if (l4_ipc_error(l4_semaphore_down((l4_cap_idx_t)semaphore, timeout), l4_utcb()) == 0)
 			return (true);

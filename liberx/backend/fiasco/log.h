@@ -24,5 +24,8 @@ void erx_fiasco_call(uint64_t number, const uint64_t args[ERX_TRAP_ARG_COUNT],
 
 /* Monotonic time since an arbitrary start, from the architecture's counter. */
 uint64_t erx_fiasco_clock_ns(void);
+/* The counter itself and its frequency, which the time page scales. */
+uint64_t erx_fiasco_counter(void);
+uint64_t erx_fiasco_counter_hz(void);
 
 #endif /* ERX_FIASCO_LOG_H */

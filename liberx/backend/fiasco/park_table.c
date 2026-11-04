@@ -15,6 +15,7 @@ static bool	park_slot_valid(const erx_fiasco_park_t *, uint32_t);
 static bool	park_leave(erx_fiasco_park_t *, uint32_t);
 static bool	park_on_list(const erx_fiasco_park_t *, uint32_t);
 static erx_fiasco_park_result_t park_take_oldest(erx_fiasco_park_t *);
+static erx_fiasco_park_result_t park_take_ready(erx_fiasco_park_t *);
 static erx_fiasco_park_result_t park_locked_step(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *,
     void *, const erx_fiasco_park_event_t *);
 static void	park_mirror_slot(erx_fiasco_park_group_t *, uint32_t);
@@ -62,6 +63,22 @@ park_take_oldest(erx_fiasco_park_t *park)
 	return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_UP, .slot = slot });
 }
 
+/* The flag goes with the entry, so the object's next trigger lists it again. */
+static erx_fiasco_park_result_t
+park_take_ready(erx_fiasco_park_t *park)
+{
+	uint32_t object;
+
+	if (park->ready_count == 0)
+		return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_NOTHING });
+	object = park->ready[0];
+	park->ready_count--;
+	for (uint32_t index = 0; index < park->ready_count; index++)
+		park->ready[index] = park->ready[index + 1];
+	park->listed &= ~(UINT64_C(1) << object);
+	return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_TAKEN, .object = object });
+}
+
 erx_fiasco_park_result_t
 erx_fiasco_park_step(erx_fiasco_park_t *park, const erx_fiasco_park_event_t *event)
 {
@@ -83,7 +100,13 @@ erx_fiasco_park_step(erx_fiasco_park_t *park, const erx_fiasco_park_event_t *eve
 		park->group_epoch++;
 		return (park_take_oldest(park));
 	case ERX_FIASCO_PARK_OP_TRIGGER:
+		if (event->object >= ERX_FIASCO_PARK_OBJECTS_MAX)
+			break;
 		park->group_epoch++;
+		if ((park->listed & (UINT64_C(1) << event->object)) == 0) {
+			park->listed |= UINT64_C(1) << event->object;
+			park->ready[park->ready_count++] = (uint8_t)event->object;
+		}
 		return (park_take_oldest(park));
 	case ERX_FIASCO_PARK_OP_PARK:
 		/* A listed slot has a park in progress, so a second one is refused. */
@@ -105,6 +128,8 @@ erx_fiasco_park_step(erx_fiasco_park_t *park, const erx_fiasco_park_event_t *eve
 		if (park_leave(park, slot))
 			return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_UP, .slot = slot });
 		return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_NOTHING });
+	case ERX_FIASCO_PARK_OP_TAKE:
+		return (park_take_ready(park));
 	}
 	return ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_REFUSED });
 }
@@ -135,6 +160,7 @@ park_locked_step(erx_fiasco_park_group_t *group, const erx_fiasco_park_effects_t
 	effects->lock(context);
 	result = erx_fiasco_park_step(&group->park, event);
 	atomic_store_explicit(&group->status->parked, group->park.parked_count, memory_order_relaxed);
+	atomic_store_explicit(&group->status->ready, group->park.ready_count, memory_order_relaxed);
 	if (event->op != ERX_FIASCO_PARK_OP_CLAIM && event->op != ERX_FIASCO_PARK_OP_TRIGGER &&
 	    event->slot < ERX_GROUP_EXECUTORS_MAX)
 		park_mirror_slot(group, event->slot);
@@ -166,13 +192,34 @@ erx_fiasco_park_release(erx_fiasco_park_group_t *group, const erx_fiasco_park_ef
 }
 
 void
-erx_fiasco_park_trigger(erx_fiasco_park_group_t *group, const erx_fiasco_park_effects_t *effects, void *context)
+erx_fiasco_park_trigger(erx_fiasco_park_group_t *group, const erx_fiasco_park_effects_t *effects, void *context,
+    uint32_t object)
 {
-	const erx_fiasco_park_event_t event = { .op = ERX_FIASCO_PARK_OP_TRIGGER };
+	const erx_fiasco_park_event_t event = { .op = ERX_FIASCO_PARK_OP_TRIGGER, .object = object };
 	const erx_fiasco_park_result_t result = park_locked_step(group, effects, context, &event);
 
 	if (result.action == ERX_FIASCO_PARK_UP)
 		effects->up(context, result.slot);
+}
+
+uint32_t
+erx_fiasco_park_take(erx_fiasco_park_group_t *group, const erx_fiasco_park_effects_t *effects, void *context,
+    uint32_t max, uint32_t *objects)
+{
+	const erx_fiasco_park_event_t event = { .op = ERX_FIASCO_PARK_OP_TAKE };
+	erx_fiasco_park_result_t result;
+	uint32_t count = 0;
+
+	effects->lock(context);
+	while (count < max) {
+		result = erx_fiasco_park_step(&group->park, &event);
+		if (result.action != ERX_FIASCO_PARK_TAKEN)
+			break;
+		objects[count++] = result.object;
+	}
+	atomic_store_explicit(&group->status->ready, group->park.ready_count, memory_order_relaxed);
+	effects->unlock(context);
+	return (count);
 }
 
 int

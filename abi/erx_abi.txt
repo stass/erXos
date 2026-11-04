@@ -313,6 +313,16 @@ enum fiasco_call u32
   value machine_end 9
   value thread_set_affinity 10
   value thread_reap 11
+  value irq_create 32
+  value irq_bind 33
+  value irq_ack 34
+  value irq_trigger 35
+  value time_set_wall 36
+
+# What erx_irq_create makes (docs/design-kernel.md, "IRQ objects").
+enum irq_kind u32
+  value soft 0
+  value line 1
 
 layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field caller u64 0
@@ -350,6 +360,25 @@ layout erx_fiasco_machine_end_request 1 wire_le 8 24
   field caller u64 0
   field res u64 8
   field how u64 16
+
+layout erx_fiasco_irq_create_request 1 wire_le 8 24
+  field caller u64 0
+  field kind u64 8
+  field selector u64 16
+
+layout erx_fiasco_irq_bind_request 1 wire_le 8 32
+  field caller u64 0
+  field irq u64 8
+  field thread u64 16
+  field record u64 24
+
+layout erx_fiasco_irq_request 1 wire_le 8 16
+  field caller u64 0
+  field irq u64 8
+
+layout erx_fiasco_time_set_wall_request 1 wire_le 8 16
+  field caller u64 0
+  field wall_ns u64 8
 
 layout erx_fiasco_reply 1 wire_le 8 24
   field status i64 0

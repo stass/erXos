@@ -16,7 +16,7 @@ module Erx
     module_function
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
-             program: 'qemu-system-aarch64', initrd: nil)
+             program: 'qemu-system-aarch64', initrd: nil, serial_input: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       raise Error, 'CPU count must be between 1 and 8' unless cpus.is_a?(Integer) && cpus.between?(1, 8)
       unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
@@ -32,8 +32,17 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       '-no-reboot', '-serial', "file:#{serial}", '-kernel', image,
+       '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
        *(initrd ? ['-initrd', initrd] : [])].freeze
+    end
+
+    # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
+    # bytes written there arrive on its receive side.
+    def serial_arguments(serial, input)
+      return ['-serial', "file:#{serial}"] unless input
+      raise Error, 'invalid QEMU path' unless input.is_a?(String) && !input.empty? && !input.match?(/[\0,]/) && !serial.include?(',')
+
+      ['-chardev', "file,id=serial0,path=#{serial},input-path=#{input}", '-serial', 'chardev:serial0']
     end
 
     # The accelerators `qemu-system-aarch64 -accel help` lists: one name per
@@ -48,11 +57,12 @@ module Erx
   # The matcher consumes complete serial lines exactly once. It retains a
   # bounded unfinished line so serial splits cannot lose a checkpoint. A
   # checkpoint may also name a verifier, called with the matching line, which
-  # raises Erx::Error when that line's content must fail the boot.
+  # raises Erx::Error when that line's content must fail the boot, and bytes the
+  # harness types into the guest's serial line once that line has come.
   class Transcript
     MAX_LINE_BYTES = 65_536
     REQUIRED_KEYS = %i[name pattern seconds].freeze
-    OPTIONAL_KEYS = %i[verify].freeze
+    OPTIONAL_KEYS = %i[verify type].freeze
     attr_reader :observed
 
     def initialize(checkpoints:)
@@ -69,6 +79,17 @@ module Erx
       @pending = ''.b
       @offset = 0
       @checkpoint_started = 0.0
+      @typed = ''.b
+    end
+
+    # Whether a checkpoint asks the harness to type.
+    def types? = @checkpoints.any? { |point| point.key?(:type) }
+
+    # The bytes due since the last call.
+    def take_typed
+      due = @typed
+      @typed = ''.b
+      due
     end
 
     def consume(path, elapsed:)
@@ -109,7 +130,8 @@ module Erx
       point.fetch(:name).is_a?(String) && !point.fetch(:name).empty? &&
         point.fetch(:pattern).is_a?(Regexp) &&
         point.fetch(:seconds).is_a?(Integer) && point.fetch(:seconds).positive? &&
-        point.fetch(:verify, -> {}).respond_to?(:call)
+        point.fetch(:verify, -> {}).respond_to?(:call) &&
+        point.fetch(:type, '').is_a?(String)
     end
 
     def check_deadline(elapsed:)
@@ -129,6 +151,7 @@ module Erx
         next unless point.fetch(:pattern).match?(line)
 
         point[:verify]&.call(line)
+        @typed << point.fetch(:type, '').b
         @observed << { 'name' => point.fetch(:name), 'elapsed_seconds' => elapsed }.freeze
         @checkpoint_started = elapsed
       end
@@ -172,17 +195,20 @@ module Erx
       directory = File.join(@root, 'build/qemu', "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
       directory = OutputDirectory.prepare(root: @root, path: directory, mode: 0o700)
       serial = File.join(directory, 'serial.log')
-      argv = QemuPlan.argv(accel: accel, image: image, serial: serial,
+      keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
+      argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
                            cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      typing = keyboard && open_keyboard(keyboard)
       begin
         version = @runner.run([@program, '--version'], name: 'qemu-version', deadline: 10)
         report['qemu_version'] = File.binread(version.fetch('log')).lines.first.to_s.strip
         guest_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         stop_guest = lambda do |_log|
           transcript_whole = matcher.consume(serial, elapsed: elapsed(guest_started))
+          typing&.write(matcher.take_typed)
           transcript_whole && !machine_end
         end
         @runner.run(argv, name: "qemu-#{accel}", deadline: deadline, success: stop_guest)
@@ -199,6 +225,7 @@ module Erx
         report['state'] = 'failed'
         raise
       ensure
+        typing&.close
         report['state'] = 'cancelled' if report['state'] == 'running'
         report['elapsed_seconds'] = elapsed(started)
         File.write(File.join(directory, 'report.json'), JSON.pretty_generate(report) + "\n")
@@ -207,6 +234,13 @@ module Erx
     end
 
     private
+
+    # A FIFO held open both ways, so QEMU's open of it never blocks and its read never
+    # sees an end of file between the bytes the transcript types.
+    def open_keyboard(path)
+      File.mkfifo(path, 0o600)
+      File.open(path, File::RDWR).tap { |keys| keys.sync = true }
+    end
 
     def elapsed(started)
       Process.clock_gettime(Process::CLOCK_MONOTONIC) - started

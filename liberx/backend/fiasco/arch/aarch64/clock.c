@@ -16,12 +16,29 @@
 #define ERX_NS_PER_SECOND	UINT64_C(1000000000)
 
 uint64_t
-erx_fiasco_clock_ns(void)
+erx_fiasco_counter_hz(void)
 {
-	uint64_t frequency, ticks;
+	uint64_t frequency;
 
 	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+	return (frequency);
+}
+
+uint64_t
+erx_fiasco_counter(void)
+{
+	uint64_t ticks;
+
 	__asm__ volatile("isb\n\tmrs %0, cntvct_el0" : "=r"(ticks));
+	return (ticks);
+}
+
+uint64_t
+erx_fiasco_clock_ns(void)
+{
+	const uint64_t frequency = erx_fiasco_counter_hz();
+	const uint64_t ticks = erx_fiasco_counter();
+
 	if (frequency == 0)
 		return (0);
 	return (ticks / frequency * ERX_NS_PER_SECOND +

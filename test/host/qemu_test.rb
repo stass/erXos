@@ -38,6 +38,37 @@ class QemuTest < Minitest::Test
     assert_equal 'none', tcg.fetch(tcg.index('-monitor') + 1)
   end
 
+  def test_a_serial_input_reads_a_path_and_still_logs_to_the_file
+    plain = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial')
+    typed = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'keys')
+    assert_equal 'file:serial', plain.fetch(plain.index('-serial') + 1)
+    assert_equal 'chardev:serial0', typed.fetch(typed.index('-serial') + 1)
+    assert_equal 'file,id=serial0,path=serial,input-path=keys', typed.fetch(typed.index('-chardev') + 1)
+  end
+
+  def test_a_comma_in_a_serial_input_path_is_refused
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'a,b') }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'a,b', serial_input: 'keys') }
+  end
+
+  def test_a_checkpoint_types_once_its_line_has_come
+    matcher = Erx::Transcript.new(checkpoints: [{ name: 'prompt', pattern: /^prompt\r?\n/n, seconds: 2, type: 'a' },
+                                                { name: 'second', pattern: /^second\r?\n/n, seconds: 2 }])
+    assert matcher.types?
+    File.binwrite(@serial, "noise\n")
+    matcher.consume(@serial, elapsed: 0.1)
+    assert_equal '', matcher.take_typed
+    File.binwrite(@serial, "noise\nprompt\n")
+    matcher.consume(@serial, elapsed: 0.2)
+    assert_equal 'a', matcher.take_typed
+    assert_equal '', matcher.take_typed
+    refute Erx::Transcript.new(checkpoints: checkpoints).types?
+  end
+
+  def test_a_checkpoint_that_types_something_else_is_a_domain_error
+    assert_raises(Erx::Error) { Erx::Transcript.new(checkpoints: [{ name: 'prompt', pattern: /^p/n, seconds: 2, type: 7 }]) }
+  end
+
   def test_invalid_guest_configuration_is_refused
     assert_raises(Erx::Error) do
       Erx::QemuPlan.argv(accel: 'unknown', image: 'image', serial: 'serial')

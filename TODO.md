@@ -118,10 +118,14 @@ it; git history is the record of completed work.
   the native suites inspect only data after protection changes. The `native_memory` suite needs
   that case once BeamAsm's JIT alias exists.
 * [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than
-  the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode; nothing on
-  QEMU asserts `parked` while a slot is parked. It has one waker in flight, and judges a lost wake only with
+  the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode. It has one waker in flight, and judges a lost wake only with
   no event or timeout left, so a stuck absorb with no work passes. A two-waker variant and a check of every
   quiet state passed the core by hand (623,596 and 287,527 states) and should replace them.
+* [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
+  test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
+* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter
+  (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want. The
+  `native_irq` suite reaches the UART through a test hook until `erx_mem_create_physical` lands with the device NIF.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
   a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.

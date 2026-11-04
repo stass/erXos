@@ -13,13 +13,15 @@
 
 /*
  * The park protocol's core (docs/design-stopgap.md, "The park protocol"): one
- * state machine over the group's epoch, each slot's epoch and the parked list in
- * order. It reads no clock and calls no kernel. Each step says what its caller
+ * state machine over the group's epoch, each slot's epoch, the parked list in order,
+ * the ready ring and the listed flags. It reads no clock and calls no kernel. Each step says what its caller
  * does once the lock is released, and a slot taken off the list is owed exactly
  * one up, so a semaphore holds 0 whenever its executor enters a park.
  */
 
 #define ERX_FIASCO_PARK_NO_SLOT	UINT32_MAX
+/* How many IRQ objects a group holds: one listed bit each, and an index fits ready's bytes. */
+#define ERX_FIASCO_PARK_OBJECTS_MAX	64u
 
 typedef struct erx_fiasco_park {
 	uint64_t	group_epoch;
@@ -27,6 +29,9 @@ typedef struct erx_fiasco_park {
 	uint64_t	used;		/* one bit per slot */
 	uint8_t		parked[ERX_GROUP_EXECUTORS_MAX];	/* oldest first */
 	uint32_t	parked_count;
+	uint64_t	listed;		/* one bit per object: on ready, so at most once */
+	uint8_t		ready[ERX_FIASCO_PARK_OBJECTS_MAX];	/* oldest first */
+	uint32_t	ready_count;
 } erx_fiasco_park_t;
 
 typedef enum erx_fiasco_park_op {
@@ -35,12 +40,14 @@ typedef enum erx_fiasco_park_op {
 	ERX_FIASCO_PARK_OP_TRIGGER,
 	ERX_FIASCO_PARK_OP_PARK,
 	ERX_FIASCO_PARK_OP_TIMEOUT,
-	ERX_FIASCO_PARK_OP_WAKE
+	ERX_FIASCO_PARK_OP_WAKE,
+	ERX_FIASCO_PARK_OP_TAKE		/* the oldest listed object leaves the ring */
 } erx_fiasco_park_op_t;
 
 typedef struct erx_fiasco_park_event {
 	erx_fiasco_park_op_t op;
-	uint32_t	slot;		/* every op but CLAIM and TRIGGER */
+	uint32_t	slot;		/* every op but CLAIM, TRIGGER and TAKE */
+	uint32_t	object;		/* for TRIGGER */
 	uint64_t	group_seen;	/* for PARK: the epochs the executor read */
 	uint64_t	slot_seen;
 } erx_fiasco_park_event_t;
@@ -53,12 +60,14 @@ typedef enum erx_fiasco_park_action {
 	ERX_FIASCO_PARK_SLEEP,		/* down with the deadline */
 	ERX_FIASCO_PARK_TIMED_OUT,	/* the park returns ERX_ETIMEDOUT */
 	ERX_FIASCO_PARK_OWED,		/* a waker took the slot: an unbounded down, then ERX_OK */
-	ERX_FIASCO_PARK_UP		/* up result.slot's semaphore */
+	ERX_FIASCO_PARK_UP,		/* up result.slot's semaphore */
+	ERX_FIASCO_PARK_TAKEN		/* result.object left the ring */
 } erx_fiasco_park_action_t;
 
 typedef struct erx_fiasco_park_result {
 	erx_fiasco_park_action_t action;
 	uint32_t	slot;		/* for CLAIMED and UP */
+	uint32_t	object;		/* for TAKEN */
 } erx_fiasco_park_result_t;
 
 erx_fiasco_park_result_t erx_fiasco_park_step(erx_fiasco_park_t *, const erx_fiasco_park_event_t *);
@@ -85,7 +94,9 @@ typedef struct erx_fiasco_park_group {
 /* The calls, each one step under the lock with its effect after it. */
 uint32_t erx_fiasco_park_claim(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *);
 void	erx_fiasco_park_release(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *, uint32_t);
-void	erx_fiasco_park_trigger(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *);
+void	erx_fiasco_park_trigger(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *, uint32_t);
+/* Moves up to max listed objects into objects, oldest first, and returns how many. Never blocks. */
+uint32_t erx_fiasco_park_take(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *, uint32_t, uint32_t *);
 /* ERX_OK when woken or when an epoch moved, ERX_ETIMEDOUT at the deadline. */
 int	erx_fiasco_park_wait(erx_fiasco_park_group_t *, const erx_fiasco_park_effects_t *, void *, uint32_t,
 	    uint64_t, uint64_t, uint64_t);

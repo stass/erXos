@@ -33,6 +33,12 @@ bool erx_abi_note_decode(const uint8_t *bytes, size_t length,
     erx_abi_note_t *result);
 bool erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
     erx_elf64_phdr_t *result);
+bool erx_fiasco_irq_bind_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_bind_request_t *result);
+bool erx_fiasco_irq_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_create_request_t *result);
+bool erx_fiasco_irq_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_irq_request_t *result);
 bool erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_machine_end_request_t *result);
 bool erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
@@ -45,6 +51,8 @@ bool erx_fiasco_thread_set_affinity_request_decode(const uint8_t *bytes, size_t 
     erx_fiasco_thread_set_affinity_request_t *result);
 bool erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_start_request_t *result);
+bool erx_fiasco_time_set_wall_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_time_set_wall_request_t *result);
 bool erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_vm_flagged_request_t *result);
 bool erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,

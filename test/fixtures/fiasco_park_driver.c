@@ -12,7 +12,8 @@
  * An executor's program is the runtime's: read the epochs, look for work, park.
  * What can go wrong shows in three checks: at rest no work may wait while both
  * executors sleep (a lost wake); a park may not sleep with an up already due to its
- * slot (a stale count); and a trigger takes the longest parked slot.
+ * slot (a stale count); a trigger takes the longest parked slot; and a look takes each
+ * object at most once (a label twice).
  */
 
 #include <pthread.h>
@@ -45,7 +46,8 @@ typedef enum pc {
 /* What the waker is in the middle of: it publishes first and steps second. */
 typedef enum source {
 	SOURCE_IDLE,
-	SOURCE_TRIGGER,
+	SOURCE_TRIGGER_0,
+	SOURCE_TRIGGER_1,
 	SOURCE_WAKE_0,
 	SOURCE_WAKE_1
 } source_t;
@@ -58,14 +60,14 @@ typedef struct model {
 	uint8_t		semaphore[EXECUTORS];
 	uint8_t		ups_flying[EXECUTORS];
 	uint8_t		wake_flag[EXECUTORS];
-	uint8_t		work;		/* one bit per object */
+	uint8_t		owed;		/* one bit per object: triggered, and its label not taken since */
 	uint8_t		source;
 	uint8_t		events_left;
 	uint8_t		timeouts_left;
 } model_t;
 
 typedef struct state_key {
-	uint8_t		bytes[24];
+	uint8_t		bytes[32];
 } state_key_t;
 
 static state_key_t *memo;
@@ -96,7 +98,11 @@ model_key(const model_t *state)
 		key.bytes[at++] = state->seen_slot[slot];
 		key.bytes[at++] = (uint8_t)(state->semaphore[slot] << 4 | state->ups_flying[slot] << 1 | state->wake_flag[slot]);
 	}
-	key.bytes[at++] = state->work;
+	key.bytes[at++] = (uint8_t)state->park.listed;
+	key.bytes[at++] = (uint8_t)state->park.ready_count;
+	for (uint32_t entry = 0; entry < EVENTS; entry++)
+		key.bytes[at++] = state->park.ready[entry];
+	key.bytes[at++] = state->owed;
 	key.bytes[at++] = state->source;
 	key.bytes[at++] = state->events_left;
 	key.bytes[at] = state->timeouts_left;
@@ -145,11 +151,21 @@ explore_executor(const model_t *state, uint32_t slot)
 		next.seen_slot[slot] = (uint8_t)state->park.slot_epoch[slot];
 		next.pc[slot] = PC_LOOK;
 		break;
-	case PC_LOOK:
-		next.pc[slot] = state->work != 0 || state->wake_flag[slot] != 0 ? PC_READ : PC_PARK;
-		next.work = 0;
+	case PC_LOOK: {
+		const erx_fiasco_park_event_t take = { .op = ERX_FIASCO_PARK_OP_TAKE };
+		erx_fiasco_park_result_t result;
+		uint8_t taken = 0;
+
+		while ((result = erx_fiasco_park_step(&next.park, &take)).action == ERX_FIASCO_PARK_TAKEN) {
+			if ((taken & (1u << result.object)) != 0)
+				disagree("a label twice: one look took an object twice");
+			taken |= (uint8_t)(1u << result.object);
+		}
+		next.owed &= (uint8_t)~taken;
+		next.pc[slot] = taken != 0 || state->wake_flag[slot] != 0 ? PC_READ : PC_PARK;
 		next.wake_flag[slot] = 0;
 		break;
+	}
 	case PC_PARK: {
 		const erx_fiasco_park_event_t event = { .op = ERX_FIASCO_PARK_OP_PARK, .slot = slot,
 		    .group_seen = state->seen_group[slot], .slot_seen = state->seen_slot[slot] };
@@ -203,13 +219,17 @@ explore_source(const model_t *state)
 	if (state->source != SOURCE_IDLE) {
 		next = *state;
 		const uint32_t slot = state->source == SOURCE_WAKE_1 ? 1u : 0u;
-		const erx_fiasco_park_event_t event = { .op = state->source == SOURCE_TRIGGER ?
-		    ERX_FIASCO_PARK_OP_TRIGGER : ERX_FIASCO_PARK_OP_WAKE, .slot = slot };
+		const bool trigger = state->source == SOURCE_TRIGGER_0 || state->source == SOURCE_TRIGGER_1;
+		const uint32_t object = state->source == SOURCE_TRIGGER_1 ? 1u : 0u;
+		const erx_fiasco_park_event_t event = { .op = trigger ?
+		    ERX_FIASCO_PARK_OP_TRIGGER : ERX_FIASCO_PARK_OP_WAKE, .slot = slot, .object = object };
 		const bool any_parked = state->park.parked_count != 0;
 		const uint32_t oldest = state->park.parked[0];
 		const erx_fiasco_park_result_t result = erx_fiasco_park_step(&next.park, &event);
 
-		if (state->source == SOURCE_TRIGGER && any_parked &&
+		if (trigger)
+			next.owed |= (uint8_t)(1u << object);
+		if (trigger && any_parked &&
 		    (result.action != ERX_FIASCO_PARK_UP || result.slot != oldest))
 			disagree("oldest first: a trigger did not take the longest parked");
 		apply_result(&next, result);
@@ -222,8 +242,7 @@ explore_source(const model_t *state)
 	for (uint32_t object = 0; object < OBJECTS; object++) {
 		next = *state;
 		next.events_left--;
-		next.work |= (uint8_t)(1u << object);
-		next.source = SOURCE_TRIGGER;
+		next.source = object == 0 ? SOURCE_TRIGGER_0 : SOURCE_TRIGGER_1;
 		explore(&next);
 		moved = true;
 	}
@@ -261,7 +280,7 @@ explore(const model_t *state)
 	if (moved)
 		return;
 	/* At rest: nothing can move, so nothing else will ever look at the work. */
-	if (state->work != 0 || state->wake_flag[0] != 0 || state->wake_flag[1] != 0)
+	if (state->owed != 0 || state->wake_flag[0] != 0 || state->wake_flag[1] != 0)
 		disagree("a lost wake: work waits and every executor sleeps");
 }
 
@@ -286,6 +305,7 @@ run_exhaustive(void)
 /* The race: real threads over the protocol, with semaphores like the kernel's. */
 #define RACE_EXECUTORS	3u
 #define RACE_ROUNDS	20000u
+#define RACE_OBJECTS	2u
 
 static erx_group_stat_t race_status;
 static erx_fiasco_park_group_t race_group = { .status = &race_status };
@@ -374,6 +394,7 @@ race_executor(void *argument)
 		const uint64_t group = atomic_load_explicit(&race_status.epoch, memory_order_acquire);
 		const uint64_t epoch = atomic_load_explicit(&race_status.exec[slot].epoch, memory_order_acquire);
 		uint32_t consumed = atomic_load_explicit(&race_consumed, memory_order_acquire);
+		uint32_t taken[RACE_OBJECTS];
 		bool found = false;
 
 		while (consumed < atomic_load_explicit(&race_published, memory_order_acquire)) {
@@ -385,12 +406,16 @@ race_executor(void *argument)
 		}
 		if (atomic_exchange_explicit(&race_flag[slot], 0, memory_order_acq_rel) != 0)
 			found = true;
+		if (erx_fiasco_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, taken) > RACE_OBJECTS)
+			found = true;
 		if (!found)
 			(void)erx_fiasco_park_wait(&race_group, &race_effects, NULL, slot, group, epoch,
 			    race_clock_ns() + 50000);
 	}
 	return (NULL);
 }
+
+static int	run_ready_calls(void);
 
 static int
 run_race(void)
@@ -407,7 +432,7 @@ run_race(void)
 		const uint32_t slot = round % RACE_EXECUTORS;
 
 		atomic_fetch_add_explicit(&race_published, 1, memory_order_acq_rel);
-		erx_fiasco_park_trigger(&race_group, &race_effects, NULL);
+		erx_fiasco_park_trigger(&race_group, &race_effects, NULL, round % RACE_OBJECTS);
 		atomic_store_explicit(&race_flag[slot], 1, memory_order_release);
 		if (erx_fiasco_park_wake(&race_group, &race_effects, NULL, slot) != ERX_OK)
 			return (1);
@@ -416,8 +441,15 @@ run_race(void)
 		sched_yield();
 	atomic_store_explicit(&race_stop, 1, memory_order_release);
 	for (uint32_t slot = 0; slot < RACE_EXECUTORS; slot++) {
-		erx_fiasco_park_trigger(&race_group, &race_effects, NULL);
+		erx_fiasco_park_trigger(&race_group, &race_effects, NULL, 0);
 		pthread_join(threads[slot], NULL);
+	}
+	uint32_t drained[RACE_OBJECTS];
+
+	(void)erx_fiasco_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, drained);
+	if (atomic_load_explicit(&race_status.ready, memory_order_relaxed) != 0 || race_group.park.listed != 0) {
+		puts("race: a take left the ring or the flags behind");
+		return (1);
 	}
 	for (uint32_t slot = 0; slot < RACE_EXECUTORS; slot++)
 		erx_fiasco_park_release(&race_group, &race_effects, NULL, slot);
@@ -503,7 +535,53 @@ run_calls(void)
 		return (1);
 	}
 }
-puts("calls: 1 pass");
+	if (run_ready_calls() != 0)
+		return (1);
+	puts("calls: 1 pass");
+	return (0);
+}
+
+/* The ring through the calls: a repeat lists nothing, max bounds a take, the mirror follows. */
+static int
+run_ready_calls(void)
+{
+	static erx_group_stat_t status;
+	erx_fiasco_park_group_t group = { .status = &status };
+	const erx_fiasco_park_event_t beyond = { .op = ERX_FIASCO_PARK_OP_TRIGGER, .object = ERX_FIASCO_PARK_OBJECTS_MAX };
+	uint32_t objects[ERX_FIASCO_PARK_OBJECTS_MAX];
+
+	erx_fiasco_park_trigger(&group, &race_effects, NULL, 5);
+	erx_fiasco_park_trigger(&group, &race_effects, NULL, 5);
+	erx_fiasco_park_trigger(&group, &race_effects, NULL, 63);
+	erx_fiasco_park_trigger(&group, &race_effects, NULL, 0);
+	if (atomic_load_explicit(&status.ready, memory_order_relaxed) != 3 ||
+	    atomic_load_explicit(&status.epoch, memory_order_relaxed) != 4) {
+		puts("calls: a repeat listed an object, or skipped the advance");
+		return (1);
+	}
+	if (erx_fiasco_park_take(&group, &race_effects, NULL, 2, objects) != 2 || objects[0] != 5 || objects[1] != 63 ||
+	    atomic_load_explicit(&status.ready, memory_order_relaxed) != 1) {
+		puts("calls: a take ignored max, the order or the mirror");
+		return (1);
+	}
+	erx_fiasco_park_trigger(&group, &race_effects, NULL, 5);
+	if (erx_fiasco_park_take(&group, &race_effects, NULL, 3, objects) != 2 || objects[0] != 0 || objects[1] != 5 ||
+	    erx_fiasco_park_take(&group, &race_effects, NULL, 3, objects) != 0) {
+		puts("calls: a taken object did not list again");
+		return (1);
+	}
+	if (erx_fiasco_park_step(&group.park, &beyond).action != ERX_FIASCO_PARK_REFUSED ||
+	    group.park.group_epoch != 5) {
+		puts("calls: an object out of range was not refused");
+		return (1);
+	}
+	for (uint32_t object = 0; object < ERX_FIASCO_PARK_OBJECTS_MAX; object++)
+		erx_fiasco_park_trigger(&group, &race_effects, NULL, object);
+	if (erx_fiasco_park_take(&group, &race_effects, NULL, ERX_FIASCO_PARK_OBJECTS_MAX, objects) !=
+	    ERX_FIASCO_PARK_OBJECTS_MAX || objects[ERX_FIASCO_PARK_OBJECTS_MAX - 1] != ERX_FIASCO_PARK_OBJECTS_MAX - 1) {
+		puts("calls: the full ring lost an object");
+		return (1);
+	}
 	return (0);
 }
 

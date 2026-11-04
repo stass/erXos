@@ -58,6 +58,18 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_elf64_phdr_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_irq_bind_request_t value;
+		(void)erx_fiasco_irq_bind_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_irq_create_request_t value;
+		(void)erx_fiasco_irq_create_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_irq_request_t value;
+		(void)erx_fiasco_irq_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_machine_end_request_t value;
 		(void)erx_fiasco_machine_end_request_decode(bytes, length, &value);
 	}
@@ -80,6 +92,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	{
 		erx_fiasco_thread_start_request_t value;
 		(void)erx_fiasco_thread_start_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_time_set_wall_request_t value;
+		(void)erx_fiasco_time_set_wall_request_decode(bytes, length, &value);
 	}
 	{
 		erx_fiasco_vm_flagged_request_t value;

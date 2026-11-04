@@ -27,9 +27,11 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/thread.h"
+#include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
 
 #define SERVICE_STACK_BYTES	16384u
@@ -129,6 +131,7 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 	if (reason != NULL)
 		return (reason);
 	service_threads[0] = SERVICE_THREAD_STARTED;
+	erx_fiasco_time_init();
 	reason = service_start();
 	if (reason != NULL)
 		return (reason);
@@ -257,6 +260,19 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 			return (ERX_EINVAL);
 		return (erx_fiasco_vm_body(ERX_FIASCO_VM_PROTECT, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, NULL));
+	case ERX_FIASCO_CALL_IRQ_CREATE:
+		return (erx_fiasco_irq_create_body(((const erx_fiasco_irq_create_request_t *)words)->kind,
+		    ((const erx_fiasco_irq_create_request_t *)words)->selector, &reply->first));
+	case ERX_FIASCO_CALL_IRQ_BIND:
+		return (erx_fiasco_irq_bind_body(((const erx_fiasco_irq_bind_request_t *)words)->irq,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->thread,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->record));
+	case ERX_FIASCO_CALL_IRQ_ACK:
+		return (erx_fiasco_irq_ack_body(((const erx_fiasco_irq_request_t *)words)->irq));
+	case ERX_FIASCO_CALL_IRQ_TRIGGER:
+		return (erx_fiasco_irq_trigger_body(((const erx_fiasco_irq_request_t *)words)->irq));
+	case ERX_FIASCO_CALL_TIME_SET_WALL:
+		return (erx_fiasco_time_set_wall_body(((const erx_fiasco_time_set_wall_request_t *)words)->wall_ns));
 	case ERX_FIASCO_CALL_MACHINE_END: {
 		const uint64_t how = ((const erx_fiasco_machine_end_request_t *)words)->how;
 

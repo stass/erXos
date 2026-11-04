@@ -5,10 +5,11 @@
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/native_irq'
 require_relative '../../tools/lib/erx/native_threads'
 require_relative '../../tools/lib/erx/native_watchdog'
 
-# The threads and watchdog suites' seeded failures (docs/design-stopgap.md,
+# The threads, watchdog and interrupt suites' seeded failures (docs/design-stopgap.md,
 # "Verification"): each seed breaks one thing in a copy of the sources, and the suite's
 # run under TCG must say so, naming the case. A seed that makes no difference means its
 # case does not run the code it claims to. Each boots QEMU and those that lose a wake
@@ -22,6 +23,10 @@ class NativeSeedsTest < Minitest::Test
   SERVICE = 'liberx/backend/fiasco/service.c'
   WATCHDOG = 'liberx/backend/fiasco/watchdog_thread.c'
   PARK = 'liberx/backend/fiasco/park_table.c'
+  IRQ = 'liberx/backend/fiasco/irq.c'
+  GROUP = 'liberx/backend/fiasco/group.c'
+  IRQ_GUEST = 'test/guest/native_irq/guest.c'
+  ACK_BODY = "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n\t(void)l4_irq_unmask(irq_cap((uint32_t)irq));\n"
   REAP_CALL = "\tif (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)\n" \
               "\t\treaper_refused(\"erx: reaper: the service refused a deletion\\n\");\n"
   CLEAR = "\tif (record->clear_word != 0) {\n" \
@@ -46,13 +51,24 @@ class NativeSeedsTest < Minitest::Test
     'the watchdog never ends the machine' => Seed.new(file: WATCHDOG, from: "\t\tif (step.action == ERX_WATCHDOG_END)\n\t\t\terx_fiasco_end_watchdog(&step.end);\n", to: '',
                                                       suite: :watchdog, cpus: 1, expected: /UNCAUGHT/),
     'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
-                                   suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/)
+                                   suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/),
+    'the ack removed' => Seed.new(file: IRQ, from: ACK_BODY, to: "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n",
+                                  suite: :irq, cpus: 1, expected: /irq-second-character/),
+    'the listed flag ignored' => Seed.new(file: PARK, from: 'if ((park->listed & (UINT64_C(1) << event->object)) == 0) {', to: '{',
+                                          suite: :irq, cpus: 1, expected: /status page's ready disagrees/),
+    'the interlock removed' => Seed.new(file: PARK, from: "if (park->group_epoch != event->group_seen || park->slot_epoch[slot] != event->slot_seen)\n\t\t\treturn ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_RETURN });\n", to: '',
+                                        suite: :irq, cpus: 1, expected: /a trigger before the park was lost/),
+    'the dispatcher triggers nothing' => Seed.new(file: GROUP, from: "\t\t\terx_fiasco_group_trigger((uint32_t)record);\n", to: "\t\t\tcontinue;\n",
+                                                  suite: :irq, cpus: 1, expected: /a lost wake/),
+    'the hook before the park removed' => Seed.new(file: IRQ_GUEST, from: "\ttrigger_and_see(irq_soft);\n\tif (erx_park(group, slot,", to: "\tif (erx_park(group, slot,",
+                                                   suite: :irq, cpus: 1, expected: /a trigger before the park was lost/)
   }.freeze
 
   def run_suite(source, seed)
     case seed.suite
     when :threads then Erx::NativeThreads::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
     when :watchdog then Erx::NativeWatchdog::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
+    when :irq then Erx::NativeIrq::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
     end
   end
 

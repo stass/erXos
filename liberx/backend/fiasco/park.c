@@ -97,9 +97,15 @@ erx_fiasco_group_status(void)
 }
 
 void
-erx_fiasco_group_trigger(void)
+erx_fiasco_group_trigger(uint32_t object)
 {
-	erx_fiasco_park_trigger(&park_group, &park_effects, NULL);
+	erx_fiasco_park_trigger(&park_group, &park_effects, NULL, object);
+}
+
+uint32_t
+erx_fiasco_group_take(uint32_t max, uint32_t *objects)
+{
+	return (erx_fiasco_park_take(&park_group, &park_effects, NULL, max, objects));
 }
 
 int
@@ -110,6 +116,12 @@ erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline)
 	if (slot == ERX_FIASCO_PARK_NO_SLOT)
 		return (ERX_ETYPE);
 	return (erx_fiasco_park_wait(&park_group, &park_effects, NULL, slot, group_epoch, slot_epoch, deadline));
+}
+
+void
+erx_yield(void)
+{
+	(void)l4_thread_yield();
 }
 
 int
