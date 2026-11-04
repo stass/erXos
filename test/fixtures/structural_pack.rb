@@ -17,7 +17,7 @@ require_relative '../../tools/lib/erx/toolchain_provenance'
 # never boot admission. The executable, source closure and full archive receive
 # their real checks; M1's root-startup and policy obligations remain unsupported.
 module StructuralPackFixture
-  BUDGET = 1_048_576
+  BUDGET = 8 * 1024 * 1024
   module_function
 
   def check_reproducible(root:, directory:, runner:, compiler: 'clang', linker: 'ld.lld')
