@@ -7,7 +7,7 @@ module Erx
     # The mapping-record core's record, defined only in its source.
     MAP_CORE = 'kernel/core/map.c'
     MAP_RECORD_USE = record_use('erx_mapping')
-    MAP_CORE_MEMBERS = /\bcore_(?:root|generation|low|high|stage|tree|window_start|window_end|pop_front|pop_back|nsegs|segs)\b/
+    MAP_CORE_OPAQUE = /\bcore_opaque\b/
 
     declare_group(
       rules: [
@@ -31,20 +31,22 @@ module Erx
                   'fiasco/kernel/src/erx/map.cpp' => "struct erx_mapping final { int ceiling; };\n",
                   'fiasco/kernel/src/kern/task.cpp' => "struct alignas(8) ::erx_mapping { int ceiling; };\n" }
         ),
-        # A record is written only from a plan the core made (K4): a plan's segments
-        # and a tree's root are in structs a caller must be able to hold, so their
-        # members are named core_, and nothing else names those members. A caller that
-        # edited a segment's ceiling before the apply would install it.
+        # A record is written only from a plan the core made (K4). What a plan will
+        # write, a tree's root and a detached subtree's root sit in structs a caller
+        # must be able to hold, as bytes whose layout only the core knows, so a
+        # caller has no member to name. The one name left is those bytes', and
+        # nothing else names it. That holds against naming: a deliberate cast of the
+        # whole struct is a kernel bug no text rule sees, and review's to catch.
         Chokepoints::Forbidden.new(
-          name: 'map-core-members',
-          rule: "only #{MAP_CORE} and include/erx/map.h name the core_ members of a mapping plan or tree",
+          name: 'map-core-opaque',
+          rule: "only #{MAP_CORE} and include/erx/map.h name the core_opaque bytes of a mapping plan, tree or detached subtree",
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*']),
-          pattern: MAP_CORE_MEMBERS,
+          pattern: MAP_CORE_OPAQUE,
           sites: [Chokepoints::Site.new(glob: MAP_CORE), Chokepoints::Site.new(glob: 'include/erx/map.h')],
-          seed: { 'kernel/core/fault.c' => "plan.core_segs[0].attrs.ceiling = 7;\n",
-                  'test/fixtures/map_driver.c' => "tree.core_root = NULL;\n",
-                  'fiasco/kernel/src/erx/map.cpp' => "plan->core_generation = tree->core_generation;\n" }
+          seed: { 'kernel/core/fault.c' => "plan.core_opaque[0] = 7;\n",
+                  'test/fixtures/map_driver.c' => "bzero(tree.core_opaque, 32);\n",
+                  'fiasco/kernel/src/erx/map.cpp' => "plan->core_opaque[3] = detached->core_opaque[0];\n" }
         )
       ]
     )

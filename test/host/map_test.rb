@@ -31,9 +31,13 @@ class MapTest < Minitest::Test
 
   # An insert command, a fixed reservation unless told otherwise. addr and size
   # give the bytes as a call would pass them, where page and pages do not.
+  # ceiling gives rights and object_ceiling alike unless each is told; only an
+  # object's mapping, deleted or not, takes them.
   def self.insert(page: 0, pages: 1, addr: page * P, size: pages * P, vm_flags: M::FIXED, base: 0, kind: M::RESERVED,
-                  object: 0, offset: 0, object_pages: 0, prot: M::NONE, ceiling: M::RW, flags: 0, mode: 'ok')
-    "insert #{addr} #{size} #{vm_flags} #{base} #{kind} #{object} #{offset} #{object_pages} #{prot} #{ceiling} #{flags} #{mode}"
+                  object: 0, offset: 0, object_pages: 0, prot: M::NONE, ceiling: 0, rights: ceiling,
+                  object_ceiling: ceiling, flags: 0, mode: 'ok')
+    "insert #{addr} #{size} #{vm_flags} #{base} #{kind} #{object} #{offset} #{object_pages} " \
+      "#{prot} #{rights} #{object_ceiling} #{flags} #{mode}"
   end
 
   def self.reserve(page, pages, **options) = insert(page: page, pages: pages, **options)
@@ -64,7 +68,7 @@ class MapTest < Minitest::Test
   RANGES = WINDOW.product(WINDOW).select { |low, high| low < high }.freeze
 
   # One plan as the driver prints it and the model predicts it.
-  PlanLine = Struct.new(:nspares, :start, :stop, :next, :done, :clears, :charge, :trim, :trim_object, :trim_offset) do
+  PlanLine = Struct.new(:nspares, :start, :stop, :next, :done, :charge) do
     def self.parse(line) = new(*line.split.drop(3).map(&:to_i))
   end
 
@@ -130,10 +134,24 @@ class MapTest < Minitest::Test
     assert_equal ["= insert #{M::ENOMEM}"] * 2, lines.grep(/\A= insert -/)
   end
 
-  # A hint does not steer placement, and may be anything at all.
-  def test_a_hint_is_not_read
-    lines = assert_agrees([[INIT, self.class.insert(addr: (1 << 64) - 1, vm_flags: 0, base: 500)]])
-    assert_includes lines, 'A 0 0 0 499'
+  # A hint that names a free, page-aligned range inside the user range is where
+  # the record goes, above the base or below it; any other hint is ignored.
+  def test_a_hint_is_honoured_when_free
+    klass = self.class
+    lines = assert_agrees([[INIT, klass.reserve(200, 4),
+                            klass.placed(2, 500, addr: 300 * P), klass.placed(2, 100, addr: 600 * P),
+                            klass.placed(2, 500, addr: 201 * P), klass.placed(2, 500, addr: 199 * P),
+                            klass.placed(2, 500, addr: (300 * P) + 1), klass.placed(2, 500, addr: 1023 * P),
+                            klass.placed(2, 500, addr: 8 * P), klass.placed(2, 500, addr: (1 << 64) - P),
+                            klass.placed(2, 500, addr: (1 << 64) - 1)]])
+    assert_equal [300, 600, 498, 496, 494, 492, 490, 488, 486],
+                 lines.grep(/\AA 0 /).map { |line| line.split.last.to_i }.last(9)
+  end
+
+  # ERX_VM_NOREPLACE modifies ERX_VM_FIXED, and a hint does not change that.
+  def test_noreplace_needs_fixed
+    lines = assert_agrees([[INIT, self.class.placed(1, 500, addr: 300 * P, vm_flags: M::NOREPLACE)]])
+    assert_includes lines, "= insert #{M::EINVAL}"
   end
 
   def test_every_placement_over_a_sparse_tree
@@ -178,6 +196,10 @@ class MapTest < Minitest::Test
     { kind: M::OBJECT, object: 1, object_pages: 4096, prot: 2, ceiling: M::RWX } => M::EINVAL,
     { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::RW, ceiling: M::R } => M::ERIGHTS,
     { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::R, ceiling: 8 } => M::EINVAL,
+    { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::R, rights: 0x101, object_ceiling: M::R } => M::EINVAL,
+    { kind: M::OBJECT, object: 1, object_pages: 4096, prot: 0x101, ceiling: M::R } => M::EINVAL,
+    { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::R, ceiling: M::R, flags: 0x101 } => M::EINVAL,
+    { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::RW, rights: M::RW, object_ceiling: M::R } => M::ERIGHTS,
     { kind: M::OBJECT, object: 0, object_pages: 4096, prot: M::R, ceiling: M::R } => M::EINVAL,
     { kind: M::OBJECT, object: 1, object_pages: 4096, prot: M::R, ceiling: M::R, flags: 2 } => M::EINVAL,
     # A record past the object's end, and an offset past it that would wrap.
@@ -191,7 +213,11 @@ class MapTest < Minitest::Test
     { kind: M::PRIVATE, object: 1, object_pages: 4096, prot: M::RX } => M::ERIGHTS,
     { kind: M::PRIVATE, object: 1, object_pages: 4096, prot: M::RW, ceiling: M::RWX } => M::EINVAL,
     { kind: M::PRIVATE, object: 0, object_pages: 4096, prot: M::RW } => M::EINVAL,
+    { kind: M::PRIVATE, object: 1, offset: 3, prot: M::RW } => M::EINVAL,
     { kind: M::KERNEL, pages: 2, prot: M::RW } => M::EINVAL,
+    { kind: M::KERNEL, prot: M::R } => M::EINVAL,
+    { kind: M::KERNEL, prot: M::RW, flags: 1 } => M::EINVAL,
+    { kind: M::KERNEL, prot: M::RW, ceiling: M::RW } => M::EINVAL,
     { kind: 0 } => M::EINVAL,
     { kind: 6 } => M::EINVAL,
     { vm_flags: M::NOREPLACE } => M::EINVAL,
@@ -219,26 +245,111 @@ class MapTest < Minitest::Test
   end
 
   # K5: a decommit trims only private memory, and exactly what the range maps;
-  # an object's record stays, its translations going.
+  # it ends at a mapping of an object, the parts before it applied.
   def test_trimming_never_meets_sharing
     lines = assert_agrees([[INIT, self.class.reserve(100, 8), self.class.commit(100, 8), self.class.object(108, 4),
                             self.class.decommit(102, 8)]])
-    private_part, object_part = plans(lines).last(2)
-    assert_equal [6, 2, 102], [private_part.trim, private_part.trim_object, private_part.trim_offset]
-    assert_equal 1, private_part.clears
-    assert_equal [0, 0, 0], [object_part.trim, object_part.trim_object, object_part.trim_offset]
-    assert_equal 1, object_part.clears
+    assert_equal 'X 1 6 2 102', lines.grep(/\AX /).last
+    assert_includes lines, "= part #{M::EEXIST}"
     assert_includes lines.last, "108,112,#{M::OBJECT},1,0"
     assert_includes lines.last, "102,108,#{M::RESERVED},0,0,0,3,0"
   end
 
+  # Commit and decommit are private memory's calls: a mapping of an object,
+  # deleted or not, ends them with ERX_EEXIST and no effect on it, the parts before
+  # it applied. Protect stays the one call over mixed kinds.
+  def test_commit_and_decommit_refuse_what_is_not_private
+    klass = self.class
+    start = [INIT, klass.reserve(100, 2), klass.commit(100, 2), klass.object(102, 2), klass.reserve(104, 2)]
+    deleted = [*start, 'deleted 102']
+    scripts = [[*start, klass.commit(100, 6)], [*start, klass.decommit(100, 6)],
+               [*deleted, klass.commit(100, 6)], [*deleted, klass.decommit(100, 6)],
+               [*start, klass.protect(100, 6, M::R)], [*deleted, klass.protect(100, 6, M::R)]]
+    lines = assert_agrees(scripts)
+    assert_equal 4, lines.grep(/\A= part #{M::EEXIST}\z/).size
+    assert_includes lines, "T 3 100,102,#{M::RESERVED},0,0,0,3,0 102,104,#{M::OBJECT},1,0,#{M::R},#{M::RW},0 " \
+                           "104,106,#{M::RESERVED},0,0,0,3,0"
+    assert_includes lines, "T 3 100,102,#{M::PRIVATE},2,100,#{M::R},#{M::RW},0 102,104,#{M::DELETED},0,0,#{M::R},#{M::RW},0 " \
+                           "104,106,#{M::PRIVATE},2,104,#{M::R},#{M::RW},0"
+  end
+
+  # An apply reports what its plan does to translations and pages, and nothing
+  # for a plan it refuses: a replacing insert and a release drop translations
+  # over any record but a reservation, a deleted one included, since it may hold
+  # some while its deletion's table step runs; a protect drops them when it lowers
+  # an access; a kernel-user page's teardown drops its.
+  def test_effects_come_from_an_accepted_apply
+    klass = self.class
+    effects = lambda do |*commands|
+      assert_agrees([[INIT, klass.reserve(100, 4), klass.commit(100, 2), *commands]]).grep(/\AX /)
+    end
+    assert_equal 'X 1 0 0 0', effects.call(klass.release(100, 1)).last
+    assert_equal 'X 1 0 0 0', effects.call(klass.reserve(101, 2)).last
+    assert_equal 'X 0 0 0 0', effects.call(klass.release(102, 2)).last
+    assert_equal 'X 0 0 0 0', effects.call(klass.reserve(102, 2)).last
+    assert_equal 'X 1 2 2 100', effects.call(klass.decommit(100, 2)).last
+    assert_equal 'X 1 0 0 0', effects.call(klass.kernel(200), 'kremove 200 ok').last
+    assert_equal 2, effects.call(klass.decommit(100, 1, mode: 'short')).size
+    assert_equal 'X 1 0 0 0', effects.call(klass.object(200, 2), 'deleted 200', klass.release(200, 2)).last
+    assert_equal 'X 1 0 0 0', effects.call(klass.protect(100, 2, M::R)).last
+    assert_equal 'X 0 0 0 0', effects.call(klass.protect(100, 2, M::R), klass.protect(100, 2, M::RW)).last
+  end
+
+  # A plan's report is the caller's copy, so lowering nspares cannot make the
+  # apply read a record it was not given.
+  def test_an_apply_counts_its_own_spares
+    lines = assert_agrees([[INIT, self.class.reserve(100, 6), "lowspares #{102 * P} #{P}"]])
+    assert_includes lines, "= lowspares #{M::ENOMEM}"
+  end
+
+  # What every planner refuses leaves nothing behind for a caller to act on; the
+  # driver stops on a refused plan that reports anything.
+  def test_a_refused_plan_reports_nothing
+    klass = self.class
+    start = [INIT, klass.reserve(100, 2), klass.commit(100, 1), klass.kernel(104), klass.object(105, 1, ceiling: M::R)]
+    assert_agrees([[*start, klass.reserve(104, 1), klass.release(104, 1), klass.protect(105, 1, M::RW),
+                    klass.reserve(104, 1, vm_flags: M::FIXED | M::NOREPLACE), klass.placed(2000, 2000), 'kremove 100 ok',
+                    klass.commit(104, 1), klass.commit(101, 1, object: 0), klass.protect(101, 1, M::RX)]])
+  end
+
+  # A record's ceiling comes from the two facts that bound it, in one place.
+  def test_a_ceiling_is_rights_and_the_object_ceiling
+    klass = self.class
+    lines = assert_agrees([[INIT, klass.object(100, 2, rights: M::RW, object_ceiling: M::R, prot: M::R),
+                            klass.object(102, 2, rights: M::RX, object_ceiling: M::RW, prot: M::R),
+                            klass.object(104, 2, rights: M::RWX, object_ceiling: M::RX, prot: M::RX),
+                            klass.protect(100, 2, M::RW), klass.protect(102, 2, M::RX),
+                            klass.insert(page: 110, kind: M::DELETED, prot: M::R, ceiling: M::R)]])
+    assert_includes lines, "= part #{M::ERIGHTS}"
+    assert_includes lines.last, "100,102,#{M::OBJECT},1,0,#{M::R},#{M::R},0"
+    no_object = assert_agrees([[INIT, klass.reserve(100, 2), klass.protect(100, 2, M::RX, object: 0),
+                                klass.protect(100, 2, M::R, object: 0)]])
+    assert_equal [M::ERIGHTS, M::EINVAL], no_object.grep(/\A= part -/).map { |line| line.split[2].to_i }
+    assert_includes lines.last, "102,104,#{M::OBJECT},1,0,#{M::R},#{M::R},0"
+    assert_includes lines.last, "104,106,#{M::OBJECT},1,0,#{M::RX},#{M::RX},0"
+    assert_includes lines.last, "110,111,#{M::DELETED},0,0,#{M::R},#{M::R},0"
+  end
+
+  # A protection wider than the record's field is refused, not narrowed.
+  def test_a_wide_protection_is_refused
+    lines = assert_agrees([[INIT, self.class.object(100, 2), self.class.part(M::PROTECT, 100, 2, prot: 0x103)]])
+    assert_includes lines, "= part #{M::EINVAL}"
+    assert_includes lines.last, "100,102,#{M::OBJECT},1,0,#{M::R}"
+  end
+
   # K5 by construction: however a caller reuses one private object, each page
-  # takes its own number as its offset, so two pages never share one.
+  # takes its own number as its offset, so two pages never share one, whether a
+  # commit or an insert made the record.
   def test_a_private_offset_is_its_page
-    lines = assert_agrees([[INIT, self.class.reserve(100, 4), self.class.commit(100, 2), self.class.commit(102, 2),
-                            self.class.decommit(100, 2), self.class.commit(100, 1)]])
+    klass = self.class
+    lines = assert_agrees([[INIT, klass.reserve(100, 4), klass.commit(100, 2), klass.commit(102, 2),
+                            klass.decommit(100, 2), klass.commit(100, 1),
+                            klass.insert(page: 200, pages: 2, kind: M::PRIVATE, object: 2, prot: M::RW),
+                            klass.insert(page: 300, pages: 2, kind: M::PRIVATE, object: 2, prot: M::RW, offset: 5)]])
     assert_includes lines.last, "100,101,#{M::PRIVATE},2,100"
     assert_includes lines.last, "102,104,#{M::PRIVATE},2,102"
+    assert_includes lines.last, "200,202,#{M::PRIVATE},2,200"
+    assert_includes lines, "= insert #{M::EINVAL}"
   end
 
   # A commit of 1 GiB is 4,096 parts of 64 pages that stay one record, and each
@@ -305,6 +416,7 @@ class MapTest < Minitest::Test
     ]
     lines = assert_agrees(scripts)
     assert_includes lines, "= deadrecord #{M::ESTALE} #{M::OBJECT}"
+    assert_equal 2, lines.grep(/\A= part #{M::EEXIST}\z/).size
   end
 
   # Plans are single use, for one tree, and name a generation; a deletion moves
@@ -319,7 +431,7 @@ class MapTest < Minitest::Test
   end
 
   # The edge rule, over ranges and table spans, with regions the records leave
-  # touched, and the walk over a range's touching records.
+  # touched.
   def test_every_edge_over_every_range
     window = (16..48).step(3).to_a
     fixture = ['init 128', self.class.reserve(16, 8), self.class.commit(20, 2), self.class.object(32, 2),
@@ -329,10 +441,9 @@ class MapTest < Minitest::Test
       [*fixture, "edges #{low * P} #{(high - low) * P} #{span}"]
     end
     lines = assert_agrees(scripts)
-    assert(lines.any? { |line| line.match?(/\AE 0 \d+ \d+ 1/) })
     assert(lines.any? { |line| line.match?(/\AE 0 .*:1/) })
     assert(lines.any? { |line| line.match?(/\AE 0 .*:0/) })
-    assert_agrees([[*fixture, *(16..60).map { |page| "nexttouch #{page}" }]])
+    assert_includes lines, 'E 0'
   end
 
   def test_random_scripts_over_a_small_space
@@ -390,21 +501,35 @@ class MapTest < Minitest::Test
     'no kernel check in a cut' => ['if ((fold.kinds & MAP_KIND_BIT(ERX_MAP_KERNEL)) != 0)', 'if (fold.kinds == 0xff)'],
     'merge ignores offsets' => ["return (low->offset + (low->end.raw - low->start.raw) ==\n\t\t    high->offset);", 'return (true);'],
     'offset not moved' => ['piece.offset += start - piece.start.raw;', 'piece.offset += 0;'],
-    'placement off the base' => ['uint64_t top = base > tree->core_high ? tree->core_high : base;',
-                                 'uint64_t top = tree->core_high + (base & 0);'],
+    'placement off the base' => ['uint64_t top = base > high ? high : base;',
+                                 'uint64_t top = high + (base & 0);'],
     'highest hole not entered' => ['if (right != NULL && right->gap >= pages)', 'if (right != NULL && right->gap >= pages + 1000)'],
     'no rebalance' => ["int heavy;\n\n\tif ((hl > hr ? hl - hr : hr - hl) < 2) {", "int heavy;\n\n\tif (hl + hr < UINT32_MAX) {"],
-    'stale plans run' => ['if (plan->core_generation != tree->core_generation)', 'if (false)'],
+    'stale plans run' => ['if (core->generation != target->generation)', 'if (false)'],
     'part not capped' => ['if (end - start > ERX_RANGE_PART_PAGES)', 'if (false)'],
     'object offset wraps' => ["(request->offset > request->object_pages ||\n\t    pages > request->object_pages - request->offset)",
                               '(pages > request->object_pages - request->offset)'],
-    'a deletion keeps the generation' => ["map_update(path[--n]);\n\ttree->core_generation++;", 'map_update(path[--n]);'],
-    'high straddler not popped' => ['plan->core_pop_back = cut_high && !straddles_both ? 1 : 0;', 'plan->core_pop_back = 0;'],
+    'a deletion keeps the generation' => ["map_update(path[--n]);\n\tcore->generation++;", 'map_update(path[--n]);'],
+    'high straddler not popped' => ['core->pop_back = cut_high && !straddles_both ? 1 : 0;', 'core->pop_back = 0;'],
     'fold miscounts' => ['fold->count += node->count;', 'fold->count += 0 * node->count;'],
-    'commit picks an offset' => ['after.offset = start;', 'after.offset = 0;']
+    'commit picks an offset' => ['after.offset = start;', 'after.offset = 0;'],
+    'no double rotation' => ["if (map_height(node->child[heavy]->child[!heavy]) >\n\t    map_height(node->child[heavy]->child[heavy]))", 'if (false)'],
+    'commit or decommit passes an object' => ["if (request->op != ERX_MAP_PROTECT &&\n\t    (at.kind == ERX_MAP_OBJECT || at.kind == ERX_MAP_DELETED))", 'if (false)'],
+    'an insert picks a private offset' => ['new.offset = request->kind == ERX_MAP_PRIVATE ? start : request->offset;', 'new.offset = 0;'],
+    'a private insert keeps an offset' => ['if (request->kind == ERX_MAP_PRIVATE && request->offset != 0)', 'if (false)'],
+    'a hint is ignored' => ['map_hint_free(tree, request->addr, pages, &start)', '(false && map_hint_free(tree, request->addr, pages, &start))'],
+    'a hint replaces' => ['return (map_fold_range(tree, *start, *start + pages).count == 0);', 'return (true);'],
+    'a hint passes the top' => ['*start > map_tree_of(tree)->high ||', 'false ||'],
+    'a ceiling ignores the object' => ['*ceiling = request->rights & request->object_ceiling;', '*ceiling = request->rights;'],
+    'an apply trusts the report' => ['want = map_plan_spares(core);', 'want = plan->nspares + (0 * map_plan_spares(core));'],
+    'a cut reports no clear' => ['core->clears = (fold.kinds & MAP_KINDS_TOUCHING) != 0;', 'core->clears = false;'],
+    'a refused plan keeps its report' => ["if (status != ERX_OK)\n\t\tmap_plan_begin(tree, plan);", 'if (false) map_plan_begin(tree, plan);'],
+    'a kernel page of any access' => ['if (kind == ERX_MAP_KERNEL && (prot != ERX_PROT_RW || flags != 0))', 'if (false)']
   }.freeze
 
   def test_the_tests_catch_a_wrong_core
+    # A script the real core fails would count as catching every mutant.
+    assert_agrees(mutant_scripts)
     MUTANTS.each do |name, (original, replacement)|
       source = File.read(File.join(@root, 'kernel/core/map.c'))
       assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place of the core"
@@ -418,18 +543,33 @@ class MapTest < Minitest::Test
   private
 
   def caught?(mutant)
-    expected = mutant_scripts.flat_map { |script| predict(script) }
-    expected != run_script(mutant, mutant_scripts.flatten)
+    @mutant_expected ||= mutant_scripts.flat_map { |script| predict(script) }
+    @mutant_expected != run_script(mutant, mutant_scripts.flatten)
   rescue Erx::CommandError
     true
   end
 
-  def mutant_scripts
+  def mutant_scripts = (@mutant_scripts ||= build_mutant_scripts)
+
+  def build_mutant_scripts
     klass = self.class
     one_page_holes = (16..600).step(2).map { |page| klass.reserve(page, 1) }
     wide_holes = [100, 200, 300, 400, 500].map { |page| klass.release(page, 6) }
     [[INIT, *FIXTURE, klass.protect(100, 14, M::RX), klass.protect(100, 14, M::R), klass.commit(100, 14)],
-     [INIT, klass.object(100, 4), klass.kernel(104), klass.decommit(102, 4), klass.release(102, 4)],
+     [INIT, klass.object(100, 4), klass.kernel(104), klass.protect(102, 4, M::NONE), klass.release(102, 4)],
+     [INIT, klass.kernel(104), klass.decommit(104, 1), klass.commit(104, 1), klass.protect(104, 1, M::NONE),
+      klass.insert(page: 110, kind: M::KERNEL, prot: M::R)],
+     [INIT, klass.object(100, 4), klass.commit(100, 4), klass.decommit(100, 4)],
+     [INIT, klass.insert(page: 100, pages: 2, kind: M::PRIVATE, object: 1, prot: M::RW),
+      klass.insert(page: 110, pages: 2, kind: M::PRIVATE, object: 1, prot: M::RW, offset: 5)],
+     [INIT, klass.reserve(200, 4), klass.placed(2, 500, addr: 300 * P), klass.placed(2, 500, addr: 201 * P),
+      klass.placed(2, 500, addr: 1023 * P), klass.placed(2, 500, addr: 1024 * P), klass.placed(2, 500, addr: 2000 * P)],
+     [INIT, klass.object(100, 2, rights: M::RW, object_ceiling: M::R, prot: M::R), klass.protect(100, 2, M::RW)],
+     [INIT, klass.reserve(100, 4), klass.commit(100, 4), klass.reserve(100, 4), klass.commit(100, 2)],
+     [INIT, klass.reserve(100, 6), "lowspares #{102 * P} #{P}"],
+     [INIT, klass.reserve(100, 2), klass.commit(100, 1), klass.release(100, 1), klass.reserve(110, 4), klass.commit(110, 2),
+      klass.reserve(111, 2), klass.kernel(120), klass.release(120, 1)],
+     *Array.new(2) { |index| random_script(Random.new(SEED + 3 + index), low: 16, high: 4096, top: 4096, length: 1500) },
      [INIT, klass.object(100, 4), klass.object(104, 4, offset: 9), klass.protect(100, 8, M::NONE), klass.placed(1, 90)],
      [INIT, klass.object(100, 4, offset: 7), klass.protect(101, 2, M::NONE), klass.release(100, 2)],
      [INIT, klass.reserve(100, 4), klass.commit(100, 2), klass.commit(102, 2)],
@@ -457,14 +597,15 @@ class MapTest < Minitest::Test
   def random_command(rng, low:, high:)
     klass = self.class
     page, pages = random_range(rng, low, high)
-    case rng.rand(12)
+    case rng.rand(13)
     when 0..1 then klass.reserve(page, pages)
     when 2 then random_object(rng, page, pages)
     when 3..4 then klass.commit(page, pages, object: rng.rand(1..3))
     when 5..6 then klass.decommit(page, pages)
     when 7 then klass.protect(page, pages, [M::NONE, M::R, M::RW, M::RX, M::RWX, 6].sample(random: rng))
     when 8 then klass.release(page, pages)
-    when 9 then klass.placed(pages, rng.rand(low..high))
+    when 9 then klass.placed(pages, rng.rand(low..high), addr: rng.rand(2).zero? ? 0 : rng.rand(low...high) * P)
+    when 11 then klass.insert(page: page, pages: pages, kind: M::PRIVATE, object: rng.rand(1..3), prot: M::RW)
     when 10 then "edges #{page * P} #{pages * P} #{[1, 8, 64, 512].sample(random: rng)}"
     else klass.kernel(page)
     end
@@ -493,7 +634,7 @@ class MapTest < Minitest::Test
     input = File.join(@directory, "script-#{script.hash.abs}.txt")
     File.write(input, script.map { |line| "#{line}\n" }.join)
     record = @runner.run([program, input], name: 'map-driver', deadline: 300)
-    File.read(record.fetch('log')).lines.map(&:chomp).grep(/\A(?:[=TDAEL] )/)
+    File.read(record.fetch('log')).lines.map(&:chomp).grep(/\A(?:[=TDAELX] )|\AE 0\z/)
   end
 
   def predict(script)

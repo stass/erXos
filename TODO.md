@@ -155,6 +155,26 @@ it; git history is the record of completed work.
   read-write record with no pages behind it, or keeps a table past its
   promise. The reserve plans of `erx_vm_plan` should take both into the one
   plan, so no caller orders them.
+* [Medium] Kernel space creation, `docs/design-kernel.md` ("Virtual memory"):
+  the placement base has no stated range. The design needs its window (the top
+  part of the user half, below fixed-address images and `liberx`'s fixed
+  placements, with a build check that they do not meet), its alignment and
+  entropy, its deterministic-mode value, and that kernel-user pages and the
+  random base of a position-independent image draw from the same window.
+* [Medium] Kernel private memory objects, callers of `erx_map_plan_insert` and
+  `erx_map_plan_part`: `include/erx/map.h` names `erx_vm_commit`, `erx_image_map`
+  and `erx_space_copy` as the only makers of a space's private objects, which
+  the core cannot check since it never dereferences a handle. When they land: a
+  chokepoint rule holds those three sites; a trim takes its object through the
+  kind-checking accessor, so a shared object fails loudly; a writable image
+  segment keeps its source on the object as slice, slice offset and first page;
+  and the private page tree splits by offset range, so a part's trim goes to the
+  reaper as one subtree.
+* [Medium] Kernel range calls, callers of `erx_map_plan_part` and
+  `erx_map_mark_deleted`: a protect's part and a deletion clear translations in
+  place, and must do so through the table step of the edge rule, one table
+  between preemption points, since the core's part spans a whole record. A
+  deletion's table step is what the core's `ERX_MAP_DELETED` record assumes.
 * [Low] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_check` judges
   a node's summary with the core's own `map_update`, so a bug in that function
   shows only through the behaviour tests, not the check; and `MapModel` shares

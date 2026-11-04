@@ -27,7 +27,7 @@
  *   after a release no page of its range is mapped, the pages outside it are
  *   unchanged, and the records that left hold exactly the pages it mapped;
  *   a fixed insert covers exactly its range, and a placed one lies below the
- *   base, on a range nothing else covers;
+ *   base or at its free hint;
  *   a detached subtree's records are as many as it says, in address order.
  */
 
@@ -44,6 +44,9 @@
 
 typedef struct fuzz_input fuzz_input_t;
 typedef struct fuzz_page fuzz_page_t;
+
+/* The most parts of one bounded call an input runs. */
+#define PARTS_MAX	128u
 
 struct fuzz_input {
 	const uint8_t	*bytes;
@@ -86,6 +89,15 @@ take_u64(fuzz_input_t *input)
 	for (int i = 0; i < 8; i++)
 		value = value << 8 | take_u8(input);
 	return (value);
+}
+
+/* A protection, sometimes with a bit no record's field could hold. */
+static uint32_t
+take_prot(fuzz_input_t *input)
+{
+	uint32_t bits = take_u8(input) & 0x1f;
+
+	return ((bits & 0x10) != 0 ? (bits & 0xf) | 0x100 : bits);
 }
 
 static erx_memobj_t *
@@ -158,7 +170,7 @@ drain(erx_map_detached_t *detached)
 {
 	erx_mapping_t *record;
 	uint64_t previous = 0;
-	uint32_t expected = detached->count, taken = 0;
+	uint32_t expected = erx_map_detached_count(detached), taken = 0;
 
 	drained_pages = 0;
 	while ((record = erx_map_detached_next(detached)) != NULL) {
@@ -185,10 +197,12 @@ require_same_shadow(const fuzz_page_t *before, fuzz_page_t *after)
 
 /*
  * Applies a plan, or fails its allocation as the input says, and returns
- * whether it applied. A failure changes nothing.
+ * whether it applied. A failure changes nothing and reports no effect. Otherwise
+ * it hands back what the apply reported; a plan's report is only a report, so
+ * writing it changes nothing.
  */
 static bool
-apply(fuzz_input_t *input, erx_map_plan_t *plan)
+apply(fuzz_input_t *input, erx_map_plan_t *plan, erx_map_result_t *effects)
 {
 	static fuzz_page_t before[SHADOW_PAGES], after[SHADOW_PAGES];
 	erx_mapping_t *spares[ERX_MAP_SPARES_MAX] = { NULL };
@@ -209,6 +223,9 @@ apply(fuzz_input_t *input, erx_map_plan_t *plan)
 		if (erx_map_apply(&tree, plan, spares, want, &result) !=
 		    ERX_ENOMEM)
 			abort();
+		if (result.clears || result.trim_pages != 0 ||
+		    result.trim_object != NULL || result.trim_offset != 0)
+			abort();
 		for (uint32_t i = 0; i < want; i++)
 			free(spares[i]);
 		take_shadow(after);
@@ -218,9 +235,11 @@ apply(fuzz_input_t *input, erx_map_plan_t *plan)
 	}
 	for (uint32_t i = 0; i < want; i++)
 		spares[i] = record_new();
+	plan->nspares = form;
 	status = erx_map_apply(&tree, plan, spares, want, &result);
 	if (status != ERX_OK)
 		abort();
+	*effects = result;
 	for (uint32_t i = 0; i < result.nfreed; i++)
 		free(result.freed[i]);
 	drain(&result.detached);
@@ -235,6 +254,8 @@ fuzz_insert(fuzz_input_t *input)
 	static fuzz_page_t before[SHADOW_PAGES], after[SHADOW_PAGES];
 	erx_map_insert_t request = { .object = NULL };
 	erx_map_plan_t plan;
+	erx_map_result_t effects;
+	bool takes_ceiling;
 	uint8_t form = take_u8(input);
 	int status;
 
@@ -247,12 +268,19 @@ fuzz_insert(fuzz_input_t *input)
 	request.offset = take_u8(input) < 0xf0 ? take_u8(input) : take_u64(input);
 	request.object_pages = take_u8(input) < 0xf0 ? UINT32_MAX :
 	    take_u64(input);
-	request.prot = take_u8(input) & 0xf;
-	request.ceiling = take_u8(input) & 0xf;
+	request.prot = take_prot(input);
+	request.rights = take_u8(input) & 0xf;
+	request.object_ceiling = take_u8(input) & 0xf;
 	request.flags = take_u8(input) < 0x80 ? 0 : 1;
+	takes_ceiling = request.kind == ERX_MAP_OBJECT ||
+	    request.kind == ERX_MAP_DELETED;
+	if (!takes_ceiling && form < 0xf0) {
+		request.rights = 0;
+		request.object_ceiling = 0;
+	}
 	if (request.kind == ERX_MAP_PRIVATE || request.kind == ERX_MAP_OBJECT)
 		request.object = take_object(input);
-	else if (form < 0xf0)
+	if (request.kind != ERX_MAP_OBJECT && form < 0xf0)
 		request.offset = 0;
 	take_shadow(before);
 	status = erx_map_plan_insert(&tree, &request, &plan);
@@ -268,10 +296,14 @@ fuzz_insert(fuzz_input_t *input)
 	if ((request.vm_flags & ERX_VM_FIXED) != 0 &&
 	    plan.range.start.raw != request.addr >> 12)
 		abort();
+	/* A placement ends at or below the base, or takes the free range hinted. */
 	if ((request.vm_flags & ERX_VM_FIXED) == 0 &&
-	    plan.range.end.raw > request.base.raw)
+	    plan.range.end.raw > request.base.raw &&
+	    plan.range.start.raw != request.addr >> 12)
 		abort();
-	if (apply(input, &plan)) {
+	if ((request.prot & ~UINT32_C(0xf)) != 0)
+		abort();
+	if (apply(input, &plan, &effects)) {
 		const erx_mapping_t *record = erx_map_lookup(&tree,
 		    plan.range.start);
 		erx_mapping_view_t view;
@@ -281,7 +313,13 @@ fuzz_insert(fuzz_input_t *input)
 		view = erx_map_view(record);
 		if (view.start.raw != plan.range.start.raw ||
 		    view.end.raw != plan.range.end.raw ||
-		    view.kind != request.kind || view.ceiling != request.ceiling)
+		    view.kind != request.kind)
+			abort();
+		if (view.ceiling != (takes_ceiling ? (request.rights &
+		    request.object_ceiling) : (uint32_t)ERX_PROT_RW))
+			abort();
+		if (view.kind == ERX_MAP_PRIVATE &&
+		    view.offset != view.start.raw)
 			abort();
 	}
 }
@@ -292,6 +330,7 @@ fuzz_release(fuzz_input_t *input)
 	static fuzz_page_t before[SHADOW_PAGES], after[SHADOW_PAGES];
 	erx_map_plan_t plan;
 	erx_map_range_t range;
+	erx_map_result_t effects;
 	uint64_t addr, mapped = 0, size;
 
 	addr = take_addr(input);
@@ -304,10 +343,13 @@ fuzz_release(fuzz_input_t *input)
 		return;
 	}
 	drained_pages = 0;
-	if (!apply(input, &plan)) {
+	if (!apply(input, &plan, &effects)) {
 		require_same_shadow(before, after);
 		return;
 	}
+	/* No promise of a table survives, so every table it covers goes whole. */
+	if (erx_map_span_touched(&tree, range.start, range.end))
+		abort();
 	take_shadow(after);
 	for (uint64_t i = 0; i < SHADOW_PAGES; i++) {
 		uint64_t page = SHADOW_LOW + i;
@@ -332,6 +374,10 @@ check_part_page(const erx_map_part_request_t *request, uint64_t page,
 	if (before->ceiling != after->ceiling ||
 	    (before->kind == 0) != (after->kind == 0))
 		abort();
+	/* Commit and decommit are private memory's calls. */
+	if (request->op != ERX_MAP_PROTECT && (before->kind == ERX_MAP_OBJECT ||
+	    before->kind == ERX_MAP_DELETED))
+		abort();
 	if (before->kind == after->kind && (before->object != after->object ||
 	    before->offset != after->offset))
 		abort();
@@ -341,31 +387,32 @@ check_part_page(const erx_map_part_request_t *request, uint64_t page,
 		abort();
 }
 
-/*
- * What a planned part says it will trim or charge, against the record at the
- * start of its range, which is the record it acts on.
- */
+/* What a planned part says it will charge, against the record it acts on. */
 static void
-check_part_plan(const erx_map_plan_t *plan, const fuzz_page_t *before)
+check_part_plan(const erx_map_plan_t *plan, const erx_mapping_view_t *view)
 {
-	erx_mapping_view_t view;
-
 	if (plan->nspares > 2 || plan->edits > 3 ||
 	    plan->charge_pages > ERX_RANGE_PART_PAGES)
 		abort();
-	if (plan->charge_pages == 0 && plan->trim_pages == 0)
+	if (plan->charge_pages > 0 && view->kind != ERX_MAP_RESERVED)
+		abort();
+}
+
+/* What an applied part says it trimmed, against the record it acted on. */
+static void
+check_part_effects(const erx_map_plan_t *plan, const erx_map_result_t *effects,
+    const erx_mapping_view_t *view, const fuzz_page_t *before)
+{
+	if (effects->trim_pages == 0)
 		return;
-	view = erx_map_view(erx_map_lookup(&tree, plan->range.start));
-	if (plan->charge_pages > 0 && view.kind != ERX_MAP_RESERVED)
+	if (view->kind != ERX_MAP_PRIVATE || !effects->clears ||
+	    effects->trim_pages != plan->range.end.raw - plan->range.start.raw ||
+	    effects->trim_object != view->object)
 		abort();
-	if (plan->trim_pages > 0 && (view.kind != ERX_MAP_PRIVATE ||
-	    plan->trim_pages != plan->range.end.raw - plan->range.start.raw ||
-	    plan->trim_object != view.object))
-		abort();
-	if (plan->trim_pages > 0 && plan->range.start.raw >= SHADOW_LOW &&
+	if (plan->range.start.raw >= SHADOW_LOW &&
 	    plan->range.start.raw < SHADOW_HIGH &&
 	    before[plan->range.start.raw - SHADOW_LOW].offset !=
-	    plan->trim_offset)
+	    effects->trim_offset)
 		abort();
 }
 
@@ -379,27 +426,40 @@ fuzz_part(fuzz_input_t *input)
 
 	request.op = (erx_map_op_t)(1 + take_u8(input) % 4);
 	request.object = take_object(input);
-	request.prot = take_u8(input) & 0xf;
+	request.prot = take_prot(input);
 	addr = take_addr(input);
 	size = take_size(input);
 	if (erx_map_range_decode(&tree, addr, size, &request.range) != ERX_OK)
 		return;
 	request.cursor = request.range.start;
-	for (;;) {
+	/* A huge commit takes 2^46 parts, and these show all that its parts do. */
+	for (uint32_t parts = 0; parts < PARTS_MAX; parts++) {
 		erx_map_plan_t plan;
+		erx_map_result_t effects;
+		const erx_mapping_t *met;
+		erx_mapping_view_t view = { .kind = ERX_MAP_RESERVED };
 
 		take_shadow(before);
 		if (erx_map_plan_part(&tree, &request, &plan) != ERX_OK) {
 			require_same_shadow(before, after);
 			return;
 		}
-		check_part_plan(&plan, before);
+		met = erx_map_lookup(&tree, plan.range.start);
+		if (met != NULL) {
+			view = erx_map_view(met);
+			check_part_plan(&plan, &view);
+		}
 		if (plan.next.raw <= request.cursor.raw && !plan.done)
 			abort();
-		if (!apply(input, &plan)) {
+		if (!apply(input, &plan, &effects)) {
 			require_same_shadow(before, after);
 			return;
 		}
+		check_part_effects(&plan, &effects, &view, before);
+		/* No promise of a table survives a decommit, so a covered table goes. */
+		if (request.op == ERX_MAP_DECOMMIT &&
+		    erx_map_span_touched(&tree, plan.range.start, plan.range.end))
+			abort();
 		take_shadow(after);
 		for (uint64_t i = 0; i < SHADOW_PAGES; i++) {
 			uint64_t page = SHADOW_LOW + i;

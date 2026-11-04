@@ -14,6 +14,11 @@
  * left over, or if a stand-in for each object's reverse map, kept from the
  * apply results alone, disagrees with the object records in the tree.
  *
+ * It stops too if a refused plan reports anything, if a refused apply reports
+ * an effect, or if a decommit or a release leaves a promise of a table in its
+ * range: that is what lets the caller detach every table such a range covers
+ * whole.
+ *
  * Numbers are decimal or 0x hex. An object is an index, 0 for none. MODE says
  * how the caller's allocation goes: ok; short hands over one record too few,
  * so the core refuses; drop gives up without an apply.
@@ -136,19 +141,40 @@ print_tree(void)
 	printf("\n");
 }
 
+/* A refused plan must give its caller nothing to act on. */
+static void
+check_refused_plan(const erx_map_plan_t *plan)
+{
+	if (plan->nspares != 0 || plan->edits != 0 || plan->done ||
+	    plan->range.start.raw != 0 || plan->range.end.raw != 0 ||
+	    plan->next.raw != 0 || plan->charge_pages != 0)
+		fail("a refused plan reports something");
+}
+
 static void
 print_plan(const char *name, int status, const erx_map_plan_t *plan)
 {
 	if (status != ERX_OK) {
+		check_refused_plan(plan);
 		printf("= %s %d\n", name, status);
 		return;
 	}
 	printf("= %s 0 %" PRIu32 " %" PRIu64 " %" PRIu64 " %" PRIu64
-	    " %d %d %" PRIu64 " %" PRIu64 " %d %" PRIu64 "\n", name,
-	    plan->nspares, plan->range.start.raw, plan->range.end.raw,
-	    plan->next.raw, plan->done ? 1 : 0, plan->clears ? 1 : 0,
-	    plan->charge_pages, plan->trim_pages,
-	    index_of(plan->trim_object), plan->trim_offset);
+	    " %d %" PRIu64 "\n", name, plan->nspares, plan->range.start.raw,
+	    plan->range.end.raw, plan->next.raw, plan->done ? 1 : 0,
+	    plan->charge_pages);
+}
+
+/*
+ * After a decommit's part, a release or a reservation's insert, nothing that
+ * holds a promise of a table
+ * touches the range, so every table it covers completely can be detached whole.
+ */
+static void
+check_no_promise(const erx_map_plan_t *plan)
+{
+	if (erx_map_span_touched(&tree, plan->range.start, plan->range.end))
+		fail("a promise survives in a decommitted or released range");
 }
 
 /* Takes a detached subtree's records, in order, printing and freeing each. */
@@ -156,7 +182,7 @@ static void
 drain(erx_map_detached_t *detached)
 {
 	erx_mapping_t *record;
-	uint32_t expected = detached->count, taken = 0;
+	uint32_t expected = erx_map_detached_count(detached), taken = 0;
 
 	printf("D %" PRIu32, expected);
 	while ((record = erx_map_detached_next(detached)) != NULL) {
@@ -169,13 +195,14 @@ drain(erx_map_detached_t *detached)
 		taken++;
 	}
 	printf("\n");
-	if (taken != expected || detached->count != 0)
+	if (taken != expected || erx_map_detached_count(detached) != 0)
 		fail("a detached subtree's count is not its records");
 }
 
 /*
  * Runs one planned edit under MODE. Returns whether it applied. "A status
- * added freed inserted" and the detached records follow it.
+ * added freed inserted", "X clears trim_pages trim_object trim_offset" and the
+ * detached records follow it.
  */
 static bool
 apply(erx_map_plan_t *plan, const char *mode)
@@ -199,6 +226,9 @@ apply(erx_map_plan_t *plan, const char *mode)
 	if (status != ERX_OK) {
 		for (uint32_t i = 0; i < want; i++)
 			record_free(spares[i]);
+		if (result.clears || result.trim_pages != 0 ||
+		    result.trim_object != NULL || result.trim_offset != 0)
+			fail("a refused apply reports an effect");
 		printf("A %d\n", status);
 		return (false);
 	}
@@ -222,7 +252,9 @@ apply(erx_map_plan_t *plan, const char *mode)
 	printf("A 0 %" PRIu32 " %" PRIu32 " %" PRIu64 "\n", result.nadded,
 	    result.nfreed, result.inserted == NULL ? 0 :
 	    erx_map_view(result.inserted).start.raw);
-	if (result.detached.count > 0)
+	printf("X %d %" PRIu64 " %d %" PRIu64 "\n", result.clears ? 1 : 0,
+	    result.trim_pages, index_of(result.trim_object), result.trim_offset);
+	if (erx_map_detached_count(&result.detached) > 0)
 		drain(&result.detached);
 	return (true);
 }
@@ -252,7 +284,10 @@ command_init(uint64_t end)
 	printf("= init 0\n");
 }
 
-/* insert ADDR SIZE VMFLAGS BASE KIND OBJECT OFFSET PAGES PROT CEILING FLAGS MODE */
+/*
+ * insert ADDR SIZE VMFLAGS BASE KIND OBJECT OFFSET PAGES PROT RIGHTS OBJCEILING
+ * FLAGS MODE
+ */
 static void
 command_insert(char **argv)
 {
@@ -264,14 +299,16 @@ command_insert(char **argv)
 		.kind = (erx_map_kind_t)number(argv[5]),
 		.object = object_of(number(argv[6])),
 		.offset = number(argv[7]), .object_pages = number(argv[8]),
-		.prot = (uint8_t)number(argv[9]),
-		.ceiling = (uint8_t)number(argv[10]),
-		.flags = (uint8_t)number(argv[11]) };
+		.prot = (uint32_t)number(argv[9]),
+		.rights = (uint32_t)number(argv[10]),
+		.object_ceiling = (uint32_t)number(argv[11]),
+		.flags = (uint32_t)number(argv[12]) };
 	int status = erx_map_plan_insert(&tree, &request, &plan);
 
 	print_plan("insert", status, &plan);
-	if (status == ERX_OK)
-		apply(&plan, argv[12]);
+	if (status == ERX_OK && apply(&plan, argv[13]) &&
+	    request.kind == ERX_MAP_RESERVED)
+		check_no_promise(&plan);
 	print_tree();
 }
 
@@ -279,7 +316,7 @@ command_insert(char **argv)
 static void
 command_release(char **argv)
 {
-	erx_map_plan_t plan;
+	erx_map_plan_t plan = { .nspares = 0 };
 	erx_map_range_t range;
 	int status = erx_map_range_decode(&tree, number(argv[1]),
 	    number(argv[2]), &range);
@@ -287,8 +324,8 @@ command_release(char **argv)
 	if (status == ERX_OK)
 		status = erx_map_plan_release(&tree, &range, &plan);
 	print_plan("release", status, &plan);
-	if (status == ERX_OK)
-		apply(&plan, argv[3]);
+	if (status == ERX_OK && apply(&plan, argv[3]))
+		check_no_promise(&plan);
 	print_tree();
 }
 
@@ -304,7 +341,7 @@ command_part(char **argv)
 	erx_map_part_request_t request = {
 		.op = (erx_map_op_t)number(argv[1]),
 		.object = object_of(number(argv[4])),
-		.prot = (uint8_t)number(argv[5]) };
+		.prot = (uint32_t)number(argv[5]) };
 	uint64_t when = number(argv[7]);
 	int status = erx_map_range_decode(&tree, number(argv[2]),
 	    number(argv[3]), &request.range);
@@ -329,6 +366,8 @@ command_part(char **argv)
 			fail("a part charges too much");
 		if (!apply(&plan, part == when ? argv[6] : "ok"))
 			break;
+		if (request.op == ERX_MAP_DECOMMIT)
+			check_no_promise(&plan);
 		if (plan.done)
 			break;
 		request.cursor = plan.next;
@@ -349,7 +388,10 @@ command_raw_release(char **argv)
 	erx_map_range_t range = { .start.raw = number(argv[1]),
 	    .end.raw = number(argv[2]) };
 
-	printf("= raw %d\n", erx_map_plan_release(&tree, &range, &plan));
+	int status = erx_map_plan_release(&tree, &range, &plan);
+
+	check_refused_plan(&plan);
+	printf("= raw %d\n", status);
 }
 
 static void
@@ -363,7 +405,10 @@ command_raw_part(char **argv)
 		.cursor.raw = number(argv[4]),
 		.object = object_of(1) };
 
-	printf("= raw %d\n", erx_map_plan_part(&tree, &request, &plan));
+	int status = erx_map_plan_part(&tree, &request, &plan);
+
+	check_refused_plan(&plan);
+	printf("= raw %d\n", status);
 }
 
 /*
@@ -412,6 +457,29 @@ command_other_tree(char **argv)
 	print_tree();
 }
 
+/*
+ * lowspares ADDR SIZE: a release that needs spares, whose report a caller
+ * overwrites to say it needs none. The report is only a report, so the apply
+ * still counts what it will write and refuses, reading no record it was not
+ * given.
+ */
+static void
+command_low_spares(char **argv)
+{
+	erx_map_plan_t plan;
+	erx_map_range_t range;
+	erx_map_result_t result;
+
+	if (erx_map_range_decode(&tree, number(argv[1]), number(argv[2]),
+	    &range) != ERX_OK ||
+	    erx_map_plan_release(&tree, &range, &plan) != ERX_OK ||
+	    plan.nspares == 0)
+		fail("lowspares: no plan that needs spares");
+	plan.nspares = 0;
+	printf("= lowspares %d\n", erx_map_apply(&tree, &plan, NULL, 0, &result));
+	print_tree();
+}
+
 /* kremove PAGE MODE */
 static void
 command_kremove(char **argv)
@@ -441,8 +509,7 @@ command_edges(char **argv)
 		printf("E %d\n", status);
 		return;
 	}
-	printf("E 0 %" PRIu64 " %" PRIu64 " %d", edges.covered_start.raw,
-	    edges.covered_end.raw, edges.covered_touched ? 1 : 0);
+	printf("E 0");
 	for (uint32_t i = 0; i < edges.nedges; i++)
 		printf(" %" PRIu64 ":%d", edges.edge[i].start.raw,
 		    edges.edge[i].keep ? 1 : 0);
@@ -550,7 +617,7 @@ command_fill(uint64_t start, uint64_t count, uint64_t pages)
 			.addr = (start + (pages + 1) * i) * ERX_PAGE_SIZE,
 			.size = pages * ERX_PAGE_SIZE,
 			.vm_flags = ERX_VM_FIXED, .kind = ERX_MAP_RESERVED,
-			.prot = ERX_PROT_NONE, .ceiling = ERX_PROT_RW };
+			.prot = ERX_PROT_NONE };
 		erx_map_plan_t plan;
 		erx_map_result_t result;
 		erx_mapping_t *spare;
@@ -570,21 +637,23 @@ run_command(char **argv, int argc)
 {
 	if (strcmp(argv[0], "init") == 0 && argc == 2) {
 		command_init(number(argv[1]));
-	} else if (strcmp(argv[0], "insert") == 0 && argc == 13) {
+	} else if (strcmp(argv[0], "insert") == 0 && argc == 14) {
 		command_insert(argv);
 	} else if (strcmp(argv[0], "release") == 0 && argc == 4) {
 		command_release(argv);
 	} else if (strcmp(argv[0], "part") == 0 && argc == 8) {
 		command_part(argv);
-} else if (strcmp(argv[0], "rawrelease") == 0 && argc == 3) {
-	command_raw_release(argv);
-} else if (strcmp(argv[0], "rawpart") == 0 && argc == 5) {
-	command_raw_part(argv);
-} else if (strcmp(argv[0], "markstale") == 0 && argc == 4) {
-	command_mark_stale(argv);
-} else if (strcmp(argv[0], "othertree") == 0 && argc == 3) {
-	command_other_tree(argv);
-} else if (strcmp(argv[0], "kremove") == 0 && argc == 3) {
+	} else if (strcmp(argv[0], "rawrelease") == 0 && argc == 3) {
+		command_raw_release(argv);
+	} else if (strcmp(argv[0], "rawpart") == 0 && argc == 5) {
+		command_raw_part(argv);
+	} else if (strcmp(argv[0], "markstale") == 0 && argc == 4) {
+		command_mark_stale(argv);
+	} else if (strcmp(argv[0], "othertree") == 0 && argc == 3) {
+		command_other_tree(argv);
+	} else if (strcmp(argv[0], "lowspares") == 0 && argc == 3) {
+		command_low_spares(argv);
+	} else if (strcmp(argv[0], "kremove") == 0 && argc == 3) {
 		command_kremove(argv);
 	} else if (strcmp(argv[0], "edges") == 0 && argc == 4) {
 		command_edges(argv);
@@ -598,13 +667,7 @@ run_command(char **argv, int argc)
 		command_fill(number(argv[1]), number(argv[2]), number(argv[3]));
 	} else if (strcmp(argv[0], "quiet") == 0 && argc == 2) {
 		quiet = (int)number(argv[1]);
-} else if (strcmp(argv[0], "nexttouch") == 0 && argc == 2) {
-	const erx_mapping_t *record = erx_map_next_touching(&tree,
-	    (erx_uvpn_t){ number(argv[1]) });
-
-	printf("L %" PRIu64 "\n", record == NULL ? 0 :
-	    erx_map_view(record).start.raw);
-} else if (strcmp(argv[0], "lookup") == 0 && argc == 2) {
+	} else if (strcmp(argv[0], "lookup") == 0 && argc == 2) {
 		const erx_mapping_t *record = erx_map_lookup(&tree,
 		    (erx_uvpn_t){ number(argv[1]) });
 

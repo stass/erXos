@@ -13,7 +13,7 @@ reserved_kind = 0
 private_kind = 1
 object_kind = 2
 insert = lambda do |page, kind, object: nil, prot: 0, ceiling: 3|
-  [0, 0, 0, page, 0x80, 0x1f, 1, 0, kind, 0, 0, 0, prot, ceiling, 0, *object, 0].pack('C*')
+  [0, 0, 0, page, 0x80, 0x1f, 1, 0, kind, 0, 0, 0, prot, ceiling, ceiling, 0, *object, 0].pack('C*')
 end
 call = ->(operation, page, size, prot: 0) { [2, operation, 1, prot, 0, page, 0x80, size, 0].pack('C*') }
 window = [0].pack('C')

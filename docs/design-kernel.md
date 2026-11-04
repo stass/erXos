@@ -497,7 +497,7 @@ machine's action list names them, and one function applies them.
 | **K3.** Every kernel allocation is charged to a budget, an object dies with its budget, and no budget's tree spends beyond its cap | `erx_kalloc` and `erx_reserve_charge`, the one source of pages, take a budget or a reserve that names one, and have no other variant once the root budget exists; a thread's kernel stack and kernel-user page are charged with the thread; carving a child charges its guarantee to the parent; every object joins its budget's list of charged objects through that list's insert function, which refuses a destroyed budget, and a budget's destroy deletes every object on the list, child budgets included; objects point at each other only through attachments, which each teardown removes, so nothing outside a budget keeps what it paid for; a destroyed budget's record stays as a tombstone, its counters excluded from the aggregate and the cache page it sits in charged to its parent, until the last object charged to it is freed; every change of a budget's counters goes through `erx_budget_adjust`, which refuses a charge that would take any budget's spending above its cap ([Budgets](#budgets)) | an allocation path without a budget; a cache shared between budgets; a boot-time allocator reachable after the root exists; an object that is on no budget's list; a pointer between objects that is not an attachment; a budget record freed while an object charged to it lives; a counter written outside `erx_budget_adjust` | a link check that no budget-free allocation symbol is referenced outside boot code; the source check that every pointer between object records is an attachment field; the chokepoint check that the budget counters are written only in `erx_budget_adjust`, with a seeded violation; exhaustion tests through every object type; a domain test that destroys a budget whose objects other domains hold and map, and finds every capability to them failing with `ERX_ESTALE`, every mapping of them faulting with `ERX_FAULT_DELETED`, and the parent's room and unspent guarantee whole again when the destroy returns, but for the cache pages of the destroyed records, and whole once their grace period and the reaper's steps for them have run, which the test waits for by draining the reaper; a test that parks a thread of another budget inside `erx_mem_copy` across the destroy of its source's budget and finds the copy failing with `ERX_ESTALE` at its next part and the tombstone freed after it, under ASan on the hosted kernel; a test that destroys a budget at each step of a thread's, a child's and a space's construction, and between every insert of its publication, on the hosted kernel, and finds the creation returning `ERX_ESTALE`, every page it backed refunded at the dead budget before the destroy returns, and the tombstone freed, with a seeded construction that admits its first part before its record joins the budget's list, which the release core's model catches as a charge the destroy's walk cannot find, left at a dead budget |
 | **K4.** A mapping never allows more than the capability that made it | `erx_vm_map`, `erx_image_map` and `erx_dma_map` fix each mapping's ceiling as the capability's rights intersected with the object's ceiling and refuse a protection above it; `erx_space_copy` copies a mapping with its ceiling; no call raises a mapping's protection above its ceiling: `erx_space_protect` moves a mapping's protection only beneath it, committing a reservation it gives access to, and commit and decommit move private memory between no access and read-write, beneath private memory's fixed ceiling | a protection computed from anything but the ceiling; a protection-changing call that ignores it | host tests of the ceiling arithmetic; a domain test maps an object read-only and tries every call that could make it writable, `erx_space_protect` failing with `ERX_ERIGHTS`; a domain test that protects committed private memory to no access and back and reads its contents unchanged |
 | **K5.** Trimming never meets sharing | only private memory is ever freed by range; private memory has no capability, so no call can map it twice, and its mapping records partition its offsets, so each of its pages has exactly one address; every other kind keeps its pages until the object is destroyed | a call that maps private memory a second time, or a range call that frees a shared object's pages | a domain test maps a shared object at two addresses, decommits and releases one view, and reads the other |
-| **K6.** Committed memory never faults for lack of memory, and no fault waits | making memory accessible first reserves and charges every page its population can need, translation tables included, whether `erx_vm_commit` or an `erx_space_protect` that gives a reservation access makes it accessible, and backs the reserve with pages in the same call: a charge borrows through the budget chain at that moment, never at a fault, and takes its pages from the allocator then, taking released pages off the released list and waiting their grace period when none is free, which is bounded and waits on no party, so between calls a reserve's pool holds a page for every promise not in use; a fault populates from that pool, copies on write from one, or stops the thread with a fault record, under the owner's lock, and touches neither the allocator nor a budget; a translation table goes only with the promise that reserved it, so a rebuild needs only the pool; the fault decision has no result that sends a message or waits ([Virtual memory](#virtual-memory), [The reaper](#the-reaper)) | a take beyond a reserve's pool; a charge that promises more than it backs; a protect that gives a reservation access without the reserve; a fault path that reaches the allocator or waits; a table detached while a committed mapping touches its span; a page released without its refund, which would leave a charge with no page behind it | a host model of the accounting checked after every random operation, which finds every reserve's pool holding a page for every promise not in use between calls; the fault decision's exhaustive host model over every mapping kind, page state and access, in which every result populates from a pool, copies on write from one or stops the thread; a domain test commits a whole budget sparsely and touches every page while every other page of the machine is held, the free lists and the released list empty throughout, every touch succeeding and the allocator's take counter unchanged by them; a domain test that reserves beyond its cap, gives parts access by `erx_space_protect` up to the cap, protects them to no access and back, and touches every page of them, with a seeded protect that skips the charge and a seeded protect that detaches a table, which the model catches; a domain test in which one domain releases and commits without pause on three CPUs while another commits and touches a fresh range on the fourth, every commit backed within two grace periods per part of 64 pages and every touch succeeding, with a seeded backing that takes nothing off the released list, under which the commit waits past its bound, which the test catches; the host model that closes a backing's owner at every part boundary of a charge of 129 pages, after which the reserve's `charged` equals its `backed`, every page of the backing is on the released list exactly once and the budget is back at its baseline, with a seeded backing that releases its hand itself, which the model's once-only check catches, and a seeded one that skips the cancellation, under which `used` stays high |
+| **K6.** Committed memory never faults for lack of memory, and no fault waits | making memory accessible first reserves and charges every page its population can need, translation tables included, whether `erx_vm_commit` or an `erx_space_protect` that gives a reservation access makes it accessible, and backs the reserve with pages in the same call: a charge borrows through the budget chain at that moment, never at a fault, and takes its pages from the allocator then, taking released pages off the released list and waiting their grace period when none is free, which is bounded and waits on no party, so between calls a reserve's pool holds a page for every promise not in use; a fault populates from that pool, copies on write from one, or stops the thread with a fault record, under the owner's lock, and touches neither the allocator nor a budget; a translation table goes only with the promise that reserved it, so a rebuild needs only the pool; the fault decision has no result that sends a message or waits ([Virtual memory](#virtual-memory), [The reaper](#the-reaper)) | a take beyond a reserve's pool; a charge that promises more than it backs; a protect that gives a reservation access without the reserve; a fault path that reaches the allocator or waits; a table detached while a record that holds a promise touches its span; a page released without its refund, which would leave a charge with no page behind it | a host model of the accounting checked after every random operation, which finds every reserve's pool holding a page for every promise not in use between calls; the fault decision's exhaustive host model over every mapping kind, page state and access, in which every result populates from a pool, copies on write from one or stops the thread; a domain test commits a whole budget sparsely and touches every page while every other page of the machine is held, the free lists and the released list empty throughout, every touch succeeding and the allocator's take counter unchanged by them; a domain test that reserves beyond its cap, gives parts access by `erx_space_protect` up to the cap, protects them to no access and back, and touches every page of them, with a seeded protect that skips the charge and a seeded protect that detaches a table, which the model catches; a domain test in which one domain releases and commits without pause on three CPUs while another commits and touches a fresh range on the fourth, every commit backed within two grace periods per part of 64 pages and every touch succeeding, with a seeded backing that takes nothing off the released list, under which the commit waits past its bound, which the test catches; the host model that closes a backing's owner at every part boundary of a charge of 129 pages, after which the reserve's `charged` equals its `backed`, every page of the backing is on the released list exactly once and the budget is back at its baseline, with a seeded backing that releases its hand itself, which the model's once-only check catches, and a seeded one that skips the cancellation, under which `used` stays high |
 | **K7.** The kernel never loads or stores through a user address, and reads memory user mode can write once per field per decision | no call takes a user address to dereference: every argument is a register value, a field of the caller's UTCB or a memory window ([Arguments and results](#arguments-and-results)); a user address is decoded only into `erx_uvpn_t`, which only the space's mapping records resolve, or `erx_uword_t`, which only `erx_uword_load`'s walk of the caller's translation tables resolves, and nothing converts either to a pointer; the kernel reaches UTCBs, shared areas and memory objects' pages through its own mappings, reads a field user mode can write only through `erx_shared_load_*`, one load per field per decision, moves message words only through `erx_msg_copy`, and moves a window's bytes only through `erx_window_read` and `erx_window_write`, deciding nothing on what they carry | a call argument that is a pointer; a conversion of a user address to a pointer; an access through a user translation; reading a shared field twice in one decision; a decision on bytes read from a window | the ABI grammar has no pointer type; a syntax-tree check that the kernel makes a pointer from an integer only in the converters of [Typed values](#typed-values) and the generated accessors; a disassembly check that the architecture's unprivileged access forms appear nowhere in the kernel; hostile rewrites of UTCBs, control areas and windows while the kernel reads them |
 | **K8.** No page is executable through one mapping while it is writable through another, by the CPU or a device, except a JIT object's pages within the one space that made them, and the kernel writes no machine code | the architecture layer forces every writable mapping execute-never, in hardware where the architecture provides it ([Port contract](#port-contract)); the kernel's text is mapped executable once at boot and is outside the direct map; no kernel call creates an executable kernel mapping; a user mapping is refused if it asks for write with execute; besides JIT objects, only immutable objects have an execute ceiling: the boot image's slices, which nothing writes, and paged objects that the system domain, holding `CODE`, which never leaves its table, creates with an execute ceiling and that are mapped only once sealed, a seal succeeding only while no CPU or DMA mapping can write the object and no such mapping being made after it ([Copy-on-write children and copies of spaces](#copy-on-write-children-and-copies-of-spaces)), so no code has a writable alias, a device's included; a JIT object is mapped writable at one address and executable at another, never both in one mapping, and only in its owner, the space created with `ERX_SPACE_JIT` whose thread made it, which needs `CODE` on the budget or a JIT space as the creator's own, since the object records its owner at creation and `erx_vm_map` refuses every other space, and never in a DMA window; it carries no `DUP`, `GIVE` or `CHILD`, so no capability to it leaves its owner and no mapping reaches another space, and nothing outside its one space aliases its pages, and its runtime moves code from written to runnable by an explicit publication step ([Virtual memory](#virtual-memory)); a copy-on-write child's ceiling never includes execute | a direct map that covers kernel text; turning the hardware enforcement off; a user mapping with both; an execute ceiling on an object that can still be written; a seal that overlooks a writable DMA mapping; a JIT object in a DMA window; a JIT space made by a creator that is neither; a JIT object mapped into a space other than its owner | a walk of the kernel tables at boot and after every test that finds no writable and executable entry; a domain test that asks for every combination; a domain test in which a JIT space creates a JIT sub-space, maps its JIT object writable in itself and then into the sub-space, which fails with `ERX_ERIGHTS`; a domain test that a sub-space created with `ERX_SPACE_JIT` from a space without it fails with `ERX_ERIGHTS`; a test that seals an object a DMA window maps writable and finds the seal failing with `ERX_EBUSY`; a test that `erx_dma_map` of a JIT object fails with `ERX_ETYPE`; a test that `erx_mem_create_paged` with `ERX_MEM_CODE` and `ERX_MEM_WRITABLE` together fails with `ERX_EINVAL` |
 | **K9.** No translation outlives its access | user mappings are non-global and tagged with their space's ASID; every removal, a mapping removed because its object was deleted included, invalidates what it made stale and waits before a page or table it covered is freed or reused; the invalidation follows from the kinds of entry cleared, so a cleared table entry is always dropped from walk caches over its span or with the whole ASID, by `erx_tlb_plan` ([Virtual memory](#virtual-memory)); a dead space's ASID is invalidated before its tables are freed; an IOMMU unmap completes the IOMMU's synchronisation, with its every-level form for a cleared table entry, before its pages' reference drops | a global user mapping; a free before the invalidation completes; a last-level-only invalidation for a cleared table entry, which leaves a walk cache pointing into a freed table | the plan's host test over random ranges and table shapes; an isolation test that hands freed pages and freed tables between domains on four CPUs under HVF and on the boards, since TCG need not keep walk caches; a host test of the maintenance helpers' order |
@@ -1771,7 +1771,12 @@ below 64 KiB are never mapped. Each record costs a kernel record charged to
 the space's budget, and a space has at most `ERX_MAPPINGS_MAX` (65,536). The
 tree supports split and join, so the records of any range come out as one
 subtree in logarithmic time; two neighbouring records merge only if their
-kinds, objects, offsets, protections and ceilings line up.
+kinds, objects, offsets, protections, ceilings and flags line up; a call
+that creates a record never merges it, and a deleted or kernel-user record
+never merges; only the bounded range calls merge the record they rewrite
+with a neighbour. A private record's offset is its first page, which no
+call chooses, so the records of one private object name disjoint offsets
+by construction.
 The translation tables are a cache of the records and the objects' pages:
 the kernel may drop any translation, and faults rebuild it from the
 space's reserve; a table itself goes only with the promise that reserved
@@ -5602,13 +5607,19 @@ completes, and that no record is freed before its grace period has ended.
 ### Virtual memory
 
 * **Placement.** Calls that create mappings take an address and flags.
-  Without `ERX_VM_FIXED` the address is a hint and the kernel picks the
-  first free range below the space's placement base, chosen at random when
-  the space is created (fixed in deterministic mode), so successive
-  mappings stay together and share translation tables. With `ERX_VM_FIXED`
-  the range starts exactly at the address and replaces whatever the space
-  mapped there, unless `ERX_VM_NOREPLACE` makes an overlap fail with
-  `ERX_EEXIST`.
+  Without `ERX_VM_FIXED` the kernel maps at the address when that range is
+  free and page-aligned, above the placement base or below it, and otherwise
+  picks the highest free range below the space's placement base, chosen at
+  random when the space is created (fixed in deterministic mode), so
+  successive mappings stay together and share translation tables. An address
+  that is unaligned or outside the user half is ignored, not refused. With
+  `ERX_VM_FIXED` the range starts exactly at the address and replaces
+  whatever the space mapped there, unless `ERX_VM_NOREPLACE` makes an overlap
+  fail with `ERX_EEXIST`; `ERX_VM_NOREPLACE` without `ERX_VM_FIXED` fails with
+  `ERX_EINVAL`. A creating call fails with `ERX_ENOMEM` when no free range of
+  the size lies below the placement base, since the kernel's own search never
+  goes above it, where fixed images and `ERX_VM_FIXED` callers put things, or
+  when the space already holds `ERX_MAPPINGS_MAX` records.
 * **Who pays.** The budget of the space that holds a mapping pays for the
   mapping record, the translation tables that cover it and the private
   memory committed in it, whoever makes the call, through the space's
@@ -5617,7 +5628,9 @@ completes, and that no record is freed before its grace period has ended.
   owns it: a mapping of an object charges the mapping space only its
   records and tables, however many spaces map the object, and a
   copy-on-write child's own pages are the child's while its parent's
-  pages stay the parent's.
+  pages stay the parent's. A record *holds a promise* of its tables unless
+  it is a reservation: private memory, a mapping of an object, a deleted
+  mapping and a kernel-user page all do.
 * **Reserve.** `erx_vm_reserve(space, addr, size, flags)` creates a
   reservation: private memory with no access and no pages. It costs one
   record and nothing else, whatever its size: address space is not
@@ -5625,16 +5638,21 @@ completes, and that no record is freed before its grace period has ended.
   what it will hold is charged only when a commit, or a protect that
   gives it access, promises the pages.
 * **Commit.** `erx_vm_commit(space, addr, size)` makes reserved memory
-  readable and writable. It first adds to the space's reserve every page
-  that populating the range can need: its data pages, and at each level
+  readable and writable, and committed memory in the range, whatever its
+  protection, becomes read-write. It first adds to the space's reserve every
+  page that populating the range can need: its data pages, and at each level
   of translation table below the root one table for every region of
-  that level that the range touches and no committed mapping of the
-  space touches already; the root comes with the space, and the binding
+  that level that the range touches and no record that holds a promise
+  touches already; the root comes with the space, and the binding
   gives the levels and the region each table covers
   ([design-arch-aarch64.md](design-arch-aarch64.md#translation)). So the
   space's reserve holds, at every moment, one table for every region a
-  committed mapping touches, whether the table is built or its page
-  waits in the pool. Each part of the call charges its pages through the
+  record that holds a promise touches, whether the table is built or its
+  page waits in the pool. Both this call and `erx_vm_decommit` act on private
+  memory, reserved or committed, and holes; a mapping of an object, deleted
+  or not, or a kernel-user page in the range ends the call with `ERX_EEXIST`,
+  the parts before it applied, as does `ERX_ENOMEM` for a split that would
+  pass `ERX_MAPPINGS_MAX`. Each part of the call charges its pages through the
   space's budget and backs them before it edits its records, in parts of
   at most 64 pages ([The reaper](#the-reaper)): a budget that cannot
   cover the part fails the call with `ERX_ENOMEM` and the parts before
@@ -5644,9 +5662,10 @@ completes, and that no record is freed before its grace period has ended.
 * **Decommit.** `erx_vm_decommit(space, addr, size)` returns committed
   memory to no access and releases, with their charge ending there
   ([The reaper](#the-reaper)), its data pages, populated or still in the
-  pool, and the table of every region the range touched that no
-  committed mapping of the space touches any more, built or in the
-  pool; the range stays reserved, and committing it again yields zeros.
+  pool, and the table of every region the range touched that no record
+  that holds a promise touches any more, built or in the pool; the range
+  stays reserved, and committing it again yields zeros. It meets only
+  private memory (**Commit** above), so it never touches a shared page.
 * **Protect.** `erx_space_protect(space (MAP), addr, size, prot)` sets
   the protection of every mapping in the range to `prot`, splitting at
   most the two records that straddle the range's ends, and keeps every
@@ -5660,7 +5679,9 @@ completes, and that no record is freed before its grace period has ended.
   meets, a reservation's being private memory's, read-write: a ceiling
   that does not include `prot` ends the call with `ERX_ERIGHTS`, and a
   hole ends it with `ERX_ERANGE`, so `ERX_PROT_RX` over a reservation is
-  refused with nothing committed. Then, if the mapping is a reservation
+  refused with nothing committed; it is the one range call over mixed kinds,
+  a kernel-user page alone ending it with `ERX_EEXIST`, and a split that would
+  pass `ERX_MAPPINGS_MAX` ends it with `ERX_ENOMEM`. Then, if the mapping is a reservation
   and `prot` is not `ERX_PROT_NONE`, it commits the part as
   `erx_vm_commit` does, charging the part's reserve to the space's
   budget, and ends the call with `ERX_ENOMEM` when the budget cannot
@@ -5673,7 +5694,7 @@ completes, and that no record is freed before its grace period has ended.
   committed memory set to `ERX_PROT_NONE` keeps its pages, their
   contents and their charge, since only a decommit or a release gives
   them up. Lowering a protection clears the range's translations in
-  place, a table at a time between preemption points, through the
+  place, by the table step of **The edge rule** below, through the
   invalidation plan of K9, whose last step folds a shared object's dirty
   entries into its stored marks (**Store tracking** below); it detaches
   no table, since every promise that reserved one stays, so a fault
@@ -5685,8 +5706,10 @@ completes, and that no record is freed before its grace period has ended.
   the range from the space in one atomic step: it splits the at most two
   records that straddle the range's ends and detaches the records between
   them as one subtree, so no access, fault or range call of the space
-  reaches them from then on. The call then walks the subtree in bounded
-  parts, with a preemption point after each: each record of an object
+  reaches them from then on. A kernel-user page in the range fails the call
+  with `ERX_EEXIST` before anything moves, and a split that would pass
+  `ERX_MAPPINGS_MAX` with `ERX_ENOMEM`. The call then walks the subtree in
+  bounded parts, with a preemption point after each: each record of an object
   leaves the object's reverse map under the object's lock, so the call
   that removes a released memory object's
   last mapping is the call that destroys it ([Closing and
@@ -5694,8 +5717,8 @@ completes, and that no record is freed before its grace period has ended.
   once, by whichever of the release and a deletion of its object reaches
   it first, and a detached record has no translation left for a deletion
   to remove. The records then go to the reaper, and the pages they held,
-  the tables of the regions no committed mapping touches any more, and
-  the pooled pages of the promises that ended are released, their charge
+  the tables of the regions no record that holds a promise touches any more,
+  and the pooled pages of the promises that ended are released, their charge
   ending at once, so the space's reserve falls and its budget's `used`
   with it.
 * **Map.** `erx_vm_map(space, addr, size, memory, offset, prot_flags)`
@@ -5726,10 +5749,14 @@ completes, and that no record is freed before its grace period has ended.
 * **Bounded range calls.** `erx_vm_commit`, `erx_vm_decommit` and
   `erx_space_protect` change records in place, a part at a time: each
   part acts on the range only as far as the end of the first record it
-  meets, holes before it included, and edits at most three records, and
-  a preemption point follows each part, so the range is consistent at
-  every preemption point, which is all that another call or a fault in
-  the space can observe.
+  meets, holes before it included, and edits at most three records in one
+  logarithmic step, and a preemption point follows each part, so the range
+  is consistent at every preemption point, which is all that another call or
+  a fault in the space can observe. A commit's part is also at most 64 pages;
+  a decommit's or a protect's spans the record it meets, so the work it
+  implies beyond the records proceeds in smaller units of its own: translations
+  a table at a time (**The edge rule** below), and a private object's released
+  offsets as one page subtree that goes to the reaper whole.
   `erx_vm_release` takes any number of records out of the space at the
   cost of detaching one subtree, and then unlinks them from their objects
   a part at a time. Every range call holds its space's existence lock from
@@ -5739,22 +5766,32 @@ completes, and that no record is freed before its grace period has ended.
 * **The edge rule** bounds the table work of every range call, and a
   table goes only with the promise that reserved it. In the tables that
   a range covers only partly, which lie at its two ends, a call edits
-  entries one by one, at most 511 per table; every table that a
-  decommit or a release covers completely it detaches whole by clearing
-  the one entry above it, and it detaches an edge table as well once no
-  committed mapping touches that table's span, which its plan reads
-  from the records, while a table that a committed mapping still touches
-  stays, empty or not, since its page is that mapping's promise. A
-  protect detaches no table: it clears entries in place, a table at a
-  time between preemption points. A private object's page tree follows
-  the same rule over the offsets the range maps. A range call therefore
-  touches at most a few thousand entries however large or populated its
-  range, but for a protect, whose cost grows with the range's entries,
-  and for one more case: where the hardware keeps dirty bits, a table
-  detached whole that holds translations of a shared object's pages is
-  read entry by entry for their dirty state, a table at a time between
-  preemption points, before it is freed (**Store tracking** below), a
-  cost that grows with the shared mappings the range covers. After the
+  entries one by one, at most 511 per table. A range here is a part's, for a
+  call made of parts, since a call can stop at a mapping of an object further
+  on. A table that a decommit's part, a release or a replacing reservation
+  covers completely holds no promise once the records have moved: a decommit's
+  part lies in one record of private memory, and the other two end every promise
+  in their range. The call detaches it whole by clearing the one entry above it.
+  An insert of any other kind detaches nothing, since its record takes over every
+  promise in its range. Only an edge table, which a record outside
+  the range may touch, is kept or detached by the records as they stand after
+  the apply: it stays, empty or not, while a record that holds a promise
+  touches its span, since its page is that record's promise, and it is detached
+  once none does. **The table step** clears entries in place, one table at a
+  time with a preemption point between tables, and detaches no table, since
+  every promise stays. Two calls work this way: a protect that lowers a
+  protection, and a deletion ([Closing and deleting](#closing-and-deleting)),
+  whose deleted record keeps its promise until its range is released. A
+  private object's page tree follows the same rule over the offsets the range
+  maps. A decommit's part or a release therefore touches at most a few thousand
+  entries however large or populated its range, with a preemption point between
+  parts. Three costs grow past that, and each follows translations that faults
+  in the space built, so none lets a call of one domain spend more than its
+  target's own earlier work: the table steps of a protect and of a deletion, and,
+  where the hardware keeps dirty bits, the
+  read of a table detached whole that holds translations of a shared object's
+  pages, entry by entry for their dirty state, a table at a time between
+  preemption points, before it is freed (**Store tracking** below). After the
   TLB invalidation has completed, the detached tables, the released
   pages and the pooled pages of the promises that ended go to the
   released list, to wait out the grace period of K9, uncharged ([The
@@ -8354,6 +8391,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | Rule | What the check requires | Evidence |
 | --- | --- | --- |
 | only the capability table's code reads a slot (K1) | the ABI file marks the slot's layout private to `kernel/core/cap.c`, so its record, offsets and accessors are generated only into `kernel/generated/cap_slot_impl.h` and `erx_cap_slot_t` is an incomplete type everywhere else; the chokepoint rule generated from that declaration lets only its owner and the owner's host tests include that header, and no other file define the record | the compiler, which refuses a member, offset or accessor of an incomplete type, and the generated text check of includes and definitions, with a seed built from the layout; a tag a macro pastes together passes the text check until the syntax-tree leg reads definitions ([TODO.md](../TODO.md)) |
+| only the mapping core writes a mapping record, and only from a plan it made (K4, K5) | `map-records-private`: `struct erx_mapping` is defined only in `kernel/core/map.c`; `map-core-opaque`: a plan's, a tree's and a detached subtree's core part are `core_opaque` bytes whose layout only that file knows, and no other file names them, which holds against naming and not against a deliberate cast |
 | only the capability core writes a table (K1, B4) | the table's record is defined only in `kernel/core/cap_impl.h` and `erx_cap_table_t` is an incomplete type everywhere else; its directory and pages reach the core as untyped storage it owns from then on; only `kernel/core/cap.c` and its host tests include that header, and no other file defines the record | the compiler, which refuses a member of an incomplete type, and the `cap-table-private` text check of includes and definitions, with a seeded member write; a tag a macro pastes together passes the text check until the syntax-tree leg reads definitions ([TODO.md](../TODO.md)) |
 | rights only shrink (K2) | an `erx_rights_t` constructed, or its `bits` written, only in `kernel/core/cap.c` | syntax trees |
 | only `erx_budget_adjust` changes a budget's counters (K3, K32) | the `guarantee`, `cap`, `used`, `carved`, `lent`, `pinned`, `dead` and `threshold` members of `erx_budget_t` written only in `kernel/core/budget.c`, by `erx_budget_adjust` and the resize, close and watch it serves | syntax trees, with a seeded write of `used` from a charging call |

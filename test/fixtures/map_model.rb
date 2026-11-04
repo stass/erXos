@@ -100,9 +100,19 @@ class MapModel
     (["T #{@records.size}"] + @records.map(&:text)).join(' ')
   end
 
-  def plan_line(name, nspares:, start:, stop:, nxt: stop, done: true, clears: 0, charge: 0, trim: 0, trim_object: 0,
-                trim_offset: 0)
-    "= #{name} 0 #{nspares} #{start} #{stop} #{nxt} #{done ? 1 : 0} #{clears} #{charge} #{trim} #{trim_object} #{trim_offset}"
+  def plan_line(name, nspares:, start:, stop:, nxt: stop, done: true, charge: 0)
+    "= #{name} 0 #{nspares} #{start} #{stop} #{nxt} #{done ? 1 : 0} #{charge}"
+  end
+
+  # What an accepted apply reports beyond its records.
+  def effects_line(clears: 0, trim: nil)
+    "X #{clears} #{trim ? trim.pages : 0} #{trim ? trim.object : 0} #{trim ? trim.offset : 0}"
+  end
+
+  # A cut drops translations wherever a record but a reservation lay: a deleted one
+  # may hold some while its deletion's table step runs.
+  def cut_clears(start, stop)
+    overlapping(start, stop).any? { |record| record.kind != RESERVED } ? 1 : 0
   end
 
   def detached_line(list) = (["D #{list.size}"] + list.map(&:text)).join(' ')
@@ -144,14 +154,33 @@ class MapModel
   def fields_status(kind, object, offset, prot, ceiling, flags)
     return EINVAL unless (RESERVED..KERNEL).cover?(kind)
     return EINVAL unless valid_prot?(prot) && (ceiling & ~RWX).zero? && (flags & ~1).zero?
+    return ERIGHTS unless beneath?(prot, ceiling)
 
     names_object = [PRIVATE, OBJECT].include?(kind)
     return EINVAL if names_object == object.zero?
     return EINVAL if !names_object && !offset.zero?
-    return EINVAL if [PRIVATE, RESERVED].include?(kind) && ceiling != RW
+    return EINVAL if [PRIVATE, RESERVED, KERNEL].include?(kind) && ceiling != RW
     return EINVAL if kind == RESERVED && (prot != NONE || !flags.zero?)
+    return EINVAL if kind == KERNEL && (prot != RW || !flags.zero?)
 
-    beneath?(prot, ceiling) ? OK : ERIGHTS
+    OK
+  end
+
+  # The ceiling an insert fixes, or nil for rights it must refuse. Only an
+  # object's mapping, deleted or not, takes one from the request.
+  def insert_ceiling(kind, rights, object_ceiling)
+    return nil unless ((rights | object_ceiling) & ~RWX).zero?
+    return rights & object_ceiling if [OBJECT, DELETED].include?(kind)
+
+    (rights | object_ceiling).zero? ? RW : nil
+  end
+
+  # Whether a hint names a page-aligned range that is free.
+  def hint_free?(addr, pages)
+    return false unless (addr % PAGE).zero?
+
+    start = addr / PAGE
+    start >= LOW && start + pages <= @high && overlapping(start, start + pages).empty?
   end
 
   # The highest hole, scanning from the base down.
@@ -219,13 +248,14 @@ class MapModel
   end
 
   # rubocop:disable Metrics/ParameterLists
-  def run_insert(addr, size, vm_flags, base, kind, object, offset, object_pages, prot, ceiling, flags, mode)
+  def run_insert(addr, size, vm_flags, base, kind, object, offset, object_pages, prot, rights, object_ceiling, flags, mode)
+    ceiling = insert_ceiling(kind, rights, object_ceiling)
     status = insert_status(addr, size, vm_flags, kind, object, offset, object_pages, prot, ceiling, flags)
     return ["= insert #{status}", tree_line] unless status == OK
 
     pages = size / PAGE
     if (vm_flags & FIXED).zero?
-      start = place(pages, base)
+      start = hint_free?(addr, pages) ? addr / PAGE : place(pages, base)
       return ["= insert #{ENOMEM}", tree_line] if start.nil?
     else
       start, = decode(addr, size)
@@ -238,20 +268,23 @@ class MapModel
 
     spares = cut_spares(start, stop) + 1
     lines = [plan_line('insert', nspares: spares, start: start, stop: stop)]
-    apply_insert(lines, mode, spares, Rec.new(start: start, end: stop, kind: kind, object: object, offset: offset,
-                                              prot: prot, ceiling: ceiling, flags: flags))
+    apply_insert(lines, mode, spares, Rec.new(start: start, end: stop, kind: kind, object: object,
+                                              offset: kind == PRIVATE ? start : offset, prot: prot, ceiling: ceiling,
+                                              flags: flags))
     lines << tree_line
   end
 
   def insert_status(addr, size, vm_flags, kind, object, offset, object_pages, prot, ceiling, flags)
     return EINVAL unless (vm_flags & ~(FIXED | NOREPLACE)).zero?
     return EINVAL if !(vm_flags & NOREPLACE).zero? && (vm_flags & FIXED).zero?
+    return EINVAL if ceiling.nil?
+    return EINVAL if kind == PRIVATE && !offset.zero?
 
     status = fields_status(kind, object, offset, prot, ceiling, flags)
     return status unless status == OK
     return EINVAL unless (size % PAGE).zero? && size.positive?
     return EINVAL if kind == KERNEL && size != PAGE
-    return ERANGE if !object.zero? && offset + (size / PAGE) > object_pages
+    return ERANGE if kind == OBJECT && offset + (size / PAGE) > object_pages
     return OK if (vm_flags & FIXED).zero?
 
     decoded = decode(addr, size)
@@ -263,9 +296,10 @@ class MapModel
     return unless after_mode(mode, spares, lines)
 
     added = cut_added(new.start, new.end) + (new.kind == OBJECT ? 1 : 0)
+    clears = cut_clears(new.start, new.end)
     pieces = cut(new.start, new.end)
     @records = (@records + [new]).sort_by(&:start)
-    lines << "A 0 #{added} 0 #{new.start}"
+    lines << "A 0 #{added} 0 #{new.start}" << effects_line(clears: clears)
     lines << detached_line(pieces) unless pieces.empty?
   end
 
@@ -282,8 +316,9 @@ class MapModel
     lines = [plan_line('release', nspares: spares, start: start, stop: stop)]
     if after_mode(mode, spares, lines)
       added = cut_added(start, stop)
+      clears = cut_clears(start, stop)
       pieces = cut(start, stop)
-      lines << "A 0 #{added} 0 0"
+      lines << "A 0 #{added} 0 0" << effects_line(clears: clears)
       lines << detached_line(pieces) unless pieces.empty?
     end
     lines << tree_line
@@ -296,7 +331,7 @@ class MapModel
     lines = [plan_line('kremove', nspares: 0, start: found.start, stop: found.end)]
     if after_mode(mode, 0, lines)
       @records -= [found]
-      lines << 'A 0 0 0 0' << detached_line([found])
+      lines << 'A 0 0 0 0' << effects_line(clears: 1) << detached_line([found])
     end
     lines << tree_line
   end
@@ -340,10 +375,8 @@ class MapModel
 
   def run_othertree(_addr, _size) = ["= othertree #{EINVAL}", tree_line]
 
-  def run_nexttouch(page)
-    found = @records.find { |record| record.end > page && record.kind != RESERVED }
-    ["L #{found ? found.start : 0}"]
-  end
+  # A caller's write to a plan's report changes nothing: the apply counts for itself.
+  def run_lowspares(_addr, _size) = ["= lowspares #{ENOMEM}", tree_line]
 
   def run_fill(start, count, pages)
     count.times do |index|
@@ -379,7 +412,7 @@ class MapModel
   def protection_decision(record, start, stop, prot)
     return Decision.new(stop: stop, clears: 0, charge: 0, status: OK) if record.prot == prot
 
-    lowered = record.kind != DELETED && !(record.prot & ~prot).zero?
+    lowered = !(record.prot & ~prot).zero?
     after = record.piece(start, stop).with_fields(prot: prot)
     Decision.new(after: after, stop: stop, clears: lowered ? 1 : 0, charge: 0, status: OK)
   end
@@ -388,7 +421,7 @@ class MapModel
     case record.kind
     when RESERVED then commit_decision(record, start, stop, part, RW)
     when PRIVATE then protection_decision(record, start, stop, RW)
-    else Decision.new(stop: stop, clears: 0, charge: 0, status: OK)
+    else Decision.new(status: EEXIST)
     end
   end
 
@@ -397,8 +430,8 @@ class MapModel
     when PRIVATE
       after = Rec.new(start: start, end: stop, kind: RESERVED, object: 0, offset: 0, prot: NONE, ceiling: RW, flags: 0)
       Decision.new(after: after, stop: stop, clears: 1, charge: 0, trim: record.piece(start, stop), status: OK)
-    when OBJECT then Decision.new(stop: stop, clears: 1, charge: 0, status: OK)
-    else Decision.new(stop: stop, clears: 0, charge: 0, status: OK)
+    when RESERVED then Decision.new(stop: stop, clears: 0, charge: 0, status: OK)
+    else Decision.new(status: EEXIST)
     end
   end
 
@@ -462,7 +495,7 @@ class MapModel
         return nil
       end
       lines << plan_line('part', nspares: 0, start: cursor, stop: stop)
-      after_mode(mode, 0, lines) && lines << 'A 0 0 0 0'
+      after_mode(mode, 0, lines) && lines << 'A 0 0 0 0' << effects_line
       return nil
     end
     if record.kind == KERNEL
@@ -488,15 +521,12 @@ class MapModel
       lines << "= part #{ENOMEM}"
       return nil
     end
-    trim = decision.trim
-    lines << plan_line('part', nspares: spares, start: begin_at, stop: reach, done: reach >= stop,
-                               clears: decision.clears, charge: decision.charge, trim: trim ? trim.pages : 0,
-                               trim_object: trim ? trim.object : 0, trim_offset: trim ? trim.offset : 0)
+    lines << plan_line('part', nspares: spares, start: begin_at, stop: reach, done: reach >= stop, charge: decision.charge)
     return nil unless after_mode(mode, spares, lines)
 
     added = pieces.drop(popped.size).count { |piece| piece.kind == OBJECT }
     @records = (@records - popped + pieces).sort_by(&:start) if decision.after
-    lines << "A 0 #{added} #{freed} 0"
+    lines << "A 0 #{added} #{freed} 0" << effects_line(clears: decision.clears, trim: decision.trim)
     reach >= stop ? nil : reach
   end
 
@@ -511,10 +541,6 @@ class MapModel
     start, stop = decoded
     regions = (start / span..(stop - 1) / span).map { |index| index * span }
     partial = regions.reject { |region| start <= region && region + span <= stop }
-    covered = regions - partial
-    from = covered.first || 0
-    to = covered.empty? ? 0 : covered.last + span
-    edges = partial.map { |region| "#{region}:#{touched?(region, region + span) ? 1 : 0}" }
-    [(["E 0 #{from} #{to} #{!covered.empty? && touched?(from, to) ? 1 : 0}"] + edges).join(' ')]
+    [(['E 0'] + partial.map { |region| "#{region}:#{touched?(region, region + span) ? 1 : 0}" }).join(' ')]
   end
 end

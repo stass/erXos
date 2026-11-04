@@ -24,13 +24,13 @@ class ChokepointsMapTest < Minitest::Test
 
   # What a plan will write is the core's, so no other file can change a ceiling
   # between a plan and its apply.
-  def test_only_the_map_core_names_the_core_members
-    members = [rule('map-core-members')]
-    allowed = { Rules::MAP_CORE => "plan->core_segs[0].source = 0;\n",
-                'include/erx/map.h' => "\terx_mapping_t *core_root;\n",
-                'test/fixtures/map_driver.c' => "plan.nspares = 1; score_segs = 0;\n" }
-    assert_empty evaluate(members, allowed)
-    found = evaluate(members, { 'kernel/core/fault.c' => "\nplan.core_segs[0].attrs.ceiling = 7;\n" })
-    assert_equal ['map-core-members: kernel/core/fault.c:2'], found.map { |v| "#{v.rule}: #{v.path}:#{v.line}" }
+  def test_only_the_map_core_names_the_opaque_bytes
+    opaque = [rule('map-core-opaque')]
+    allowed = { Rules::MAP_CORE => "return ((map_plan_core_t *)(void *)plan->core_opaque);\n",
+                'include/erx/map.h' => "\tunsigned char core_opaque[32];\n",
+                'test/fixtures/map_driver.c' => "plan.nspares = 1; score_opaque = 0; core_opaques = 0;\n" }
+    assert_empty evaluate(opaque, allowed)
+    found = evaluate(opaque, { 'kernel/core/fault.c' => "\nplan.core_opaque[0] = 7;\n" })
+    assert_equal ['map-core-opaque: kernel/core/fault.c:2'], found.map { |v| "#{v.rule}: #{v.path}:#{v.line}" }
   end
-  end
+end
