@@ -369,7 +369,9 @@ scripts live in `~/erxos-scratch/tools/`.
   through that sink's one escaping function. Raw control characters on a
   terminal are an attack (ANSI and OSC escape injection) on the operator's
   host, so the escaping covers C0 and C1 controls, bidirectional overrides,
-  invisible format characters and invalid UTF-8.
+  invisible format characters and invalid UTF-8. The one exception is the
+  strict escape for a program's own output, which passes tab and newline
+  as that program's layout; text attributed to a source escapes them too.
 * **Generated code is code too.** Generated C, Erlang and headers must be
   readable, ASCII-only and free of undefined behavior, and are produced by a
   Ruby generator checked into the tree.
