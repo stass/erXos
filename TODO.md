@@ -446,7 +446,7 @@ it; git history is the record of completed work.
   `migrate_to`, `kernel_context_drq` and the kill's request wait into C17
   against it.
 * [Medium] stopgap scheduling, the charge at switches
-  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#server-urgency-and-charging)):
+  ([design-stopgap.md](docs/design-stopgap.md#scheduling)):
   the work that writes `erx_sched_charge` calls it from
   `Sched_context::Ready_queue::activate` as well as from the tick hook. It needs no change to `config/fiasco/kernel.defconfig`, and
   `FINE_GRAINED_CPUTIME` stays unset.
@@ -950,7 +950,7 @@ it; git history is the record of completed work.
   spaces' remaining work, paid for by their budgets. Acceptable only
   while development builds run trusted code; erXos's kernel bounds it
   with the finishing share, and it goes with the stopgap at M7
-  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#security)).
+  ([design-stopgap.md](docs/design-stopgap.md#deletion)).
 * [Low] platforms, QEMU `virt`'s fw-cfg device: check whether its node,
   `qemu,fw-cfg-mmio`, offers the DMA interface on the pinned QEMU. If it
   does, list it among the bus masters of the DMA contract; the system
@@ -1026,7 +1026,7 @@ document's "residual risks accepted" paragraph.
   again from its capability lookup, and the build check that only the
   send's glue returns `ERX_SYS_ACTION_RETRY`, with a seeded second
   returner failing it, land with the dispatch and the IPC glue
-  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#the-wait-funnel)).
+  ([design-stopgap.md](docs/design-stopgap.md#ipc-gates-and-where-transfer-fits)).
 * [High] chokepoints, the pending M1 rules of
   `tools/lib/erx/chokepoint_rules/`: the object leg (no liberx target
   object outside the fiasco backend references an `l4_` symbol or holds a
@@ -1068,7 +1068,7 @@ document's "residual risks accepted" paragraph.
 * [Medium] bench, G1's guest workloads (`tools/erx bench timer`, `stop`,
   the null call, IPC, park and wake, boot time): they reuse the conformance
   harness's boot, deadline and guest endings, with results kept per
-  accelerator ([plan.md](docs/plan.md#m1-the-stopgap-speaks-erxoss-interface)).
+  accelerator ([plan.md](docs/plan.md#m1-the-system-boots-on-fiasco)).
 
 * [High] kernel memory, file-backed memory objects with evictable clean
   pages, so that large-file `mmap` (LMDB, SQLite in mmap mode) and ML

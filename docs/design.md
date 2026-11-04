@@ -28,9 +28,9 @@ monitors and exits keep Erlang's semantics, so the whole machine is one
 Erlang system.
 Everything is inspectable from an Erlang shell on the serial console or
 from the development host, down to kernel objects and the line of source a
-process is executing. Until erXos's kernel is written, a modified Fiasco
+process is executing. Until erXos's kernel is written, a near-stock Fiasco
 stands in for it behind the same interface, carrying the part of it that
-the plan's first, vertical slice of the system uses.
+Phase 1's system uses.
 
 Decisions every reader must know:
 
@@ -47,7 +47,7 @@ Decisions every reader must know:
   mechanisms behind them, IRQ objects as doorbells on a group's ready list
   and epochs that order wakes against parks, are in
   [design-scheduler.md](design-scheduler.md).
-* **erXos's own kernel, on Fiasco's design, with a modified Fiasco as the
+* **erXos's own kernel, on Fiasco's design, with a near-stock Fiasco as the
   stopgap.** The kernel keeps Fiasco's model wherever erXos needs nothing
   else, among it capabilities in a table per space, IPC gates bound to
   threads, messages in each thread's registers with capabilities passed at
@@ -67,11 +67,10 @@ Decisions every reader must know:
   map does not cover.
   Deleting a budget deletes every object charged to it, as EROS's space
   banks do, so ending a domain is one destruction. The
-  modified Fiasco implements, inside Fiasco's kernel, the part of its
-  semantics that the plan's vertical slice of the system uses, and
-  erXos's C17 kernel boots the same slice and replaces it before the
-  security closure milestone, carrying alone every mechanism beyond the
-  slice
+  near-stock Fiasco under `liberx`'s Fiasco backend carries none of these
+  semantics, and erXos's C17 kernel boots Phase 1's system and replaces it
+  before the security closure milestone, carrying alone every mechanism
+  beyond that system
   ([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
 * **Every runtime in user mode.** ERTS runs in every Erlang domain, the
   system domain included, from one of two runtime images: the system
@@ -151,8 +150,7 @@ evidence, not additional design contracts.
 | [overview.md](overview.md) | a reader's introduction to the design; the architecture and subsystem documents define the contracts |
 | this document | the architecture and every decision that constrains more than one subsystem |
 | [design-kernel.md](design-kernel.md) | the kernel: objects and capabilities, budgets, memory, spaces and sub-spaces, threads, IPC gates, IRQ objects, umtx, vCPU upcalls, interrupts, boot, the ABI, its L4 lineage, and the modified Fiasco behind the same interface |
-| [design-stopgap.md](design-stopgap.md) | the stopgap binding: how the modified Fiasco carries the kernel interface: the route from user mode, capabilities in Fiasco's object space, deletion and the ownership of pages, the boot handoff, the startup and pool plans and their charge evidence, the seam between the C17 cores and Fiasco's C++, the crash record on the console, and what the tests and benchmarks observe |
-| [design-stopgap-scheduling.md](design-stopgap-scheduling.md) | the stopgap's scheduling binding: the run word and the stop of a space with its exit record (K18), park and wake on Fiasco's scheduler (S2, S3), and server urgency and charging without donation (S5, S6), with the C17 cores, the host models and the G1 benchmarks |
+| [design-stopgap.md](design-stopgap.md) | the stopgap: `liberx`'s Fiasco backend over a near-stock Fiasco in Phase 1: the call table, the root's ownership of every kernel object, the root service, memory through the pool window, threads, exit and readiness, the boot handoff, the Phase 1 manifest check, the console, and what Phase 1 defers and where it lands |
 | [design-arch-aarch64.md](design-arch-aarch64.md) | the AArch64 binding: how the architecture provides each item of the kernel's port contract, its system-call convention, translation tables, IOMMU, firmware calls and speculation mitigations, and the terms that nothing generic uses |
 | [design-platforms.md](design-platforms.md) | the platform binding: QEMU `virt`, the Raspberry Pi 4 Model B and the Raspberry Pi 5, with their interrupt controllers and MSI frames, firmware, boot, the early console, the system manifest per platform, DMA, entropy, watchdogs, trial requests, device secrets and trust in the boot |
 | [design-scheduler.md](design-scheduler.md) | the first level: groups, grants, urgency, park and wake, deferred preemption, service work on a service's own grant, the runtime contract, and the experiments that tune them |
@@ -371,7 +369,7 @@ Supporting terms, each defined in the document that owns it:
   | kernel (C17): capabilities, budgets, spaces, memory objects, threads,    |
   | groups and grants, IPC gates, IRQ objects, umtx, vCPU upcalls,           |
   | interrupts, IOMMU, time, entropy, early console, trace, the watchdog;    |
-  | or, until it replaces it, the modified Fiasco behind the same interface  |
+  | or, until it replaces it, a near-stock Fiasco behind the same interface  |
   +--------------------------------------------------------------------------+
 ```
 
@@ -485,7 +483,7 @@ Decisions that constrain more than one subsystem:
 | --- | --- | --- |
 | **Hierarchical scheduling with grants is the normal execution model.** The kernel schedules threads within groups' grants; runtimes schedule lightweight processes on their executors. | The user's decision. ERTS's scheduler switches processes without entering the kernel and is proven; the kernel needs one authority over CPU time for every thread, native or runtime. | [design-scheduler.md](design-scheduler.md) |
 | **The six rules of the two-level contract.** Executors are ordinary preemptible threads; preemption never runs runtime code; wakeups and capacity changes are queued events, taken at safe points; executors never block except to park, a umtx wait in the domain's own private memory counting as inside the domain; budgets are enforced whatever the hints say; there is no donation: every thread is charged to its own group. | Each rule removes a failure that ended an earlier two-level system: re-entrancy, lost or reordered events, executors lost to blocking, trust in user-reported state, and inheritance of another's time, which puts a scheduling dependency between domains and a payer to derive and audit at every call ([research](research-hierarchical-scheduling.md#negative-evidence)). | [design-scheduler.md](design-scheduler.md#context) |
-| **erXos's own C17 kernel on Fiasco's design; the modified Fiasco as the stopgap for a vertical slice.** The kernel interface is erXos's; the stopgap implements inside Fiasco's kernel, not above it, the part of its semantics that the plan's vertical slice of the system uses (the system domain's runtime and the live machine, domains and their connections, the command shell with its programs, immutable code and one data store), as its scope table lists; erXos's kernel boots the same slice and replaces the stopgap, gated on the conformance suite and the slice's tests, before the security closure milestone, and every mechanism beyond the slice lands on erXos's kernel alone. | A working system first, on proven code, without letting Fiasco's model leak above the interface; a stopgap held to what the slice uses keeps Fiasco's modifications small and builds no mechanism twice; a kernel of its own, reshaped for erXos (budgets, groups, generations, memory objects), once the architecture has settled. | [design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco), [plan.md](plan.md) |
+| **erXos's own C17 kernel on Fiasco's design; a near-stock Fiasco as the stopgap for Phase 1.** The kernel interface is erXos's; `liberx`'s Fiasco backend implements, above Fiasco and not inside it, the part of the interface that Phase 1's system uses (the system domain's runtime and the live machine, domains and their connections, the command shell with its programs, immutable code and one data store), as its call table lists; erXos's kernel boots the same system and replaces the stopgap, gated on the conformance suite and the system's tests, before the security closure milestone, and every mechanism beyond that system lands on erXos's kernel alone. | A working system first, on proven code, without letting Fiasco's model leak above the interface; a stopgap held to what Phase 1's system uses keeps Fiasco near-stock and builds no mechanism twice; a kernel of its own, reshaped for erXos (budgets, groups, generations, memory objects), once the architecture has settled. | [design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco), [plan.md](plan.md) |
 | **The kernel keeps Fiasco's model wherever erXos needs nothing else.** [Kernel](#kernel) lists what it keeps, from a kernel stack per thread with helping locks to the vCPU interface for signals; every departure is in the kernel's L4 lineage ledger, with its reason and what Fiasco's way would lose. | The user's standing principle, to minimise needless changes from the L4 model; Fiasco's design and know-how come with its model. | [design-kernel.md](design-kernel.md#l4-lineage) |
 | **The Fiasco fork is frozen and owned.** It enters the tree once, with its notices and an origin file; upstream is not tracked; new C++ is allowed only for kernel objects and hooks that integrate with Fiasco, with the policy and state machines behind them in C17 shared with erXos's kernel. | The user's decisions; the C17 cores move to erXos's kernel unchanged. | [design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco) |
 | **Every runtime in user mode.** The system domain's ERTS too. | A runtime's fault ends a domain, not the machine; the kernel writes no machine code and carries no runtime. | [design-runtime.md](design-runtime.md) |
@@ -544,7 +542,7 @@ Decisions that constrain more than one subsystem:
 | **A command shell with rc's language, and toybox.** Each session can run a shell in Erlang that speaks Plan 9's rc, with emacs-style editing and job control; builtins, Erlang commands and toybox's applets, with `wak` as awk, share one command namespace, of which programs see the Erlang and program commands their `/bin` lists, run with the programs' own capabilities; pipes between Erlang commands carry records whose values keep their statuses. | The user's decisions; rc's single quoting rule and list variables remove the rescanning that makes POSIX shells error-prone, and a shell in Erlang reaches the inspector and the code store directly. A shell compatible with tcsh is a possible addition in the roadmap. | [design-shell.md](design-shell.md) |
 | **Release consoles log in.** A release build's console and host-link console start a login, and a session runs in its principal's own domain; an Erlang shell in the system domain needs the system-shell facet, which development builds give to `root`. | Evaluating an expression in the system domain is as strong as installing code there, so it needs a facet as strong as the install facet. | [design-live.md](design-live.md#the-console) |
 | **Text is UTF-8; system identifiers are ASCII; terminals see text escaped visibly.** Data is UTF-8 everywhere; an identifier matches `[a-z0-9][a-z0-9._-]*`, at most 63 bytes, checked once at creation and never normalised; file names are the bytes given, valid UTF-8, never normalised; each sink's one escaper renders controls, bidirectional and invisible format characters and invalid UTF-8 visibly, from a table generated from Unicode's data. | The user's decision. Raw controls on a terminal are an attack on the operator's host, and look-alike or reordered text misleads; one table and one escaper per sink make the rule hold by construction. | [design-live.md](design-live.md#text-on-terminals), [design-system.md](design-system.md#identifiers), [design-files.md](design-files.md#text-in-file-names) |
-| **A boot image is admitted, and the root task started, from one startup plan under a charge model the kernel verifies at boot.** The packer and the kernel run the same C17 `erx_root_plan` over the boot image and the backend's charge model; the packer admits an image only if the plan fits the platform's memory less the model's bound on the kernel's own boot use, and the kernel refuses to start the root task when its pool's real capacity or the charges it applied disagree with the plan. | Admission rests on the production plan and never on a declared baseline ([plan.md](plan.md#m0-the-tree-the-toolchain-and-the-oracle)); one function run on both sides makes the host's admission a prediction the kernel checks, so no root task runs that its image did not pay for, and a bootloader's memory report is never an input. | [design-stopgap.md](design-stopgap.md#the-startup-plan-and-its-charge-evidence), [design-abi.md](design-abi.md#canonical-source-packing-and-checking) |
+| **A boot image is admitted, and the root task started, from one startup plan under a charge model the kernel verifies at boot.** The packer and the kernel run the same C17 `erx_root_plan` over the boot image and the backend's charge model; the packer admits an image only if the plan fits the platform's memory less the model's bound on the kernel's own boot use, and the kernel refuses to start the root task when its pool's real capacity or the charges it applied disagree with the plan. | Admission rests on the production plan and never on a declared baseline ([plan.md](plan.md#m0-the-tree-the-toolchain-and-the-oracle)); one function run on both sides makes the host's admission a prediction the kernel checks, so no root task runs that its image did not pay for, and a bootloader's memory report is never an input. | [design-kernel.md](design-kernel.md#the-startup-plan-and-its-charge-evidence), [design-abi.md](design-abi.md#canonical-source-packing-and-checking) |
 
 ## Correct by construction in code
 
@@ -1288,22 +1286,19 @@ the root task pets; and a root task whose fault is a machine reset, after
 a crash record, rather than a kernel panic.
 
 **The stopgap.** A modified Fiasco, frozen at commit `50bbe8a9` with its
-`bootstrap`, `sigma0`, `l4sys`, `libfdt` and `mk`, implements the part of
-the interface that the plan's vertical slice of the system uses, with the
-interface's semantics added inside Fiasco's kernel; its scope table lists
-what it carries in full, what with a weaker guarantee, and what it leaves
-to erXos's kernel
-([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)),
-and [design-stopgap.md](design-stopgap.md) binds the interface to
-Fiasco's mechanisms: one trap, one object header and table, and one
-startup plan shared by the packer and the kernel.
+`bootstrap`, `sigma0`, `l4sys`, `libfdt` and `mk`, runs near-stock under
+Phase 1 of the plan; `liberx`'s Fiasco backend implements the interface
+over Fiasco's own calls in user mode, with nothing of erXos's kernel
+semantics inside Fiasco
+([design-stopgap.md](design-stopgap.md)); its call table says what is
+carried in full, what with a weaker result, and what is refused.
 Its kernel-mode build boots under HVF and TCG; its hypervisor build does
 not boot under HVF; its null call costs 29 ns under HVF
 ([research](research-hierarchical-scheduling.md#fiasco-under-hvf)). Its
 devices are virtio-mmio devices with ordinary interrupts, since MSIs, DMA
 windows and the IOMMU are erXos's kernel's. erXos's kernel replaces it
-once it runs the same slice, gated on the conformance suite and the
-slice's tests ([plan.md](plan.md)); the effort of writing it is calibrated
+once it runs Phase 1's system, gated on the conformance suite and
+Phase 1's tests ([plan.md](plan.md)); the effort of writing it is calibrated
 by a pilot first, the capability table and budgets
 ([design-kernel.md](design-kernel.md#risks-and-open-questions)).
 
@@ -2197,8 +2192,8 @@ processes.
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | Two-level scheduling misses priority or latency targets that a kernel thread per process would meet | medium | high | E-S1, E-S2 and E-S8 on the same kernel before user domains build on it; urgency publication and the receive boost; the plain configuration as the fallback |
-| Writing erXos's kernel takes longer than the plan assumes | medium | high | everything after the vertical slice waits for erXos's kernel, while the slice runs on the stopgap and is usable; a pilot calibrates the effort before the kernel is written in full; the interface does not change, so the stopgap can carry a further mechanism behind it if the plan cannot wait |
-| The stopgap's modifications to Fiasco grow large | medium | medium | the stopgap carries only the part of the interface that the vertical slice uses; the C17 cores are shared with erXos's kernel; Fiasco's own mechanisms are reused where the interface allows |
+| Writing erXos's kernel takes longer than the plan assumes | medium | high | everything after Phase 1's system waits for erXos's kernel, while that system runs on the stopgap and is usable; a pilot calibrates the effort before the kernel is written in full; the interface does not change, so the stopgap can carry a further mechanism behind it if the plan cannot wait |
+| The stopgap's modifications to Fiasco grow large | medium | medium | Fiasco stays near-stock: the backend carries only the part of the interface that Phase 1's system uses, refuses the rest with `ERX_ENOTSUP`, and builds no kernel mechanism in user mode; Fiasco's own mechanisms are reused where the interface allows |
 | Cross-domain messaging costs too much for real applications | medium | medium | E-D1 before user domains build on it; doorbell batching; lazy decode; a lane is already a direct ring between the two parties |
 | An Erlang driver misses a device's timing, or costs more than a stated fraction of its throughput | medium | medium | gate G9 measures interrupt-to-handler latency and ring throughput per device class on QEMU and the Pi 4 and decides batching; an exception is a row in the driver table with its measurement, run as a native shim in a sub-space port behind the same interface |
 | A saturated service slows every client of it, since it runs on one capped grant | medium | medium | policy sizes each service's grant for the domains it serves and the service schedules its clients fairly within it; work that grows with a client's input runs in the client's own domain; per-client statistics in the inspector show where the time went |
@@ -2397,7 +2392,7 @@ Decided by the user, and recorded where each applies:
   storage domain whose only client is the vault, with littlefs until
   erXos's F2FS, which a fresh installation brings, with nothing carried
   across ([design-system.md](design-system.md#the-vault)).
-* The roadmap: the vertical slice on the modified Fiasco, then erXos's
+* The roadmap: Phase 1's system on a near-stock Fiasco, then erXos's
   kernel, gated by the conformance suite
   ([Decisions](#decisions), [plan.md](plan.md)).
 * erXos's kernel keeps Fiasco's two object locks, the capability lock and

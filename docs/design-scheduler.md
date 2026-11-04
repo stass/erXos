@@ -933,9 +933,9 @@ again and reports whether it has changed. The step returns with every
 answer the instant that answer next changes, when the share is spent or
 the period ends; the dispatch arms that instant as one deadline of the
 CPU's one-shot timer, and the deadline's handler feeds `DEADLINE` and
-picks when the answer has changed. The stopgap has no share and does
-not call the step
-([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
+picks when the answer has changed. On the stopgap the share and the step
+are unsupported, per the backend's table
+([design-stopgap.md](design-stopgap.md#the-call-table)).
 
 *A kill is a decision.* The kill of the thread running on the CPU, its
 own exit, a stop of its own space, or a kill that a cross-CPU request
@@ -1101,12 +1101,9 @@ lifetime](#ownership-and-lifetime)). A thread that ends itself with
 `erx_thread_exit` and a thread the reaper's put kills from the kernel's
 own context are charged the same way. A stopped thread's remaining kernel work
 cannot start another user request, since it never returns to user mode
-([design-kernel.md](design-kernel.md#threads-and-faults)). The stopgap
-runs its finishing threads at a fixed priority above every urgency,
-outside every quota and charged the same way, with no finishing share:
-a stream of kills there holds a CPU's user threads back for as long as
-it lasts, a stopgap residual
-([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
+([design-kernel.md](design-kernel.md#threads-and-faults)). On the
+stopgap the finishing share is unsupported, per the backend's table
+([design-stopgap.md](design-stopgap.md#deletion)).
 
 **Reclamation.** Emptying and destroying a stopped space run in the
 calls that ask for them, charged to their callers as any call is
@@ -1552,14 +1549,10 @@ scheduling decision, where the donation lapses
 (`Thread::activate_ipc_partner` in `thread-ipc.cpp` switches the
 execution context alone; `Context::schedule_switch_to_locked` switches
 both). erXos's own kernel charges every interval to the running thread's
-group, so a server never runs on its caller's time at all. The stopgap
-does not take the direct switch: a send makes the server ready, and the
-scheduler picks it at the sender's next decision through
-`schedule_switch_to_locked`, which switches both contexts, so there too
-the server runs at its own urgency and on its own grant from its first
-instruction
-([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)).
-Neither kernel carries a
+group, so a server never runs on its caller's time at all. On the
+stopgap IPC calls are refused, per the backend's table
+([design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)),
+and there is no direct switch to take. Neither kernel carries a
 donation across a preemption or down a chain of calls, and neither
 resolves anything at a decision but the running thread's own group
 ([design-kernel.md](design-kernel.md#l4-lineage)).
@@ -1674,9 +1667,8 @@ deadlines are measured in the same virtual time.
   before any code calls `erx_sched_pick` across CPUs ([Verification and
   testing](#verification-and-testing)). The core's contract, that its caller
   serialises every call naming a thread, is this protocol's: the caller is
-  the thread's home CPU. The stopgap runs Fiasco's machinery itself
-  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md)) and never
-  calls the pick.
+  the thread's home CPU. The stopgap runs Fiasco's scheduler itself and
+  never calls the pick.
 * **Shared group state**: the pool, under `pool_lock`, touched at most once
   per draw quantum per CPU; the park state, under `park_lock`, touched by
   park, trigger, take ready and executor wake. Both are leaf locks taken
@@ -1894,23 +1886,12 @@ scheduler binding (`+sbt`) is the adapter's pinning and cannot be changed
 from Erlang; and a NIF that blocks on a normal scheduler fails instead of
 stalling it.
 
-The stopgap implements the part of this interface that the plan's vertical
-slice uses on the modified Fiasco, configurations C0 and C1: groups,
-shared areas, park and wake and urgency resolution are a Fiasco kernel
-object around the same C17 core; an IRQ object bound to a group is
-Fiasco's IRQ object with the group in place of a thread as its target;
-Fiasco's IPC rendezvous carries erXos's IPC calls as
-[design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)
-binds them, and what a server runs on from its first instruction, with
-no direct switch, is
-[design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)'s;
-accounting runs at Fiasco's
-timer interrupts, a 1 ms periodic tick, so quota enforcement there is
-accurate to 1 ms per CPU per period instead of to the one-shot timer;
-and killed threads finish at a fixed priority above every urgency with
-no finishing share, so the share's bounds are erXos's kernel's alone.
-C2's features are erXos's kernel's alone; the stopgap's scope table lists
-each difference
+On the stopgap a group is a record in `liberx`'s Fiasco backend and gives
+readiness only; quotas, urgency resolution, charging, shared areas and the
+finishing share are unsupported, per the backend's table
+([design-stopgap.md](design-stopgap.md#the-call-table)), and threads run on
+Fiasco's fixed priorities. The features of configurations C0 to C2 are
+erXos's kernel's alone
 ([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
 
 ## Failure handling, diagnostics and debuggability
@@ -2091,7 +2072,7 @@ experiments below:
 * accounting, draws and status words cost at most 1% of CPU time at the
   default slice;
 * quota enforcement is accurate to one draw quantum per CPU per period on
-  erXos's kernel and to one 1 ms tick per CPU per period on the stopgap;
+  erXos's kernel, and the stopgap enforces no quotas;
 * a shared service's per-client attribution, as its runtime reports it,
   is within a stated fraction of a cycle-counter ground truth, the
   fraction set by E-S5.
@@ -2200,9 +2181,8 @@ client's.**
   Deleting donation deletes the payer, the loan, the fallback, the
   reservation and the arithmetic at once, and leaves a scheduler whose
   only path is the running thread's own group. The stopgap builds no
-  direct switch: a send makes the receiver ready and the scheduler picks
-  it with its own scheduling context
-  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)).
+  direct switch: it refuses IPC calls, per the backend's table
+  ([design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)).
 
 **Scheduler activations and other upcall interfaces.**
 
@@ -2394,7 +2374,7 @@ client's.**
 | cross-CPU wakes under HVF are slow | unknown | wake latency above budget, felt as messaging latency | E-S4; executors stay pinned and a busy runtime finds work without wakes |
 | quotas at 10 ms periods make a throttled domain's latency jumpy | medium | p99 latency for capped domains | E-S7 tunes periods and draw quanta; policy prefers capacity over tight caps |
 | refill once per period lets a burst that straddles a boundary use up to twice the quota in one period's span, and local slices strand quota on CPUs a group left | medium | short-term isolation between groups | E-S7 measures both and decides whether a CPU that goes idle returns its local quota to the pool; sporadic replenishment, as in seL4's scheduling contexts, is the fallback |
-| slices and quota enforcement at the stopgap's 1 ms tick are accurate only to the tick | high on the stopgap | coarse slices there; charges are exact to the clock | documented accuracy differences; erXos's kernel uses one-shot timers ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)) |
+| slices and quota enforcement exist only on erXos's kernel | high on the stopgap | the stopgap enforces no quotas and has no slices; on erXos's kernel charges are exact to the clock | the backend's table says what the stopgap carries ([design-stopgap.md](design-stopgap.md#the-call-table)); erXos's kernel uses one-shot timers |
 | two runtimes in one space share a group | low | contention and taken wake-ups inside one space | the kernel keeps a group's executors in one space and its ready list to executors; a space that runs two runtimes gives each a group of its own |
 
 Open questions:

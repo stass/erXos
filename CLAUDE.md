@@ -57,13 +57,41 @@ supervision and inspection span them all.
   them as written. That milestone is reached on erXos's own kernel: the
   stopgap Fiasco is never hardened, though bugs found in it are fixed as
   anywhere else.
+* **Two phases.** Phase 1 of [docs/plan.md](docs/plan.md) brings the
+  system up on a near-stock Fiasco: `liberx`'s Fiasco backend implements
+  the kernel interface over Fiasco's own calls in user mode, the system
+  domain's `liberx` owns every kernel object and serves the other tasks,
+  as L4Re's root task does, and nothing of erXos's kernel semantics is
+  built into Fiasco. Phase 2 builds erXos's kernel with every guarantee.
+  In Phase 1 the properties a kernel enforces are deferred as
+  enforcement, not rewritten: isolation between domains, budgets as
+  guarantees, stops and exit records, bounded kernel paths, the one
+  route from user mode, no panic on a domain's input, and the kernel
+  items of the "by construction" list in Design. The backend refuses a
+  call it cannot implement over Fiasco with `ERX_ENOTSUP`, reports a
+  value it cannot measure as unsupported or partial with its reporter
+  named, and never rebuilds a kernel mechanism in user mode for a
+  property that only erXos's kernel promises. Every rule below still
+  binds the code written in Phase 1: `liberx`, the runtimes, the
+  services, the drivers and the tools follow the untrusted-input,
+  chokepoint, escaping, fuzz-target, generated-ABI and never-fabricate
+  rules as written, and build against the target interfaces of the
+  design documents, so that Phase 2 changes what is behind `liberx` and
+  what the kernel enforces, not what services and runtimes call. Phase
+  1's kernel carries no erXos C17 code, so the kernel stack proof and the
+  kernel-side chokepoints have no site to check until erXos's kernel;
+  their tools and tests stay.
 * **A stopgap promises little.** Its design commits only to what the
   milestone using it needs and its tests check: no memory errors, no
-  deadlock, the interface's results, and exact accounting, for trusted
-  workloads. Latency bounds, fairness and progress against hostile load
-  belong to the component that replaces it; on the stopgap they are
-  recorded as residuals, not engineered into inherited code. Its reviews
-  check those commitments, not the target design's.
+  deadlock, and the results of the calls it offers, for trusted
+  workloads. A call it does not offer fails with `ERX_ENOTSUP`, a value
+  it cannot measure is reported as unsupported or partial with its
+  reporter named, and no weakness of the stopgap is worked around unless
+  the work is cheap or needed for its replacement anyway. Latency bounds,
+  fairness, exact accounting and progress against hostile load belong to
+  the component that replaces it; on the stopgap they are recorded as
+  residuals, not engineered into inherited code. Its reviews check those
+  commitments, not the target design's.
 * **Nothing ships until I say so.** No one deploys erXos with stopgaps in
   production, so polishing a stopgap is throwaway work, even where untrusted
   input reaches it. What we need is to know where its gaps are: each is
@@ -207,7 +235,10 @@ scripts live in `~/erxos-scratch/tools/`.
   wherever erXos needs nothing else; every departure, whether for erXos's
   needs or for an idea from research systems (SPIN, Singularity, Plan 9,
   Inferno, Genera), is recorded with its reason in the kernel's L4 lineage
-  ledger. CPU time has one authority, the kernel, and each runtime
+  ledger. When a design keeps hitting issues, check how Fiasco, L4 and
+  Zircon solved the problem before adding mechanism, and reverse a
+  departure that has no recorded reason. CPU time has one authority, the
+  kernel, and each runtime
   schedules its own lightweight processes within the kernel's grants.
 * **System code is Erlang.** What erXos writes for the running system, the
   system services, the network stack and the file systems included, is

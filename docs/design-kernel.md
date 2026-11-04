@@ -19,8 +19,8 @@ executable at once, a kernel that never loads or stores through a user
 address, and CPU time charged to the group of the thread that spent it.
 It keeps Fiasco's process model: a
 kernel stack per thread, a preemptible kernel with helping locks, and
-calls that sleep where they wait. Until this kernel is written, a modified
-Fiasco implements the same interface ([The current implementation: the
+calls that sleep where they wait. Until this kernel is written, a near-stock
+Fiasco stands behind the same interface ([The current implementation: the
 modified Fiasco](#the-current-implementation-the-modified-fiasco)). Every
 place where erXos departs from Fiasco is listed, with its reason, in [L4
 lineage](#l4-lineage). The architecture is in [design.md](design.md); the
@@ -2440,6 +2440,124 @@ Every user page is never executable in kernel mode, so the kernel never
 executes user memory, and every kernel page is never executable in user
 mode ([Port contract](#port-contract)).
 
+### The startup plan and its charge evidence
+
+The kernel starts the root task from one startup plan, and the packer
+admits a boot image from the same plan. Each plan is one pure function
+that runs on the host, at packing, and in the kernel, at boot. The two
+runs do not see the same inputs, and the kernel checks a stated relation
+between them.
+
+**The charge model.** The kernel's charge model declares the byte cost
+of each thing the startup plan and the domain planner charge: a thread's
+record and kernel stack, a space's record, a gate's, an interrupt
+object's, a group's per-CPU records, a memory object's record, a mapping
+record, a capability-table page, a translation table and a kernel-user
+page; and `boot_reserve`, the bound on what the kernel's own boot takes
+from its allocator before the root task is created, as a base, a
+per-CPU term and a per-heap-page term. The model is declared once and
+generated for C, on the host and the target, and for Ruby. A change to
+the kernel's objects that the model does not follow fails the kernel
+build.
+
+**The root plan.** `erx_root_plan(spec, model, plan)` is pure over
+`spec`: the root entry's image manifest (its segments with their file
+and memory sizes, protection and flags), the stack size, the capability
+limit, the CPU count, the sizes of the root objects' fixed pages, and
+the boot information page's strings. It yields `erx_root_plan_t`:
+
+* the addresses of the image's segments, the stack, the kernel-user page
+  and the boot information page;
+* the first thread's start registers: the entry, the stack top, and the
+  boot information page's address in the first argument register the
+  architecture's ABI file names;
+* a list of steps, each `(kind, count, bytes)`, in the order the kernel
+  applies them: the root budget's record, the space, the root and
+  `system` groups, the root resource, the boot image's object and the
+  root entry's slice, the time page, the machine page, the device-secret
+  page, the capability table's pages for the root slots, the mapping
+  records and translation tables of every mapping, the kernel-user
+  page's mapping included, the private pages of the writable segments
+  and the stack, the thread with its kernel-user page, and the boot
+  information page;
+* `total`, the sum of the bytes in pages.
+
+The plan fails with the status of the first check that fails, and
+nothing is applied.
+
+**The pool plan.** `erx_pool_plan(map, model, plan)` is pure over `map`:
+the conventional ranges and the reserved ranges (the kernel's placed
+segments, the boot image, the device tree, every `/reserved-memory`
+entry). It rounds each conventional range inward and each reservation
+outward to `pool_align`, the unit the kernel's allocator rounds to, and
+yields `heap`, the bytes the allocator holds after that rounding:
+conventional memory rounded inward, less every reservation rounded
+outward. A map that leaves `heap` below the model's floor fails the plan.
+The relation between the host's `heap` and the kernel's is monotone:
+more RAM and smaller reservations never shrink `heap`, which a host test
+of the plan pins.
+
+* The root plan's inputs are the root entry's manifest and the charge
+  model, the same bytes on both sides, so its two results are equal: the
+  kernel requires the charges it applied to equal the plan it computed,
+  and the host's `total` is that same figure.
+* The pool plan's inputs on the host are the platform's memory table at
+  `memory_min` and bounds on the reservations: the kernel's placed
+  extent, which the link fixes; the boot image's size; and
+  `loader_reserve` for what the loader places, whose addresses the host
+  cannot know. At boot its inputs are the actual descriptors and the
+  actual reservations. With RAM at least `memory_min` and each loader
+  reservation within `loader_reserve`, all checked at boot, the kernel's
+  `heap` is at least the host's. The loader and the kernel, which do see
+  the same inputs, agree exactly.
+
+**On the host.** The packer runs `erx_root_plan`, built for the host and
+called through a small host helper as `erx_dom_plan_create` is for
+property 12 ([design-abi.md](design-abi.md#canonical-source-packing-and-checking)),
+over the root entry's manifest and the charge model, and `erx_pool_plan`
+over the platform's memory table, with the kernel's placed extent from
+`erx_elf_plan`'s kernel profile over the kernel it is packing, the boot
+image's size and `loader_reserve` as the reservations. It admits the
+image only if
+
+```text
+pool.heap - boot_reserve(cpus_max, pool.heap) - plan.total >= root_memory
+```
+
+where `pool.heap` is the pool plan's heap at `memory_min`, the smallest
+RAM the manifest's platform record admits, which the packer writes from
+the platform table and the kernel checks against the device tree at
+boot; `cpus_max` is the platform's CPU count; and `root_memory` is the
+manifest's, the guarantee the root task requires of the root budget after
+the root plan's charges. The admission records the plan's `total` and
+step counts, the pool plan's figures, the model's identity (the ABI's
+generated-output hash and the kernel build it was asserted against) and
+the inequality's figures as the **charge evidence** inside the `Admitted`
+value that the publisher requires (`tools/lib/erx/manifest.rb`). Only the
+production plans produce that value: a cost declared in a source file or
+a structural test fixture is not evidence and admits nothing. The kernel
+repeats both computations at boot; the host's figures are a prediction it
+checks, never an input.
+
+**At boot.** The kernel's boot step for the root task ([Boot](#boot),
+step 11) runs `erx_root_plan` over the same manifest, read from the boot
+image, applies each step through the budget-charging funnel, charged to
+the root budget, maps the image's read-only and executable segments from
+the boot image's object and copies its writable segments into private
+pages, as `erx_image_map` does, builds the capability table with the
+root slots the ABI file fixes, writes the boot information page and the
+machine page, creates the first thread as a worker of `system` with the
+plan's start registers, and before it starts the thread compares the root
+budget's `used` and the count of each record kind with the plan. A
+difference is a kernel bug and refuses the start with a crash record of
+cause `PANIC` naming the step. The plan's mapping steps, through the
+mapping records, are the only thing that maps the root task's image,
+charged and with a ceiling and a reverse map like any other mapping, and
+the root task needs no pager.
+
+Production images run the root plan for every image, and
+`erx_dom_plan_create` for each child domain the manifest names.
+
 ### The root task
 
 The system domain is the **root task**: the one user-mode task the kernel
@@ -3709,11 +3827,8 @@ queues itself and links the word's queue into the object's `att_words`
 under that object's lock ([Umtx](#umtx)). The order has no level for
 scheduler or request queues: a CPU's ready queues are written by that
 CPU alone and its request queue is appended with release stores
-(**Cross-CPU requests** below), so no lock guards them. The stopgap's
-Fiasco does lock its queues and takes those locks inside leaves; that
-level belongs to the fork's own lock-order check, recorded in
-[design-stopgap-scheduling.md](design-stopgap-scheduling.md#concurrency-and-failure-behavior),
-and not to this order. Debug builds check the order
+(**Cross-CPU requests** below), so no lock guards them. Fiasco's own
+queue locks belong to Fiasco and not to this order. Debug builds check the order
 on every acquisition, check that a fresh take finds its lock free, and
 time every hold.
 
@@ -3769,11 +3884,7 @@ its object until it is taken or withdrawn. A
 sender blocked on a gate, a waiter on a umtx word and a parked executor
 hold none: each is linked on a list its owner's teardown empties, touches
 that list on waking only while it is still on it, and reaches the object
-again only through a fresh lookup. The stopgap's one exception is the
-requester of a waited cross-CPU request, which holds its target across
-the answer wait
-([design-stopgap-scheduling.md](design-stopgap-scheduling.md#differences-from-erxoss-kernel)).
-Pointers between objects are
+again only through a fresh lookup. Pointers between objects are
 attachments, which the target's teardown removes, where Fiasco counts
 them ([L4 lineage](#l4-lineage)). Each put
 waits on the list of the CPU that queued it, with the grace period it
@@ -6299,12 +6410,12 @@ erXos leaves out: trees of hidden clone nodes, the attribution of pages
 along chains of clones, eviction, discardable memory and user-mode
 pagers.
 
-**The stopgap.** The modified Fiasco implements paged objects supplied
-whole and sealed, which hold the code and files programs run and map, and
-none of the rest: copy-on-write children, store tracking and copies of
-spaces are erXos's kernel's alone, since Fiasco's memory model of mapping
-databases and user-level pagers has nothing to build them on. The
-personality's second tier, which needs them, runs on erXos's kernel
+**The stopgap.** The backend offers no paged objects: it refuses them
+with `ERX_ENOTSUP`, per its call table, and copy-on-write children, store
+tracking and copies of spaces are erXos's kernel's alone, since Fiasco's
+memory model of mapping databases and user-level pagers has nothing to
+build them on. The personality's second tier, which needs them, runs on
+erXos's kernel
 ([plan.md](plan.md#track-q-the-second-tier),
 [The current implementation](#the-current-implementation-the-modified-fiasco)).
 
@@ -7528,215 +7639,10 @@ which the host models and the multi-CPU suites cover.
 
 ### The current implementation: the modified Fiasco
 
-Until erXos's kernel is written, a modified Fiasco implements the part of
-the interface this document defines that the plan's vertical slice of the
-system uses: the system domain's runtime and the live machine, domains
-over connections, the command shell with its programs over pipes, and
-immutable
-code with one data store ([plan.md](plan.md)). erXos's kernel then boots
-the same slice and replaces the stopgap, and every mechanism beyond the
-slice lands on erXos's kernel alone, so none is built twice. Code above
-the interface learns of a missing feature only from `ERX_ENOTSUP`:
-runtimes, services, Erlang code and tools see `abi/erx_abi.txt`'s calls,
-status codes and layouts on both kernels, and a call the stopgap leaves
-out fails there with `ERX_ENOTSUP`, as an unknown call does. What else a
-person or a tool can tell apart, on the console above all, is listed
-under **Differences that remain** below. How the fork carries the
-interface, the route from user mode and the transport, capabilities in
-Fiasco's object space, deletion and the ownership of pages, the boot
-handoff, the startup and pool plans and their charge evidence, the seam
-between the C17 cores and Fiasco's C++, the crash record on the console,
-and what the tests and benchmarks observe, is the stopgap binding's own
-document, [design-stopgap.md](design-stopgap.md); the Fiasco mechanisms
-behind stops, park and wake and charging are
-[design-stopgap-scheduling.md](design-stopgap-scheduling.md)'s.
-
-**What the stopgap carries, and how.** One table keys every feature of
-the interface. For each it gives whether the stopgap carries it in full,
-with a weaker guarantee that is documented and tested, or leaves it to
-erXos's kernel, where its conformance tests run alone; how the modified
-Fiasco carries it, with a mechanism of Fiasco's used as it is (existing),
-changed (modified) or added beside Fiasco's own (added); what differs from
-erXos's kernel; and which milestones of [plan.md](plan.md) rely on it.
-The interface's properties are implemented inside the Fiasco kernel, not
-emulated above it, so that a test that passes on one kernel tests the
-same property on the other:
-
-| Feature | On the stopgap | How the modified Fiasco carries it | What differs | Relied on by |
-| --- | --- | --- | --- | --- |
-| capabilities: generations and per-type rights, the one lookup, copies, closes, and passing at a rendezvous and by `erx_cap_pass` | in full | modified: Fiasco's object space reduced to a facade over the C17 capability table, whose slots carry the generation and the erXos rights word and which `kernel/core/cap.c` alone reads and writes; every lookup is `erx_cap_lookup`; a copy appends a slot to the object's list and a close clears one through `erx_cap_slot_clear`; passing at a rendezvous as `erx_pass_plan`, `erx_pass_take` under the sender's table lock and `erx_pass_install` at the one install point of Fiasco's IPC transfer, into the slots the receiver reserved, at most four items a message, once M5's design has fixed who owns a transfer with items so that the step holding the receiver stays one bounded step ([Transfer ownership](design-stopgap-scheduling.md#stop-and-exit)); `erx_cap_pass` as the same plan and apply from one task's table into another's under both tasks' existence locks, as `Task::sys_map` takes them; Fiasco's object mapping database is not built ([design-stopgap.md](design-stopgap.md#capabilities-in-fiascos-object-space)) | | M1 (copies, closes and `erx_cap_pass` in its creator's case), M5 (rendezvous transfer and the other cases of `erx_cap_pass`) |
-| the capability lock and the existence lock | in full | existing: Fiasco's own, the object's lock over its slot list and its `existence_lock`; the dispatch takes the existence lock of the one argument the ABI file marks `exists` through `erx_object_lock_existence`, a handler that needs two takes them in address order, as `Task::sys_map` takes both tasks' (`task.cpp`), and the capability core takes the object's lock for every change of a slot ([design-stopgap.md](design-stopgap.md#capabilities-in-fiascos-object-space)) | | M1; K26's container test runs on the stopgap from M5 |
-| deletion (K26) | in full | modified: the C17 deletion core closes the object first, by Fiasco's existence-lock invalidation changed to return the lock word's old value, so one destroy wins; waits for the lock's holder; empties its slots in bounded parts through `erx_cap_slot_clear`; runs the type's attachment teardown, which removes both ends of every attachment of the record; and hands the record to the reaper through the header's one link, which after the grace period drops the creation's reference, the fork's `Kobject::put` being that one drop and never a free, with the header's `refs` as the only count, held by the creation, by threads across preemption points, by the requester of a waited cross-CPU request across its answer wait, the stopgap's one departure from K33, and by queued requests nobody waits for; Fiasco's per-type `destroy` and `put` overrides, `Ref_cnt_obj` and `initiate_deletion` are deleted ([design-stopgap.md](design-stopgap.md#deletion)) | | M1, M5 |
-| budgets as space banks: destroying a budget deletes every object charged to it and every budget carved from it; guarantees, caps, the borrowing chain, `erx_budget_resize` and `erx_budget_watch` | in full | replaced: Fiasco's `Ram_quota`, which accounts bytes at each allocation, and its allocation adapters are not built; an `Erx_budget` is the C17 core's `erx_budget_t` behind the glue's opaque header, with its kind, guarantee, cap, counters, watch and `att_charged` list, whose destroy deletes every object on the list, child budgets included, through the C17 deletion core, and the charges that remain pass to its nearest live ancestor; every change of its counters is the C17 `erx_budget_adjust` shared with erXos's kernel, so the chain, the walls, the caps, the close of a destroyed budget and the watch's crossing are the same code on both; the only thing the fork charges is a whole page, through `erx_reserve_charge`, which backs what it admits, and `erx_page_release`, at which a charge ends, before the page is freed; tables come through `Erx_table_alloc` over the space's reserve and records from the budget's caches, so no allocation of the fork is accounted outside the funnel ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)); deleting a Fiasco factory leaves the objects it made, and a Fiasco quota is fixed at its creation | | M1, M5 |
-| kernel memory | in full | modified: memory objects' pages come from Fiasco's kernel allocator through the budget-charging funnel, which charges a reserve and backs it with whole single pages in the same call; a page comes into use only from its reserve's pool, leaves its reserve only through `erx_page_release`, onto the machine-wide released list, retired to the batch after Fiasco's current one and chained through page records the fork adds for the heap, and reaches Fiasco's free lists only through the reaper's free step once that batch has completed, unless the backing of a charge takes it off the list and waits for the batch itself, as [The reaper](#the-reaper) says, so an admitted charge is always backed and a fault never allocates; a thread block is two single pages mapped into an 8 KiB-aligned slot of a thread region the fork adds, as this kernel's stacks are, so no allocation on the fork is above order zero; `bootstrap` passes Fiasco's `kmemsize` option, computed by the pool plan that the kernel recomputes at boot, to give that allocator all of RAM but the regions `bootstrap` placed and the boot image, within the kernel's 1 GiB physical-memory window, where Fiasco's default is 6 per cent of RAM on 64-bit builds (`config.cpp`, `kmem_alloc.cpp`); the root budget, from which every other budget is carved, is a wall whose guarantee and cap are that pool ([design-stopgap.md](design-stopgap.md#kernel-memory-and-the-root-budget)) | the root budget is what Fiasco's allocator holds once Fiasco's own boot is done, less the page records and the thread region's tables, not every page left, and RAM beyond the window is unusable | M5, G6's many domains |
-| spaces with their parents, created by any holder of `SPACES`, and sub-spaces | in full | modified: Fiasco tasks, constructed by the glue's installer from `erx_space_create`'s validated plan and never through Fiasco's factory, which is not built, with the parent and the wait for children's exit records from the C17 stop core shared with erXos's kernel | | M1, M5 (K27) |
-| stops of spaces and threads, `CONTROL` stops, and exit records (K18) | in full | added: a list of each task's threads, which Fiasco's tasks lack, joined at a thread's creation under the task's lock; one run word per task holding the stop state and the count of its live threads, written only under the task's lock by the C17 stop core, which a thread enters at its creation and leaves at its death edge, before Fiasco's `unbind()`; one kill request per thread, carried by Fiasco's eager cross-CPU request, which ends its wait, marks it dying and raises it to the finishing priority; every return to user mode passes `erx_return_check` in Fiasco's common return path, where a killed thread dies through `Thread::do_kill` and a thread of a stopped task holds until its kill; the IRQ shortcut is off; a `CONTROL` stop sleeps the thread at that check, its registers kept, until `erx_thread_start`; the death edge that takes the count to zero posts the exit record to the fault gate, publishes `EXITED` and wakes every waiting stopper, once every child's record has been posted ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)) | the count is of live threads, created to dead, where erXos's kernel counts the threads active inside calls, both zero exactly when no thread can act; finishing threads run on their own CPUs at the fixed finishing priority above every urgency, outside every quota, charged for the accounting to the `finishing_ns` of their own paths, as on erXos's kernel, but with no finishing share, so a stream of kills can hold a CPU's user threads back for as long as it lasts, and a dying lock holder may be helped as Fiasco helps any holder (**Differences that remain** below); a thread of a stopped space that reaches its return boundary before its kill holds there rather than dying at once, with the same observable contract | M1 (K18), M5 (K27) |
-| emptying a stopped space's table, and deleting a tree of tasks | in full | added: the emptying of a stopped task's own table, in bounded parts, each slot cleared through the C17 capability core's `erx_cap_slot_clear`, shared with erXos's kernel; the deletion walk of a stopped task's tree, deleting each task below ([design-stopgap.md](design-stopgap.md#deletion)) | | M1 (the walk, run by a space's destroy), M5 (`erx_space_clear_caps`) |
-| pauses of spaces, in their named states | erXos's kernel alone | | `erx_space_pause` fails with `ERX_ENOTSUP`; `Ctrl-Z` stops a job's Erlang commands, and the shell names the job's programs, which run on | track S, after M7 |
-| memory objects (private, shared, contiguous and physical), private memory, ceilings, reserves, `erx_space_protect`, `erx_mem_grow` and `erx_mem_copy` | in full | added: a memory-object kernel object whose pages come from Fiasco's kernel allocator charged to the quota, a contiguous object's as one physical range and a physical object's from a resource's device memory; mappings inserted into the task's address space directly, without the mapping database, each attached to its object's reverse map; per-task mapping records from the same C17 planning core as erXos's kernel, with a deleted object's records kept so an access to them faults as `ERX_FAULT_DELETED`; the fault decision's populate results resolved in the kernel before any page-fault message; `erx_mem_copy` as an invocation that copies through Fiasco's kernel mapping of both objects' pages; every invocation's arguments in registers and UTCB words, with windows as erXos defines them ([Arguments and results](#arguments-and-results)) | | M1 (private and shared objects and kernel-made physical objects), M5; contiguous objects and physical objects from device resources with the resource rows' milestones |
-| paged objects supplied whole and sealed: the file and code objects that programs run and map | in full | added: the memory-object kernel object with `erx_mem_supply` and `erx_mem_seal`: an object is mapped only once sealed and has an execute ceiling only when created with `ERX_MEM_CODE`, as [Copy-on-write children and copies of spaces](#copy-on-write-children-and-copies-of-spaces) defines | | track P, M6 |
-| store tracking with `erx_mem_dirty` | erXos's kernel alone | | a file's `MAP_SHARED` mappings are the second tier's | track Q |
-| copy-on-write children | erXos's kernel alone | | `erx_exec` copies a program's writable segments into private memory at load, and a writable private mapping of a file reads its range into private memory at the call | track Q |
-| copies of spaces | erXos's kernel alone | | programs start by spawning; `fork` is the second tier's | track Q |
-| JIT objects in JIT spaces | in full | added: the memory-object kernel object's JIT kind, with the rights of its kind ([Rights](#rights)), recording the task whose thread created it, a task created as a JIT space, and mapped writable at one address and executable at another only in that task | | M4 |
-| no mapping writable and executable at once (K8) | in full | modified: a check in the address-space insertion path | | M1, M4 |
-| no page executable through one mapping while writable through another (K8) | weaker | the same check, with an execute ceiling only on the boot image's slices, sealed code objects and JIT objects | it holds for the CPU and not for devices: the stopgap's drivers run with unconfined DMA | M4, M6 |
-| threads, executors and workers, and the executor rule | in full | modified: Fiasco threads with the class and group added; the executor rule checked in the IPC path | | M1, M2 |
-| faults to the fault gate | in full | modified: Fiasco's page-fault and exception paths hand every user-mode exception to `erx_fault_classify` and every memory fault to `erx_fault_decide`, which populates through Fiasco's translation-table insert or stops the thread and posts the fault record to the space's fault gate as a kernel-originated message with the fault label; Fiasco's per-thread pager and exception handler stay unset and the paths that would use them are not built, so no code in a space can redirect its faults ([design-stopgap.md](design-stopgap.md#faults-and-the-fault-of-the-root-task)) | | M1 |
-| a fault of the root task, which has no fault gate (K31) | in full | modified: the root task has no pager; the kernel maps its whole image at start from the same startup plan that computes its charges, and a stray access reaches the kernel's crash path, which writes a crash record with cause `FAULT` and ends the machine | | M1 |
-| the kernel's watchdog and the root task's halt (K31) | in full | added: `erx_watchdog_pet` as an invocation on the erXos platform object; the deadline checked at Fiasco's periodic tick; the crash record written to the console, since QEMU has no region that survives a reset; the end through the same firmware call as `erx_machine_end`; a stop of the root task's task by anything but `erx_machine_end` takes the same path | no board watchdog, since the stopgap runs on QEMU only | M1, M3 |
-| IPC gates, open waits, calls with an implicit reply, deadlines, and messages in the UTCB | in full | modified: Fiasco's IPC gates and IPC paths, with absolute deadlines turned into Fiasco's timeouts and a dropped caller woken with `ERX_EDEAD`; Fiasco's UTCB, the same 1 KiB, with a receive by count turned into a receive window over the reserved slots | | M1 |
-| no donation: a server runs on its own group's grant | in full | modified: Fiasco's IPC direct switch is not taken: `activate_ipc_partner` makes the receiver ready and switches to nothing, and the scheduler's own switch, which sets the CPU's scheduling context to the thread it picks, runs the server at its own priority and on its own group's grant from its first instruction ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)) | | M1 |
-| groups in configurations C0 and C1: grants, quotas, urgency levels, park and wake with epochs, and shared areas | weaker | added: a group kernel object around the C17 scheduler core; the shared areas as Fiasco kernel-user memory; Fiasco's fixed-priority ready queues and dispatch, which call the core for resolution, charging and draws and never for a pick; the park protocol on Fiasco's spin lock, state writers and timeouts ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#park-and-wake)) | charges are taken at every change of a CPU's scheduling context and at Fiasco's 1 ms periodic tick, and quota enforcement runs at the tick, so it is accurate to 1 ms per CPU per period ([design-scheduler.md](design-scheduler.md#compatibility-and-migration)) | M1 (C0), M2 (C1) |
-| published urgency, deferred preemption, status words and idle-first wake placement (C2) | erXos's kernel alone | | | M8 |
-| IRQ objects bound to threads or groups, fired by software and by lines | in full | modified: Fiasco's IRQ objects, with the binding to a group and the last delivery at release added | | M1, track P |
-| MSI IRQ objects | erXos's kernel alone | | the stopgap's devices are virtio-mmio devices with ordinary interrupts | M9 |
-| umtx | in full | added: wait and wake on task addresses, each word found by a walk of the task's page table, refused unless its page is RAM that Fiasco's kernel maps, and read through that mapping | | M1, track P |
-| vCPU upcalls | in full | modified: Fiasco's vCPU interface in its kernel-mode build, with the state area in the thread's kernel-user memory, and every inherited path that enters, defers or resumes an upcall deciding through the C17 `erx_vcpu_step` shared with erXos's kernel: an upcall admits only an IRQ delivery, where Fiasco's `vcpu_async_ipc` admits any sender (`receiver.cpp`), so no message is received into the registers an upcall interrupts; a resume decides by the thread's queue, where Fiasco's tests the pending flag, which user mode can clear (`thread_object.cpp`); a resumed frame with a bit it may not hold stops the thread; the fault flags read as zero, executors refused, and umtx waits ended with `ERX_EINTR`; Fiasco reaches the area through its own kernel alias, unchanged; conformance tests on the stopgap send a message to an armed thread with events enabled, which its open wait receives and no upcall takes, and resume over a queued delivery whose pending flag user mode cleared, which enters the upcall again | | M5, track P |
-| resources: device memory and interrupt lines | in full | added: a resource kernel object over the device memory and interrupt lines that `bootstrap` and the kernel derive from the device tree | | M6 |
-| a PCIe bridge's windows, DMA windows and the IOMMU | erXos's kernel alone | | the stopgap's drivers drive virtio-mmio devices with unconfined DMA; the stopgap runs development builds only, which run trusted code | M9 |
-| asynchronous errors | weaker | existing: Fiasco's handler, which counts each error per CPU and resumes (`thread-jdb.cpp`) | no containment: an error is counted, not contained as [Interrupts, time and entropy](#interrupts-time-and-entropy) describes; a documented difference with its tests | |
-| the early console and the kernel log | in full | modified: Fiasco's own UART driver for the console port, written until the console's driver carves the UART from the root resource and at a panic or the machine's end, with Fiasco's own console output turned off once the root task starts and the UART's registers in the root resource; the kernel log as a ring the stopgap adds, written through `erx_log_escape` and read with `erx_log_read` | Fiasco's own start-up lines precede erXos's banner on the console (**Differences that remain** below) | M1, M3 |
-| the time page and timers | in full | added: the time page as kernel memory mapped read-only, updated from Fiasco's clock; kernel deadlines as Fiasco's timeouts | | M1, M3 |
-| entropy | in full | added: the C17 generator core over FreeBSD's ChaCha20 and the imported BLAKE3 (`kernel/crypto/`) behind a kernel object | | M1 |
-| the trace ring and `erx_object_info` | in full | added: erXos's trace ring and inspection topics as kernel objects beside Fiasco's objects, recording the ABI file's trace event types | Fiasco's own trace buffer stays in its kernel debugger | M4 |
-| deterministic mode | in full | added: with `erx.det=1` the stopgap starts no secondary CPU, seeds the generator with the fixed value, fixes the placement bases of the objects it adds, reads time only from the instruction-counted virtual counter and fixes the wall clock, as erXos's kernel does ([Deterministic mode](#deterministic-mode)) | Fiasco's own start-up lines are part of the transcript | M3 |
-| the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` is the first stage of the bootable file, finds the archive with `erx_boot_locate`, runs erXos's C17 `ERXPACK` validator, checks the kernel's file and finds the kernel and the root task in the image, there being no `sigma0` executable; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |
-| the machine page and its boot value | in full | added: the page, in the ABI file's layout, written by the kernel from the boot arguments `bootstrap` passes and from the two `/chosen` properties that name the boot slot, which the QEMU harness writes | | M6 |
-| the device-secret page | in full | added: the page, in the ABI file's layout, with the status `no_key`, since the stopgap runs only on QEMU, where the platform has no key | no boot-only section: the key read is erXos's kernel's alone | M1, so the root task's root capabilities are the same on both kernels |
-| ending the machine | in full | added: `erx_machine_end` as an invocation on an erXos platform object that calls Fiasco's firmware calls for power-off and reset; `ERX_END_TRIAL` fails with `ERX_ENOTSUP` | | M1 |
-| the machine lease of a trial boot (K19) and the board's watchdog | erXos's kernel alone | | they come with M12, after erXos's kernel has replaced the stopgap; on the stopgap no lease is held and no board watchdog runs | M12 |
-
-**What enters the tree.** One frozen, mutually consistent set, imported
-once as erXos's code under `fiasco/` with an `ORIGIN.md` for each part
-(repository, commit and the SHA-256 of what was imported): the Fiasco
-kernel at commit `50bbe8a9`; Fiasco's `bootstrap` at `a4f4ad18`; from
-`l4re-core` at `e2e2d5af`, `sigma0`, the `l4sys` headers and the libraries
-those two link; `libfdt` at `5756062b`; and the `mk` build system at
-`22cc26e5`, which builds them behind erXos's top-level build; and, from
-`drivers-frst` at `6459d70997da1a2ad97775c8772b4a41284b0a9e`, only
-the PL011 UART source, its required headers and build support that
-`bootstrap` links. The UART subset keeps its MIT package licence and has
-its own origin inventory; other `drivers-frst` drivers are excluded.
-The kernel and its user-level parts must come from the same tree: a
-snapshot user land and a newer kernel fail a boot-information layout check
-([research](research-hierarchical-scheduling.md#fiasco-under-hvf)). None of
-L4Re's user-level stack above `sigma0` enters: no `moe`, no `ned`, no L4Re
-libraries for applications. The kernel is built to run in kernel mode
-without its hypervisor support (`CONFIG_CPU_VIRT` off); the hypervisor
-build does not boot under HVF.
-
-**The seam.** `liberx` is the only code that issues kernel calls, and its
-`fiasco` backend is the only code that includes an `l4sys` header or
-executes Fiasco's system-call instruction sequence; a chokepoint check
-enforces both ([Chokepoint checks](#chokepoint-checks)). The root task's
-`liberx`, the runtimes and the programs are linked against `liberx` and
-run unchanged on either kernel.
-
-The C++ that integrates with Fiasco (the kernel objects it adds, hooks in its
-scheduler and IPC paths) is thin; the decisions behind it (the scheduler
-core, the planning of mappings, budget arithmetic, the park state
-machine, the ABI decoders, the boot-image
-validator) are C17 files shared with erXos's kernel and built for the host.
-The construction rules (the stack proof, `musttail`-only recursion, the
-chokepoint checks, generated register access) bind that C17 code;
-Fiasco's inherited C++ keeps its own style and is exempt.
-
-**Differences that remain.** Besides the weaker guarantees of the table,
-each documented, tested, and gone when erXos's kernel replaces the
-stopgap:
-
-* user mode reads the performance counters directly, for profiling, and
-  they count every thread and kernel mode, so a domain can observe
-  another's activity; erXos's kernel leaves them disabled
-  ([design-stopgap.md](design-stopgap.md#interfaces)). Development builds
-  run trusted code only, and a confined profiling interface replaces
-  this access (`TODO.md`).
-
-* `sigma0`'s task remains, the task Fiasco's code takes for the root of
-  physical memory; no thread runs in it, nothing can send to it, and the
-  boot image carries no executable for it. Fiasco's memory mapping
-  database, which its boot rooted there, is not built: the only mappings
-  are erXos's mapping records ([design-stopgap.md](design-stopgap.md#transport)).
-  It pages nothing of the
-  root task, which has no pager; the kernel maps the root task's whole
-  image at start from the same startup plan that computes its charges
-  ([design-stopgap.md](design-stopgap.md#transport)).
-* Fiasco prints its own start-up lines on the console before erXos's
-  banner. The slice's transcript tests and M7's comparison of the two
-  kernels start at the banner, which both print, so those lines never
-  count as a difference; in deterministic mode they are part of a
-  transcript that stays byte-identical from run to run.
-* Fiasco's kernel debugger is built into development builds only, on the
-  console port, which it shares with the console's driver there.
-* Finishing on the fork has no share: a killed thread runs at the fixed
-  finishing priority above every user urgency on its own CPU, outside
-  every quota, until its call is done, so a stream of kills homed on one
-  CPU holds that CPU's user threads back, the root task's petting thread
-  among them, for as long as the stream lasts. The bound is the stopped
-  spaces' remaining work, which their budgets paid for. erXos's kernel
-  bounds it with the finishing share; on the fork it is a stopgap
-  residual, acceptable because development builds run trusted code
-  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#security),
-  `TODO.md`).
-* The stopgap is never hardened: development builds run trusted code only,
-  and the security closure milestone is reached on erXos's kernel. Bugs
-  found in the fork are fixed like any other. Its designs commit to what
-  M1 needs and its tests check, for trusted workloads: no memory error,
-  no deadlock, every stop finishing, the interface's results and exact
-  accounting; latency bounds, fairness and progress against hostile load
-  are erXos's kernel's.
-
-**Licences.** Fiasco, `bootstrap`, `l4re-core`'s `sigma0` and `l4sys`, and
-`mk` declare MIT in their `LICENSE.spdx` files; `libfdt`'s declares MIT
-for its packaging and `GPL-2.0-or-later OR BSD-2-Clause` for the library
-in `lib/contrib`, used under BSD-2-Clause. The fork excludes Fiasco's
-GPL-licensed `src/lib/regex`, `src/lib/simple_malloc` and `src/lib/gcov`,
-the LGPL `perfctr` code and the Qualcomm board support, whose eight files
-under `src/kern/arm/bsp/qcom/` carry GPL-2.0 headers, and configures out
-the kernel-debugger features that need them. Two GPL-2.0 files stay,
-because the kernel cannot be built without them: `src/kern/kobject_rpc.h`,
-which `task.cpp`, `ipc_gate.cpp`, `irq.cpp`, `icu_helper.cpp`,
-`pi_mutex.cpp` and `arm/smc_user.cpp` include, and
-`src/kern/jdb_object.cpp`, part of the kernel debugger of development
-builds, whose disassembler, capstone, is BSD-3-Clause-Attribution (the
-licences as the files' own headers and the fork's `LICENSE.spdx` state
-them at `50bbe8a9`). So every stopgap build carries GPL code, and nothing
-built on the stopgap is distributed outside the project, in source or
-binary form, until erXos's kernel replaces it, as the rule for stopgaps
-requires. erXos's own code is BSD-2-Clause; the project's stopgap
-distribution restriction also applies to its dependencies. `l4re-core`
-contains GPL-licensed libraries
-(its minimal C and C++ support among them); the import records the link
-closure of `bootstrap` and `sigma0` and the licence of each library in it.
-
-erXos's kernel translates or copies code only from Fiasco files whose
-effective licence is permissive and whose provenance shows nothing else, a
-rule decided provisionally, for the user to confirm
-([design.md](design.md#risks-and-open-questions)). A file takes the
-licence that Fiasco's `LICENSE.spdx` declares for its package, MIT for the
-kernel at `50bbe8a9`, unless its own notice says otherwise, and the import
-records each translated file's upstream history: GPL-2.0 counts a
-translation as a modification, so a file whose history shows GPL code is
-not translated, whatever its header says. erXos's kernel needs nothing
-from the two GPL-2.0 files, since its dispatch is generated and it has no
-kernel debugger, and the import's licence scan lists every file whose
-notice is not permissive, so a review can see that no erXos file derives
-from one. Code that erXos's kernel translates from a permissive Fiasco file
-keeps Fiasco's notice: each such file carries
-`SPDX-License-Identifier: BSD-2-Clause AND MIT`, since it
-holds erXos's own code and Fiasco's, with Kernkonzept's copyright line and
-a line naming the Fiasco file and commit it derives from;
-`kernel/NOTICE-fiasco` holds the MIT text, and the dependency table of
-[design.md](design.md#dependencies) records it.
-
-**Replacing it.** erXos's kernel replaces the stopgap once it runs the
-same slice. The conformance suite, run identically on both kernels for
-every feature the stopgap carries, the slice's transcript tests, the
-oracle and the scheduler and messaging benchmarks are compared, and every
-difference is a bug in erXos's kernel, a documented improvement with a
-test, or a bug in the stopgap recorded as such ([plan.md](plan.md)); what
-the stopgap leaves out is tested on erXos's kernel alone.
+The current implementation is a near-stock Fiasco under `liberx`'s Fiasco
+backend, described in [design-stopgap.md](design-stopgap.md), whose table
+says which call is carried, weaker or refused. This document describes
+erXos's kernel, which Phase 1 does not change.
 
 ## Interfaces
 
@@ -8673,7 +8579,7 @@ the user*. No departure rests on taste alone.
 | Sizing a quota | a factory's limit is fixed when it is created, its children's limits sum within it, and a factory spends only its own limit, so every process is a hard partition of its creator's memory | a budget has a guarantee, carved as a factory's limit is and never taken by another, and a cap beyond it, up to which a charge borrows the room of its ancestors, counted at each of them by one chain; its carver resizes both while it lives; a budget whose cap equals its guarantee is a hard partition for every charge, admitted or refused at itself, which every domain's is ([Budgets](#budgets)) | a program of a session gets a floor that lets it start and end, and spends what its siblings are not using, as a QNX process draws on the system's pool within `RLIMIT_AS`, so a session runs as many programs as fit rather than as many as their guesses fit, and a policy corrects a size without restarting what it sized; domains keep the partition, so a domain's memory depends on nothing but the kernel | a program would be refused while its session had memory free, or every program would be sized at the largest it might need and a session would hold a few; a wrong size would last as long as its holder | needed by erXos; the borrowing is EROS's and Fiasco's hard partition relaxed where the user asked, at programs |
 | Memory | sigma0 owns physical memory at boot; user-level pagers map pages with flexpages when a fault arrives as an IPC (`thread-ipc.cpp`); map copies, grant moves, and unmap revokes through the mapping database; copy-on-write lives in user-level dataspace servers such as `moe` | memory objects with fixed ceilings, private memory with reserves, paged objects filled whole and sealed before any mapping, copy-on-write children, store tracking and copies of spaces, and a reverse map per object; there is no pager: every fault populates from its object or stops the thread (K4, K6), and none sends a message or waits; a mapping keeps its object, and an access to a deleted object's mapping faults to the fault gate | no fault waits on another domain, so an executor's fault never stalls its runtime and no domain can stall another's threads; a file server learns nothing of a program's layout; a file's shared mapping is its session's own shared object, written back from the pages the kernel reports stored; the runtimes and `liberx` stay simple, and erXos writes no region manager, since the kernel knows which object a faulting address maps | an executor that faulted would stall its runtime's scheduler until a pager replied; reserves and ceilings would be each pager's duty; Fiasco's message would show a pager every faulting address and instruction of its clients; Fiasco's page-fault IPC waits for ever | needed by erXos, by the user's decision |
 | Execution model | a kernel stack per thread, in an 8 KiB block with the thread on 64-bit targets; a preemptible kernel with helping locks and preemption points inside long operations; a killed thread finishes its kernel work, then tears itself down on its own stack and waits out a grace period after its detachments (`Thread::do_kill`) | the same: a kernel stack per thread, a preemptible kernel and helping locks; long operations, such as removing a large run of capabilities, proceed in bounded parts between preemption points; a started call runs to its end, and a stopped or killed thread dies at its return to user mode with its waits cancelled, as `Thread::prepare_kill` arranges, a deleted thread tearing itself down there and waiting out a grace period after its detachments; the stack proof covers each thread's kernel stack with the interrupt path on top | erXos keeps Fiasco's model | nothing | follows Fiasco |
-| Object lifetime | an object is destroyed in two phases: `destroy` marks it invalid, then after a read-copy-update grace period `put` drops the last reference (`kobject.cpp`); capability lookups take no reference, and reference counts cover only pointers between objects; each object has two locks: a helping lock over its slot list, which `lock_obj` takes without a counted reference, checking after each help that the slot still names the same object (`kobject_mapdb.cpp`), and an existence lock, which an operation that may pass preemption points holds after taking a counted reference and which a deletion invalidates and then waits to be free (`kobject.cpp`), so no mapping is inserted into a task under destruction (`Task::destroy`, `task.cpp`); a deletion empties every slot under the object's lock and then invalidates the existence lock (`kobject_mapdb.cpp`, `map_util.cpp`) | the same two phases and lookups, and the same two locks taken the same ways: the capability lock by `erx_object_lock_cap`, without a counted reference, looking the capability up again after every help, and the existence lock by `erx_object_lock_existence`, after a counted reference, held by every operation that changes an object across preemption points, invalidated by the object's destroy and then waited for, so nothing attaches to an object under teardown and no operation on it is still running; reference counts cover only threads that hold an object across a preemption point, never across a wait (K33), the stopgap's requester of a waited cross-CPU request being the one exception ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#the-wait-funnel)), and every pointer from one object to another is an attachment of the target, which the target's teardown removes; one difference of order: the destroy invalidates the existence lock first, then clears the slots in bounded parts, and the one lookup refuses an object whose existence lock is invalid; an object's pages are released by its teardown and uncharged from then on, while its record stays until the reaper frees it | erXos bounds every stretch between preemption points (K13), so a long slot list is cleared in parts, and a deleted object must be unreachable from the first part (K26); the invalid lock is then the one mark that the lookup, the insert functions and the takers of the lock all read; an object dies with its budget (K3), which a counted pointer from an object of another budget would prevent | with Fiasco's order, a lookup would reach a deleted object until the last of its slots was cleared; with counted pointers between objects, an object could outlive its budget | follows Fiasco, by the user's decision; the order and the attachments needed by erXos |
+| Object lifetime | an object is destroyed in two phases: `destroy` marks it invalid, then after a read-copy-update grace period `put` drops the last reference (`kobject.cpp`); capability lookups take no reference, and reference counts cover only pointers between objects; each object has two locks: a helping lock over its slot list, which `lock_obj` takes without a counted reference, checking after each help that the slot still names the same object (`kobject_mapdb.cpp`), and an existence lock, which an operation that may pass preemption points holds after taking a counted reference and which a deletion invalidates and then waits to be free (`kobject.cpp`), so no mapping is inserted into a task under destruction (`Task::destroy`, `task.cpp`); a deletion empties every slot under the object's lock and then invalidates the existence lock (`kobject_mapdb.cpp`, `map_util.cpp`) | the same two phases and lookups, and the same two locks taken the same ways: the capability lock by `erx_object_lock_cap`, without a counted reference, looking the capability up again after every help, and the existence lock by `erx_object_lock_existence`, after a counted reference, held by every operation that changes an object across preemption points, invalidated by the object's destroy and then waited for, so nothing attaches to an object under teardown and no operation on it is still running; reference counts cover only threads that hold an object across a preemption point, never across a wait (K33), and every pointer from one object to another is an attachment of the target, which the target's teardown removes; one difference of order: the destroy invalidates the existence lock first, then clears the slots in bounded parts, and the one lookup refuses an object whose existence lock is invalid; an object's pages are released by its teardown and uncharged from then on, while its record stays until the reaper frees it | erXos bounds every stretch between preemption points (K13), so a long slot list is cleared in parts, and a deleted object must be unreachable from the first part (K26); the invalid lock is then the one mark that the lookup, the insert functions and the takers of the lock all read; an object dies with its budget (K3), which a counted pointer from an object of another budget would prevent | with Fiasco's order, a lookup would reach a deleted object until the last of its slots was cleared; with counted pointers between objects, an object could outlive its budget | follows Fiasco, by the user's decision; the order and the attachments needed by erXos |
 | Two existence locks on one object | `Lock_guard_2` takes the one lock once when both pointers are equal (`lock_guard.cpp`), so a map whose source is the destination task proceeds (`Task::sys_map`, `task.cpp`) | `erx_object_lock_existence2` refuses two references to one object with `ERX_EINVAL`, before any lock | no call that holds two existence locks has a meaning on one object, and a refusal keeps one rule for the handler that takes them: each lock it took is one release | the handler would have to tell one lock from two at its release, for a case no caller wants | the design's own calls: a copy of a space onto itself has nothing to copy |
 | IPC gates | a gate is bound to one thread with a label, whose two low bits carry the sender's rights on the gate; an open wait receives from every gate and IRQ object bound to the thread; a call leaves an implicit reply capability, and with the explicit-reply option, on by default, a task keeps a space of reply capabilities so that one thread can hold several calls; send and receive have separate timeouts | Fiasco's gates, open wait, implicit reply and two timeouts, as absolute deadlines; no donation, the server running on its own group's grant; capability passing at the rendezvous; labels are the binder's in all 64 bits; no explicit reply capabilities; a caller dropped because its server took another call, or whose server died, is woken with `ERX_EDEAD`, where Fiasco leaves the first waiting until its own timeout and the second waiting for ever (`Thread::do_kill` in `thread.cpp`) | erXos keeps Fiasco's model without its donation; no erXos server defers a reply past its next receive, and one that serves concurrently binds a gate to each of several threads; a server gives different authority through different gates; no caller waits for a reply no one can send | nothing erXos uses; explicit reply capabilities and rights in labels can be added behind the same calls if a server needs them | follows Fiasco; defensible for the subset and the dropped callers |
 | Messages | a per-thread UTCB with 63 message registers, 504 bytes on 64-bit targets, holding the words and the typed items, and 58 buffer registers holding the receive items | Fiasco's message and buffer registers in the same 1 KiB UTCB; a receive accepts capabilities by count, at most four a message | erXos keeps Fiasco's model; the count follows from kernel-assigned slots (K1) | nothing | follows Fiasco |
@@ -9325,7 +9231,7 @@ Fiasco's scheduling:
 | --- | --- | --- | --- |
 | hashing each file with portable code at its first slice lengthens the boot and each domain's first start | medium | boot time, in proportion to the bytes the boot uses | each file is hashed once per boot and only when used; the boot benchmark reports the hashing time per platform, and the boot image stays small, with the system release in EROFS images from M6 |
 | a loader places the device tree or another payload inside a large single file, because it ignores the declared image size | low | the boot stops with the locator's overlap check | the file's own extent covers the archive whatever the header says; the boot probe confirms each board's placement before anything depends on it ([design-platforms.md](design-platforms.md#boot)) |
-| the stopgap's modifications grow large (memory objects, sealed paged objects, groups, the stop core in Fiasco's C++) | medium | the stopgap takes longer than expected | the stopgap carries only the part of the interface that the plan's vertical slice uses, and every mechanism beyond it lands on erXos's kernel alone ([The current implementation](#the-current-implementation-the-modified-fiasco)); the C17 cores are shared, so work done for the stopgap is work done for erXos's kernel; the plan's pilot calibrates the effort |
+| the stopgap's modifications grow large (memory objects, sealed paged objects, groups, the stop core in Fiasco's C++) | medium | the stopgap takes longer than expected | the backend carries only the part of the interface that Phase 1's system uses, and every mechanism beyond it lands on erXos's kernel alone ([The current implementation](#the-current-implementation-the-modified-fiasco)); the plan's pilot calibrates the effort |
 | the stopgap carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | nothing built on the stopgap is distributed outside the project | recorded at import; erXos's kernel takes code only from files whose effective licence is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
 | 8 KiB kernel stacks do not hold the proven worst case with an interrupt on top | low | larger stacks, about 4 KiB more per thread | the stack proof fails the build first; Fiasco runs in 8 KiB with its thread record in the same block |
 | deleting an object that has many capabilities or mappings takes many bounded parts | low | a long call for the deleter | closing makes the object unreachable in the first part, so no other call waits for the rest, and the drain waits only for the one operation that holds the existence lock; each part is bounded and preemptible |
