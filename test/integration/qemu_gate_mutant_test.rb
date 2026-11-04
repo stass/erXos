@@ -10,19 +10,19 @@ require_relative '../../tools/lib/erx/qemu_gate'
 
 # Proves the QEMU gate fails when the kernel's result for a call breaks. The
 # probe guest is built from a copy of the sources in which the user-side trap
-# stub asks the kernel for one byte more than the probe's message holds, so
+# stub asks the kernel for one byte more than a full message holds, so
 # the real kernel on QEMU answers differently while the hosted backend, which
 # does not use that stub, still agrees with the expected transcript. A control
 # run of an unmutated copy must pass, so the failure is the mutation's.
 #
-# Needs a built Fiasco, ERX_CLANG and ERX_LLD, and boots QEMU under TCG, so
+# Needs ERX_CLANG and ERX_LLD (the run builds the kernel), and boots QEMU under TCG, so
 # `make check` excuses it (STANDALONE_INTEGRATION_TESTS in tools/erx) and
 # `make check-qemu-mutant` runs it. A missing tool is a failure, not a skip.
 class QemuGateMutantTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   STUB = 'liberx/backend/fiasco/arch/aarch64/generated/trap.c'
   CALL = '(uint64_t)(uint32_t)len.raw;'
-  MUTANT = '(uint64_t)(uint32_t)len.raw + 1;'
+  MUTANT = '(uint64_t)(uint32_t)len.raw + (len.raw == 504);'
   COPIED = %w[include kernel liberx test].freeze
 
   def source_copy(directory, mutate:)

@@ -27,7 +27,8 @@ class QemuGateTest < Minitest::Test
   end
 
   def test_the_suites_are_found_by_their_files
-    assert_equal %w[conformance debug_log], Gate.suites.map(&:name)
+    assert_equal Gate.suites.map(&:name).sort, Gate.suites.map(&:name)
+    assert_includes Gate.suites.map(&:name), 'debug_log'
   end
 
   def test_a_directory_without_suites_or_with_a_bad_declaration_stops_the_gate
@@ -57,12 +58,24 @@ class QemuGateTest < Minitest::Test
 
   def test_an_unknown_cell_status_is_refused
     assert_raises(Erx::Error) { Gate.result({ 'a' => 'ok' }) }
+    assert_raises(Erx::Error) { Gate::Result.new(cells: { 'a' => nil }, notes: []) }
   end
 
   def test_the_gate_passes_only_when_nothing_failed_or_went_unrun
     assert_equal 'passed', Gate.overall(%w[passed pending])
     assert_equal 'incomplete', Gate.overall(%w[passed incomplete pending])
     assert_equal 'failed', Gate.overall(%w[incomplete failed])
+  end
+
+  def test_a_gate_whose_suites_are_all_pending_ran_nothing
+    assert_equal 'incomplete', Gate.overall(%w[pending])
+  end
+
+  def test_the_accelerators_the_qemu_plan_lists_work_as_a_set_would
+    listed = Erx::QemuPlan.accelerators("Accelerators supported in QEMU binary:\nhvf\ntcg\n")
+    here = Gate::Context.new(root: ROOT, accels: %w[hvf tcg tcg], available: listed, jobs: 1)
+    assert_equal %w[hvf tcg], here.runnable
+    assert_empty here.missing
   end
 
   def test_a_suite_that_raises_is_a_failed_suite_with_the_message

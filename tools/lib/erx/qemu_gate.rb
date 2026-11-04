@@ -36,6 +36,12 @@ module Erx
     # What a suite sees: the repository, the accelerators asked for and those
     # this host's QEMU offers, and the build job count.
     Context = Data.define(:root, :accels, :available, :jobs) do
+      # QemuPlan.accelerators hands over a Set; both lists are kept as arrays
+      # without repeats, so the set operations below hold for any caller.
+      def initialize(root:, accels:, available:, jobs:)
+        super(root: root, accels: accels.to_a.uniq, available: available.to_a.uniq, jobs: jobs)
+      end
+
       # The requested accelerators this host can run, in the order asked.
       def runnable = accels & available
 
@@ -43,7 +49,15 @@ module Erx
       def missing = accels - available
     end
 
-    Result = Data.define(:cells, :notes)
+    # Cells map a name to one of CELL_STATUSES; a status outside it cannot be built.
+    Result = Data.define(:cells, :notes) do
+      def initialize(cells:, notes:)
+        unknown = cells.values - CELL_STATUSES
+        raise Error, "QEMU suites: unknown cell status #{unknown.first.inspect}" unless unknown.empty?
+
+        super(cells: cells.dup.freeze, notes: notes.dup.freeze)
+      end
+    end
     Suite = Data.define(:name, :run)
 
     SUITE_FILES = DeclarationFiles.new('QEMU suites')
@@ -67,10 +81,7 @@ module Erx
     def suites = (@suites ||= load_suites(File.join(__dir__, 'qemu_suites')))
 
     def result(cells, notes: [])
-      unknown = cells.values - CELL_STATUSES
-      raise Error, "QEMU suites: unknown cell status #{unknown.first.inspect}" unless unknown.empty?
-
-      Result.new(cells: cells.freeze, notes: notes.freeze)
+      Result.new(cells: cells, notes: notes)
     end
 
     # The accelerators the installed QEMU lists, from `-accel help`.
@@ -91,9 +102,11 @@ module Erx
     end
 
     # The gate's status over the suites' statuses.
+    # Passes only when some suite ran and passed: a gate whose suites are all
+    # pending ran nothing, and says so as incomplete.
     def overall(statuses)
       return 'failed' if statuses.empty? || statuses.include?('failed')
-      return 'incomplete' if statuses.include?('incomplete')
+      return 'incomplete' if statuses.include?('incomplete') || !statuses.include?('passed')
 
       'passed'
     end
