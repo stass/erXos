@@ -890,6 +890,16 @@ it; git history is the record of completed work.
   Fiasco audit sees a core object's sources (`.NAME.o.d`) but not its
   flags; record it as Fiasco's `.cmd` files do and have the audit compare
   it with `CoreArchive::FLAGS`.
+* [Medium] build, Fiasco audit of erXos sources
+  (`tools/lib/erx/fiasco_provenance.rb`, `erxos_notice?`): its test is a
+  substring in the first eight lines, so `BSD-2-Clause AND GPL-2.0-only`
+  is recorded as `BSD-2-Clause`. Use `Attribution.erxos_addition?`, or a
+  test of the same strength, once the audit's real inputs can be run
+  against it.
+* [Low] build, import inventory (`tools/lib/erx/origin.rb`, `Origin#check`,
+  and `PackProvenance#imported_item`): a `changes` row whose hash no longer
+  matches still supplies the file's licence when the file has an erXos
+  header; a stale row should be refused.
 * [Medium] build, Fiasco audit of imported cores
   (`tools/lib/erx/fiasco_provenance.rb`, `erxos_source` and
   `attribute_erxos`): a file under `kernel/` or `include/` is attributed

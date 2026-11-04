@@ -146,7 +146,77 @@ class OriginTest < Minitest::Test
     write_origin
     write_file('new.c', "int value;\n")
     assert_raises(Erx::Error) { @origin.check }
-    write_file('new.c', "/* SPDX-License-Identifier: BSD-2-Clause */\nint value;\n")
+    write_file('new.c', "// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause */\nint value;\n")
+    assert @origin.check
+  end
+
+  HOLDER = 'Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>'
+  NOTICE = "// #{HOLDER}\n// SPDX-License-Identifier: BSD-2-Clause\n"
+
+  def assert_not_an_addition(bytes)
+    write_file('new.c', bytes)
+    error = assert_raises(Erx::Error, bytes) { @origin.check }
+    assert_match(/not plainly erXos's own: new\.c/, error.message)
+  end
+
+  # A new file is attributed from its own header, so the file must declare the
+  # project's licence and no other, in any form a reader could take for one.
+  def test_new_source_may_declare_only_the_project_licence
+    write_origin
+    ["// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause-Patent */\n",
+     "// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause AND GPL-2.0-only */\n",
+     "// #{HOLDER}\n/* not SPDX-License-Identifier: BSD-2-Clause */\n",
+     "#{NOTICE}/* SPDX-License-Identifier: GPL-2.0-only */\n",
+     "#{NOTICE}int value;\n// SPDX-License-Identifier: GPL-2.0-only\n",
+     "#{NOTICE}int value;\n" + ("/* padding */\n" * 1000) + "// SPDX-License-Identifier: GPL-2.0-only\n",
+     "// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause */ /* SPDX-License-Identifier: GPL-2.0-only */\n",
+     "// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause */\r/* SPDX-License-Identifier: GPL-2.0-only */\r",
+     "#{NOTICE}<!-- SPDX-License-Identifier: GPL-2.0-only -->\n",
+     "#{NOTICE}dnl SPDX-License-Identifier: GPL-2.0-only\n",
+     "#{NOTICE}int value; /* SPDX-License-Identifier: GPL-2.0-only */\n",
+     "#{NOTICE}// spdx-license-identifier: GPL-2.0-only\n",
+     "#{NOTICE}// SPDX-License-Identifier : GPL-2.0-only\n"].each { |bytes| assert_not_an_addition(bytes) }
+  end
+
+  # An unedited third-party file can already declare BSD-2-Clause, and that
+  # licence requires its holder's notice kept: another holder's name, or none,
+  # means the file is not erXos's own.
+  def test_new_source_may_name_only_the_project_as_copyright_holder
+    write_origin
+    ["/* SPDX-License-Identifier: BSD-2-Clause */\nint value;\n",
+     "// Copyright (c) 1990 The Regents\n// SPDX-License-Identifier: BSD-2-Clause\n",
+     "#{NOTICE}int value;\n/* Copyright (c) 1990 The Regents */\n",
+     "#{NOTICE}/* COPYRIGHT 1990 The Regents */\n"].each { |bytes| assert_not_an_addition(bytes) }
+  end
+
+  def test_notice_below_the_header_comment_does_not_make_an_addition
+    write_origin
+    assert_not_an_addition("int value;\n#{NOTICE}")
+  end
+
+  def test_new_binary_is_not_an_addition_even_with_its_nul_past_the_header_window
+    write_origin
+    assert_not_an_addition("#{NOTICE}#{'x' * 9000}\0".b)
+  end
+
+  def test_a_crlf_addition_is_read_like_any_other
+    write_origin
+    write_file('new.c', "// #{HOLDER}\r\n// SPDX-License-Identifier: BSD-2-Clause\r\nint value;\r\n")
+    assert @origin.check
+  end
+
+  def test_excluded_path_does_not_come_back_as_an_addition
+    File.write(File.join(@directory, 'kept.c'), 'int kept;')
+    @origin.write(repository: 'https://example.org/upstream', revision: '1', archive_sha256: 'a' * 64, review: @review,
+                  exclusions: [{ 'path' => 'removed.c', 'reason' => 'licence' }, { 'path' => 'gone', 'reason' => 'licence' }])
+    FileUtils.mkdir_p(File.join(@directory, 'gone'))
+    ['removed.c', 'gone/inner.c'].each do |path|
+      write_file(path, "#{NOTICE}int value;\n")
+      error = assert_raises(Erx::Error) { @origin.check }
+      assert_match(/restores a path its import excluded/, error.message)
+      File.unlink(File.join(@directory, path))
+    end
+    write_file('removed.c.new', "#{NOTICE}int value;\n")
     assert @origin.check
   end
 

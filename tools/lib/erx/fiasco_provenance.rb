@@ -26,9 +26,9 @@ module Erx
                    'users/pkg/l4re-core/sigma0/server/src/OBJ-arm64_armv8a-std-l4f/sigma0.map']
     }.freeze
 
-    # The header line that attributes an erXos source, its own or one added
-    # to a fork part (Origin#check requires it of every added file).
-    ERXOS_NOTICE = 'SPDX-License-Identifier: BSD-2-Clause'
+    # The header line that attributes an erXos source. A file added to a fork
+    # part must also pass Attribution.erxos_addition?, as Origin#check requires.
+    ERXOS_NOTICE = Attribution::ERXOS_NOTICE
     ERXOS_HEADER_LINES = 8
 
     # compiler, when the build compiled the C17 cores, is the clang that
@@ -536,11 +536,11 @@ module Erx
     end
 
     # A file erXos added to a fork part, which no import record lists: its
-    # header names its licence, as Origin#check requires of every addition.
+    # header names its licence, by the same test Origin#check applies to it.
     def erxos_addition(source)
-      return nil unless erxos_notice?(source)
+      return nil unless Attribution.erxos_addition?(read(source))
 
-      { 'license' => 'BSD-2-Clause', 'evidence' => "erXos addition; #{ERXOS_NOTICE} in its header" }
+      { 'license' => Attribution::ERXOS_LICENSE, 'evidence' => "erXos addition; #{ERXOS_NOTICE} in its header" }
     end
 
     # The captured erXos source behind path: a C17 core, a header or a

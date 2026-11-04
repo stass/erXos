@@ -12,6 +12,14 @@ module Erx
   # Import inventories record attribution decisions; they do not infer a
   # licence merely because a file has no notice. Defaults require review.
   module Attribution
+    ERXOS_LICENSE = 'BSD-2-Clause'
+    ERXOS_NOTICE = "SPDX-License-Identifier: #{ERXOS_LICENSE}".freeze
+    ERXOS_COPYRIGHT = /Copyright \(c\) \d{4}(?:-\d{4})?, Stanislav Sedov <stas@deglitch\.com>/n
+    # The comment forms attribution reads a licence from. A declaration in any
+    # other form is not read here; erxos_addition? refuses it by counting.
+    SPDX_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n
+    ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:\*\/[ \t]*)?\r?$/n
+
     module_function
 
     def validate_expression(expression)
@@ -92,10 +100,49 @@ module Erx
         'evidence' => review.fetch('default_evidence'), 'reviewed' => true }
     end
 
+    # Whether a file in an imported tree with no inventory row is erXos's own
+    # code: its header holds erXos's notice, and neither a licence declaration
+    # nor a copyright holder appears anywhere but in erXos's own lines. Every
+    # mention of either word is counted instead of recognising forms of a second
+    # declaration, so a form this test does not know fails closed. Content
+    # cannot prove who wrote a file: this refuses a third-party file as it
+    # arrives, not one whose notices someone rewrote. Origin#check admits a new
+    # file on this test and PackProvenance attributes one on it, so the two
+    # cannot disagree.
+    def erxos_addition?(bytes)
+      bytes = bytes.b
+      return false if bytes.include?("\0")
+
+      header_notice?(bytes, notice: ERXOS_NOTICE) &&
+        only_in?(bytes, word: /SPDX-License-Identifier/ni, form: ERXOS_DECLARATION_LINE) &&
+        only_in?(bytes, word: /copyright/ni, form: ERXOS_COPYRIGHT)
+    end
+
+    # Whether the file has the form, and has the word nowhere outside it.
+    def only_in?(bytes, word:, form:)
+      found = bytes.scan(form).size
+      found.positive? && bytes.scan(word).size == found
+    end
+    private_class_method :only_in?
+
+    # Whether the file's opening comment lines, within the read bound, hold the
+    # notice. Any line opening with a comment leader of a language counts.
+    def header_notice?(bytes, notice:)
+      bytes.byteslice(0, 8192).lines.each do |line|
+        stripped = line.lstrip
+        next if stripped.strip.empty?
+        return false unless stripped.start_with?('#', '%', ';', '//', '/*', '*', '<!--', '--')
+        # A closing `*/` alone on its line leaves no text before it.
+        comment = stripped.split('*/', 2).first.split('-->', 2).first.to_s
+        return true if comment.include?(notice)
+      end
+      false
+    end
+
     def spdx(bytes)
       return nil if bytes.nil? || bytes.include?("\0")
 
-      match = bytes.match(/^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n)
+      match = bytes.match(SPDX_LINE)
       return nil unless match
 
       expression = match[1].sub(/[ \t]*(?:\*\/|-->).*\z/n, '').strip
@@ -107,6 +154,7 @@ module Erx
   class Origin
     INVENTORY_MARKER = "\n```json\n"
     PAYLOAD_FIELDS = %w[version repository revision archive_sha256 exclusions files changes].freeze
+    MODIFIED_NOTICE = 'Modified by erXos'
 
     def initialize(root:, read_bytes: nil, authorize: nil, known_hash: nil)
       @root = File.expand_path(root)
@@ -167,14 +215,17 @@ module Erx
         if baseline && baseline.fetch('sha256') == Digest::SHA256.hexdigest(bytes)
           next
         end
-        notice = baseline ? 'Modified by erXos' : 'SPDX-License-Identifier: BSD-2-Clause'
         explicit_change = payload.fetch('changes')[path]
         if !source?(path, bytes: bytes) && explicit_change &&
            explicit_change.fetch('sha256') == Digest::SHA256.hexdigest(bytes)
           next
         end
-        unless header_notice?(bytes, notice: notice)
-          raise Error, "imported file lacks its erXos change notice: #{path}"
+        if baseline
+          unless Attribution.header_notice?(bytes, notice: MODIFIED_NOTICE)
+            raise Error, "imported file lacks its erXos change notice: #{path}"
+          end
+        else
+          check_addition(path, bytes: bytes, exclusions: payload.fetch('exclusions'))
         end
         next unless source?(path, bytes: bytes)
 
@@ -197,6 +248,18 @@ module Erx
     def imported_file(path) = read.fetch('files')[path]
 
     private
+
+    # A path the import removed for a recorded reason does not come back as
+    # erXos's code, whatever its header says.
+    def check_addition(path, bytes:, exclusions:)
+      excluded = exclusions.any? do |exclusion|
+        path == exclusion.fetch('path') || path.start_with?(exclusion.fetch('path') + '/')
+      end
+      raise Error, "new file restores a path its import excluded: #{path}" if excluded
+      return if Attribution.erxos_addition?(bytes)
+
+      raise Error, "new file in an imported tree is not plainly erXos's own: #{path}"
+    end
 
     def inventory_entry(path, review:)
       absolute = File.join(@root, path)
@@ -226,18 +289,6 @@ module Erx
       end
     rescue Errno::ENOENT, Errno::ELOOP => error
       raise Error, "unresolved import link: #{error.message}"
-    end
-
-    def header_notice?(bytes, notice:)
-      bytes.byteslice(0, 8192).lines.each do |line|
-        stripped = line.lstrip
-        next if stripped.strip.empty?
-        return false unless stripped.start_with?('#', '%', ';', '//', '/*', '*', '<!--', '--')
-        # A closing `*/` alone on its line leaves no text before it.
-        comment = stripped.split('*/', 2).first.split('-->', 2).first.to_s
-        return true if comment.include?(notice)
-      end
-      false
     end
 
     def source?(path, bytes:)

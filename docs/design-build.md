@@ -64,9 +64,13 @@ in its own digest inventory.
 
 The change-notice check compares the current path set and bytes with this
 inventory. A modified text file carries erXos's change notice in its header;
-an added file carries erXos's own notice. A changed binary or another file
-that cannot hold a comment has an explicit change entry in its origin
-document. Every recorded file must remain present with its recorded file
+an added file carries erXos's own notice and copyright line, mentions no
+other licence declaration or copyright holder, does not restore a path the
+import excluded, and is attributed from that header as erXos's code rather
+than the import's. The check refuses a third-party file as it arrives; it
+cannot detect one whose notices someone rewrote, which is a matter for code
+review. A changed binary or another file that cannot hold a comment has an explicit
+change entry in its origin document. Every recorded file must remain present with its recorded file
 type; deleting one fails the check. Import selection removes excluded files
 before creating the inventory.
 The check discovers changed files from the comparison rather than a

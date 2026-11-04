@@ -246,6 +246,62 @@ class PackProvenanceTest < Minitest::Test
     refute_includes JSON.generate(records), @root
   end
 
+  ADDITION = "/* Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
+             " * SPDX-License-Identifier: BSD-2-Clause */\nint added;\n"
+
+  # Resolves a release link record whose one source is a file in `vendor`, an
+  # imported tree under MIT, and returns the records. The source is an addition
+  # the tree's check saw, or, given `captured_after_check`, a file written after
+  # that check, which the catalog holds without the check having read it.
+  def resolve_vendor_source(captured_after_check: nil, imports: { 'vendor' => 'permanent' })
+    FileUtils.mkdir_p(File.join(@root, 'vendor'))
+    write('vendor/upstream.c', "/* SPDX-License-Identifier: MIT */\nint upstream;\n")
+    Erx::Origin.new(root: File.join(@root, 'vendor')).write(repository: 'https://example.invalid/vendor',
+      revision: 'fixture', archive_sha256: 'a' * 64,
+      review: { 'rules' => [], 'default_license' => 'MIT', 'default_evidence' => 'fixture' })
+    added = write('vendor/added.c', ADDITION)
+    checked = Erx::BuildInputs.imported(root: File.join(@root, 'vendor'))
+    source = captured_after_check ? write('vendor/late.c', captured_after_check) : added
+    write('root.d', "root.o: #{source.delete_prefix(@root + '/')}\n")
+    @receipt.fetch('compiles').first['sources'] = [reference(source)]
+    @receipt.fetch('compiles').first['dependency'] = reference(File.join(@root, 'root.d'))
+    receipt = write('receipt.json', JSON.generate(@receipt))
+    resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog.merge(checked), imports: imports)
+    resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'release')
+  end
+
+  def test_file_erxos_added_to_an_import_is_attributed_as_erxos_code
+    record = resolve_vendor_source.first
+    assert_equal 'vendor/added.c', record.fetch('path')
+    assert_equal 'BSD-2-Clause', record.fetch('license')
+    assert_equal 'BSD-2-Clause', record.fetch('declared_license')
+    assert_equal 'file SPDX', record.fetch('evidence')
+    assert_includes record.fetch('notice'), 'SPDX-License-Identifier: BSD-2-Clause'
+    assert_includes record.fetch('notice'), 'project BSD licence text'
+    assert_equal ['LICENSE'], record.fetch('notice_documents').map { |document| document.fetch('path') }
+  end
+
+  def test_addition_takes_the_status_of_the_tree_it_lives_in
+    assert_equal 'stopgap', resolve_vendor_source(imports: { 'vendor' => 'stopgap' }).first.fetch('status')
+  end
+
+  def test_file_captured_after_the_check_with_no_notice_has_no_attribution
+    error = assert_raises(Erx::Error) { resolve_vendor_source(captured_after_check: "int late;\n") }
+    assert_match(/unresolved imported input: vendor\/late\.c/, error.message)
+  end
+
+  def test_file_captured_after_the_check_declaring_another_licence_has_no_attribution
+    bytes = "// Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
+            "// SPDX-License-Identifier: BSD-2-Clause AND GPL-2.0-only\n"
+    error = assert_raises(Erx::Error) { resolve_vendor_source(captured_after_check: bytes) }
+    assert_match(/unresolved imported input: vendor\/late\.c/, error.message)
+  end
+
+  def test_addition_in_an_unregistered_import_is_refused
+    error = assert_raises(Erx::Error) { resolve_vendor_source(imports: {}) }
+    assert_match(/unregistered imported dependency: vendor\/added\.c/, error.message)
+  end
+
   def test_permissive_license_alternative_is_selected_instead_of_requiring_both
     File.write(@source, "/* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0-only */\nint start;\n")
     @receipt.fetch('compiles').first['sources'] = [reference(@source)]

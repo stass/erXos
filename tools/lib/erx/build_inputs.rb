@@ -3,7 +3,6 @@
 # frozen_string_literal: true
 
 require 'digest'
-require 'set'
 require_relative 'bounded_file'
 require_relative 'origin'
 require_relative 'import_notices'
@@ -52,20 +51,15 @@ module Erx
       raise Error, "cannot capture build inputs: #{error.class}"
     end
 
+    # Origin#check walks the whole tree and refuses a file that is neither an
+    # inventory row nor an erXos addition, so a catalog comes back only when
+    # every file it records has passed that one check.
     def self.imported(root:)
       root = File.realpath(root)
       metadata = capture(root: root, paths: ['ORIGIN.md'])
-      source = Origin.new(root: root, read_bytes: lambda { |path| metadata.read(path, maximum: 64 * 1024 * 1024) })
-      inventory = source.inventory
-      paths = (inventory.fetch('files').keys | inventory.fetch('changes').keys) + ['ORIGIN.md']
-      allowed = paths.map { |path| File.expand_path(path, root) }.to_set.freeze
       entries = metadata.instance_variable_get(:@entries).dup
       aliases = metadata.instance_variable_get(:@aliases).dup
-      authorize = lambda do |path|
-        raise Error, 'import file is absent from its reviewed inventory' unless allowed.include?(File.expand_path(path, root))
-      end
-      checked = Origin.new(root: root, authorize: authorize, read_bytes: lambda do |path|
-        authorize.call(path)
+      checked = Origin.new(root: root, read_bytes: lambda do |path|
         canonical = File.realpath(path)
         raise Error, 'imported input escapes its registered tree' unless canonical.start_with?(root + '/')
         bytes = BoundedFile.read(canonical, maximum: MAX_FILE_BYTES)

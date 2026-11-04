@@ -369,15 +369,11 @@ module Erx
       elsif path.start_with?(@root + '/')
         label = path.delete_prefix(@root + '/')
         origin_root = find_origin(File.dirname(path))
-        if origin_root
-          inventory = @catalog.find_import(origin_root)
-          raise Error, 'import source is absent from its checked catalog' unless inventory
-          relative = path.delete_prefix(origin_root + '/')
-          item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative]
-          raise Error, "unresolved imported input: #{label}" unless item
+        status = origin_root ? @imports.fetch(origin_root) { raise Error, "unregistered imported dependency: #{label}" } : 'permanent'
+        item = origin_root && imported_item(origin_root, path, bytes: bytes, label: label)
+        if item
           license = item.fetch('license')
           evidence = item.fetch('evidence')
-          status = @imports.fetch(origin_root) { raise Error, "unregistered imported dependency: #{label}" }
           parts = [leading_notice(bytes)]
         else
           # Build outputs have no stable staging directory. Content identifies
@@ -387,7 +383,6 @@ module Erx
                                          review: { 'rules' => [], 'default_license' => 'NOASSERTION',
                                                    'default_evidence' => '' }).fetch('license')
           evidence = 'file SPDX'
-          status = 'permanent'
           license_document = File.join(@root, 'LICENSE')
           parts = [leading_notice(bytes), snapshot_bytes(license_document, maximum: @notice_limit)]
           document_references << notice_reference('path' => license_document,
@@ -406,7 +401,7 @@ module Erx
         end
         label = public_path
       end
-      if origin_root
+      if item
         profile_path = File.join(@root, 'config/provenance/import-notices.json')
         references = if @catalog.include_path?(profile_path)
                        profile = @notice_profile ||= ImportNotices.parse(snapshot_bytes(profile_path))
@@ -430,6 +425,21 @@ module Erx
                         'evidence' => evidence.freeze,
                         'status' => status.freeze, 'notice' => notice.freeze,
                         'notice_documents' => document_references.uniq.freeze }.freeze
+    end
+
+    # The inventory row of a file in an import. nil for a file erXos added to the
+    # tree: its own header is its attribution, so it takes the licence and
+    # notices of erXos's other code, not the import's, and the status of the
+    # tree it lives in. A catalog may hold a file captured after the tree's
+    # check, so the notice is read here from the hashed bytes; a file with
+    # neither row nor notice has no licence to record.
+    def imported_item(origin_root, path, bytes:, label:)
+      inventory = @catalog.find_import(origin_root)
+      raise Error, 'import source is absent from its checked catalog' unless inventory
+      relative = path.delete_prefix(origin_root + '/')
+      item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative]
+      raise Error, "unresolved imported input: #{label}" unless item || Attribution.erxos_addition?(bytes)
+      item
     end
 
     def notice_reference(reference)
