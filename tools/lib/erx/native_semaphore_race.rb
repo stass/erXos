@@ -13,7 +13,8 @@ module Erx
   # An up across CPUs racing a down's timeout, made certain rather than probable
   # (docs/design-stopgap.md, "Verification"). test/guest/native_semaphore_race runs on a
   # kernel built with one more define, whose up pauses between dequeuing its waiter and
-  # activating it, until the waiter is queued again or the hold runs out. No other image boots that kernel.
+  # activating it, until the waiter is queued again or the hold runs out. No other image boots that kernel,
+  # and its build is why make check-native-seeds runs this rather than the QEMU gate.
   module NativeSemaphoreRace
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_semaphore_race/guest.c'].freeze
