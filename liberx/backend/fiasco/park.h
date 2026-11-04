@@ -37,6 +37,5 @@ uint32_t	erx_fiasco_group_take(uint32_t max, uint32_t *objects);
 int	erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline) ERX_WARN_UNUSED_RESULT;
 /* An empty slot is ERX_EINVAL. */
 int	erx_executor_wake(uint32_t slot) ERX_WARN_UNUSED_RESULT;
-void	erx_yield(void);
 
 #endif /* ERX_FIASCO_PARK_H */

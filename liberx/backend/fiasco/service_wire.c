@@ -17,7 +17,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/service_wire.h"
 
-_Static_assert(sizeof(erx_fiasco_thread_create_request_t) / sizeof(uint64_t) == ERX_FIASCO_WIRE_WORDS_MAX,
+_Static_assert(sizeof(erx_fiasco_vm_map_request_t) / sizeof(uint64_t) == ERX_FIASCO_WIRE_WORDS_MAX,
     "the longest request");
 
 uint32_t
@@ -50,6 +50,18 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_irq_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_TIME_SET_WALL:
 		return (sizeof(erx_fiasco_time_set_wall_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_MEM_CREATE:
+		return (sizeof(erx_fiasco_mem_create_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_VM_MAP:
+		return (sizeof(erx_fiasco_vm_map_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_SPACE_CREATE:
+		return (sizeof(erx_fiasco_space_create_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_IMAGE_MAP:
+		return (sizeof(erx_fiasco_image_map_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_SPACE_STOP:
+		return (sizeof(erx_fiasco_space_stop_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_TASK_JOIN:
+		return (sizeof(erx_fiasco_task_join_request_t) / sizeof(uint64_t));
 	default:
 		return (0);
 	}
@@ -62,7 +74,7 @@ erx_fiasco_wire_decode(const erx_fiasco_wire_input_t *input)
 	const uint64_t task = input->label >> ERX_FIASCO_WIRE_LABEL_SHIFT;
 	uint32_t expected;
 
-	if (task >= input->live_tasks) {
+	if (task >= 64 || ((input->live_mask >> task) & 1) == 0) {
 		decoded.kind = ERX_FIASCO_WIRE_DROP;
 		return (decoded);
 	}

@@ -12,12 +12,13 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "liberx/backend/fiasco/park_table.h"
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/umtx_table.h"
 
 /*
  * The thread table and the thread calls (docs/design-stopgap.md, "Thread
- * creation"). These calls serve the root's own threads: "the task" below is the root.
+ * creation"). "The task" below is the caller's.
  */
 
 /* What erx_thread_create reads from the head of the caller's public UTCB's mr. */
@@ -60,8 +61,13 @@ erx_fiasco_thread_record_t *erx_fiasco_thread_record(uint32_t);
 /* The calling thread's public UTCB: the start of its record. */
 erx_utcb_t *erx_utcb_self(void);
 
-/* The first thread's half of the table: its pages, slots, record and semaphore. */
-const char	*erx_fiasco_thread_table_init(void);
+/* The order of the area holding a task's 128 native UTCB slots. */
+#define ERX_FIASCO_UTCB_AREA_ORDER	17u
+/* The task's part of another task's thread handle: a task's own handles are indices. */
+#define ERX_FIASCO_HANDLE_TASK_SHIFT	8u
+
+/* The first thread's own record, once its table's pages and its semaphore exist. */
+void		erx_fiasco_thread_first_init(void);
 
 /* Starts the reaper, on the first thread once the service runs. Returns NULL, or why not. */
 const char	*erx_fiasco_reaper_start(void);
@@ -87,6 +93,20 @@ uint64_t	erx_fiasco_thread_native_slot(uint32_t);
 uint64_t	erx_fiasco_thread_semaphore_cap(uint32_t);
 uint64_t	erx_fiasco_thread_cap(uint32_t);
 
+/*
+ * The root's capability slots past both per-thread runs, as indexes for
+ * erx_fiasco_thread_cap. One list, so that no two users can pick the same slot.
+ */
+enum {
+	ERX_FIASCO_SLOT_SERVICE_GATE = ERX_FIASCO_THREADS_MAX,
+	ERX_FIASCO_SLOT_SERVICE_THREAD,
+	ERX_FIASCO_SLOT_WATCHDOG,
+	/* One slot for each IRQ object. */
+	ERX_FIASCO_SLOT_IRQS,
+	/* Each task's run of slots: service_task.c divides them. */
+	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_FIASCO_PARK_OBJECTS_MAX
+};
+
 /* The first thread's kernel-given UTCB: its page holds the service's and the watchdog's too. */
 void		*erx_fiasco_thread_first_utcb(void);
 
@@ -96,8 +116,9 @@ uint64_t	erx_fiasco_thread_pointer(void);
 
 /*
  * The starting registers are in the caller's public UTCB. space 0 is the caller's
- * own task, the only one there is; budget and group are ignored, and an executor
- * takes a slot in the task's one group, or ERX_ENOMEM.
+ * own task; the root may also name a task with no thread yet, whose first thread this
+ * makes. budget and group are ignored, and an executor takes a slot in the task's one
+ * group, or ERX_ENOMEM.
  * No free index is ERX_ENOMEM. *thread is the handle.
  */
 int	erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thread_class,
@@ -118,6 +139,9 @@ int	erx_thread_set_affinity(uint64_t thread, uint64_t mask) ERX_WARN_UNUSED_RESU
  * A handle that names no thread is ERX_EINVAL.
  */
 int	erx_fiasco_thread_set_clear_word(uint64_t thread, uint64_t word) ERX_WARN_UNUSED_RESULT;
+
+/* Gives the CPU to the next thread of the caller's priority on it, if any. */
+void	erx_yield(void);
 
 /* Hands the calling thread to the reaper and never returns. */
 _Noreturn void	erx_thread_exit(void);

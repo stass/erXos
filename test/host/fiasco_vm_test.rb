@@ -26,7 +26,7 @@ class FiascoVmTest < Minitest::Test
     'write with execute admitted' => ['vm_table.c', "\t\tdefault:\n\t\t\treturn (ERX_EINVAL);", "\t\tdefault:\n\t\t\tplan->target = ERX_FIASCO_PAGE_RX;\n\t\t\tbreak;", 'a protection that is not one passed'],
     'zeroing skipped' => ['page_pool.c', "\tbzero((void *)page, ERX_PAGE_SIZE);\n", '', 'a taken page is not zero'],
     'protect takes a fresh page' => ['vm_table.c', "\tif (steps.take)\n", "\tif (steps.take || steps.map != ERX_PROT_NONE)\n", 'a page lost its contents'],
-    'wrong window page' => ['vm_table.c', 'effects->map(window, addr, steps.map);', 'effects->map(steps.take ? window : window + ERX_PAGE_SIZE, addr, steps.map);', 'a page lost its contents'],
+    'wrong window page' => ['vm_table.c', 'effects->map(table->label, window, addr, steps.map);', 'effects->map(table->label, steps.take ? window : window + ERX_PAGE_SIZE, addr, steps.map);', 'a page lost its contents'],
     'pool check removed' => ['vm_table.c', "\tif (plan.pages_needed > pool->free_pages)\n\t\treturn (ERX_ENOMEM);\n", '', "the call's result differs"],
     'plan applied page by page' => ['vm_table.c', "\tif (plan.pages_needed > pool->free_pages)\n\t\treturn (ERX_ENOMEM);\n", "\tif (plan.pages_needed > pool->free_pages) {\n\t\tplan.end = plan.start + ERX_PAGE_SIZE;\n\t\tapply_plan(table, pool, effects, &plan);\n\t\treturn (ERX_ENOMEM);\n\t}\n", 'a refused call changed something'],
     'commit on access change removed' => ['vm_table.c', '[ERX_FIASCO_PAGE_RW] = { .take = true, .map = ERX_PROT_RW, .after = ERX_FIASCO_PAGE_RW }', '[ERX_FIASCO_PAGE_RW] = { .after = ERX_FIASCO_PAGE_UNCOMMITTED }', 'a page has the wrong rights'],
@@ -39,6 +39,11 @@ class FiascoVmTest < Minitest::Test
     'reserve keeps the pages it replaces' => ['vm_table.c', "\tpages_move(table, pool, effects, plan->start, plan->end, plan->target);\n", "\tif (plan->op != ERX_FIASCO_VM_RESERVE)\n\t\tpages_move(table, pool, effects, plan->start, plan->end, plan->target);\n", "the pool's count does not add up"],
     'a splitting release at capacity admitted' => ['vm_table.c', "\tif (request->op == ERX_FIASCO_VM_RELEASE && table->nranges == table->ranges_max &&\n\t    ranges_split(table, plan->start, end))\n\t\treturn (ERX_ENOMEM);\n", '', 'a splitting release passed with the table full'],
     'a reserve at capacity admitted' => ['vm_table.c', "\tif (table->nranges + 1 > table->ranges_max)\n\t\treturn (ERX_ENOMEM);\n", '', 'a reserve passed with the table full'],
+    'an alias keeps the rights before it' => ['vm_table.c', "\t\teffects->unmap(table->label, addr + done, VM_RIGHTS_ALL);\n", '', 'an alias writable and executable at once'],
+    'the index ignores the label' => ['vm_table.c', "\treturn (addr | table->label);\n", "\t(void)table;\n\treturn (addr);\n", 'two tables share a page'],
+    'an alias over a committed page admitted' => ['vm_table.c', "\tif (count_takes(table, addr, end, ERX_FIASCO_PAGE_RW) != size / ERX_PAGE_SIZE)\n\t\treturn (ERX_EEXIST);\n", '', 'an alias over a committed page passed'],
+    'an alias of addresses not reserved admitted' => ['vm_table.c', "\tif (!range_reserved(table, addr, end) || __builtin_add_overflow(object->area_start, offset, &first))\n", "\tif (__builtin_add_overflow(object->area_start, offset, &first))\n", 'a bad alias passed'],
+    'clearing leaves the pages' => ['vm_table.c', "\t\tapply_plan(table, pool, effects, &plan);\n\t}\n}\n\n/* The area's lowest", "\t\t(void)plan;\n\t\t(void)pool;\n\t\t(void)effects;\n\t\ttable->nranges--;\n\t}\n}\n\n/* The area's lowest", 'clearing one table reached'],
     'a free range too small accepted' => ['vm_table.c', 'if (table->ranges[run].start - gap >= size) {', 'if (table->ranges[run].start - gap > 0) {', 'a non-fixed reserve landed wrong']
   }.freeze
 

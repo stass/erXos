@@ -118,12 +118,6 @@ erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline)
 	return (erx_fiasco_park_wait(&park_group, &park_effects, NULL, slot, group_epoch, slot_epoch, deadline));
 }
 
-void
-erx_yield(void)
-{
-	(void)l4_thread_yield();
-}
-
 int
 erx_executor_wake(uint32_t slot)
 {

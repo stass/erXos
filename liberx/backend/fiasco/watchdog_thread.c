@@ -69,11 +69,10 @@ watchdog_main(void)
 	}
 }
 
-/* Past the gate's and the service's capability slots, as they sit past the threads'. */
 const char *
 erx_fiasco_watchdog_start(const erx_watchdog_config_t *config, erx_watchdog_mode_t mode)
 {
-	const l4_cap_idx_t thread = (l4_cap_idx_t)erx_fiasco_thread_cap(ERX_FIASCO_THREADS_MAX + 2);
+	const l4_cap_idx_t thread = (l4_cap_idx_t)erx_fiasco_thread_cap(ERX_FIASCO_SLOT_WATCHDOG);
 	const l4_sched_param_t param = l4_sched_param(WATCHDOG_PRIORITY, 0);
 
 	watchdog_config = *config;

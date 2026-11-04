@@ -127,6 +127,8 @@ flags vm_flags u32
   bit noreplace 1
 flags space_flags u32
   bit jit 0
+flags mem_flags u32
+  bit jit 0
 enum exit_kind i64
   value parent -9223372036854775807
   value released -9223372036854775806
@@ -313,6 +315,12 @@ enum fiasco_call u32
   value machine_end 9
   value thread_set_affinity 10
   value thread_reap 11
+  value mem_create 12
+  value vm_map 13
+  value space_create 14
+  value image_map 15
+  value space_stop 16
+  value task_join 17
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -332,9 +340,10 @@ layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field thread_class u64 32
   field index u64 40
 
-layout erx_fiasco_thread_start_request 1 wire_le 8 16
+layout erx_fiasco_thread_start_request 1 wire_le 8 24
   field caller u64 0
   field thread u64 8
+  field trampoline u64 16
 
 layout erx_fiasco_thread_set_affinity_request 1 wire_le 8 24
   field caller u64 0
@@ -379,6 +388,45 @@ layout erx_fiasco_irq_request 1 wire_le 8 16
 layout erx_fiasco_time_set_wall_request 1 wire_le 8 16
   field caller u64 0
   field wall_ns u64 8
+
+layout erx_fiasco_mem_create_request 1 wire_le 8 32
+  field caller u64 0
+  field budget u64 8
+  field size u64 16
+  field flags u64 24
+
+layout erx_fiasco_vm_map_request 1 wire_le 8 56
+  field caller u64 0
+  field space u64 8
+  field addr u64 16
+  field size u64 24
+  field mem u64 32
+  field offset u64 40
+  field prot u64 48
+
+layout erx_fiasco_space_create_request 1 wire_le 8 56
+  field caller u64 0
+  field budget u64 8
+  field parent u64 16
+  field fault u64 24
+  field label u64 32
+  field flags u64 40
+  field cap_limit u64 48
+
+layout erx_fiasco_image_map_request 1 wire_le 8 32
+  field caller u64 0
+  field space u64 8
+  field image u64 16
+  field entry u64 24
+
+layout erx_fiasco_space_stop_request 1 wire_le 8 24
+  field caller u64 0
+  field space u64 8
+  field status i64 16
+
+layout erx_fiasco_task_join_request 1 wire_le 8 16
+  field caller u64 0
+  field task u64 8
 
 layout erx_fiasco_reply 1 wire_le 8 24
   field status i64 0

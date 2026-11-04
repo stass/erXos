@@ -35,7 +35,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	memcpy(&tag_label, data + sizeof(input.label), sizeof(tag_label));
 	input.tag_label = tag_label;
 	input.words = data[sizeof(input.label) + sizeof(tag_label)] & 0x3f;
-	input.live_tasks = data[sizeof(input.label) + sizeof(tag_label) + 1];
+	input.live_mask = data[sizeof(input.label) + sizeof(tag_label) + 1];
 	memcpy(mr, data + WIRE_HEAD_BYTES,
 	    size - WIRE_HEAD_BYTES < sizeof(mr) ? size - WIRE_HEAD_BYTES : sizeof(mr));
 	input.mr = mr;
@@ -43,11 +43,11 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	decoded = erx_fiasco_wire_decode(&input);
 	switch (decoded.kind) {
 	case ERX_FIASCO_WIRE_DROP:
-		if ((input.label >> ERX_FIASCO_WIRE_LABEL_SHIFT) < input.live_tasks)
+		if ((input.label >> ERX_FIASCO_WIRE_LABEL_SHIFT) < 64 && ((input.live_mask >> (input.label >> ERX_FIASCO_WIRE_LABEL_SHIFT)) & 1) != 0)
 			abort();
 		break;
 	case ERX_FIASCO_WIRE_REQUEST:
-		if (decoded.task >= input.live_tasks || decoded.caller >= ERX_FIASCO_THREADS_MAX ||
+		if (decoded.task >= 64 || ((input.live_mask >> decoded.task) & 1) == 0 || decoded.caller >= ERX_FIASCO_THREADS_MAX ||
 		    decoded.status != ERX_OK || erx_fiasco_wire_words(decoded.call) != input.words ||
 		    input.words > ERX_FIASCO_WIRE_WORDS_MAX || decoded.call != tag_label ||
 		    decoded.request[0] != decoded.caller ||

@@ -14,6 +14,8 @@
 
 #define VM_PAGE_MASK		((uint64_t)ERX_PAGE_SIZE - 1)
 #define VM_STATE_MASK		UINT64_C(7)
+/* A key's page number stays below this bit: the backend's addresses stop at 2^39. */
+#define VM_LABEL_SHIFT		27u
 /* Rights by themselves, as ERX_PROT_* spells them only in combinations. */
 #define VM_RIGHT_W		(ERX_PROT_RW & ~ERX_PROT_R)
 #define VM_RIGHT_X		(ERX_PROT_RX & ~ERX_PROT_R)
@@ -40,6 +42,7 @@ static void	ranges_add(erx_fiasco_vm_table_t *, uint64_t, uint64_t);
 static size_t	ranges_first_after(const erx_fiasco_vm_table_t *, uint64_t);
 static void	ranges_remove(erx_fiasco_vm_table_t *, uint64_t, uint64_t);
 static bool	ranges_split(const erx_fiasco_vm_table_t *, uint64_t, uint64_t);
+static uint64_t	page_key(const erx_fiasco_vm_table_t *, uint64_t);
 static void	apply_plan(erx_fiasco_vm_table_t *, erx_fiasco_pool_t *,
 		    const erx_fiasco_vm_effects_t *, const erx_fiasco_vm_plan_t *);
 static int	plan_reserve(const erx_fiasco_vm_table_t *, const erx_fiasco_vm_request_t *,
@@ -99,12 +102,17 @@ erx_fiasco_vm_layout(uint64_t window_pages)
 }
 
 void
-erx_fiasco_vm_table_init(erx_fiasco_vm_table_t *table, erx_fiasco_vm_range_t *ranges,
+erx_fiasco_vm_index_init(erx_fiasco_vm_page_t *pages, size_t slots)
+{
+	bzero(pages, slots * sizeof(*pages));
+}
+
+void
+erx_fiasco_vm_table_init(erx_fiasco_vm_table_t *table, uint32_t label, erx_fiasco_vm_range_t *ranges,
     size_t ranges_max, erx_fiasco_vm_page_t *pages, size_t slots, uint64_t area_start,
     uint64_t area_end)
 {
-	bzero(pages, slots * sizeof(*pages));
-	*table = (erx_fiasco_vm_table_t){ .ranges = ranges, .ranges_max = ranges_max,
+	*table = (erx_fiasco_vm_table_t){ .label = label, .ranges = ranges, .ranges_max = ranges_max,
 	    .pages = pages, .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end };
 }
 
@@ -267,40 +275,49 @@ page_move(erx_fiasco_vm_table_t *table, erx_fiasco_pool_t *pool,
 	if (steps.take)
 		window = erx_fiasco_pool_take(pool);
 	if (steps.drop != 0)
-		effects->unmap(addr, steps.drop);
+		effects->unmap(table->label, addr, steps.drop);
 	if (steps.map != ERX_PROT_NONE)
-		effects->map(window, addr, steps.map);
+		effects->map(table->label, window, addr, steps.map);
 	if (steps.give_back) {
 		page_forget(table, slot);
 		erx_fiasco_pool_put(pool, window);
 	} else if (steps.after != ERX_FIASCO_PAGE_UNCOMMITTED) {
-		page->addr = addr;
+		page->key = page_key(table, addr);
 		page->window_and_state = (uint64_t)window | (uint64_t)steps.after;
 	}
 }
 
-/* Fibonacci hashing: the product's upper half is the well-mixed part. */
-static size_t
-page_home(const erx_fiasco_vm_table_t *table, uint64_t addr)
+static uint64_t
+page_key(const erx_fiasco_vm_table_t *table, uint64_t addr)
 {
-	return ((size_t)(((addr / ERX_PAGE_SIZE) * VM_HASH_MULTIPLIER) >> 32) & table->pages_mask);
+	return (addr | table->label);
+}
+
+/* Fibonacci hashing over page number and label: the product's upper half is the well-mixed part. */
+static size_t
+page_home(const erx_fiasco_vm_table_t *table, uint64_t key)
+{
+	const uint64_t mixed = (key / ERX_PAGE_SIZE) | ((key & VM_PAGE_MASK) << VM_LABEL_SHIFT);
+
+	return ((size_t)((mixed * VM_HASH_MULTIPLIER) >> 32) & table->pages_mask);
 }
 
 static erx_fiasco_vm_state_t
 page_state(const erx_fiasco_vm_page_t *page)
 {
-	if (page->addr == 0)
+	if (page->key == 0)
 		return (ERX_FIASCO_PAGE_UNCOMMITTED);
 	return ((erx_fiasco_vm_state_t)(page->window_and_state & VM_STATE_MASK));
 }
 
-/* The slot holding addr, or the empty slot where it would go. */
+/* The slot holding the table's addr, or the empty slot where it would go. */
 static size_t
 page_find(const erx_fiasco_vm_table_t *table, uint64_t addr)
 {
-	size_t slot = page_home(table, addr);
+	const uint64_t key = page_key(table, addr);
+	size_t slot = page_home(table, key);
 
-	while (table->pages[slot].addr != 0 && table->pages[slot].addr != addr)
+	while (table->pages[slot].key != 0 && table->pages[slot].key != key)
 		slot = (slot + 1) & table->pages_mask;
 	return (slot);
 }
@@ -317,10 +334,10 @@ page_forget(erx_fiasco_vm_table_t *table, size_t hole)
 
 	for (;;) {
 		next = (next + 1) & mask;
-		if (table->pages[next].addr == 0)
+		if (table->pages[next].key == 0)
 			break;
 		/* An entry may fill the hole unless its home lies after the hole. */
-		if (((next - page_home(table, table->pages[next].addr)) & mask) >= ((next - hole) & mask)) {
+		if (((next - page_home(table, table->pages[next].key)) & mask) >= ((next - hole) & mask)) {
 			table->pages[hole] = table->pages[next];
 			hole = next;
 		}
@@ -347,6 +364,58 @@ count_takes(const erx_fiasco_vm_table_t *table, uint64_t start, uint64_t end,
 				count++;
 	}
 	return (count);
+}
+
+uintptr_t
+erx_fiasco_vm_window(const erx_fiasco_vm_table_t *table, uint64_t addr)
+{
+	const erx_fiasco_vm_page_t *const page = &table->pages[page_find(table, addr)];
+
+	if (page->key == 0)
+		return (0);
+	return ((uintptr_t)(page->window_and_state & ~VM_PAGE_MASK));
+}
+
+int
+erx_fiasco_vm_map_object(const erx_fiasco_vm_table_t *table, const erx_fiasco_vm_table_t *object,
+    const erx_fiasco_vm_effects_t *effects, uint64_t addr, uint64_t size, uint64_t offset, uint32_t prot)
+{
+	uint64_t end, first, object_end;
+	int error;
+
+	if ((prot != ERX_PROT_R && prot != ERX_PROT_RW && prot != ERX_PROT_RX) || (offset & VM_PAGE_MASK) != 0)
+		return (ERX_EINVAL);
+	error = range_decode(table, addr, size, &end);
+	if (error != 0)
+		return (error);
+	if (!range_reserved(table, addr, end) || __builtin_add_overflow(object->area_start, offset, &first))
+		return (ERX_ERANGE);
+	/* Every page here would take a page to become read-write only if none is committed. */
+	if (count_takes(table, addr, end, ERX_FIASCO_PAGE_RW) != size / ERX_PAGE_SIZE)
+		return (ERX_EEXIST);
+	error = range_decode(object, first, size, &object_end);
+	if (error != 0)
+		return (error);
+	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE)
+		if (erx_fiasco_vm_window(object, first + done) == 0)
+			return (ERX_ERANGE);
+	/* A map only adds rights, and no record says what is mapped here: so it drops all first. */
+	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE) {
+		effects->unmap(table->label, addr + done, VM_RIGHTS_ALL);
+		effects->map(table->label, erx_fiasco_vm_window(object, first + done), addr + done, prot);
+	}
+	return (0);
+}
+
+void
+erx_fiasco_vm_table_clear(erx_fiasco_vm_table_t *table, erx_fiasco_pool_t *pool, const erx_fiasco_vm_effects_t *effects)
+{
+	while (table->nranges > 0) {
+		const erx_fiasco_vm_plan_t plan = { .op = ERX_FIASCO_VM_RELEASE, .target = ERX_FIASCO_PAGE_UNCOMMITTED,
+		    .start = table->ranges[0].start, .end = table->ranges[0].end };
+
+		apply_plan(table, pool, effects, &plan);
+	}
 }
 
 /* The area's lowest free range of this size. */

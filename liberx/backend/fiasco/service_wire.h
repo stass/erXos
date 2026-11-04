@@ -15,6 +15,8 @@
  */
 
 #define ERX_FIASCO_THREADS_MAX		128u
+/* How many tasks live at once, the root the first. */
+#define ERX_FIASCO_TASKS_MAX		8u
 /* Fiasco's fault protocols; service.c pins these to Fiasco's own. */
 #define ERX_FIASCO_WIRE_PAGE_FAULT	(-2)
 #define ERX_FIASCO_WIRE_EXCEPTION	(-5)
@@ -25,7 +27,7 @@
 /* The gate label holds the task's index above the sender's rights. */
 #define ERX_FIASCO_WIRE_LABEL_SHIFT	2u
 /* The longest request, in words. */
-#define ERX_FIASCO_WIRE_WORDS_MAX	6u
+#define ERX_FIASCO_WIRE_WORDS_MAX	7u
 
 typedef enum erx_fiasco_wire_kind {
 	ERX_FIASCO_WIRE_DROP = 1,	/* no live task: no reply */
@@ -39,7 +41,7 @@ typedef struct erx_fiasco_wire_input {
 	uint64_t	 label;
 	int64_t		 tag_label;
 	uint32_t	 words;		/* the tag's count; mr holds at least this many */
-	uint32_t	 live_tasks;
+	uint64_t	 live_mask;	/* bit n: task n is live */
 	const uint64_t	*mr;
 } erx_fiasco_wire_input_t;
 

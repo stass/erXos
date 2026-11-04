@@ -67,7 +67,8 @@ the [root service](#the-root-service), which runs the call's body.
 
 The root holds a capability to every object it creates, with Fiasco's delete right, so
 `l4_task_delete_obj` always reaches it. Callers hold **handles**: indices in a per-task handle
-table the service keeps, never Fiasco capability values. Another task holds only these, mapped by
+table the service keeps, never Fiasco capability values. Each task has a run of slots in the root, past the root's own: its
+threads, its semaphores, its gate, its space and the semaphore its end ups. Another task holds only these, mapped by
 the root with `l4_task_map` and rights `L4_CAP_FPAGE_RWS`:
 
 | Slot | Object | Used for |
@@ -245,7 +246,7 @@ seeds Track K's conformance roster.
 | erXos call | Phase 1 consumer | Body | Result and refusals | erXos's kernel instead |
 | --- | --- | --- | --- | --- |
 | `erx_vm_reserve`, `_commit`, `_decommit`, `_release`, `erx_space_protect` | musl `malloc`, ERTS allocators, stacks | service: [Budgets](#budgets-and-the-ownership-of-pages) | correct contents; `ERX_ENOMEM` from the pool, or with no free range, or with a task's runs full, which refuses a new reserve even where it would merge; write and execute together `ERX_EINVAL`; a touch of a decommitted page is a fault | lazy population with committed memory reserved (K6); protection beneath a ceiling (K4), so `_RX` over private memory is `ERX_ERIGHTS`; a refused call keeps the parts before it (K6); `erx_vm_reserve` without `ERX_VM_FIXED` searches below the placement base, where this one takes the lowest free range of its area |
-| `erx_mem_create`, `erx_vm_map` | BeamAsm's JIT object in its test task; the time page, a group's areas | service: pool pages recorded as an object; each map is `l4_task_map` from the window. `ERX_MEM_JIT` only from a task made with `ERX_SPACE_JIT` | any number of mappings; `erx_mem_grow`, sealing `ERX_ENOTSUP` | grow and seal work |
+| `erx_mem_create`, `erx_vm_map` | BeamAsm's JIT object in its test task; the time page, a group's areas | service: pool pages recorded as an object; each map is `l4_task_map` from the window, at addresses the caller reserved and has not committed. `ERX_MEM_JIT` only from a task made with `ERX_SPACE_JIT`, else `ERX_ERIGHTS` | any number of mappings, into the object's own task; another `space` `ERX_ENOTSUP`; no free object of the task's 16, or no pages, `ERX_ENOMEM`; `erx_mem_grow`, sealing `ERX_ENOTSUP` | grow and seal work |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | the device NIF: UART (M3), virtio-mmio block (M6) | service: `l4sigma0_map_iomem` into the root at a reserved address, from the manifest's device entry; for the console UART also [the handoff](#the-console) | a second `erx_vm_map` `ERX_ENOTSUP` | any count, within rights |
 | `erx_mem_create_contiguous`, `erx_mem_dma_addr` | the device NIF's buffers and rings (M6) | service: first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, cached. `dma_addr` is physical address plus offset | unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
@@ -333,8 +334,11 @@ destination and source (`lock_guard.cpp:255`), which Fiasco accepts.
 
 ### Shared objects and the JIT alias
 
-A shared object is an array of window addresses, and `erx_vm_map` maps each page with the requested rights, so a
-read-write alias and a read-execute alias are two mappings of one window page. No task's mapping has write and
+A shared object is a range table of its own over offsets, under a label above every task's, so its pages are ordinary entries of the
+page index: each owns its window page, the pool hands them out, and they come back by the release every table has. They are all
+committed when it is created, and it lives until its task ends. `erx_vm_map` maps each page with the requested rights, so a
+read-write alias and a read-execute alias are two mappings of one window page. The index holds no entry for a mapping, since an entry owns
+its page, so the object's pages keep the index's bound, and a range call over mapped addresses sees them as uncommitted: the caller's own bug, a recorded gap. Since a map only adds rights, each map drops all rights at its address first, so no call leaves a task's page writable and executable at once. No task's mapping has write and
 execute at once. The pool window itself does, in the root, so M4 checks the range table and tests each JIT alias
 by a fault, and the page-table walk belongs to M7.
 
@@ -397,7 +401,7 @@ thread yet, which takes index 0.
 is refused untouched, since a 1 written over the kernel's 0 would lose the index for good. The service, in order:
 
 1. `l4_thread_control_start`, `_pager` and `_exc_handler` naming the task's gate, `_bind(slot, task)`, `_commit`.
-2. `l4_thread_ex_regs(thread, trampoline, record, 0)`.
+2. `l4_thread_ex_regs(thread, trampoline, record, 0)`. The trampoline's address comes in the start request, as each task's image has its own. A task's first thread starts at the image's entry instead, the one address of the task the root knows: its first instructions put the task's first stack and its C entry in the record and go to the trampoline.
 3. `l4_scheduler_run_thread`.
 
 Starting a thread twice is `ERX_EINVAL`.
@@ -496,13 +500,13 @@ status)`, which musl's `exit` does, the launcher's `erx_space_stop(task, status)
 2. **The objects.** Its IRQ objects, semaphores and gate, then the task object, which unmaps everything before the call
    returns (`task.cpp:686-699`).
 3. **The memory.** Its pages return to the pool, and its range and handle tables are freed.
-4. **The status** goes to whoever started the task, as a test's transcript line. A thread that stopped its own task gets
+4. **The status** goes to whoever started the task, as a test's transcript line: the end ups a semaphore of the root's, on which the launcher's `erx_fiasco_task_join` waits, and that call takes the status and frees the label. A thread that stopped its own task gets
    no reply.
 
 **A request cannot race this.** The service runs each request or fault to completion before it receives the next, finds
 the task from the gate's label and each handle in that task's table, and keeps no pointer across a receive. Fiasco IPC
 queues no messages: a request is a live thread blocked on the gate, and deleting the thread removes it. So once a stop
-returns to the receive, nothing can name that task, and its label is reusable at once.
+returns to the receive, nothing can name that task, and its label is reusable once the status is taken.
 
 ## Interrupts and readiness
 
@@ -589,7 +593,7 @@ A page fault is recorded as kind `memory`, with the low three bits of Fiasco's f
 write. Every exception is recorded as kind `undefined`, with the architecture's syndrome in `cause`: the record is for a reader, and
 Phase 1 acts on no finer kind.
 
-* **A test task's fault:** the record goes to the log, then [task exit](#task-exit). The machine continues.
+* **A test task's fault:** the record goes out through `l4_vcon_write`, then [task exit](#task-exit), with a status of -1. The machine continues.
 * **The root's fault:** [the end path](#the-end-path).
 * **The service's own fault** goes to `sigma0`, which repairs nothing: a recorded gap.
 
@@ -733,6 +737,13 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 * A failed start that did not reach Fiasco's kill path loses that index until the task ends, and so does a start the service refused for a handle whose create is still in flight, since the stub writes the marker first.
 * The root's image is mapped read, write and execute from `sigma0`, so a stray write to its code or read-only data does not fault.
 * A label naming no live task is counted, and nothing reads the count.
+* A mapping of a shared object has no record, so a range call over one sees uncommitted addresses: `erx_vm_release`, `erx_vm_decommit` and a protect to no access leave it mapped, and a commit or a protect to any access maps a fresh page over it. A second `erx_vm_map` at the same addresses replaces the first. A mapping never outlives its object's pages, since both last until the task ends.
+* `ERX_SPACE_JIT` gates only `ERX_MEM_JIT`: a task without it still makes code, through an object with no flag or through `erx_space_protect`.
+* `erx_fiasco_task_join` trusts its caller: a task is joined once, and a second join, or a join of an index with no task, waits forever. A space handle is the task's index, so a stale one names the next task to take it.
+* `erx_image_map` does not check the program's file hash, and every refusal of its segments reads `ERX_ENOMEM`. A fault message's words are not counted, so a task's raw IPC can put stale numbers in its own crash record.
+* `erx_object_destroy` and `erx_cap_close` are not built for memory, so an object lives until its task ends, and no call maps an object into another task.
+* A task's fault status is -1, since the ABI file holds no `ERX_EXIT_CRASH` yet.
+* Eight tasks live at once, and each of a task's range tables is static in the root's image.
 * When the watchdog ends the machine, log lines the reader had not taken are lost.
 * The crash frame may interleave with a console driver that is writing, and a kernel `WARN` or panic line may interleave at any time.
 * Any littlefs block error, deadline or driver restart makes the volume unavailable until reboot.
@@ -764,9 +775,9 @@ the tests.
 | `pthread_cond_broadcast` with 64 waiters, one mutex held at a time | the next waiter's barrier left locked: the deadline fires |
 | **Park**, `test/host/fiasco_park_test.rb`, exhaustive over two executors, two objects, three events and two timeouts, with each up landing on its own, and TSan over real threads; on QEMU, the `native_threads` suite, a trigger between the empty check and the park, a turn with two executors on two CPUs, and a timeout racing a wake | the epoch comparison removed: a lost wake. An up to a slot not listed: a stale count. The epoch comparison removed on QEMU: the case's park never returns |
 | Affinity to each CPU, read back: the `native_threads` suite pins a thread of raised priority to each CPU in turn while a probe counts on every CPU, and only that CPU's probe stops | mask ignored: every CPU but the first shows the wrong probe stopping |
-| **A second task** creates memory and a thread through the service and runs code through a JIT object's read-execute alias. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show | RW alias mapped RX: the write faults |
-| **Task exit**: a spinning thread's count on a shared page freezes; `l4_task_cap_valid` is 0 for every recorded thread; the pool's count returns | thread deletion skipped: the capability stays valid (the count alone can still freeze). Memory step skipped: the pool is short |
-| **Request against exit**: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the dead-label counter stays 0 | thread and gate deletion skipped: requests arrive for a freed label and the counter moves |
+| **A second task**, the QEMU gate's `native_task` suite: a program from the boot image, built through `elf_plan.c`, commits memory and creates a thread through the service, writes code through a JIT object's read-write alias and runs it through the read-execute alias, then rewrites the page on one CPU and runs it on each other CPU in turn, 2,000 times each, with a status of 0. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show. A write in the read-execute alias and a run in the read-write alias each end the task with a crash frame the suite reads back, and the machine continues | RW alias mapped RX: the write faults, and the case's status is not 0. The range table's own seeds, in `fiasco_vm_test.rb`, catch an index that ignores the label |
+| **Task exit**: with a thread spinning on each CPU, the first thread stops the task; `l4_task_cap_valid` is 0 for every thread, semaphore, gate and space of the task; the pool's count returns; the root's stop does the same | thread deletion skipped: the capability stays valid. Memory step skipped: the pool is short |
+| **Request against exit**, in `native_task`: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the dead-label counter stays 0 | thread and gate deletion skipped: requests arrive for a freed label and the counter moves |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
 | **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ring and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
@@ -799,12 +810,12 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
-The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads` and `native_crash` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
+The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads`, `native_crash` and `native_task` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
 handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
 `l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. `native_threads` and `native_watchdog` have run, with each thread on a CPU in turn, service calls and semaphore wakes across
 CPUs, timed waits racing wakes, `l4_scheduler_run_thread`'s mask on a thread before its start and while it runs, priority 255 over a spinning thread, the deletion of a running thread's capability from another CPU with the marker cleared afterwards, the same for the first thread, an index and its
-native UTCB reused, and deleted semaphores recreated at the same slot.
+native UTCB reused, and deleted semaphores recreated at the same slot. `native_task` has run `l4_factory_create_task` with the 128 KiB `utcb_area`, a gate and semaphores mapped into a task, a gate named at `L4_BASE_PAGER_CAP` as pager and exception handler in the thread's own task, `l4_thread_control_bind` into another task, `l4_task_map` into a task from the window, one page mapped twice with different rights, user-mode cache maintenance through the read-execute alias, and a task's end while its threads run on other CPUs or call the gate.
 Everything below was read at the cited lines and has not been executed.
 
 **Run by hand, not kept in a suite**, a root with a helper thread whose pager it was, under TCG and HVF: a write in R, a run in R or RW, a touch of an
@@ -813,7 +824,6 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 
 **The thread package:**
 
-* A 128 KiB area works in `utcb_area`: `task.cpp:253,356,645-649,887`.
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
 * Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.
 

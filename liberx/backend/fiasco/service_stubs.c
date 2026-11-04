@@ -5,7 +5,7 @@
 
 /*
  * The caller's side of the service's calls: each stub fills its request's layout
- * from abi/erx_abi.txt and sends it through the root's gate. No address crosses
+ * from abi/erx_abi.txt and sends it through the task's gate. No address crosses
  * except as a value.
  */
 
@@ -95,6 +95,66 @@ int
 erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot)
 {
 	return (stub_flagged(ERX_FIASCO_CALL_SPACE_PROTECT, addr, size, prot, NULL));
+}
+
+int
+erx_mem_create(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem)
+{
+	const erx_fiasco_mem_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
+	    .size = size, .flags = flags };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_MEM_CREATE, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*mem = reply.first;
+	return (status);
+}
+
+int
+erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot)
+{
+	const erx_fiasco_vm_map_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space, .addr = addr,
+	    .size = size, .mem = mem, .offset = offset, .prot = prot };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_VM_MAP, &request, sizeof(request), &reply));
+}
+
+int
+erx_space_create(uint64_t budget, uint64_t parent, uint64_t fault, uint64_t label, uint32_t flags, uint32_t cap_limit,
+    uint64_t *space)
+{
+	const erx_fiasco_space_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
+	    .parent = parent, .fault = fault, .label = label, .flags = flags, .cap_limit = cap_limit };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_SPACE_CREATE, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*space = reply.first;
+	return (status);
+}
+
+int
+erx_image_map(uint64_t space, uint64_t image, uint64_t entry, uint64_t *start)
+{
+	const erx_fiasco_image_map_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space,
+	    .image = image, .entry = entry };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_IMAGE_MAP, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*start = reply.first;
+	return (status);
+}
+
+int
+erx_space_stop(uint64_t space, int64_t status)
+{
+	const erx_fiasco_space_stop_request_t request = { .caller = erx_fiasco_thread_self()->index, .space = space,
+	    .status = status };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_SPACE_STOP, &request, sizeof(request), &reply));
 }
 
 int

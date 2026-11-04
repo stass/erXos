@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/native_irq'
 require_relative '../../tools/lib/erx/native_threads'
+require_relative '../../tools/lib/erx/native_task'
 require_relative '../../tools/lib/erx/native_watchdog'
 
 # The threads, watchdog and interrupt suites' seeded failures (docs/design-stopgap.md,
@@ -22,6 +23,7 @@ class NativeSeedsTest < Minitest::Test
   THREAD = 'liberx/backend/fiasco/thread.c'
   SERVICE = 'liberx/backend/fiasco/service.c'
   WATCHDOG = 'liberx/backend/fiasco/watchdog_thread.c'
+  TASK = 'liberx/backend/fiasco/service_task.c'
   PARK = 'liberx/backend/fiasco/park_table.c'
   IRQ = 'liberx/backend/fiasco/irq.c'
   GROUP = 'liberx/backend/fiasco/group.c'
@@ -46,10 +48,16 @@ class NativeSeedsTest < Minitest::Test
                                                suite: :threads, cpus: 1, expected: /park_alone FAILED/),
     'the trampoline omits the thread pointer' => Seed.new(file: 'liberx/backend/fiasco/arch/aarch64/thread_start.S', from: "\tmsr\ttpidr_el0, x11\n", to: '',
                                                           suite: :threads, cpus: 1, expected: /tls_and_arg FAILED/),
-    'the failed start deletes nothing' => Seed.new(file: SERVICE, from: "\tif (!service_thread_steps(index, cap)) {\n\t\tservice_thread_delete(index);\n", to: "\tif (!service_thread_steps(index, cap)) {\n",
+    'the failed start deletes nothing' => Seed.new(file: SERVICE, from: "\tif (!service_thread_steps(task, index, ip)) {\n\t\tservice_thread_delete(task, index);\n", to: "\tif (!service_thread_steps(task, index, ip)) {\n",
                                                    suite: :threads, cpus: 1, expected: /failed_start FAILED/),
     'the watchdog never ends the machine' => Seed.new(file: WATCHDOG, from: "\t\tif (step.action == ERX_WATCHDOG_END)\n\t\t\terx_fiasco_end_watchdog(&step.end);\n", to: '',
                                                       suite: :watchdog, cpus: 1, expected: /UNCAUGHT/),
+    'the read-write alias mapped read-execute' => Seed.new(file: 'liberx/backend/fiasco/vm_table.c', from: 'addr + done, prot);', to: 'addr + done, ERX_PROT_RX);',
+                                                           suite: :task, cpus: 1, expected: /service FAILED/),
+    'the thread deletion skipped' => Seed.new(file: TASK, from: "\t\t\ttask_delete(erx_fiasco_task_thread_cap(task, index));\n", to: "\t\t\tcontinue;\n",
+                                              suite: :task, cpus: 1, expected: /service FAILED/),
+    'the memory step skipped' => Seed.new(file: TASK, from: "\terx_fiasco_vm_task_close(task);\n", to: '',
+                                          suite: :task, cpus: 1, expected: /service FAILED/),
     'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
                                    suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/),
     'the ack removed' => Seed.new(file: IRQ, from: ACK_BODY, to: "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n",
@@ -67,6 +75,7 @@ class NativeSeedsTest < Minitest::Test
   def run_suite(source, seed)
     case seed.suite
     when :threads then Erx::NativeThreads::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
+    when :task then Erx::NativeTask::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
     when :watchdog then Erx::NativeWatchdog::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
     when :irq then Erx::NativeIrq::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
     end

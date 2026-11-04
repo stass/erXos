@@ -66,6 +66,22 @@ erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how)
 	erx_fiasco_machine_end(how != ERX_END_OFF);
 }
 
+/* Buffers of its own: the watchdog's end may run at the same time and takes the others. */
+void
+erx_fiasco_task_crash_write(const erx_crash_fault_t *fault)
+{
+	static const char message[] = "task fault";
+	static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t record[ERX_CRASH_SIZE];
+	static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t scratch[ERX_CRASH_SCRATCH_BYTES];
+	const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = ERX_CRASH_CAUSE_FAULT,
+	    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,
+	    .uptime_ns = erx_fiasco_clock_ns(), .fault = *fault, .message = message,
+	    .message_length = sizeof(message) - 1 };
+
+	(void)erx_crash_record_write(&input, record, scratch);
+	erx_crash_frame_write(record);
+}
+
 /* No log ring is passed to the writer, so these guard nothing. */
 void
 erx_effect_log_lock(void)

@@ -150,12 +150,17 @@ struct erx_rights {
 #define ERX_FAULT_FOREIGN_TRAP UINT32_C(6)
 #define ERX_FAULT_MEMORY UINT32_C(1)
 #define ERX_FAULT_UNDEFINED UINT32_C(3)
+#define ERX_FIASCO_CALL_IMAGE_MAP UINT32_C(15)
 #define ERX_FIASCO_CALL_IRQ_ACK UINT32_C(34)
 #define ERX_FIASCO_CALL_IRQ_BIND UINT32_C(33)
 #define ERX_FIASCO_CALL_IRQ_CREATE UINT32_C(32)
 #define ERX_FIASCO_CALL_IRQ_TRIGGER UINT32_C(35)
 #define ERX_FIASCO_CALL_MACHINE_END UINT32_C(9)
+#define ERX_FIASCO_CALL_MEM_CREATE UINT32_C(12)
+#define ERX_FIASCO_CALL_SPACE_CREATE UINT32_C(14)
 #define ERX_FIASCO_CALL_SPACE_PROTECT UINT32_C(8)
+#define ERX_FIASCO_CALL_SPACE_STOP UINT32_C(16)
+#define ERX_FIASCO_CALL_TASK_JOIN UINT32_C(17)
 #define ERX_FIASCO_CALL_THREAD_CREATE UINT32_C(2)
 #define ERX_FIASCO_CALL_THREAD_REAP UINT32_C(11)
 #define ERX_FIASCO_CALL_THREAD_SET_AFFINITY UINT32_C(10)
@@ -163,6 +168,7 @@ struct erx_rights {
 #define ERX_FIASCO_CALL_TIME_SET_WALL UINT32_C(36)
 #define ERX_FIASCO_CALL_VM_COMMIT UINT32_C(5)
 #define ERX_FIASCO_CALL_VM_DECOMMIT UINT32_C(6)
+#define ERX_FIASCO_CALL_VM_MAP UINT32_C(13)
 #define ERX_FIASCO_CALL_VM_RELEASE UINT32_C(7)
 #define ERX_FIASCO_CALL_VM_RESERVE UINT32_C(4)
 #define ERX_FRAME_MAX UINT32_C(16777216)
@@ -278,6 +284,7 @@ struct erx_rights {
 #define ERX_MANIFEST_STRINGS_MAX UINT32_C(4194304)
 #define ERX_MANIFEST_VERSION UINT16_C(1)
 #define ERX_MAPPINGS_MAX UINT32_C(65536)
+#define ERX_MEM_JIT UINT32_C(1)
 #define ERX_MF_DEVICE_HOSTILE UINT32_C(1)
 #define ERX_MF_DEVICE_ROLE_BLOCK UINT32_C(5)
 #define ERX_MF_DEVICE_ROLE_CONFIGURATION UINT32_C(3)
@@ -956,6 +963,30 @@ _Static_assert(offsetof(erx_group_stat_t, ready) ==
 _Static_assert(offsetof(erx_group_stat_t, exec) ==
     ERX_GROUP_STAT_OFF_EXEC, "erx_group_stat.exec offset");
 
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_SIZE 32
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_ALIGN 8
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_SPACE 8
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_IMAGE 16
+#define ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_ENTRY 24
+typedef struct erx_fiasco_image_map_request erx_fiasco_image_map_request_t;
+struct erx_fiasco_image_map_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	space;
+	uint64_t	image;
+	uint64_t	entry;
+};
+_Static_assert(sizeof(erx_fiasco_image_map_request_t) == ERX_FIASCO_IMAGE_MAP_REQUEST_SIZE, "erx_fiasco_image_map_request size");
+_Static_assert(_Alignof(erx_fiasco_image_map_request_t) == ERX_FIASCO_IMAGE_MAP_REQUEST_ALIGN, "erx_fiasco_image_map_request alignment");
+_Static_assert(offsetof(erx_fiasco_image_map_request_t, caller) ==
+    ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_CALLER, "erx_fiasco_image_map_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_image_map_request_t, space) ==
+    ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_SPACE, "erx_fiasco_image_map_request.space offset");
+_Static_assert(offsetof(erx_fiasco_image_map_request_t, image) ==
+    ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_IMAGE, "erx_fiasco_image_map_request.image offset");
+_Static_assert(offsetof(erx_fiasco_image_map_request_t, entry) ==
+    ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_ENTRY, "erx_fiasco_image_map_request.entry offset");
+
 #define ERX_FIASCO_IRQ_BIND_REQUEST_SIZE 32
 #define ERX_FIASCO_IRQ_BIND_REQUEST_ALIGN 8
 #define ERX_FIASCO_IRQ_BIND_REQUEST_OFF_CALLER 0
@@ -1036,6 +1067,30 @@ _Static_assert(offsetof(erx_fiasco_machine_end_request_t, res) ==
 _Static_assert(offsetof(erx_fiasco_machine_end_request_t, how) ==
     ERX_FIASCO_MACHINE_END_REQUEST_OFF_HOW, "erx_fiasco_machine_end_request.how offset");
 
+#define ERX_FIASCO_MEM_CREATE_REQUEST_SIZE 32
+#define ERX_FIASCO_MEM_CREATE_REQUEST_ALIGN 8
+#define ERX_FIASCO_MEM_CREATE_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_MEM_CREATE_REQUEST_OFF_BUDGET 8
+#define ERX_FIASCO_MEM_CREATE_REQUEST_OFF_SIZE 16
+#define ERX_FIASCO_MEM_CREATE_REQUEST_OFF_FLAGS 24
+typedef struct erx_fiasco_mem_create_request erx_fiasco_mem_create_request_t;
+struct erx_fiasco_mem_create_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	budget;
+	uint64_t	size;
+	uint64_t	flags;
+};
+_Static_assert(sizeof(erx_fiasco_mem_create_request_t) == ERX_FIASCO_MEM_CREATE_REQUEST_SIZE, "erx_fiasco_mem_create_request size");
+_Static_assert(_Alignof(erx_fiasco_mem_create_request_t) == ERX_FIASCO_MEM_CREATE_REQUEST_ALIGN, "erx_fiasco_mem_create_request alignment");
+_Static_assert(offsetof(erx_fiasco_mem_create_request_t, caller) ==
+    ERX_FIASCO_MEM_CREATE_REQUEST_OFF_CALLER, "erx_fiasco_mem_create_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_mem_create_request_t, budget) ==
+    ERX_FIASCO_MEM_CREATE_REQUEST_OFF_BUDGET, "erx_fiasco_mem_create_request.budget offset");
+_Static_assert(offsetof(erx_fiasco_mem_create_request_t, size) ==
+    ERX_FIASCO_MEM_CREATE_REQUEST_OFF_SIZE, "erx_fiasco_mem_create_request.size offset");
+_Static_assert(offsetof(erx_fiasco_mem_create_request_t, flags) ==
+    ERX_FIASCO_MEM_CREATE_REQUEST_OFF_FLAGS, "erx_fiasco_mem_create_request.flags offset");
+
 #define ERX_FIASCO_REPLY_SIZE 24
 #define ERX_FIASCO_REPLY_ALIGN 8
 #define ERX_FIASCO_REPLY_OFF_STATUS 0
@@ -1055,6 +1110,78 @@ _Static_assert(offsetof(erx_fiasco_reply_t, first) ==
     ERX_FIASCO_REPLY_OFF_FIRST, "erx_fiasco_reply.first offset");
 _Static_assert(offsetof(erx_fiasco_reply_t, second) ==
     ERX_FIASCO_REPLY_OFF_SECOND, "erx_fiasco_reply.second offset");
+
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_SIZE 56
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_ALIGN 8
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_BUDGET 8
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_PARENT 16
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_FAULT 24
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_LABEL 32
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_FLAGS 40
+#define ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_CAP_LIMIT 48
+typedef struct erx_fiasco_space_create_request erx_fiasco_space_create_request_t;
+struct erx_fiasco_space_create_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	budget;
+	uint64_t	parent;
+	uint64_t	fault;
+	uint64_t	label;
+	uint64_t	flags;
+	uint64_t	cap_limit;
+};
+_Static_assert(sizeof(erx_fiasco_space_create_request_t) == ERX_FIASCO_SPACE_CREATE_REQUEST_SIZE, "erx_fiasco_space_create_request size");
+_Static_assert(_Alignof(erx_fiasco_space_create_request_t) == ERX_FIASCO_SPACE_CREATE_REQUEST_ALIGN, "erx_fiasco_space_create_request alignment");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, caller) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_CALLER, "erx_fiasco_space_create_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, budget) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_BUDGET, "erx_fiasco_space_create_request.budget offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, parent) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_PARENT, "erx_fiasco_space_create_request.parent offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, fault) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_FAULT, "erx_fiasco_space_create_request.fault offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, label) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_LABEL, "erx_fiasco_space_create_request.label offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, flags) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_FLAGS, "erx_fiasco_space_create_request.flags offset");
+_Static_assert(offsetof(erx_fiasco_space_create_request_t, cap_limit) ==
+    ERX_FIASCO_SPACE_CREATE_REQUEST_OFF_CAP_LIMIT, "erx_fiasco_space_create_request.cap_limit offset");
+
+#define ERX_FIASCO_SPACE_STOP_REQUEST_SIZE 24
+#define ERX_FIASCO_SPACE_STOP_REQUEST_ALIGN 8
+#define ERX_FIASCO_SPACE_STOP_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_SPACE_STOP_REQUEST_OFF_SPACE 8
+#define ERX_FIASCO_SPACE_STOP_REQUEST_OFF_STATUS 16
+typedef struct erx_fiasco_space_stop_request erx_fiasco_space_stop_request_t;
+struct erx_fiasco_space_stop_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	space;
+	int64_t	status;
+};
+_Static_assert(sizeof(erx_fiasco_space_stop_request_t) == ERX_FIASCO_SPACE_STOP_REQUEST_SIZE, "erx_fiasco_space_stop_request size");
+_Static_assert(_Alignof(erx_fiasco_space_stop_request_t) == ERX_FIASCO_SPACE_STOP_REQUEST_ALIGN, "erx_fiasco_space_stop_request alignment");
+_Static_assert(offsetof(erx_fiasco_space_stop_request_t, caller) ==
+    ERX_FIASCO_SPACE_STOP_REQUEST_OFF_CALLER, "erx_fiasco_space_stop_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_space_stop_request_t, space) ==
+    ERX_FIASCO_SPACE_STOP_REQUEST_OFF_SPACE, "erx_fiasco_space_stop_request.space offset");
+_Static_assert(offsetof(erx_fiasco_space_stop_request_t, status) ==
+    ERX_FIASCO_SPACE_STOP_REQUEST_OFF_STATUS, "erx_fiasco_space_stop_request.status offset");
+
+#define ERX_FIASCO_TASK_JOIN_REQUEST_SIZE 16
+#define ERX_FIASCO_TASK_JOIN_REQUEST_ALIGN 8
+#define ERX_FIASCO_TASK_JOIN_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_TASK_JOIN_REQUEST_OFF_TASK 8
+typedef struct erx_fiasco_task_join_request erx_fiasco_task_join_request_t;
+struct erx_fiasco_task_join_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	task;
+};
+_Static_assert(sizeof(erx_fiasco_task_join_request_t) == ERX_FIASCO_TASK_JOIN_REQUEST_SIZE, "erx_fiasco_task_join_request size");
+_Static_assert(_Alignof(erx_fiasco_task_join_request_t) == ERX_FIASCO_TASK_JOIN_REQUEST_ALIGN, "erx_fiasco_task_join_request alignment");
+_Static_assert(offsetof(erx_fiasco_task_join_request_t, caller) ==
+    ERX_FIASCO_TASK_JOIN_REQUEST_OFF_CALLER, "erx_fiasco_task_join_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_task_join_request_t, task) ==
+    ERX_FIASCO_TASK_JOIN_REQUEST_OFF_TASK, "erx_fiasco_task_join_request.task offset");
 
 #define ERX_FIASCO_THREAD_CREATE_REQUEST_SIZE 48
 #define ERX_FIASCO_THREAD_CREATE_REQUEST_ALIGN 8
@@ -1124,14 +1251,16 @@ _Static_assert(offsetof(erx_fiasco_thread_set_affinity_request_t, thread) ==
 _Static_assert(offsetof(erx_fiasco_thread_set_affinity_request_t, mask) ==
     ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_MASK, "erx_fiasco_thread_set_affinity_request.mask offset");
 
-#define ERX_FIASCO_THREAD_START_REQUEST_SIZE 16
+#define ERX_FIASCO_THREAD_START_REQUEST_SIZE 24
 #define ERX_FIASCO_THREAD_START_REQUEST_ALIGN 8
 #define ERX_FIASCO_THREAD_START_REQUEST_OFF_CALLER 0
 #define ERX_FIASCO_THREAD_START_REQUEST_OFF_THREAD 8
+#define ERX_FIASCO_THREAD_START_REQUEST_OFF_TRAMPOLINE 16
 typedef struct erx_fiasco_thread_start_request erx_fiasco_thread_start_request_t;
 struct erx_fiasco_thread_start_request {
 	_Alignas(8) uint64_t	caller;
 	uint64_t	thread;
+	uint64_t	trampoline;
 };
 _Static_assert(sizeof(erx_fiasco_thread_start_request_t) == ERX_FIASCO_THREAD_START_REQUEST_SIZE, "erx_fiasco_thread_start_request size");
 _Static_assert(_Alignof(erx_fiasco_thread_start_request_t) == ERX_FIASCO_THREAD_START_REQUEST_ALIGN, "erx_fiasco_thread_start_request alignment");
@@ -1139,6 +1268,8 @@ _Static_assert(offsetof(erx_fiasco_thread_start_request_t, caller) ==
     ERX_FIASCO_THREAD_START_REQUEST_OFF_CALLER, "erx_fiasco_thread_start_request.caller offset");
 _Static_assert(offsetof(erx_fiasco_thread_start_request_t, thread) ==
     ERX_FIASCO_THREAD_START_REQUEST_OFF_THREAD, "erx_fiasco_thread_start_request.thread offset");
+_Static_assert(offsetof(erx_fiasco_thread_start_request_t, trampoline) ==
+    ERX_FIASCO_THREAD_START_REQUEST_OFF_TRAMPOLINE, "erx_fiasco_thread_start_request.trampoline offset");
 
 #define ERX_FIASCO_TIME_SET_WALL_REQUEST_SIZE 16
 #define ERX_FIASCO_TIME_SET_WALL_REQUEST_ALIGN 8
@@ -1179,6 +1310,42 @@ _Static_assert(offsetof(erx_fiasco_vm_flagged_request_t, size) ==
     ERX_FIASCO_VM_FLAGGED_REQUEST_OFF_SIZE, "erx_fiasco_vm_flagged_request.size offset");
 _Static_assert(offsetof(erx_fiasco_vm_flagged_request_t, flags) ==
     ERX_FIASCO_VM_FLAGGED_REQUEST_OFF_FLAGS, "erx_fiasco_vm_flagged_request.flags offset");
+
+#define ERX_FIASCO_VM_MAP_REQUEST_SIZE 56
+#define ERX_FIASCO_VM_MAP_REQUEST_ALIGN 8
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_SPACE 8
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_ADDR 16
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_SIZE 24
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_MEM 32
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_OFFSET 40
+#define ERX_FIASCO_VM_MAP_REQUEST_OFF_PROT 48
+typedef struct erx_fiasco_vm_map_request erx_fiasco_vm_map_request_t;
+struct erx_fiasco_vm_map_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	space;
+	uint64_t	addr;
+	uint64_t	size;
+	uint64_t	mem;
+	uint64_t	offset;
+	uint64_t	prot;
+};
+_Static_assert(sizeof(erx_fiasco_vm_map_request_t) == ERX_FIASCO_VM_MAP_REQUEST_SIZE, "erx_fiasco_vm_map_request size");
+_Static_assert(_Alignof(erx_fiasco_vm_map_request_t) == ERX_FIASCO_VM_MAP_REQUEST_ALIGN, "erx_fiasco_vm_map_request alignment");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, caller) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_CALLER, "erx_fiasco_vm_map_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, space) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_SPACE, "erx_fiasco_vm_map_request.space offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, addr) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_ADDR, "erx_fiasco_vm_map_request.addr offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, size) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_SIZE, "erx_fiasco_vm_map_request.size offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, mem) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_MEM, "erx_fiasco_vm_map_request.mem offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, offset) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_OFFSET, "erx_fiasco_vm_map_request.offset offset");
+_Static_assert(offsetof(erx_fiasco_vm_map_request_t, prot) ==
+    ERX_FIASCO_VM_MAP_REQUEST_OFF_PROT, "erx_fiasco_vm_map_request.prot offset");
 
 #define ERX_FIASCO_VM_RANGE_REQUEST_SIZE 24
 #define ERX_FIASCO_VM_RANGE_REQUEST_ALIGN 8
@@ -2099,6 +2266,8 @@ typedef uint32_t erx_machine_flags_t;
 typedef uint16_t erx_manifest_flags_t;
 
 typedef uint16_t erx_manifest_mode_t;
+
+typedef uint32_t erx_mem_flags_t;
 
 typedef uint32_t erx_mf_device_flags_t;
 

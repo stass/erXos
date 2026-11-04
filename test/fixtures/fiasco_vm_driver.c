@@ -83,8 +83,9 @@ mmu_index(uint64_t addr)
 }
 
 static void
-fake_map(uintptr_t window, uint64_t addr, uint32_t prot)
+fake_map(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot)
 {
+	(void)label;
 	mmu_page_t *page = &mmu[mmu_index(addr)];
 
 	/* Fiasco keeps the mapping there and adds rights: a different page is a bug. */
@@ -97,9 +98,11 @@ fake_map(uintptr_t window, uint64_t addr, uint32_t prot)
 }
 
 static void
-fake_unmap(uint64_t addr, uint32_t rights)
+fake_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 {
 	mmu_page_t *page = &mmu[mmu_index(addr)];
+
+	(void)label;
 
 	if (page->window == 0)
 		fail("an unmap of nothing", addr);
@@ -116,7 +119,8 @@ world_reset(unsigned pool_pages)
 	memset(mmu, 0, sizeof(mmu));
 	memset(&pool, 0, sizeof(pool));
 	memset(ranges, 0xa5, sizeof(ranges));
-	erx_fiasco_vm_table_init(&table, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
+	erx_fiasco_vm_index_init(index_slots, SLOTS);
+	erx_fiasco_vm_table_init(&table, 0, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
 	    AREA_START + RANDOM_AREA_PAGES * PAGE);
 	for (unsigned page = 0; page < pool_pages; page++)
 		erx_fiasco_pool_put(&pool, (uintptr_t)(window_memory + page * PAGE));
@@ -536,6 +540,121 @@ check_pool(void)
 			fail("a taken page is not zero", offset);
 }
 
+/* Where a table's effects landed, for the cases over more than one table. */
+typedef struct label_map {
+	uint32_t	label;
+	uintptr_t	window;
+	uint64_t	addr;
+	uint32_t	prot;
+} label_map_t;
+
+static label_map_t label_maps[64];
+static size_t label_nmaps;
+/* Table 1's rights, by page: a map adds, as Fiasco's does. */
+static uint32_t label_rights[16];
+
+static void
+label_map(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot)
+{
+	if (label_nmaps == sizeof(label_maps) / sizeof(label_maps[0]))
+		fail("too many maps", addr);
+	label_maps[label_nmaps++] = (label_map_t){ .label = label, .window = window, .addr = addr, .prot = prot };
+	if (label == 1) {
+		label_rights[(addr - AREA_START) / PAGE] |= prot;
+		if ((label_rights[(addr - AREA_START) / PAGE] & (RIGHT_W | RIGHT_X)) == (RIGHT_W | RIGHT_X))
+			fail("an alias writable and executable at once", addr);
+	}
+}
+
+static void
+label_unmap(uint32_t label, uint64_t addr, uint32_t rights)
+{
+	if (label == 1)
+		label_rights[(addr - AREA_START) / PAGE] &= ~rights;
+}
+
+static const erx_fiasco_vm_effects_t label_effects = { .map = label_map, .unmap = label_unmap };
+
+static int
+table_call(erx_fiasco_vm_table_t *which, erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot)
+{
+	const erx_fiasco_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
+
+	return (erx_fiasco_vm_call(which, &pool, &label_effects, &request, NULL));
+}
+
+/* Two tables and an object share one index: the same address names a page per label, and each clears alone. */
+static void
+check_labels(void)
+{
+	static erx_fiasco_vm_range_t ranges_a[4], ranges_b[4], ranges_object[2];
+	erx_fiasco_vm_table_t a, b, object;
+	uintptr_t window_a, window_b, window_object;
+	uint64_t full;
+
+	current_case = "labels";
+	world_reset(POOL_PAGES);
+	memset(label_rights, 0, sizeof(label_rights));
+	full = pool.free_pages;
+	erx_fiasco_vm_table_init(&a, 1, ranges_a, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
+	erx_fiasco_vm_table_init(&b, 2, ranges_b, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
+	erx_fiasco_vm_table_init(&object, 3, ranges_object, 2, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE);
+	if (table_call(&a, ERX_FIASCO_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&b, ERX_FIASCO_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&a, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    table_call(&b, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0)
+		fail("two tables' calls were refused", 0);
+	window_a = erx_fiasco_vm_window(&a, AREA_START);
+	window_b = erx_fiasco_vm_window(&b, AREA_START);
+	if (window_a == 0 || window_b == 0 || window_a == window_b)
+		fail("two tables share a page", window_a);
+	if (erx_fiasco_vm_window(&a, AREA_START + PAGE) != 0 || erx_fiasco_vm_window(&object, AREA_START) != 0)
+		fail("a window for an uncommitted page", 0);
+	if (table_call(&a, ERX_FIASCO_VM_DECOMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    erx_fiasco_vm_window(&b, AREA_START) != window_b)
+		fail("one table's decommit reached another's page", window_b);
+
+	if (table_call(&object, ERX_FIASCO_VM_RESERVE, PAGE, 2 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&object, ERX_FIASCO_VM_COMMIT, PAGE, 2 * PAGE, 0, 0) != 0)
+		fail("the object's pages were refused", 0);
+	window_object = erx_fiasco_vm_window(&object, 2 * PAGE);
+	label_nmaps = 0;
+	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RW) != 0 ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 3 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
+		fail("two aliases of one page were refused", 0);
+	if (label_nmaps != 2 || label_maps[0].window != window_object || label_maps[1].window != window_object ||
+	    label_maps[0].label != 1 || label_maps[0].addr != AREA_START + 2 * PAGE || label_maps[0].prot != ERX_PROT_RW ||
+	    label_maps[1].addr != AREA_START + 3 * PAGE || label_maps[1].prot != ERX_PROT_RX)
+		fail("an alias landed wrong", label_nmaps);
+	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
+		fail("a second map of an alias was refused", 0);
+	label_nmaps = 0;
+	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_NONE) != ERX_EINVAL ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_RW | ERX_PROT_RX) != ERX_EINVAL ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 1, ERX_PROT_RW) != ERX_EINVAL ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 8 * PAGE, PAGE, 0, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 2 * PAGE, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, 2 * PAGE, PAGE, ERX_PROT_RW) != ERX_ERANGE)
+		fail("a bad alias passed", label_nmaps);
+	if (table_call(&a, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 0, ERX_PROT_RW) != ERX_EEXIST)
+		fail("an alias over a committed page passed", label_nmaps);
+	if (label_nmaps != 1)
+		fail("a refused alias mapped", label_nmaps);
+
+	erx_fiasco_vm_table_clear(&a, &pool, &label_effects);
+	if (a.nranges != 0 || erx_fiasco_vm_window(&a, AREA_START) != 0 || erx_fiasco_vm_window(&b, AREA_START) != window_b ||
+	    erx_fiasco_vm_window(&object, 2 * PAGE) != window_object)
+		fail("clearing one table reached another's page", window_b);
+	erx_fiasco_vm_table_clear(&b, &pool, &label_effects);
+	erx_fiasco_vm_table_clear(&object, &pool, &label_effects);
+	if (pool.free_pages != full)
+		fail("the pool's count did not return", pool.free_pages);
+	for (size_t slot = 0; slot < SLOTS; slot++)
+		if (index_slots[slot].key != 0)
+			fail("the index kept a cleared page", slot);
+}
+
 /* An index always has twice the slots of the pages it might hold, and fills whole pages. */
 static void
 check_layout(void)
@@ -568,6 +687,7 @@ main(int argc, char **argv)
 	check_random_calls(seed, 20000);
 	check_random_calls(seed + 1, 20000);
 	check_steps_table();
+	check_labels();
 	printf("ok: %lu checks\n", checks);
 	free(window_memory);
 	return (0);

@@ -24,8 +24,8 @@
  *
  *   ranges  The reserved addresses, as sorted, disjoint runs. Adjacent runs
  *           merge, so a range is wholly reserved exactly when one run covers it.
- *   pages   A hash from a committed page's address to its window page and
- *           protection. A page absent here is uncommitted, and has no protection
+ *   pages   One hash for the machine, from a committed page's address and its
+ *           table's label to its window page and protection. A page absent here is uncommitted, and has no protection
  *           to remember: access to it means committing it. Each entry owns a
  *           distinct window page, and the index has two slots for every page the
  *           window holds (erx_fiasco_vm_layout), so committing never finds it
@@ -48,9 +48,13 @@ typedef struct erx_fiasco_vm_range {
 	uint64_t	end;
 } erx_fiasco_vm_range_t;
 
-/* A slot of the page index. An addr of 0 is empty: no area may hold address 0. */
+/*
+ * A slot of the page index, whose key is the page's address with its table's label in
+ * the low bits, which a page's address leaves clear. A key of 0 is empty: no area may
+ * hold address 0.
+ */
 typedef struct erx_fiasco_vm_page {
-	uint64_t	addr;
+	uint64_t	key;
 	uint64_t	window_and_state;	/* a window page's address, low bits the state */
 } erx_fiasco_vm_page_t;
 
@@ -60,6 +64,7 @@ typedef struct erx_fiasco_vm_table {
 	size_t			 ranges_max;
 	erx_fiasco_vm_page_t	*pages;
 	size_t			 pages_mask;	/* slots - 1; slots are a power of two */
+	uint32_t		 label;		/* below ERX_PAGE_SIZE, and no other table's */
 	uint64_t		 area_start;	/* where reservations may lie */
 	uint64_t		 area_end;
 } erx_fiasco_vm_table_t;
@@ -123,20 +128,23 @@ typedef struct erx_fiasco_vm_steps {
 	erx_fiasco_vm_state_t	after;
 } erx_fiasco_vm_steps_t;
 
-/* The kernel-facing half. Each ends the machine rather than report a refusal. */
+/* The kernel-facing half, in the space of the table's label. Each ends the machine rather than report a refusal. */
 typedef struct erx_fiasco_vm_effects {
-	void	(*map)(uintptr_t window, uint64_t addr, uint32_t prot);
-	void	(*unmap)(uint64_t addr, uint32_t rights);
+	void	(*map)(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot);
+	void	(*unmap)(uint32_t label, uint64_t addr, uint32_t rights);
 } erx_fiasco_vm_effects_t;
 
 /* The index a window of this many pages needs; never empty. */
 erx_fiasco_vm_layout_t	erx_fiasco_vm_layout(uint64_t);
 
+/* Empties the machine's index, of a power of two slots. Every table then shares it. */
+void	erx_fiasco_vm_index_init(erx_fiasco_vm_page_t *, size_t);
+
 /*
- * An empty table over [area_start, area_end), with its index of a power of two
- * slots zeroed. The caller keeps both arrays for the table's life.
+ * An empty table of this label over [area_start, area_end), in an index whose pages
+ * hold none of the label's. The caller keeps both arrays for the table's life.
  */
-void	erx_fiasco_vm_table_init(erx_fiasco_vm_table_t *, erx_fiasco_vm_range_t *,
+void	erx_fiasco_vm_table_init(erx_fiasco_vm_table_t *, uint32_t, erx_fiasco_vm_range_t *,
 	    size_t, erx_fiasco_vm_page_t *, size_t, uint64_t, uint64_t);
 
 erx_fiasco_vm_steps_t	erx_fiasco_vm_steps(erx_fiasco_vm_state_t, erx_fiasco_vm_state_t);
@@ -166,5 +174,27 @@ int	erx_fiasco_vm_plan(const erx_fiasco_vm_table_t *, const erx_fiasco_vm_reques
 int	erx_fiasco_vm_call(erx_fiasco_vm_table_t *, erx_fiasco_pool_t *,
 	    const erx_fiasco_vm_effects_t *, const erx_fiasco_vm_request_t *,
 	    uint64_t *) ERX_WARN_UNUSED_RESULT;
+
+/* The window page behind a committed address of the table, or 0 for any other. */
+uintptr_t	erx_fiasco_vm_window(const erx_fiasco_vm_table_t *, uint64_t);
+
+/*
+ * Maps pages of an object, itself a table whose committed pages it owns, at reserved
+ * and uncommitted addresses of another table, whole or not at all. The page index does
+ * not hold such a page, as a slot there owns its page; so the object keeps it, and a
+ * call of the table over the addresses sees them as uncommitted. The offset counts from
+ * the object's area_start. Refuses:
+ *
+ *   ERX_EINVAL  a size of zero, an address, size or offset not page-aligned, or a
+ *               protection other than R, RW and RX;
+ *   ERX_ERANGE  addresses not wholly reserved, or pages the object does not hold;
+ *   ERX_EEXIST  a committed page among the addresses.
+ */
+int	erx_fiasco_vm_map_object(const erx_fiasco_vm_table_t *, const erx_fiasco_vm_table_t *,
+	    const erx_fiasco_vm_effects_t *, uint64_t, uint64_t, uint64_t, uint32_t) ERX_WARN_UNUSED_RESULT;
+
+/* Releases every run, so the table's pages go back to the pool and its label is free. */
+void	erx_fiasco_vm_table_clear(erx_fiasco_vm_table_t *, erx_fiasco_pool_t *,
+	    const erx_fiasco_vm_effects_t *);
 
 #endif /* ERX_FIASCO_VM_TABLE_H */

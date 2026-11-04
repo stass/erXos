@@ -14,21 +14,30 @@ module Erx
   class NativeRoot
     BACKEND = 'liberx/backend/fiasco'
     LINK_SCRIPT = "#{BACKEND}/root.ld"
+    TASK_LINK_SCRIPT = "#{BACKEND}/task.ld"
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory: the effects over sigma0 and the two pure cores.
     VM = %W[#{BACKEND}/vm.c #{BACKEND}/page_pool.c #{BACKEND}/vm_table.c].freeze
     # The root service and what it runs on: threads, waits and the end path. The
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
-    SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_wire.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
+    SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
                  #{BACKEND}/park.c #{BACKEND}/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c].freeze
+    # The root's way to a task's program: the record and archive, and the launcher.
+    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c kernel/core/boot_handoff.c].freeze
+    # A task's own program: its entry, its console and memcpy, and the stubs and
+    # threads it reaches the service through.
+    TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c
+              #{BACKEND}/service_stubs.c #{BACKEND}/thread.c #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c
+              #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c #{BACKEND}/park_table.c
+              #{BACKEND}/arch/aarch64/clock.c #{BACKEND}/arch/aarch64/cache.c].freeze
     # The system's root task. The archive's core comes from Fiasco's boot archive,
     # which does not hold the handoff record's core, since bootstrap only writes it.
-    SYSTEM = [*RUNTIME, *VM, *SERVICE, "#{BACKEND}/root.c", 'kernel/core/boot_handoff.c'].freeze
+    SYSTEM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c"].freeze
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
                -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
@@ -48,18 +57,24 @@ module Erx
 
     # The system's root task, as the archive's boot/stopgap-root entry.
     def build_system(directory:)
-      build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: [@fiasco.boot_core_archive])
+      build(name: 'stopgap-root', sources: SYSTEM, directory: directory)
     end
 
-    # Compiles sources in source's tree and links them, with any archives, into
-    # directory/name. Headers of Fiasco are system headers here: they are
-    # inherited, so -pedantic judges only erXos's own code.
-    def build(name:, sources:, directory:, archives: [], flags: [])
+    # A task's program for the boot image: fixed addresses, as task.ld gives.
+    def build_task(name:, sources:, directory:, flags: [])
+      build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT)
+    end
+
+    # Compiles sources in source's tree and links them into directory/name, with Fiasco's
+    # boot archive, which holds the cores the service reads a program with. Headers of
+    # Fiasco are system headers here: they are inherited, so -pedantic judges only
+    # erXos's own code.
+    def build(name:, sources:, directory:, flags: [], script: LINK_SCRIPT)
       FileUtils.mkdir_p(directory)
       objects = sources.map { |source| compile(source, directory: directory, flags: flags) }
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', LINK_SCRIPT, '-o', program, *objects, *archives, *libraries],
+      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, *objects, @fiasco.boot_core_archive, *libraries],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program
     end

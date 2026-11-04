@@ -27,8 +27,6 @@
 #include "liberx/backend/fiasco/thread.h"
 
 #define IRQ_OBJECTS_MAX		ERX_FIASCO_PARK_OBJECTS_MAX
-/* Past the gate's, the service's and the watchdog's capability slots, with room between. */
-#define IRQ_CAP_BASE		(ERX_FIASCO_THREADS_MAX + 16u)
 
 typedef struct irq_object {
 	bool	present;
@@ -40,7 +38,7 @@ static irq_object_t irq_objects[IRQ_OBJECTS_MAX];
 static l4_cap_idx_t
 irq_cap(uint32_t index)
 {
-	return ((l4_cap_idx_t)erx_fiasco_thread_cap(IRQ_CAP_BASE + index));
+	return ((l4_cap_idx_t)erx_fiasco_thread_cap(ERX_FIASCO_SLOT_IRQS + index));
 }
 
 int

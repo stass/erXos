@@ -289,6 +289,24 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_image_map_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_image_map_request_t *result)
+{
+	erx_fiasco_image_map_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_IMAGE_MAP_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.space = erx_abi_load_u64(bytes + 8);
+	value.image = erx_abi_load_u64(bytes + 16);
+	value.entry = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_irq_bind_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_irq_bind_request_t *result)
 {
@@ -357,6 +375,24 @@ erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_mem_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_mem_create_request_t *result)
+{
+	erx_fiasco_mem_create_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_MEM_CREATE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.budget = erx_abi_load_u64(bytes + 8);
+	value.size = erx_abi_load_u64(bytes + 16);
+	value.flags = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_reply_t *result)
 {
@@ -373,6 +409,65 @@ erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
 	}
 	value.first = erx_abi_load_u64(bytes + 8);
 	value.second = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_space_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_space_create_request_t *result)
+{
+	erx_fiasco_space_create_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_SPACE_CREATE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.budget = erx_abi_load_u64(bytes + 8);
+	value.parent = erx_abi_load_u64(bytes + 16);
+	value.fault = erx_abi_load_u64(bytes + 24);
+	value.label = erx_abi_load_u64(bytes + 32);
+	value.flags = erx_abi_load_u64(bytes + 40);
+	value.cap_limit = erx_abi_load_u64(bytes + 48);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_space_stop_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_space_stop_request_t *result)
+{
+	erx_fiasco_space_stop_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_SPACE_STOP_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.space = erx_abi_load_u64(bytes + 8);
+	{
+		uint64_t raw;
+
+		raw = erx_abi_load_u64(bytes + 16);
+		value.status = (raw <= UINT64_C(9223372036854775807) ? (int64_t)raw : -INT64_C(1) - (int64_t)(UINT64_C(18446744073709551615) - (uint64_t)raw));
+	}
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_task_join_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_task_join_request_t *result)
+{
+	erx_fiasco_task_join_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_TASK_JOIN_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.task = erx_abi_load_u64(bytes + 8);
 
 	*result = value;
 	return (true);
@@ -442,6 +537,7 @@ erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
 
 	value.caller = erx_abi_load_u64(bytes + 0);
 	value.thread = erx_abi_load_u64(bytes + 8);
+	value.trampoline = erx_abi_load_u64(bytes + 16);
 
 	*result = value;
 	return (true);
@@ -476,6 +572,27 @@ erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,
 	value.addr = erx_abi_load_u64(bytes + 8);
 	value.size = erx_abi_load_u64(bytes + 16);
 	value.flags = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_vm_map_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_map_request_t *result)
+{
+	erx_fiasco_vm_map_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_VM_MAP_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.space = erx_abi_load_u64(bytes + 8);
+	value.addr = erx_abi_load_u64(bytes + 16);
+	value.size = erx_abi_load_u64(bytes + 24);
+	value.mem = erx_abi_load_u64(bytes + 32);
+	value.offset = erx_abi_load_u64(bytes + 40);
+	value.prot = erx_abi_load_u64(bytes + 48);
 
 	*result = value;
 	return (true);

@@ -19,6 +19,7 @@
 #include <l4/sys/ipc.h>
 #include <l4/sys/semaphore.h>
 #include <l4/sys/task.h>
+#include <l4/sys/thread.h>
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
@@ -41,7 +42,6 @@
  */
 #define THREAD_TABLE		ERX_FIASCO_AREA_START
 #define THREAD_UTCB_AREA	UINT64_C(0xf00000000)
-#define THREAD_UTCB_ORDER	17u
 /* A capability slot past the fixed ones: semaphores, then threads. */
 #define THREAD_SLOT(n)		(L4_BASE_CAPS_LAST + (((uint64_t)(n) + 1) << L4_CAP_SHIFT))
 #define REAPER_STACK_BYTES	16384u
@@ -49,7 +49,7 @@
 _Static_assert(sizeof(erx_fiasco_start_t) <= sizeof(((erx_utcb_t *)0)->mr), "the starting registers fit the public UTCB");
 _Static_assert(sizeof(erx_fiasco_thread_record_t) <= 2048, "a record is 2 KiB");
 _Static_assert(ERX_FIASCO_THREADS_MAX * 2048 == 64 * ERX_PAGE_SIZE, "the table is 64 pages");
-_Static_assert(L4_UTCB_OFFSET << 7 == UINT64_C(1) << THREAD_UTCB_ORDER, "128 slots fill the area");
+_Static_assert(L4_UTCB_OFFSET << 7 == UINT64_C(1) << ERX_FIASCO_UTCB_AREA_ORDER, "128 slots fill the area");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, gpr) ==
     ERX_FIASCO_RECORD_OFF_ARG, "the trampoline's argument");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, sp) ==
@@ -124,23 +124,10 @@ erx_fiasco_thread_cap(uint32_t index)
 	return (THREAD_SLOT(ERX_FIASCO_THREADS_MAX + index));
 }
 
-const char *
-erx_fiasco_thread_table_init(void)
+void
+erx_fiasco_thread_first_init(void)
 {
 	erx_fiasco_thread_record_t *first;
-	l4_fpage_t area = l4_fpage(THREAD_UTCB_AREA, THREAD_UTCB_ORDER, L4_FPAGE_RW);
-	uint64_t reserved;
-
-	if (erx_fiasco_vm_body(ERX_FIASCO_VM_RESERVE, THREAD_TABLE,
-	    ERX_FIASCO_THREADS_MAX * UINT64_C(2048), ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(ERX_FIASCO_VM_COMMIT, THREAD_TABLE,
-	    ERX_FIASCO_THREADS_MAX * UINT64_C(2048), 0, NULL) != ERX_OK)
-		return ("threads: no memory for the thread table");
-	if (l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP, &area)) < 0)
-		return ("threads: the kernel refused the UTCB area");
-	if (l4_error(l4_factory_create(L4_BASE_FACTORY_CAP, L4_PROTO_SEMAPHORE,
-	    erx_fiasco_thread_semaphore_cap(0))) < 0)
-		return ("threads: the kernel refused the first thread's semaphore");
 
 	first = erx_fiasco_thread_record(0);
 	atomic_store_explicit(&first->used, ERX_FIASCO_THREAD_STARTED, memory_order_relaxed);
@@ -150,7 +137,6 @@ erx_fiasco_thread_table_init(void)
 	thread_first_utcb = l4_utcb();
 	atomic_store_explicit(&first->utcb.self, (uint64_t)(uintptr_t)&first->utcb, memory_order_relaxed);
 	l4_utcb_tcr()->user[0] = (l4_umword_t)(uintptr_t)first;
-	return (NULL);
 }
 
 static bool
@@ -196,6 +182,15 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 
 	if (thread_class != ERX_THREAD_CLASS_WORKER && thread_class != ERX_THREAD_CLASS_EXECUTOR)
 		return (ERX_EINVAL);
+	if (space != 0) {
+		const erx_fiasco_thread_create_request_t first = { .caller = erx_fiasco_thread_self()->index,
+		    .budget = budget, .space = space, .group = group, .thread_class = thread_class };
+
+		status = erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_CREATE, &first, sizeof(first), &reply);
+		if (status == ERX_OK)
+			*thread = reply.first;
+		return (status);
+	}
 	index = thread_claim();
 	if (index >= ERX_FIASCO_THREADS_MAX)
 		return (ERX_ENOMEM);
@@ -247,8 +242,12 @@ erx_thread_start(uint64_t thread)
 	uint32_t state = ERX_FIASCO_THREAD_CREATED;
 	int status;
 
+	request.caller = erx_fiasco_thread_self()->index;
+	request.thread = thread;
+	request.trampoline = (uint64_t)(uintptr_t)erx_fiasco_thread_trampoline;
+	/* Another task's first thread has no record here and no trampoline of ours. */
 	if (thread >= ERX_FIASCO_THREADS_MAX)
-		return (ERX_EINVAL);
+		return (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &request, sizeof(request), &reply));
 	record = erx_fiasco_thread_record((uint32_t)thread);
 	if (!atomic_compare_exchange_strong_explicit(&record->used, &state, ERX_FIASCO_THREAD_STARTED,
 	    memory_order_acquire, memory_order_relaxed))
@@ -257,8 +256,6 @@ erx_thread_start(uint64_t thread)
 	    L4_UTCB_THREAD_REGS_OFFSET);
 	__atomic_store_n(&native->free_marker, 1, __ATOMIC_RELEASE);
 
-	request.caller = erx_fiasco_thread_self()->index;
-	request.thread = thread;
 	status = erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &request, sizeof(request), &reply);
 	/* A created record has its kernel objects, so a refusal here deleted them. It leaves the marker it wrote, a recorded gap. */
 	if (status != ERX_OK) {
@@ -287,6 +284,12 @@ erx_fiasco_thread_set_clear_word(uint64_t thread, uint64_t word)
 		return (ERX_EINVAL);
 	erx_fiasco_thread_record((uint32_t)thread)->clear_word = word;
 	return (ERX_OK);
+}
+
+void
+erx_yield(void)
+{
+	(void)l4_thread_yield();
 }
 
 bool

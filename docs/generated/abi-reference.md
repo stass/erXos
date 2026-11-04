@@ -144,12 +144,17 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FAULT_FOREIGN_TRAP` | 6 |
 | `ERX_FAULT_MEMORY` | 1 |
 | `ERX_FAULT_UNDEFINED` | 3 |
+| `ERX_FIASCO_CALL_IMAGE_MAP` | 15 |
 | `ERX_FIASCO_CALL_IRQ_ACK` | 34 |
 | `ERX_FIASCO_CALL_IRQ_BIND` | 33 |
 | `ERX_FIASCO_CALL_IRQ_CREATE` | 32 |
 | `ERX_FIASCO_CALL_IRQ_TRIGGER` | 35 |
 | `ERX_FIASCO_CALL_MACHINE_END` | 9 |
+| `ERX_FIASCO_CALL_MEM_CREATE` | 12 |
+| `ERX_FIASCO_CALL_SPACE_CREATE` | 14 |
 | `ERX_FIASCO_CALL_SPACE_PROTECT` | 8 |
+| `ERX_FIASCO_CALL_SPACE_STOP` | 16 |
+| `ERX_FIASCO_CALL_TASK_JOIN` | 17 |
 | `ERX_FIASCO_CALL_THREAD_CREATE` | 2 |
 | `ERX_FIASCO_CALL_THREAD_REAP` | 11 |
 | `ERX_FIASCO_CALL_THREAD_SET_AFFINITY` | 10 |
@@ -157,6 +162,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_TIME_SET_WALL` | 36 |
 | `ERX_FIASCO_CALL_VM_COMMIT` | 5 |
 | `ERX_FIASCO_CALL_VM_DECOMMIT` | 6 |
+| `ERX_FIASCO_CALL_VM_MAP` | 13 |
 | `ERX_FIASCO_CALL_VM_RELEASE` | 7 |
 | `ERX_FIASCO_CALL_VM_RESERVE` | 4 |
 | `ERX_FRAME_MAX` | 16777216 |
@@ -272,6 +278,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MANIFEST_STRINGS_MAX` | 4194304 |
 | `ERX_MANIFEST_VERSION` | 1 |
 | `ERX_MAPPINGS_MAX` | 65536 |
+| `ERX_MEM_JIT` | 1 |
 | `ERX_MF_DEVICE_HOSTILE` | 1 |
 | `ERX_MF_DEVICE_ROLE_BLOCK` | 5 |
 | `ERX_MF_DEVICE_ROLE_CONFIGURATION` | 3 |
@@ -578,6 +585,17 @@ Storage: `shared`. Prefix size: 8320. Alignment: 8.
 | `ready` | `u32` | 56 | 1 |
 | `exec` | `erx_exec_stat` | 128 | 64 |
 
+### `erx_fiasco_image_map_request_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `space` | `u64` | 8 | 1 |
+| `image` | `u64` | 16 | 1 |
+| `entry` | `u64` | 24 | 1 |
+
 ### `erx_fiasco_irq_bind_request_t`
 
 Storage: `wire_le`. Prefix size: 32. Alignment: 8.
@@ -618,6 +636,17 @@ Storage: `wire_le`. Prefix size: 24. Alignment: 8.
 | `res` | `u64` | 8 | 1 |
 | `how` | `u64` | 16 | 1 |
 
+### `erx_fiasco_mem_create_request_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `budget` | `u64` | 8 | 1 |
+| `size` | `u64` | 16 | 1 |
+| `flags` | `u64` | 24 | 1 |
+
 ### `erx_fiasco_reply_t`
 
 Storage: `wire_le`. Prefix size: 24. Alignment: 8.
@@ -627,6 +656,39 @@ Storage: `wire_le`. Prefix size: 24. Alignment: 8.
 | `status` | `i64` | 0 | 1 |
 | `first` | `u64` | 8 | 1 |
 | `second` | `u64` | 16 | 1 |
+
+### `erx_fiasco_space_create_request_t`
+
+Storage: `wire_le`. Prefix size: 56. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `budget` | `u64` | 8 | 1 |
+| `parent` | `u64` | 16 | 1 |
+| `fault` | `u64` | 24 | 1 |
+| `label` | `u64` | 32 | 1 |
+| `flags` | `u64` | 40 | 1 |
+| `cap_limit` | `u64` | 48 | 1 |
+
+### `erx_fiasco_space_stop_request_t`
+
+Storage: `wire_le`. Prefix size: 24. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `space` | `u64` | 8 | 1 |
+| `status` | `i64` | 16 | 1 |
+
+### `erx_fiasco_task_join_request_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `task` | `u64` | 8 | 1 |
 
 ### `erx_fiasco_thread_create_request_t`
 
@@ -662,12 +724,13 @@ Storage: `wire_le`. Prefix size: 24. Alignment: 8.
 
 ### `erx_fiasco_thread_start_request_t`
 
-Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+Storage: `wire_le`. Prefix size: 24. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
 | `caller` | `u64` | 0 | 1 |
 | `thread` | `u64` | 8 | 1 |
+| `trampoline` | `u64` | 16 | 1 |
 
 ### `erx_fiasco_time_set_wall_request_t`
 
@@ -688,6 +751,20 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `addr` | `u64` | 8 | 1 |
 | `size` | `u64` | 16 | 1 |
 | `flags` | `u64` | 24 | 1 |
+
+### `erx_fiasco_vm_map_request_t`
+
+Storage: `wire_le`. Prefix size: 56. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `space` | `u64` | 8 | 1 |
+| `addr` | `u64` | 16 | 1 |
+| `size` | `u64` | 24 | 1 |
+| `mem` | `u64` | 32 | 1 |
+| `offset` | `u64` | 40 | 1 |
+| `prot` | `u64` | 48 | 1 |
 
 ### `erx_fiasco_vm_range_request_t`
 

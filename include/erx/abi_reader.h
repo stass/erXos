@@ -33,6 +33,8 @@ bool erx_abi_note_decode(const uint8_t *bytes, size_t length,
     erx_abi_note_t *result);
 bool erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
     erx_elf64_phdr_t *result);
+bool erx_fiasco_image_map_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_image_map_request_t *result);
 bool erx_fiasco_irq_bind_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_irq_bind_request_t *result);
 bool erx_fiasco_irq_create_request_decode(const uint8_t *bytes, size_t length,
@@ -41,8 +43,16 @@ bool erx_fiasco_irq_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_irq_request_t *result);
 bool erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_machine_end_request_t *result);
+bool erx_fiasco_mem_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_mem_create_request_t *result);
 bool erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_reply_t *result);
+bool erx_fiasco_space_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_space_create_request_t *result);
+bool erx_fiasco_space_stop_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_space_stop_request_t *result);
+bool erx_fiasco_task_join_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_task_join_request_t *result);
 bool erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_create_request_t *result);
 bool erx_fiasco_thread_reap_request_decode(const uint8_t *bytes, size_t length,
@@ -55,6 +65,8 @@ bool erx_fiasco_time_set_wall_request_decode(const uint8_t *bytes, size_t length
     erx_fiasco_time_set_wall_request_t *result);
 bool erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_vm_flagged_request_t *result);
+bool erx_fiasco_vm_map_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_map_request_t *result);
 bool erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_vm_range_request_t *result);
 bool erx_frame_header_decode(const uint8_t *bytes, size_t length,

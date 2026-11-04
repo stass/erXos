@@ -19,10 +19,13 @@ module Erx
       # and reader, and the ELF planner.
       unchecked_objects: %w[
         liberx/backend/erx/arch/aarch64/generated/calls.c
+        liberx/backend/fiasco/arch/aarch64/cache.c
         liberx/backend/fiasco/arch/aarch64/clock.c
         liberx/backend/fiasco/arch/aarch64/generated/trap.c
         liberx/backend/fiasco/arch/aarch64/root_start.S
+        liberx/backend/fiasco/arch/aarch64/task_start.S
         liberx/backend/fiasco/arch/aarch64/thread_start.S
+        liberx/backend/fiasco/cache.h
         liberx/backend/fiasco/console.c
         liberx/backend/fiasco/console.h
         liberx/backend/fiasco/end.c
@@ -31,6 +34,8 @@ module Erx
         liberx/backend/fiasco/group.c
         liberx/backend/fiasco/group.h
         liberx/backend/fiasco/irq.c
+        liberx/backend/fiasco/launcher.c
+        liberx/backend/fiasco/launcher.h
         liberx/backend/fiasco/lock.h
         liberx/backend/fiasco/log.c
         liberx/backend/fiasco/log.h
@@ -42,13 +47,20 @@ module Erx
         liberx/backend/fiasco/park_table.h
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root.ld
+        liberx/backend/fiasco/root_open.c
+        liberx/backend/fiasco/root_open.h
         liberx/backend/fiasco/root_mem.c
         liberx/backend/fiasco/root_mem.h
         liberx/backend/fiasco/service.c
         liberx/backend/fiasco/service.h
+        liberx/backend/fiasco/service_task.c
+        liberx/backend/fiasco/service_task.h
         liberx/backend/fiasco/service_stubs.c
         liberx/backend/fiasco/service_wire.c
         liberx/backend/fiasco/service_wire.h
+        liberx/backend/fiasco/task.ld
+        liberx/backend/fiasco/task_start.c
+        liberx/backend/fiasco/task_start.h
         liberx/backend/fiasco/thread.c
         liberx/backend/fiasco/thread.h
         liberx/backend/fiasco/time.c
@@ -109,6 +121,8 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_task/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_park_driver.c'),
@@ -142,13 +156,15 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_task.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_task/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
         ),
@@ -162,7 +178,7 @@ module Erx
           pattern: /\berx_fiasco_vm_body\b/,
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.[ch]'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c'),
-                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c')],
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_task.c')],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { erx_fiasco_vm_body(0, 0, 0, 0, 0); }\n" }
         ),
         Chokepoints::Forbidden.new(
