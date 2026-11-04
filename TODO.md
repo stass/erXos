@@ -111,6 +111,104 @@ it; git history is the record of completed work.
   syntax-tree check the design's row names, which stays the pending
   `budget-counters` rule; a layout-compatible record under another name,
   cast from an `erx_budget_t` pointer, escapes the text rule.
+* [Medium] Kernel space core, `kernel/core/space.c`: the core keeps a
+  space's place in the tree and its run state, and decides creations
+  and the steps of the stop and deletion walks; what the design puts
+  beside it in `erx_space_t` is the integration's (WP16, WP25, WP39).
+  Each space's count of children whose exit records are not posted
+  belongs in `erx_space_attach`, the one place a child joins, and its
+  decrement beside the exit record's posting. A deletion's first
+  critical section must also invalidate the space's existence lock and
+  set the table's emptied flag
+  (`erx_cap_table_set_emptied`): the core unlinks the space under the
+  parent's lock and returns `ERX_DELETE_SPACE`, so the caller takes the
+  table's lock inside the parent's, which the lock order allows (a
+  space's lock at 3, a table's at 4), and sets the flag before dropping
+  either. It then empties the table through `erx_cap_slot_clear`, and
+  runs the destroy of any space whose last capability a clear removed
+  only after the table's lock is dropped, since that destroy takes a
+  space's lock. The walks' counted
+  references (each walk's root and held space), `erx_space_record_init` after
+  the allocation, the reaper's two free steps (`erx_space_free_ready`,
+  which runs exactly once, and `erx_space_unhold_parent`:
+  the object core should trap a second, and a counted reference rising from
+  zero, in debug and host builds), the threads' kill
+  list (`test/fixtures/space_driver.c` stands in for all of these) and
+  `erx_space_stop`'s refusal of the kernel's exit statuses are the call
+  layer's. The values of `ERX_EXIT_PARENT`,
+  `ERX_EXIT_RELEASED` and `ERX_EXIT_NOTHREAD` (`abi/erx_abi.txt`,
+  INT64_MIN + 1 to + 3) were chosen here, where the design names them
+  without values; confirm them before a runtime relies on them.
+* [Medium] Kernel space core, `kernel/core/space.c`: K27 asks that every
+  stop of a space be made by, or start, one of the two walks, but
+  `erx_space_stop` stops one space and leaves starting the walk to each
+  caller (the stop call, the last thread's exit, `ERX_EXIT_NOTHREAD`,
+  the destroy). Fold the root's stop into `erx_stop_walk_begin(walk,
+  root, status, stopper)`, reporting whether it stopped the root, and
+  drop the single-space stop, so every stop has its walk by
+  construction. Likewise the threads' order (new threads at the front,
+  killed ones at the end) is the caller's, and `erx_stop_step` trusts
+  the caller's report of the first thread; move the thread list into the
+  core with WP25.
+* [Medium] Kernel space integration (WP25, WP39), `include/erx/space.h`:
+  the core decides the walks and the exit word, and the space destroy is
+  the integration's. Split it into one space's own teardown (drain, empty
+  its table, detach its mapping records, withdraw its exit record, queue its
+  put), which `ERX_DELETE_SPACE` runs for each space and which starts no walk
+  and reads no close result, and the destroy (close, drain, stop, stop walk,
+  `erx_delete_walk_begin` and the step loop; a close that says `ERX_ESTALE`
+  or a begin that says DONE stops there, queuing no put). Add a chokepoint:
+  that one function is referenced only from the `ERX_DELETE_SPACE` handler,
+  with a test seeding a second caller. The queue of exit records and the
+  gate's `exits_dropped` are stand-ins in `test/fixtures/space_driver.c`
+  until the integration exists, and `erx_space_clear_caps` has no host test,
+  so K27's domain tests are what prove them: the fixture has one queue, so
+  it cannot show a record moved between receivers. The word's orders are
+  explored single-threaded; add a race when the post has its real path.
+* [Medium] Kernel exit records, `docs/design-kernel.md` ("A deletion takes the
+  record with it"): the withdrawal needs a place for each record, one ordering
+  lock and a word, because the record lives in the space it reports. Weigh
+  keeping a posted record in a small fixed record charged to the creator: it
+  pins no space, so the withdrawal, the word and the count go, the creator
+  learns of every end, and only a party that refuses to receive pays.
+* [Medium] Kernel space lifetime, `docs/design-kernel.md` ("Who owns a
+  deletion"): a deletion below a space rests on the thread of the call that
+  unlinked it, and that thread's group may be unscheduled, leaving the spaces
+  below stopped but undeleted and their capabilities answering, one chain
+  per stalled call (Security states it). Owner's decision before the security
+  closure milestone: run the rest of a begun deletion at the finishing level;
+  or keep a space listed until its parts end, so a second walker shares them
+  and descends, as stop walks do (recommended, since it removes the
+  dependence on another's thread); or keep the stated limit.
+* [Medium] Kernel objects, `docs/design-kernel.md` ("Closing and deleting"):
+  a deleted IRQ object leaves one last delivery at its target, and a posted
+  delivery holds a counted reference on its object until it is taken, so a
+  target that never receives keeps the IRQ object's record, on whatever
+  budget paid for it. Decide it as a space's exit record is decided
+  (withdraw and count at the target) or state the bound in Security.
+* [Low] Program end, `docs/design-runtime.md` and `docs/design-programs.md`
+  ("A program's end"): the runtime has the handler destroy the anchor, and
+  the programs design has it destroy the program's budget. Both delete the
+  tree; one should be the stated step.
+* [Low] Kernel space status, `abi/erx_abi.txt`: `ERX_EXIT_RELEASED` is seldom
+  received, since a destroy withdraws or drops the record of a space it
+  stops. Decide whether it still earns its place in the status set.
+* [Low] Space core tests, `test/fixtures/space_model.rb`: the model cannot
+  represent a table emptied by `erx_space_clear_caps` before its space's
+  deletion, since it holds `emptied` equal to deleting; add a `clear` command
+  when the call exists.
+* [Medium] Space core tests, `test/host/space_test.rb`: the
+  acquire/release claims on a space's run word and the publication of
+  the first stop's status and stopper are exercised single-threaded
+  only; add a ThreadSanitizer race of stops, walks and `erx_space_read`
+  and list it in `tools/erx check-sanitizers`. The state assertions match
+  regular expressions over the driver's positional state line, and the
+  refusal table spells raw `plan` commands; parse the line into named
+  fields and give the refusals a keyword helper. Untested: a
+  `parent_self` request naming another record, `erx_space_init_first`'s
+  refusals, `erx_space_attach` with object 0, and the ancestry check
+  ahead of the depth limit (no case has a parent outside the tree at the
+  deepest level).
 * [Medium] Kernel invalidation planner, `kernel/core/tlb_plan.c`: a
   cleared table entry carries its span in bytes, and the planner accepts
   any aligned power of two of at least two pages, so a range call that

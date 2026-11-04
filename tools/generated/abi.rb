@@ -3921,6 +3921,17 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["exit_kind"] = EnumType.new(
+        name: "exit_kind".b,
+        base: types.fetch("i64"),
+        members: {
+          "nothread".b => -9223372036854775805,
+          "parent".b => -9223372036854775807,
+          "released".b => -9223372036854775806
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       types["fault_kind"] = EnumType.new(
         name: "fault_kind".b,
         base: types.fetch("u32"),
@@ -6345,6 +6356,15 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["space_flags"] = EnumType.new(
+        name: "space_flags".b,
+        base: types.fetch("u32"),
+        members: {
+          "jit".b => 1
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
       types["system_manifest_path"] = BytesType.new(
         name: "system_manifest_path".b,
         size: 15,
@@ -7571,6 +7591,7 @@ module Erx
           "erx_vcpu".b,
           "erx_utcb".b,
           "erx_kupage".b,
+          "exit_kind".b,
           "fault_kind".b,
           "erx_fault".b,
           "erx_crash_brief".b,
@@ -7611,6 +7632,7 @@ module Erx
           "seg_flags".b,
           "erx_image_segment".b,
           "erx_image_manifest".b,
+          "space_flags".b,
           "system_manifest_path".b,
           "uaddr".b,
           "upage".b,
@@ -8221,6 +8243,24 @@ module Erx
             value: -14,
             type: types.fetch("i32"),
             description: "executor made a call that would wait".b
+          ).freeze,
+          "exit_nothread".b => Constant.new(
+            name: "exit_nothread".b,
+            value: -9223372036854775805,
+            type: types.fetch("i64"),
+            description: nil
+          ).freeze,
+          "exit_parent".b => Constant.new(
+            name: "exit_parent".b,
+            value: -9223372036854775807,
+            type: types.fetch("i64"),
+            description: nil
+          ).freeze,
+          "exit_released".b => Constant.new(
+            name: "exit_released".b,
+            value: -9223372036854775806,
+            type: types.fetch("i64"),
+            description: nil
           ).freeze,
           "fault_alignment".b => Constant.new(
             name: "fault_alignment".b,
@@ -9377,6 +9417,18 @@ module Erx
           "slice_min_us".b => Constant.new(
             name: "slice_min_us".b,
             value: 500,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "space_depth_max".b => Constant.new(
+            name: "space_depth_max".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "space_jit".b => Constant.new(
+            name: "space_jit".b,
+            value: 1,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

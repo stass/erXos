@@ -114,6 +114,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ETIMEDOUT` | -9 |
 | `ERX_ETYPE` | -3 |
 | `ERX_EWOULDBLOCK` | -14 |
+| `ERX_EXIT_NOTHREAD` | -9223372036854775805 |
+| `ERX_EXIT_PARENT` | -9223372036854775807 |
+| `ERX_EXIT_RELEASED` | -9223372036854775806 |
 | `ERX_FAULT_ALIGNMENT` | 4 |
 | `ERX_FAULT_ASYNC_ERROR` | 7 |
 | `ERX_FAULT_BREAKPOINT` | 5 |
@@ -307,6 +310,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SEG_GUARDED` | 1 |
 | `ERX_SLICE_MAX_US` | 50000 |
 | `ERX_SLICE_MIN_US` | 500 |
+| `ERX_SPACE_DEPTH_MAX` | 64 |
+| `ERX_SPACE_JIT` | 1 |
 | `ERX_TLB_BY_ADDRESS_MAX` | 64 |
 | `ERX_URGENCY_MAX` | 63 |
 | `ERX_USER_BASE_MIN` | 65536 |

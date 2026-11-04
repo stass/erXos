@@ -206,7 +206,7 @@ Three layers carry them:
 | **B7.** A crash record read from the console is valid or reported as truncated or corrupt | the frame's header fixes the form and the exact length, the reader reads exactly that many lines and no more, and accepts only a record whose fields check against its form | a reader that accepts a prefix, a length outside the form, or a record whose form differs from the frame's | the reader's fuzz target and its truncated and corrupt fixtures |
 | **B8.** The stack proof's claim covers the C17 cores only | the proof's entry list is the cores' exported functions, its allowance is a declared share of Fiasco's thread block, and its report names that scope | a report line that names the kernel stack | the report's wording test |
 | **B9.** A page is in exactly one of a live reserve, a backing's hand, the released list or the allocator's free lists, and only the funnel moves it | the funnel charges a reserve and backs it, in the same call, with whole single pages from Fiasco's page allocator, and from the released list when the allocator is empty; a held page is reachable from exactly one reserve (a budget's cache, a thread, a space, a memory object), comes into use only through `erx_reserve_take`, and leaves its reserve only through `erx_page_release`, which appends it to the released list and then refunds its charge; `erx_released_take` alone takes a page off the list, for the reaper's free step, which returns mature pages to the allocator, or for a backing, which waits their grace period itself; so pages held plus pages in backings' hands plus pages released plus pages free is the root budget's guarantee at every instant between parts; Fiasco's slab caches and byte-granular quota are not built, so an inherited callee that still names them fails the link, and the raw page allocator's call sites in the linked kernel are the funnel, the free step and boot-time code | a glue call of the raw allocator; an inherited callee that allocates below the glue; a fault path that reaches the raw allocator; a record that keeps a page after its release; a page returned to the allocator by anything but the free step; a release that refunds before it appends | the glue's import allowlist; the raw allocator's call-site check over the linked kernel's disassembly, with a seeded inherited caller and a seeded fault-path caller failing the build; the released list's append referenced only from `erx_page_release` and its unlink only from `erx_released_take`, with a seeded release that refunds first; the accounting check at the end of the conformance run, which finds the funnel's count of held pages plus the pages in backings' hands plus the released list's length plus the allocator's free count equal to the root budget's guarantee, with a seeded uncharged page failing it, and the kernel design's host model of the accounting for the budget side (K32) |
-| **B10.** One destroy wins, and an object is freed once | the existence lock's invalidation is one fetch-or whose old value names the winner; the loser destroys nothing; `refs` is the one count, held by the creation, by threads and by queued requests, and the reaper frees at zero | a second `initiate_deletion`; a per-type reference count; a put that frees; a queued request naming an object it does not hold | the chokepoint rows of [design-kernel.md](design-kernel.md#chokepoint-checks) for the deletion core, applied to the fork; a hosted test that races two destroys of one object under ASan; a hosted test that destroys an IRQ object while its delivery is queued at a thread of another CPU, with the request's reference seeded away and ASan reporting the use |
+| **B10.** One destroy wins, and an object is freed once | the existence lock's invalidation is one fetch-or whose old value names the winner; the loser destroys nothing, but for the walk that unlinks a space, which runs that space's teardown and put whoever won; `refs` is the one count, held by the creation, by threads and by queued requests, and the reaper frees at zero | a second `initiate_deletion`; a per-type reference count; a put that frees; a queued request naming an object it does not hold | the chokepoint rows of [design-kernel.md](design-kernel.md#chokepoint-checks) for the deletion core, applied to the fork; a hosted test that races two destroys of one object under ASan; a hosted test that destroys an IRQ object while its delivery is queued at a thread of another CPU, with the request's reference seeded away and ASan reporting the use |
 | **B11.** No register record from user memory reaches a frame unchecked | the thread core admits a record only through the generated `erx_regs_admit`, which refuses any bit of `state`, `fp_control` or `fp_status` outside the architecture file's user mask, and stores it in the thread's record; the glue's one loader, `Erx::regs_load`, copies from that record and adds the fixed bits; no glue function takes a register record | a glue function with an `erx_regs_t` or `erx_uframe_t` parameter; a write of the frame's processor state outside the loader; an admit that masks instead of refusing | the glue's signature and field checks, with a seeded parameter and a seeded write failing the build; the conformance cases that create, write and resume with a privileged bit set and get `ERX_EINVAL`; the generator's test of `erx_regs_admit` with a seeded mask that admits a mode bit |
 
 ## Data model
@@ -667,7 +667,7 @@ The capability core is the kernel design's, applied to Fiasco's objects
 through the header: a creation installs the new object into the
 creator's table with `erx_cap_install`; `erx_cap_dup` adds a slot to the
 object's list, where Fiasco's object map would; `erx_cap_close` and the
-emptying walk clear slots only through `erx_cap_slot_clear`; the lookup
+deletion core clear slots only through `erx_cap_slot_clear`; the lookup
 reads a slot under its sequence count and takes no lock
 ([Objects and capabilities](design-kernel.md#objects-and-capabilities)).
 The locks are Fiasco's, in the header's storage: the capability lock is
@@ -695,7 +695,12 @@ Four things make it hold in full on the fork:
   that passed lookup before the close, a release racing a delete, a
   budget's destroy, finds it set and returns, destroying nothing. Only
   the winner pushes the object onto a reap list, through the header's
-  `rcu` link; `Kobject::initiate_deletion` is not built.
+  `rcu` link; `Kobject::initiate_deletion` is not built. A task is the one
+  case where the winner is not the one that finishes: its result decides
+  which destroy goes on to the stop walk and the deletion walk, and the walk
+  that unlinks the task runs its teardown and pushes it, whatever that
+  result was; a winner whose begin finds the task unlinked stops there
+  ([Creating spaces](design-kernel.md#creating-spaces)).
 * **One reference count.** `refs` in the header is the only count:
   one for the creation, one for each thread that keeps the object across
   a preemption point, never across a wait of the funnel (K33), one for
@@ -779,18 +784,29 @@ Four things make it hold in full on the fork:
   holding no record is that page released, which refunds the page to
   its budget as any release does. `Kobject::put` on the fork is that drop, one implementation
   for every type; the per-type `put` overrides that freed a thread or
-  dropped a gate's thread are deleted.
+  dropped a gate's thread are deleted. A space's record, the `Task`, is
+  freed only after every child's record
+  ([Creating spaces](design-kernel.md#creating-spaces)): at zero the reaper
+  makes the readiness step, `erx_space_free_ready`, and leaves a record
+  with a child's record unfreed; the free step calls
+  `erx_space_unhold_parent` before the memory goes, and queues on the
+  reaper the free step of a parent whose last hold that dropped, so a chain goes one level per round,
+  by no recursion, at most `ERX_SPACE_DEPTH_MAX` long. A child's parent
+  pointer is therefore valid for the child's whole life.
 
 **Space teardown.** `Task::destroy` on the fork does not call
 `fpage_unmap` over the mapping database, which holds no erXos mapping
-and would skip every one of them (`map_util.cpp`). It runs three steps
-in the order the stop binding fixes
-([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)).
-First the stop binding's part: the stop of the space and the kill
-request to each of its threads. Then the emptying walk of the
-capability table, in bounded parts through `erx_cap_slot_clear`: the
-walk that `erx_space_clear_caps` runs for a holder of `CAPS` from M5,
-run by every destroy from M1, since a destroyed space's slots must go.
+and would skip every one of them (`map_util.cpp`). It first makes the stop binding's part, in the order that binding fixes
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)):
+the stop of the space, the kill request to each of its threads and the
+stop walk of its tree. It then runs the deletion walk of the task's tree
+once, from the root, and for each task the walk unlinks, the root included,
+runs that task's own teardown through one function, which starts no walk
+and does not read the close's result. That teardown is two steps. First
+the emptying of the capability table, in bounded parts through
+`erx_cap_slot_clear`: the emptying that `erx_space_clear_caps` runs for a
+holder of `CAPS` from M5, run by every deletion from M1, since a deleted
+space's slots must go.
 Then the C17 space teardown: in bounded parts, each mapping record is
 detached from its object's reverse map and its translation entries
 cleared through `erx_tlb_plan`, applied by `Mem_unit`; the plan's last
@@ -800,7 +816,8 @@ through `erx_page_release`, as `erx_vm_unmap` does, and invalidates
 the space's ASID. The root directory it keeps: every entry of it is
 cleared by then, so it translates nothing, and it stays the space's one
 held page, `_dir` and `_dir_phys` pointing at it, until the space's
-record is freed. The reason is the fork's finishing threads: a thread
+record is freed, which on the fork also waits for every child's record,
+since the destructor that releases it runs at the free. The reason is the fork's finishing threads: a thread
 of the stopped task runs the rest of its call on its own CPU and dies
 at its return boundary
 ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#stop-and-exit)),
@@ -824,7 +841,7 @@ has dropped its reference on the space and the grace period has ended,
 so no CPU can switch into the space again; a debug build asserts in
 `make_current` that the page `_dir_phys` names is held. So every page
 the space held but one is on the released list, its charge ended,
-before the destroy returns, and only the reaper's free step turns it
+before the call that unlinked the task returns, and only the reaper's free step turns it
 free; the one page follows at the record's free, as a thread's block
 does. The destroy
 does not wait for the exit record, which the stop binding posts at the
@@ -1205,7 +1222,7 @@ alone.
   counted reference it holds on the thread, which the handler's result
   hands to the dispatch for the installation of the capability in the
   creator's table; a refused insert destroys the unpublished thread
-  through the ordinary deletion walk, which releases the block, an
+  through the ordinary deletion, which releases the block, an
   installation that fills no slot destroys the published thread the
   same way, and a budget destroyed meanwhile
   closes and drains the construction record, which cancels the backing
@@ -1548,8 +1565,8 @@ thread stay `Thread_ptr::Invalid` for every thread: no path calls
 built, so no code in a space can redirect its faults.
 
 **The root space** is the one space without a parent: the root plan
-creates it so, and `erx_space_create` always records the caller's space
-as the parent, so no other space is ever without one, and nothing can
+creates it so, and `erx_space_create` always records a parent, the
+caller's space or a space below it, so no other space is ever without one, and nothing can
 take the root's parent away. That identity, not the absence of a fault
 gate, routes the root's faults: a fault record whose space has no parent
 reaches `erx_panic` with cause `FAULT` and the record, writes the crash

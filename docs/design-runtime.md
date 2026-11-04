@@ -1227,9 +1227,9 @@ signal's default action and for a fault, as `erx_prog:status/1` reads it
 then stops the anchor with the same status, which ends the program's
 children and their trees. When the anchor's exit record arrives, which
 the kernel posts only after every space below it has ended, the handler
-has the driver empty the tree's tables with `erx_space_clear_caps`,
-close the session's capabilities to the anchor, the image, the budget and
-the group, and close the port, which releases the channel, the data area
+has the driver destroy the anchor, which deletes the tree whatever
+capabilities its spaces hold to each other, and close the session's
+capabilities to the image, the budget and the group, and close the port, which releases the channel, the data area
 and the program's memory to the session's budget. Closing the port from
 the Erlang side, by `port_close/1` or the owner's exit, stops the anchor
 with `ERX_EXIT_SIGNAL` plus `SIGKILL`, and the command server reaps the

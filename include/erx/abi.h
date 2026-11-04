@@ -120,6 +120,9 @@ struct erx_rights {
 #define ERX_ETIMEDOUT (-INT32_C(9))
 #define ERX_ETYPE (-INT32_C(3))
 #define ERX_EWOULDBLOCK (-INT32_C(14))
+#define ERX_EXIT_NOTHREAD (-INT64_C(9223372036854775805))
+#define ERX_EXIT_PARENT (-INT64_C(9223372036854775807))
+#define ERX_EXIT_RELEASED (-INT64_C(9223372036854775806))
 #define ERX_FAULT_ALIGNMENT UINT32_C(4)
 #define ERX_FAULT_ASYNC_ERROR UINT32_C(7)
 #define ERX_FAULT_BREAKPOINT UINT32_C(5)
@@ -313,6 +316,8 @@ struct erx_rights {
 #define ERX_SEG_GUARDED UINT32_C(1)
 #define ERX_SLICE_MAX_US UINT32_C(50000)
 #define ERX_SLICE_MIN_US UINT32_C(500)
+#define ERX_SPACE_DEPTH_MAX UINT32_C(64)
+#define ERX_SPACE_JIT UINT32_C(1)
 #define ERX_TLB_BY_ADDRESS_MAX UINT32_C(64)
 #define ERX_URGENCY_MAX UINT8_C(63)
 #define ERX_USER_BASE_MIN UINT64_C(65536)
@@ -1515,6 +1520,8 @@ _Static_assert(offsetof(erx_kupage_t, utcb) ==
 _Static_assert(offsetof(erx_kupage_t, vcpu) ==
     ERX_KUPAGE_OFF_VCPU, "erx_kupage.vcpu offset");
 
+typedef int64_t erx_exit_kind_t;
+
 typedef uint32_t erx_fault_kind_t;
 
 #define ERX_FAULT_SIZE 48
@@ -2247,6 +2254,8 @@ _Static_assert(offsetof(erx_image_manifest_t, base_alignment) ==
     ERX_IMAGE_MANIFEST_OFF_BASE_ALIGNMENT, "erx_image_manifest.base_alignment offset");
 _Static_assert(offsetof(erx_image_manifest_t, segments) == ERX_IMAGE_MANIFEST_SIZE,
     "erx_image_manifest.segments offset");
+
+typedef uint32_t erx_space_flags_t;
 
 typedef uint8_t erx_system_manifest_path_t[15];
 #define ERX_SYSTEM_MANIFEST_PATH_SIZE 15

@@ -724,11 +724,15 @@ edge", and the count reaches zero exactly then.
 teardown or the stopper of a space with no live thread, holds no lock
 and performs three steps in this order:
 
-1. **Post.** Fills the space's `Exit_sender` with the record, kind
-   `exit`, the first stop's status and stopper, takes `erx_object_ref`
-   on the space for the delivery, and sends it to the fault gate's
-   bound thread as an IRQ delivery is sent: resolved under the gate's
-   lock, at the receiver's home CPU through `Erx::request`, the
+1. **Post.** Makes `erx_space_exit_post`: a second post does nothing, and a
+   post that finds the deletion begun drops the record, counted, taking
+   no reference. Otherwise it fills the space's `Exit_sender` with the
+   record, kind `exit`, the first stop's status and stopper, takes
+   `erx_object_ref` on the space for the delivery, and sends it to the
+   fault gate's bound thread as an IRQ delivery is sent: resolved under
+   the gate's lock, where it asks `erx_space_exit_waits`, drops the
+   record, counted, with its reference, when that says false, and
+   records the place, at the receiver's home CPU through `Erx::request`, the
    unwaited request, when that is another CPU, taken at once by an open
    wait or queued at the thread as a sender of `ERX_URGENCY_MAX`. The
    delivery's reference goes with the record through every queue it
@@ -737,7 +741,11 @@ and performs three steps in this order:
    that takes the record, the receive that completes the send, or
    withdraws it: a receiver that dies with the delivery queued
    withdraws it in its kill continuation to the gate's next binding or
-   holds it at the gate, the reference still held; a gate destroyed
+   holds it at the gate, the reference still held, by the same placement
+   under the gate's lock; the space's deletion withdraws a record it
+   finds posted, under that lock, through `Erx::request` to the thread the
+   place names, on a node of its own, or off `att_blocked` itself
+   ([Threads and faults](design-kernel.md#threads-and-faults)); a gate destroyed
    with the record on its list, or a space whose gate is gone, drops
    the record, counted, and its reference with it; the root space,
    which has no gate, takes the kernel design's route to `erx_panic`
@@ -806,8 +814,10 @@ that may run (K14).
 **A space's teardown.** The space's destroy, from `erx_object_destroy`,
 a release or its budget's destroy, runs this binding's part first:
 `STOP` with `ERX_EXIT_RELEASED` when the word is `LIVE`, the walk, and,
-on `CLAIM`, the post and publication; then the emptying walk of the capability table in
-bounded parts through `erx_cap_slot_clear`; then the mapping teardown of
+on `CLAIM`, the post and publication, a record whose space's deletion
+has begun being dropped and counted at its gate; then the deletion walk,
+which withdraws a waiting exit record and empties the capability table of
+each task it reaches in bounded parts through `erx_cap_slot_clear`; then the mapping teardown of
 [design-stopgap.md](design-stopgap.md#deletion). The destroy does not
 wait for `EXITED`: each thread dies on its own path, the record posts at
 the last death, and the space's record stays until its last reference
@@ -1244,7 +1254,8 @@ changes the request, the funnel, the finishing priority or the run word.
 * **Unwaited requests.** A delivery queued at a thread through
   `Erx::request` may run after an eager abort of that thread's wait, or
   after its kill; its handler decides from its object's binding under
-  the object's lock, never from the order, and what is queued at a
+  the object's lock, and an exit record's from the placement made under
+  its gate's lock, never from the order, and what is queued at a
   dying thread when it writes its dead mark is run or cancelled by its
   kill continuation's drain of the closed queue, in parts
   ([design-stopgap.md](design-stopgap.md#stop-and-exit-the-binding)).
@@ -1405,7 +1416,7 @@ each stated there:
   the death order above places it;
 * a thread's FP state is inline in its block, so the kill moves and
   frees none;
-* the space's teardown runs this binding's stop and emptying before the
+* the space's teardown runs this binding's stop and deletion walk before the
   mapping teardown, and the root space is the one without a parent;
 * the generated dispatch marks `erx_space_stop`, the IPC waits,
   `erx_umtx_wait` and `erx_park` with their executor attribute,
