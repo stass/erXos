@@ -85,7 +85,7 @@ class ManifestTest < Minitest::Test
   end
 
   def test_root_budget_overcommit_is_refused
-    source = @source.sub('root_memory 1073741824', 'root_memory 33554432')
+    source = @source.sub('root_memory 402653184', 'root_memory 33554432')
     error = assert_raises(Erx::Manifest::Invalid) { fixture(source) }
     assert_equal 4, error.property
   end
@@ -102,7 +102,7 @@ class ManifestTest < Minitest::Test
                                 'file_size' => 0, 'mem_size' => 8_388_608,
                                 'prot' => @codec.member('prot', 'rw'), 'flags' => 0 }
     context = Erx::Manifest::Context.new(**arguments)
-    source = @source.sub('root_memory 1073741824', 'root_memory 4096')
+    source = @source.sub('root_memory 402653184', 'root_memory 4096')
                     .sub('system_baseline 67108864', 'system_baseline 1')
                     .sub('memory 268435456', 'memory 0')
     error = assert_raises(Erx::Manifest::Invalid) { fixture(source, context) }

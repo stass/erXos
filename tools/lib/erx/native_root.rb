@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'fileutils'
+require 'json'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'pack_provenance'
 
 module Erx
   # A program that runs as the root task on Fiasco: C17 from liberx's fiasco
@@ -29,8 +32,8 @@ module Erx
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c].freeze
-    # The root's way to a task's program: the record and archive, and the launcher.
-    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c kernel/core/boot_handoff.c].freeze
+    # The root's way to the archive: the record, the launcher and the manifest's reader.
+    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c kernel/core/boot_handoff.c liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
     # threads it reaches the service through.
     TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c
@@ -62,6 +65,27 @@ module Erx
       build(name: 'stopgap-root', sources: SYSTEM, directory: directory)
     end
 
+    # The system's root task with the receipt that binds it to what the link took: its
+    # objects, their dependency files and the link map (PackProvenance reads these). The
+    # dependency files leave out Fiasco's and the compiler's headers, system headers
+    # here, so the receipt names erXos's own sources and Fiasco's audit answers for the
+    # rest. Returns the program, its receipt, and every file those name.
+    def build_system_receipted(directory:)
+      program = build_system(directory: directory)
+      compiles = SYSTEM.map { |source| compile_record(source, directory: directory) }
+      linked = {
+        'version' => 1, 'kind' => 'linked', 'artifact' => reference(program),
+        'linker_map' => reference(map_path(program)).merge('format' => 'lld', 'directory' => '.'),
+        'compiles' => compiles, 'archives' => [], 'inputs' => [reference(File.join(@root, LINK_SCRIPT))]
+      }
+      receipt = File.join(directory, 'stopgap-root.receipt.json')
+      File.write(receipt, JSON.pretty_generate(linked) + "\n")
+      named = compiles.flat_map { |record| [record.fetch('object'), record.fetch('dependency'), *record.fetch('sources')] }
+      inputs = [program, map_path(program), receipt, File.join(@root, LINK_SCRIPT),
+                *named.map { |file| File.expand_path(file.fetch('path'), @root) }].uniq
+      { program: program, receipt: receipt, inputs: inputs.freeze }.freeze
+    end
+
     # A task's program for the boot image: fixed addresses, as task.ld gives.
     def build_task(name:, sources:, directory:, flags: [])
       build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT)
@@ -77,7 +101,8 @@ module Erx
       objects = sources.map { |source| compile(source, directory: directory, flags: flags) }
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, *objects, *archives, @fiasco.boot_core_archive, *libraries],
+      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-Map', map_path(program), '-o', program, *objects, *archives,
+                   @fiasco.boot_core_archive, *libraries],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program
     end
@@ -85,11 +110,26 @@ module Erx
     private
 
     def compile(source, directory:, flags:)
-      object = File.join(directory, "#{source.tr('/', '_').tr('.', '_')}.o")
+      object = object_path(source, directory)
       headers = @fiasco.user_include_directories.flat_map { |path| ['-isystem', path] }
-      @runner.run([@compiler, *FLAGS, *flags, *headers, '-c', source, '-o', object],
+      @runner.run([@compiler, *FLAGS, *flags, *headers, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object],
                   name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source)
       object
+    end
+
+    def object_path(source, directory) = File.join(directory, "#{source.tr('/', '_').tr('.', '_')}.o")
+
+    def map_path(program) = "#{program}.map"
+
+    def compile_record(source, directory:)
+      object = object_path(source, directory)
+      _targets, sources = PackProvenance.dependencies(File.binread("#{object}.d"))
+      { 'object' => reference(object), 'dependency' => reference("#{object}.d"), 'directory' => '.',
+        'sources' => sources.map { |path| reference(File.expand_path(path, @root)) } }
+    end
+
+    def reference(path)
+      { 'path' => path.delete_prefix("#{@root}/"), 'sha256' => Digest::SHA256.file(path).hexdigest }
     end
   end
 end

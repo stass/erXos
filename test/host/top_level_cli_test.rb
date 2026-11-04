@@ -166,10 +166,10 @@ class TopLevelCliTest < Minitest::Test
     assert_empty step_commands(commands, 'host-tests')
   end
 
-  def test_production_pack_reports_unsupported_startup
-    status, output = run_cli('pack')
-    assert_equal 1, status
-    assert_includes output, 'unsupported root_startup'
+  def test_production_pack_takes_no_arguments
+    status, output = run_cli('pack', 'extra')
+    assert_equal 2, status
+    assert_includes output, 'unexpected arguments'
   end
 
   def test_commands_refuse_unsupported_collaborators

@@ -319,8 +319,8 @@ generated file and finds it unchanged.
   ([design-kernel.md](design-kernel.md#chokepoint-checks)).
 * The boot-image format: test tooling writes deterministic `ERXPACK`
   version 2 structural fixtures with `NOTICES`, checked by the host-built
-  C17 validator and its fuzz target. Production `tools/erx pack` refuses
-  output until the real startup planner is available, as specified below.
+  C17 validator and its fuzz target. Production `tools/erx pack` arrives at
+  M1, with the Phase 1 manifest check, as specified below.
 * The TLA+/TLC runner and its tested expectation classification, private
   work directories and hard deadlines, `make check-tla` as a separate gate,
   tool version/hash pin and setup diagnostics
@@ -341,8 +341,8 @@ UTCB, kernel objects, private image memory or bootstrap allocations.
 
 Only test tooling writes these fixtures. They carry no new wire flag and
 cannot construct the production `Admitted` value or bypass its publisher.
-`Manifest.admit` and production packing remain blocked on the real
-initial-root feasibility/charge plan, even when no child is configured.
+Production packing waits for M1's manifest check, whose root startup rule
+stands in for the real initial-root feasibility/charge plan until Track K.
 The root image's checked private-memory lower bound is still enforced;
 a sufficient declared baseline alone is not a startup proof. The separate
 M0 guest demo boots the frozen Fiasco set to its banner and does not claim

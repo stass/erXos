@@ -58,7 +58,7 @@ machine
   console "/uart@0"
   hostlink ""
   platform "fixture"
-  root_memory 1073741824
+  root_memory 402653184
   system_baseline 67108864
   system_share @share.system
   users_share @share.users

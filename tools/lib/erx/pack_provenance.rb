@@ -16,8 +16,10 @@ module Erx
   # requests an image. External files require exact reviewed registry entries.
   class PackProvenance
     MAX_METADATA = 64 * 1024 * 1024
-    def initialize(root:, catalog:, external: [], imports: {}, runner: nil, archive_program: 'llvm-ar')
+    # compiler is the clang that built Fiasco's C17 cores, which Fiasco's audit records.
+    def initialize(root:, catalog:, external: [], imports: {}, runner: nil, archive_program: 'llvm-ar', compiler: nil)
       @root = File.realpath(root)
+      @compiler = compiler
       raise Error, 'source checking requires a catalog from its trusted builder' unless catalog.is_a?(BuildInputs)
       @catalog = catalog
       @external = {}
@@ -242,16 +244,25 @@ module Erx
         notices = source.fetch('notices', []) + selected.fetch('grants').flat_map do |grant|
           fresh.fetch('license_notices', {}).fetch(grant, [])
         end
-        attribute(File.expand_path(path, @root), records, build_kind,
-                  additional_notices: notices, public_path: source['original_source'])
+        # A file erXos added to the fork is in no import's inventory, nor is a core's copy
+        # under Fiasco's inputs, so the audit's finding is their attribution. An addition
+        # takes erXos's own license for its notice.
+        addition = source['evidence'].to_s.start_with?('erXos addition')
+        notices += [{ 'path' => 'LICENSE', 'sha256' => @catalog.entry(File.join(@root, 'LICENSE')).fetch('sha256') }] if addition
+        attribute(File.expand_path(path, @root), records, build_kind, additional_notices: notices,
+                  public_path: source['original_source'], audited: source)
       end
     end
 
     def fresh_fiasco_audit
-      external = FiascoProvenance.external_registry(root: @root)
-      auditor = FiascoProvenance.new(root: @root, runner: @runner, external: external)
-      fresh = auditor.audit
-      [external, fresh, auditor.input_catalog]
+      # One audit answers every receipt of this resolver: it reads the whole of Fiasco's
+      # build, and an image names that build once per entry and again at its snapshot.
+      @fiasco_audit ||= begin
+        external = FiascoProvenance.external_registry(root: @root, compiler: @compiler)
+        auditor = FiascoProvenance.new(root: @root, runner: @runner, external: external, compiler: @compiler)
+        fresh = auditor.audit
+        [external, fresh, auditor.input_catalog].freeze
+      end
     end
 
     def resolve_link(receipt, records:, build_kind:)
@@ -314,7 +325,8 @@ module Erx
           key = "#{File.expand_path(archive, directory)}(#{member}"
           object = archive_members[key]
           unless object
-            archive_path = File.expand_path(archive, directory)
+            # A registered archive is keyed by its real path; a link names it as the search path does.
+            archive_path = File.realpath(File.expand_path(archive, directory))
             if @external.key?(archive_path)
               attribute(archive_path, records, build_kind)
               next
@@ -336,7 +348,7 @@ module Erx
       inputs.each { |input| attribute(checked_file(input).fetch('path'), records, build_kind) }
     end
 
-    def attribute(path, records, build_kind, additional_notices: [], public_path: nil)
+    def attribute(path, records, build_kind, additional_notices: [], public_path: nil, audited: nil)
       path = authorized_path(path)
       additions = additional_notices.map { |notice| verified_read(notice, maximum: @notice_limit) }
       document_references = additional_notices.map { |notice| notice_reference(notice) }
@@ -369,8 +381,12 @@ module Erx
       elsif path.start_with?(@root + '/')
         label = path.delete_prefix(@root + '/')
         origin_root = find_origin(File.dirname(path))
-        status = origin_root ? @imports.fetch(origin_root) { raise Error, "unregistered imported dependency: #{label}" } : 'permanent'
-        item = origin_root && imported_item(origin_root, path, bytes: bytes, label: label)
+        status = if origin_root
+                   @imports.fetch(origin_root) { audited ? 'permanent' : raise(Error, "unregistered imported dependency: #{label}") }
+                 else
+                   'permanent'
+                 end
+        item = origin_root && imported_item(origin_root, path, bytes: bytes, label: label, audited: audited)
         if item
           license = item.fetch('license')
           evidence = item.fetch('evidence')
@@ -433,11 +449,11 @@ module Erx
     # tree it lives in. A catalog may hold a file captured after the tree's
     # check, so the notice is read here from the hashed bytes; a file with
     # neither row nor notice has no licence to record.
-    def imported_item(origin_root, path, bytes:, label:)
+    def imported_item(origin_root, path, bytes:, label:, audited:)
       inventory = @catalog.find_import(origin_root)
-      raise Error, 'import source is absent from its checked catalog' unless inventory
+      raise Error, 'import source is absent from its checked catalog' unless inventory || audited
       relative = path.delete_prefix(origin_root + '/')
-      item = inventory.fetch('changes')[relative] || inventory.fetch('files')[relative]
+      item = (inventory && (inventory.fetch('changes')[relative] || inventory.fetch('files')[relative])) || audited
       raise Error, "unresolved imported input: #{label}" unless item || Attribution.erxos_addition?(bytes)
       item
     end

@@ -159,11 +159,41 @@ it; git history is the record of completed work.
   `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
   break under its older `json`. The oracle's `probe` operation should exercise a
   duplicate-key refusal there.
-* [Low] stopgap, `liberx/backend/fiasco/root.c`: the root has no path to the kernel command
-  line, so the system root's watchdog runs on `erx_watchdog_config_default` in normal mode,
-  `erx.watchdog` is parsed only by the suite's guest and `erx.det=1` does not reach it.
-  Nothing pets it either until M3's root does, so a system root that outlives its
-  60-second boot deadline ends the machine.
+* [Low] stopgap, `liberx/backend/fiasco/root.c`: the root holds `/chosen/bootargs` in its
+  handoff view (`bootargs`, `bootargs_len`, read in source) but nothing parses them and the
+  harness passes no `-append`, so the system root's watchdog runs on
+  `erx_watchdog_config_default` in normal mode, `erx.watchdog` is parsed only by the suite's
+  guest and `erx.det=1` does not reach it. Nothing pets it either until M3's root does, so a
+  system root that outlives its 60-second boot deadline ends the machine; the production
+  image ends the machine well before that. Parsing the arguments is M3's, with the first
+  consumer that outlives the deadline.
+* [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root reads the handoff record but writes no
+  `erx_boot_info` page, for itself or a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff)
+  says it does, and it seeds no `rng.c`. No consumer exists until ERTS's port, which starts there.
+* [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
+  places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
+  the host link's first consumer, M3.
+* [Medium] stopgap, `tools/lib/erx/production_image.rb`: the root's link attributes `libl4sys.p.a`,
+  `libsigma0.a` and the boot cores whole, under a license the recipe states, and its dependency
+  files leave out Fiasco's and the compiler's headers. The boot cores are stated as BSD-2-Clause
+  though the root takes BLAKE3's objects from them (BLAKE3's text is present only through the
+  audit and its header). `CoreArchive::Built.objects` maps cores to objects, so per-member records
+  are within reach for them; this comes before any distribution.
+* [Medium] stopgap, `tools/lib/erx/pack_provenance.rb`: an `assembled` receipt binds its artifact to
+  its components only by being written. The image packs `users/bin/.../sigma0` while Fiasco's audit
+  reads the unstripped `OBJ-.../sigma0`, so a stale installed `sigma0` would pass. The audit should
+  record the installed file and how it derives from the audited one.
+* [Medium] tooling, `tools/lib/erx/production_image.rb`: the device-path check dumps unversioned `virt`
+  on `cortex-a72` with two serial ports, not the `virt-11.1` machine the harness boots. Build the dump
+  from `QemuPlan`'s machine and CPU.
+* [Medium] stopgap, `liberx/backend/fiasco/root.c`: `root_memory_fits` is a pure decision with no
+  boundary test: the 512 and 256 MiB boots do not pin its formula. It belongs in a host-built core.
+* [Low] tooling, `tools/lib/erx/pack_provenance.rb`: `attribute` takes a file with no inventory row at
+  the audit's word and as `permanent`, whatever the audit's status, and `resolve_fiasco` picks out
+  erXos's additions by their evidence text. The audit should emit each one's status and notices.
+* [Low] stopgap, `liberx/backend/fiasco/vm.c`: the pool takes all of `sigma0`'s memory and only
+  checks it against `root_memory`; nothing keeps the excess for a later budget. Budgets over the
+  pool arrive with the domains they guard (M5).
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.

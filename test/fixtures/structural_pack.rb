@@ -20,38 +20,6 @@ module StructuralPackFixture
   BUDGET = 16 * 1_048_576
   module_function
 
-  def check_reproducible(root:, directory:, runner:, compiler: 'clang', linker: 'ld.lld')
-    directory = Erx::OutputDirectory.prepare(root: root, path: directory)
-    raise Erx::Error, 'structural reproducibility requires a clean directory' unless Dir.empty?(directory)
-    codec = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: root).schema)
-    tools = Erx::PackTools.build(root: root, owner_root: root, directory: File.join(directory, 'tools'), runner: runner,
-                                compiler: compiler, sanitizers: %w[address undefined])
-    resource = runner.run([compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
-    installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
-    external = Erx::ToolchainProvenance.registry(profile: File.join(root, 'config/provenance/llvm-23.1.3.json'),
-                                                installation: installation)
-    first, second = %w[first second].map do |name|
-      build(root: root, directory: File.join(directory, name), codec: codec, runner: runner,
-            tools: tools, compiler: compiler, linker: linker, external: external)
-    end
-    left, right = [first, second].map { |fixture| fixture.fetch('report') }
-    # Both forms: the archive of the two-file form and the single file,
-    # whose archive must equal the two-file archive.
-    archive = File.binread(left.fetch('path'))
-    single = File.binread(left.fetch('single_path'))
-    identical = archive == File.binread(right.fetch('path')) &&
-                single == File.binread(right.fetch('single_path')) &&
-                single.byteslice(-archive.bytesize, archive.bytesize) == archive
-    report = { 'kind' => 'structural_fixture_reproducibility', 'state' => identical ? 'completed' : 'failed',
-               'byte_identical' => identical, 'structure' => 'validated', 'executable' => 'validated',
-               'provenance' => 'validated', 'root_startup' => 'unsupported',
-               'policy_admission' => 'unsupported', 'child_plan_instances' => 0,
-               'first' => left, 'second' => right, 'report' => File.join(directory, 'result.json') }
-    File.write(report.fetch('report'), JSON.pretty_generate(report) + "\n")
-    raise Erx::Error, 'structural ERXPACK fixture differs across clean builds' unless identical
-    report.freeze
-  end
-
   # extra_files are further file entries, { path:, snapshot: }, which the wire
   # format carries and the manifest's catalog binds like any other.
   def build(root:, directory:, codec:, runner:, tools:, compiler:, linker:, external:, extra_files: [], first_stage: nil)

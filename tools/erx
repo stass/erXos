@@ -194,17 +194,20 @@ module Erx
 
     def self.check_reproducible(arguments)
       no_arguments(arguments)
-      require_relative '../test/fixtures/structural_pack'
+      require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       environment = host_environment(runner: runner)
+      compiler = environment.fetch('ERX_CLANG')
+      fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
+      fiasco.build(jobs: 4)
       parent = File.join(ROOT, 'build/reproducible')
       OutputDirectory.prepare(root: ROOT, path: parent)
-      directory = Dir.mktmpdir('structural-', parent)
-      report = StructuralPackFixture.check_reproducible(root: ROOT, directory: directory, runner: runner,
-                                                        compiler: environment.fetch('ERX_CLANG'),
-                                                        linker: environment.fetch('ERX_LLD'))
-      Terminal.puts("structural test fixture: byte-identical; #{report.fetch('report')}")
-      Terminal.puts('root_startup: unsupported; policy_admission: unsupported; child_plan_instances: 0')
+      report = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
+                              .check_reproducible(directory: Dir.mktmpdir('production-', parent))
+      Terminal.puts("production image: byte-identical; #{report.fetch('report')}")
+      claims = report.fetch('manifest')
+      Terminal.puts("root_startup: #{claims.fetch('root_startup')}; policy_admission: #{claims.fetch('policy_admission')}; " \
+                    "child_plan_instances: #{claims.fetch('child_plan_instances')}")
       0
     end
 
@@ -321,9 +324,21 @@ module Erx
       end
     end
 
-    def self.pack(_arguments)
-      Terminal.puts('unsupported root_startup: production packing requires the M1 initial-root startup and charge plan')
-      1
+    # Builds Fiasco and packs the production image into a fresh directory of build/.
+    def self.pack(arguments)
+      no_arguments(arguments)
+      require_relative 'lib/erx/production_image'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      environment = host_environment(runner: runner)
+      compiler = environment.fetch('ERX_CLANG')
+      fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
+      fiasco.build(jobs: 4)
+      parent = File.join(ROOT, 'build/production-image')
+      OutputDirectory.prepare(root: ROOT, path: parent)
+      built = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
+                             .build(directory: Dir.mktmpdir('image-', parent))
+      Terminal.puts("production image: #{built.single}; root_startup: #{built.report.fetch('manifest').fetch('root_startup')}")
+      0
     end
 
     # The stack proof alone, with the toolchain make check verifies.

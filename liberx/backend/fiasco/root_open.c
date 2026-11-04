@@ -12,9 +12,11 @@
 #include <l4/sys/kip.h>
 
 #include "erx/abi.h"
+#include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
 #include "erx/pack.h"
 #include "kernel/crypto/blake3/blake3.h"
+#include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_open.h"
 
 /* Where the root sees the kernel information page: no RAM on QEMU virt is here. */
@@ -66,5 +68,24 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 	if (!erx_pack_file_check(pack, pack->header.nentries - 1, &root_hasher,
 	    &pack_error))
 		return (pack_error.reason);
+	return (NULL);
+}
+
+const char *
+erx_fiasco_root_read_manifest(const erx_pack_view_t *pack, erx_manifest_view_t *manifest)
+{
+	erx_pack_error_t pack_error = { 0 };
+	erx_abi_error_t error = { 0 };
+	erx_pack_entry_t entry;
+	uint32_t index;
+
+	if (erx_fiasco_launcher_find(pack, ERX_SYSTEM_MANIFEST_PATH_STRING, &index) != ERX_OK ||
+	    !erx_pack_entry_at(pack, index, &entry))
+		return ("manifest: the archive holds none");
+	if (!erx_pack_file_check(pack, index, &root_hasher, &pack_error))
+		return (pack_error.reason);
+	if (!erx_manifest_open(pack->bytes + (size_t)entry.data_off, (size_t)entry.data_size,
+	    manifest, &error))
+		return (error.reason);
 	return (NULL);
 }

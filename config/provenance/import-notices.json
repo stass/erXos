@@ -2,6 +2,7 @@
   "version": 1,
   "licenses": {
     "Apache-2.0": [{"path": "otp/LICENSE.txt", "sha256": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"}],
+    "Apache-2.0 WITH LLVM-exception": [{"path": "kernel/crypto/blake3/LICENSE_A2LLVM", "sha256": "a5695f57ea0c221e0e8b7d784ff774c35e88c3d3270353646a925880bb3492cc"}],
     "BSD-2-Clause": [{"path": "otp/LICENSES/BSD-2-Clause.txt", "sha256": "06413eaf2855d173db853258579d9f8013d1599c8d7340adc32383ce658352af"}],
     "BSD-3-Clause": [{"path": "otp/LICENSES/BSD-3-Clause.txt", "sha256": "8fff43829a246bf63d422e0bde3ae6300ceed0be445a5d4d0a553f2781002d52"}],
     "MIT": [{"path": "otp/LICENSES/MIT.txt", "sha256": "c181eed254a608399a1059ddf5cb72cb1f1a5841a083aaa30f3e6713853ddf9f"}],

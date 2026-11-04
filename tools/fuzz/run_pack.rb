@@ -136,8 +136,7 @@ module Erx
           runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
                       *target.includes.flat_map { |path| ['-I', File.join(root, path)] },
-                      *target.sources.map { |source| File.join(root, source) },
-                      File.join(root, 'liberx/generated/abi_reader.c'),
+                      *[*target.sources, 'liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
                       File.join(root, "tools/fuzz/#{kind}_fuzz.c"), '-o', program],
                      name: "compile-#{kind}-fuzz", deadline: COMPILE_DEADLINE)
           runner.run([program, "-runs=#{runs}", '-max_len=32768', '-timeout=5',

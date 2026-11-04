@@ -47,6 +47,7 @@ class GateBaselineTest < Minitest::Test
                                             kernel/crypto/blake3/blake3_portable.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                                      kernel/crypto/blake3/blake3_portable.c] },
+    'manifest' => { seeds: 11, sources: %w[liberx/generated/abi_reader.c] },
     'sched' => { seeds: 5, sources: %w[kernel/sched/sched.c] },
     'sha256' => { seeds: 8, sources: %w[kernel/crypto/sha2/sha256c.c] },
     'space' => { seeds: 4, sources: %w[kernel/core/space.c kernel/core/cap.c] },
@@ -84,7 +85,7 @@ class GateBaselineTest < Minitest::Test
 
   # The suites the QEMU gate runs. The conformance roster's pending cases are
   # not a floor: they come and go as the calls they wait for land.
-  QEMU_SUITES = %w[boot_image conformance debug_log native_boot].freeze
+  QEMU_SUITES = %w[boot_image conformance debug_log native_boot production_image].freeze
 
   def test_the_qemu_gate_still_runs_every_suite
     assert_empty QEMU_SUITES - Erx::QemuGate.suites.map(&:name)

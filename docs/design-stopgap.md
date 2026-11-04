@@ -167,11 +167,13 @@ service's bodies directly.
    the archive, so the fault path maps it read-only by its sub-type: `l4sigma0_map_mem` is `sigma0`'s
    RAM request, which maps read, write and execute whatever the sub-type says (`memmap.cc:125`). After
    this step no page of the root is mapped on demand.
-4. Reads the manifest through its generated C reader, which allocates nothing, and the kernel command
-   line from the handoff view's `bootargs` ([The command line](#the-command-line)). Later steps take
-   device entries, wall offset, seed and the system's arguments from the first, and the watchdog's
+4. Finds the archive's `system_manifest_path` entry, checks its file hash and reads it through the
+   generated C reader, which allocates nothing and whose view stays in the archive, and reads the kernel
+   command line from the handoff view's `bootargs` ([The command line](#the-command-line)). Later steps
+   take device entries, wall offset, seed and the system's arguments from the first, and the watchdog's
    numbers and deterministic mode from the second.
-5. Builds the pool window and contiguous pools ([The pool](#the-pool)).
+5. Builds the pool window and contiguous pools ([The pool](#the-pool)). If the pool and the root's
+   image together hold less than the manifest's `root_memory`, it refuses the boot.
 6. Makes its own thread table ([Thread creation](#thread-creation)); fills the time page; seeds
    `rng.c`; writes its boot information page, flagged `ERX_BOOT_ROOT`; creates its gate, the service
    thread, stopped, with the `sigma0` gate as pager, and the watchdog with its configuration and start
@@ -279,6 +281,45 @@ diagnostic. A platform record without these numbers is not admitted. The
 
 A test task's program is a boot-image entry named by the boot argument
 `erx.test=PATH`, not a `partial_boot` record.
+
+## The production image
+
+`Erx::ProductionImage` (`tools/lib/erx/production_image.rb`) builds the image the
+system boots from, and `tools/erx pack` and `make check-reproducible` run it. Its archive
+comes through `Pack#build`, the one funnel that takes `Manifest::Admitted`, so nothing
+reaches it unadmitted. Test images keep `BootImage` and the structural recipe
+under `test/fixtures`, which `Manifest::StructuralFixture` feeds; the production path loads
+nothing from `test/fixtures`, and `production_image_test.rb` checks the loaded files.
+
+| Archive entry | Kind | What it is |
+| --- | --- | --- |
+| `boot_kernel_path`, `boot_sigma0_path` | file | Fiasco's kernel and `sigma0`, as `bootstrap` loads them |
+| `boot_stand_in_root_path` | file | the root as an ELF file, which `bootstrap` loads |
+| `system/root` | image | the same program as an image, the header's root entry, which the root startup rule sizes |
+| `system_manifest_path`, `system/NOTICES` | file | what `Pack#build` generates |
+
+The root is stored twice because `bootstrap` reads an ELF file while the archive's
+root entry is an image by the validator's rule. Track K's planner loads the image
+and the file goes.
+
+**Source records.** The kernel and `sigma0` carry an `assembled` receipt over Fiasco's
+own receipt, so their notices come from Fiasco's audit. The root carries a `linked`
+receipt over its objects, dependency files and link map. Its dependency files leave out
+system headers (Fiasco's and the compiler's). Fiasco's three archives that its link takes
+members of are registered whole, with the license of the package they come from, since
+their members have no compile record a `linked` receipt could name.
+
+**The boot.** The root reports the build identifier, index hash and entry count; then, as numbers
+only, `root_memory`, `system_baseline`, the unit count and the pool's free pages; then
+`erx: root task: ERTS starts here; this image holds no ERTS`, and it ends the machine with
+`ERX_END_OFF`. ERTS's port starts at that line, with the root linked as
+`NativeMusl`'s is. On a machine smaller than `root_memory` the same image ends at the
+refusal of step 5.
+
+**Device paths.** Each suite run dumps QEMU's own device tree (`-machine virt,dumpdtb`) and
+checks each device path and `compatible` of [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json)
+against it. `/pl011@9040000` exists only when QEMU is given a second `-serial`, which the
+harness does not give yet: nothing opens the host link before M3.
 
 ## The call table
 
@@ -887,7 +928,10 @@ the tests.
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |
-| **Function-API set** on both backends, refusals included; `make check-reproducible` | a refusal changed in one backend |
+| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line and ends the machine, and a 256 MiB machine ends at the root's `root_memory` refusal; `production_image_test.rb` | a wrong device path or compatible, in that test; a misread `root_memory`: the manifest line's numbers fail its transcript |
+| **The manifest's C reader**: `tools/fuzz/manifest_fuzz.c`, each table of an accepted manifest read back to its count and no further | a row out of a table's range would abort it |
+| `make check-reproducible`: two clean builds of the production image, in directories of different names, byte-identical in archive and bootable file | a path or time reaching an output fails it |
+| **Function-API set** on both backends, refusals included | a refusal changed in one backend |
 
 ## Differences from erXos's kernel
 
@@ -931,7 +975,7 @@ call, and no stub takes a snapshot of it.
 
 The gate's `native_musl` suite has run `libl4sys.p.a` linked beside musl, and musl's start, TLS, identifiers, join, detached exit and condition variables on the root, under TCG and HVF at 1 and 4 CPUs.
 
-The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads`, `native_crash` and `native_task` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
+The gate's `boot_image`, `native_boot`, `production_image`, `native_memory`, `debug_log`, `native_threads`, `native_crash` and `native_task` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
 handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
 `l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. `native_threads` and `native_watchdog` have run, with each thread on a CPU in turn, service calls and semaphore wakes across
