@@ -89,8 +89,8 @@ layout erx_share 1 wire_le 8 48
   field capacity_first u32 28
   field slice_us u32 32
   field grace_us u32 36
-  field base u8 40
-  field ceiling u8 41
+  field base urgency 40
+  field ceiling urgency 41
   field flags group_flags 42
   padding 44 4
 layout erx_manifest 1 wire_le 8 368

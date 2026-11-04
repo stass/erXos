@@ -727,55 +727,6 @@ erx_crash_record_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
-erx_share_decode(const uint8_t *bytes, size_t length,
-    erx_share_t *result)
-{
-	erx_share_t value = {0};
-
-	if (bytes == NULL || result == NULL || length < ERX_SHARE_SIZE)
-		return (false);
-
-	value.quota_ns = erx_abi_load_u64(bytes + 0);
-	value.period_ns = erx_abi_load_u64(bytes + 8);
-	value.cpuset = erx_abi_load_u64(bytes + 16);
-	value.capacity_mcpu = erx_abi_load_u32(bytes + 24);
-	value.capacity_first = erx_abi_load_u32(bytes + 28);
-	value.slice_us = erx_abi_load_u32(bytes + 32);
-	value.grace_us = erx_abi_load_u32(bytes + 36);
-	value.base = bytes[40];
-	value.ceiling = bytes[41];
-	value.flags = erx_abi_load_u16(bytes + 42);
-
-	*result = value;
-	return (true);
-}
-
-bool
-erx_mf_principal_decode(const uint8_t *bytes, size_t length,
-    erx_mf_principal_t *result)
-{
-	erx_mf_principal_t value = {0};
-
-	if (bytes == NULL || result == NULL || length < ERX_MF_PRINCIPAL_SIZE)
-		return (false);
-
-	if (!erx_mf_str_decode(bytes + 0,
-	    ERX_MF_STR_SIZE, &value.name))
-		return (false);
-	value.memory = erx_abi_load_u64(bytes + 8);
-	if (!erx_share_decode(bytes + 16,
-	    ERX_SHARE_SIZE, &value.grant))
-		return (false);
-	value.domains = erx_abi_load_u32(bytes + 64);
-	value.names = erx_abi_load_u32(bytes + 68);
-	value.default_limits = erx_abi_load_u32(bytes + 72);
-	value.ceiling_limits = erx_abi_load_u32(bytes + 76);
-
-	*result = value;
-	return (true);
-}
-
-bool
 erx_log_record_decode(const uint8_t *bytes, size_t length,
     erx_log_record_t *result)
 {
@@ -859,39 +810,6 @@ erx_mf_domain_decode(const uint8_t *bytes, size_t length,
 	if (!erx_mf_str_decode(bytes + 56,
 	    ERX_MF_STR_SIZE, &value.env))
 		return (false);
-
-	*result = value;
-	return (true);
-}
-
-bool
-erx_mf_limits_decode(const uint8_t *bytes, size_t length,
-    erx_mf_limits_t *result)
-{
-	erx_mf_limits_t value = {0};
-
-	if (bytes == NULL || result == NULL || length < ERX_MF_LIMITS_SIZE)
-		return (false);
-
-	if (!erx_mf_str_decode(bytes + 0,
-	    ERX_MF_STR_SIZE, &value.name))
-		return (false);
-	value.memory = erx_abi_load_u64(bytes + 8);
-	value.outer = erx_abi_load_u64(bytes + 16);
-	if (!erx_share_decode(bytes + 24,
-	    ERX_SHARE_SIZE, &value.grant))
-		return (false);
-	if (!erx_share_decode(bytes + 72,
-	    ERX_SHARE_SIZE, &value.spaces))
-		return (false);
-	value.lane = erx_abi_load_u32(bytes + 120);
-	value.connections = erx_abi_load_u32(bytes + 124);
-	value.crash = erx_abi_load_u32(bytes + 128);
-	value.flags = erx_abi_load_u32(bytes + 132);
-	value.runtime_limits = erx_abi_load_u32(bytes + 136);
-	value.reserved = erx_abi_load_u32(bytes + 140);
-	value.peer_held = erx_abi_load_u64(bytes + 144);
-	value.peer_held_total = erx_abi_load_u64(bytes + 152);
 
 	*result = value;
 	return (true);
@@ -1052,6 +970,75 @@ erx_pack_header_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_image_segment_decode(const uint8_t *bytes, size_t length,
+    erx_image_segment_t *result)
+{
+	erx_image_segment_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_IMAGE_SEGMENT_SIZE)
+		return (false);
+
+	value.file_offset = erx_abi_load_u64(bytes + 0);
+	value.mem_offset = erx_abi_load_u64(bytes + 8);
+	value.file_size = erx_abi_load_u64(bytes + 16);
+	value.mem_size = erx_abi_load_u64(bytes + 24);
+	value.prot = erx_abi_load_u32(bytes + 32);
+	value.flags = erx_abi_load_u32(bytes + 36);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_image_manifest_decode(const uint8_t *bytes, size_t length,
+    erx_image_manifest_t *result)
+{
+	erx_image_manifest_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_IMAGE_MANIFEST_SIZE)
+		return (false);
+
+	value.magic = erx_abi_load_u32(bytes + 0);
+	value.version = erx_abi_load_u16(bytes + 4);
+	value.nsegments = erx_abi_load_u16(bytes + 6);
+	value.abi_version = erx_abi_load_u32(bytes + 8);
+	value.flags = erx_abi_load_u32(bytes + 12);
+	value.span = erx_abi_load_u64(bytes + 16);
+	value.fixed_base = erx_abi_load_u64(bytes + 24);
+	value.entry = erx_abi_load_u64(bytes + 32);
+	value.phdr_offset = erx_abi_load_u64(bytes + 40);
+	value.phnum = erx_abi_load_u32(bytes + 48);
+	value.base_alignment = erx_abi_load_u32(bytes + 52);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_share_decode(const uint8_t *bytes, size_t length,
+    erx_share_t *result)
+{
+	erx_share_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_SHARE_SIZE)
+		return (false);
+
+	value.quota_ns = erx_abi_load_u64(bytes + 0);
+	value.period_ns = erx_abi_load_u64(bytes + 8);
+	value.cpuset = erx_abi_load_u64(bytes + 16);
+	value.capacity_mcpu = erx_abi_load_u32(bytes + 24);
+	value.capacity_first = erx_abi_load_u32(bytes + 28);
+	value.slice_us = erx_abi_load_u32(bytes + 32);
+	value.grace_us = erx_abi_load_u32(bytes + 36);
+	value.base.raw = bytes[40];
+	value.ceiling.raw = bytes[41];
+	value.flags = erx_abi_load_u16(bytes + 42);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_manifest_decode(const uint8_t *bytes, size_t length,
     erx_manifest_t *result)
 {
@@ -1162,45 +1149,58 @@ erx_manifest_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
-erx_image_segment_decode(const uint8_t *bytes, size_t length,
-    erx_image_segment_t *result)
+erx_mf_limits_decode(const uint8_t *bytes, size_t length,
+    erx_mf_limits_t *result)
 {
-	erx_image_segment_t value = {0};
+	erx_mf_limits_t value = {0};
 
-	if (bytes == NULL || result == NULL || length < ERX_IMAGE_SEGMENT_SIZE)
+	if (bytes == NULL || result == NULL || length < ERX_MF_LIMITS_SIZE)
 		return (false);
 
-	value.file_offset = erx_abi_load_u64(bytes + 0);
-	value.mem_offset = erx_abi_load_u64(bytes + 8);
-	value.file_size = erx_abi_load_u64(bytes + 16);
-	value.mem_size = erx_abi_load_u64(bytes + 24);
-	value.prot = erx_abi_load_u32(bytes + 32);
-	value.flags = erx_abi_load_u32(bytes + 36);
+	if (!erx_mf_str_decode(bytes + 0,
+	    ERX_MF_STR_SIZE, &value.name))
+		return (false);
+	value.memory = erx_abi_load_u64(bytes + 8);
+	value.outer = erx_abi_load_u64(bytes + 16);
+	if (!erx_share_decode(bytes + 24,
+	    ERX_SHARE_SIZE, &value.grant))
+		return (false);
+	if (!erx_share_decode(bytes + 72,
+	    ERX_SHARE_SIZE, &value.spaces))
+		return (false);
+	value.lane = erx_abi_load_u32(bytes + 120);
+	value.connections = erx_abi_load_u32(bytes + 124);
+	value.crash = erx_abi_load_u32(bytes + 128);
+	value.flags = erx_abi_load_u32(bytes + 132);
+	value.runtime_limits = erx_abi_load_u32(bytes + 136);
+	value.reserved = erx_abi_load_u32(bytes + 140);
+	value.peer_held = erx_abi_load_u64(bytes + 144);
+	value.peer_held_total = erx_abi_load_u64(bytes + 152);
 
 	*result = value;
 	return (true);
 }
 
 bool
-erx_image_manifest_decode(const uint8_t *bytes, size_t length,
-    erx_image_manifest_t *result)
+erx_mf_principal_decode(const uint8_t *bytes, size_t length,
+    erx_mf_principal_t *result)
 {
-	erx_image_manifest_t value = {0};
+	erx_mf_principal_t value = {0};
 
-	if (bytes == NULL || result == NULL || length < ERX_IMAGE_MANIFEST_SIZE)
+	if (bytes == NULL || result == NULL || length < ERX_MF_PRINCIPAL_SIZE)
 		return (false);
 
-	value.magic = erx_abi_load_u32(bytes + 0);
-	value.version = erx_abi_load_u16(bytes + 4);
-	value.nsegments = erx_abi_load_u16(bytes + 6);
-	value.abi_version = erx_abi_load_u32(bytes + 8);
-	value.flags = erx_abi_load_u32(bytes + 12);
-	value.span = erx_abi_load_u64(bytes + 16);
-	value.fixed_base = erx_abi_load_u64(bytes + 24);
-	value.entry = erx_abi_load_u64(bytes + 32);
-	value.phdr_offset = erx_abi_load_u64(bytes + 40);
-	value.phnum = erx_abi_load_u32(bytes + 48);
-	value.base_alignment = erx_abi_load_u32(bytes + 52);
+	if (!erx_mf_str_decode(bytes + 0,
+	    ERX_MF_STR_SIZE, &value.name))
+		return (false);
+	value.memory = erx_abi_load_u64(bytes + 8);
+	if (!erx_share_decode(bytes + 16,
+	    ERX_SHARE_SIZE, &value.grant))
+		return (false);
+	value.domains = erx_abi_load_u32(bytes + 64);
+	value.names = erx_abi_load_u32(bytes + 68);
+	value.default_limits = erx_abi_load_u32(bytes + 72);
+	value.ceiling_limits = erx_abi_load_u32(bytes + 76);
 
 	*result = value;
 	return (true);
@@ -1453,12 +1453,24 @@ erx_manifest_check_root(const uint8_t *bytes ERX_UNUSED,
 	if (!(((uint64_t)record->system_share.flags & UINT64_C(65520)) == 0))
 		return (erx_abi_fail(error, "flags",
 		    "root.system_share.flags", base + 114));
+	if (!(record->system_share.ceiling.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "root.system_share.ceiling", base + 113));
+	if (!(record->system_share.base.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "root.system_share.base", base + 112));
 	if (!(erx_abi_zero(bytes + 164, 4)))
 		return (erx_abi_fail(error, "reserved",
 		    "root.users_share.padding", base + 164));
 	if (!(((uint64_t)record->users_share.flags & UINT64_C(65520)) == 0))
 		return (erx_abi_fail(error, "flags",
 		    "root.users_share.flags", base + 162));
+	if (!(record->users_share.ceiling.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "root.users_share.ceiling", base + 161));
+	if (!(record->users_share.base.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "root.users_share.base", base + 160));
 	if (!(header->magic == UINT32_C(1297633861)))
 		return (erx_abi_fail(error, "value",
 		    "root.magic", base + 0));
@@ -1560,6 +1572,12 @@ erx_manifest_check_principals(const uint8_t *bytes ERX_UNUSED,
 	if (!(((uint64_t)record->grant.flags & UINT64_C(65520)) == 0))
 		return (erx_abi_fail(error, "flags",
 		    "principals[].grant.flags", base + 58));
+	if (!(record->grant.ceiling.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "principals[].grant.ceiling", base + 57));
+	if (!(record->grant.base.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "principals[].grant.base", base + 56));
 	if (!(record->name.offset <= header->strings.count && record->name.length <= header->strings.count - record->name.offset && record->name.length <= UINT64_C(63) && record->name.length != 0))
 		return (erx_abi_fail(error, "string_range",
 		    "principals[].name.offset", base + 0));
@@ -1637,6 +1655,12 @@ erx_manifest_check_limits(const uint8_t *bytes ERX_UNUSED,
 	if (!(((uint64_t)record->grant.flags & UINT64_C(65520)) == 0))
 		return (erx_abi_fail(error, "flags",
 		    "limits[].grant.flags", base + 66));
+	if (!(record->grant.ceiling.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "limits[].grant.ceiling", base + 65));
+	if (!(record->grant.base.raw <= UINT8_C(63)))
+		return (erx_abi_fail(error, "range",
+		    "limits[].grant.base", base + 64));
 	if (!(erx_abi_zero(bytes + 116, 4)))
 		return (erx_abi_fail(error, "reserved",
 		    "limits[].spaces.padding", base + 116));
@@ -1644,6 +1668,16 @@ erx_manifest_check_limits(const uint8_t *bytes ERX_UNUSED,
 		if (!(((uint64_t)record->spaces.flags & UINT64_C(65520)) == 0))
 			return (erx_abi_fail(error, "flags",
 			    "limits[].spaces.flags", base + 114));
+	}
+	if ((record->flags & UINT64_C(1)) != 0) {
+		if (!(record->spaces.ceiling.raw <= UINT8_C(63)))
+			return (erx_abi_fail(error, "range",
+			    "limits[].spaces.ceiling", base + 113));
+	}
+	if ((record->flags & UINT64_C(1)) != 0) {
+		if (!(record->spaces.base.raw <= UINT8_C(63)))
+			return (erx_abi_fail(error, "range",
+			    "limits[].spaces.base", base + 112));
 	}
 	if (!(record->name.offset <= header->strings.count && record->name.length <= header->strings.count - record->name.offset && record->name.length <= UINT64_C(63) && record->name.length != 0))
 		return (erx_abi_fail(error, "string_range",

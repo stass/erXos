@@ -51,6 +51,24 @@ block a milestone's numbers.
   frames the stack proof reports for each. Fixes: `always_inline` at -O2
   alone, if the stack proof's -O0 build can keep plain `static inline`;
   or the seven rounds unrolled by hand in `erx_blake3_compress_in_place`.
+* **[Medium] kernel, a walk of the group path at every decision.** The
+  scheduler core (`kernel/sched/sched.c`) stores no derived limit, so each
+  wake, each pick and each thread a pick examines loads the ceiling on every
+  level of its group path, and again each cpuset, up to eight levels each,
+  from group records that other CPUs' threads read too. A pick that examines
+  a thread does this twice, for its urgency and for its CPUs. The cost is
+  unmeasured. Measure: `tools/erx bench` park and wake on one and across
+  CPUs at group depths 1, 4 and 8, on QEMU `virt` (HVF). Fixes: one walk per
+  thread per decision that yields both limits, or a per-group generation
+  that lets a thread keep its limits until an ancestor's grant changes.
+* **[Low] kernel, a ready queue's size per CPU.** A CPU's ready queues are 64
+  pairs of pointers beside the bitmap, a little over 1 KiB per CPU, and a
+  pick reads two cache lines of them besides each thread's record. The cache
+  cost against a smaller encoding, such as only as many levels as a machine
+  uses, is unmeasured. Measure: context-switch latency against ready threads
+  at one level and spread over all 64, on QEMU `virt` (HVF), with G1's
+  numbers. Fixes: keep only the head and thread the tail through it, or
+  compact the levels.
 * **[Low] kernel, eager FP and SIMD switch.** Every switch saves and
   restores the full FP and SIMD state. Its cost is unmeasured; the
   `TODO.md` item on the eager switch's missing cases tracks the

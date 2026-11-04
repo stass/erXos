@@ -630,7 +630,7 @@ contract already defines. Its size is 48 bytes and alignment is 8:
 | --- | --- | --- |
 | 0, 8, 16 | `quota_ns`, `period_ns`, `cpuset` | three `u64` |
 | 24, 28, 32, 36 | `capacity_mcpu`, `capacity_first`, `slice_us`, `grace_us` | four `u32` |
-| 40, 41, 42 | `base`, `ceiling`, `flags` | `u8`, `u8`, `u16` |
+| 40, 41, 42 | `base`, `ceiling`, `flags` | two `erx_urgency_t`, each a `u8`, and `u16` |
 | 44 | zero padding | four bytes |
 
 `UINT64_MAX` encodes `ERX_QUOTA_NONE`; zero quota means no CPU time.

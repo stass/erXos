@@ -77,18 +77,12 @@ bool erx_crash_brief_decode(const uint8_t *bytes, size_t length,
     erx_crash_brief_t *result);
 bool erx_crash_record_decode(const uint8_t *bytes, size_t length,
     erx_crash_record_t *result);
-bool erx_share_decode(const uint8_t *bytes, size_t length,
-    erx_share_t *result);
-bool erx_mf_principal_decode(const uint8_t *bytes, size_t length,
-    erx_mf_principal_t *result);
 bool erx_log_record_decode(const uint8_t *bytes, size_t length,
     erx_log_record_t *result);
 bool erx_mf_image_decode(const uint8_t *bytes, size_t length,
     erx_mf_image_t *result);
 bool erx_mf_domain_decode(const uint8_t *bytes, size_t length,
     erx_mf_domain_t *result);
-bool erx_mf_limits_decode(const uint8_t *bytes, size_t length,
-    erx_mf_limits_t *result);
 bool erx_mf_parameter_decode(const uint8_t *bytes, size_t length,
     erx_mf_parameter_t *result);
 bool erx_mf_device_decode(const uint8_t *bytes, size_t length,
@@ -99,12 +93,18 @@ bool erx_boot_info_decode(const uint8_t *bytes, size_t length,
     erx_boot_info_t *result);
 bool erx_pack_header_decode(const uint8_t *bytes, size_t length,
     erx_pack_header_t *result);
-bool erx_manifest_decode(const uint8_t *bytes, size_t length,
-    erx_manifest_t *result);
 bool erx_image_segment_decode(const uint8_t *bytes, size_t length,
     erx_image_segment_t *result);
 bool erx_image_manifest_decode(const uint8_t *bytes, size_t length,
     erx_image_manifest_t *result);
+bool erx_share_decode(const uint8_t *bytes, size_t length,
+    erx_share_t *result);
+bool erx_manifest_decode(const uint8_t *bytes, size_t length,
+    erx_manifest_t *result);
+bool erx_mf_limits_decode(const uint8_t *bytes, size_t length,
+    erx_mf_limits_t *result);
+bool erx_mf_principal_decode(const uint8_t *bytes, size_t length,
+    erx_mf_principal_t *result);
 
 typedef struct erx_abi_error erx_abi_error_t;
 struct erx_abi_error {

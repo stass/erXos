@@ -55,6 +55,7 @@ limit log_ring_bytes u32 65536
 # Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
 limit log_text_max u32 2112
 limit log_rate_bytes u32 16384
+limit group_depth_max u32 8
 
 status ok 0 "success"
 status inval -1 "invalid argument"
@@ -80,6 +81,7 @@ scalar uaddr u64
 scalar upage u64 align 4096
 scalar pack_offset u64
 scalar utcb_length u32 range 0 @utcb_bytes_max
+scalar urgency u8 range 0 @urgency_max
 
 flags pack_flags u32
   bit development 0

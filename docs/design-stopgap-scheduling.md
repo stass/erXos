@@ -423,7 +423,7 @@ them ([Data model](design-scheduler.md#data-model)).
 **The cores.** `kernel/core/stop.c` holds `erx_stop_step`;
 `kernel/core/wait.c` holds `erx_wait_step`, `erx_wait_complete` and
 `erx_wait_class`; `kernel/core/return.c` holds `erx_return_check`;
-`kernel/core/park.c` holds `erx_park_step`; `kernel/core/sched.c` holds
+`kernel/core/park.c` holds `erx_park_step`; `kernel/sched/sched.c` holds
 `erx_sched_resolve` and `erx_sched_charge`, with the draw, throttle and
 pick that C1 and erXos's kernel use, and the finishing share's step,
 which erXos's kernel alone calls. Each is
@@ -1120,8 +1120,8 @@ death ([design-stopgap.md](design-stopgap.md#budgets-and-the-ownership-of-pages)
 Configuration C0: urgency levels, round robin within a level, no quota.
 
 **Urgency to priority.** A thread's Fiasco priority is
-`erx_sched_resolve(thread, path) + 1`, in 1 to 64 above Fiasco's idle
-priority 0: a worker's base, an executor's group base, clamped to the
+`erx_sched_resolve(thread) + 1`, in 1 to 64 above Fiasco's idle
+priority 0: its own base, or its group's until it has one, clamped to the
 least ceiling on its group path; a dying thread's is
 `ERX_PRIO_FINISHING`. The priority is written at the thread's creation,
 by `erx_thread_set_urgency`, by the kill, and by `erx_group_configure`,
@@ -1341,9 +1341,9 @@ erx_return_t erx_return_check(erx_run_state_t run, uint32_t flags, uint32_t hold
 /* kernel/core/park.c: the scheduler design's protocol */
 erx_park_result_t erx_park_step(erx_park_t *group, erx_park_event_t event);
 
-/* kernel/core/sched.c */
-erx_urgency_t erx_sched_resolve(const erx_thread_sched_t *t, const erx_group_t *path[], size_t depth);
-void erx_sched_charge(erx_group_t *path[], size_t depth, uint64_t ns);
+/* kernel/sched/sched.c */
+erx_urgency_t erx_sched_resolve(const erx_sched_thread_t *t);
+void erx_sched_charge(const erx_sched_group_t *group, uint64_t ns);
 	/* adds to the per-CPU records of each group on the path: usage, or
 	 * finishing_ns from the thread's kill on */
 ```

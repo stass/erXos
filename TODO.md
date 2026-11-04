@@ -262,6 +262,48 @@ it; git history is the record of completed work.
   rendered in the traced domain
   ([design-runtime.md](docs/design-runtime.md#the-console-and-standard-io),
   [design-live.md](docs/design-live.md#tracing)).
+* [Medium] scheduler, the pick core is configuration C0's
+  (`kernel/sched/sched.c`, `erx_sched_pick`): it has no finishing level,
+  no throttled lists and no published urgency yet, which the design's
+  Pick and dispatch names and erXos's own kernel and C1 need. The stopgap
+  keeps Fiasco's ready queue until C1, so nothing on the target calls
+  `erx_sched_wake`, `erx_sched_remove` or `erx_sched_pick` before then.
+* [High] scheduler, no design for how a thread passes between CPUs
+  ([Concurrency](docs/design-scheduler.md#concurrency), `include/erx/sched.h`):
+  the core decides on one CPU and leaves this to its caller, and the design
+  says only that a cross-CPU wake is a request. It has to settle, before C1 or
+  erXos's own kernel calls `erx_sched_pick`: which CPU a wake and a kill go
+  to; how a wake meets a blocking thread's last check without being lost, and
+  that a wake means only "check again"; that a thread a pick gave up stays
+  untouchable until the switch off its stack is done, even by a kill of a
+  thread on its way to another CPU; that a stale wake or arrival cannot revive
+  a thread a kill took or join a later move of it; and when a record that
+  requests can still name may be freed. Two attempts inside the core, an atomic
+  claim and a home CPU with a moving state, each failed review on these cases.
+* [Medium] scheduler, a raised urgency waits behind its old level
+  (`erx_sched_pick`,
+  [Pick and dispatch](docs/design-scheduler.md#pick-and-dispatch)): a pick
+  examines only the head of the highest non-empty level, so a ready thread
+  whose base or ceiling rose stays on its old level, unseen, for as long as
+  a more urgent thread stays ready. The stopgap refreshes priorities when
+  they change and is not affected; erXos's own kernel is. Fix: have a
+  raising `erx_thread_set_urgency` and `erx_group_configure` post a request
+  that requeues each ready thread they raise on its CPU, or state the wait
+  as a limit in the design.
+* [Medium] scheduler, `erx_sched_thread_init` and `erx_sched_root_init` on a
+  live record (`kernel/sched/sched.c`): a second call re-parents a thread,
+  changing the group it is charged to (S6), or clears a group's parent,
+  removing every ancestor's limit (S5). Add a build check that thread
+  creation alone calls the one and kernel boot alone the other, with the
+  work that adds those callers.
+* [Low] scheduler tests, the model follows the core's order of operations
+  (`test/fixtures/sched_model.rb`): it shares no code, but one misreading
+  of Pick and dispatch could pass in both; only the literal-value tests of
+  `test/host/sched_test.rb` stand apart from it. "Resolved once per pick"
+  has no test, since no single-threaded script can observe it. Add the
+  decision traces the parity test of
+  [design-scheduler.md](docs/design-scheduler.md#verification-and-testing)
+  names, when the stopgap can produce them.
 * [Medium] scheduler, S4: a deferred preemption lets an executor run
   `grace_us` past exhaustion as debt, so a period can reach the quota plus
   one quantum plus the grace per CPU, where S4 promises one quantum.

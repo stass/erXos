@@ -4328,272 +4328,6 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
-      types["erx_share"] = Layout.new(
-        name: "erx_share".b,
-        version: 1,
-        storage: "wire_le".b,
-        alignment: 8,
-        size: 48,
-        fields: [
-          Field.new(
-            name: "quota_ns".b,
-            type: types.fetch("u64"),
-            offset: 0,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "period_ns".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "cpuset".b,
-            type: types.fetch("u64"),
-            offset: 16,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "capacity_mcpu".b,
-            type: types.fetch("u32"),
-            offset: 24,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "capacity_first".b,
-            type: types.fetch("u32"),
-            offset: 28,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "slice_us".b,
-            type: types.fetch("u32"),
-            offset: 32,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "grace_us".b,
-            type: types.fetch("u32"),
-            offset: 36,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "base".b,
-            type: types.fetch("u8"),
-            offset: 40,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "ceiling".b,
-            type: types.fetch("u8"),
-            offset: 41,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "flags".b,
-            type: types.fetch("group_flags"),
-            offset: 42,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze
-        ].freeze,
-        padding: [[44, 4].freeze].freeze,
-        tail: nil,
-        sequence: nil,
-        private_owner: nil,
-        line: source_line
-      ).freeze
-      types["erx_mf_principal"] = Layout.new(
-        name: "erx_mf_principal".b,
-        version: 1,
-        storage: "wire_le".b,
-        alignment: 8,
-        size: 80,
-        fields: [
-          Field.new(
-            name: "name".b,
-            type: types.fetch("erx_mf_str"),
-            offset: 0,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "memory".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "grant".b,
-            type: types.fetch("erx_share"),
-            offset: 16,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "domains".b,
-            type: types.fetch("u32"),
-            offset: 64,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "names".b,
-            type: types.fetch("u32"),
-            offset: 68,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "default_limits".b,
-            type: types.fetch("u32"),
-            offset: 72,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "ceiling_limits".b,
-            type: types.fetch("u32"),
-            offset: 76,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze
-        ].freeze,
-        padding: [].freeze,
-        tail: nil,
-        sequence: nil,
-        private_owner: nil,
-        line: source_line
-      ).freeze
       types["image_flags"] = EnumType.new(
         name: "image_flags".b,
         base: types.fetch("u32"),
@@ -5246,202 +4980,6 @@ module Erx
         }.freeze,
         flags: true,
         allowed: nil
-      ).freeze
-      types["erx_mf_limits"] = Layout.new(
-        name: "erx_mf_limits".b,
-        version: 1,
-        storage: "wire_le".b,
-        alignment: 8,
-        size: 160,
-        fields: [
-          Field.new(
-            name: "name".b,
-            type: types.fetch("erx_mf_str"),
-            offset: 0,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "memory".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "outer".b,
-            type: types.fetch("u64"),
-            offset: 16,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "grant".b,
-            type: types.fetch("erx_share"),
-            offset: 24,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "spaces".b,
-            type: types.fetch("erx_share"),
-            offset: 72,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "lane".b,
-            type: types.fetch("u32"),
-            offset: 120,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "connections".b,
-            type: types.fetch("u32"),
-            offset: 124,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "crash".b,
-            type: types.fetch("u32"),
-            offset: 128,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "flags".b,
-            type: types.fetch("mf_limits_flags"),
-            offset: 132,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "runtime_limits".b,
-            type: types.fetch("u32"),
-            offset: 136,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "reserved".b,
-            type: types.fetch("u32"),
-            offset: 140,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 4294967295,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "peer_held".b,
-            type: types.fetch("u64"),
-            offset: 144,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "peer_held_total".b,
-            type: types.fetch("u64"),
-            offset: 152,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze
-        ].freeze,
-        padding: [].freeze,
-        tail: nil,
-        sequence: nil,
-        private_owner: nil,
-        line: source_line
       ).freeze
       types["mf_parameter_kind"] = EnumType.new(
         name: "mf_parameter_kind".b,
@@ -6521,6 +6059,472 @@ module Erx
         flags: false,
         allowed: nil
       ).freeze
+      types["sealing_secret_label"] = BytesType.new(
+        name: "sealing_secret_label".b,
+        size: 20,
+        fixed: "erXos sealing secret".b
+      ).freeze
+      types["seg_flags"] = EnumType.new(
+        name: "seg_flags".b,
+        base: types.fetch("u32"),
+        members: {
+          "guarded".b => 1
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_image_segment"] = Layout.new(
+        name: "erx_image_segment".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 40,
+        fields: [
+          Field.new(
+            name: "file_offset".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "mem_offset".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "file_size".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "mem_size".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "prot".b,
+            type: types.fetch("prot"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("seg_flags"),
+            offset: 36,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_image_manifest"] = Layout.new(
+        name: "erx_image_manifest".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 56,
+        fields: [
+          Field.new(
+            name: "magic".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "version".b,
+            type: types.fetch("u16"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "nsegments".b,
+            type: types.fetch("u16"),
+            offset: 6,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "abi_version".b,
+            type: types.fetch("u32"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("image_flags"),
+            offset: 12,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "span".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "fixed_base".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "entry".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "phdr_offset".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "phnum".b,
+            type: types.fetch("u32"),
+            offset: 48,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "base_alignment".b,
+            type: types.fetch("u32"),
+            offset: 52,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: Tail.new(
+          name: "segments".b,
+          type: types.fetch("erx_image_segment"),
+          count_field: "nsegments".b,
+          maximum: 8,
+          line: source_line
+        ).freeze,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["system_manifest_path"] = BytesType.new(
+        name: "system_manifest_path".b,
+        size: 15,
+        fixed: "system/manifest".b
+      ).freeze
+      types["uaddr"] = ScalarType.new(
+        name: "uaddr".b,
+        base: types.fetch("u64"),
+        minimum: 0,
+        maximum: 18446744073709551615,
+        multiple: 1
+      ).freeze
+      types["upage"] = ScalarType.new(
+        name: "upage".b,
+        base: types.fetch("u64"),
+        minimum: 0,
+        maximum: 18446744073709551615,
+        multiple: 4096
+      ).freeze
+      types["urgency"] = ScalarType.new(
+        name: "urgency".b,
+        base: types.fetch("u8"),
+        minimum: 0,
+        maximum: 63,
+        multiple: 1
+      ).freeze
+      types["erx_share"] = Layout.new(
+        name: "erx_share".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 48,
+        fields: [
+          Field.new(
+            name: "quota_ns".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "period_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cpuset".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "capacity_mcpu".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "capacity_first".b,
+            type: types.fetch("u32"),
+            offset: 28,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "slice_us".b,
+            type: types.fetch("u32"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "grace_us".b,
+            type: types.fetch("u32"),
+            offset: 36,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "base".b,
+            type: types.fetch("urgency"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ceiling".b,
+            type: types.fetch("urgency"),
+            offset: 41,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("group_flags"),
+            offset: 42,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [[44, 4].freeze].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_manifest"] = Layout.new(
         name: "erx_manifest".b,
         version: 1,
@@ -7151,30 +7155,16 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
-      types["sealing_secret_label"] = BytesType.new(
-        name: "sealing_secret_label".b,
-        size: 20,
-        fixed: "erXos sealing secret".b
-      ).freeze
-      types["seg_flags"] = EnumType.new(
-        name: "seg_flags".b,
-        base: types.fetch("u32"),
-        members: {
-          "guarded".b => 1
-        }.freeze,
-        flags: true,
-        allowed: nil
-      ).freeze
-      types["erx_image_segment"] = Layout.new(
-        name: "erx_image_segment".b,
+      types["erx_mf_limits"] = Layout.new(
+        name: "erx_mf_limits".b,
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 40,
+        size: 160,
         fields: [
           Field.new(
-            name: "file_offset".b,
-            type: types.fetch("u64"),
+            name: "name".b,
+            type: types.fetch("erx_mf_str"),
             offset: 0,
             count: nil,
             bits: [].freeze,
@@ -7187,7 +7177,7 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "mem_offset".b,
+            name: "memory".b,
             type: types.fetch("u64"),
             offset: 8,
             count: nil,
@@ -7201,7 +7191,7 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "file_size".b,
+            name: "outer".b,
             type: types.fetch("u64"),
             offset: 16,
             count: nil,
@@ -7215,8 +7205,8 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "mem_size".b,
-            type: types.fetch("u64"),
+            name: "grant".b,
+            type: types.fetch("erx_share"),
             offset: 24,
             count: nil,
             bits: [].freeze,
@@ -7229,9 +7219,51 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "prot".b,
-            type: types.fetch("prot"),
-            offset: 32,
+            name: "spaces".b,
+            type: types.fetch("erx_share"),
+            offset: 72,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "lane".b,
+            type: types.fetch("u32"),
+            offset: 120,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "connections".b,
+            type: types.fetch("u32"),
+            offset: 124,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "crash".b,
+            type: types.fetch("u32"),
+            offset: 128,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -7244,8 +7276,64 @@ module Erx
           ).freeze,
           Field.new(
             name: "flags".b,
-            type: types.fetch("seg_flags"),
-            offset: 36,
+            type: types.fetch("mf_limits_flags"),
+            offset: 132,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "runtime_limits".b,
+            type: types.fetch("u32"),
+            offset: 136,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u32"),
+            offset: 140,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 4294967295,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "peer_held".b,
+            type: types.fetch("u64"),
+            offset: 144,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "peer_held_total".b,
+            type: types.fetch("u64"),
+            offset: 152,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -7263,16 +7351,16 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
-      types["erx_image_manifest"] = Layout.new(
-        name: "erx_image_manifest".b,
+      types["erx_mf_principal"] = Layout.new(
+        name: "erx_mf_principal".b,
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 56,
+        size: 80,
         fields: [
           Field.new(
-            name: "magic".b,
-            type: types.fetch("u32"),
+            name: "name".b,
+            type: types.fetch("erx_mf_str"),
             offset: 0,
             count: nil,
             bits: [].freeze,
@@ -7285,36 +7373,8 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "version".b,
-            type: types.fetch("u16"),
-            offset: 4,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "nsegments".b,
-            type: types.fetch("u16"),
-            offset: 6,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "abi_version".b,
-            type: types.fetch("u32"),
+            name: "memory".b,
+            type: types.fetch("u64"),
             offset: 8,
             count: nil,
             bits: [].freeze,
@@ -7327,22 +7387,8 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "flags".b,
-            type: types.fetch("image_flags"),
-            offset: 12,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "span".b,
-            type: types.fetch("u64"),
+            name: "grant".b,
+            type: types.fetch("erx_share"),
             offset: 16,
             count: nil,
             bits: [].freeze,
@@ -7355,51 +7401,9 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "fixed_base".b,
-            type: types.fetch("u64"),
-            offset: 24,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "entry".b,
-            type: types.fetch("u64"),
-            offset: 32,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "phdr_offset".b,
-            type: types.fetch("u64"),
-            offset: 40,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "phnum".b,
+            name: "domains".b,
             type: types.fetch("u32"),
-            offset: 48,
+            offset: 64,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -7411,9 +7415,37 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "base_alignment".b,
+            name: "names".b,
             type: types.fetch("u32"),
-            offset: 52,
+            offset: 68,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "default_limits".b,
+            type: types.fetch("u32"),
+            offset: 72,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ceiling_limits".b,
+            type: types.fetch("u32"),
+            offset: 76,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -7426,35 +7458,10 @@ module Erx
           ).freeze
         ].freeze,
         padding: [].freeze,
-        tail: Tail.new(
-          name: "segments".b,
-          type: types.fetch("erx_image_segment"),
-          count_field: "nsegments".b,
-          maximum: 8,
-          line: source_line
-        ).freeze,
+        tail: nil,
         sequence: nil,
         private_owner: nil,
         line: source_line
-      ).freeze
-      types["system_manifest_path"] = BytesType.new(
-        name: "system_manifest_path".b,
-        size: 15,
-        fixed: "system/manifest".b
-      ).freeze
-      types["uaddr"] = ScalarType.new(
-        name: "uaddr".b,
-        base: types.fetch("u64"),
-        minimum: 0,
-        maximum: 18446744073709551615,
-        multiple: 1
-      ).freeze
-      types["upage"] = ScalarType.new(
-        name: "upage".b,
-        base: types.fetch("u64"),
-        minimum: 0,
-        maximum: 18446744073709551615,
-        multiple: 4096
       ).freeze
       types["utcb_length"] = ScalarType.new(
         name: "utcb_length".b,
@@ -7569,8 +7576,6 @@ module Erx
           "erx_crash_brief".b,
           "erx_crash_record".b,
           "group_flags".b,
-          "erx_share".b,
-          "erx_mf_principal".b,
           "image_flags".b,
           "log_level".b,
           "log_record_flags".b,
@@ -7588,7 +7593,6 @@ module Erx
           "mf_kind".b,
           "erx_mf_domain".b,
           "mf_limits_flags".b,
-          "erx_mf_limits".b,
           "mf_parameter_kind".b,
           "erx_mf_parameter".b,
           "mf_selector".b,
@@ -7603,7 +7607,6 @@ module Erx
           "pack_offset".b,
           "prot".b,
           "seal".b,
-          "erx_manifest".b,
           "sealing_secret_label".b,
           "seg_flags".b,
           "erx_image_segment".b,
@@ -7611,6 +7614,11 @@ module Erx
           "system_manifest_path".b,
           "uaddr".b,
           "upage".b,
+          "urgency".b,
+          "erx_share".b,
+          "erx_manifest".b,
+          "erx_mf_limits".b,
+          "erx_mf_principal".b,
           "utcb_length".b
         ].freeze,
         constants: {
@@ -8290,6 +8298,12 @@ module Erx
             name: "group_defer".b,
             value: 2,
             type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "group_depth_max".b => Constant.new(
+            name: "group_depth_max".b,
+            value: 8,
+            type: types.fetch("u32"),
             description: nil
           ).freeze,
           "group_executors".b => Constant.new(

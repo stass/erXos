@@ -146,14 +146,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_crash_record_decode(bytes, length, &value);
 	}
 	{
-		erx_share_t value;
-		(void)erx_share_decode(bytes, length, &value);
-	}
-	{
-		erx_mf_principal_t value;
-		(void)erx_mf_principal_decode(bytes, length, &value);
-	}
-	{
 		erx_log_record_t value;
 		(void)erx_log_record_decode(bytes, length, &value);
 	}
@@ -164,10 +156,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	{
 		erx_mf_domain_t value;
 		(void)erx_mf_domain_decode(bytes, length, &value);
-	}
-	{
-		erx_mf_limits_t value;
-		(void)erx_mf_limits_decode(bytes, length, &value);
 	}
 	{
 		erx_mf_parameter_t value;
@@ -190,16 +178,28 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_pack_header_decode(bytes, length, &value);
 	}
 	{
-		erx_manifest_t value;
-		(void)erx_manifest_decode(bytes, length, &value);
-	}
-	{
 		erx_image_segment_t value;
 		(void)erx_image_segment_decode(bytes, length, &value);
 	}
 	{
 		erx_image_manifest_t value;
 		(void)erx_image_manifest_decode(bytes, length, &value);
+	}
+	{
+		erx_share_t value;
+		(void)erx_share_decode(bytes, length, &value);
+	}
+	{
+		erx_manifest_t value;
+		(void)erx_manifest_decode(bytes, length, &value);
+	}
+	{
+		erx_mf_limits_t value;
+		(void)erx_mf_limits_decode(bytes, length, &value);
+	}
+	{
+		erx_mf_principal_t value;
+		(void)erx_mf_principal_decode(bytes, length, &value);
 	}
 	{
 		erx_manifest_view_t view;

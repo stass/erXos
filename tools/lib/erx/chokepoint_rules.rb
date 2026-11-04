@@ -202,6 +202,12 @@ module Erx
       scope: ERXOS_C,
       pattern: PRIVATE_HEADER_INCLUDE,
       sites: [Chokepoints::Site.new(glob: 'kernel/core/*'),
+              # A core outside kernel/core includes only its own group's private headers.
+              *CoreArchive.core_files(REPOSITORY).reject { |source| source.start_with?('kernel/core/') }.map do |source|
+                headers = GROUPS.fetch(File.basename(source, '.c')).private_headers
+                permits = Regexp.union(headers.map { |header| include_of(header) })
+                Chokepoints::Site.new(glob: source, permits: permits)
+              end,
               *GROUPS.values.flat_map do |group|
                 permits = Regexp.union(group.private_headers.map { |header| include_of(header) })
                 group.private_header_tests.map { |test| Chokepoints::Site.new(glob: test, permits: permits) }

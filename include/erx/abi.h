@@ -133,6 +133,7 @@ struct erx_rights {
 #define ERX_GRACE_MAX_US UINT32_C(1000)
 #define ERX_GRACE_MIN_US UINT32_C(5)
 #define ERX_GROUP_DEFER UINT16_C(2)
+#define ERX_GROUP_DEPTH_MAX UINT32_C(8)
 #define ERX_GROUP_EXECUTORS UINT32_C(64)
 #define ERX_GROUP_HINTS UINT16_C(1)
 #define ERX_GROUP_PLACE UINT16_C(8)
@@ -1639,91 +1640,6 @@ _Static_assert(offsetof(erx_crash_record_t, frames) ==
 
 typedef uint16_t erx_group_flags_t;
 
-#define ERX_SHARE_SIZE 48
-#define ERX_SHARE_ALIGN 8
-#define ERX_SHARE_OFF_QUOTA_NS 0
-#define ERX_SHARE_OFF_PERIOD_NS 8
-#define ERX_SHARE_OFF_CPUSET 16
-#define ERX_SHARE_OFF_CAPACITY_MCPU 24
-#define ERX_SHARE_OFF_CAPACITY_FIRST 28
-#define ERX_SHARE_OFF_SLICE_US 32
-#define ERX_SHARE_OFF_GRACE_US 36
-#define ERX_SHARE_OFF_BASE 40
-#define ERX_SHARE_OFF_CEILING 41
-#define ERX_SHARE_OFF_FLAGS 42
-typedef struct erx_share erx_share_t;
-struct erx_share {
-	_Alignas(8) uint64_t	quota_ns;
-	uint64_t	period_ns;
-	uint64_t	cpuset;
-	uint32_t	capacity_mcpu;
-	uint32_t	capacity_first;
-	uint32_t	slice_us;
-	uint32_t	grace_us;
-	uint8_t	base;
-	uint8_t	ceiling;
-	erx_group_flags_t	flags;
-	uint8_t	padding_0[4];
-};
-_Static_assert(sizeof(erx_share_t) == ERX_SHARE_SIZE, "erx_share size");
-_Static_assert(_Alignof(erx_share_t) == ERX_SHARE_ALIGN, "erx_share alignment");
-_Static_assert(offsetof(erx_share_t, quota_ns) ==
-    ERX_SHARE_OFF_QUOTA_NS, "erx_share.quota_ns offset");
-_Static_assert(offsetof(erx_share_t, period_ns) ==
-    ERX_SHARE_OFF_PERIOD_NS, "erx_share.period_ns offset");
-_Static_assert(offsetof(erx_share_t, cpuset) ==
-    ERX_SHARE_OFF_CPUSET, "erx_share.cpuset offset");
-_Static_assert(offsetof(erx_share_t, capacity_mcpu) ==
-    ERX_SHARE_OFF_CAPACITY_MCPU, "erx_share.capacity_mcpu offset");
-_Static_assert(offsetof(erx_share_t, capacity_first) ==
-    ERX_SHARE_OFF_CAPACITY_FIRST, "erx_share.capacity_first offset");
-_Static_assert(offsetof(erx_share_t, slice_us) ==
-    ERX_SHARE_OFF_SLICE_US, "erx_share.slice_us offset");
-_Static_assert(offsetof(erx_share_t, grace_us) ==
-    ERX_SHARE_OFF_GRACE_US, "erx_share.grace_us offset");
-_Static_assert(offsetof(erx_share_t, base) ==
-    ERX_SHARE_OFF_BASE, "erx_share.base offset");
-_Static_assert(offsetof(erx_share_t, ceiling) ==
-    ERX_SHARE_OFF_CEILING, "erx_share.ceiling offset");
-_Static_assert(offsetof(erx_share_t, flags) ==
-    ERX_SHARE_OFF_FLAGS, "erx_share.flags offset");
-
-#define ERX_MF_PRINCIPAL_SIZE 80
-#define ERX_MF_PRINCIPAL_ALIGN 8
-#define ERX_MF_PRINCIPAL_OFF_NAME 0
-#define ERX_MF_PRINCIPAL_OFF_MEMORY 8
-#define ERX_MF_PRINCIPAL_OFF_GRANT 16
-#define ERX_MF_PRINCIPAL_OFF_DOMAINS 64
-#define ERX_MF_PRINCIPAL_OFF_NAMES 68
-#define ERX_MF_PRINCIPAL_OFF_DEFAULT_LIMITS 72
-#define ERX_MF_PRINCIPAL_OFF_CEILING_LIMITS 76
-typedef struct erx_mf_principal erx_mf_principal_t;
-struct erx_mf_principal {
-	_Alignas(8) erx_mf_str_t	name;
-	uint64_t	memory;
-	erx_share_t	grant;
-	uint32_t	domains;
-	uint32_t	names;
-	uint32_t	default_limits;
-	uint32_t	ceiling_limits;
-};
-_Static_assert(sizeof(erx_mf_principal_t) == ERX_MF_PRINCIPAL_SIZE, "erx_mf_principal size");
-_Static_assert(_Alignof(erx_mf_principal_t) == ERX_MF_PRINCIPAL_ALIGN, "erx_mf_principal alignment");
-_Static_assert(offsetof(erx_mf_principal_t, name) ==
-    ERX_MF_PRINCIPAL_OFF_NAME, "erx_mf_principal.name offset");
-_Static_assert(offsetof(erx_mf_principal_t, memory) ==
-    ERX_MF_PRINCIPAL_OFF_MEMORY, "erx_mf_principal.memory offset");
-_Static_assert(offsetof(erx_mf_principal_t, grant) ==
-    ERX_MF_PRINCIPAL_OFF_GRANT, "erx_mf_principal.grant offset");
-_Static_assert(offsetof(erx_mf_principal_t, domains) ==
-    ERX_MF_PRINCIPAL_OFF_DOMAINS, "erx_mf_principal.domains offset");
-_Static_assert(offsetof(erx_mf_principal_t, names) ==
-    ERX_MF_PRINCIPAL_OFF_NAMES, "erx_mf_principal.names offset");
-_Static_assert(offsetof(erx_mf_principal_t, default_limits) ==
-    ERX_MF_PRINCIPAL_OFF_DEFAULT_LIMITS, "erx_mf_principal.default_limits offset");
-_Static_assert(offsetof(erx_mf_principal_t, ceiling_limits) ==
-    ERX_MF_PRINCIPAL_OFF_CEILING_LIMITS, "erx_mf_principal.ceiling_limits offset");
-
 typedef uint32_t erx_image_flags_t;
 
 typedef uint32_t erx_log_level_t;
@@ -1910,66 +1826,6 @@ _Static_assert(offsetof(erx_mf_domain_t, env) ==
     ERX_MF_DOMAIN_OFF_ENV, "erx_mf_domain.env offset");
 
 typedef uint32_t erx_mf_limits_flags_t;
-
-#define ERX_MF_LIMITS_SIZE 160
-#define ERX_MF_LIMITS_ALIGN 8
-#define ERX_MF_LIMITS_OFF_NAME 0
-#define ERX_MF_LIMITS_OFF_MEMORY 8
-#define ERX_MF_LIMITS_OFF_OUTER 16
-#define ERX_MF_LIMITS_OFF_GRANT 24
-#define ERX_MF_LIMITS_OFF_SPACES 72
-#define ERX_MF_LIMITS_OFF_LANE 120
-#define ERX_MF_LIMITS_OFF_CONNECTIONS 124
-#define ERX_MF_LIMITS_OFF_CRASH 128
-#define ERX_MF_LIMITS_OFF_FLAGS 132
-#define ERX_MF_LIMITS_OFF_RUNTIME_LIMITS 136
-#define ERX_MF_LIMITS_OFF_RESERVED 140
-#define ERX_MF_LIMITS_OFF_PEER_HELD 144
-#define ERX_MF_LIMITS_OFF_PEER_HELD_TOTAL 152
-typedef struct erx_mf_limits erx_mf_limits_t;
-struct erx_mf_limits {
-	_Alignas(8) erx_mf_str_t	name;
-	uint64_t	memory;
-	uint64_t	outer;
-	erx_share_t	grant;
-	erx_share_t	spaces;
-	uint32_t	lane;
-	uint32_t	connections;
-	uint32_t	crash;
-	erx_mf_limits_flags_t	flags;
-	uint32_t	runtime_limits;
-	uint32_t	reserved;
-	uint64_t	peer_held;
-	uint64_t	peer_held_total;
-};
-_Static_assert(sizeof(erx_mf_limits_t) == ERX_MF_LIMITS_SIZE, "erx_mf_limits size");
-_Static_assert(_Alignof(erx_mf_limits_t) == ERX_MF_LIMITS_ALIGN, "erx_mf_limits alignment");
-_Static_assert(offsetof(erx_mf_limits_t, name) ==
-    ERX_MF_LIMITS_OFF_NAME, "erx_mf_limits.name offset");
-_Static_assert(offsetof(erx_mf_limits_t, memory) ==
-    ERX_MF_LIMITS_OFF_MEMORY, "erx_mf_limits.memory offset");
-_Static_assert(offsetof(erx_mf_limits_t, outer) ==
-    ERX_MF_LIMITS_OFF_OUTER, "erx_mf_limits.outer offset");
-_Static_assert(offsetof(erx_mf_limits_t, grant) ==
-    ERX_MF_LIMITS_OFF_GRANT, "erx_mf_limits.grant offset");
-_Static_assert(offsetof(erx_mf_limits_t, spaces) ==
-    ERX_MF_LIMITS_OFF_SPACES, "erx_mf_limits.spaces offset");
-_Static_assert(offsetof(erx_mf_limits_t, lane) ==
-    ERX_MF_LIMITS_OFF_LANE, "erx_mf_limits.lane offset");
-_Static_assert(offsetof(erx_mf_limits_t, connections) ==
-    ERX_MF_LIMITS_OFF_CONNECTIONS, "erx_mf_limits.connections offset");
-_Static_assert(offsetof(erx_mf_limits_t, crash) ==
-    ERX_MF_LIMITS_OFF_CRASH, "erx_mf_limits.crash offset");
-_Static_assert(offsetof(erx_mf_limits_t, flags) ==
-    ERX_MF_LIMITS_OFF_FLAGS, "erx_mf_limits.flags offset");
-_Static_assert(offsetof(erx_mf_limits_t, runtime_limits) ==
-    ERX_MF_LIMITS_OFF_RUNTIME_LIMITS, "erx_mf_limits.runtime_limits offset");
-_Static_assert(offsetof(erx_mf_limits_t, reserved) ==
-    ERX_MF_LIMITS_OFF_RESERVED, "erx_mf_limits.reserved offset");
-_Static_assert(offsetof(erx_mf_limits_t, peer_held) ==
-    ERX_MF_LIMITS_OFF_PEER_HELD, "erx_mf_limits.peer_held offset");
-_Static_assert(offsetof(erx_mf_limits_t, peer_held_total) ==
-    ERX_MF_LIMITS_OFF_PEER_HELD_TOTAL, "erx_mf_limits.peer_held_total offset");
 
 typedef uint32_t erx_mf_parameter_kind_t;
 
@@ -2298,6 +2154,172 @@ typedef uint32_t erx_prot_t;
 
 typedef uint32_t erx_seal_t;
 
+typedef uint8_t erx_sealing_secret_label_t[20];
+#define ERX_SEALING_SECRET_LABEL_SIZE 20
+#define ERX_SEALING_SECRET_LABEL_BYTES { 0x65, 0x72, 0x58, 0x6f, 0x73, 0x20, 0x73, 0x65, 0x61, 0x6c, 0x69, 0x6e, 0x67, 0x20, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74 }
+#define ERX_SEALING_SECRET_LABEL_STRING "erXos sealing secret"
+
+typedef uint32_t erx_seg_flags_t;
+
+#define ERX_IMAGE_SEGMENT_SIZE 40
+#define ERX_IMAGE_SEGMENT_ALIGN 8
+#define ERX_IMAGE_SEGMENT_OFF_FILE_OFFSET 0
+#define ERX_IMAGE_SEGMENT_OFF_MEM_OFFSET 8
+#define ERX_IMAGE_SEGMENT_OFF_FILE_SIZE 16
+#define ERX_IMAGE_SEGMENT_OFF_MEM_SIZE 24
+#define ERX_IMAGE_SEGMENT_OFF_PROT 32
+#define ERX_IMAGE_SEGMENT_OFF_FLAGS 36
+typedef struct erx_image_segment erx_image_segment_t;
+struct erx_image_segment {
+	_Alignas(8) uint64_t	file_offset;
+	uint64_t	mem_offset;
+	uint64_t	file_size;
+	uint64_t	mem_size;
+	erx_prot_t	prot;
+	erx_seg_flags_t	flags;
+};
+_Static_assert(sizeof(erx_image_segment_t) == ERX_IMAGE_SEGMENT_SIZE, "erx_image_segment size");
+_Static_assert(_Alignof(erx_image_segment_t) == ERX_IMAGE_SEGMENT_ALIGN, "erx_image_segment alignment");
+_Static_assert(offsetof(erx_image_segment_t, file_offset) ==
+    ERX_IMAGE_SEGMENT_OFF_FILE_OFFSET, "erx_image_segment.file_offset offset");
+_Static_assert(offsetof(erx_image_segment_t, mem_offset) ==
+    ERX_IMAGE_SEGMENT_OFF_MEM_OFFSET, "erx_image_segment.mem_offset offset");
+_Static_assert(offsetof(erx_image_segment_t, file_size) ==
+    ERX_IMAGE_SEGMENT_OFF_FILE_SIZE, "erx_image_segment.file_size offset");
+_Static_assert(offsetof(erx_image_segment_t, mem_size) ==
+    ERX_IMAGE_SEGMENT_OFF_MEM_SIZE, "erx_image_segment.mem_size offset");
+_Static_assert(offsetof(erx_image_segment_t, prot) ==
+    ERX_IMAGE_SEGMENT_OFF_PROT, "erx_image_segment.prot offset");
+_Static_assert(offsetof(erx_image_segment_t, flags) ==
+    ERX_IMAGE_SEGMENT_OFF_FLAGS, "erx_image_segment.flags offset");
+
+#define ERX_IMAGE_MANIFEST_SIZE 56
+#define ERX_IMAGE_MANIFEST_ALIGN 8
+#define ERX_IMAGE_MANIFEST_OFF_MAGIC 0
+#define ERX_IMAGE_MANIFEST_OFF_VERSION 4
+#define ERX_IMAGE_MANIFEST_OFF_NSEGMENTS 6
+#define ERX_IMAGE_MANIFEST_OFF_ABI_VERSION 8
+#define ERX_IMAGE_MANIFEST_OFF_FLAGS 12
+#define ERX_IMAGE_MANIFEST_OFF_SPAN 16
+#define ERX_IMAGE_MANIFEST_OFF_FIXED_BASE 24
+#define ERX_IMAGE_MANIFEST_OFF_ENTRY 32
+#define ERX_IMAGE_MANIFEST_OFF_PHDR_OFFSET 40
+#define ERX_IMAGE_MANIFEST_OFF_PHNUM 48
+#define ERX_IMAGE_MANIFEST_OFF_BASE_ALIGNMENT 52
+typedef struct erx_image_manifest erx_image_manifest_t;
+struct erx_image_manifest {
+	_Alignas(8) uint32_t	magic;
+	uint16_t	version;
+	uint16_t	nsegments;
+	uint32_t	abi_version;
+	erx_image_flags_t	flags;
+	uint64_t	span;
+	uint64_t	fixed_base;
+	uint64_t	entry;
+	uint64_t	phdr_offset;
+	uint32_t	phnum;
+	uint32_t	base_alignment;
+	erx_image_segment_t	segments[];
+};
+_Static_assert(sizeof(erx_image_manifest_t) == ERX_IMAGE_MANIFEST_SIZE, "erx_image_manifest size");
+_Static_assert(_Alignof(erx_image_manifest_t) == ERX_IMAGE_MANIFEST_ALIGN, "erx_image_manifest alignment");
+_Static_assert(offsetof(erx_image_manifest_t, magic) ==
+    ERX_IMAGE_MANIFEST_OFF_MAGIC, "erx_image_manifest.magic offset");
+_Static_assert(offsetof(erx_image_manifest_t, version) ==
+    ERX_IMAGE_MANIFEST_OFF_VERSION, "erx_image_manifest.version offset");
+_Static_assert(offsetof(erx_image_manifest_t, nsegments) ==
+    ERX_IMAGE_MANIFEST_OFF_NSEGMENTS, "erx_image_manifest.nsegments offset");
+_Static_assert(offsetof(erx_image_manifest_t, abi_version) ==
+    ERX_IMAGE_MANIFEST_OFF_ABI_VERSION, "erx_image_manifest.abi_version offset");
+_Static_assert(offsetof(erx_image_manifest_t, flags) ==
+    ERX_IMAGE_MANIFEST_OFF_FLAGS, "erx_image_manifest.flags offset");
+_Static_assert(offsetof(erx_image_manifest_t, span) ==
+    ERX_IMAGE_MANIFEST_OFF_SPAN, "erx_image_manifest.span offset");
+_Static_assert(offsetof(erx_image_manifest_t, fixed_base) ==
+    ERX_IMAGE_MANIFEST_OFF_FIXED_BASE, "erx_image_manifest.fixed_base offset");
+_Static_assert(offsetof(erx_image_manifest_t, entry) ==
+    ERX_IMAGE_MANIFEST_OFF_ENTRY, "erx_image_manifest.entry offset");
+_Static_assert(offsetof(erx_image_manifest_t, phdr_offset) ==
+    ERX_IMAGE_MANIFEST_OFF_PHDR_OFFSET, "erx_image_manifest.phdr_offset offset");
+_Static_assert(offsetof(erx_image_manifest_t, phnum) ==
+    ERX_IMAGE_MANIFEST_OFF_PHNUM, "erx_image_manifest.phnum offset");
+_Static_assert(offsetof(erx_image_manifest_t, base_alignment) ==
+    ERX_IMAGE_MANIFEST_OFF_BASE_ALIGNMENT, "erx_image_manifest.base_alignment offset");
+_Static_assert(offsetof(erx_image_manifest_t, segments) == ERX_IMAGE_MANIFEST_SIZE,
+    "erx_image_manifest.segments offset");
+
+typedef uint8_t erx_system_manifest_path_t[15];
+#define ERX_SYSTEM_MANIFEST_PATH_SIZE 15
+#define ERX_SYSTEM_MANIFEST_PATH_BYTES { 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2f, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74 }
+#define ERX_SYSTEM_MANIFEST_PATH_STRING "system/manifest"
+
+typedef struct erx_uaddr erx_uaddr_t;
+struct erx_uaddr {
+	uint64_t	raw;
+};
+_Static_assert(sizeof(erx_uaddr_t) == 8, "erx_uaddr size");
+
+typedef struct erx_upage erx_upage_t;
+struct erx_upage {
+	uint64_t	raw;
+};
+_Static_assert(sizeof(erx_upage_t) == 8, "erx_upage size");
+
+typedef struct erx_urgency erx_urgency_t;
+struct erx_urgency {
+	uint8_t	raw;
+};
+_Static_assert(sizeof(erx_urgency_t) == 1, "erx_urgency size");
+
+#define ERX_SHARE_SIZE 48
+#define ERX_SHARE_ALIGN 8
+#define ERX_SHARE_OFF_QUOTA_NS 0
+#define ERX_SHARE_OFF_PERIOD_NS 8
+#define ERX_SHARE_OFF_CPUSET 16
+#define ERX_SHARE_OFF_CAPACITY_MCPU 24
+#define ERX_SHARE_OFF_CAPACITY_FIRST 28
+#define ERX_SHARE_OFF_SLICE_US 32
+#define ERX_SHARE_OFF_GRACE_US 36
+#define ERX_SHARE_OFF_BASE 40
+#define ERX_SHARE_OFF_CEILING 41
+#define ERX_SHARE_OFF_FLAGS 42
+typedef struct erx_share erx_share_t;
+struct erx_share {
+	_Alignas(8) uint64_t	quota_ns;
+	uint64_t	period_ns;
+	uint64_t	cpuset;
+	uint32_t	capacity_mcpu;
+	uint32_t	capacity_first;
+	uint32_t	slice_us;
+	uint32_t	grace_us;
+	erx_urgency_t	base;
+	erx_urgency_t	ceiling;
+	erx_group_flags_t	flags;
+	uint8_t	padding_0[4];
+};
+_Static_assert(sizeof(erx_share_t) == ERX_SHARE_SIZE, "erx_share size");
+_Static_assert(_Alignof(erx_share_t) == ERX_SHARE_ALIGN, "erx_share alignment");
+_Static_assert(offsetof(erx_share_t, quota_ns) ==
+    ERX_SHARE_OFF_QUOTA_NS, "erx_share.quota_ns offset");
+_Static_assert(offsetof(erx_share_t, period_ns) ==
+    ERX_SHARE_OFF_PERIOD_NS, "erx_share.period_ns offset");
+_Static_assert(offsetof(erx_share_t, cpuset) ==
+    ERX_SHARE_OFF_CPUSET, "erx_share.cpuset offset");
+_Static_assert(offsetof(erx_share_t, capacity_mcpu) ==
+    ERX_SHARE_OFF_CAPACITY_MCPU, "erx_share.capacity_mcpu offset");
+_Static_assert(offsetof(erx_share_t, capacity_first) ==
+    ERX_SHARE_OFF_CAPACITY_FIRST, "erx_share.capacity_first offset");
+_Static_assert(offsetof(erx_share_t, slice_us) ==
+    ERX_SHARE_OFF_SLICE_US, "erx_share.slice_us offset");
+_Static_assert(offsetof(erx_share_t, grace_us) ==
+    ERX_SHARE_OFF_GRACE_US, "erx_share.grace_us offset");
+_Static_assert(offsetof(erx_share_t, base) ==
+    ERX_SHARE_OFF_BASE, "erx_share.base offset");
+_Static_assert(offsetof(erx_share_t, ceiling) ==
+    ERX_SHARE_OFF_CEILING, "erx_share.ceiling offset");
+_Static_assert(offsetof(erx_share_t, flags) ==
+    ERX_SHARE_OFF_FLAGS, "erx_share.flags offset");
+
 #define ERX_MANIFEST_SIZE 368
 #define ERX_MANIFEST_ALIGN 8
 #define ERX_MANIFEST_OFF_MAGIC 0
@@ -2482,116 +2504,101 @@ _Static_assert(offsetof(erx_manifest_t, partial_boot) ==
 _Static_assert(offsetof(erx_manifest_t, strings) ==
     ERX_MANIFEST_OFF_STRINGS, "erx_manifest.strings offset");
 
-typedef uint8_t erx_sealing_secret_label_t[20];
-#define ERX_SEALING_SECRET_LABEL_SIZE 20
-#define ERX_SEALING_SECRET_LABEL_BYTES { 0x65, 0x72, 0x58, 0x6f, 0x73, 0x20, 0x73, 0x65, 0x61, 0x6c, 0x69, 0x6e, 0x67, 0x20, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74 }
-#define ERX_SEALING_SECRET_LABEL_STRING "erXos sealing secret"
-
-typedef uint32_t erx_seg_flags_t;
-
-#define ERX_IMAGE_SEGMENT_SIZE 40
-#define ERX_IMAGE_SEGMENT_ALIGN 8
-#define ERX_IMAGE_SEGMENT_OFF_FILE_OFFSET 0
-#define ERX_IMAGE_SEGMENT_OFF_MEM_OFFSET 8
-#define ERX_IMAGE_SEGMENT_OFF_FILE_SIZE 16
-#define ERX_IMAGE_SEGMENT_OFF_MEM_SIZE 24
-#define ERX_IMAGE_SEGMENT_OFF_PROT 32
-#define ERX_IMAGE_SEGMENT_OFF_FLAGS 36
-typedef struct erx_image_segment erx_image_segment_t;
-struct erx_image_segment {
-	_Alignas(8) uint64_t	file_offset;
-	uint64_t	mem_offset;
-	uint64_t	file_size;
-	uint64_t	mem_size;
-	erx_prot_t	prot;
-	erx_seg_flags_t	flags;
+#define ERX_MF_LIMITS_SIZE 160
+#define ERX_MF_LIMITS_ALIGN 8
+#define ERX_MF_LIMITS_OFF_NAME 0
+#define ERX_MF_LIMITS_OFF_MEMORY 8
+#define ERX_MF_LIMITS_OFF_OUTER 16
+#define ERX_MF_LIMITS_OFF_GRANT 24
+#define ERX_MF_LIMITS_OFF_SPACES 72
+#define ERX_MF_LIMITS_OFF_LANE 120
+#define ERX_MF_LIMITS_OFF_CONNECTIONS 124
+#define ERX_MF_LIMITS_OFF_CRASH 128
+#define ERX_MF_LIMITS_OFF_FLAGS 132
+#define ERX_MF_LIMITS_OFF_RUNTIME_LIMITS 136
+#define ERX_MF_LIMITS_OFF_RESERVED 140
+#define ERX_MF_LIMITS_OFF_PEER_HELD 144
+#define ERX_MF_LIMITS_OFF_PEER_HELD_TOTAL 152
+typedef struct erx_mf_limits erx_mf_limits_t;
+struct erx_mf_limits {
+	_Alignas(8) erx_mf_str_t	name;
+	uint64_t	memory;
+	uint64_t	outer;
+	erx_share_t	grant;
+	erx_share_t	spaces;
+	uint32_t	lane;
+	uint32_t	connections;
+	uint32_t	crash;
+	erx_mf_limits_flags_t	flags;
+	uint32_t	runtime_limits;
+	uint32_t	reserved;
+	uint64_t	peer_held;
+	uint64_t	peer_held_total;
 };
-_Static_assert(sizeof(erx_image_segment_t) == ERX_IMAGE_SEGMENT_SIZE, "erx_image_segment size");
-_Static_assert(_Alignof(erx_image_segment_t) == ERX_IMAGE_SEGMENT_ALIGN, "erx_image_segment alignment");
-_Static_assert(offsetof(erx_image_segment_t, file_offset) ==
-    ERX_IMAGE_SEGMENT_OFF_FILE_OFFSET, "erx_image_segment.file_offset offset");
-_Static_assert(offsetof(erx_image_segment_t, mem_offset) ==
-    ERX_IMAGE_SEGMENT_OFF_MEM_OFFSET, "erx_image_segment.mem_offset offset");
-_Static_assert(offsetof(erx_image_segment_t, file_size) ==
-    ERX_IMAGE_SEGMENT_OFF_FILE_SIZE, "erx_image_segment.file_size offset");
-_Static_assert(offsetof(erx_image_segment_t, mem_size) ==
-    ERX_IMAGE_SEGMENT_OFF_MEM_SIZE, "erx_image_segment.mem_size offset");
-_Static_assert(offsetof(erx_image_segment_t, prot) ==
-    ERX_IMAGE_SEGMENT_OFF_PROT, "erx_image_segment.prot offset");
-_Static_assert(offsetof(erx_image_segment_t, flags) ==
-    ERX_IMAGE_SEGMENT_OFF_FLAGS, "erx_image_segment.flags offset");
+_Static_assert(sizeof(erx_mf_limits_t) == ERX_MF_LIMITS_SIZE, "erx_mf_limits size");
+_Static_assert(_Alignof(erx_mf_limits_t) == ERX_MF_LIMITS_ALIGN, "erx_mf_limits alignment");
+_Static_assert(offsetof(erx_mf_limits_t, name) ==
+    ERX_MF_LIMITS_OFF_NAME, "erx_mf_limits.name offset");
+_Static_assert(offsetof(erx_mf_limits_t, memory) ==
+    ERX_MF_LIMITS_OFF_MEMORY, "erx_mf_limits.memory offset");
+_Static_assert(offsetof(erx_mf_limits_t, outer) ==
+    ERX_MF_LIMITS_OFF_OUTER, "erx_mf_limits.outer offset");
+_Static_assert(offsetof(erx_mf_limits_t, grant) ==
+    ERX_MF_LIMITS_OFF_GRANT, "erx_mf_limits.grant offset");
+_Static_assert(offsetof(erx_mf_limits_t, spaces) ==
+    ERX_MF_LIMITS_OFF_SPACES, "erx_mf_limits.spaces offset");
+_Static_assert(offsetof(erx_mf_limits_t, lane) ==
+    ERX_MF_LIMITS_OFF_LANE, "erx_mf_limits.lane offset");
+_Static_assert(offsetof(erx_mf_limits_t, connections) ==
+    ERX_MF_LIMITS_OFF_CONNECTIONS, "erx_mf_limits.connections offset");
+_Static_assert(offsetof(erx_mf_limits_t, crash) ==
+    ERX_MF_LIMITS_OFF_CRASH, "erx_mf_limits.crash offset");
+_Static_assert(offsetof(erx_mf_limits_t, flags) ==
+    ERX_MF_LIMITS_OFF_FLAGS, "erx_mf_limits.flags offset");
+_Static_assert(offsetof(erx_mf_limits_t, runtime_limits) ==
+    ERX_MF_LIMITS_OFF_RUNTIME_LIMITS, "erx_mf_limits.runtime_limits offset");
+_Static_assert(offsetof(erx_mf_limits_t, reserved) ==
+    ERX_MF_LIMITS_OFF_RESERVED, "erx_mf_limits.reserved offset");
+_Static_assert(offsetof(erx_mf_limits_t, peer_held) ==
+    ERX_MF_LIMITS_OFF_PEER_HELD, "erx_mf_limits.peer_held offset");
+_Static_assert(offsetof(erx_mf_limits_t, peer_held_total) ==
+    ERX_MF_LIMITS_OFF_PEER_HELD_TOTAL, "erx_mf_limits.peer_held_total offset");
 
-#define ERX_IMAGE_MANIFEST_SIZE 56
-#define ERX_IMAGE_MANIFEST_ALIGN 8
-#define ERX_IMAGE_MANIFEST_OFF_MAGIC 0
-#define ERX_IMAGE_MANIFEST_OFF_VERSION 4
-#define ERX_IMAGE_MANIFEST_OFF_NSEGMENTS 6
-#define ERX_IMAGE_MANIFEST_OFF_ABI_VERSION 8
-#define ERX_IMAGE_MANIFEST_OFF_FLAGS 12
-#define ERX_IMAGE_MANIFEST_OFF_SPAN 16
-#define ERX_IMAGE_MANIFEST_OFF_FIXED_BASE 24
-#define ERX_IMAGE_MANIFEST_OFF_ENTRY 32
-#define ERX_IMAGE_MANIFEST_OFF_PHDR_OFFSET 40
-#define ERX_IMAGE_MANIFEST_OFF_PHNUM 48
-#define ERX_IMAGE_MANIFEST_OFF_BASE_ALIGNMENT 52
-typedef struct erx_image_manifest erx_image_manifest_t;
-struct erx_image_manifest {
-	_Alignas(8) uint32_t	magic;
-	uint16_t	version;
-	uint16_t	nsegments;
-	uint32_t	abi_version;
-	erx_image_flags_t	flags;
-	uint64_t	span;
-	uint64_t	fixed_base;
-	uint64_t	entry;
-	uint64_t	phdr_offset;
-	uint32_t	phnum;
-	uint32_t	base_alignment;
-	erx_image_segment_t	segments[];
+#define ERX_MF_PRINCIPAL_SIZE 80
+#define ERX_MF_PRINCIPAL_ALIGN 8
+#define ERX_MF_PRINCIPAL_OFF_NAME 0
+#define ERX_MF_PRINCIPAL_OFF_MEMORY 8
+#define ERX_MF_PRINCIPAL_OFF_GRANT 16
+#define ERX_MF_PRINCIPAL_OFF_DOMAINS 64
+#define ERX_MF_PRINCIPAL_OFF_NAMES 68
+#define ERX_MF_PRINCIPAL_OFF_DEFAULT_LIMITS 72
+#define ERX_MF_PRINCIPAL_OFF_CEILING_LIMITS 76
+typedef struct erx_mf_principal erx_mf_principal_t;
+struct erx_mf_principal {
+	_Alignas(8) erx_mf_str_t	name;
+	uint64_t	memory;
+	erx_share_t	grant;
+	uint32_t	domains;
+	uint32_t	names;
+	uint32_t	default_limits;
+	uint32_t	ceiling_limits;
 };
-_Static_assert(sizeof(erx_image_manifest_t) == ERX_IMAGE_MANIFEST_SIZE, "erx_image_manifest size");
-_Static_assert(_Alignof(erx_image_manifest_t) == ERX_IMAGE_MANIFEST_ALIGN, "erx_image_manifest alignment");
-_Static_assert(offsetof(erx_image_manifest_t, magic) ==
-    ERX_IMAGE_MANIFEST_OFF_MAGIC, "erx_image_manifest.magic offset");
-_Static_assert(offsetof(erx_image_manifest_t, version) ==
-    ERX_IMAGE_MANIFEST_OFF_VERSION, "erx_image_manifest.version offset");
-_Static_assert(offsetof(erx_image_manifest_t, nsegments) ==
-    ERX_IMAGE_MANIFEST_OFF_NSEGMENTS, "erx_image_manifest.nsegments offset");
-_Static_assert(offsetof(erx_image_manifest_t, abi_version) ==
-    ERX_IMAGE_MANIFEST_OFF_ABI_VERSION, "erx_image_manifest.abi_version offset");
-_Static_assert(offsetof(erx_image_manifest_t, flags) ==
-    ERX_IMAGE_MANIFEST_OFF_FLAGS, "erx_image_manifest.flags offset");
-_Static_assert(offsetof(erx_image_manifest_t, span) ==
-    ERX_IMAGE_MANIFEST_OFF_SPAN, "erx_image_manifest.span offset");
-_Static_assert(offsetof(erx_image_manifest_t, fixed_base) ==
-    ERX_IMAGE_MANIFEST_OFF_FIXED_BASE, "erx_image_manifest.fixed_base offset");
-_Static_assert(offsetof(erx_image_manifest_t, entry) ==
-    ERX_IMAGE_MANIFEST_OFF_ENTRY, "erx_image_manifest.entry offset");
-_Static_assert(offsetof(erx_image_manifest_t, phdr_offset) ==
-    ERX_IMAGE_MANIFEST_OFF_PHDR_OFFSET, "erx_image_manifest.phdr_offset offset");
-_Static_assert(offsetof(erx_image_manifest_t, phnum) ==
-    ERX_IMAGE_MANIFEST_OFF_PHNUM, "erx_image_manifest.phnum offset");
-_Static_assert(offsetof(erx_image_manifest_t, base_alignment) ==
-    ERX_IMAGE_MANIFEST_OFF_BASE_ALIGNMENT, "erx_image_manifest.base_alignment offset");
-_Static_assert(offsetof(erx_image_manifest_t, segments) == ERX_IMAGE_MANIFEST_SIZE,
-    "erx_image_manifest.segments offset");
-
-typedef uint8_t erx_system_manifest_path_t[15];
-#define ERX_SYSTEM_MANIFEST_PATH_SIZE 15
-#define ERX_SYSTEM_MANIFEST_PATH_BYTES { 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2f, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74 }
-#define ERX_SYSTEM_MANIFEST_PATH_STRING "system/manifest"
-
-typedef struct erx_uaddr erx_uaddr_t;
-struct erx_uaddr {
-	uint64_t	raw;
-};
-_Static_assert(sizeof(erx_uaddr_t) == 8, "erx_uaddr size");
-
-typedef struct erx_upage erx_upage_t;
-struct erx_upage {
-	uint64_t	raw;
-};
-_Static_assert(sizeof(erx_upage_t) == 8, "erx_upage size");
+_Static_assert(sizeof(erx_mf_principal_t) == ERX_MF_PRINCIPAL_SIZE, "erx_mf_principal size");
+_Static_assert(_Alignof(erx_mf_principal_t) == ERX_MF_PRINCIPAL_ALIGN, "erx_mf_principal alignment");
+_Static_assert(offsetof(erx_mf_principal_t, name) ==
+    ERX_MF_PRINCIPAL_OFF_NAME, "erx_mf_principal.name offset");
+_Static_assert(offsetof(erx_mf_principal_t, memory) ==
+    ERX_MF_PRINCIPAL_OFF_MEMORY, "erx_mf_principal.memory offset");
+_Static_assert(offsetof(erx_mf_principal_t, grant) ==
+    ERX_MF_PRINCIPAL_OFF_GRANT, "erx_mf_principal.grant offset");
+_Static_assert(offsetof(erx_mf_principal_t, domains) ==
+    ERX_MF_PRINCIPAL_OFF_DOMAINS, "erx_mf_principal.domains offset");
+_Static_assert(offsetof(erx_mf_principal_t, names) ==
+    ERX_MF_PRINCIPAL_OFF_NAMES, "erx_mf_principal.names offset");
+_Static_assert(offsetof(erx_mf_principal_t, default_limits) ==
+    ERX_MF_PRINCIPAL_OFF_DEFAULT_LIMITS, "erx_mf_principal.default_limits offset");
+_Static_assert(offsetof(erx_mf_principal_t, ceiling_limits) ==
+    ERX_MF_PRINCIPAL_OFF_CEILING_LIMITS, "erx_mf_principal.ceiling_limits offset");
 
 typedef struct erx_utcb_length erx_utcb_length_t;
 struct erx_utcb_length {

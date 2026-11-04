@@ -1792,7 +1792,7 @@ and baseline, TCG apart from HVF:
 
 | Name | Workload | Endpoint |
 | --- | --- | --- |
-| `null` | `erx_thread_set_urgency(ERX_CAP_SELF_THREAD, u)` with `u` the thread's current base: decode, one lookup, a decision that changes nothing | the call's return; Fiasco's native null call (29 ns under HVF) is the baseline |
+| `null` | `erx_thread_set_urgency(ERX_CAP_SELF_THREAD, u)` with `u` the base the thread was last given: decode, one lookup, a decision that changes nothing | the call's return; Fiasco's native null call (29 ns under HVF) is the baseline |
 | `ipc` | a worker's `erx_ipc_call` to a server in `erx_ipc_reply_wait`; same space and a sub-space; same CPU and pinned to another | the caller's return |
 | `park` | an executor in `erx_park`; a worker triggers an IRQ object bound to the group; same CPU and another | the executor's return from `erx_park` |
 | `timer` | `erx_park` and `erx_ipc_wait` with a deadline | the return, against the deadline: **deadline-to-resume latency**, which includes the tick's quantisation and the scheduling delay |

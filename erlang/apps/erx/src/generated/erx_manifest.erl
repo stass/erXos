@@ -49,7 +49,8 @@
               erx_mf_selector_t/0,
               erx_mf_window_rights_t/0,
               erx_mf_window_role_t/0,
-              erx_seal_t/0]).
+              erx_seal_t/0,
+              erx_urgency_t/0]).
 
 -type erx_manifest_t() :: #{
     'magic' := 0..4294967295,
@@ -291,8 +292,8 @@
     'capacity_first' := 0..4294967295,
     'slice_us' := 0..4294967295,
     'grace_us' := 0..4294967295,
-    'base' := 0..255,
-    'ceiling' := 0..255,
+    'base' := erx_urgency_t(),
+    'ceiling' := erx_urgency_t(),
     'flags' := erx_group_flags_t()
 }.
 
@@ -325,6 +326,8 @@
 -type erx_mf_window_role_t() :: 0..4294967295.
 
 -type erx_seal_t() :: 0..4294967295.
+
+-type erx_urgency_t() :: 0..255.
 
 -doc "Validate the complete file and retain its immutable bytes.".
 -spec read(binary()) -> {ok, view()} | {error, error()}.
@@ -4427,7 +4430,7 @@ type('erx_share') ->
             },
             #{
                 'name' => 'base',
-                'type' => 'u8',
+                'type' => 'urgency',
                 'offset' => 40,
                 'count' => 'scalar',
                 'zero' => 0,
@@ -4435,7 +4438,7 @@ type('erx_share') ->
             },
             #{
                 'name' => 'ceiling',
-                'type' => 'u8',
+                'type' => 'urgency',
                 'offset' => 41,
                 'count' => 'scalar',
                 'zero' => 0,
@@ -4610,5 +4613,14 @@ type('u64') ->
     #{'kind' => 'integer', 'size' => 8, 'signed' => false};
 type('u8') ->
     #{'kind' => 'integer', 'size' => 1, 'signed' => false};
+type('urgency') ->
+    #{
+        'kind' => 'scalar',
+        'size' => 1,
+        'base' => 'u8',
+        'minimum' => 0,
+        'maximum' => 63,
+        'multiple' => 1
+    };
 type(_) ->
     fail(unsupported, <<"schema">>, 0).

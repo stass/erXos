@@ -127,6 +127,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_GRACE_MAX_US` | 1000 |
 | `ERX_GRACE_MIN_US` | 5 |
 | `ERX_GROUP_DEFER` | 2 |
+| `ERX_GROUP_DEPTH_MAX` | 8 |
 | `ERX_GROUP_EXECUTORS` | 64 |
 | `ERX_GROUP_HINTS` | 1 |
 | `ERX_GROUP_PLACE` | 8 |
@@ -863,37 +864,6 @@ Storage: `wire_le`. Prefix size: 904. Alignment: 8.
 | `regs` | `erx_regs` | 120 | 1 |
 | `frames` | `u64` | 392 | 64 |
 
-### `erx_share_t`
-
-Storage: `wire_le`. Prefix size: 48. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `quota_ns` | `u64` | 0 | 1 |
-| `period_ns` | `u64` | 8 | 1 |
-| `cpuset` | `u64` | 16 | 1 |
-| `capacity_mcpu` | `u32` | 24 | 1 |
-| `capacity_first` | `u32` | 28 | 1 |
-| `slice_us` | `u32` | 32 | 1 |
-| `grace_us` | `u32` | 36 | 1 |
-| `base` | `u8` | 40 | 1 |
-| `ceiling` | `u8` | 41 | 1 |
-| `flags` | `group_flags` | 42 | 1 |
-
-### `erx_mf_principal_t`
-
-Storage: `wire_le`. Prefix size: 80. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `name` | `erx_mf_str` | 0 | 1 |
-| `memory` | `u64` | 8 | 1 |
-| `grant` | `erx_share` | 16 | 1 |
-| `domains` | `u32` | 64 | 1 |
-| `names` | `u32` | 68 | 1 |
-| `default_limits` | `u32` | 72 | 1 |
-| `ceiling_limits` | `u32` | 76 | 1 |
-
 ### `erx_log_record_t`
 
 Storage: `wire_le`. Prefix size: 32. Alignment: 8.
@@ -948,26 +918,6 @@ Storage: `wire_le`. Prefix size: 64. Alignment: 8.
 | `reserved` | `u32` | 44 | 1 |
 | `args` | `erx_mf_str` | 48 | 1 |
 | `env` | `erx_mf_str` | 56 | 1 |
-
-### `erx_mf_limits_t`
-
-Storage: `wire_le`. Prefix size: 160. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `name` | `erx_mf_str` | 0 | 1 |
-| `memory` | `u64` | 8 | 1 |
-| `outer` | `u64` | 16 | 1 |
-| `grant` | `erx_share` | 24 | 1 |
-| `spaces` | `erx_share` | 72 | 1 |
-| `lane` | `u32` | 120 | 1 |
-| `connections` | `u32` | 124 | 1 |
-| `crash` | `u32` | 128 | 1 |
-| `flags` | `mf_limits_flags` | 132 | 1 |
-| `runtime_limits` | `u32` | 136 | 1 |
-| `reserved` | `u32` | 140 | 1 |
-| `peer_held` | `u64` | 144 | 1 |
-| `peer_held_total` | `u64` | 152 | 1 |
 
 ### `erx_mf_parameter_t`
 
@@ -1069,6 +1019,55 @@ Storage: `wire_le`. Prefix size: 96. Alignment: 8.
 | `build_id` | `u8` | 56 | 8 |
 | `index_hash` | `u8` | 64 | 32 |
 
+### `erx_image_segment_t`
+
+Storage: `wire_le`. Prefix size: 40. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `file_offset` | `u64` | 0 | 1 |
+| `mem_offset` | `u64` | 8 | 1 |
+| `file_size` | `u64` | 16 | 1 |
+| `mem_size` | `u64` | 24 | 1 |
+| `prot` | `prot` | 32 | 1 |
+| `flags` | `seg_flags` | 36 | 1 |
+
+### `erx_image_manifest_t`
+
+Storage: `wire_le`. Prefix size: 56. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `magic` | `u32` | 0 | 1 |
+| `version` | `u16` | 4 | 1 |
+| `nsegments` | `u16` | 6 | 1 |
+| `abi_version` | `u32` | 8 | 1 |
+| `flags` | `image_flags` | 12 | 1 |
+| `span` | `u64` | 16 | 1 |
+| `fixed_base` | `u64` | 24 | 1 |
+| `entry` | `u64` | 32 | 1 |
+| `phdr_offset` | `u64` | 40 | 1 |
+| `phnum` | `u32` | 48 | 1 |
+| `base_alignment` | `u32` | 52 | 1 |
+| `segments` | `erx_image_segment` | 56 | `nsegments` (maximum 8) |
+
+### `erx_share_t`
+
+Storage: `wire_le`. Prefix size: 48. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `quota_ns` | `u64` | 0 | 1 |
+| `period_ns` | `u64` | 8 | 1 |
+| `cpuset` | `u64` | 16 | 1 |
+| `capacity_mcpu` | `u32` | 24 | 1 |
+| `capacity_first` | `u32` | 28 | 1 |
+| `slice_us` | `u32` | 32 | 1 |
+| `grace_us` | `u32` | 36 | 1 |
+| `base` | `urgency` | 40 | 1 |
+| `ceiling` | `urgency` | 41 | 1 |
+| `flags` | `group_flags` | 42 | 1 |
+
 ### `erx_manifest_t`
 
 Storage: `wire_le`. Prefix size: 368. Alignment: 8.
@@ -1120,37 +1119,39 @@ Storage: `wire_le`. Prefix size: 368. Alignment: 8.
 | `partial_boot` | `erx_mf_span` | 352 | 1 |
 | `strings` | `erx_mf_span` | 360 | 1 |
 
-### `erx_image_segment_t`
+### `erx_mf_limits_t`
 
-Storage: `wire_le`. Prefix size: 40. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `file_offset` | `u64` | 0 | 1 |
-| `mem_offset` | `u64` | 8 | 1 |
-| `file_size` | `u64` | 16 | 1 |
-| `mem_size` | `u64` | 24 | 1 |
-| `prot` | `prot` | 32 | 1 |
-| `flags` | `seg_flags` | 36 | 1 |
-
-### `erx_image_manifest_t`
-
-Storage: `wire_le`. Prefix size: 56. Alignment: 8.
+Storage: `wire_le`. Prefix size: 160. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
-| `magic` | `u32` | 0 | 1 |
-| `version` | `u16` | 4 | 1 |
-| `nsegments` | `u16` | 6 | 1 |
-| `abi_version` | `u32` | 8 | 1 |
-| `flags` | `image_flags` | 12 | 1 |
-| `span` | `u64` | 16 | 1 |
-| `fixed_base` | `u64` | 24 | 1 |
-| `entry` | `u64` | 32 | 1 |
-| `phdr_offset` | `u64` | 40 | 1 |
-| `phnum` | `u32` | 48 | 1 |
-| `base_alignment` | `u32` | 52 | 1 |
-| `segments` | `erx_image_segment` | 56 | `nsegments` (maximum 8) |
+| `name` | `erx_mf_str` | 0 | 1 |
+| `memory` | `u64` | 8 | 1 |
+| `outer` | `u64` | 16 | 1 |
+| `grant` | `erx_share` | 24 | 1 |
+| `spaces` | `erx_share` | 72 | 1 |
+| `lane` | `u32` | 120 | 1 |
+| `connections` | `u32` | 124 | 1 |
+| `crash` | `u32` | 128 | 1 |
+| `flags` | `mf_limits_flags` | 132 | 1 |
+| `runtime_limits` | `u32` | 136 | 1 |
+| `reserved` | `u32` | 140 | 1 |
+| `peer_held` | `u64` | 144 | 1 |
+| `peer_held_total` | `u64` | 152 | 1 |
+
+### `erx_mf_principal_t`
+
+Storage: `wire_le`. Prefix size: 80. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `name` | `erx_mf_str` | 0 | 1 |
+| `memory` | `u64` | 8 | 1 |
+| `grant` | `erx_share` | 16 | 1 |
+| `domains` | `u32` | 64 | 1 |
+| `names` | `u32` | 68 | 1 |
+| `default_limits` | `u32` | 72 | 1 |
+| `ceiling_limits` | `u32` | 76 | 1 |
 
 ## Calls
 
