@@ -2628,7 +2628,8 @@ record into it, so no padding byte holds what the buffer held before; it
 cleans those lines to the point of coherency, and then prints the same fields and
 text on the console as the panic report's first part, followed by the
 record itself in the **crash frame**, so that a reader validates the
-record rather than parses the report's prose:
+record rather than parses the report's prose. A newline before the header
+line ends whatever line the report left open:
 
 ```text
 --erx-crash-begin <form> <length>
@@ -2651,27 +2652,32 @@ record rather than parses the report's prose:
   `length`, is the frame's integrity check; the fields before it,
   `magic`, `version` and `length`, the reader checks by value, so there
   is no second checksum.
-* The reader, `tools/lib/erx/crash_frame.rb`, which shares a fuzz target
-  with the writer over both forms, refuses the header line before reading
+* The C reader, `kernel/core/crash_read.c`, shares a fuzz target with the
+  writer over both forms; the harness's reader,
+  `tools/lib/erx/crash_frame.rb`, is written apart from it, has a fuzz target
+  of its own and gives the same answer on mutated frames. Each refuses the
+  header line before reading
   a payload line when the form or the length is outside these rules,
   reads exactly the lines the length names, and accepts the record only
   if `magic`, `version`, `form` and `length` equal the frame's, the CRC
-  matches, `cause` is one of the four, `cpu` is below the CPU limit,
+  matches, `cause` is one of the four, `cpu` is below `ERX_CPU_LIMIT`,
   `boot_value` and `boot_slot` are one of the machine page's pairs, the
   padding is zero,
   `nframes` is at most 64 and zero unless the form is full and the cause
   `PANIC`, the fault record's `kind` is a declared kind for `FAULT` and is
   `exit` for `HALT`, the fault record is zero for `WATCHDOG`, and in the
-  full form every byte of `text` is printable ASCII or a newline, as
-  escaped text is. A frame that ends before its lines or before the end
+  full form `regs` is zero unless the cause is `FAULT` or `PANIC`, `frames`
+  is zero past `nframes`, and every byte of `text` is printable ASCII or a
+  newline, as escaped text is. A frame that ends before its lines or before the end
   line is reported as `truncated`; a line that is not base64 of the
   expected length, a second header line inside a frame, or any failed
   check as `corrupt`, with the lines kept; and no such boot passes a K31
   case.
 * The ABI file declares `crash_frame_begin` and `crash_frame_end`, the
   marker strings, `crash_frame_line` (76) and `crash_frame_lines_max`
-  (288); `ERX_CRASH_BRIEF_SIZE` and `ERX_CRASH_RECORD_SIZE` are the
-  generated sizes of the two layouts.
+  (288), and `cpu_limit`, one more than the highest CPU a cpuset can name;
+  `ERX_CRASH_BRIEF_SIZE` and `ERX_CRASH_RECORD_SIZE` are the generated sizes
+  of the two layouts.
 
 How each kernel carries the frame to its console is its binding's
 ([design-stopgap.md](design-stopgap.md#the-watchdog-the-crash-record-and-the-console)).
@@ -2679,16 +2685,28 @@ Every byte of text
 in the record passed `erx_log_escape` when it entered the log, and the
 report escapes everything else it did not write.
 
+`erx_crash_record_write` is the one writer. It cannot refuse, since nothing
+can report a refusal at the machine's end, so what it writes always passes
+the reader's checks: an input that contradicts itself, a cause outside the
+four, a CPU past the limit or a fault record the cause does not allow, is a
+kernel bug and is written as `PANIC` rather than blamed on the root task; a
+boot pair outside the machine page's is written as unknown; a form outside
+the two is written as brief, and the brief form never reads the registers,
+the backtrace, the message or the log. The message passes `erx_log_escape`;
+the log's newest whole lines that fit follow it, each read through the
+log's own check of a record, since a panic may have stopped a CPU halfway
+through an append.
+
 At boot step 4 the kernel reads the region before it carves the buffer. A
-record whose magic, version, form, length, boot value with its slot, padding
-and CRC check, and whose form is
+record that passes the reader's checks, and whose form is
 the one the running build writes, is the **previous crash record**: the
 kernel copies it into fresh pages wrapped in a read-only physical memory
 object, hands that object to the root task among the root capabilities,
 and clears the region's magic, so a record is reported once; the machine
-page says one was found. A record of the other form is refused and its
-bytes zeroed, so a release build never hands on, or keeps, a full record
-that a development build left. The check is a pure function over the
+page says one was found. Anything else that holds the magic, a record of
+the other form or one that fails a check, is refused and its bytes zeroed,
+so a release build never hands on, or keeps, a full record that a
+development build left. The decision, `erx_crash_previous_plan`, is a pure function over the
 bytes, bounded by `ERX_CRASH_SIZE`, with a fuzz target over both forms,
 since the region is memory that firmware and the previous boot wrote. The
 system domain shows the record in the inspector after the reboot, to a
@@ -8402,6 +8420,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | no object pointer from a lookup is used after a preemption point (K1) | in debug and host builds, `erx_uref_get` and `erx_object_ref` compare the reference's epoch with the thread's count of preemption points, which every explicit point and every helping-lock acquire advances, and stop the build's tests on a mismatch; `erx_uref_t`'s members read only in `kernel/core/cap.c`; the generated decoder looks up every plain capability argument after every other argument and existence lock of the call | syntax trees; the generator's test, which feeds it a call declared with a capability first; the hostile and fuzz suites in debug builds |
 | an object's state only advances, from live to released or deleted and from released to deleted, one destroy alone tears an object down, and only the reaper frees an object, after its grace period (K21, K26) | an object's `state` word written only by `erx_cap_slot_clear` in `kernel/core/cap.c`, which writes `ERX_OBJ_RELEASED` and only over `ERX_OBJ_LIVE`; the invalidation of an existence lock, one atomic operation whose result decides which destroy goes on, and for a space goes on to its walks, the walk that unlinks it running its teardown whatever that result was, referenced only from the deletion core in `kernel/core/delete.c`; the object free entry point referenced only from the reaper's put and free steps in `kernel/core/reaper.c` | syntax trees, relocations |
 | a sealed object is never written (K23) | a memory object's writer count changed only by `erx_mem_writer_enter` and `erx_mem_writer_leave`, which the writable-mapping insert, `erx_dma_map`, `erx_window_write` and `erx_mem_supply` call around every write path, and read by `erx_mem_seal`; the copy into an object's pages referenced only from those paths | syntax trees, relocations |
+| only the crash core builds a crash record (K31) | `erx_crash_record_write` and `ERX_CRASH_MAGIC` named only in `kernel/core/crash.c`, its seam, the binding's end funnel and the core's tests, by the `crash-record-writer` rule | a test seeds a second writer in a core and in the glue |
 | only the root task pets the watchdog, and every end of the machine passes one funnel (K19, K31) | `erx_watchdog_pet`'s handler requires `POWER` on the root resource, which no carved resource carries, by its generated decoder; the watchdog's deadline written only in the watchdog core, `kernel/core/watchdog.c`; the firmware's end calls referenced only from `erx_machine_end_effect`, which `erx_panic`, `erx_machine_end`, the lease's deadline and the watchdog's reach, and the crash record's writer referenced only from `erx_panic` | relocations, syntax trees |
 | every return to user mode passes the one decision of deaths, stops, holds and upcalls (K18, K29, K30) | the exit path, which alone holds exception-return instructions besides the boot entry's drop, calls `erx_return_check` before it restores the user registers; a space's hold count and its `quiesced` mark are read only there and in the space core's pause, resume, quiesce and copy functions, and changed only by them: the `holds` word, the pause count and the slots' tickets in `erx_space_pause` and `erx_space_resume`, `quiesced` set where the active count falls to zero under a hold, in the call boundary's decrement and in `erx_space_pause`, and cleared in `erx_space_resume`; `att_quiescers` woken only by the space core's one quiesce completion, called where the mark is set, in `erx_space_resume` for every quiescer waiting under the ticket it resumes, whatever other holds remain, in `erx_space_stop` and in the space's teardown | disassembly, syntax trees |
 | only `erx_vcpu_control` arms a thread for upcalls (K20) | the thread's armed flag written only in `erx_vcpu_control`, which checks the class, and in the thread's teardown | syntax trees |

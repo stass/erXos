@@ -1760,8 +1760,8 @@ bounded poll for room applies to every byte, so a hung UART drops the
 rest of the frame, which the reader then reports as truncated. The
 harness's reader, `tools/lib/erx/crash_frame.rb`, takes the first
 header line after the banner from the serial log and validates as the
-kernel design says; the reader and the writer share a fuzz target over
-both forms.
+kernel design says; the C reader and the writer share a fuzz target over
+both forms, and the two readers are compared on mutated frames.
 
 **Console ownership in a partial boot.** The early console prints every
 kernel log record, `erx_debug_log` lines included, until the system

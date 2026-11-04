@@ -705,6 +705,16 @@ module Erx
         flags: false,
         allowed: nil
       ).freeze
+      types["crash_frame_begin"] = BytesType.new(
+        name: "crash_frame_begin".b,
+        size: 17,
+        fixed: "--erx-crash-begin".b
+      ).freeze
+      types["crash_frame_end"] = BytesType.new(
+        name: "crash_frame_end".b,
+        size: 15,
+        fixed: "--erx-crash-end".b
+      ).freeze
       types["device_secret_label"] = BytesType.new(
         name: "device_secret_label".b,
         size: 19,
@@ -7559,6 +7569,8 @@ module Erx
           "cap_slot_state".b,
           "crash_cause".b,
           "crash_form".b,
+          "crash_frame_begin".b,
+          "crash_frame_end".b,
           "device_secret_label".b,
           "device_secret_status".b,
           "elf_magic".b,
@@ -7859,6 +7871,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "cpu_limit".b => Constant.new(
+            name: "cpu_limit".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "cpuset_bits".b => Constant.new(
             name: "cpuset_bits".b,
             value: 64,
@@ -7898,6 +7916,18 @@ module Erx
           "crash_form_full".b => Constant.new(
             name: "crash_form_full".b,
             value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "crash_frame_line".b => Constant.new(
+            name: "crash_frame_line".b,
+            value: 76,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "crash_frame_lines_max".b => Constant.new(
+            name: "crash_frame_lines_max".b,
+            value: 288,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

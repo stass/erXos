@@ -51,6 +51,10 @@ limit boot_strings_max u32 2048
 limit crash_version u32 2
 limit crash_size u32 16384
 limit crash_magic u64 0x4853415243585245
+limit crash_frame_line u32 76
+limit crash_frame_lines_max u32 288
+# The CPUs one kernel runs: a cpuset is one u64.
+limit cpu_limit u32 64
 limit budget_depth_max u32 16
 limit log_ring_bytes u32 65536
 # Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
@@ -136,6 +140,8 @@ enum crash_cause u32
 bytes pack_magic 8 value 4552585041434b00
 bytes boot_locator_magic 8 value 455258424f4f5400
 bytes system_manifest_path 15 value 73797374656d2f6d616e6966657374
+bytes crash_frame_begin 17 value 2d2d6572782d63726173682d626567696e
+bytes crash_frame_end 15 value 2d2d6572782d63726173682d656e64
 bytes abi_note_owner 6 value 6572586f7300
 bytes abi_note_section 13 value 2e6e6f74652e6572782e616269
 layout erx_abi_note 1 wire_le 4 24

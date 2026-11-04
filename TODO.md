@@ -973,10 +973,6 @@ document's "residual risks accepted" paragraph.
   UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
   `carries_capability?` refuses as a plain aggregate
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
-* [Low] crash record, the crash frame's constants: the design says the ABI
-  file declares `crash_frame_begin`, `crash_frame_end`, `crash_frame_line` and
-  `crash_frame_lines_max`, and it does not yet. They land with the frame's
-  writer and reader.
 * [Low] crash record, the brief form's promise: `fault` keeps `addr`, `pc` and
   `status`, so a wild dereference or an exit status can carry 8 bytes of what
   the root task held, against [design-kernel.md](docs/design-kernel.md#the-root-task)'s

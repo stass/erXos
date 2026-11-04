@@ -63,6 +63,7 @@ module Erx
           'kernel/generated/abi_decode.c' => decoder(schema),
           'kernel/generated/abi_run.c' => run_source(schema),
           'include/erx/core/abi_trap.h' => trap_seam(schema),
+          'include/erx/core/abi_crash.h' => crash_seam(schema),
           'liberx/backend/erx/arch/aarch64/generated/calls.c' => trap_source(schema),
           'liberx/backend/fiasco/generated/calls.h' => backend_header(schema, 'fiasco'),
           'liberx/backend/fiasco/generated/calls.c' => backend_source(schema, 'fiasco'),
@@ -578,6 +579,27 @@ module Erx
          "#define ERX_TRAP_REG_RESULTS { #{indices.call('results').join(', ')} }",
          "#define ERX_TRAP_UTCB_BYTES #{utcb.size}",
          '', '#endif /* ERX_CORE_ABI_TRAP_H */', ''].join("\n")
+      end
+
+      # What the crash core's seam needs of the ABI: every value the glue
+      # hands the crash record's writer, spelled as include/erx/abi.h spells
+      # it, so a file that includes both redefines nothing differently.
+      def crash_seam(schema)
+        enums = %w[crash_cause crash_form boot_value boot_slot].flat_map do |name|
+          schema.types.fetch(name).members.sort.map do |member, value|
+            "#define ERX_#{name.upcase}_#{member.upcase} UINT32_C(#{value})"
+          end
+        end
+        regs = schema.types.fetch('erx_regs')
+        brief = schema.types.fetch('erx_crash_brief')
+        build_id = brief.fields.find { |member| member.name == 'build_id' }
+        [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_CRASH_H', '#define ERX_CORE_ABI_CRASH_H', '',
+         '#include <stdint.h>', '',
+         *enums,
+         "#define ERX_CRASH_SIZE UINT32_C(#{schema.constants.fetch('crash_size').value})",
+         "#define ERX_CRASH_REGS_BYTES #{regs.size}",
+         "#define ERX_CRASH_BUILD_ID_BYTES #{build_id.count}",
+         '', '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")
       end
 
       def frame_index(register)

@@ -48,6 +48,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CAP_SLOT_STATE_RETIRED` | 3 |
 | `ERX_CAPS_MAX` | 1048576 |
 | `ERX_COPY_MAX` | 1048576 |
+| `ERX_CPU_LIMIT` | 64 |
 | `ERX_CPUSET_BITS` | 64 |
 | `ERX_CRASH_CAUSE_FAULT` | 1 |
 | `ERX_CRASH_CAUSE_HALT` | 2 |
@@ -55,6 +56,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CRASH_CAUSE_WATCHDOG` | 3 |
 | `ERX_CRASH_FORM_BRIEF` | 1 |
 | `ERX_CRASH_FORM_FULL` | 2 |
+| `ERX_CRASH_FRAME_LINE` | 76 |
+| `ERX_CRASH_FRAME_LINES_MAX` | 288 |
 | `ERX_CRASH_MAGIC` | 5211581015370781253 |
 | `ERX_CRASH_SIZE` | 16384 |
 | `ERX_CRASH_VERSION` | 2 |

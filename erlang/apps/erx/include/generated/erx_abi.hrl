@@ -40,6 +40,7 @@
 -define(ERX_CAP_SLOT_STATE_RETIRED, 3).
 -define(ERX_CAPS_MAX, 1048576).
 -define(ERX_COPY_MAX, 1048576).
+-define(ERX_CPU_LIMIT, 64).
 -define(ERX_CPUSET_BITS, 64).
 -define(ERX_CRASH_CAUSE_FAULT, 1).
 -define(ERX_CRASH_CAUSE_HALT, 2).
@@ -47,6 +48,8 @@
 -define(ERX_CRASH_CAUSE_WATCHDOG, 3).
 -define(ERX_CRASH_FORM_BRIEF, 1).
 -define(ERX_CRASH_FORM_FULL, 2).
+-define(ERX_CRASH_FRAME_LINE, 76).
+-define(ERX_CRASH_FRAME_LINES_MAX, 288).
 -define(ERX_CRASH_MAGIC, 5211581015370781253).
 -define(ERX_CRASH_SIZE, 16384).
 -define(ERX_CRASH_VERSION, 2).
@@ -377,6 +380,10 @@
 -define(ERX_MSG_ITEM_ALIGN, 8).
 -define(ERX_MSG_ITEM_OFF_DESC, 0).
 -define(ERX_MSG_ITEM_OFF_CAP, 8).
+-define(ERX_CRASH_FRAME_BEGIN_SIZE, 17).
+-define(ERX_CRASH_FRAME_BEGIN_BYTES, <<"--erx-crash-begin">>).
+-define(ERX_CRASH_FRAME_END_SIZE, 15).
+-define(ERX_CRASH_FRAME_END_BYTES, <<"--erx-crash-end">>).
 -define(ERX_DEVICE_SECRET_LABEL_SIZE, 19).
 -define(ERX_DEVICE_SECRET_LABEL_BYTES, <<"erXos device secret">>).
 -define(ERX_ELF_MAGIC_SIZE, 4).

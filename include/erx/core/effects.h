@@ -26,8 +26,9 @@ void erx_effect_log_unlock(void);
 uint64_t erx_effect_clock_ns(void);
 
 /*
- * Writes one rendered log line to the early console. It holds only what the
- * log's renderer made, and failing to write it is not the caller's concern.
+ * Writes one line to the early console: a rendered log line or a line of the
+ * crash frame. It holds only what those writers made, and failing to write it
+ * is not the caller's concern.
  */
 void erx_effect_console_write(const char *line, size_t length);
 

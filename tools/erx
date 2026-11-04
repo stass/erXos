@@ -300,7 +300,7 @@ module Erx
     end
 
     def self.fuzz_ruby(runner:, environment:, seconds:, seed:)
-      %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb].each do |path|
+      %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb tools/fuzz/crash_frame.rb].each do |path|
         runner.run([RbConfig.ruby, File.join(ROOT, path), '--seconds', seconds.to_s, '--seed', seed.to_s],
                    name: "fuzz-#{File.basename(path, '.rb').tr('_', '-')}", deadline: seconds + 30,
                    chdir: ROOT, env: environment)

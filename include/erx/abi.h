@@ -54,6 +54,7 @@ struct erx_rights {
 #define ERX_CAP_SLOT_STATE_RETIRED UINT32_C(3)
 #define ERX_CAPS_MAX UINT32_C(1048576)
 #define ERX_COPY_MAX UINT32_C(1048576)
+#define ERX_CPU_LIMIT UINT32_C(64)
 #define ERX_CPUSET_BITS UINT32_C(64)
 #define ERX_CRASH_CAUSE_FAULT UINT32_C(1)
 #define ERX_CRASH_CAUSE_HALT UINT32_C(2)
@@ -61,6 +62,8 @@ struct erx_rights {
 #define ERX_CRASH_CAUSE_WATCHDOG UINT32_C(3)
 #define ERX_CRASH_FORM_BRIEF UINT32_C(1)
 #define ERX_CRASH_FORM_FULL UINT32_C(2)
+#define ERX_CRASH_FRAME_LINE UINT32_C(76)
+#define ERX_CRASH_FRAME_LINES_MAX UINT32_C(288)
 #define ERX_CRASH_MAGIC UINT64_C(5211581015370781253)
 #define ERX_CRASH_SIZE UINT32_C(16384)
 #define ERX_CRASH_VERSION UINT32_C(2)
@@ -564,6 +567,16 @@ typedef uint32_t erx_cap_slot_state_t;
 typedef uint32_t erx_crash_cause_t;
 
 typedef uint32_t erx_crash_form_t;
+
+typedef uint8_t erx_crash_frame_begin_t[17];
+#define ERX_CRASH_FRAME_BEGIN_SIZE 17
+#define ERX_CRASH_FRAME_BEGIN_BYTES { 0x2d, 0x2d, 0x65, 0x72, 0x78, 0x2d, 0x63, 0x72, 0x61, 0x73, 0x68, 0x2d, 0x62, 0x65, 0x67, 0x69, 0x6e }
+#define ERX_CRASH_FRAME_BEGIN_STRING "--erx-crash-begin"
+
+typedef uint8_t erx_crash_frame_end_t[15];
+#define ERX_CRASH_FRAME_END_SIZE 15
+#define ERX_CRASH_FRAME_END_BYTES { 0x2d, 0x2d, 0x65, 0x72, 0x78, 0x2d, 0x63, 0x72, 0x61, 0x73, 0x68, 0x2d, 0x65, 0x6e, 0x64 }
+#define ERX_CRASH_FRAME_END_STRING "--erx-crash-end"
 
 typedef uint8_t erx_device_secret_label_t[19];
 #define ERX_DEVICE_SECRET_LABEL_SIZE 19
