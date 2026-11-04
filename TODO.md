@@ -109,20 +109,10 @@ it; git history is the record of completed work.
   thread. The handle table of
   [design-stopgap.md](docs/design-stopgap.md#capabilities-in-fiascos-object-space)
   replaces it.
-* [Medium] stopgap, Fiasco's `Semaphore`, `fiasco/kernel/src/kern/semaphore.cpp`: an up
-  across CPUs dequeues its waiter and only later reaches the waiter's CPU, through
-  `Context::activate`'s remote state change (`context.cpp:1059,1612`). If the waiter's
-  timeout fires in between, `sys_down` reports success, as it must, but the activation is
-  still on its way. If the thread has entered another down by the time it lands, that down
-  returns success with no up and with the thread still on the semaphore's queue, and a
-  third down inserts it twice. A vCPU the host preempts holds that window open. The
-  threads suite counts it (`umtx_no_stale_wake`, the umtx node still queued after a wait)
-  and has not seen it. Timed waits only; erXos's own kernel has no such object. The fix, if
-  it is ever seen, is in `sys_down`: a thread made ready while still queued and with no
-  timeout or cancel goes back to sleep. Beyond the early return, such an up can dequeue a running
-  thread and never count, which is a true lost wake, and the umtx node can be queued twice. ERTS's
-  timed parks reach this path from M3, so settle it then. The suite's count covers umtx waits only, not a
-  park returning with its slot still listed.
+* [Medium] stopgap, the fork's executable pages under SMP: nothing runs a page rewritten on one CPU and run
+  again on another, so instruction-cache coherence across CPUs and the reuse of an executable page are unverified:
+  the native suites inspect only data after protection changes. The `native_memory` suite needs
+  that case once BeamAsm's JIT alias exists.
 * [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than
   the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode; nothing on
   QEMU asserts `parked` while a slot is parked. It has one waker in flight, and judges a lost wake only with

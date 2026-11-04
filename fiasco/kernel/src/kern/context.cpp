@@ -1,5 +1,6 @@
 // Modified by erXos: lazy FP switching is deleted; FP state is switched
-// eagerly (docs/design-stopgap.md, "FP and SIMD state").
+// eagerly (docs/design-stopgap.md, "FP and SIMD state"). activate() can add
+// state bits with Thread_ready (docs/design-stopgap.md, "Thread start").
 INTERFACE:
 
 #include "types.h"
@@ -1053,13 +1054,15 @@ Context::in_ready_list() const
  *
  * This function sets a new thread onto the ready list and switches to
  * the thread if it can preempt the currently running thread.
+ *
+ * \param also  State bits that arrive together with Thread_ready.
  */
 PUBLIC
 void
-Context::activate()
+Context::activate(Mword also = 0)
 {
   auto guard = lock_guard(cpu_lock);
-  if (xcpu_state_change(~0UL, Thread_ready, true) == Reschedule::Yes)
+  if (xcpu_state_change(~0UL, Thread_ready | also, true) == Reschedule::Yes)
     current()->switch_to_locked(this);
 }
 

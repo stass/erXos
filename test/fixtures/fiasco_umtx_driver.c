@@ -470,8 +470,15 @@ run_wire(void)
 		fail("a label naming no live task must drop");
 	if (decode(3, ERX_FIASCO_WIRE_PAGE_FAULT, 2, 0).kind != ERX_FIASCO_WIRE_FAULT_PAGE)
 		fail("the sender's rights in a label must be masked");
-	if (decode(0, ERX_FIASCO_WIRE_EXCEPTION, 0, 0).kind != ERX_FIASCO_WIRE_FAULT_EXCEPTION)
+	if (decode(0, ERX_FIASCO_WIRE_EXCEPTION, ERX_FIASCO_WIRE_EXCEPTION_WORDS, 0).kind != ERX_FIASCO_WIRE_FAULT_EXCEPTION)
 		fail("an exception is a fault");
+	/* A fault's handler reads its fields without looking again, so a short message must not get there. */
+	for (uint32_t words = 0; words < 64; words++) {
+		if (words != ERX_FIASCO_WIRE_PAGE_FAULT_WORDS && decode(0, ERX_FIASCO_WIRE_PAGE_FAULT, words, 0).kind != ERX_FIASCO_WIRE_REFUSE)
+			fail("a page fault of any other length is refused");
+		if (words != ERX_FIASCO_WIRE_EXCEPTION_WORDS && decode(0, ERX_FIASCO_WIRE_EXCEPTION, words, 0).kind != ERX_FIASCO_WIRE_REFUSE)
+			fail("an exception of any other length is refused");
+	}
 	got = decode(0, 200, start_words, 0);
 	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
 		fail("an unknown number is ERX_EINVAL");
@@ -490,7 +497,7 @@ run_wire(void)
 	got = decode(0, ERX_FIASCO_CALL_THREAD_START, start_words, ERX_FIASCO_THREADS_MAX - 1);
 	if (got.kind != ERX_FIASCO_WIRE_REQUEST || got.caller != ERX_FIASCO_THREADS_MAX - 1 || got.request[1] != 7)
 		fail("a good request must decode");
-	printf("wire: 9 cases\n");
+	printf("wire: 11 cases\n");
 }
 
 int

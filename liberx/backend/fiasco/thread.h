@@ -72,6 +72,12 @@ const char	*erx_fiasco_reaper_start(void);
  */
 bool		erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline);
 
+#ifdef ERX_FIASCO_TEST_HOOKS
+/* A semaphore's up, and an IPC receive wait of the given length with nothing to receive. */
+void		erx_fiasco_test_semaphore_up(uint64_t);
+void		erx_fiasco_test_ipc_sleep_us(uint64_t);
+#endif
+
 /*
  * Where each index's native UTCB is in the table's area, and its capabilities in
  * the root. Index 0, the first thread, has the kernel-given UTCB instead, which is

@@ -60,11 +60,13 @@ erx_fiasco_wire_decode(const erx_fiasco_wire_input_t *input)
 	decoded.task = (uint32_t)task;
 
 	if (input->tag_label == ERX_FIASCO_WIRE_PAGE_FAULT) {
-		decoded.kind = ERX_FIASCO_WIRE_FAULT_PAGE;
+		if (input->words == ERX_FIASCO_WIRE_PAGE_FAULT_WORDS)
+			decoded.kind = ERX_FIASCO_WIRE_FAULT_PAGE;
 		return (decoded);
 	}
 	if (input->tag_label == ERX_FIASCO_WIRE_EXCEPTION) {
-		decoded.kind = ERX_FIASCO_WIRE_FAULT_EXCEPTION;
+		if (input->words == ERX_FIASCO_WIRE_EXCEPTION_WORDS)
+			decoded.kind = ERX_FIASCO_WIRE_FAULT_EXCEPTION;
 		return (decoded);
 	}
 	if (input->tag_label == ERX_CALL_DEBUG_LOG) {

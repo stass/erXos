@@ -45,6 +45,7 @@
 
 _Static_assert(L4_PROTO_PAGE_FAULT == ERX_FIASCO_WIRE_PAGE_FAULT, "Fiasco's page fault protocol");
 _Static_assert(L4_PROTO_EXCEPTION == ERX_FIASCO_WIRE_EXCEPTION, "Fiasco's exception protocol");
+_Static_assert(sizeof(l4_exc_regs_t) <= ERX_FIASCO_WIRE_EXCEPTION_WORDS * sizeof(uint64_t), "the exception's words hold its registers");
 
 /*
  * The threads suite's image is built with this hook, and no other is: the step of

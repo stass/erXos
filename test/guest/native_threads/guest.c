@@ -842,6 +842,7 @@ case_park_ping(void)
 static _Atomic uint32_t park_race_stop;
 static _Atomic uint32_t park_race_slot;
 static _Atomic uint32_t park_race_stale;
+static _Atomic uint32_t park_race_left;
 
 /*
  * Parks with deadlines as short as the wakes come, then one with no waker: a
@@ -857,8 +858,9 @@ park_race_helper(uint64_t arg)
 	for (uint32_t round = 0; round < RACE_ROUNDS; round++)
 		(void)erx_park(group_epoch(), slot_epoch(slot), erx_fiasco_clock_ns() + (round % 8 + 1) * 10000);
 	atomic_store_explicit(&park_race_stop, 1, memory_order_release);
-	/* The waker sees the stop only after its last wake has passed. */
-	settle(5 * NS_PER_MS);
+	/* The waker's last wake has returned before this thread looks at its epochs. */
+	while (atomic_load_explicit(&park_race_left, memory_order_acquire) == 0)
+		settle(NS_PER_MS);
 	if (erx_park(group_epoch(), slot_epoch(slot), erx_fiasco_clock_ns() + 5 * NS_PER_MS) != ERX_ETIMEDOUT)
 		atomic_store_explicit(&park_race_stale, 1, memory_order_release);
 	bump_done();
@@ -879,6 +881,7 @@ case_park_timeout_races_wake(void)
 		settle(NS_PER_MS);
 	while (atomic_load_explicit(&park_race_stop, memory_order_acquire) == 0)
 		(void)erx_executor_wake(slot - 1);
+	atomic_store_explicit(&park_race_left, 1, memory_order_release);
 	return (wait_for(&done, 1) && atomic_load(&park_race_stale) == 0);
 }
 

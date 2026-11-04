@@ -131,6 +131,22 @@ module Erx
       image_path
     end
 
+    # The kernel again with a test's defines, in its own directory: for a suite
+    # that must hold a window open, which no image but that suite's ever boots.
+    # build must have run. A source change discards it, as it does the real one.
+    def build_test_kernel(name:, defines:, jobs: 4)
+      prepare_source_cache
+      cores = build_cores
+      directory = File.join(@build, "test-kernel-#{name}")
+      inputs = File.read(File.join(@build, '.erx-inputs.json'))
+      marker = File.join(directory, '.erx-test-inputs.json')
+      current = File.file?(marker) && File.read(marker) == inputs
+      FileUtils.remove_entry(directory) if File.exist?(directory) && !current
+      build_kernel(jobs: jobs, cores: cores, directory: directory, defines: defines)
+      File.write(marker, inputs)
+      File.join(directory, 'fiasco')
+    end
+
     # The first stage as built: bootstrap's flat image, with neither locator
     # field written (docs/design-kernel.md, "The bootable file"). What boots is
     # this with an archive; BootImage writes both forms.
@@ -270,14 +286,15 @@ module Erx
                         output: File.join(@build, 'cores'), check: proof)
     end
 
-    def build_kernel(jobs:, cores:)
-      directory = File.join(@build, 'kernel')
+    def build_kernel(jobs:, cores:, directory: File.join(@build, 'kernel'), defines: [])
       configure(source: @inputs.part('kernel'), directory: directory,
                 input: @inputs.configuration('kernel.defconfig'),
                 output: 'globalconfig.out', name: 'fiasco-kernel-config')
       # The resolved file, not the defconfig: a select can set an option the
       # defconfig leaves unset.
       FiascoConfig.check(File.join(directory, 'globalconfig.out'))
+      # The kernel's Makeconf reads this file from its build directory.
+      File.write(File.join(directory, 'Makeconf.local'), "CPPFLAGS += #{defines.join(' ')}\n") unless defines.empty?
       @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
                    "ERX_CORE_ARCHIVE=#{cores.archive}", "ERX_CORE_INCLUDE=#{cores.seam}"],
                   name: 'fiasco-kernel-build', deadline: 600, env: build_environment)

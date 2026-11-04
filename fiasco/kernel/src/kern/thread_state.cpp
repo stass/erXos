@@ -1,7 +1,7 @@
 // Modified by erXos: FP state is switched eagerly, so no thread owns the
 // FPU (docs/design-stopgap.md, "FP and SIMD state"). The notice makes this
 // file's implementation part non-empty, so its header includes what it
-// names.
+// names. Thread_sem_woken is erXos's too (Semaphore::wake_dequeued()).
 INTERFACE:
 
 #include "types.h"
@@ -54,7 +54,8 @@ enum Thread_state : Mword
   /// Thread is about to be killed.
   Thread_dying                = 0x400,
 
-  // 0x800 is free
+  /// A semaphore's activation of this thread has landed (Semaphore::wake_dequeued()).
+  Thread_sem_woken            = 0x800,
 
   /// Thread::finish_migration must be executed on the new CPU core before
   /// executing any userland code (actually to re-enqueue timeouts).

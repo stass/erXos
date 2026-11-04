@@ -100,6 +100,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_park_driver.c'),
@@ -136,7 +137,8 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_semaphore_race/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
         ),

@@ -1,3 +1,5 @@
+// Modified by erXos: a thread this semaphore dequeued does not leave sys_down
+// before its activation has landed (docs/design-stopgap.md, "Thread start").
 INTERFACE:
 
 #include <limits.h>
@@ -26,6 +28,9 @@ IMPLEMENTATION:
 
 #include "ipc_timeout.h"
 #include "assert_opt.h"
+#include "mem.h"
+#include "processor.h"
+#include "timer.h"
 
 JDB_DEFINE_TYPENAME(Semaphore,  "\033[37mIRQ sem\033[m");
 
@@ -62,6 +67,37 @@ Semaphore::count_up(Thread **wakeup)
   return old;
 }
 
+/**
+ * Wake a thread this semaphore has just dequeued.
+ *
+ * From another CPU the activation lands some time after the dequeue, and the
+ * thread's timeout or cancel can end its wait in between. Thread_sem_woken,
+ * which only this sets and which arrives together with Thread_ready, is how
+ * sys_down knows the activation has landed, so that it never outlives the
+ * down it belongs to: a late Thread_ready would end whatever the thread blocks
+ * in next, and most waits take it for their own wake.
+ */
+PRIVATE static inline NOEXPORT
+void
+Semaphore::wake_dequeued(Thread *t)
+{
+#ifdef ERX_TEST_SEMAPHORE_WAKE_HOLD_US
+  // The test kernel of tools/lib/erx/native_semaphore_race.rb only: holds an
+  // up across CPUs here, between its dequeue and its activation, until the
+  // waiter has queued itself again or the hold runs out.
+  if (t->home_cpu() != current_cpu())
+    {
+      Unsigned64 const end = Timer::system_clock() + ERX_TEST_SEMAPHORE_WAKE_HOLD_US;
+      while (!t->wait_queue() && Timer::system_clock() < end)
+        {
+          Proc::pause();
+          Mem::barrier();
+        }
+    }
+#endif
+  t->activate(Thread_sem_woken);
+}
+
 PRIVATE inline NOEXPORT ALWAYS_INLINE
 void
 Semaphore::_hit_edge_irq(Upstream_irq const *ui)
@@ -80,7 +116,7 @@ Semaphore::_hit_edge_irq(Upstream_irq const *ui)
 
   Upstream_irq::ack(ui);
   if (t)
-    t->activate();
+    wake_dequeued(t);
 }
 
 PRIVATE static
@@ -99,7 +135,7 @@ Semaphore::_hit_level_irq(Upstream_irq const *ui)
   count_up(&t);
 
   if (t)
-    t->activate();
+    wake_dequeued(t);
 }
 
 PRIVATE static
@@ -240,7 +276,22 @@ Semaphore::sys_down(L4_fpage::Rights rights, L4_timeout t, Utcb const *utcb)
       // Therefore, the semaphore down operation must be reported as successful!
       // Also Semaphore::destroy() could be the reason why the thread was
       // dequeued and unblocked.
+      //
+      // Whoever dequeued this thread has yet to activate it, or the activation
+      // is on its way here. Wait for it, so that it lands in this wait and in no
+      // later one. It cannot be missed: a remote state change lands here only
+      // through the request interrupt, which the CPU lock keeps out until
+      // schedule() lets the CPU go, so nothing lands between the check and
+      // clearing Thread_ready. A cancel in this wait finds the down complete.
+      while (!(c_thread->state() & Thread_sem_woken))
+        {
+          c_thread->state_del_dirty(Thread_ready);
+          c_thread->schedule();
+        }
+      c_thread->state_del_dirty(Thread_cancel);
     }
+
+  c_thread->state_del_dirty(Thread_sem_woken);
 
   // An IPC error might have been set by Semaphore::destroy() to indicate that
   // the reason for unblocking the waiting thread was not the completion of the
@@ -305,7 +356,7 @@ Semaphore::destroy(Kobjects_list &reap_list) override
           t->utcb().access()->error = L4_error::Not_existent;
         }
 
-      t->activate();
+      wake_dequeued(t);
     }
 }
 

@@ -24,13 +24,15 @@ module Erx
       def fetch(name) = public_send(name)
     end
 
-    def initialize(root:, runner:, compiler:, linker:)
+    # kernel replaces the built kernel, for a suite that boots a test kernel.
+    def initialize(root:, runner:, compiler:, linker:, kernel: nil)
       @root = File.expand_path(root)
       @runner = runner
       @compiler = compiler
       @linker = linker
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
       @fiasco = Fiasco.new(root: @root, runner: runner, compiler: compiler)
+      @kernel = kernel || @fiasco.kernel_path
     end
 
     # Rebuilds directory from nothing, so a stale archive cannot stand in.
@@ -60,7 +62,7 @@ module Erx
     private
 
     def extra_files(stand_in_root)
-      files = [{ path: @codec.fixed_bytes('boot_kernel_path'), snapshot: @fiasco.kernel_path },
+      files = [{ path: @codec.fixed_bytes('boot_kernel_path'), snapshot: @kernel },
                { path: @codec.fixed_bytes('boot_sigma0_path'), snapshot: @fiasco.sigma0_path }]
       files << { path: @codec.fixed_bytes('boot_stand_in_root_path'), snapshot: stand_in_root } if stand_in_root
       files.each { |file| raise Error, "#{file.fetch(:snapshot)} is not built" unless File.file?(file.fetch(:snapshot)) }

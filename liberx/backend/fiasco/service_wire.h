@@ -18,6 +18,10 @@
 /* Fiasco's fault protocols; service.c pins these to Fiasco's own. */
 #define ERX_FIASCO_WIRE_PAGE_FAULT	(-2)
 #define ERX_FIASCO_WIRE_EXCEPTION	(-5)
+/* Each fault's words, all of them: its handler reads them without looking again. service.c holds the
+ * exception's to Fiasco's register block, and the native_crash suite runs both. */
+#define ERX_FIASCO_WIRE_PAGE_FAULT_WORDS	2u
+#define ERX_FIASCO_WIRE_EXCEPTION_WORDS	40u
 /* The gate label holds the task's index above the sender's rights. */
 #define ERX_FIASCO_WIRE_LABEL_SHIFT	2u
 /* The longest request, in words. */

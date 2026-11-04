@@ -309,6 +309,21 @@ erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline)
 	}
 }
 
+#ifdef ERX_FIASCO_TEST_HOOKS
+void
+erx_fiasco_test_semaphore_up(uint64_t semaphore)
+{
+	(void)l4_semaphore_up((l4_cap_idx_t)semaphore);
+}
+
+void
+erx_fiasco_test_ipc_sleep_us(uint64_t microseconds)
+{
+	(void)l4_ipc_sleep(l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(
+	    microseconds < L4_TIMEOUT_US_MAX ? microseconds : L4_TIMEOUT_US_MAX)));
+}
+#endif
+
 /* On the list under the lock, then an up: the reaper finds the record or was already due to look. */
 static _Noreturn void
 thread_exit_to_reaper(erx_fiasco_thread_record_t *record)

@@ -14,6 +14,8 @@ Erx::PackFuzz.declare_target(
      message.call(4, 3, 2, 1, 0, 1),
      message.call(3, -2, 2, 1, 0x1000, 0x44000000),
      message.call(0, -5, 0, 1),
+     message.call(0, -5, 40, 1),
+     message.call(0, -2, 0, 1),
      message.call(0, 2, 6, 1, 0, 0, 0, 0, 0, 5),
      message.call(0, 3, 2, 1, 128, 0),
      message.call(0, 200, 2, 1),

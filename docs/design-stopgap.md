@@ -380,6 +380,8 @@ free and its marker reads 0**, checked under the thread lock, lowest first, as L
 Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears one. No claimable index is
 `ERX_ENOMEM`.
 
+**A semaphore's wake across CPUs.** The fork changes one thing in `Semaphore`. An up on another CPU dequeues its waiter and activates it afterwards, and the waiter's timeout can fire in between. Its down then reports success, as it must, since the count went to it, but the activation is still on its way, and it would end whatever the thread blocks in next: an IPC wait with a false timeout, or another down with success and no up, leaving the thread queued. So the activation carries `Thread_sem_woken`, and a down that finds its thread dequeued waits for that bit before it returns. No activation outlives its down, so no other wait has to expect one.
+
 **`erx_thread_create`.** The stub claims an index. The service runs `l4_factory_create_thread` and
 `l4_factory_create(factory, L4_PROTO_SEMAPHORE, cap)` (`factory.h:470`, `semaphore.cpp:329`), maps the semaphore
 at the index's slot, copies the starting registers from the caller's public UTCB into the record, and replies
@@ -766,6 +768,7 @@ the tests.
 | **Interrupt**: a UART receive and a software object wake a parked executor; `erx_group_take_ready` returns each label once; ack lets the next through | ack removed: the second character never arrives. Listed flag ignored: a label twice |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
 | **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
+| **A semaphore's wake across CPUs**, the `native_semaphore_race` suite, on a test kernel whose up holds itself between the dequeue and the activation until the waiter is queued again or half a second passes: at least three raced downs each, followed by an IPC wait that lasts its whole length and by a down that times out; too few raced downs fail the case | the bit's wait removed: the IPC wait ends early and the second down reports an up that never came |
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
 | **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
@@ -809,7 +812,6 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 
 * A 128 KiB area works in `utcb_area`: `task.cpp:253,356,645-649,887`.
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
-* A semaphore's count stays exact when an up across CPUs races a down's timeout: `sys_down` looks under the semaphore's lock, and a thread no longer queued was given the up and reports success (`semaphore.cpp:203-243`). Its late activation is the gap [`TODO.md`](../TODO.md) records (`context.cpp:1059,1612`), which the suite counts and has not seen.
 * Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.
 
 **Later packages:**
