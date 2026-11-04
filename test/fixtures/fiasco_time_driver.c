@@ -17,7 +17,7 @@
 #include "liberx/backend/fiasco/time_table.h"
 
 #define NS_PER_SECOND	UINT64_C(1000000000)
-/* Five years, in seconds: past this the scale may read a nanosecond above the floor. */
+/* Five years, in seconds, within which each frequency below reads the exact floor. */
 #define REACH_SECONDS	UINT64_C(157680000)
 #define RANDOM_COUNTERS	2000000u
 #define WAIT_MAX_US	UINT64_C(1000000)

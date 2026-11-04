@@ -53,7 +53,7 @@ class NativeSeedsTest < Minitest::Test
     'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
                                    suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/),
     'the ack removed' => Seed.new(file: IRQ, from: ACK_BODY, to: "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n",
-                                  suite: :irq, cpus: 1, expected: /irq-second-character/),
+                                  suite: :irq, cpus: 1, expected: /a lost wake/),
     'the listed flag ignored' => Seed.new(file: PARK, from: 'if ((park->listed & (UINT64_C(1) << event->object)) == 0) {', to: '{',
                                           suite: :irq, cpus: 1, expected: /status page's ready disagrees/),
     'the interlock removed' => Seed.new(file: PARK, from: "if (park->group_epoch != event->group_seen || park->slot_epoch[slot] != event->slot_seen)\n\t\t\treturn ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_RETURN });\n", to: '',

@@ -186,13 +186,13 @@ module Erx
     # until QEMU exits, and a guest still running at the deadline fails it, as
     # does one that exits before its transcript is complete. Otherwise the
     # harness ends the guest at the last checkpoint.
-    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false)
+    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil)
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
       matcher = Transcript.new(checkpoints: checkpoints)
       deadline = checkpoints.sum { |point| point.fetch(:seconds) } + 5
-      directory = File.join(@root, 'build/qemu', "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
+      directory ||= File.join(@root, 'build/qemu', "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
       directory = OutputDirectory.prepare(root: @root, path: directory, mode: 0o700)
       serial = File.join(directory, 'serial.log')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
@@ -201,8 +201,9 @@ module Erx
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      typing = keyboard && open_keyboard(keyboard)
+      typing = nil
       begin
+        typing = keyboard && open_keyboard(keyboard)
         version = @runner.run([@program, '--version'], name: 'qemu-version', deadline: 10)
         report['qemu_version'] = File.binread(version.fetch('log')).lines.first.to_s.strip
         guest_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -240,6 +241,8 @@ module Erx
     def open_keyboard(path)
       File.mkfifo(path, 0o600)
       File.open(path, File::RDWR).tap { |keys| keys.sync = true }
+    rescue SystemCallError => e
+      raise Error, "no FIFO to type through: #{e.message}"
     end
 
     def elapsed(started)

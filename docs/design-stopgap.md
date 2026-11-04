@@ -442,8 +442,8 @@ word between tasks.
 
 A deadline is absolute monotonic nanoseconds. The backend reads the architecture's user-mode counter directly, through
 `erx_fiasco_clock_ns` in the architecture layer's `clock.c`, and not the time page, which only a caller of
-`erx_time_page` needs; the page's scale gives the same nanosecond for five years of counting, since `time_table.c` rounds its
-multiplier up at the largest shift that fits. `erx_fiasco_time_wait_us` takes the remainder, rounds it up to
+`erx_time_page` needs; the page's scale gives the same nanosecond for years of counting at QEMU's and the Raspberry Pi's frequencies, and at most one
+above it after that, since `time_table.c` rounds its multiplier up at the largest shift that fits. `erx_fiasco_time_wait_us` takes the remainder, rounds it up to
 microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
 wait is never early, and is late by up to Fiasco's timer granularity plus one part in 512. A deadline already past
 returns without a kernel call.

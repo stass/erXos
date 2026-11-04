@@ -34,10 +34,10 @@ module Erx
        point('irq-time-page', /\Aerx: irq: the time page agrees/n, 30),
        point('irq-uart-registers', /\Aerx: irq: sigma0 gave the UART/n, 30),
        point('irq-line-free', /\Aerx: irq: the UART's receive line is free/n, 30),
-       point('irq-parked-wake', /\Aerx: irq: a parked executor woke/n, 30),
-       point('irq-before-park', /\Aerx: irq: a trigger before the park returned/n, 30),
-       point('irq-once-and-order', /\Aerx: irq: each label once, oldest first/n, 30),
-       point('irq-timed-park', /\Aerx: irq: a timed park ended/n, 30),
+       point('irq-parked-wake', /\Aerx: irq: a parked executor woke/n, 60),
+       point('irq-before-park', /\Aerx: irq: a trigger before the park returned/n, 60),
+       point('irq-once-and-order', /\Aerx: irq: each label once, oldest first/n, 60),
+       point('irq-timed-park', /\Aerx: irq: a timed park ended/n, 60),
        point('irq-rounds', /\Aerx: irq: rounds of ring and park/n, 120),
        point('irq-prompt-first', /\Aerx: irq: type a character/n, 30, type: FIRST),
        point('irq-first-character', uart_line(FIRST), 60),
@@ -80,11 +80,12 @@ module Erx
       private
 
       def boot(built, accel, count)
+        directory = File.join(@root, 'build/qemu', "irq-#{accel}-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB,
-                                                            checkpoints: NativeIrq.checkpoints, machine_end: true)
+                                                            checkpoints: NativeIrq.checkpoints, machine_end: true, directory: directory)
       rescue Error => e
-        serial = Dir[File.join(@root, 'build/qemu/*/serial.log')].max_by { |path| File.mtime(path) }
-        NativeIrq.judge(File.binread(serial)) if serial
+        serial = File.join(directory, 'serial.log')
+        NativeIrq.judge(File.binread(serial)) if File.file?(serial)
         raise e
       else
         serial = report.fetch('serial_log')

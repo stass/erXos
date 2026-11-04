@@ -406,8 +406,8 @@ race_executor(void *argument)
 		}
 		if (atomic_exchange_explicit(&race_flag[slot], 0, memory_order_acq_rel) != 0)
 			found = true;
-		if (erx_fiasco_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, taken) > RACE_OBJECTS)
-			found = true;
+		/* Only for ThreadSanitizer's view of the ring: the counters above say what is found. */
+		(void)erx_fiasco_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, taken);
 		if (!found)
 			(void)erx_fiasco_park_wait(&race_group, &race_effects, NULL, slot, group, epoch,
 			    race_clock_ns() + 50000);

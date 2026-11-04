@@ -726,7 +726,7 @@ park_self_helper(uint64_t arg)
 	bool ok;
 
 	(void)arg;
-	erx_fiasco_group_trigger();
+	erx_fiasco_group_trigger(0);
 	ok = erx_park(group, epoch, ERX_FIASCO_UMTX_FOREVER) == ERX_OK;
 	group = group_epoch();
 	ok = ok && erx_executor_wake(slot) == ERX_OK;
@@ -782,7 +782,7 @@ case_park_trigger_in_window(void)
 	if (create_class(park_gate_helper, 0, 0, ERX_THREAD_CLASS_EXECUTOR, &thread) != ERX_OK ||
 	    erx_thread_start(thread) != ERX_OK || !wait_for(&park_gate_at, 1))
 		return (false);
-	erx_fiasco_group_trigger();
+	erx_fiasco_group_trigger(0);
 	atomic_store_explicit(&park_gate_open, 1, memory_order_release);
 	(void)erx_umtx_wake(word_addr(&park_gate_open), 1);
 	return (wait_for(&done, 1) && atomic_load(&park_gate_ok) == 1);
@@ -829,13 +829,13 @@ case_park_ping(void)
 	}
 	for (uint32_t round = 1; round <= PARK_ROUNDS; round++) {
 		atomic_store_explicit(&park_published, round, memory_order_release);
-		erx_fiasco_group_trigger();
+		erx_fiasco_group_trigger(0);
 		if (!wait_for(&park_consumed, round))
 			return (false);
 	}
 	atomic_store_explicit(&park_stop, 1, memory_order_release);
 	for (uint32_t index = 0; index < PARK_EXECUTORS; index++)
-		erx_fiasco_group_trigger();
+		erx_fiasco_group_trigger(0);
 	return (wait_for(&done, PARK_EXECUTORS));
 }
 

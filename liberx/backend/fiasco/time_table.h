@@ -20,9 +20,11 @@ typedef struct erx_fiasco_time_scale {
 
 /*
  * The scale of a counter of this frequency. mult is rounded up at the largest shift
- * that keeps it in 64 bits, which gives the exact floor of counter * 10^9 / hz for five
- * years of counting, and at most a nanosecond above it after that. A frequency of zero,
- * which no conforming hardware reports, scales every counter to time zero.
+ * that keeps it in 64 bits. That gives the exact floor of counter * 10^9 / hz while
+ * counter * (hz / gcd(hz, 10^9)) stays below 2^shift, which is years on the frequencies of
+ * QEMU and the Raspberry Pi, and at most a nanosecond above it after that, so a wait is
+ * never early. A frequency of zero, which no conforming hardware reports, scales every
+ * counter to time zero.
  */
 erx_fiasco_time_scale_t erx_fiasco_time_scale(uint64_t hz);
 

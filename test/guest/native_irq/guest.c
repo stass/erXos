@@ -306,6 +306,7 @@ start_executor(void)
 
 	start.regs.sp = (uint64_t)(uintptr_t)(executor_stack + sizeof(executor_stack));
 	start.regs.pc = (uint64_t)(uintptr_t)executor_main;
+	/* erx_thread_create takes the new thread's starting registers from the caller's UTCB. */
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
 	if (erx_thread_create(0, 0, 0, ERX_THREAD_CLASS_EXECUTOR, &thread) != ERX_OK ||
@@ -322,7 +323,7 @@ ring_when_parked(void)
 
 	while (atomic_load_explicit(&cases_done, memory_order_acquire) == 0) {
 		if (atomic_load_explicit(&ring_wanted, memory_order_acquire) != 0 &&
-		    atomic_load_explicit(&status->exec[0].state, memory_order_relaxed) == ERX_EXEC_STATE_PARKED) {
+		    atomic_load_explicit(&status->exec[0].state, memory_order_acquire) == ERX_EXEC_STATE_PARKED) {
 			if (atomic_load_explicit(&status->parked, memory_order_relaxed) != 1)
 				fail("erx: irq: the status page's parked disagrees FAILED\n");
 			atomic_store_explicit(&ring_wanted, 0, memory_order_release);
@@ -356,12 +357,12 @@ check_time(void)
 static void
 bind_objects(void)
 {
-	uint64_t group;
+	uint64_t group, unused;
 	int status;
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
-	if (erx_group_create(0, 0, &group) != ERX_ELIMIT)
+	if (erx_group_create(0, 0, &unused) != ERX_ELIMIT)
 		fail("erx: irq: a second group was not refused FAILED\n");
 	if (erx_fiasco_test_map_device(UART_PHYS, UART_VIRT) != 0)
 		fail("erx: irq: sigma0 refused the UART's registers FAILED\n");
@@ -373,13 +374,13 @@ bind_objects(void)
 	if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_soft) != ERX_OK ||
 	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_other) != ERX_OK)
 		fail("erx: irq: no software object FAILED\n");
-	if (erx_irq_create(0, 0, ERX_IRQ_LINE, UART_LINE, &group) != ERX_EBUSY)
+	if (erx_irq_create(0, 0, ERX_IRQ_LINE, UART_LINE, &unused) != ERX_EBUSY)
 		fail("erx: irq: a second object on the line was not refused FAILED\n");
-	if (erx_irq_bind(irq_uart, 1, LABEL_UART) != ERX_OK || erx_irq_bind(irq_soft, 1, LABEL_SOFT) != ERX_OK ||
-	    erx_irq_bind(irq_other, 1, LABEL_OTHER) != ERX_OK)
+	if (erx_irq_bind(irq_uart, group, LABEL_UART) != ERX_OK || erx_irq_bind(irq_soft, group, LABEL_SOFT) != ERX_OK ||
+	    erx_irq_bind(irq_other, group, LABEL_OTHER) != ERX_OK)
 		fail("erx: irq: the service refused a bind FAILED\n");
-	if (erx_irq_bind(irq_soft, 1, LABEL_SOFT) != ERX_ENOTSUP || erx_irq_bind(77, 1, 0) != ERX_EINVAL ||
-	    erx_irq_bind(irq_soft, 2, 0) != ERX_EINVAL || erx_irq_ack(77) != ERX_EINVAL ||
+	if (erx_irq_bind(irq_soft, group, LABEL_SOFT) != ERX_ENOTSUP || erx_irq_bind(77, group, 0) != ERX_EINVAL ||
+	    erx_irq_bind(irq_soft, group + 1, 0) != ERX_EINVAL || erx_irq_ack(77) != ERX_EINVAL ||
 	    erx_irq_trigger(77) != ERX_EINVAL)
 		fail("erx: irq: a malformed call was not refused FAILED\n");
 	if (erx_group_take_ready(1) != ERX_ETYPE)

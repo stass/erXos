@@ -25,7 +25,10 @@ void		erx_fiasco_executor_release(uint32_t slot);
 /* The page the epochs are mirrored in: an executor reads them before its empty check. */
 const erx_group_stat_t *erx_fiasco_group_status(void);
 
-/* What the dispatcher runs for an object's delivery: it lists the object, the epoch advances and the longest parked wakes. */
+/*
+ * What the dispatcher runs for an object's delivery: it lists the object, the epoch
+ * advances and the longest parked wakes.
+ */
 void		erx_fiasco_group_trigger(uint32_t object);
 /* Moves up to max listed objects into objects, oldest first, and returns how many. */
 uint32_t	erx_fiasco_group_take(uint32_t max, uint32_t *objects);

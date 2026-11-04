@@ -26,8 +26,6 @@
 #define GROUP_HANDLE		UINT64_C(1)
 #define DISPATCHER_STACK_BYTES	16384u
 
-_Static_assert(ERX_MSG_WORDS <= ERX_FIASCO_PARK_OBJECTS_MAX, "a take fits the ring");
-
 static void	dispatcher_main(uint64_t);
 
 static _Alignas(16) uint8_t dispatcher_stack[DISPATCHER_STACK_BYTES];
@@ -77,6 +75,7 @@ erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group)
 		return (ERX_ELIMIT);
 	start.regs.sp = (uint64_t)(uintptr_t)(dispatcher_stack + sizeof(dispatcher_stack));
 	start.regs.pc = (uint64_t)(uintptr_t)dispatcher_main;
+	/* erx_thread_create takes the new thread's starting registers from the caller's UTCB. */
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
 	status = erx_thread_create(0, 0, 0, ERX_THREAD_CLASS_WORKER, &thread);

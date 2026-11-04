@@ -64,7 +64,7 @@ erx_time_wall_ns(uint64_t *wall_ns)
 
 	do {
 		before = atomic_load_explicit(&time_area.page.seq, memory_order_acquire);
-		if (before > TIME_SEQ_LAST)
+		if (before >= TIME_SEQ_LAST)
 			return (false);
 		offset = atomic_load_explicit(&time_area.page.wall_offset_ns, memory_order_relaxed);
 		atomic_thread_fence(memory_order_acquire);

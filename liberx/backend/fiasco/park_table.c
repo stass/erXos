@@ -143,7 +143,7 @@ park_mirror_slot(erx_fiasco_park_group_t *group, uint32_t slot)
 
 	if (park_slot_valid(park, slot))
 		state = park_on_list(park, slot) ? ERX_EXEC_STATE_PARKED : ERX_EXEC_STATE_RUNNING;
-	atomic_store_explicit(&exec->state, state, memory_order_relaxed);
+	atomic_store_explicit(&exec->state, state, memory_order_release);
 	atomic_store_explicit(&exec->epoch, park->slot_epoch[slot], memory_order_release);
 }
 
