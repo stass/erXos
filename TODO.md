@@ -119,6 +119,10 @@ it; git history is the record of completed work.
   again on another, so instruction-cache coherence across CPUs and the reuse of an executable page are unverified:
   the native suites inspect only data after protection changes. The `native_memory` suite needs
   that case once BeamAsm's JIT alias exists.
+* [Medium] stopgap, `liberx/backend/fiasco`, call table of `docs/design-stopgap.md`: `erx_cap_dup`, `erx_cap_close`,
+  `erx_object_destroy`, `erx_object_info`, `erx_budget_create`, `erx_log_read`, `erx_group_configure` and
+  `erx_group_info` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
+  entry and the Erlang log reader, which arrive with M3; each gets its body and a `test/guest/function_api` row then.
 * [Low] stopgap, `test/guest/native_task/guest.c`, `request_against_exit`: no seed shows the dropped-request
   count can move, as the thread deletion seed stops the suite at its earlier `service` case.
 * [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
