@@ -703,18 +703,48 @@ it; git history is the record of completed work.
   ([design-stopgap.md](docs/design-stopgap.md)). Read the entries from the
   linked kernel's references to the archive instead, which needs the proof
   to run after the link as well as before it.
-* [Medium] kernel, boot image: nothing calls the file check yet. WP32
-  writes `bootstrap`'s use of `erx_boot_locate`, `erx_pack_open` and
-  `erx_pack_file_check`; `erx_image_slice` needs the verdict table and
-  hashing in parts of 64 KiB, which `erx_pack_file_check`, hashing a run in
-  one call, cannot give it. Make it a pure stepper the core owns, computing
-  the digest itself, not a digest the caller passes in, so that function
-  stays the one check. The slice also needs `pack.c` in the kernel's archive
-  and its stack proof as well as in `bootstrap`, and must decide what a run
-  of only empty files, an object of no pages, returns. `tools/erx pack` stays refused
-  until the M1 root startup, so `--two-file` and the slot refusal wait for
-  it; and the harness's single-file boot cases need that first stage
-  ([design-kernel.md](docs/design-kernel.md#tests-of-the-boot-image)).
+* [Medium] kernel, boot image: `erx_image_slice` needs the verdict table and
+  hashing in parts of 64 KiB, which `erx_pack_file_check`, hashing a run in one
+  call, cannot give it. Make it a pure stepper the core owns, computing the
+  digest itself, not a digest the caller passes in, so that function stays the
+  one check. The slice also needs `pack.c` in the kernel's archive and its stack
+  proof as well as in `bootstrap`, and must decide what a run of only empty
+  files, an object of no pages, returns. Until it lands nothing checks a file
+  `bootstrap` does not place, so a file cut short inside `system/root` boots,
+  though [design-kernel.md](docs/design-kernel.md#the-bootable-file) counts it as
+  refused. `tools/erx pack` stays refused until the M1 root startup, so
+  `--two-file` and the slot refusal wait for it.
+* [Medium] stopgap boot, `kernel/core/boot_place.c`: `bootstrap` places two
+  entries the target design does not have, `boot/sigma0` and `boot/stopgap-root`,
+  because the kernel still starts sigma0 and a root task from its information
+  page; sigma0 pages that stand-in root with read, write and execute over its
+  whole range, since one range cannot tell its segments apart, gaps between
+  segments included, which nothing zeroes. Delete both roles, their ABI paths and the record of the recipe in
+  `tools/lib/erx/boot_image.rb` when the kernel maps the root task from the
+  startup plan. `tools/lib/erx/boot_image.rb` builds on the structural fixture's
+  unadmitted manifest until production packing lands.
+* [Medium] stopgap boot, `kernel/core/boot_place.c`: the handoff record's
+  `pool_usable`, `pool_heap` and `pool_regions` are zero and `kmemsize` keeps
+  Fiasco's default until `erx_pool_plan` and `abi/backend/fiasco.txt` land; the
+  kernel does not read them yet. `kip_size` and the kernel's alignment are limits
+  of `abi/erx_abi.txt` until that backend file exists to hold them.
+* [Medium] stopgap boot, `fiasco/bootstrap/server/src/init_kip.cc`: `init_kip_md`
+  writes the memory descriptors at the offset the kernel image's information page
+  names, unchecked against the view's size or its count, though
+  [design-stopgap.md](docs/design-stopgap.md#boot-handoff) says within the view.
+  Only a kernel image whose hash matched gets there, and a kernel image already
+  runs in kernel mode, so this is a crash on a bad build and no gain. Check the
+  offset and count in the plan or just before the write, with a fixture.
+* [Medium] stopgap boot, `tools/lib/erx/boot_image_check.rb`: two cases of the
+  verification table are not run on QEMU: a single file whose header asks QEMU to
+  place it away from `bootstrap`'s link address, and a boot with the validator
+  removed. The first needs the harness to expect a deadline, the second a seeded
+  first stage.
+* [Low] stopgap boot, `fiasco/bootstrap`: the inherited image tools and module
+  code (`build.pl`, `exec.cc`, `module.cc`, `boot_modules.cc`, `mod_info.cc`,
+  `uncompress.cc`, `mk/tool/imagebuilder`) are unbuilt and the other platforms'
+  sources still name them. Delete them or fix those platforms with the first
+  port that needs one.
 * [Medium] build, stopgap bootstrap: `kernel/core/pack.c` is left out of
   the kernel's archive (`CoreArchive::BOOTSTRAP_SOURCES`) but is not yet
   linked into `bootstrap`, since nothing there calls it until the boot

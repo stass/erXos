@@ -35,7 +35,13 @@ module Erx
     CORE_PATTERNS = %w[kernel/core/*.c kernel/sched/*.c].freeze
     PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'kernel/generated/*.c'].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
-    BOOTSTRAP_SOURCES = %w[kernel/core/pack.c].freeze
+    BOOTSTRAP_SOURCES = %w[kernel/core/boot_place.c kernel/core/pack.c].freeze
+    # What bootstrap links: those cores with what they call. Translation is off
+    # when they run, so every load and store must be aligned.
+    BOOT_SOURCES = [*BOOTSTRAP_SOURCES, 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
+                    'liberx/elf_plan.c', 'liberx/generated/abi_reader.c'].freeze
+    BOOT_FLAGS = %w[-mstrict-align].freeze
+    BOOT_ARCHIVE = 'erx_boot.a'
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections
                -I include -I kernel/generated -I kernel/crypto].freeze
@@ -91,11 +97,11 @@ module Erx
     # stand in for an object's frames. The compile runs from root with
     # relative paths, so the frames name the tree's files and not this
     # host's checkout. Returns the objects by source.
-    def compile(root:, sources:, level:, compiler:, runner:, directory:)
+    def compile(root:, sources:, level:, compiler:, runner:, directory:, extra_flags: [])
       sources.to_h do |source|
         object = File.join(directory, object_name(source))
         raw = File.join(directory, ".#{File.basename(object)}.raw.d")
-        runner.run([compiler, *FLAGS, level, '-MD', '-MF', raw, '-c', source, '-o', object],
+        runner.run([compiler, *FLAGS, *extra_flags, level, '-MD', '-MF', raw, '-c', source, '-o', object],
                    name: 'core-compile', deadline: 120, chdir: root, env: environment)
         record = dependency_record(BoundedFile.read(raw, maximum: PackProvenance::MAX_METADATA),
                                    object: File.basename(object), root: root)
@@ -129,6 +135,27 @@ module Erx
       end
       Built.new(archive: File.join(output, ARCHIVE),
                 objects: sources(root).to_h { |source| [source, File.join(output, object_name(source))] },
+                seam: File.join(output, SEAM))
+    end
+
+    # The archive bootstrap links, under output, from the tree at root.
+    def build_boot(root:, compiler:, runner:, output:, project:)
+      tools = tools_beside(compiler)
+      parent = OutputDirectory.prepare(root: project, path: File.dirname(output))
+      raise Error, 'C17 boot archive directory is a symlink' if File.symlink?(output)
+
+      Dir.mktmpdir('.boot-cores-', parent) do |temporary|
+        staged = File.join(temporary, 'tree')
+        FileUtils.mkdir_p(staged)
+        objects = compile(root: root, sources: BOOT_SOURCES, level: LEVEL, compiler: compiler, runner: runner,
+                          directory: staged, extra_flags: BOOT_FLAGS)
+        check_undefined(listing(objects.values, tools: tools, runner: runner))
+        archive(objects.values, directory: staged, tools: tools, runner: runner, name: BOOT_ARCHIVE)
+        copy_seam(root: root, directory: staged)
+        install(staged, output: output, temporary: temporary) unless same_tree?(staged, output)
+      end
+      Built.new(archive: File.join(output, BOOT_ARCHIVE),
+                objects: BOOT_SOURCES.to_h { |source| [source, File.join(output, object_name(source))] },
                 seam: File.join(output, SEAM))
     end
 
@@ -199,8 +226,8 @@ module Erx
 
     # A GNU-format archive with a symbol index, which the GNU linker of the
     # inherited build reads; llvm-ar writes it without times or owners.
-    def archive(objects, directory:, tools:, runner:)
-      runner.run([tools.fetch(:ar), '--format=gnu', 'rcsD', ARCHIVE, *objects.map { |path| File.basename(path) }],
+    def archive(objects, directory:, tools:, runner:, name: ARCHIVE)
+      runner.run([tools.fetch(:ar), '--format=gnu', 'rcsD', name, *objects.map { |path| File.basename(path) }],
                  name: 'core-archive', deadline: 60, chdir: directory, env: environment)
       File.write(File.join(directory, MEMBERS), objects.map { |path| File.basename(path) }.join(' ') + "\n")
     end

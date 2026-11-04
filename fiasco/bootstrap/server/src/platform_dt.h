@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2021-2025 Kernkonzept GmbH.
  * Author(s): Adam Lackorzynski <adam@l4re.org>
@@ -5,37 +6,14 @@
  * License: see LICENSE.spdx (in this directory or the directories above)
  */
 
-#include "boot_modules.h"
 #include "dt.h"
 #include "platform.h"
 
 template<typename BASE>
-class Platform_dt : public BASE,
-                    public Boot_modules_image_mode
+class Platform_dt : public BASE
 {
-  struct Dt_module : Internal_module_base
-  {
-    Dt_module(const char *cmdline, Dt const &dt)
-    : Internal_module_base(cmdline), dt(dt)
-    {}
-
-    void set_region(l4util_l4mod_mod *m) const override
-    {
-      m->mod_start = (unsigned long)dt.fdt();
-      m->mod_end   = (unsigned long)dt.fdt() + dt.fdt_size();
-    }
-
-    Dt const &dt;
-  };
-
-  Dt_module mod_fdt;
-
 public:
-  Platform_dt() : mod_fdt(".fdt", dt) {}
-
   virtual l4_addr_t get_fdt_addr() const = 0;
-
-  Boot_modules *modules() override { return this; }
 
   void setup_memory_map() override
   {
@@ -51,12 +29,6 @@ public:
   void init_dt() override
   {
     dt.init(get_fdt_addr());
-  }
-
-  void add_dt_module(Internal_module_list &mods) override
-  {
-    if (dt.have_fdt())
-      mods.push_front(&mod_fdt);
   }
 
   Dt dt;

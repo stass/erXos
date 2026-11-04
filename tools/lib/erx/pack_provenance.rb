@@ -178,7 +178,7 @@ module Erx
       raise Error, 'unsupported build receipt version' unless receipt.is_a?(Hash) && receipt['version'] == 1
       if receipt['kind'] == 'fiasco'
         exact_keys(receipt, %w[version kind artifact audit])
-        fixed_fiasco_path(receipt.fetch('artifact'), 'images/bootstrap_banner.elf')
+        fixed_fiasco_path(receipt.fetch('artifact'), 'images/bootstrap.raw')
         fixed_fiasco_path(receipt.fetch('audit'), 'provenance.json')
       end
       output = checked_file(receipt.fetch('artifact'))

@@ -52,7 +52,9 @@ module StructuralPackFixture
     report.freeze
   end
 
-  def build(root:, directory:, codec:, runner:, tools:, compiler:, linker:, external:)
+  # extra_files are further file entries, { path:, snapshot: }, which the wire
+  # format carries and the manifest's catalog binds like any other.
+  def build(root:, directory:, codec:, runner:, tools:, compiler:, linker:, external:, extra_files: [], first_stage: nil)
     directory = Erx::OutputDirectory.prepare(root: root, path: directory)
     raise Erx::Error, 'structural fixture build requires a clean directory' unless Dir.empty?(directory)
     native = PackRootFixture.build(root: root, directory: File.join(directory, 'native'),
@@ -74,10 +76,18 @@ module StructuralPackFixture
         'source' => { 'kind' => 'artifact', 'id' => 'root',
                       'sha256' => Digest::SHA256.file(native.fetch('artifact')).hexdigest },
         'image' => writer.image_manifest(plan) }
-    ].sort_by { |row| row.fetch('path').b }
+    ]
+    rows += extra_files.map do |file|
+      { 'path' => file.fetch(:path), 'kind' => ordinary, 'flags' => 0, 'snapshot' => file.fetch(:snapshot),
+        'size' => File.size(file.fetch(:snapshot)),
+        'source' => { 'kind' => 'artifact', 'id' => file.fetch(:path),
+                      'sha256' => Digest::SHA256.file(file.fetch(:snapshot)).hexdigest } }
+    end
+    rows = rows.sort_by { |row| row.fetch('path').b }
     root_entry = rows.index { |row| row.fetch('path') == 'system/root' }
     context = Erx::Manifest::Context.new(build_kind: 'development', platform: ManifestContextFixture.platform,
-                                         catalog: rows, root_entry: root_entry,
+                                         catalog: rows.map { |row| row.reject { |key, _| %w[snapshot size].include?(key) } },
+                                         root_entry: root_entry,
                                          artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_entry } },
                                          provenance: provenance)
     source = File.binread(File.join(root, 'test/fixtures/manifest_empty.txt'))
@@ -90,7 +100,9 @@ module StructuralPackFixture
     File.binwrite(manifest_path, structural.bytes)
     File.binwrite(notices_path, resolver.notices(provenance, budget: BUDGET))
     rows = rows.map do |row|
-      if row.fetch('kind') == codec.member('entry_kind', 'image')
+      if row.key?('snapshot')
+        row
+      elsif row.fetch('kind') == codec.member('entry_kind', 'image')
         row.merge('snapshot' => native.fetch('artifact'), 'size' => plan.fetch('output_size'), 'plan' => plan)
       else
         snapshot = row.fetch('source').fetch('producer') == 'manifest' ? manifest_path : notices_path
@@ -109,7 +121,7 @@ module StructuralPackFixture
     end
     first_stage_path = File.join(directory, 'first-stage')
     single_path = File.join(directory, 'structural.boot')
-    File.binwrite(first_stage_path, FirstStageFixture.bytes)
+    File.binwrite(first_stage_path, first_stage ? File.binread(first_stage) : FirstStageFixture.bytes)
     Erx::BootFile.write(codec: codec, first_stage: first_stage_path, archive: output_path, output: single_path, output_root: root)
     report = { 'kind' => 'structural_test_fixture', 'path' => output_path, 'single_path' => single_path,
                'single_sha256' => Digest::SHA256.file(single_path).hexdigest,

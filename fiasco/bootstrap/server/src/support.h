@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -14,9 +15,7 @@
 #define __BOOTSTRAP__SUPPORT_H__
 
 #include <l4/drivers/uart_base.h>
-#include <l4/util/l4mod.h>
 #include <l4/sys/compiler.h>
-#include "mod_info.h"
 #include "region.h"
 
 #include <stdio.h>
@@ -36,7 +35,6 @@ void ctor_init();
 
 enum { Verbose_load = 0 };
 
-void init_modules_infos();
 
 template<typename T>
 inline T *l4_round_page(T *p)

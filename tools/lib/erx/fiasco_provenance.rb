@@ -161,8 +161,8 @@ module Erx
     end
 
     def record_receipt(report)
-      unless report.fetch('state') == 'complete' && report.fetch('image').fetch('artifact').fetch('path') == 'build/fiasco/images/bootstrap_banner.elf'
-        raise Error, 'cannot record an incomplete Fiasco build receipt'
+      unless report.fetch('state') == 'complete' && report.fetch('image').fetch('artifact').fetch('path') == 'build/fiasco/images/bootstrap.raw'
+        raise Error, "cannot record an incomplete Fiasco build receipt: unresolved #{report.fetch('unresolved', []).first(3).inspect}"
       end
       @inputs.verify if @inputs
       audit_path = File.join(@build, 'provenance.json')
@@ -187,7 +187,7 @@ module Erx
       raise Error, 'Fiasco source checking has not completed' unless @audit_complete && @inputs
       return @checked_catalog if @checked_catalog
       @inputs.verify
-      fixed = %w[build/fiasco/receipt.json build/fiasco/provenance.json build/fiasco/images/bootstrap_banner.elf]
+      fixed = %w[build/fiasco/receipt.json build/fiasco/provenance.json build/fiasco/images/bootstrap.raw]
       fixed << 'build/fiasco/inputs/RECORD.json'
       external_notices = @external.values.flat_map { |entry| entry.fetch('notices').map { |notice| notice.fetch('path') } }
       fixed.each { |path| read(File.join(@root, path)) }
@@ -263,48 +263,20 @@ module Erx
 
     def audit_image(executables)
       require_relative 'fiasco'
-      final = File.join(@build, 'images/bootstrap_banner.elf')
+      final = File.join(@build, 'images/bootstrap.raw')
       original = read(final)
       inputs = executables.to_h { |item| [item.fetch('name'), item.fetch('artifact')] }
       Dir.mktmpdir('.image-audit-', @build) do |directory|
-        modules = File.join(directory, 'modules')
-        output = File.join(directory, 'output')
-        FileUtils.mkdir_p([modules, output])
-        { 'kernel' => 'fiasco', 'bootstrap' => 'bootstrap.elf', 'sigma0' => 'sigma0' }.each do |name, filename|
-          File.binwrite(File.join(modules, filename), read(File.join(@root, inputs.fetch(name).fetch('path'))))
-        end
-        # The installed sigma0 retains a GNU debug-link section. Reproduce its
-        # exact install transform before feeding it to the image builder.
-        link_directory = File.join(directory, 'linked')
-        FileUtils.mkdir_p(link_directory)
-        linked_sigma = File.join(link_directory, 'sigma0')
-        File.binwrite(linked_sigma, read(File.join(@root, inputs.fetch('sigma0').fetch('path'))))
-        installed_sigma = File.join(@build, 'users/bin/arm64_armv8a/std/l4f/sigma0')
-        installed_bytes = read(installed_sigma)
-        sigma_copy = File.join(modules, 'sigma0')
-        @runner.run([@image_objcopy || 'aarch64-elf-objcopy', '--strip-unneeded',
-                     "--add-gnu-debuglink=#{linked_sigma}", linked_sigma, sigma_copy],
-                    name: 'fiasco-install-proof', deadline: 30, env: Fiasco.build_environment)
-        unless BoundedFile.read(sigma_copy, maximum: PackProvenance::MAX_METADATA) == installed_bytes
-          raise Error, 'installed sigma0 differs from its fixed strip/debug-link transform'
-        end
-        recipe = @inputs ? @inputs.configuration('modules.list') : File.join(@root, 'config/fiasco/modules.list')
-        module_recipe = File.join(modules, 'modules.list')
-        File.binwrite(module_recipe, read(recipe))
-        image_configuration = @generation.fetch('image')
-        @runner.run([@image_perl || 'perl', project_input('fiasco/mk/tool/bin/l4image'),
-                     '-i', File.join(modules, 'bootstrap.elf'), '-o', File.join(output, 'bootstrap_banner.elf'),
-                     '--verbose', 'create', '--entry', image_configuration.fetch('entry'),
-                     '--modules-list-file', module_recipe, '--search-path', modules,
-                     '--set-attr', 'l4i:QEMUcmd', image_configuration.fetch('qemu_command')],
-                    name: 'fiasco-image-proof', deadline: 180, env: Fiasco.build_environment)
-        replay = BoundedFile.read(File.join(output, 'bootstrap_banner.elf'), maximum: PackProvenance::MAX_METADATA)
-        unless replay == original
-          File.binwrite(File.join(@build, 'images/replay-mismatch.elf'), replay)
+        linked = File.join(directory, 'bootstrap.elf')
+        replayed = File.join(directory, 'bootstrap.raw')
+        File.binwrite(linked, read(File.join(@root, inputs.fetch('bootstrap').fetch('path'))))
+        @runner.run([@image_objcopy || 'aarch64-elf-objcopy', '-O', 'binary', linked, replayed],
+                    name: 'fiasco-image-proof', deadline: 30, env: Fiasco.build_environment)
+        unless BoundedFile.read(replayed, maximum: PackProvenance::MAX_METADATA) == original
           raise Error, 'final Fiasco image differs from its fixed construction replay'
         end
         { 'artifact' => reference(final), 'method' => 'byte-identical fixed construction replay',
-          'inputs' => inputs.values, 'installed_sigma0' => reference(installed_sigma), 'modules' => reference(recipe) }
+          'inputs' => inputs.values }
       end
     end
 
@@ -312,7 +284,7 @@ module Erx
       @generation_profile = File.join(@root, 'config/provenance/fiasco-generation.json')
       @generation = JsonInput.parse(read(@generation_profile), max_bytes: 1024 * 1024, label: 'Fiasco generation profile')
       unless @generation.is_a?(Hash) && @generation.keys.sort == %w[compile_dependencies image inputs profiles recipes version] && @generation['version'] == 1 &&
-             @generation['profiles'].is_a?(Hash) && @generation['profiles'].size == 9 && @generation['recipes'].is_a?(Hash) &&
+             @generation['profiles'].is_a?(Hash) && @generation['profiles'].size == 8 && @generation['recipes'].is_a?(Hash) &&
              @generation['recipes'].size.between?(1, 8192) && @generation['compile_dependencies'].is_a?(Hash) &&
              @generation['compile_dependencies'].size <= 64 && @generation['inputs'].is_a?(Hash) && @generation['inputs'].size.between?(1, 8192) &&
              @generation['image'].is_a?(Hash) && @generation['image'].keys.sort == %w[entry qemu_command] && @generation['image']['entry'] == 'banner' &&
@@ -572,13 +544,14 @@ module Erx
     end
 
     # The captured erXos source behind path: a C17 core, a header or a
-    # stack-proof declaration of the private inputs, or the cores'
+    # stack-proof declaration of the private inputs, or either cores'
     # archive's copy of include/erx/core/. nil for any other path.
     def erxos_source(path)
       return nil unless @inputs
 
-      seam = File.join(@build, 'cores', CoreArchive::SEAM) + '/'
-      captured = path.start_with?(seam) ? @inputs.path('include/' + path.delete_prefix(seam)) : path
+      seam = %w[cores boot-cores].map { |name| File.join(@build, name, CoreArchive::SEAM) + '/' }
+                                 .find { |directory| path.start_with?(directory) }
+      captured = seam ? @inputs.path('include/' + path.delete_prefix(seam)) : path
       tree = @inputs.tree + '/'
       relative = captured.delete_prefix(tree)
       return nil unless captured.start_with?(tree) &&
@@ -589,17 +562,33 @@ module Erx
 
     def attribute_erxos(path, captured:)
       relative = captured.delete_prefix(@inputs.tree + '/')
-      unless erxos_notice?(captured)
+      attribution = imported_attribution(captured) || erxos_attribution(captured)
+      unless attribution
         @sources[path] = reference(path).merge('state' => 'unresolved')
         @unresolved << "erXos source has no #{ERXOS_NOTICE} header: #{relative}"
         return
       end
       raise Error, "derived source differs from its origin: #{label(path)}" unless digest(captured) == digest(path)
 
-      @sources[path] = reference(path).merge('source' => label(captured), 'original_source' => relative,
-                                            'license' => 'BSD-2-Clause',
-                                            'evidence' => "erXos source; #{ERXOS_NOTICE} in its header",
-                                            'status' => 'erxos')
+      @sources[path] = reference(path).merge('source' => label(captured), 'original_source' => relative, **attribution)
+    end
+
+    # Imported code in the tree, such as BLAKE3, carries no erXos notice: its
+    # license and evidence are its row in the ORIGIN.md beside it. nil for a file
+    # with no row, even beside an ORIGIN.md, so an erXos file there still needs
+    # its notice.
+    def imported_attribution(captured)
+      directory = File.dirname(captured)
+      return nil unless File.file?(File.join(directory, 'ORIGIN.md'))
+
+      row = Origin.new(root: directory, read_bytes: ->(path) { @inputs.read(path) }).imported_file(File.basename(captured))
+      row && { 'license' => row.fetch('license'), 'evidence' => row.fetch('evidence'), 'status' => 'imported' }
+    end
+
+    def erxos_attribution(captured)
+      return nil unless erxos_notice?(captured)
+
+      { 'license' => 'BSD-2-Clause', 'evidence' => "erXos source; #{ERXOS_NOTICE} in its header", 'status' => 'erxos' }
     end
 
     def erxos_notice?(path)

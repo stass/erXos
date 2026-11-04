@@ -37,7 +37,7 @@ module PackFixture
   end
 
   def valid(paths: ['system/root'], image_bytes: image,
-            manifest_bytes: AbiManifestFixture.valid, file_bytes: 'f'.b)
+            manifest_bytes: AbiManifestFixture.valid, file_bytes: 'f'.b, files: {})
     names = paths.map(&:b)
     raise 'fixture root is required' unless names.include?('system/root'.b)
     unless names.include?('system/manifest'.b)
@@ -52,7 +52,7 @@ module PackFixture
     names.each do |name|
       root = name == 'system/root'.b
       manifest = name == 'system/manifest'.b
-      data = root ? image_bytes : (manifest ? manifest_bytes : file_bytes)
+      data = files[name] || (root ? image_bytes : (manifest ? manifest_bytes : file_bytes))
       entries << [path_offset, name.bytesize, root ? 2 : 1, (root || manifest) ? 1 : 0,
                   cursor, data.bytesize, 0, "\0" * 32].pack('VvCCQ<3a32')
       payloads << [cursor, data]

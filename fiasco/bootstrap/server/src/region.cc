@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -16,7 +17,6 @@
 #include <l4/sys/consts.h>
 
 #include "region.h"
-#include "module.h"
 
 unsigned long
 Region_list::find_free(Region const &search, unsigned long _size,
@@ -223,7 +223,7 @@ Region::vprint(bool aligned) const
       if (*name() == '.')
         printf("%s", name() + 1);
       else
-        print_module_name(name(), "");
+        printf("%s", name());
     }
   putchar('\n');
 }

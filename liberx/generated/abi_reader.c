@@ -894,6 +894,37 @@ erx_mf_window_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_boot_handoff_decode(const uint8_t *bytes, size_t length,
+    erx_boot_handoff_t *result)
+{
+	erx_boot_handoff_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_BOOT_HANDOFF_SIZE)
+		return (false);
+
+	value.version = erx_abi_load_u32(bytes + 0);
+	value.flags = erx_abi_load_u32(bytes + 4);
+	for (size_t index = 0; index < 8; index++) {
+		value.build_id[index] = bytes[8 + index * 1];
+	}
+	for (size_t index = 0; index < 32; index++) {
+		value.index_hash[index] = bytes[16 + index * 1];
+	}
+	value.image_start = erx_abi_load_u64(bytes + 48);
+	value.image_size = erx_abi_load_u64(bytes + 56);
+	value.pool_usable = erx_abi_load_u64(bytes + 64);
+	value.pool_heap = erx_abi_load_u64(bytes + 72);
+	value.pool_regions = erx_abi_load_u32(bytes + 80);
+	value.bootargs_len = erx_abi_load_u32(bytes + 84);
+	for (size_t index = 0; index < 2048; index++) {
+		value.bootargs[index] = bytes[88 + index * 1];
+	}
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_boot_info_decode(const uint8_t *bytes, size_t length,
     erx_boot_info_t *result)
 {

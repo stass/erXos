@@ -18,7 +18,7 @@ module Erx
     # The inherited parts and their configuration, and the erXos sources the
     # stopgap kernel links: the C17 cores, their headers and the stack
     # proof's declarations (CoreArchive).
-    ERXOS_ROOTS = %w[kernel include].freeze
+    ERXOS_ROOTS = %w[kernel include liberx].freeze
     ROOTS = (%w[fiasco config/fiasco] + ERXOS_ROOTS).freeze
     # The inputs only the kernel build reads; every other input is the user
     # build's. A change to one of them discards that build's outputs.

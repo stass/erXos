@@ -29,6 +29,11 @@ class FiascoTest < Minitest::Test
 
     # The cores' archive has its own tests (core_archive_test.rb); here it
     # is a fixed result whose paths the kernel make must receive.
+    def build_boot_cores
+      Erx::CoreArchive::Built.new(archive: File.join(@build, %q(boot-cores/erx_boot.a)), objects: {},
+                                  seam: File.join(@build, %q(boot-cores/seam)))
+    end
+
     def build_cores
       Erx::CoreArchive::Built.new(archive: File.join(@build, 'cores/erx_cores.a'), objects: {},
                                   seam: File.join(@build, 'cores/seam'))
@@ -61,18 +66,14 @@ class FiascoTest < Minitest::Test
         name = argv[2].end_with?('/kernel') ? 'globalconfig.out' : '.kconfig'
         FileUtils.copy_file(config.delete_prefix('DEFCONFIG='), File.join(directory, name))
       end
-      if argv.include?('elfimage')
-        directory = argv.find { |argument| argument.start_with?('BOOTSTRAP_OUTPUT_DIR=') }
-                        .delete_prefix('BOOTSTRAP_OUTPUT_DIR=')
-        FileUtils.mkdir_p(directory)
-        users = argv.fetch(argv.index('-C') + 1)
-        File.write(File.join(directory, 'bootstrap_banner.elf'), File.read(File.join(users, 'module-data')))
-      end
       if options.fetch(:name) == 'fiasco-users-build'
         users = argv.fetch(argv.index('-C') + 1)
         generated = File.join(users, 'module-data')
         source = File.join(File.dirname(users), 'source/Makefile')
         File.write(generated, File.read(source)) unless File.file?(generated)
+        flat = File.join(users, Erx::Fiasco::BOOTSTRAP_OBJECTS, 'bootstrap.raw')
+        FileUtils.mkdir_p(File.dirname(flat))
+        File.write(flat, File.read(generated))
       end
       { 'state' => 'succeeded' }
     end
@@ -85,7 +86,7 @@ class FiascoTest < Minitest::Test
     %w[kernel mk l4re-core bootstrap libfdt drivers-frst].each do |name|
       FileUtils.mkdir_p(File.join(@directory, 'fiasco', name))
     end
-    %w[kernel include].each { |name| FileUtils.mkdir_p(File.join(@directory, name)) }
+    %w[kernel include liberx].each { |name| FileUtils.mkdir_p(File.join(@directory, name)) }
     File.write(File.join(@directory, 'fiasco/mk/Makefile'), '# inherited')
     FileUtils.mkdir_p(File.join(@directory, 'config/fiasco'))
     File.write(kernel_config, KERNEL_CONFIG)
@@ -110,14 +111,15 @@ class FiascoTest < Minitest::Test
     assert_equal @fiasco.image_path, @fiasco.build(jobs: 3)
     assert @runner.commands.all? { |command| command.fetch(:argv).first == 'gmake' }
     assert @runner.commands.all? { |command| command.fetch(:options).fetch(:deadline).positive? }
-    image = @runner.commands.find { |command| command.fetch(:argv).include?('elfimage') }
-    assert_includes image.fetch(:argv), 'E=banner'
+    users = @runner.commands.find { |command| command.fetch(:options).fetch(:name) == 'fiasco-users-build' }
+    boot_cores = File.join(@directory, 'build/fiasco/boot-cores')
+    assert_includes users.fetch(:argv), "ERX_BOOT_ARCHIVE=#{boot_cores}/erx_boot.a"
+    assert_includes users.fetch(:argv), "ERX_BOOT_INCLUDE=#{boot_cores}/seam"
     kernel = @runner.commands.find { |command| command.fetch(:options).fetch(:name) == 'fiasco-kernel-build' }
     cores = File.join(@directory, 'build/fiasco/cores')
     assert_includes kernel.fetch(:argv), "ERX_CORE_ARCHIVE=#{cores}/erx_cores.a"
     assert_includes kernel.fetch(:argv), "ERX_CORE_INCLUDE=#{cores}/seam"
-    assert_includes image.fetch(:argv), 'PT=arm_virt'
-    assert_includes image.fetch(:argv), 'CROSS_COMPILE=aarch64-elf-'
+    assert_includes users.fetch(:argv), 'CROSS_COMPILE=aarch64-elf-'
   end
 
   def test_kernel_uses_recorded_private_inputs_and_rejects_later_repository_edits

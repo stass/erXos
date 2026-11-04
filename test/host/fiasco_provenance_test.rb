@@ -8,6 +8,52 @@ require 'fileutils'
 require_relative '../../tools/lib/erx/fiasco_provenance'
 
 class FiascoProvenanceTest < Minitest::Test
+  # The part of FiascoInputs the attribution of a captured source reads.
+  CapturedTree = Data.define(:tree) do
+    def find_captured_path(path) = path
+    def read(path, maximum: nil) = File.binread(path)
+  end
+
+  # Attributes a copy of a file beside BLAKE3's real ORIGIN.md, as a captured source.
+  def attribute_beside_origin(name, content)
+    Dir.mktmpdir do |temporary|
+      root = File.realpath(temporary)
+      tree = File.join(root, 'build/fiasco/capture')
+      directory = File.join(tree, 'kernel/crypto/blake3')
+      FileUtils.mkdir_p(directory)
+      repository = File.expand_path('../..', __dir__)
+      FileUtils.cp(File.join(repository, 'kernel/crypto/blake3/ORIGIN.md'), directory)
+      source = File.join(directory, name)
+      File.write(source, content)
+      auditor = Erx::FiascoProvenance.new(root: root, runner: nil)
+      auditor.instance_variable_set(:@sources, {})
+      auditor.instance_variable_set(:@unresolved, [])
+      auditor.instance_variable_set(:@inputs, CapturedTree.new(tree))
+      auditor.send(:attribute_erxos, source, captured: source)
+      yield auditor.instance_variable_get(:@sources).fetch(source), auditor.instance_variable_get(:@unresolved)
+    end
+  end
+
+  def test_an_imported_file_is_recorded_under_the_license_of_its_origin_row
+    attribute_beside_origin('blake3.c', "int fixture;\n") do |record, unresolved|
+      assert_empty unresolved
+      assert_equal 'Apache-2.0 WITH LLVM-exception', record.fetch('license')
+      assert_equal 'imported', record.fetch('status')
+      assert_includes record.fetch('evidence'), 'BLAKE3'
+    end
+  end
+
+  def test_a_file_beside_an_origin_record_without_a_row_needs_the_erxos_notice
+    attribute_beside_origin('unlisted.c', "int fixture;\n") do |record, unresolved|
+      assert_equal 'unresolved', record.fetch('state')
+      assert_includes unresolved.first, 'unlisted.c'
+    end
+    attribute_beside_origin('unlisted.c', "// #{Erx::FiascoProvenance::ERXOS_NOTICE}\n") do |record, unresolved|
+      assert_empty unresolved
+      assert_equal 'erxos', record.fetch('status')
+    end
+  end
+
   def test_embedded_musl_source_records_name_the_full_package_notice
     Dir.mktmpdir do |temporary|
       root = File.realpath(temporary)
@@ -54,7 +100,7 @@ class FiascoProvenanceTest < Minitest::Test
       build = File.join(root, 'build/fiasco')
       FileUtils.mkdir_p([File.join(build, 'images'), File.join(build, 'users/bin/arm64_armv8a/std/l4f'), File.join(root, 'config/fiasco')])
       File.write(File.join(build, 'users/Makefile'), '$(error unreviewed generated code)')
-      File.write(File.join(build, 'images/bootstrap_banner.elf'), 'final image')
+      File.write(File.join(build, 'images/bootstrap.raw'), 'final image')
       File.write(File.join(build, 'users/bin/arm64_armv8a/std/l4f/sigma0'), 'installed sigma')
       File.write(File.join(root, 'config/fiasco/modules.list'), 'fixed module list')
       FileUtils.mkdir_p(File.join(root, 'fiasco/mk/tool/bin'))
@@ -68,14 +114,8 @@ class FiascoProvenanceTest < Minitest::Test
       runner = Object.new
       runner.define_singleton_method(:run) do |argv, **_options|
         commands << argv
-        if argv.first.include?('objcopy')
-          File.write(argv.last, 'installed sigma')
-        elsif argv.first == 'gmake'
-          output = argv.find { |argument| argument.start_with?('BOOTSTRAP_OUTPUT_DIR=') }.delete_prefix('BOOTSTRAP_OUTPUT_DIR=')
-          File.write(File.join(output, 'bootstrap_banner.elf'), 'final image')
-        else
-          File.write(argv.fetch(argv.index('-o') + 1), 'final image')
-        end
+        # The replay of the flat image, whose arguments end in its output.
+        File.write(argv.last, 'final image')
         {}
       end
       auditor = Erx::FiascoProvenance.new(root: root, runner: runner)
@@ -94,7 +134,7 @@ class FiascoProvenanceTest < Minitest::Test
       File.write(recipe, 'reviewed generator')
       config = 'build/fiasco/kernel/config'
       File.write(File.join(root, config), 'CONFIG_FEATURE=y')
-      profiles = (1..9).to_h do |index|
+      profiles = (1..8).to_h do |index|
         relative = "kernel/header#{index}.h"
         File.write(File.join(root, 'build/fiasco', relative), 'generated configuration')
         [relative, { 'role' => 'configuration', 'output_sha256' => Digest::SHA256.hexdigest('generated configuration'),

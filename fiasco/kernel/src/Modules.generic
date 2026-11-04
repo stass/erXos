@@ -1,3 +1,4 @@
+# Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 # Modified by erXos: the glue modules of erx/ join the kernel.
 # -*- makefile -*-
 # vi:se ft=make:
@@ -108,7 +109,8 @@ endif
 
 # erXos's glue onto the C17 cores (Makeconf, ERX_CORE_ARCHIVE).
 VPATH			+= erx
-INTERFACES_KERNEL	+= erx_probe erx_syscall
+INTERFACES_KERNEL	+= erx_handoff erx_probe erx_syscall
+CXXFLAGS_erx_handoff	+= $(ERX_GLUE_CXXFLAGS)
 CXXFLAGS_erx_probe	+= $(ERX_GLUE_CXXFLAGS)
 CXXFLAGS_erx_syscall	+= $(ERX_GLUE_CXXFLAGS)
 

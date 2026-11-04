@@ -25,6 +25,13 @@ IPC-heavy work. Measure: a contended ticket lock across a switch, on four vCPUs
 under HVF, with the `tools/erx bench` IPC workloads, against M7's gate, if
 the protocol fails its model or its implementation. Fix: none is needed while
 the protocol stands; if the numbers miss the gate, the lock is not taken.
+* **[Low] stopgap boot, hashing with the MMU off.** `bootstrap` hashes the index
+  and the files it places with BLAKE3's portable code before the MMU is on, so
+  with the data cache off under HVF and native. The harness reads the serial log
+  about every 50 ms, too coarsely to see this cost on a 1 MiB image. Measure: the
+  time from `bootstrap`'s first line to the kernel's banner with serial
+  timestamps, on HVF and the Pi 4, with a boot image of the size the first real
+  system has. Fix on the table: turn the caches on before hashing.
 * **[Medium] kernel, first-use hash of large boot image files.** The kernel
   checks each boot image file's BLAKE3 hash the first time it is mapped or
   read, once per file per boot, and runs BLAKE3's portable code because it

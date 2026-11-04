@@ -21,7 +21,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
+| `ERX_BOOT_HANDOFF_VERSION` | 2 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
+| `ERX_BOOT_KERNEL_ALIGN` | 2097152 |
+| `ERX_BOOT_KIP_VIEW_MIN` | 4096 |
+| `ERX_BOOT_KIP_VIEW_TYPE` | 16 |
+| `ERX_BOOT_KOPTIONS_VIEW_TYPE` | 17 |
 | `ERX_BOOT_LOCATOR_VERSION` | 1 |
 | `ERX_BOOT_ROOT` | 4 |
 | `ERX_BOOT_SLOT_A` | 1 |
@@ -978,6 +983,24 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `rights` | `mf_window_rights` | 16 | 1 |
 | `image` | `u32` | 20 | 1 |
 | `reserved` | `u64` | 24 | 1 |
+
+### `erx_boot_handoff_t`
+
+Storage: `wire_le`. Prefix size: 2136. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `version` | `u32` | 0 | 1 |
+| `flags` | `pack_flags` | 4 | 1 |
+| `build_id` | `u8` | 8 | 8 |
+| `index_hash` | `u8` | 16 | 32 |
+| `image_start` | `u64` | 48 | 1 |
+| `image_size` | `u64` | 56 | 1 |
+| `pool_usable` | `u64` | 64 | 1 |
+| `pool_heap` | `u64` | 72 | 1 |
+| `pool_regions` | `u32` | 80 | 1 |
+| `bootargs_len` | `u32` | 84 | 1 |
+| `bootargs` | `u8` | 88 | 2048 |
 
 ### `erx_boot_info_t`
 

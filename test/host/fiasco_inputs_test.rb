@@ -46,7 +46,7 @@ class FiascoInputsTest < Minitest::Test
       source = File.join(root, 'fiasco/kernel/src/banner.cpp')
       File.write(source, "// Modified by erXos\nint banner;\n")
       File.write(File.join(root, 'config/fiasco/kernel.defconfig'), 'CONFIG_ARM=y')
-      FileUtils.mkdir_p([File.join(root, 'kernel/core'), File.join(root, 'include/erx/core')])
+      FileUtils.mkdir_p([File.join(root, 'kernel/core'), File.join(root, 'include/erx/core'), File.join(root, 'liberx')])
       File.write(File.join(root, 'kernel/core/watchdog.c'), "int watchdog;\n")
       File.write(File.join(root, 'include/erx/core/watchdog.h'), "extern int watchdog;\n")
       inputs = Erx::FiascoInputs.new(root: root)

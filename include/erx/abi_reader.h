@@ -89,6 +89,8 @@ bool erx_mf_device_decode(const uint8_t *bytes, size_t length,
     erx_mf_device_t *result);
 bool erx_mf_window_decode(const uint8_t *bytes, size_t length,
     erx_mf_window_t *result);
+bool erx_boot_handoff_decode(const uint8_t *bytes, size_t length,
+    erx_boot_handoff_t *result);
 bool erx_boot_info_decode(const uint8_t *bytes, size_t length,
     erx_boot_info_t *result);
 bool erx_pack_header_decode(const uint8_t *bytes, size_t length,

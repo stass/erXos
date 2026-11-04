@@ -170,6 +170,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_mf_window_decode(bytes, length, &value);
 	}
 	{
+		erx_boot_handoff_t value;
+		(void)erx_boot_handoff_decode(bytes, length, &value);
+	}
+	{
 		erx_boot_info_t value;
 		(void)erx_boot_info_decode(bytes, length, &value);
 	}

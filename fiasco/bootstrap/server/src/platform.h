@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Copyright (C) 2015, 2017, 2019-2025 Kernkonzept GmbH.
@@ -8,8 +9,9 @@
 
 #pragma once
 
-#include "boot_modules.h"
 #include "koptions-def.h"
+#include <string.h>
+#include "region.h"
 #include <l4/sys/l4int.h>
 #include <l4/sys/kip.h>
 #include <stdlib.h> // exit()
@@ -25,7 +27,6 @@ public:
   virtual void after_setup_memory_map() {};
   virtual void firmware_announce_memory(Region) { }
   virtual void exit_boot_services() { }
-  virtual Boot_modules *modules() = 0;
   virtual bool probe() = 0;
 
   virtual l4_uint64_t to_phys(l4_addr_t bootstrap_addr)
@@ -52,7 +53,6 @@ public:
   }
 
   virtual void init_dt() {}
-  virtual void add_dt_module(Internal_module_list &) {}
 
   /**
    * Invoked late during startup, when the memory map is already set up and all
@@ -75,11 +75,9 @@ public:
    */
   virtual void setup_kernel_options(L4_kernel_options::Options *) {}
 
-  virtual void init_regions()
-  { modules()->init_mod_regions(); }
+  virtual void init_regions() {}
 
-  virtual void finalize_regions()
-  { modules()->finalize_mod_regions(); }
+  virtual void finalize_regions() {}
 
   virtual void boot_kernel(unsigned long entry)
   {
@@ -117,11 +115,9 @@ inline Platform_base::~Platform_base() {}
 void setup_single_region_ram_memory_map();
 
 template<class BASE>
-class Platform_single_region_ram : public BASE,
-  public Boot_modules_image_mode
+class Platform_single_region_ram : public BASE
 {
 public:
-  Boot_modules *modules() override { return this; }
 
   void setup_memory_map() override
   {

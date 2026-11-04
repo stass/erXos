@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Copyright (C) 2015,2017,2019-2025 Kernkonzept GmbH.
@@ -36,7 +37,6 @@ public:
                                   true);
       }
 
-    modules()->init_mod_regions();
   }
 
   void set_psci_method(Psci_method method) { _psci_method = method; }

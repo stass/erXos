@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_range.h"
 
 /*
  * The boot image's three pure checks (design-kernel.md, The boot image,
@@ -34,7 +35,6 @@
 
 typedef struct erx_blake3_ctx erx_blake3_ctx_t;
 typedef struct erx_boot_inputs erx_boot_inputs_t;
-typedef struct erx_boot_range erx_boot_range_t;
 typedef struct erx_pack_error erx_pack_error_t;
 typedef struct erx_pack_scratch erx_pack_scratch_t;
 typedef struct erx_pack_view erx_pack_view_t;
@@ -59,12 +59,6 @@ struct erx_pack_view {
 	const uint8_t	*bytes;
 	size_t		 length;
 	erx_pack_header_t header;
-};
-
-/* A physical range [start, start + size). */
-struct erx_boot_range {
-	uint64_t	start;
-	uint64_t	size;
 };
 
 /*

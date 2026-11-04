@@ -1,3 +1,4 @@
+/* Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff"). */
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -16,7 +17,6 @@ ENTRY(_start)
 
 PHDRS {
   common PT_LOAD;
-  mods PT_LOAD;
 }
 
 SECTIONS
@@ -64,6 +64,9 @@ SECTIONS
     LONG(0) /* terminate .eh_frame */
   } : common
 
+  .dynamic : { *(.dynamic) } : common
+  .got     : { *(.got.plt) *(.got) } : common
+
   . = ALIGN(4);
   _edata  =  .;
   PROVIDE (edata = .);
@@ -77,45 +80,11 @@ SECTIONS
   } : common
   _bss_end = .;
 
-  /* Must be before _end so that they are retained even if modules are moved
-   * around. In contrast, the .rel.dyn section is not needed after the
-   * relocations have been processed. */
-  .dynamic : { *(.dynamic) }
-  .got     : { *(.got.plt) *(.got) }
-
   _end = . ;
   PROVIDE (end = .);
 
-  /* Moved here to ensure that these sections are located _after_ the text
-   * section. In the other case we would get program sections with a virtual
-   * address of 0 */
-  .hash    : { *(.hash)    }
-  .dynsym  : { *(.dynsym)  }
-  .dynstr  : { *(.dynstr)  }
-
-  .rela.dyn :
-    {
-      *(.rela.init)
-      *(.rela.text .rela.text.* .rela.gnu.linkonce.t.*)
-      *(.rela.fini)
-      *(.rela.rodata .rela.rodata.* .rela.gnu.linkonce.r.*)
-      *(.rela.data .rela.data.* .rela.gnu.linkonce.d.*)
-      *(.rela.ctors)
-      *(.rela.dtors)
-      *(.rela.got)
-      *(.rela.bss .rela.bss.* .rela.gnu.linkonce.b.*)
-    }
-  .rela.plt : { *(.rela.plt) }
-
-  /* Needs to be last so that l4image does not mess up PHDR offsets other
-   * sections. */
-  .data.m :
-  {
-    _module_data_start = .;
-    *(.module_data)
-  } : mods
-
-  _end_of_initial_bootstrap = .;
+  /* What the boot header declares, zero-initialised data included. */
+  __erx_image_size = ABSOLUTE(_end - _start);
 
   /* drop the following sections since we do not need them for DROPS */
   /DISCARD/ : {

@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 #pragma once
 
 #include "types.h"
@@ -42,7 +43,7 @@ namespace L4_kernel_options
   enum
   {
     Magic = 0x4C344B43,
-    Version_current = 6,
+    Version_current = 7,
   };
 
   enum Uart_type
@@ -91,5 +92,9 @@ namespace L4_kernel_options
     Unsigned32  opt(Flags flag) const { return flags & flag; }
 
     Unsigned32  node;             /// The AMP node ID where the options apply
+    Unsigned32  erx_pad;
+
+    /// erXos's handoff record (docs/design-stopgap.md, "The handoff record").
+    Unsigned8   erx_handoff[2136];
   } __attribute__((packed));
 };

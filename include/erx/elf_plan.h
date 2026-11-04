@@ -44,4 +44,49 @@ struct erx_elf_error {
 bool erx_elf_plan(const uint8_t *, size_t, uint64_t,
     erx_elf_plan_t *, erx_elf_error_t *);
 
+/*
+ * The kernel profile: an executable that bootstrap places by physical address
+ * before translation is on. A segment's addresses are the ELF's physical ones;
+ * with a dynamic section the image relocates itself, so bootstrap may place it
+ * at any offset of its alignment, and without one it runs where it is linked.
+ * Up to ERX_ELF_SEGMENTS_MAX segments, in ascending physical order.
+ */
+typedef struct erx_elf_kernel_load erx_elf_kernel_load_t;
+typedef struct erx_elf_kernel_plan erx_elf_kernel_plan_t;
+typedef struct erx_elf_kernel_view erx_elf_kernel_view_t;
+typedef struct erx_elf_kernel_views erx_elf_kernel_views_t;
+
+struct erx_elf_kernel_load {
+	uint64_t	source_offset;
+	uint64_t	address;
+	uint64_t	file_size;
+	uint64_t	mem_size;
+};
+
+/* A view is a part of a segment by its physical address; no placement. */
+struct erx_elf_kernel_view {
+	uint64_t	address;
+	uint64_t	size;
+};
+
+/* The smallest size each required view may report. */
+struct erx_elf_kernel_views {
+	uint64_t	kip_min;
+	uint64_t	koptions_min;
+};
+
+struct erx_elf_kernel_plan {
+	uint64_t	 entry;
+	uint64_t	 alignment;
+	uint32_t	 nloads;
+	bool		 relocatable;
+	erx_elf_kernel_load_t loads[ERX_ELF_SEGMENTS_MAX];
+	erx_elf_kernel_view_t kip;
+	erx_elf_kernel_view_t koptions;
+};
+
+bool erx_elf_plan_kernel(const uint8_t *, size_t,
+    const erx_elf_kernel_views_t *, erx_elf_kernel_plan_t *,
+    erx_elf_error_t *);
+
 #endif /* ERX_ELF_PLAN_H */

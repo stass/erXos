@@ -524,3 +524,17 @@ layout erx_cap_slot 1 shared 8 64
   visibility state internal
   visibility next internal
   sequence seq terminal 0xffffffffffffffff exhaustion @stale recovery none
+
+# What bootstrap tells the kernel (docs/design-stopgap.md, "The handoff record").
+layout erx_boot_handoff 2 wire_le 8 2136
+  field version u32 0
+  field flags pack_flags 4
+  field build_id u8 8 count 8
+  field index_hash u8 16 count 32
+  field image_start u64 48
+  field image_size u64 56
+  field pool_usable u64 64
+  field pool_heap u64 72
+  field pool_regions u32 80
+  field bootargs_len u32 84
+  field bootargs u8 88 count 2048

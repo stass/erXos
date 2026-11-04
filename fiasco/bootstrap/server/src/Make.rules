@@ -1,3 +1,4 @@
+# Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 # vim:set ft=make:
 # 
 # User definable variables for bootstrap:
@@ -39,11 +40,7 @@ EXTRA_GENERAL_D_DEP += .redo-change-tracker $(BID_RAM_BASE_DEP) \
 INCLUDE_MAKE_RULES   = $(SRC_DIR)/*/Make.rules
 BOOTSTRAP_LD_dep    := $(SRC_DIR)/ldscript.inc
 
-# Use PIE infrastructure where possible
-CAN_PIE_arm     := y
-CAN_PIE_arm64   := y
-CAN_PIE_riscv   := y
-BID_CAN_PIE      = $(CAN_PIE_$(ARCH))
+# bootstrap runs at its link address and never relocates itself.
 
 # convenience
 ifneq ($(E),)
@@ -134,9 +131,9 @@ CXXFLAGS_arm    += -mno-unaligned-access
 SRC_C           += memcpy_aligned.c
 CFLAGS_memcpy_aligned.c = -ffreestanding
 
-SRC_CC          += exec.cc module.cc region.cc startup.cc init_kip.cc \
+SRC_CC          += region.cc startup.cc init_kip.cc \
                    libc_support+.cc koptions.cc \
-                   memory.cc boot_modules.cc mod_info.cc
+                   memory.cc erx_image.cc
 SRC_CC-$(BOOTSTRAP_DO_UEFI) += efi-support.cc
 
 SRC_CC_x86      += ARCH-x86/reboot.cc base_critical.cc
@@ -172,8 +169,6 @@ DEFINES_qemu_fw_cfg.cc      += -D_DEFAULT_SOURCE
 DEFINES_qemu_fw_cfg_mmio.cc += -D_DEFAULT_SOURCE
 DEFINES_qemu_ramfb.cc       += -D_DEFAULT_SOURCE
 DEFINES_efi-support.cc      += -D_DEFAULT_SOURCE
-
-MOD_ADDR         = 0x02000000
 
 CPPFLAGS        += $(CPPFLAGS_$(ARCH)-$(PLATFORM_TYPE))
 CPPFLAGS        += $(BID_PKG_CONFIG_CFLAGS)
@@ -216,106 +211,12 @@ SUFFIX := $(if $(BOOTSTRAP_IMAGE_SUFFIX),$(ENTRY_FN)_$(BOOTSTRAP_IMAGE_SUFFIX),$
 
 BOOTSTRAP_LINKADDR = $(firstword $(call default_reloc,$(od)bootstrap.elf))
 
-BUILD_MOD_CMD_ENVVARS = CC="$(CC)" LD="$(LD)" \
-                        CROSS_COMPILE=$(CROSS_COMPILE) \
-                        MAKE_INC_FILE=$(CURDIR)/mod.make.inc \
-                        FLAGS_CC="$(CARCHFLAGS) $(CCXX_FLAGS) -I$(SRC_DIR)" \
-                        OUTPUT_DIR="$(od)" \
-                        OPT_ARCH=$(ARCH) \
-                        CAN_DECOMPRESS=$(CONFIG_BOOTSTRAP_COMPRESS) \
-                        L4DIR=$(L4DIR) \
-                        BOOTSTRAP_LINKADDR=$(BOOTSTRAP_LINKADDR) \
-                        OPT_RAM_BASE=$(RAM_BASE) \
-                        OPT_EFIMODE=$(if $(BOOTSTRAP_DO_UEFI),y,n) \
-                        OPT_PLATFORM_TYPE=$(PLATFORM_TYPE) \
-                        OPT_BITS=$(BITS) \
-                        QEMU_BINARY_NAME="$(QEMU_BINARY_NAME)" \
-                        QEMU_OPTIONS="$(QEMU_OPTIONS)"
-
-ifneq ($(ENTRY),)
- ifeq ($(filter clean cleanall,$(MAKECMDGOALS)),)
-  BUILD_MOD_CMD = ( SEARCHPATH="$(BOOTSTRAP_SEARCH_PATH):$(BOOTSTRAP_MODULE_PATH_BINLIB)" \
-                    $(BUILD_MOD_CMD_ENVVARS) \
-                    $(SRC_DIR)/build.pl $(1) $(BOOTSTRAP_MODULES_LIST) "$(ENTRY)" || \
-                    (echo "processing-of-module-list-failed"; exit 1))
- endif
-endif
-
-
 # we need to re-do if some things change
 .redo-change-tracker: FORCE
-	$(VERBOSE)echo "$(ENTRY) '$(BOOTSTRAP_CMDLINE)' '$(BOOTSTRAP_SEARCH_PATH):$(BOOTSTRAP_MODULE_PATH_BINLIB)' '$(RAM_SIZE_MB)' '$(PLATFORM_TYPE)' '$(PLATFORM_UART_NR)' '$(od)' '$(OPT_STRIP)' '$(call default_reloc,$(ARCH))' '$(BOOTSTRAP_DO_UEFI)'" > $@.tmp
-	$(if $(BUILD_MOD_CMD),$(VERBOSE)$(call BUILD_MOD_CMD,dump) >> $@.tmp)
+	$(VERBOSE)echo "'$(BOOTSTRAP_CMDLINE)' '$(RAM_SIZE_MB)' '$(PLATFORM_TYPE)' '$(PLATFORM_UART_NR)' '$(od)' '$(OPT_STRIP)' '$(call default_reloc,$(ARCH))' '$(BOOTSTRAP_DO_UEFI)'" > $@.tmp
 	$(VERBOSE)$(call move_if_changed,$@,$@.tmp)
 
-
-INSTALL_FILES += $(INSTALL_FILES-y)
-
-ifneq ($(ENTRY),)
-
-INSTALL_FILES  += $(BOOTSTRAP_ELF_NAME) bootstrap_$(SUFFIX) bootstrap_$(SUFFIX).elf
-BOOTSTRAP_LINK_SOURCE = $(BOOTSTRAP_ELF_NAME)
-
-INSTALL_FILES-$(BOOTSTRAP_DO_UEFI) += bootstrap_$(SUFFIX).efi $(EFI_IMAGE)
-
-$(od)bootstrap_$(SUFFIX): $(od)$(BOOTSTRAP_LINK_SOURCE)
-	$(VERBOSE)$(LN) -f $< $@
-
-$(od)bootstrap_$(SUFFIX).elf: $(od)$(BOOTSTRAP_LINK_SOURCE)
-	$(VERBOSE)$(LN) -f $< $@
-
-$(od)bootstrap_$(SUFFIX).elf32: $(od)$(BOOTSTRAP_LINK_SOURCE)
-	$(VERBOSE)$(LN) -f $< $@
-
-$(od)bootstrap_$(SUFFIX).efi: $(od)$(EFI_IMAGE)
-	$(VERBOSE)$(LN) -f $< $@
-
-$(od)bootstrap_$(SUFFIX).%: $(od)bootstrap.%
-	$(VERBOSE)$(LN) -f $< $@
-
- ifeq ($(ARCH),$(filter $(ARCH),arm arm64 mips riscv))
-   BID_POST_PROG_LINK_MSG_$(od)$(BOOTSTRAP_ELF_NAME) = echo -e "  ==> Post-processing $@"
-   BID_POST_PROG_LINK_$(od)$(BOOTSTRAP_ELF_NAME)     = \
-      $(VERBOSE)LC_ALL=C $(NM) -C $@ | \
-        LC_ALL=C $(GREP) -E ' . __PLATFORMS_(BEGIN|END)$$' | \
-                (read a i; read b i; \
-                 if [ "$$a" = "$$b" ]; then \
-                   echo -e "\nERROR: Missing at least one platform instantiation.\n"; \
-                   $(RM) $@; \
-                   exit 1; \
-                 fi ) || exit 1; \
-      $(if $(BOOTSTRAP_NO_STRIP),,$(STRIP) $@)
-
-   ifneq ($(BOOTSTRAP_DO_RAW_IMAGE),)
-     INSTALL_FILES      += bootstrap.raw bootstrap_$(SUFFIX).raw
-   endif
- endif
-
-all:: $(addprefix $(IMAGES_DIR)/,$(INSTALL_FILES))
-	$(VERBOSE)echo "  Image size(s) in bytes:"
-	$(VERBOSE)for f in $(filter bootstrap_$(SUFFIX).elf bootstrap.raw, $(INSTALL_FILES)); do \
-	  find $(if $(od),$(od),.) -name $$f -printf " %30f:  %s\n"; \
-	done
-	$(if $(LDFLAGS_$(od)bootstrap.elf),$(VERBOSE)echo "  Start address: $(BOOTSTRAP_LINKADDR)")
-
-# install images into easy to reach directory in build dir
-$(IMAGES_DIR)/%: $(od)%
-	$(VERBOSE)echo "  ==> Installing $< in image directory"
-	$(VERBOSE)(cd $(dir $@) && $(LN) -sf $(if $(od),,$(CURDIR)/)$<)
-
-else
-  INSTALL_FILES += bootstrap $(BOOTSTRAP_ELF_NAME) $(BOOTSTRAP_RAW)
-
-  ifneq ($(EFI_IMAGE),)
-$(od)bootstrap.efi: $(od)$(EFI_IMAGE)
-	$(VERBOSE)$(LN) -f $< $@
-
-    INSTALL_FILES-$(BOOTSTRAP_DO_UEFI) += bootstrap.efi
-  endif
-endif # ENTRY
-
-SRC_CC-$(CONFIG_BOOTSTRAP_COMPRESS) += uncompress.cc
-REQUIRES_LIBS-$(CONFIG_BOOTSTRAP_COMPRESS) += zlib
+INSTALL_FILES += bootstrap $(BOOTSTRAP_ELF_NAME) $(BOOTSTRAP_RAW)
 
 ifneq ($(RAM_SIZE_MB),)
 CPPFLAGS += -DRAM_SIZE_MB=$(RAM_SIZE_MB)
@@ -324,44 +225,10 @@ endif
 CXXFLAGS += -fno-rtti -fno-exceptions
 CXXFLAGS += $(call checkcxx,-fno-threadsafe-statics)
 
-ifneq ($(BUILD_MOD_CMD),)
- ifeq ($(filter clean cleanall,$(MAKECMDGOALS)),)
-
-processing-of-module-list-failed:
-	@echo
-	@echo "  Processing of entry $(ENTRY) in $(BOOTSTRAP_MODULES_LIST) failed!"
-	@echo
-	@exit 1
-
-build_list_cmd := $(if $(MAKE_RESTARTS),list_unique,fetch_files_and_list_unique)
-entry_files    := $(shell $(call BUILD_MOD_CMD,$(build_list_cmd)))
-
-# Avoid that pattern rules match on module files
-$(filter-out processing-of-module-list-failed,$(entry_files)): ;
-
-mod.make.inc $(od)mbi_modules.o: $(GENERAL_D_LOC) $(entry_files)
-	@echo Building entry \""$(ENTRY)"\".
-	$(VERBOSE)$(call BUILD_MOD_CMD,build)
-
-  -include mod.make.inc
-  BOOTSTRAP_LD_dep             += mod.make.inc
-  STARTUP_C_dep                := mod.make.inc
-  OBJS                         += $(MODULE_OBJECT_FILES)
- endif
-
-else
-mod.make.inc $(od)mbi_modules.o: $(GENERAL_D_LOC) \
-                                 $(BOOTSTRAP_BUILD_OUTPUT_FORMATTER)
-	$(VERBOSE)$(BUILD_MOD_CMD_ENVVARS) $(SRC_DIR)/build.pl build
-
-  -include mod.make.inc
-  BOOTSTRAP_LD_dep             += mod.make.inc
-  STARTUP_C_dep                := mod.make.inc
-  OBJS                         += $(MODULE_OBJECT_FILES)
-
-endif
-
-CPPFLAGS += -DMODADDR=$(MOD_ADDR)
+# erXos's C17 cores of the boot path (tools/lib/erx/core_archive.rb), and the
+# one directory of their headers bootstrap's erXos function includes.
+EXTRA_LIBS      += $(ERX_BOOT_ARCHIVE)
+PRIVATE_INCDIR  += $(ERX_BOOT_INCLUDE)
 
 all:: $(BOOTSTRAP_RAW)
 
@@ -369,20 +236,14 @@ all:: $(BOOTSTRAP_RAW)
 $(BOOTSTRAP_RAW): $(BOOTSTRAP_ELF_NAME)
 	@$(GEN_MESSAGE)
 	$(VERBOSE)$(OBJCOPY) -O binary $< $@
-	$(VERBOSE)L4DIR=$(L4DIR) $(SRC_DIR)/build.pl postprocess_raw $(ARCH) "$@"
 	$(VERBOSE)chmod -x $@
 
-BID_POST_PROG_LINK_MSG_$(TARGET) = echo -e "  [$(PKGNAME_DIRNAME)] ==> Image post-processing $@"
-BID_POST_PROG_LINK_$(TARGET)     = $(VERBOSE)L4DIR=$(L4DIR) $(SRC_DIR)/build.pl postprocess $@
-
-$(TARGET): $(LDSCRIPT) $(OBJS_$(TARGET))
+$(TARGET): $(LDSCRIPT) $(OBJS_$(TARGET)) $(ERX_BOOT_ARCHIVE)
 
 # Link address of the bootstrap binary - for arm_gen we set it to 0 such
 # that it is DT_DYN. PIE build is enforced through PLATFORM_TYPE selection
 bootstrap_link_address = $(if $(filter arm_gen,$(PLATFORM_TYPE)),0,$(call default_reloc,$(ARCH)))
 
-startup.o: $(STARTUP_C_dep)
-CPPFLAGS_boot_modules.cc += -DLINKADDR=$(strip $(call bootstrap_link_address))
 
 %.ld: %.ld.in $(GENERAL_D_LOC) $(BOOTSTRAP_LD_dep)
 	@$(GEN_MESSAGE)
@@ -390,7 +251,7 @@ CPPFLAGS_boot_modules.cc += -DLINKADDR=$(strip $(call bootstrap_link_address))
 	$(VERBOSE)$(CPP) -P $(CPPFLAGS) -DLINKADDR=$(strip $(call bootstrap_link_address)) $< -o $@
 
 clean cleanall::
-	$(VERBOSE)$(RM) mod.make.inc mods.offsets mod*.bin mbi_modules.bin $(LDSCRIPT)
+	$(VERBOSE)$(RM) $(LDSCRIPT)
 	$(VERBOSE)$(RM) mod*.bin
 	$(VERBOSE)$(RM) $(SRC32_C:.c=.o32) $(SRC32_CC:.cc=.o32) $(SRC32_S:.S=.o32)
 	$(VERBOSE)$(RM) .redo-change-tracker

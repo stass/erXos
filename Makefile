@@ -13,7 +13,7 @@ DOCKER_CONTEXT ?=
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
-.PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant
+.PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-boot-image
 
 all: build
 
@@ -62,6 +62,9 @@ check-conformance:
 
 check-debug-log:
 	$(RUBY) tools/erx check-debug-log
+
+check-boot-image:
+	$(RUBY) tools/erx check-boot-image
 
 status:
 	$(RUBY) tools/erx status

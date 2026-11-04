@@ -193,6 +193,9 @@ module Erx
       read
     end
 
+    # The inventory's row for a file as imported; nil for a file it does not list.
+    def imported_file(path) = read.fetch('files')[path]
+
     private
 
     def inventory_entry(path, review:)

@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -21,12 +22,12 @@
 using L4::Kip::Mem_desc;
 
 void
-init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi, l4util_l4mod_info *mbi)
+init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi)
 {
   if (L4_KIP_VERSION_FIASCO != l4_kip_version(l4i))
     panic("Cannot load kernels other than Fiasco");
 
-  l4i->user_ptr = reinterpret_cast<unsigned long>(mbi);
+  l4i->user_ptr = 0;
 
   /* set up sigma0 info */
   l4i->sigma0_ip = bi->sigma0_start;

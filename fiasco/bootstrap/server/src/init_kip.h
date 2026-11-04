@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Copyright (C) 2023-2025 Kernkonzept GmbH.
@@ -15,7 +16,6 @@
 #include "startup.h"
 #include "region.h"
 
-void init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi,
-                    l4util_l4mod_info *mbi);
+void init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi);
 
 void init_kip_md(l4_kernel_info_t *l4i, Region_list *ram, Region_list *regions);

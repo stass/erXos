@@ -11,6 +11,12 @@
 #include "erx/elf_plan.h"
 
 static bool erx_elf_fail(erx_elf_error_t *, const char *, uint64_t);
+static bool erx_elf_header(const uint8_t *, size_t, erx_elf64_ehdr_t *);
+static bool erx_elf_kernel_load(erx_elf_kernel_plan_t *,
+    const erx_elf64_phdr_t *, size_t, erx_elf_error_t *);
+static bool erx_elf_kernel_view(const erx_elf_kernel_plan_t *,
+    const erx_elf64_phdr_t *, uint64_t, uint64_t, erx_elf_kernel_view_t *,
+    erx_elf_error_t *);
 static bool erx_elf_extent(uint64_t, uint64_t, uint64_t);
 static bool erx_elf_round(uint64_t, uint64_t, uint64_t *);
 static bool erx_elf_equal(const uint8_t *, const uint8_t *, size_t);
@@ -369,35 +375,44 @@ erx_elf_place(erx_elf_plan_t *plan, const erx_elf64_ehdr_t *header,
 	return (true);
 }
 
+/* The file header both profiles require, with its table inside the file. */
+static bool
+erx_elf_header(const uint8_t *bytes, size_t length, erx_elf64_ehdr_t *header)
+{
+	static const uint8_t magic[] = ERX_ELF_MAGIC_BYTES;
+	uint64_t table_bytes;
+
+	return (erx_elf64_ehdr_decode(bytes, length, header) &&
+	    erx_elf_equal(header->e_ident, magic, sizeof(magic)) &&
+	    header->e_ident[ERX_ELF_EI_CLASS] == ERX_ELF_CLASS64 &&
+	    header->e_ident[ERX_ELF_EI_DATA] == ERX_ELF_DATA_LSB &&
+	    header->e_ident[ERX_ELF_EI_VERSION] == ERX_ELF_VERSION_CURRENT &&
+	    header->e_version == ERX_ELF_VERSION_CURRENT &&
+	    header->e_machine == ERX_ARCH_ELF_MACHINE &&
+	    (header->e_type == ERX_ELF_ET_EXEC || header->e_type == ERX_ELF_ET_DYN) &&
+	    header->e_ehsize == ERX_ELF64_EHDR_SIZE &&
+	    header->e_phentsize == ERX_ELF64_PHDR_SIZE &&
+	    header->e_phnum != 0 && header->e_phnum != ERX_ELF_PN_XNUM &&
+	    !__builtin_mul_overflow((uint64_t)header->e_phnum,
+	    (uint64_t)ERX_ELF64_PHDR_SIZE, &table_bytes) &&
+	    erx_elf_extent(header->e_phoff, table_bytes, length));
+}
+
 bool
 erx_elf_plan(const uint8_t *bytes, size_t length, uint64_t output_budget,
     erx_elf_plan_t *result, erx_elf_error_t *error)
 {
-	static const uint8_t magic[] = ERX_ELF_MAGIC_BYTES;
 	erx_elf_plan_t plan;
 	erx_elf64_ehdr_t header;
 	erx_elf64_phdr_t program;
 	erx_elf64_phdr_t phdr_hint;
 	erx_elf64_phdr_t dynamic, tls;
-	uint64_t table_bytes, metadata_work;
+	uint64_t metadata_work;
 	uint32_t notes;
 	bool has_phdr_hint, has_dynamic, has_tls;
 
 	if (bytes == NULL || result == NULL ||
-	    !erx_elf64_ehdr_decode(bytes, length, &header) ||
-	    !erx_elf_equal(header.e_ident, magic, sizeof(magic)) ||
-	    header.e_ident[ERX_ELF_EI_CLASS] != ERX_ELF_CLASS64 ||
-	    header.e_ident[ERX_ELF_EI_DATA] != ERX_ELF_DATA_LSB ||
-	    header.e_ident[ERX_ELF_EI_VERSION] != ERX_ELF_VERSION_CURRENT ||
-	    header.e_version != ERX_ELF_VERSION_CURRENT ||
-	    header.e_machine != ERX_ARCH_ELF_MACHINE ||
-	    (header.e_type != ERX_ELF_ET_EXEC && header.e_type != ERX_ELF_ET_DYN) ||
-	    header.e_ehsize != ERX_ELF64_EHDR_SIZE ||
-	    header.e_phentsize != ERX_ELF64_PHDR_SIZE ||
-	    header.e_phnum == 0 || header.e_phnum == ERX_ELF_PN_XNUM ||
-	    __builtin_mul_overflow((uint64_t)header.e_phnum,
-	    (uint64_t)ERX_ELF64_PHDR_SIZE, &table_bytes) ||
-	    !erx_elf_extent(header.e_phoff, table_bytes, length))
+	    !erx_elf_header(bytes, length, &header))
 		return (erx_elf_fail(error, "elf_header", 0));
 	plan = (erx_elf_plan_t){ .base_alignment = ERX_PAGE_SIZE,
 	    .phnum = header.e_phnum };
@@ -462,6 +477,146 @@ erx_elf_plan(const uint8_t *bytes, size_t length, uint64_t output_budget,
 	if ((has_dynamic && !erx_elf_metadata_mapped(&plan, &dynamic, false, error)) ||
 	    (has_tls && !erx_elf_metadata_mapped(&plan, &tls, true, error)))
 		return (false);
+	*result = plan;
+	return (true);
+}
+
+/*
+ * One loadable segment of the kernel profile: bytes the file holds, at a
+ * physical address above the segment before it, so copying them in table
+ * order never overlaps a segment already copied.
+ */
+static bool
+erx_elf_kernel_load(erx_elf_kernel_plan_t *plan,
+    const erx_elf64_phdr_t *program, size_t length, erx_elf_error_t *error)
+{
+	const erx_elf_kernel_load_t *previous;
+	uint64_t end;
+
+	if (program->p_memsz == 0)
+		return (true);
+	if (plan->nloads == ERX_ELF_SEGMENTS_MAX)
+		return (erx_elf_fail(error, "load_count", program->p_offset));
+	if (program->p_filesz > program->p_memsz ||
+	    !erx_elf_extent(program->p_offset, program->p_filesz, length) ||
+	    __builtin_add_overflow(program->p_paddr, program->p_memsz, &end))
+		return (erx_elf_fail(error, "load_range", program->p_offset));
+	if (program->p_align > ERX_BOOT_KERNEL_ALIGN ||
+	    (program->p_align != 0 && (program->p_align & (program->p_align - 1)) != 0))
+		return (erx_elf_fail(error, "load_alignment", program->p_offset));
+	if (plan->nloads != 0) {
+		previous = &plan->loads[plan->nloads - 1];
+		if (program->p_paddr < previous->address + previous->mem_size)
+			return (erx_elf_fail(error, "load_order", program->p_offset));
+	}
+	plan->loads[plan->nloads++] = (erx_elf_kernel_load_t){
+		.source_offset = program->p_offset,
+		.address = program->p_paddr,
+		.file_size = program->p_filesz,
+		.mem_size = program->p_memsz,
+	};
+	if (program->p_align > plan->alignment)
+		plan->alignment = program->p_align;
+	return (true);
+}
+
+/*
+ * A metadata view: not a placement, but a part of one loadable segment's
+ * file-backed bytes, at the same file-to-physical offset, so what is written
+ * through it lands inside bytes the copy put there.
+ */
+static bool
+erx_elf_kernel_view(const erx_elf_kernel_plan_t *plan,
+    const erx_elf64_phdr_t *program, uint64_t minimum, uint64_t alignment,
+    erx_elf_kernel_view_t *view, erx_elf_error_t *error)
+{
+	const erx_elf_kernel_load_t *load;
+	uint64_t end;
+
+	if (program->p_memsz != program->p_filesz || program->p_filesz < minimum ||
+	    __builtin_add_overflow(program->p_paddr, program->p_filesz, &end))
+		return (erx_elf_fail(error, "view_size", program->p_offset));
+	/* bootstrap reads it through a pointer with translation off. */
+	if ((program->p_paddr & (alignment - 1)) != 0)
+		return (erx_elf_fail(error, "view_alignment", program->p_offset));
+	for (uint32_t index = 0; index < plan->nloads; index++) {
+		load = &plan->loads[index];
+		if (program->p_paddr < load->address ||
+		    end > load->address + load->file_size)
+			continue;
+		if (program->p_paddr - load->address !=
+		    program->p_offset - load->source_offset)
+			return (erx_elf_fail(error, "view_offset", program->p_offset));
+		*view = (erx_elf_kernel_view_t){ .address = program->p_paddr,
+		    .size = program->p_filesz };
+		return (true);
+	}
+	return (erx_elf_fail(error, "view_outside", program->p_offset));
+}
+
+/*
+ * The kernel profile: an executable bootstrap places by physical address
+ * before translation is on, so protection means nothing here and only bounds
+ * do. Views the caller asks for are required exactly once.
+ */
+bool
+erx_elf_plan_kernel(const uint8_t *bytes, size_t length,
+    const erx_elf_kernel_views_t *views, erx_elf_kernel_plan_t *result,
+    erx_elf_error_t *error)
+{
+	erx_elf_kernel_plan_t plan;
+	const erx_elf_kernel_load_t *load;
+	erx_elf64_ehdr_t header;
+	erx_elf64_phdr_t program;
+	bool entry_found;
+
+	if (bytes == NULL || result == NULL ||
+	    !erx_elf_header(bytes, length, &header))
+		return (erx_elf_fail(error, "elf_header", 0));
+	plan = (erx_elf_kernel_plan_t){ .entry = header.e_entry,
+	    .alignment = ERX_PAGE_SIZE };
+	/* Loads first, so a view's table position cannot change its verdict. */
+	for (uint16_t index = 0; index < header.e_phnum; index++) {
+		if (!erx_elf_phdr(bytes, length, &header, index, &program))
+			return (erx_elf_fail(error, "program_header", header.e_phoff));
+		if (program.p_type == ERX_ELF_PT_INTERP)
+			return (erx_elf_fail(error, "interpreter", program.p_offset));
+		if (program.p_type == ERX_ELF_PT_DYNAMIC)
+			plan.relocatable = true;
+		if (program.p_type == ERX_ELF_PT_LOAD &&
+		    !erx_elf_kernel_load(&plan, &program, length, error))
+			return (false);
+	}
+	if (plan.nloads == 0)
+		return (erx_elf_fail(error, "no_load", 0));
+	for (uint16_t index = 0; views != NULL && index < header.e_phnum; index++) {
+		if (!erx_elf_phdr(bytes, length, &header, index, &program))
+			return (erx_elf_fail(error, "program_header", header.e_phoff));
+		if (program.p_type == ERX_BOOT_KIP_VIEW_TYPE) {
+			if (plan.kip.size != 0)
+				return (erx_elf_fail(error, "view_duplicate", program.p_offset));
+			if (!erx_elf_kernel_view(&plan, &program, views->kip_min,
+			    ERX_PAGE_SIZE, &plan.kip, error))
+				return (false);
+		}
+		if (program.p_type == ERX_BOOT_KOPTIONS_VIEW_TYPE) {
+			if (plan.koptions.size != 0)
+				return (erx_elf_fail(error, "view_duplicate", program.p_offset));
+			if (!erx_elf_kernel_view(&plan, &program, views->koptions_min,
+			    ERX_BOOT_HANDOFF_ALIGN, &plan.koptions, error))
+				return (false);
+		}
+	}
+	if (views != NULL && (plan.kip.size == 0 || plan.koptions.size == 0))
+		return (erx_elf_fail(error, "view_missing", 0));
+	entry_found = false;
+	for (uint32_t index = 0; index < plan.nloads; index++) {
+		load = &plan.loads[index];
+		entry_found = entry_found || (plan.entry >= load->address &&
+		    plan.entry < load->address + load->file_size);
+	}
+	if (!entry_found || (plan.entry & 3) != 0)
+		return (erx_elf_fail(error, "entry_outside", plan.entry));
 	*result = plan;
 	return (true);
 }

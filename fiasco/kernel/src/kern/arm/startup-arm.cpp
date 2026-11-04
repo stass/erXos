@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 IMPLEMENTATION [arm]:
 
 #include "banner.h"
@@ -10,6 +11,7 @@ IMPLEMENTATION [arm]:
 #include "ipi.h"
 #include "kernel_task.h"
 #include "kernel_uart.h"
+#include "erx_handoff.h"
 #include "kip_init.h"
 #include "kmem_alloc.h"
 #include "kmem_space.h"
@@ -47,6 +49,7 @@ Startup::stage2()
   Mem_space::init_page_sizes();
 
   Kip_init::init();
+  Erx_handoff::check_descriptors();
   Kmem_alloc::init();
   Dt::init();
 

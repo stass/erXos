@@ -12,6 +12,7 @@ require_relative 'lib/erx/tla'
 require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/qemu'
 require_relative 'lib/erx/conformance'
+require_relative 'lib/erx/boot_image_check'
 require_relative 'lib/erx/debug_log_probe'
 require_relative 'lib/erx/qemu_gate'
 require_relative 'lib/erx/checks'
@@ -68,6 +69,8 @@ module Erx
         conformance(command_arguments, **collaborators)
       when 'check-qemu'
         check_qemu(command_arguments, **collaborators)
+      when 'check-boot-image'
+        check_boot_image(command_arguments, **collaborators)
       when 'check-debug-log'
         check_debug_log(command_arguments, **collaborators)
       when 'oracle'
@@ -351,7 +354,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
       0
     end
 
@@ -465,6 +468,31 @@ module Erx
                end
       Terminal.puts("Linux host oracle: #{result.fetch('state')}; #{result.fetch('report')}")
       result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
+    end
+
+    # The bootable file on the stopgap: good images in both forms under each
+    # accelerator, and each damage the boot checks claim to catch.
+    def self.check_boot_image(input_arguments)
+      arguments = input_arguments.dup
+      accels = %w[tcg hvf]
+      jobs = 8
+      OptionParser.new do |flags|
+        flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| accels = value }
+        flags.on('--jobs N', Integer, 'Build jobs') { |value| jobs = value }
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      unless (accels - %w[tcg hvf]).empty? && !accels.empty?
+        raise OptionParser::InvalidArgument, 'accelerators must be tcg or hvf'
+      end
+
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      report = BootImageCheck::Run.new(root: ROOT, runner: runner, compiler: ENV.fetch('ERX_CLANG', ''),
+                                       linker: ENV.fetch('ERX_LLD', '')).call(accels: accels, jobs: jobs)
+      report.fetch(:good).each do |label, run|
+        Terminal.puts("boot image #{label}: boots in #{run.fetch(:seconds).round(3)} s; #{run.fetch(:serial)}")
+      end
+      report.fetch(:refused).each { |name, serial| Terminal.puts("boot image refused: #{name}; #{serial}") }
+      0
     end
 
     # The debug-log probe on the stopgap kernel under each accelerator, each

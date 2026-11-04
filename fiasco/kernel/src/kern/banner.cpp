@@ -1,4 +1,5 @@
-// Modified by erXos: the stopgap admits trusted code only, and the banner
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
+// Modified by erXos: the banner reports the boot image bootstrap validated and
 // runs the C17 cores' link probe.
 INTERFACE:
 
@@ -12,6 +13,7 @@ IMPLEMENTATION:
 
 #include <cstdio>
 #include "config.h"
+#include "erx_handoff.h"
 #include "erx_probe.h"
 
 PUBLIC static FIASCO_INIT
@@ -21,7 +23,7 @@ Banner::init()
   // Kip::k() has not necessarily been initialized yet!
   extern char _initkip_start[];
   printf("\n%s\n", _initkip_start);
-  printf("development build: trusted code only\n");
+  Erx_handoff::banner();
   Erx_probe::run();
 
   if constexpr (Config::kernel_warn_config_string()

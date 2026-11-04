@@ -193,6 +193,11 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["boot_kernel_path"] = BytesType.new(
+        name: "boot_kernel_path".b,
+        size: 11,
+        fixed: "boot/kernel".b
+      ).freeze
       types["boot_locator_magic"] = BytesType.new(
         name: "boot_locator_magic".b,
         size: 8,
@@ -282,6 +287,11 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["boot_sigma0_path"] = BytesType.new(
+        name: "boot_sigma0_path".b,
+        size: 11,
+        fixed: "boot/sigma0".b
+      ).freeze
       types["boot_slot"] = EnumType.new(
         name: "boot_slot".b,
         base: types.fetch("u32"),
@@ -292,6 +302,11 @@ module Erx
         }.freeze,
         flags: false,
         allowed: nil
+      ).freeze
+      types["boot_stand_in_root_path"] = BytesType.new(
+        name: "boot_stand_in_root_path".b,
+        size: 17,
+        fixed: "boot/stopgap-root".b
       ).freeze
       types["boot_value"] = EnumType.new(
         name: "boot_value".b,
@@ -5471,6 +5486,174 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["erx_boot_handoff"] = Layout.new(
+        name: "erx_boot_handoff".b,
+        version: 2,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 2136,
+        fields: [
+          Field.new(
+            name: "version".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("pack_flags"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "build_id".b,
+            type: types.fetch("u8"),
+            offset: 8,
+            count: 8,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "index_hash".b,
+            type: types.fetch("u8"),
+            offset: 16,
+            count: 32,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "image_start".b,
+            type: types.fetch("u64"),
+            offset: 48,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "image_size".b,
+            type: types.fetch("u64"),
+            offset: 56,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "pool_usable".b,
+            type: types.fetch("u64"),
+            offset: 64,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "pool_heap".b,
+            type: types.fetch("u64"),
+            offset: 72,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "pool_regions".b,
+            type: types.fetch("u32"),
+            offset: 80,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "bootargs_len".b,
+            type: types.fetch("u32"),
+            offset: 84,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "bootargs".b,
+            type: types.fetch("u8"),
+            offset: 88,
+            count: 2048,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_boot_info"] = Layout.new(
         name: "erx_boot_info".b,
         version: 1,
@@ -7557,9 +7740,12 @@ module Erx
           "arch_boot_magic".b,
           "erx_arch_boot_header".b,
           "boot_flags".b,
+          "boot_kernel_path".b,
           "boot_locator_magic".b,
           "erx_boot_locator".b,
+          "boot_sigma0_path".b,
           "boot_slot".b,
+          "boot_stand_in_root_path".b,
           "boot_value".b,
           "budget_kind".b,
           "cap".b,
@@ -7644,6 +7830,7 @@ module Erx
           "mf_window_role".b,
           "erx_mf_window".b,
           "pack_flags".b,
+          "erx_boot_handoff".b,
           "erx_boot_info".b,
           "pack_magic".b,
           "erx_pack_header".b,
@@ -7709,9 +7896,39 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "boot_handoff_version".b => Constant.new(
+            name: "boot_handoff_version".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "boot_installed_only".b => Constant.new(
             name: "boot_installed_only".b,
             value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "boot_kernel_align".b => Constant.new(
+            name: "boot_kernel_align".b,
+            value: 2097152,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "boot_kip_view_min".b => Constant.new(
+            name: "boot_kip_view_min".b,
+            value: 4096,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "boot_kip_view_type".b => Constant.new(
+            name: "boot_kip_view_type".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "boot_koptions_view_type".b => Constant.new(
+            name: "boot_koptions_view_type".b,
+            value: 17,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

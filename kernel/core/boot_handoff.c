@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "erx/abi.h"
+#include "erx/core/boot_handoff.h"
+
+_Static_assert(ERX_BOOT_HANDOFF_RECORD_SIZE == ERX_BOOT_HANDOFF_SIZE,
+    "the seam's record size is the ABI's");
+_Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) ==
+    sizeof(((erx_boot_handoff_t *)0)->build_id) &&
+    sizeof(((erx_boot_handoff_view_t *)0)->index_hash) ==
+    sizeof(((erx_boot_handoff_t *)0)->index_hash), "the view holds the record's identifiers");
+
+const char *
+erx_boot_handoff_accept(const uint8_t *record, size_t length,
+    erx_boot_handoff_view_t *view)
+{
+	const erx_boot_handoff_t *handoff;
+	uint64_t end;
+
+	if (record == NULL || view == NULL || length < ERX_BOOT_HANDOFF_SIZE ||
+	    ((uintptr_t)record % ERX_BOOT_HANDOFF_ALIGN) != 0)
+		return ("record_extent");
+	handoff = (const erx_boot_handoff_t *)(const void *)record;
+	if (handoff->version != ERX_BOOT_HANDOFF_VERSION)
+		return ("version");
+	if ((handoff->flags & ~(uint32_t)(ERX_PACK_DEVELOPMENT |
+	    ERX_PACK_UNCONFINED_DMA)) != 0)
+		return ("flags");
+	if (handoff->image_size == 0 ||
+	    (handoff->image_start % ERX_PAGE_SIZE) != 0 ||
+	    (handoff->image_size % ERX_PAGE_SIZE) != 0 ||
+	    __builtin_add_overflow(handoff->image_start, handoff->image_size, &end))
+		return ("image_range");
+	if (handoff->bootargs_len > ERX_BOOT_STRINGS_MAX)
+		return ("bootargs_length");
+	*view = (erx_boot_handoff_view_t){
+		.flags = handoff->flags,
+		.development = (handoff->flags & ERX_PACK_DEVELOPMENT) != 0,
+		.image = { .start = handoff->image_start,
+		    .size = handoff->image_size },
+		.pool_usable = handoff->pool_usable,
+		.pool_heap = handoff->pool_heap,
+		.pool_regions = handoff->pool_regions,
+		.bootargs = (const char *)handoff->bootargs,
+		.bootargs_len = handoff->bootargs_len,
+	};
+	for (size_t index = 0; index < sizeof(view->build_id); index++)
+		view->build_id[index] = handoff->build_id[index];
+	for (size_t index = 0; index < sizeof(view->index_hash); index++)
+		view->index_hash[index] = handoff->index_hash[index];
+	return (NULL);
+}
+
+bool
+erx_boot_handoff_covered(const erx_boot_handoff_view_t *view,
+    const erx_boot_range_t *ranges, size_t count)
+{
+	uint64_t end, range_end;
+
+	if (view == NULL || ranges == NULL ||
+	    __builtin_add_overflow(view->image.start, view->image.size, &end))
+		return (false);
+	for (size_t index = 0; index < count; index++) {
+		if (__builtin_add_overflow(ranges[index].start, ranges[index].size,
+		    &range_end))
+			continue;
+		if (ranges[index].start <= view->image.start && end <= range_end)
+			return (true);
+	}
+	return (false);
+}

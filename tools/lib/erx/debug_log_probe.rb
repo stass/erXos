@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require_relative 'boot_image'
 require_relative 'bounded_file'
 require_relative 'error'
 require_relative 'fiasco'
@@ -166,9 +167,8 @@ module Erx
         guest = File.join(directory, 'debug_log_probe')
         @runner.run([@linker, '-T', File.join(GUEST, 'link.ld'), '-o', guest, *objects],
                     name: 'debug-log-guest-link', deadline: 60, chdir: @source)
-        Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
-              .debug_log_image(guest: guest, modules: File.join(@source, GUEST, 'modules.list'),
-                               directory: File.join(@build, 'image'))
+        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
+                 .build(directory: File.join(@build, 'image'), stand_in_root: guest).fetch(:single)
       end
     end
   end

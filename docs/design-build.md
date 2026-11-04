@@ -175,16 +175,15 @@ inputs; erXos's `musl/` is not silently substituted into that boot build.
 The import records the effective licences of these support files along
 with the two executables' linker evidence.
 
-The M0 banner recipe embeds the kernel and `sigma0` as bootstrap modules
-and supplies no root module. The pinned bootstrap supports an absent root
-module, and Fiasco starts `sigma0` and returns without creating a root
-task when its root entry is zero. The harness ends this guest at its named
-banner checkpoint. This exercises the frozen boot set without introducing
-a throwaway native root task. M1 replaces the recipe's modules with
-erXos's bootable file: `bootstrap` alone, built as a flat image, with
-the archive that erXos's packer appends
-([design-stopgap.md](design-stopgap.md#boot-handoff)), and starts
-`liberx`'s root-task entry.
+erXos's bootable file is `bootstrap` alone, built as a flat image, with the
+archive that erXos's packer appends
+([design-stopgap.md](design-stopgap.md#boot-handoff)); `bootstrap` carries no
+Fiasco modules. Starting `liberx`'s root-task entry is the root startup's;
+until it lands, `tools/lib/erx/boot_image.rb` packs the kernel and `sigma0`,
+and a guest test's root task, as files bootstrap places, over the structural
+fixture's unadmitted manifest. The banner image has no root to place, so
+Fiasco starts `sigma0` and returns without creating a root task when its root
+entry is zero, and the harness ends this guest at its named banner checkpoint.
 
 ## Generation
 

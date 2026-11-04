@@ -30,6 +30,11 @@ limit pack_path_max u32 4096
 limit pack_strings_max u32 4194304
 limit pack_hash_size u32 32
 limit boot_locator_version u32 1
+limit boot_handoff_version u32 2
+limit boot_kip_view_type u32 16
+limit boot_koptions_view_type u32 17
+limit boot_kip_view_min u32 4096
+limit boot_kernel_align u32 2097152
 limit image_version u16 1
 limit image_magic u32 0x49585245
 limit image_segments_max u16 8
@@ -139,6 +144,9 @@ enum crash_cause u32
 
 bytes pack_magic 8 value 4552585041434b00
 bytes boot_locator_magic 8 value 455258424f4f5400
+bytes boot_kernel_path 11 value 626f6f742f6b65726e656c
+bytes boot_sigma0_path 11 value 626f6f742f7369676d6130
+bytes boot_stand_in_root_path 17 value 626f6f742f73746f706761702d726f6f74
 bytes system_manifest_path 15 value 73797374656d2f6d616e6966657374
 bytes crash_frame_begin 17 value 2d2d6572782d63726173682d626567696e
 bytes crash_frame_end 15 value 2d2d6572782d63726173682d656e64

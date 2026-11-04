@@ -1,3 +1,4 @@
+// Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
 
 #include <l4/sys/compiler.h>
 
@@ -25,7 +26,6 @@ void __main(unsigned long r0, unsigned long r1,
   ctor_init();
   Platform_base::iterate_platforms();
 
-  init_modules_infos();
-  startup(mod_header->mbi_cmdline());
+  startup(nullptr);
   l4_infinite_loop();
 }

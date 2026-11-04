@@ -85,7 +85,7 @@ class PackProvenanceTest < Minitest::Test
   def fiasco_fixture
     require_relative '../../tools/lib/erx/fiasco_provenance'
     FileUtils.mkdir_p(File.join(@root, 'build/fiasco/images'))
-    image = write('build/fiasco/images/bootstrap_banner.elf', 'Fiasco image')
+    image = write('build/fiasco/images/bootstrap.raw', 'Fiasco image')
     facts = { 'state' => 'complete', 'image' => { 'artifact' => reference(image) },
               'sources' => [{ 'path' => 'root.c', 'license' => 'BSD-2-Clause' }] }
     audit = write('build/fiasco/provenance.json', Erx::FiascoProvenance.canonical_report(facts))
