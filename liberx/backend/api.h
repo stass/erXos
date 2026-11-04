@@ -108,6 +108,31 @@ int	erx_irq_ack(uint64_t irq) ERX_WARN_UNUSED_RESULT;
  */
 int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * Devices' memory. A device's registers, by physical address, with the only attribute
+ * ERX_MEM_ATTR_DEVICE; a run of memory a device can address, of at most
+ * ERX_MEM_CONTIGUOUS_MAX bytes, aligned to its size rounded up to a power of two and
+ * wholly below device address limit, 0 for none. budget and resource are ignored. Malformed
+ * arguments are ERX_EINVAL on both backends, and hosted, which has no devices, refuses a
+ * well-formed create with ERX_ENOTSUP. erx_mem_dma_addr gives the address a device uses: a
+ * handle naming no object is ERX_EINVAL, as every handle is hosted, another kind of object
+ * ERX_ETYPE, and an offset past the end ERX_ERANGE.
+ */
+int	erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr,
+	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
+int	erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit,
+	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
+int	erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * Entropy: at most ERX_ENTROPY_BYTES_MAX bytes a call, at the head of the caller's UTCB's
+ * mr, packed from each word's low byte. A read touches no byte past len. More bytes, or an
+ * unknown flag, is ERX_EINVAL, and ERX_ENTROPY_CREDIT is ERX_ENOTSUP, since no source is
+ * trusted. What the bytes are worth natively, the root's banner line says. res is ignored.
+ */
+int	erx_entropy_read(uint32_t len) ERX_WARN_UNUSED_RESULT;
+int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_RESULT;
+
 /* how is ERX_END_OFF or ERX_END_RESET, and res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 

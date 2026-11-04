@@ -13,6 +13,8 @@ limit copy_max u32 1048576
 limit group_executors u32 64
 limit tlb_by_address_max u32 64
 limit msg_words u32 63
+limit entropy_bytes_max u32 256
+limit mem_contiguous_max u32 1048576
 limit group_executors_max u32 64
 limit msg_caps u32 4
 limit utcb_brs u32 58
@@ -129,6 +131,10 @@ flags space_flags u32
   bit jit 0
 flags mem_flags u32
   bit jit 0
+enum mem_attr u32
+  value device 0
+flags entropy_flags u32
+  bit credit 0
 enum exit_kind i64
   value parent -9223372036854775807
   value released -9223372036854775806
@@ -321,6 +327,11 @@ enum fiasco_call u32
   value image_map 15
   value space_stop 16
   value task_join 17
+  value mem_create_physical 18
+  value mem_create_contiguous 19
+  value mem_dma_addr 20
+  value entropy_read 21
+  value entropy_add 22
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -389,6 +400,35 @@ layout erx_fiasco_mem_create_request 1 wire_le 8 32
   field budget u64 8
   field size u64 16
   field flags u64 24
+
+layout erx_fiasco_mem_physical_request 1 wire_le 8 40
+  field caller u64 0
+  field budget u64 8
+  field base u64 16
+  field size u64 24
+  field attr u64 32
+
+layout erx_fiasco_mem_contiguous_request 1 wire_le 8 32
+  field caller u64 0
+  field budget u64 8
+  field size u64 16
+  field limit u64 24
+
+layout erx_fiasco_mem_dma_request 1 wire_le 8 24
+  field caller u64 0
+  field mem u64 8
+  field offset u64 16
+
+layout erx_fiasco_entropy_read_request 1 wire_le 8 8
+  field caller u64 0
+
+layout erx_fiasco_entropy_add_request 1 wire_le 8 48
+  field caller u64 0
+  field len u64 8
+  field word0 u64 16
+  field word1 u64 24
+  field word2 u64 32
+  field word3 u64 40
 
 layout erx_fiasco_vm_map_request 1 wire_le 8 56
   field caller u64 0

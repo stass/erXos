@@ -118,6 +118,8 @@ struct erx_rights {
 #define ERX_ENOCALLER (-INT32_C(13))
 #define ERX_ENOMEM (-INT32_C(6))
 #define ERX_ENOTSUP (-INT32_C(12))
+#define ERX_ENTROPY_BYTES_MAX UINT32_C(256)
+#define ERX_ENTROPY_CREDIT UINT32_C(1)
 #define ERX_ENTROPY_QUALITY_FIXED UINT32_C(3)
 #define ERX_ENTROPY_QUALITY_GOOD UINT32_C(1)
 #define ERX_ENTROPY_QUALITY_WEAK UINT32_C(2)
@@ -150,6 +152,8 @@ struct erx_rights {
 #define ERX_FAULT_FOREIGN_TRAP UINT32_C(6)
 #define ERX_FAULT_MEMORY UINT32_C(1)
 #define ERX_FAULT_UNDEFINED UINT32_C(3)
+#define ERX_FIASCO_CALL_ENTROPY_ADD UINT32_C(22)
+#define ERX_FIASCO_CALL_ENTROPY_READ UINT32_C(21)
 #define ERX_FIASCO_CALL_IMAGE_MAP UINT32_C(15)
 #define ERX_FIASCO_CALL_IRQ_ACK UINT32_C(34)
 #define ERX_FIASCO_CALL_IRQ_BIND UINT32_C(33)
@@ -157,6 +161,9 @@ struct erx_rights {
 #define ERX_FIASCO_CALL_IRQ_TRIGGER UINT32_C(35)
 #define ERX_FIASCO_CALL_MACHINE_END UINT32_C(9)
 #define ERX_FIASCO_CALL_MEM_CREATE UINT32_C(12)
+#define ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS UINT32_C(19)
+#define ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL UINT32_C(18)
+#define ERX_FIASCO_CALL_MEM_DMA_ADDR UINT32_C(20)
 #define ERX_FIASCO_CALL_SPACE_CREATE UINT32_C(14)
 #define ERX_FIASCO_CALL_SPACE_PROTECT UINT32_C(8)
 #define ERX_FIASCO_CALL_SPACE_STOP UINT32_C(16)
@@ -285,6 +292,8 @@ struct erx_rights {
 #define ERX_MANIFEST_STRINGS_MAX UINT32_C(4194304)
 #define ERX_MANIFEST_VERSION UINT16_C(1)
 #define ERX_MAPPINGS_MAX UINT32_C(65536)
+#define ERX_MEM_ATTR_DEVICE UINT32_C(0)
+#define ERX_MEM_CONTIGUOUS_MAX UINT32_C(1048576)
 #define ERX_MEM_JIT UINT32_C(1)
 #define ERX_MF_DEVICE_HOSTILE UINT32_C(1)
 #define ERX_MF_DEVICE_ROLE_BLOCK UINT32_C(5)
@@ -649,6 +658,8 @@ typedef uint8_t erx_elf_magic_t[4];
 
 typedef uint32_t erx_end_t;
 
+typedef uint32_t erx_entropy_flags_t;
+
 typedef uint32_t erx_entropy_quality_t;
 
 typedef uint8_t erx_entry_flags_t;
@@ -964,6 +975,50 @@ _Static_assert(offsetof(erx_group_stat_t, ready) ==
 _Static_assert(offsetof(erx_group_stat_t, exec) ==
     ERX_GROUP_STAT_OFF_EXEC, "erx_group_stat.exec offset");
 
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_SIZE 48
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_ALIGN 8
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_LEN 8
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD0 16
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD1 24
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD2 32
+#define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD3 40
+typedef struct erx_fiasco_entropy_add_request erx_fiasco_entropy_add_request_t;
+struct erx_fiasco_entropy_add_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	len;
+	uint64_t	word0;
+	uint64_t	word1;
+	uint64_t	word2;
+	uint64_t	word3;
+};
+_Static_assert(sizeof(erx_fiasco_entropy_add_request_t) == ERX_FIASCO_ENTROPY_ADD_REQUEST_SIZE, "erx_fiasco_entropy_add_request size");
+_Static_assert(_Alignof(erx_fiasco_entropy_add_request_t) == ERX_FIASCO_ENTROPY_ADD_REQUEST_ALIGN, "erx_fiasco_entropy_add_request alignment");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, caller) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_CALLER, "erx_fiasco_entropy_add_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, len) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_LEN, "erx_fiasco_entropy_add_request.len offset");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, word0) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD0, "erx_fiasco_entropy_add_request.word0 offset");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, word1) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD1, "erx_fiasco_entropy_add_request.word1 offset");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, word2) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD2, "erx_fiasco_entropy_add_request.word2 offset");
+_Static_assert(offsetof(erx_fiasco_entropy_add_request_t, word3) ==
+    ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_WORD3, "erx_fiasco_entropy_add_request.word3 offset");
+
+#define ERX_FIASCO_ENTROPY_READ_REQUEST_SIZE 8
+#define ERX_FIASCO_ENTROPY_READ_REQUEST_ALIGN 8
+#define ERX_FIASCO_ENTROPY_READ_REQUEST_OFF_CALLER 0
+typedef struct erx_fiasco_entropy_read_request erx_fiasco_entropy_read_request_t;
+struct erx_fiasco_entropy_read_request {
+	_Alignas(8) uint64_t	caller;
+};
+_Static_assert(sizeof(erx_fiasco_entropy_read_request_t) == ERX_FIASCO_ENTROPY_READ_REQUEST_SIZE, "erx_fiasco_entropy_read_request size");
+_Static_assert(_Alignof(erx_fiasco_entropy_read_request_t) == ERX_FIASCO_ENTROPY_READ_REQUEST_ALIGN, "erx_fiasco_entropy_read_request alignment");
+_Static_assert(offsetof(erx_fiasco_entropy_read_request_t, caller) ==
+    ERX_FIASCO_ENTROPY_READ_REQUEST_OFF_CALLER, "erx_fiasco_entropy_read_request.caller offset");
+
 #define ERX_FIASCO_IMAGE_MAP_REQUEST_SIZE 32
 #define ERX_FIASCO_IMAGE_MAP_REQUEST_ALIGN 8
 #define ERX_FIASCO_IMAGE_MAP_REQUEST_OFF_CALLER 0
@@ -1068,6 +1123,30 @@ _Static_assert(offsetof(erx_fiasco_machine_end_request_t, res) ==
 _Static_assert(offsetof(erx_fiasco_machine_end_request_t, how) ==
     ERX_FIASCO_MACHINE_END_REQUEST_OFF_HOW, "erx_fiasco_machine_end_request.how offset");
 
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_SIZE 32
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_ALIGN 8
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_BUDGET 8
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_SIZE 16
+#define ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_LIMIT 24
+typedef struct erx_fiasco_mem_contiguous_request erx_fiasco_mem_contiguous_request_t;
+struct erx_fiasco_mem_contiguous_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	budget;
+	uint64_t	size;
+	uint64_t	limit;
+};
+_Static_assert(sizeof(erx_fiasco_mem_contiguous_request_t) == ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_SIZE, "erx_fiasco_mem_contiguous_request size");
+_Static_assert(_Alignof(erx_fiasco_mem_contiguous_request_t) == ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_ALIGN, "erx_fiasco_mem_contiguous_request alignment");
+_Static_assert(offsetof(erx_fiasco_mem_contiguous_request_t, caller) ==
+    ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_CALLER, "erx_fiasco_mem_contiguous_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_mem_contiguous_request_t, budget) ==
+    ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_BUDGET, "erx_fiasco_mem_contiguous_request.budget offset");
+_Static_assert(offsetof(erx_fiasco_mem_contiguous_request_t, size) ==
+    ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_SIZE, "erx_fiasco_mem_contiguous_request.size offset");
+_Static_assert(offsetof(erx_fiasco_mem_contiguous_request_t, limit) ==
+    ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_OFF_LIMIT, "erx_fiasco_mem_contiguous_request.limit offset");
+
 #define ERX_FIASCO_MEM_CREATE_REQUEST_SIZE 32
 #define ERX_FIASCO_MEM_CREATE_REQUEST_ALIGN 8
 #define ERX_FIASCO_MEM_CREATE_REQUEST_OFF_CALLER 0
@@ -1091,6 +1170,54 @@ _Static_assert(offsetof(erx_fiasco_mem_create_request_t, size) ==
     ERX_FIASCO_MEM_CREATE_REQUEST_OFF_SIZE, "erx_fiasco_mem_create_request.size offset");
 _Static_assert(offsetof(erx_fiasco_mem_create_request_t, flags) ==
     ERX_FIASCO_MEM_CREATE_REQUEST_OFF_FLAGS, "erx_fiasco_mem_create_request.flags offset");
+
+#define ERX_FIASCO_MEM_DMA_REQUEST_SIZE 24
+#define ERX_FIASCO_MEM_DMA_REQUEST_ALIGN 8
+#define ERX_FIASCO_MEM_DMA_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_MEM_DMA_REQUEST_OFF_MEM 8
+#define ERX_FIASCO_MEM_DMA_REQUEST_OFF_OFFSET 16
+typedef struct erx_fiasco_mem_dma_request erx_fiasco_mem_dma_request_t;
+struct erx_fiasco_mem_dma_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	mem;
+	uint64_t	offset;
+};
+_Static_assert(sizeof(erx_fiasco_mem_dma_request_t) == ERX_FIASCO_MEM_DMA_REQUEST_SIZE, "erx_fiasco_mem_dma_request size");
+_Static_assert(_Alignof(erx_fiasco_mem_dma_request_t) == ERX_FIASCO_MEM_DMA_REQUEST_ALIGN, "erx_fiasco_mem_dma_request alignment");
+_Static_assert(offsetof(erx_fiasco_mem_dma_request_t, caller) ==
+    ERX_FIASCO_MEM_DMA_REQUEST_OFF_CALLER, "erx_fiasco_mem_dma_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_mem_dma_request_t, mem) ==
+    ERX_FIASCO_MEM_DMA_REQUEST_OFF_MEM, "erx_fiasco_mem_dma_request.mem offset");
+_Static_assert(offsetof(erx_fiasco_mem_dma_request_t, offset) ==
+    ERX_FIASCO_MEM_DMA_REQUEST_OFF_OFFSET, "erx_fiasco_mem_dma_request.offset offset");
+
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_SIZE 40
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_ALIGN 8
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_BUDGET 8
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_BASE 16
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_SIZE 24
+#define ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_ATTR 32
+typedef struct erx_fiasco_mem_physical_request erx_fiasco_mem_physical_request_t;
+struct erx_fiasco_mem_physical_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	budget;
+	uint64_t	base;
+	uint64_t	size;
+	uint64_t	attr;
+};
+_Static_assert(sizeof(erx_fiasco_mem_physical_request_t) == ERX_FIASCO_MEM_PHYSICAL_REQUEST_SIZE, "erx_fiasco_mem_physical_request size");
+_Static_assert(_Alignof(erx_fiasco_mem_physical_request_t) == ERX_FIASCO_MEM_PHYSICAL_REQUEST_ALIGN, "erx_fiasco_mem_physical_request alignment");
+_Static_assert(offsetof(erx_fiasco_mem_physical_request_t, caller) ==
+    ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_CALLER, "erx_fiasco_mem_physical_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_mem_physical_request_t, budget) ==
+    ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_BUDGET, "erx_fiasco_mem_physical_request.budget offset");
+_Static_assert(offsetof(erx_fiasco_mem_physical_request_t, base) ==
+    ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_BASE, "erx_fiasco_mem_physical_request.base offset");
+_Static_assert(offsetof(erx_fiasco_mem_physical_request_t, size) ==
+    ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_SIZE, "erx_fiasco_mem_physical_request.size offset");
+_Static_assert(offsetof(erx_fiasco_mem_physical_request_t, attr) ==
+    ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_ATTR, "erx_fiasco_mem_physical_request.attr offset");
 
 #define ERX_FIASCO_REPLY_SIZE 24
 #define ERX_FIASCO_REPLY_ALIGN 8
@@ -2267,6 +2394,8 @@ typedef uint32_t erx_machine_flags_t;
 typedef uint16_t erx_manifest_flags_t;
 
 typedef uint16_t erx_manifest_mode_t;
+
+typedef uint32_t erx_mem_attr_t;
 
 typedef uint32_t erx_mem_flags_t;
 

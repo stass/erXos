@@ -26,10 +26,12 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/random.h>
 #include <unistd.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/device_check.h"
 #include "liberx/backend/core/vm_table.h"
 #include "liberx/backend/hosted/internal.h"
 
@@ -273,4 +275,61 @@ erx_vm_free_pages(void)
 	count = vm_free;
 	(void)pthread_mutex_unlock(&vm_lock);
 	return (count);
+}
+
+/* No device exists here, so a device's address would be made up: docs/design-stopgap.md, "The hosted backend". */
+int
+erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr, uint64_t *mem)
+{
+	const int status = erx_backend_physical_check(base, size, attr);
+
+	(void)budget;
+	(void)resource;
+	(void)mem;
+	return (status != ERX_OK ? status : ERX_ENOTSUP);
+}
+
+int
+erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit, uint64_t *mem)
+{
+	const int status = erx_backend_contiguous_check(size);
+
+	(void)budget;
+	(void)resource;
+	(void)limit;
+	(void)mem;
+	return (status != ERX_OK ? status : ERX_ENOTSUP);
+}
+
+/* No call makes an object it answers for, so no handle names one. */
+int
+erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
+{
+	(void)mem;
+	(void)offset;
+	(void)addr;
+	return (ERX_EINVAL);
+}
+
+int
+erx_entropy_read(uint32_t len)
+{
+	uint64_t words[ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t)] = { 0 };
+	const int checked = erx_backend_entropy_read_check(len);
+
+	if (checked != ERX_OK)
+		return (checked);
+	if (len != 0 && getentropy(words, len) != 0)
+		return (ERX_ENOTSUP);
+	for (uint32_t done = 0; done < len; done += sizeof(uint64_t))
+		erx_backend_mr_put_bytes(erx_utcb_self(), done, words[done / sizeof(uint64_t)], len);
+	return (ERX_OK);
+}
+
+/* The host's generator takes nothing from a program, so the bytes go nowhere. */
+int
+erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags)
+{
+	(void)res;
+	return (erx_backend_entropy_add_check(len, flags));
 }

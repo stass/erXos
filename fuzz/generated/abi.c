@@ -58,6 +58,14 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_elf64_phdr_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_entropy_add_request_t value;
+		(void)erx_fiasco_entropy_add_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_entropy_read_request_t value;
+		(void)erx_fiasco_entropy_read_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_image_map_request_t value;
 		(void)erx_fiasco_image_map_request_decode(bytes, length, &value);
 	}
@@ -78,8 +86,20 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_fiasco_machine_end_request_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_mem_contiguous_request_t value;
+		(void)erx_fiasco_mem_contiguous_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_mem_create_request_t value;
 		(void)erx_fiasco_mem_create_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_mem_dma_request_t value;
+		(void)erx_fiasco_mem_dma_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_mem_physical_request_t value;
+		(void)erx_fiasco_mem_physical_request_decode(bytes, length, &value);
 	}
 	{
 		erx_fiasco_reply_t value;

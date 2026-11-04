@@ -289,6 +289,41 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_entropy_add_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_entropy_add_request_t *result)
+{
+	erx_fiasco_entropy_add_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_ENTROPY_ADD_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.len = erx_abi_load_u64(bytes + 8);
+	value.word0 = erx_abi_load_u64(bytes + 16);
+	value.word1 = erx_abi_load_u64(bytes + 24);
+	value.word2 = erx_abi_load_u64(bytes + 32);
+	value.word3 = erx_abi_load_u64(bytes + 40);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_entropy_read_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_entropy_read_request_t *result)
+{
+	erx_fiasco_entropy_read_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_ENTROPY_READ_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_image_map_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_image_map_request_t *result)
 {
@@ -375,6 +410,24 @@ erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_mem_contiguous_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_mem_contiguous_request_t *result)
+{
+	erx_fiasco_mem_contiguous_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_MEM_CONTIGUOUS_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.budget = erx_abi_load_u64(bytes + 8);
+	value.size = erx_abi_load_u64(bytes + 16);
+	value.limit = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_mem_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_mem_create_request_t *result)
 {
@@ -387,6 +440,42 @@ erx_fiasco_mem_create_request_decode(const uint8_t *bytes, size_t length,
 	value.budget = erx_abi_load_u64(bytes + 8);
 	value.size = erx_abi_load_u64(bytes + 16);
 	value.flags = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_mem_dma_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_mem_dma_request_t *result)
+{
+	erx_fiasco_mem_dma_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_MEM_DMA_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.mem = erx_abi_load_u64(bytes + 8);
+	value.offset = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_mem_physical_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_mem_physical_request_t *result)
+{
+	erx_fiasco_mem_physical_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_MEM_PHYSICAL_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.budget = erx_abi_load_u64(bytes + 8);
+	value.base = erx_abi_load_u64(bytes + 16);
+	value.size = erx_abi_load_u64(bytes + 24);
+	value.attr = erx_abi_load_u64(bytes + 32);
 
 	*result = value;
 	return (true);

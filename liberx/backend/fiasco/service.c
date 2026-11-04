@@ -27,6 +27,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/service_task.h"
@@ -124,6 +125,7 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_time_init();
+	erx_fiasco_entropy_init();
 	erx_fiasco_task_table_init();
 	reason = service_start();
 	if (reason != NULL)
@@ -298,6 +300,17 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_MEM_CREATE:
 		return (erx_fiasco_task_mem_create_body(decoded->task, ((const erx_fiasco_mem_create_request_t *)words)->size,
 		    ((const erx_fiasco_mem_create_request_t *)words)->flags, &reply->first));
+	case ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL:
+		return (erx_fiasco_task_mem_physical_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS:
+		return (erx_fiasco_task_mem_contiguous_body(decoded->task, words, &reply->first));
+	case ERX_FIASCO_CALL_MEM_DMA_ADDR:
+		return (erx_fiasco_vm_object_dma_addr(decoded->task, ((const erx_fiasco_mem_dma_request_t *)words)->mem,
+		    ((const erx_fiasco_mem_dma_request_t *)words)->offset, &reply->first));
+	case ERX_FIASCO_CALL_ENTROPY_READ:
+		return (erx_fiasco_entropy_read_body(&reply->first, &reply->second));
+	case ERX_FIASCO_CALL_ENTROPY_ADD:
+		return (erx_fiasco_entropy_add_body(words));
 	case ERX_FIASCO_CALL_VM_MAP:
 		return (erx_fiasco_task_vm_map_body(decoded->task, words));
 	case ERX_FIASCO_CALL_SPACE_CREATE:

@@ -51,12 +51,4 @@ int	erx_fiasco_irq_bind_body(uint64_t irq, uint64_t thread, uint64_t record);
 int	erx_fiasco_irq_ack_body(uint64_t irq);
 int	erx_fiasco_irq_trigger_body(uint64_t irq);
 
-#ifdef ERX_FIASCO_TEST_HOOKS
-/*
- * Maps a page of device registers at virt, on the first thread. The suite's stand-in
- * for erx_mem_create_physical, the device NIF's call. Returns sigma0's status.
- */
-int	erx_fiasco_test_map_device(uint64_t phys, uint64_t virt);
-#endif
-
 #endif /* ERX_FIASCO_GROUP_H */

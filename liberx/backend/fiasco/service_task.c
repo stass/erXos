@@ -29,6 +29,7 @@
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/root_mem.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/core/device_check.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -362,6 +363,27 @@ erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, 
 	if ((flags & ERX_MEM_JIT) != 0 && (task_rows[caller].flags & ERX_SPACE_JIT) == 0)
 		return (ERX_ERIGHTS);
 	return (erx_fiasco_vm_object_create(caller, size, mem));
+}
+
+int
+erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem)
+{
+	const int status = request->attr > UINT32_MAX ? ERX_EINVAL :
+	    erx_backend_physical_check(request->base, request->size, (uint32_t)request->attr);
+
+	if (status != ERX_OK)
+		return (status);
+	return (erx_fiasco_vm_physical_create(caller, request->base, request->size, mem));
+}
+
+int
+erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contiguous_request_t *request, uint64_t *mem)
+{
+	const int status = erx_backend_contiguous_check(request->size);
+
+	if (status != ERX_OK)
+		return (status);
+	return (erx_fiasco_vm_contiguous_create(caller, request->size, request->limit, mem));
 }
 
 /* A task's objects map into the task alone: nothing yet maps one across tasks. */

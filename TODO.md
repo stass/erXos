@@ -130,8 +130,16 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
   test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
 * [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter
-  (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want. The
-  `native_irq` suite reaches the UART through a test hook until `erx_mem_create_physical` lands with the device NIF.
+  (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want.
+* [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the
+  counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device;
+  `erx_mem_create_physical` for the console UART does not yet do [the handoff](docs/design-stopgap.md#the-console).
+* [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/core/vm_table.c`: the range table sees an object's mapping as uncommitted, so
+  `erx_space_protect` over mapped registers or a mapped run returns `ERX_OK` and puts a fresh pool page there, and a decommit or release leaves the
+  mapping reachable. No caller does either. Nothing tests a task that ends holding a physical or contiguous object, so `vm_give`'s address check and
+  the index's room for run pages stay untested. A restarted driver spends device window pages and contiguous runs each life, since neither comes back.
+* [Low] stopgap, `liberx/backend/hosted/vm.c`: `erx_mem_create` and `erx_vm_map` have no hosted body, which the call table's row asks for, so
+  `test/guest/function_api` holds no shared object's case and its device cases stay native alone.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
   a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.
@@ -173,7 +181,7 @@ it; git history is the record of completed work.
   Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
 * [Low] musl, `musl/src/internal/erxos/syscall.c`: `sched_getaffinity` is refused, so
   `sysconf(_SC_NPROCESSORS_ONLN)` does not count CPUs; `native_musl` counts them by the refused pin. `AT_RANDOM`
-  is absent, so mallocng's secret comes from an address alone. `sched_yield` does nothing.
+  is absent, so mallocng's secret comes from an address alone; `erx_entropy_read` can supply its 16 bytes at program start. `sched_yield` does nothing.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

@@ -695,6 +695,64 @@ check_layout(void)
 	}
 }
 
+/*
+ * The contiguous pool against a table of what each page holds: every run from every
+ * state that a sequence of small takes reaches, and the limit at each value around it.
+ */
+static void
+check_contig_take(erx_fiasco_contig_t *pool, bool *held, uint32_t pages, uint32_t limit)
+{
+	uint32_t align = 1;
+	uint32_t first, expected = ERX_FIASCO_CONTIG_NONE;
+
+	while (align < pages)
+		align *= 2;
+	for (uint32_t candidate = 0; expected == ERX_FIASCO_CONTIG_NONE && candidate + pages <= limit; candidate += align) {
+		bool free_run = true;
+
+		for (uint32_t page = candidate; page < candidate + pages; page++)
+			free_run = free_run && !held[page];
+		if (free_run)
+			expected = candidate;
+	}
+	first = erx_fiasco_contig_take(pool, pages, limit);
+	if (!(first == expected))
+		fail("contig: first fit, aligned, below the limit, over free pages", 0);
+	if (first == ERX_FIASCO_CONTIG_NONE)
+		return;
+	for (uint32_t page = first; page < first + pages; page++)
+		held[page] = true;
+}
+
+static void
+check_contig(unsigned seed)
+{
+	erx_fiasco_contig_t pool = { { 0 } };
+	bool held[ERX_FIASCO_CONTIG_PAGES] = { false };
+
+	current_case = "contiguous pool";
+	if (!(erx_fiasco_contig_take(&pool, 0, ERX_FIASCO_CONTIG_PAGES) == ERX_FIASCO_CONTIG_NONE))
+		fail("contig: an empty run", 0);
+	if (!(erx_fiasco_contig_take(&pool, ERX_FIASCO_CONTIG_PAGES + 1, UINT32_MAX) == ERX_FIASCO_CONTIG_NONE))
+		fail("contig: a run longer than the pool", 0);
+	if (!(erx_fiasco_contig_take(&pool, 1, 0) == ERX_FIASCO_CONTIG_NONE))
+		fail("contig: a limit below every page", 0);
+	for (uint32_t pages = 1; pages <= ERX_FIASCO_CONTIG_PAGES; pages++) {
+		erx_fiasco_contig_t alone = { { 0 } };
+		bool alone_held[ERX_FIASCO_CONTIG_PAGES] = { false };
+
+		check_contig_take(&alone, alone_held, pages, ERX_FIASCO_CONTIG_PAGES);
+		check_contig_take(&alone, alone_held, pages, ERX_FIASCO_CONTIG_PAGES);
+	}
+	srandom((unsigned)seed);
+	for (uint32_t round = 0; round < 4000; round++) {
+		const uint32_t pages = 1 + (uint32_t)random() % (round % 8 == 0 ? 256 : 8);
+		const uint32_t limit = 1 + (uint32_t)random() % ERX_FIASCO_CONTIG_PAGES;
+
+		check_contig_take(&pool, held, pages, limit);
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -703,6 +761,7 @@ main(int argc, char **argv)
 	if (posix_memalign((void **)&window_memory, ERX_PAGE_SIZE, (size_t)(POOL_PAGES * PAGE)) != 0)
 		return (1);
 	check_pool();
+	check_contig(seed);
 	check_layout();
 	check_refusals();
 	check_every_state_range_and_call();

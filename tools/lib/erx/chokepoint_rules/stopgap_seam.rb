@@ -21,6 +21,7 @@ module Erx
         liberx/backend/erx/arch/aarch64/generated/calls.c
         liberx/backend/core/mem.h
         liberx/backend/core/refused.c
+        liberx/backend/core/device_check.h
         liberx/backend/api.h
         liberx/backend/fiasco/api_names.c
         liberx/backend/hosted/arch/aarch64/switch_stack.S
@@ -39,6 +40,8 @@ module Erx
         liberx/backend/fiasco/console.c
         liberx/backend/fiasco/console.h
         liberx/backend/fiasco/end.c
+        liberx/backend/fiasco/entropy.c
+        liberx/backend/fiasco/entropy.h
         liberx/backend/fiasco/generated/calls.c
         liberx/backend/fiasco/generated/calls.h
         liberx/backend/fiasco/group.c
@@ -130,6 +133,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'musl/src/thread/erxos/clone.c'),
                   Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/function_api/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/function_api/device_cases.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
@@ -160,7 +164,7 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
-                "the root's memory effects' fixed refusals, the end path's crash frame, the service's and the reaper's fixed refusals, " \
+                "the root's memory effects' fixed refusals, the entropy banner line, the end path's crash frame, the service's and the reaper's fixed refusals, " \
                 "the memory, thread, crash, watchdog and interrupt transcripts and the debug log call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
@@ -172,6 +176,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/entropy.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_task.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c', permits: /\Aerx_fiasco_console_write\z/),

@@ -28,7 +28,7 @@ void	function_api_say(const char *text);
 uint64_t	function_api_group(void);
 
 /* Runs each set's cases in order, one line each, and ends the machine. */
-void	function_api_run(const function_api_case_t *extra, size_t nextra);
+void	function_api_run(const function_api_case_t *extra, size_t nextra, const function_api_case_t *device, size_t ndevice);
 
 /* The cases helper threads share; irq_cases.c uses them too. */
 bool	function_api_wait_for(const void *word, unsigned want);

@@ -80,6 +80,8 @@ int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
 uint64_t	erx_fiasco_task_space_encode(uint32_t task);
 bool	erx_fiasco_task_space_decode(uint64_t space, uint32_t *task);
 int	erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, uint64_t *mem);
+int	erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem);
+int	erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contiguous_request_t *request, uint64_t *mem);
 int	erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request_t *request);
 
 /* A task's fault: its crash record, then its end. The root's own fault never comes here. */

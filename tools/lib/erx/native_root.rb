@@ -24,6 +24,8 @@ module Erx
     SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
                  #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
+                 #{BACKEND}/entropy.c kernel/core/rng.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
+                 kernel/crypto/chacha20/chacha.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c].freeze
@@ -39,7 +41,7 @@ module Erx
     # which does not hold the handoff record's core, since bootstrap only writes it.
     SYSTEM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c"].freeze
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
-               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I .].freeze
+               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I kernel/crypto -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
 
     # source is the tree the C comes from, which a test may seed with a fault.

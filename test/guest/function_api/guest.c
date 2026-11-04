@@ -17,6 +17,10 @@
 
 void erx_fiasco_root_main(void);
 
+/* What takes a device, and so holds natively alone: device_cases.c. */
+extern const function_api_case_t function_api_device_cases[];
+extern const size_t function_api_device_case_count;
+
 static uint64_t group;
 
 void
@@ -51,6 +55,7 @@ erx_fiasco_root_main(void)
 		erx_fiasco_machine_off();
 	}
 	function_api_say("erx: function-api: service up\n");
-	function_api_run(function_api_irq_cases, function_api_irq_case_count);
+	function_api_run(function_api_irq_cases, function_api_irq_case_count, function_api_device_cases,
+	    function_api_device_case_count);
 	erx_fiasco_machine_off();
 }

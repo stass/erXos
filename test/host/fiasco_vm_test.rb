@@ -23,6 +23,9 @@ class FiascoVmTest < Minitest::Test
   # Each edits exactly one place in its core, and the driver must name what is
   # wrong: name => [core, original, replacement, the driver's diagnostic].
   MUTANTS = {
+    'a contiguous run not aligned' => ['page_pool.c', "\t\talign *= 2;\n", "\t\talign = pages;\n", 'contig: first fit'],
+    'a contiguous run over a held page' => ['page_pool.c', 'if (!contig_free(pool, first, pages))', 'if (!contig_free(pool, first, 0))', 'contig: first fit'],
+    'a contiguous run past the limit' => ['page_pool.c', 'limit < ERX_FIASCO_CONTIG_PAGES ? limit : ERX_FIASCO_CONTIG_PAGES;', '((void)limit, ERX_FIASCO_CONTIG_PAGES);', %q(contig: a limit below every page)],
     'write with execute admitted' => ['vm_table.c', "\t\tdefault:\n\t\t\treturn (ERX_EINVAL);", "\t\tdefault:\n\t\t\tplan->target = ERX_BACKEND_PAGE_RX;\n\t\t\tbreak;", 'a protection that is not one passed'],
     'zeroing skipped' => ['page_pool.c', "\tbzero((void *)page, ERX_PAGE_SIZE);\n", '', 'a taken page is not zero'],
     'protect takes a fresh page' => ['vm_table.c', "\tif (steps.take)\n", "\tif (steps.take || steps.map != ERX_PROT_NONE)\n", 'a page lost its contents'],

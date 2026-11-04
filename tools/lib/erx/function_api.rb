@@ -24,10 +24,14 @@ module Erx
       umtx_word_differs umtx_past_deadline umtx_timeout_not_early umtx_wake_counts umtx_ping_pong
       umtx_timeout_races_wake memory_from_threads affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake many_threads machine_end_refused
+      entropy_read entropy_add entropy_refusals mem_device_refusals
     ].freeze
     # The IRQ row: what both backends pass, and what holds only hosted (irq_cases.c).
     IRQ_CASES = %w[irq_refusals irq_wakes_parked irq_objects_run_out].freeze
     HOSTED_IRQ_CASES = %w[irq_refusals irq_line_refused irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
+    # The devices' row: what takes a device natively, and hosted, that there is none.
+    DEVICE_CASES = %w[physical_reads_registers physical_refusals contiguous_runs contiguous_device_writes].freeze
+    HOSTED_DEVICE_CASES = %w[mem_device_refused].freeze
     LAST_CASE = 'indices_run_out'
     GUEST = 'test/guest/function_api'
     HOSTED_SOURCES = %W[
@@ -40,7 +44,7 @@ module Erx
       #{GUEST}/cases.c #{GUEST}/hosted.c #{GUEST}/irq_cases.c
     ].freeze
     NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
-                      'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c"].freeze
+                      'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c"].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.
     CASE_SECONDS = 90
     # The join loop's deletions each wait for a grace period, which across CPUs under TCG takes far longer.
@@ -49,13 +53,14 @@ module Erx
     module_function
 
     def hosted_lines
-      [*(CASES + HOSTED_IRQ_CASES + [LAST_CASE]).map { |name| "#{PREFIX}#{name} ok" }, "#{PREFIX}done"]
+      [*(CASES + HOSTED_IRQ_CASES + HOSTED_DEVICE_CASES + [LAST_CASE]).map { |name| "#{PREFIX}#{name} ok" }, "#{PREFIX}done"]
     end
 
     def checkpoints
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+       { name: 'entropy-quality', pattern: /\Aerx: entropy: quality: low, from the counter alone/n, seconds: 30 }.freeze,
        { name: 'function-api-up', pattern: /\A#{Regexp.escape(PREFIX)}service up/n, seconds: 30 }.freeze,
-       *[*CASES, *IRQ_CASES, LAST_CASE].map do |name|
+       *[*CASES, *IRQ_CASES, *DEVICE_CASES, LAST_CASE].map do |name|
          { name: "function-api-#{name}", pattern: /\A#{Regexp.escape(PREFIX)}#{name} ok/n,
            seconds: LONG_CASES.fetch(name, CASE_SECONDS) }.freeze
        end,

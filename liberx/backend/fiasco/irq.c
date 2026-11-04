@@ -13,7 +13,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <l4/sigma0/sigma0.h>
 #include <l4/sys/consts.h>
 #include <l4/sys/factory.h>
 #include <l4/sys/icu.h>
@@ -97,11 +96,3 @@ erx_fiasco_irq_trigger_body(uint64_t irq)
 	(void)l4_irq_trigger(irq_cap((uint32_t)irq));
 	return (ERX_OK);
 }
-
-#ifdef ERX_FIASCO_TEST_HOOKS
-int
-erx_fiasco_test_map_device(uint64_t phys, uint64_t virt)
-{
-	return (l4sigma0_map_iomem(L4_BASE_PAGER_CAP, (l4_addr_t)phys, (l4_addr_t)virt, L4_PAGESIZE, 0));
-}
-#endif

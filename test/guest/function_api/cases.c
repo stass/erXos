@@ -1030,6 +1030,69 @@ case_indices_run_out(void)
 	return (status == ERX_ENOMEM && made > 0);
 }
 
+#define ENTROPY_FILL	UINT64_C(0xaaaaaaaaaaaaaaaa)
+
+/* Two reads differ, and a read fills what it says and no byte past it. */
+static bool
+case_entropy_read(void)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const uint32_t last = ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t) - 1;
+	uint64_t first[2];
+
+	atomic_store(&utcb->mr[0], ENTROPY_FILL);
+	if (erx_entropy_read(0) != ERX_OK || atomic_load(&utcb->mr[0]) != ENTROPY_FILL ||
+	    erx_entropy_read(3) != ERX_OK || atomic_load(&utcb->mr[0]) >> 24 != ENTROPY_FILL >> 24)
+		return (false);
+	atomic_store(&utcb->mr[2], ENTROPY_FILL);
+	if (erx_entropy_read(2 * sizeof(uint64_t)) != ERX_OK || atomic_load(&utcb->mr[2]) != ENTROPY_FILL)
+		return (false);
+	first[0] = atomic_load(&utcb->mr[0]);
+	first[1] = atomic_load(&utcb->mr[1]);
+	atomic_store(&utcb->mr[last], ENTROPY_FILL);
+	if (erx_entropy_read(ERX_ENTROPY_BYTES_MAX) != ERX_OK || atomic_load(&utcb->mr[last]) == ENTROPY_FILL)
+		return (false);
+	return (atomic_load(&utcb->mr[0]) != first[0] || atomic_load(&utcb->mr[1]) != first[1]);
+}
+
+static bool
+case_entropy_add(void)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+
+	for (uint32_t word = 0; word < 8; word++)
+		atomic_store(&utcb->mr[word], word);
+	return (erx_entropy_add(0, 0, 0) == ERX_OK && erx_entropy_add(0, 8 * sizeof(uint64_t) - 1, 0) == ERX_OK &&
+	    erx_entropy_read(16) == ERX_OK);
+}
+
+static bool
+case_entropy_refusals(void)
+{
+	return (erx_entropy_read(ERX_ENTROPY_BYTES_MAX + 1) == ERX_EINVAL &&
+	    erx_entropy_add(0, ERX_ENTROPY_BYTES_MAX + 1, 0) == ERX_EINVAL &&
+	    erx_entropy_add(0, 8, (uint32_t)ERX_ENTROPY_CREDIT << 1) == ERX_EINVAL &&
+	    erx_entropy_add(0, 8, ERX_ENTROPY_CREDIT) == ERX_ENOTSUP);
+}
+
+/* What is wrong with a request before any device comes into it. */
+static bool
+case_mem_device_refusals(void)
+{
+	const uint64_t page = ERX_PAGE_SIZE;
+	uint64_t mem, addr;
+
+	return (erx_mem_create_physical(0, 0, page, 0, ERX_MEM_ATTR_DEVICE, &mem) == ERX_EINVAL &&
+	    erx_mem_create_physical(0, 0, page + 1, page, ERX_MEM_ATTR_DEVICE, &mem) == ERX_EINVAL &&
+	    erx_mem_create_physical(0, 0, page, page + 1, ERX_MEM_ATTR_DEVICE, &mem) == ERX_EINVAL &&
+	    erx_mem_create_physical(0, 0, UINT64_MAX - page + 1, page, ERX_MEM_ATTR_DEVICE, &mem) == ERX_EINVAL &&
+	    erx_mem_create_physical(0, 0, page, page, ERX_MEM_ATTR_DEVICE + 1, &mem) == ERX_EINVAL &&
+	    erx_mem_create_contiguous(0, 0, 0, 0, &mem) == ERX_EINVAL &&
+	    erx_mem_create_contiguous(0, 0, page + 1, 0, &mem) == ERX_EINVAL &&
+	    erx_mem_create_contiguous(0, 0, ERX_MEM_CONTIGUOUS_MAX + page, 0, &mem) == ERX_EINVAL &&
+	    erx_mem_dma_addr(UINT64_C(1) << 40, 0, &addr) == ERX_EINVAL);
+}
+
 static const function_api_case_t shared_cases[] = {
 	{ "decommit_recommit_reads_zeros", case_decommit_recommit_reads_zeros },
 	{ "released_pages_read_zeros", case_released_pages_read_zeros },
@@ -1066,6 +1129,10 @@ static const function_api_case_t shared_cases[] = {
 	{ "park_timeout_races_wake", case_park_timeout_races_wake },
 	{ "many_threads", case_many_threads },
 	{ "machine_end_refused", case_machine_end_refused },
+	{ "entropy_read", case_entropy_read },
+	{ "entropy_add", case_entropy_add },
+	{ "entropy_refusals", case_entropy_refusals },
+	{ "mem_device_refusals", case_mem_device_refusals },
 };
 
 static void
@@ -1077,13 +1144,15 @@ report(const char *name, bool ok)
 }
 
 void
-function_api_run(const function_api_case_t *extra, size_t nextra)
+function_api_run(const function_api_case_t *extra, size_t nextra, const function_api_case_t *device, size_t ndevice)
 {
 	pool_at_start = erx_vm_free_pages();
 	for (size_t index = 0; index < sizeof(shared_cases) / sizeof(shared_cases[0]); index++)
 		report(shared_cases[index].name, shared_cases[index].run());
 	for (size_t index = 0; index < nextra; index++)
 		report(extra[index].name, extra[index].run());
+	for (size_t index = 0; index < ndevice; index++)
+		report(device[index].name, device[index].run());
 	report("indices_run_out", case_indices_run_out());
 	function_api_say("erx: function-api: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);

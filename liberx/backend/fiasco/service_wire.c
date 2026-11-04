@@ -52,6 +52,16 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_time_set_wall_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_MEM_CREATE:
 		return (sizeof(erx_fiasco_mem_create_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL:
+		return (sizeof(erx_fiasco_mem_physical_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS:
+		return (sizeof(erx_fiasco_mem_contiguous_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_MEM_DMA_ADDR:
+		return (sizeof(erx_fiasco_mem_dma_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_ENTROPY_READ:
+		return (sizeof(erx_fiasco_entropy_read_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_ENTROPY_ADD:
+		return (sizeof(erx_fiasco_entropy_add_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_VM_MAP:
 		return (sizeof(erx_fiasco_vm_map_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_SPACE_CREATE:

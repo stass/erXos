@@ -52,7 +52,21 @@ int	erx_fiasco_vm_body(uint32_t task, erx_backend_vm_op_t op, uint64_t addr, uin
  * lives as long as the task.
  */
 int	erx_fiasco_vm_object_create(uint32_t task, uint64_t size, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
-/* Maps an object's pages into its own task: vm_table.h lists each refusal. */
+/*
+ * An object over a device's registers, mapped at a device window address and from
+ * there anywhere its task reserves. A full window, or no slot, is ERX_ENOMEM;
+ * sigma0's refusal, which RAM gets, is ERX_ERANGE. Its arguments are checked already.
+ */
+int	erx_fiasco_vm_physical_create(uint32_t task, uint64_t base, uint64_t size, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+/*
+ * An object over a zeroed run of the contiguous pool, wholly below device address
+ * limit (0 for none). No such run, or no slot, is ERX_ENOMEM. Its size is checked
+ * already. The run stays held when the object goes: a device may still write it.
+ */
+int	erx_fiasco_vm_contiguous_create(uint32_t task, uint64_t size, uint64_t limit, uint64_t *handle) ERX_WARN_UNUSED_RESULT;
+/* A contiguous object's device address at an offset in it; another kind of object is ERX_ETYPE, an offset past it ERX_ERANGE. */
+int	erx_fiasco_vm_object_dma_addr(uint32_t task, uint64_t handle, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
+/* Maps an object's pages into its own task: vm_table.h lists each refusal. A device's object mapped to run is ERX_ERIGHTS. */
 int	erx_fiasco_vm_object_map(uint32_t task, uint64_t handle, uint64_t addr, uint64_t size,
 	    uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 

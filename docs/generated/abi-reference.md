@@ -112,6 +112,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ENOCALLER` | -13 |
 | `ERX_ENOMEM` | -6 |
 | `ERX_ENOTSUP` | -12 |
+| `ERX_ENTROPY_BYTES_MAX` | 256 |
+| `ERX_ENTROPY_CREDIT` | 1 |
 | `ERX_ENTROPY_QUALITY_FIXED` | 3 |
 | `ERX_ENTROPY_QUALITY_GOOD` | 1 |
 | `ERX_ENTROPY_QUALITY_WEAK` | 2 |
@@ -144,6 +146,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FAULT_FOREIGN_TRAP` | 6 |
 | `ERX_FAULT_MEMORY` | 1 |
 | `ERX_FAULT_UNDEFINED` | 3 |
+| `ERX_FIASCO_CALL_ENTROPY_ADD` | 22 |
+| `ERX_FIASCO_CALL_ENTROPY_READ` | 21 |
 | `ERX_FIASCO_CALL_IMAGE_MAP` | 15 |
 | `ERX_FIASCO_CALL_IRQ_ACK` | 34 |
 | `ERX_FIASCO_CALL_IRQ_BIND` | 33 |
@@ -151,6 +155,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_IRQ_TRIGGER` | 35 |
 | `ERX_FIASCO_CALL_MACHINE_END` | 9 |
 | `ERX_FIASCO_CALL_MEM_CREATE` | 12 |
+| `ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS` | 19 |
+| `ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL` | 18 |
+| `ERX_FIASCO_CALL_MEM_DMA_ADDR` | 20 |
 | `ERX_FIASCO_CALL_SPACE_CREATE` | 14 |
 | `ERX_FIASCO_CALL_SPACE_PROTECT` | 8 |
 | `ERX_FIASCO_CALL_SPACE_STOP` | 16 |
@@ -279,6 +286,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MANIFEST_STRINGS_MAX` | 4194304 |
 | `ERX_MANIFEST_VERSION` | 1 |
 | `ERX_MAPPINGS_MAX` | 65536 |
+| `ERX_MEM_ATTR_DEVICE` | 0 |
+| `ERX_MEM_CONTIGUOUS_MAX` | 1048576 |
 | `ERX_MEM_JIT` | 1 |
 | `ERX_MF_DEVICE_HOSTILE` | 1 |
 | `ERX_MF_DEVICE_ROLE_BLOCK` | 5 |
@@ -586,6 +595,27 @@ Storage: `shared`. Prefix size: 8320. Alignment: 8.
 | `ready` | `u32` | 56 | 1 |
 | `exec` | `erx_exec_stat` | 128 | 64 |
 
+### `erx_fiasco_entropy_add_request_t`
+
+Storage: `wire_le`. Prefix size: 48. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `len` | `u64` | 8 | 1 |
+| `word0` | `u64` | 16 | 1 |
+| `word1` | `u64` | 24 | 1 |
+| `word2` | `u64` | 32 | 1 |
+| `word3` | `u64` | 40 | 1 |
+
+### `erx_fiasco_entropy_read_request_t`
+
+Storage: `wire_le`. Prefix size: 8. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+
 ### `erx_fiasco_image_map_request_t`
 
 Storage: `wire_le`. Prefix size: 32. Alignment: 8.
@@ -637,6 +667,17 @@ Storage: `wire_le`. Prefix size: 24. Alignment: 8.
 | `res` | `u64` | 8 | 1 |
 | `how` | `u64` | 16 | 1 |
 
+### `erx_fiasco_mem_contiguous_request_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `budget` | `u64` | 8 | 1 |
+| `size` | `u64` | 16 | 1 |
+| `limit` | `u64` | 24 | 1 |
+
 ### `erx_fiasco_mem_create_request_t`
 
 Storage: `wire_le`. Prefix size: 32. Alignment: 8.
@@ -647,6 +688,28 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `budget` | `u64` | 8 | 1 |
 | `size` | `u64` | 16 | 1 |
 | `flags` | `u64` | 24 | 1 |
+
+### `erx_fiasco_mem_dma_request_t`
+
+Storage: `wire_le`. Prefix size: 24. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `mem` | `u64` | 8 | 1 |
+| `offset` | `u64` | 16 | 1 |
+
+### `erx_fiasco_mem_physical_request_t`
+
+Storage: `wire_le`. Prefix size: 40. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `budget` | `u64` | 8 | 1 |
+| `base` | `u64` | 16 | 1 |
+| `size` | `u64` | 24 | 1 |
+| `attr` | `u64` | 32 | 1 |
 
 ### `erx_fiasco_reply_t`
 

@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/log.h"
@@ -23,12 +24,11 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
+#include "liberx/backend/fiasco/vm.h"
 
 /* QEMU virt's PL011: its registers, and its receive line, SPI 1. */
 #define UART_PHYS	UINT64_C(0x9000000)
 #define UART_LINE	33u
-/* Below the thread table's UTCB area, where nothing else of the root lives. */
-#define UART_VIRT	UINT64_C(0xe00000000)
 #define UART_DR		0x00u
 #define UART_FR		0x18u
 #define UART_FR_RXFE	(1u << 4)
@@ -53,6 +53,7 @@ void erx_fiasco_root_main(void);
 
 static _Alignas(16) uint8_t executor_stack[STACK_BYTES];
 static uint64_t irq_uart, irq_soft, irq_other;
+static uint64_t uart_registers;
 /* The executor's ask of the first thread: ring the software object once it is parked. */
 static _Atomic uint32_t ring_wanted;
 static _Atomic uint32_t cases_done;
@@ -98,13 +99,13 @@ report(const char *what, uint64_t value, uint64_t other)
 static uint32_t
 uart_read(uint32_t offset)
 {
-	return (*(volatile uint32_t *)(uintptr_t)(UART_VIRT + offset));
+	return (*(volatile uint32_t *)(uintptr_t)(uart_registers + offset));
 }
 
 static void
 uart_write(uint32_t offset, uint32_t value)
 {
-	*(volatile uint32_t *)(uintptr_t)(UART_VIRT + offset) = value;
+	*(volatile uint32_t *)(uintptr_t)(uart_registers + offset) = value;
 }
 
 static uint32_t
@@ -357,14 +358,16 @@ check_time(void)
 static void
 bind_objects(void)
 {
-	uint64_t group, unused;
+	uint64_t group, unused, uart;
 	int status;
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
 	if (erx_group_create(0, 0, &unused) != ERX_ELIMIT)
 		fail("erx: irq: a second group was not refused FAILED\n");
-	if (erx_fiasco_test_map_device(UART_PHYS, UART_VIRT) != 0)
+	if (erx_mem_create_physical(0, 0, UART_PHYS, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &uart) != ERX_OK ||
+	    erx_vm_reserve(0, ERX_PAGE_SIZE, 0, &uart_registers) != ERX_OK ||
+	    erx_vm_map(ERX_CAP_SELF, uart_registers, ERX_PAGE_SIZE, uart, 0, ERX_PROT_RW) != ERX_OK)
 		fail("erx: irq: sigma0 refused the UART's registers FAILED\n");
 	say("erx: irq: sigma0 gave the UART's registers\n");
 	status = erx_irq_create(0, 0, ERX_IRQ_LINE, UART_LINE, &irq_uart);

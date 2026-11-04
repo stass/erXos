@@ -9,6 +9,7 @@
  * except as a value.
  */
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,6 +17,8 @@
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
+#include "liberx/backend/core/device_check.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -118,6 +121,94 @@ erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t 
 	erx_fiasco_reply_t reply;
 
 	return (erx_fiasco_service_call(ERX_FIASCO_CALL_VM_MAP, &request, sizeof(request), &reply));
+}
+
+int
+erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr, uint64_t *mem)
+{
+	const erx_fiasco_mem_physical_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
+	    .base = base, .size = size, .attr = attr };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL, &request, sizeof(request), &reply);
+
+	(void)resource;
+	if (status == ERX_OK)
+		*mem = reply.first;
+	return (status);
+}
+
+int
+erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit, uint64_t *mem)
+{
+	const erx_fiasco_mem_contiguous_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
+	    .size = size, .limit = limit };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS, &request, sizeof(request), &reply);
+
+	(void)resource;
+	if (status == ERX_OK)
+		*mem = reply.first;
+	return (status);
+}
+
+int
+erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
+{
+	const erx_fiasco_mem_dma_request_t request = { .caller = erx_fiasco_thread_self()->index, .mem = mem,
+	    .offset = offset };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_MEM_DMA_ADDR, &request, sizeof(request), &reply);
+
+	if (status == ERX_OK)
+		*addr = reply.first;
+	return (status);
+}
+
+/* A reply holds two words, so a read asks for them until it has its bytes. */
+int
+erx_entropy_read(uint32_t len)
+{
+	const erx_fiasco_entropy_read_request_t request = { .caller = erx_fiasco_thread_self()->index };
+	const int checked = erx_backend_entropy_read_check(len);
+	erx_fiasco_reply_t reply;
+
+	if (checked != ERX_OK)
+		return (checked);
+	for (uint32_t done = 0; done < len; done += 2 * sizeof(uint64_t)) {
+		const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_ENTROPY_READ, &request, sizeof(request), &reply);
+
+		if (status != ERX_OK)
+			return (status);
+		erx_backend_mr_put_bytes(erx_utcb_self(), done, reply.first, len);
+		erx_backend_mr_put_bytes(erx_utcb_self(), done + sizeof(uint64_t), reply.second, len);
+	}
+	return (ERX_OK);
+}
+
+/* A request holds four words of bytes, so a long add takes several. */
+int
+erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags)
+{
+	const uint32_t chunk = 4 * sizeof(uint64_t);
+	const int checked = erx_backend_entropy_add_check(len, flags);
+	const erx_utcb_t *const utcb = erx_utcb_self();
+	erx_fiasco_reply_t reply;
+
+	(void)res;
+	if (checked != ERX_OK)
+		return (checked);
+	for (uint32_t done = 0; done < len; done += chunk) {
+		const uint32_t word = done / sizeof(uint64_t);
+		const erx_fiasco_entropy_add_request_t request = { .caller = erx_fiasco_thread_self()->index,
+		    .len = len - done < chunk ? len - done : chunk,
+		    .word0 = atomic_load(&utcb->mr[word]), .word1 = atomic_load(&utcb->mr[word + 1]),
+		    .word2 = atomic_load(&utcb->mr[word + 2]), .word3 = atomic_load(&utcb->mr[word + 3]) };
+		const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_ENTROPY_ADD, &request, sizeof(request), &reply);
+
+		if (status != ERX_OK)
+			return (status);
+	}
+	return (ERX_OK);
 }
 
 int
