@@ -6,7 +6,7 @@
 /*
  * The admission state machine of include/erx/admit.h. The phases run in
  * the order they are declared, and each failure leaves for RELEASING if
- * the phase holds the plan's existence locks and for FINISHED if not.
+ * the phase holds the plan's existence lock and for FINISHED if not.
  */
 
 #include <stdint.h>
@@ -15,13 +15,12 @@
 
 static erx_sys_admit_action_t erx_sys_admit_finish(erx_sys_admission_t *,
     erx_status_t);
-static erx_sys_admit_action_t erx_sys_admit_find(erx_sys_admission_t *);
+static erx_sys_admit_action_t erx_sys_admit_lock(erx_sys_admission_t *);
 static erx_sys_admit_action_t erx_sys_admit_look(erx_sys_admission_t *);
 static erx_sys_admit_action_t erx_sys_admit_lookup(erx_sys_admission_t *,
     erx_sys_admit_phase_t);
 static erx_sys_admit_action_t erx_sys_admit_release(erx_sys_admission_t *,
     erx_status_t);
-static erx_sys_admit_action_t erx_sys_admit_unlock(erx_sys_admission_t *);
 
 erx_sys_admit_action_t
 erx_sys_admit_first(erx_sys_admission_t *admission,
@@ -34,8 +33,8 @@ erx_sys_admit_first(erx_sys_admission_t *admission,
 	status = erx_sys_admit_plan(shape, &admission->plan);
 	if (status != ERX_OK)
 		return (erx_sys_admit_finish(admission, status));
-	if (admission->plan.exists > 0)
-		return (erx_sys_admit_find(admission));
+	if (admission->plan.exists != 0)
+		return (erx_sys_admit_lookup(admission, ERX_SYS_ADMIT_FINDING));
 	return (erx_sys_admit_look(admission));
 }
 
@@ -46,8 +45,7 @@ erx_sys_admit_next(erx_sys_admission_t *admission, erx_status_t result)
 	case ERX_SYS_ADMIT_FINDING:
 		if (result != ERX_OK)
 			return (erx_sys_admit_finish(admission, result));
-		admission->cursor++;
-		return (erx_sys_admit_find(admission));
+		return (erx_sys_admit_lock(admission));
 	case ERX_SYS_ADMIT_LOCKING:
 		if (result != ERX_OK)
 			return (erx_sys_admit_finish(admission, result));
@@ -60,27 +58,21 @@ erx_sys_admit_next(erx_sys_admission_t *admission, erx_status_t result)
 	case ERX_SYS_ADMIT_RUNNING:
 		return (erx_sys_admit_release(admission, result));
 	case ERX_SYS_ADMIT_RELEASING:
-		if (admission->cursor <= 1)
-			return (erx_sys_admit_finish(admission, admission->status));
-		admission->cursor--;
-		return (erx_sys_admit_unlock(admission));
 	case ERX_SYS_ADMIT_FINISHED:
 		return (erx_sys_admit_finish(admission, admission->status));
 	}
 	return (erx_sys_admit_finish(admission, ERX_EINVAL));
 }
 
-/* The next existence-locked capability's lookup, or the lock step. */
+/* The lock of position 0; the lookups after it start at position 1. */
 static erx_sys_admit_action_t
-erx_sys_admit_find(erx_sys_admission_t *admission)
+erx_sys_admit_lock(erx_sys_admission_t *admission)
 {
 	erx_sys_admit_action_t action = {0};
 
-	if (admission->cursor < admission->plan.exists)
-		return (erx_sys_admit_lookup(admission, ERX_SYS_ADMIT_FINDING));
+	admission->cursor = 1;
 	admission->phase = ERX_SYS_ADMIT_LOCKING;
-	action.op = admission->plan.exists == 2 ? ERX_SYS_ADMIT_LOCK2 :
-	    ERX_SYS_ADMIT_LOCK;
+	action.op = ERX_SYS_ADMIT_LOCK;
 	return (action);
 }
 
@@ -114,25 +106,17 @@ erx_sys_admit_lookup(erx_sys_admission_t *admission,
 	return (action);
 }
 
-/* Leave a phase that holds the plan's existence locks, if it has any. */
+/* Leave a phase that holds the plan's existence lock, if it has one. */
 static erx_sys_admit_action_t
 erx_sys_admit_release(erx_sys_admission_t *admission, erx_status_t status)
 {
+	erx_sys_admit_action_t action = {0};
+
 	if (admission->plan.exists == 0)
 		return (erx_sys_admit_finish(admission, status));
 	admission->phase = ERX_SYS_ADMIT_RELEASING;
 	admission->status = status;
-	admission->cursor = admission->plan.exists;
-	return (erx_sys_admit_unlock(admission));
-}
-
-static erx_sys_admit_action_t
-erx_sys_admit_unlock(erx_sys_admission_t *admission)
-{
-	erx_sys_admit_action_t action = {0};
-
 	action.op = ERX_SYS_ADMIT_UNLOCK;
-	action.position = admission->cursor - 1;
 	return (action);
 }
 

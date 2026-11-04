@@ -91,7 +91,9 @@ module CapModel
     'msi_irq' => LINE,
     'root_resource' => mask(:carve, :power, :trace, :entropy, :inspect, :dup, :give),
     'carved_resource' => mask(:carve, :inspect, :dup, :give),
-    'dma_window' => TYPES.fetch(:dma)[1]
+    'dma_window' => TYPES.fetch(:dma)[1],
+    'reserved_space' => mask(:map, :threads, :caps, :stop),
+    'reserved_thread' => mask(:configure)
   }.freeze
 
   Slot = Data.define(:state, :generation, :seq, :object, :type, :rights) do

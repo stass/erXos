@@ -19,10 +19,17 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_ASID_BITS` | 16 |
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
+| `ERX_BOOT_ARGS_MAX` | 2048 |
 | `ERX_BOOT_DET` | 1 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
 | `ERX_BOOT_ROOT` | 4 |
+| `ERX_BOOT_SLOT_A` | 1 |
+| `ERX_BOOT_SLOT_B` | 2 |
+| `ERX_BOOT_SLOT_NONE` | 0 |
 | `ERX_BOOT_STRINGS_MAX` | 2048 |
+| `ERX_BOOT_VALUE_NORMAL` | 2 |
+| `ERX_BOOT_VALUE_TRIAL` | 3 |
+| `ERX_BOOT_VALUE_UNKNOWN` | 1 |
 | `ERX_BOOT_VERSION` | 1 |
 | `ERX_BUDGET_DEPTH_MAX` | 16 |
 | `ERX_BUDGET_ELASTIC` | 2 |
@@ -31,6 +38,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CAP_GENERATION_BITS` | 40 |
 | `ERX_CAP_NULL` | 0 |
 | `ERX_CAP_PAGE_SLOTS` | 64 |
+| `ERX_CAP_SELF` | 16777215 |
+| `ERX_CAP_SELF_THREAD` | 16777214 |
 | `ERX_CAP_SLOT_BITS` | 24 |
 | `ERX_CAP_SLOT_STATE_FREE` | 0 |
 | `ERX_CAP_SLOT_STATE_LIVE` | 2 |
@@ -48,6 +57,10 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CRASH_SIZE` | 16384 |
 | `ERX_CRASH_VERSION` | 1 |
 | `ERX_CTL_MAX` | 4096 |
+| `ERX_DEVICE_SECRET_STATUS_NEVER_PROVISIONED` | 3 |
+| `ERX_DEVICE_SECRET_STATUS_NO_KEY` | 2 |
+| `ERX_DEVICE_SECRET_STATUS_PRESENT` | 1 |
+| `ERX_DEVICE_SECRET_STATUS_READ_FAILED` | 4 |
 | `ERX_EBUSY` | -8 |
 | `ERX_EDEAD` | -15 |
 | `ERX_EEXIST` | -11 |
@@ -86,6 +99,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ENOCALLER` | -13 |
 | `ERX_ENOMEM` | -6 |
 | `ERX_ENOTSUP` | -12 |
+| `ERX_ENTROPY_QUALITY_FIXED` | 3 |
+| `ERX_ENTROPY_QUALITY_GOOD` | 1 |
+| `ERX_ENTROPY_QUALITY_WEAK` | 2 |
 | `ERX_ENTRY_FILE` | 1 |
 | `ERX_ENTRY_IMAGE` | 2 |
 | `ERX_ENTRY_SEAL` | 2 |
@@ -181,6 +197,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_KIND_PAGED_MEMORY` | 11 |
 | `ERX_KIND_PHYSICAL_MEMORY` | 8 |
 | `ERX_KIND_PREVIOUS_CRASH` | 18 |
+| `ERX_KIND_RESERVED_SPACE` | 26 |
+| `ERX_KIND_RESERVED_THREAD` | 27 |
 | `ERX_KIND_ROOT_BUDGET` | 1 |
 | `ERX_KIND_ROOT_RESOURCE` | 23 |
 | `ERX_KIND_SHARED_MEMORY` | 7 |
@@ -191,6 +209,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_LANE_MIN` | 4096 |
 | `ERX_LANE_SIDE_DATA` | 8192 |
 | `ERX_LANE_SIDE_RPAGE` | 4096 |
+| `ERX_MACHINE_CRASH_FOUND` | 2 |
+| `ERX_MACHINE_DET` | 1 |
 | `ERX_MANIFEST_BYTES_MAX` | 16777216 |
 | `ERX_MANIFEST_DEVELOPMENT` | 1 |
 | `ERX_MANIFEST_MAGIC` | 1297633861 |
@@ -307,6 +327,24 @@ Storage: `wire_le`. Prefix size: 48. Alignment: 8.
 | `out_size` | `u32` | 40 | 1 |
 | `in_size` | `u32` | 44 | 1 |
 
+### `erx_boot_root_extension_t`
+
+Storage: `wire_le`. Prefix size: 88. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `root_budget` | `cap` | 0 | 1 |
+| `root_group` | `cap` | 8 | 1 |
+| `system_group` | `cap` | 16 | 1 |
+| `root_resource` | `cap` | 24 | 1 |
+| `boot_image` | `cap` | 32 | 1 |
+| `time_page` | `cap` | 40 | 1 |
+| `self_space` | `cap` | 48 | 1 |
+| `self_thread` | `cap` | 56 | 1 |
+| `device_secret` | `cap` | 64 | 1 |
+| `machine_page` | `cap` | 72 | 1 |
+| `previous_crash` | `cap` | 80 | 1 |
+
 ### `erx_msg_item_t`
 
 Storage: `wire_le`. Prefix size: 16. Alignment: 8.
@@ -345,6 +383,15 @@ Private to `kernel/core/cap.c`: defined only in `kernel/generated/cap_slot_impl.
 | `type` | `u32` | 28 | 1 |
 | `state` | `u32` | 32 | 1 |
 | `next` | `u32` | 36 | 1 |
+
+### `erx_device_secret_page_t`
+
+Storage: `shared`. Prefix size: 40. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `status` | `u32` | 0 | 1 |
+| `secret` | `u8` | 8 | 32 |
 
 ### `erx_elf64_dyn_t`
 
@@ -447,6 +494,27 @@ Storage: `shared`. Prefix size: 16. Alignment: 8.
 | --- | --- | ---: | ---: |
 | `rpos` | `u64` | 0 | 1 |
 | `wake` | `u64` | 8 | 1 |
+
+### `erx_machine_page_t`
+
+Storage: `shared`. Prefix size: 4096. Alignment: 4096.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `lease_seq` | `u64` | 0 | 1 |
+| `lease_deadline_ns` | `u64` | 8 | 1 |
+| `boot_value` | `u32` | 16 | 1 |
+| `boot_slot` | `u32` | 20 | 1 |
+| `flags` | `u32` | 24 | 1 |
+| `entropy_quality` | `u32` | 28 | 1 |
+| `memory_bytes` | `u64` | 32 | 1 |
+| `cpu_count` | `u32` | 40 | 1 |
+| `watchdog_period_s` | `u32` | 44 | 1 |
+| `watchdog_deadline_s` | `u32` | 48 | 1 |
+| `watchdog_boot_s` | `u32` | 52 | 1 |
+| `build_id` | `u8` | 56 | 8 |
+| `boot_args_len` | `u32` | 64 | 1 |
+| `boot_args` | `u8` | 72 | 2048 |
 
 ### `erx_mf_boot_order_t`
 

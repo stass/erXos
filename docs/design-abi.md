@@ -92,8 +92,8 @@ The declaration forms are:
 | `status NAME INTEGER DESCRIPTION` | a signed 32-bit result; zero is success and every error is negative |
 | `right NAME POSITION DESCRIPTION` | a distinct position 0 through 31 within the kernel's 32-bit `erx_rights_t` word |
 | `type NAME INTEGER` | explicit `rights` and `pass` lists, including an explicit empty pass list |
-| `kind NAME INTEGER TYPE` | a creation kind of an object type: its `default` list, within the type's rights, and for a carved kind `carves KIND`, the kind it is carved from, whose default it does not exceed but by `destroy` |
-| `cap NAME SLOT KIND [optional]` | a well-known root slot and the creation kind its capability is installed as, which fixes its object type and rights; `optional` when the boot may leave the slot null |
+| `kind NAME INTEGER TYPE` | a creation kind of an object type: its `default` list, within the type's rights, and for a carved kind `carves KIND`, the kind it is carved from, whose default it does not exceed but by `destroy`; `reserved_space` and `reserved_thread` state what the reserved values `cap_self` and `cap_self_thread` carry, and no call creates them |
+| `cap NAME SLOT KIND [optional]` | a well-known root slot and the creation kind its capability is installed as, which fixes its object type and rights; `optional` when the boot may leave the slot null. Slots run from 1 without a gap, and the generator derives the layout `erx_boot_root_extension` from these lines, one `cap` field per slot |
 | `call NAME NUMBER` | the call metadata and members described below |
 | `reader NAME ROOT_LAYOUT MAX_BYTES` | bounded tables and references described below |
 | `translation NAME SOURCE TARGET` | a complete directed mapping for one named consumer context |
@@ -277,10 +277,12 @@ and the action is never a status or a result register. Only a call that
 may wait and takes a capability can be marked `retry`.
 
 A capability argument names an object type and its required rights. The
-`exists` property names the argument whose existence lock the call holds;
-a call holds at most two, and a result none. The generated admission
+`exists` property names the argument whose existence lock the dispatch
+holds across the handler; a call declares at most one, and a result none.
+A call that needs two existence locks marks neither, and its handler takes
+both as its first act. The generated admission
 plan lists a call's capability arguments in the order the dispatch takes
-them, the existence-locked ones first, then the rest, each in declaration
+them, the existence-locked one first, then the rest in declaration
 order, with each one's object type and required rights; the admission
 core, `kernel/core/admit.c`, turns the plan into lookups and locks
 ([System-call dispatch](design-kernel.md#system-call-dispatch)), and
@@ -500,8 +502,21 @@ The root slot assignments are root budget 1, root group 2, system group
 3, root resource 4, boot image 5, time page 6, own space 7, own thread
 8, device-secret page 9, machine page 10 and previous-crash record 11.
 These are slot numbers, not complete capability
-values: boot information supplies each value with its generation. The
+values: the root extension of the boot information page, derived from them,
+supplies each value with its generation, slot N at offset 8 x (N - 1). The
 optional previous-crash capability is null when no record exists.
+
+The reserved capability values are `cap_self`, `0xffffff`, and
+`cap_self_thread`, `0xfffffe`, generation 0 and slot bits above `caps_max`
+([Objects and capabilities](design-kernel.md#objects-and-capabilities)).
+
+The machine page's layout is in [The root
+task](design-kernel.md#the-root-task), and the device-secret page's in [Device
+secrets](design-platforms.md#device-secrets). The public HMAC messages are
+`device_secret_label`, the ASCII text `erXos device secret`, which HMAC-SHA-256
+keyed by the board's key turns into the device secret, and
+`sealing_secret_label`, the ASCII text `erXos sealing secret`, which it keyed by
+the device secret turns into the sealing secret, neither with a terminating NUL.
 
 ## Boot-image representations
 

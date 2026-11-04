@@ -59,6 +59,17 @@ typedef struct erx_cap_view {
 	uint64_t	 generation;
 } erx_cap_view_t;
 
+/*
+ * The object store's handles of the calling thread's space and thread, for
+ * the reserved values ERX_CAP_SELF and ERX_CAP_SELF_THREAD: what those values
+ * mean depends on the caller, so the lookup receives it as an argument and
+ * reads no global state.
+ */
+typedef struct erx_cap_self {
+	uint64_t	 space;
+	uint64_t	 thread;
+} erx_cap_self_t;
+
 /* The free slots a receive took for the capabilities a pass brings it. */
 typedef struct erx_cap_reservation {
 	uint32_t	 count;
@@ -213,9 +224,18 @@ void		erx_cap_table_set_emptied(erx_cap_table_t *table);
  * under its sequence count without a lock. ERX_ESTALE for a value that
  * names no live slot at its generation, ERX_ETYPE, ERX_ERIGHTS. A view
  * is written only on ERX_OK, and is one state of the slot.
+ *
+ * self is the calling thread's when table is its own space's, and NULL for a
+ * read of another space's table. With it, ERX_CAP_SELF and ERX_CAP_SELF_THREAD
+ * name the caller's own objects, with the rights of ERX_KIND_RESERVED_SPACE and
+ * ERX_KIND_RESERVED_THREAD, and pass the same type and rights checks; their
+ * view's slot is 0, since they name no slot, so erx_pass_plan refuses one and
+ * no writer can clear, take or move through one. Without it they are stale, as is every other value whose slot
+ * bits lie above the table's limit.
  */
-erx_status_t	erx_cap_read(const erx_cap_table_t *table, erx_cap_t cap,
-		    erx_ktype_t type, uint32_t required, erx_cap_view_t *viewp);
+erx_status_t	erx_cap_read(const erx_cap_table_t *table,
+		    const erx_cap_self_t *self, erx_cap_t cap, erx_ktype_t type,
+		    uint32_t required, erx_cap_view_t *viewp);
 
 /*
  * Install a capability in a free slot, for a creation, erx_cap_dup or a
@@ -255,7 +275,7 @@ void		erx_cap_release_reservation(erx_cap_table_t *table,
  * Decide a whole pass from what the source table held: a pure function.
  * ERX_EINVAL for a count above ERX_MSG_CAPS, ERX_ELIMIT for one above the
  * receiver's room; then for each item in order ERX_ESTALE for a value
- * that names no live slot, ERX_EINVAL for a slot named twice or an
+ * that names no live slot, a view of a reserved value among them, ERX_EINVAL for a slot named twice or an
  * unknown operation, ERX_ETYPE and ERX_ERIGHTS for an item's checked type
  * and rights, ERX_ERIGHTS without GIVE from the caller's own table or
  * without DUP for a copy, and ERX_ETYPE for a type that never passes

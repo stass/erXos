@@ -336,6 +336,54 @@ class CapTest < Minitest::Test
     assert status.success?, output
   end
 
+  # ERX_CAP_SELF and ERX_CAP_SELF_THREAD through the one lookup: fixed rights
+  # the design lists, the same refusals as any capability, and no way to reach
+  # them without the caller's view or to touch a slot through them.
+  def test_reserved_self_values_resolve_in_the_one_lookup
+    self_space = 0xffffff
+    self_thread = 0xfffffe
+    space = M.constant('k_space')
+    thread = M.constant('k_thread')
+    space_rights = M::KINDS.fetch('reserved_space')
+    thread_rights = M::KINDS.fetch('reserved_thread')
+    estale = M.constant('estale')
+    etype = M.constant('etype')
+    erights = M.constant('erights')
+    destroy = M.constant('hr_destroy')
+    item = format('item %x %x %x 0 0', self_space, M::COPY, 0xffffffff)
+    commands = ['table 0 2', 'grow 0 1',
+                format('self 0 %x %x %x', self_space, space, space_rights),
+                format('self 0 %x 0 0', self_space),
+                format('self 0 %x %x %x', self_thread, thread, thread_rights),
+                format('self 0 %x %x 0', self_space, thread),
+                format('self 0 %x %x 0', self_thread, space),
+                format('self 0 %x %x %x', self_space, space, destroy),
+                format('self 0 %x %x %x', self_space, space, M.constant('hr_dup')),
+                format('self 0 %x %x %x', self_thread, thread, destroy),
+                format('self 0 %x 0 0', self_space | (1 << 24)),
+                format('self 0 %x 0 0', 0xfffffd),
+                format('self 0 %x 0 0', 0x100000),
+                format('read 0 %x 0 0', self_space),
+                format('read 0 %x 0 0', self_thread),
+                format('clear 0 %x %x', self_space, 0x5a),
+                format('clear 0 %x %x', self_thread, 0x7b),
+                'table 1 2', 'grow 1 1', 'reserve 1 1',
+                'pass 0 1 1 0 1', item,
+                'pass 0 1 0 1 1', item]
+    lines = run_driver(commands).grep(/\A(?:self|read|clear|plan) /)
+    assert_equal [format('self 0 5a %x %x 0 0', space, space_rights),
+                  format('self 0 5a %x %x 0 0', space, space_rights),
+                  format('self 0 7b %x %x 0 0', thread, thread_rights),
+                  "self #{etype} 0 0 0 0 0", "self #{etype} 0 0 0 0 0",
+                  "self #{erights} 0 0 0 0 0", "self #{erights} 0 0 0 0 0",
+                  "self #{erights} 0 0 0 0 0",
+                  "self #{estale} 0 0 0 0 0", "self #{estale} 0 0 0 0 0",
+                  "self #{estale} 0 0 0 0 0",
+                  "read #{estale} 0 0 0 0 0", "read #{estale} 0 0 0 0 0",
+                  "clear #{estale}", "clear #{estale}",
+                  "plan #{estale} 0 0", "plan #{estale} 0 0"], lines
+  end
+
   private
 
   MUTANTS = [

@@ -98,7 +98,7 @@ churn_read(void *arg)
 		    UINT64_C(1442695040888963407);
 		slot = 1 + (uint32_t)(state >> 33) % (ERX_CAP_PAGE_SLOTS - 1);
 		cap.raw = atomic_load(&published[slot]);
-		if (erx_cap_read(&table, cap, ERX_K_MEMORY, 0, &view) != ERX_OK) {
+		if (erx_cap_read(&table, NULL, cap, ERX_K_MEMORY, 0, &view) != ERX_OK) {
 			atomic_fetch_add(&refused, 1);
 			continue;
 		}

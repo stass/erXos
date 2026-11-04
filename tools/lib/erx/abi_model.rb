@@ -143,10 +143,6 @@ module Erx
         version = unsigned(abi.args.first, abi.line, maximum: (1 << 32) - 1)
         abi.fail!('ABI version must be positive') if version.zero?
         architecture = validate_architecture(by_kind)
-        definitions = unique_definitions(declarations)
-        constants = collect_constants(by_kind)
-        add_constant(constants, 'abi_version', version, BASE_TYPES.fetch('u32'), abi.line)
-        types, type_order = resolve_types(definitions, constants)
         rights = by_kind.fetch('right', []).to_h do |declaration|
           arity(declaration.line, 4)
           no_members(declaration)
@@ -157,6 +153,10 @@ module Erx
         objects = validate_objects(by_kind.fetch('type', []), rights)
         kinds = validate_kinds(by_kind.fetch('kind', []), objects, rights)
         caps = validate_caps(by_kind.fetch('cap', []), kinds)
+        definitions = unique_definitions(declarations + root_extension(caps))
+        constants = collect_constants(by_kind)
+        add_constant(constants, 'abi_version', version, BASE_TYPES.fetch('u32'), abi.line)
+        types, type_order = resolve_types(definitions, constants)
         calls = validate_calls(by_kind.fetch('call', []), types, constants, objects, rights)
         abi.fail!('calls require a complete architecture binding') if calls.any? && !architecture
         readers = by_kind.fetch('reader', []).map { |item| validate_reader(item, types, constants) }
@@ -854,8 +854,23 @@ module Erx
         end
         if caps.any?
           unique_values(caps.transform_values { |cap| cap.fetch(:slot) }, label: 'root slot', line: declarations.first.line)
+          slots = caps.values.map { |cap| cap.fetch(:slot) }.sort
+          declarations.first.fail!('root slots must run from 1 without a gap') unless slots == (1..slots.size).to_a
         end
         caps.sort.to_h
+      end
+
+      # The boot information page's root extension, as the source text of a
+      # layout derived from the `cap` lines: one value for each slot, slot 1
+      # first, so its fields cannot disagree with them. It then passes through
+      # the same validation as a layout written by hand.
+      def root_extension(caps)
+        return [] if caps.empty?
+
+        ordered = caps.sort_by { |_name, cap| cap.fetch(:slot) }
+        lines = ordered.map { |name, cap| "  field #{name} cap #{(cap.fetch(:slot) - 1) * 8}\n" }
+        Syntax.parse("layout erx_boot_root_extension 1 wire_le 8 #{lines.size * 8}\n#{lines.join}".b,
+                     path: '<the cap lines>')
       end
 
       # These declaration families are validated in their own bounded passes.

@@ -176,6 +176,14 @@ class AbiCallsTest < Minitest::Test
     assert_equal "root capability checks passed\n", File.binread(record.fetch('log'))
   end
 
+  # A generated decoder would copy the secret into a frame its reader cannot
+  # zero, so the device-secret page has none in any language.
+  def test_no_decoder_copies_the_device_secret
+    %w[liberx/generated/abi_reader.c include/erx/abi_reader.h].each do |path|
+      refute_includes File.read(File.join(@root, path)), 'erx_device_secret_page', path
+    end
+  end
+
   def test_marshalled_wrappers_compile_for_every_backend
     marshal_outputs
     run_command([@compiler, *marshal_flags, '--target=aarch64-none-elf', '-ffreestanding', '-c',

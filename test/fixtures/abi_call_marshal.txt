@@ -17,11 +17,12 @@ status wouldblock -14 "executor made a call that would wait"
 right stop 0 "stop a space"
 right call 1 "send through a gate"
 right map 2 "act on a space's mappings"
+right caps 3 "fill a space's capability table"
 scalar cap u64
 scalar deadline u64
 scalar uword u64 align 4
 type space 1
-  rights stop,map
+  rights stop,map,caps
   pass none
 type gate 2
   rights call
@@ -108,10 +109,9 @@ call space_copy 7
   effects changes
   charges none
   bound pages 1
-  arg gate cap gate call register 0
-  arg from cap space stop register 1 exists
+  arg from cap space stop,map register 0
+  arg to cap space map,caps register 1
   arg ticket u64 register 2
-  arg to cap space stop register 3 exists
 call space_pause 8
   waits no
   executor allow
@@ -135,14 +135,6 @@ call admit_2_0 10
   bound records 1
   arg first cap space stop,map register 0
   arg second cap gate call register 1
-call admit_2_2 11
-  waits no
-  executor allow
-  effects changes
-  charges none
-  bound records 1
-  arg first cap space stop register 0 exists
-  arg second cap space map register 1 exists
 call admit_3_0 12
   waits no
   executor allow

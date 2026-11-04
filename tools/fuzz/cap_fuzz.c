@@ -80,6 +80,9 @@ fuzz_check(bool condition)
 		abort();
 }
 
+/* The object store's handles of the fuzzed caller's space and thread. */
+static const erx_cap_self_t fuzz_self = { 0x5a, 0x7b };
+
 /* A value the fuzzer chose, or now and then one the table issued. */
 static erx_cap_t
 fuzz_value(fuzz_input_t *in, fuzz_table_t *t)
@@ -90,6 +93,10 @@ fuzz_value(fuzz_input_t *in, fuzz_table_t *t)
 	if (raw < FUZZ_LIMIT && t->shadow[raw].value != 0)
 		cap.raw = t->shadow[raw].value ^ (fuzz_take(in, 1) == 0 ?
 		    UINT64_C(1) << ERX_CAP_SLOT_BITS : 0);
+	else if (raw == FUZZ_LIMIT)
+		cap.raw = ERX_CAP_SELF;
+	else if (raw == FUZZ_LIMIT + 1)
+		cap.raw = ERX_CAP_SELF_THREAD;
 	else
 		cap.raw = raw << 56 | fuzz_take(in, 7);
 	return (cap);
@@ -102,7 +109,34 @@ fuzz_read(fuzz_table_t *t, erx_cap_t cap, erx_ktype_t type, uint32_t required)
 	erx_cap_view_t view;
 	const fuzz_slot_t *s;
 
-	if (erx_cap_read(&t->table, cap, type, required, &view) != ERX_OK)
+	/*
+	 * The reserved values name the caller's own objects with the view of
+	 * self, and nothing without it; neither touches the table.
+	 */
+	if (cap.raw == ERX_CAP_SELF || cap.raw == ERX_CAP_SELF_THREAD) {
+		const erx_cap_self_t none = { 0, 0 };
+		bool space = cap.raw == ERX_CAP_SELF;
+		erx_create_kind_t kind = space ? ERX_KIND_RESERVED_SPACE :
+		    ERX_KIND_RESERVED_THREAD;
+		uint32_t rights = erx_kind_default_mask(kind);
+		erx_status_t expected = type != ERX_CAP_ANY_TYPE &&
+		    type != erx_kind_ktype(kind) ? ERX_ETYPE :
+		    (rights & required) != required ? ERX_ERIGHTS : ERX_OK;
+
+		fuzz_check(erx_cap_read(&t->table, NULL, cap, type, required,
+		    &view) == ERX_ESTALE);
+		fuzz_check(erx_cap_read(&t->table, &none, cap, type, required,
+		    &view) == ERX_ESTALE);
+		fuzz_check(erx_cap_read(&t->table, &fuzz_self, cap, type, required,
+		    &view) == expected);
+		if (expected == ERX_OK)
+			fuzz_check(view.slot == 0 && view.rights.bits == rights &&
+			    view.type == erx_kind_ktype(kind) && view.object ==
+			    (space ? fuzz_self.space : fuzz_self.thread));
+		return;
+	}
+	if (erx_cap_read(&t->table, &fuzz_self, cap, type, required,
+	    &view) != ERX_OK)
 		return;
 	fuzz_check(index < FUZZ_LIMIT);
 	s = &t->shadow[index];
@@ -168,7 +202,8 @@ fuzz_pass(fuzz_input_t *in)
 		items[i].type = (uint32_t)fuzz_take(in, 1) % 11;
 		items[i].required = (uint32_t)fuzz_take(in, 1);
 		memset(&sources[i], 0, sizeof(sources[i]));
-		sources[i].status = erx_cap_read(&from->table, items[i].cap,
+		sources[i].status = erx_cap_read(&from->table,
+		    (flags & 1) != 0 ? &fuzz_self : NULL, items[i].cap,
 		    ERX_CAP_ANY_TYPE, 0, &sources[i].view);
 	}
 	request = (erx_pass_request_t){ items, n, to->reservation.count,

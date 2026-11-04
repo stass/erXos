@@ -439,8 +439,8 @@ as the stopgap's scope table lists
   console; the time page; entropy; `erx_machine_end`;
 * the root task: the first space without parent or fault gate, the root
   capabilities at the ABI file's well-known slots, the boot information
-  page flagged `ERX_BOOT_ROOT`, and the device-secret page in its encoding
-  of none ([design-kernel.md](design-kernel.md#the-root-task));
+  page flagged `ERX_BOOT_ROOT`, and the device-secret page with the status
+  `no_key` ([design-kernel.md](design-kernel.md#the-root-task));
 * the watchdog: `erx_watchdog_pet` on the platform object, needing
   `POWER`, armed when the root task starts under `erx.watchdog`'s period,
   deadline and boot deadline, its deadline checked at Fiasco's tick, and

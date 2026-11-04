@@ -18,6 +18,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_boot_connection_decode(bytes, length, &value);
 	}
 	{
+		erx_boot_root_extension_t value;
+		(void)erx_boot_root_extension_decode(bytes, length, &value);
+	}
+	{
 		erx_msg_item_t value;
 		(void)erx_msg_item_decode(bytes, length, &value);
 	}

@@ -441,7 +441,8 @@ typedef struct erx_boot_info {
 	uint64_t	seal_addr;		/* the release the boot image marks
 						 * with ERX_ENTRY_SEAL: where the
 						 * sealing page is mapped, read-only;
-						 * otherwise zero */
+						 * otherwise, or with no device secret,
+						 * zero */
 	erx_cap_t	crash_area;		/* memory for a crash dump, or zero
 						 * for a domain without one */
 	struct {
@@ -515,8 +516,15 @@ system connection's peer by its node name and id as well, as
 system domain's process that admits the domain, which that process
 exported to the domain before it started
 ([Connections in ERTS](#connections-in-erts)).
-With `ERX_BOOT_ROOT`, the page continues with the root capabilities
-([The root-task entry](#the-root-task-entry)). Every later connection,
+With `ERX_BOOT_ROOT`, the page continues at `ERX_BOOT_INFO_SIZE`, offset 272,
+with the **root extension**, `erx_boot_root_extension_t`, which the ABI
+generator derives from the ABI file's `cap` lines, so that nothing is copied by
+hand: one capability value for each root slot, the value of slot N at offset
+8 x (N - 1), 88 bytes in all, and `ERX_CAP_NULL` in an optional slot the boot
+left empty ([The root-task entry](#the-root-task-entry)). The strings the
+page's offsets name lie past it. The entry's close of the device-secret page
+leaves that field's value stale, so it names nothing from then on (K1).
+Every later connection,
 every device and every grant reaches the runtime as a message from the
 system domain over the system connection, naming slots the domain library
 installed in the domain's table.

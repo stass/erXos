@@ -213,13 +213,150 @@ layout erx_time_page 1 shared 8 48
   visibility wall_offset_ns release
   sequence seq terminal 0xffffffffffffffff exhaustion @limit recovery none
 
+# The machine page ("The root task"): read-only to every holder. The kernel
+# writes it before the root task starts and fixes everything on it but the
+# lease, which a reader takes under lease_seq: it loads the count, retries
+# while it is odd, stops at its terminal value, loads lease_deadline_ns and
+# loads the count again. A
+# deadline of 0 means no lease is held, and the time is the monotonic clock's
+# in nanoseconds. boot_value holds a boot_value and boot_slot a boot_slot,
+# slot none exactly when the value is unknown. flags holds machine_flags and
+# entropy_quality an entropy_quality; a shared field is a plain integer, so
+# its enum is named here. The watchdog fields are erx.watchdog's seconds.
+# boot_args holds boot_args_len bytes of the words the kernel did not take,
+# as the command line spaces them, and zero after them. It is firmware text:
+# untrusted, and it reaches a console only through that sink's escaper.
+limit boot_args_max u32 2048
+enum boot_value u32
+  value unknown 1
+  value normal 2
+  value trial 3
+enum boot_slot u32
+  value none 0
+  value a 1
+  value b 2
+enum entropy_quality u32
+  value good 1
+  value weak 2
+  value fixed 3
+flags machine_flags u32
+  bit det 0
+  bit crash_found 1
+layout erx_machine_page 1 shared 4096 4096
+  field lease_seq u64 0
+  field lease_deadline_ns u64 8
+  field boot_value u32 16
+  field boot_slot u32 20
+  field flags u32 24
+  field entropy_quality u32 28
+  field memory_bytes u64 32
+  field cpu_count u32 40
+  field watchdog_period_s u32 44
+  field watchdog_deadline_s u32 48
+  field watchdog_boot_s u32 52
+  field build_id u8 56 count 8
+  field boot_args_len u32 64
+  padding 68 4
+  field boot_args u8 72 count @boot_args_max
+  padding 2120 1976
+  sequence lease_seq terminal 0xffffffffffffffff exhaustion @limit recovery none
+  atomic lease_seq load acquire store release
+  writer lease_seq kernel_lease
+  owner lease_seq kernel all
+  visibility lease_seq internal
+  atomic lease_deadline_ns load acquire store release
+  writer lease_deadline_ns kernel_lease
+  owner lease_deadline_ns kernel all
+  visibility lease_deadline_ns release
+  atomic boot_value load acquire store none
+  writer boot_value kernel_boot
+  owner boot_value kernel all
+  visibility boot_value release
+  atomic boot_slot load acquire store none
+  writer boot_slot kernel_boot
+  owner boot_slot kernel all
+  visibility boot_slot release
+  atomic flags load acquire store none
+  writer flags kernel_boot
+  owner flags kernel all
+  visibility flags release
+  atomic entropy_quality load acquire store none
+  writer entropy_quality kernel_boot
+  owner entropy_quality kernel all
+  visibility entropy_quality release
+  atomic memory_bytes load acquire store none
+  writer memory_bytes kernel_boot
+  owner memory_bytes kernel all
+  visibility memory_bytes release
+  atomic cpu_count load acquire store none
+  writer cpu_count kernel_boot
+  owner cpu_count kernel all
+  visibility cpu_count release
+  atomic watchdog_period_s load acquire store none
+  writer watchdog_period_s kernel_boot
+  owner watchdog_period_s kernel all
+  visibility watchdog_period_s release
+  atomic watchdog_deadline_s load acquire store none
+  writer watchdog_deadline_s kernel_boot
+  owner watchdog_deadline_s kernel all
+  visibility watchdog_deadline_s release
+  atomic watchdog_boot_s load acquire store none
+  writer watchdog_boot_s kernel_boot
+  owner watchdog_boot_s kernel all
+  visibility watchdog_boot_s release
+  atomic boot_args_len load acquire store none
+  writer boot_args_len kernel_boot
+  owner boot_args_len kernel all
+  visibility boot_args_len release
+  atomic build_id[] load acquire store none
+  writer build_id[] kernel_boot
+  owner build_id[] kernel all
+  visibility build_id[] release
+  atomic boot_args[] load acquire store none
+  writer boot_args[] kernel_boot
+  owner boot_args[] kernel all
+  visibility boot_args[] internal
+
+# The device-secret page ("Device secrets" in docs/design-platforms.md):
+# written once in the boot-only section, before any reader exists, and read
+# only through the page's own mapping. It is a shared layout, not a wire one,
+# so the generator emits no decoder that would copy the secret into a frame its
+# reader could not zero. status holds a device_secret_status; any other status
+# than present means every byte of secret is zero, and the rest of the page is
+# zero. Each label is public: the kernel derives the device secret with
+# HMAC-SHA-256 keyed by the board's key, over the first, and the root-task
+# entry derives the sealing secret keyed by the device secret, over the second.
+enum device_secret_status u32
+  value present 1
+  value no_key 2
+  value never_provisioned 3
+  value read_failed 4
+bytes device_secret_label 19 value 6572586f732064657669636520736563726574
+bytes sealing_secret_label 20 value 6572586f73207365616c696e6720736563726574
+layout erx_device_secret_page 1 shared 8 40
+  field status u32 0
+  padding 4 4
+  field secret u8 8 count 32
+  atomic status load acquire store none
+  atomic secret[] load acquire store none
+  writer status kernel_boot
+  writer secret[] kernel_boot
+  owner status kernel all
+  owner secret[] kernel all
+  visibility status release
+  visibility secret[] internal
+
 # Capability values and tables (docs/design-kernel.md, "Objects and
 # capabilities"). A value holds its slot's index in bits 0-23 and the
 # slot's generation in bits 24-63; slot 0 is never issued, so value 0 names
 # nothing, and cap_null spells it. A table grows a page of cap_page_slots
 # slots at a time up to its space's limit, at most caps_max slots, slot 0
-# included.
+# included. cap_self and cap_self_thread are reserved values whose slot bits
+# lie above caps_max, so no slot can ever bear them, and the one lookup
+# resolves them to the calling thread's space and thread.
 limit cap_null u64 0
+limit cap_self u64 0xffffff
+limit cap_self_thread u64 0xfffffe
 limit cap_slot_bits u32 24
 limit cap_generation_bits u32 40
 limit caps_max u32 1048576
@@ -313,11 +450,19 @@ kind carved_resource 24 resource
   carves root_resource
 kind dma_window 25 dma
   default map,bind,inspect,dup,give,destroy
+# What the reserved values cap_self and cap_self_thread carry; no call
+# creates an object of these kinds.
+kind reserved_space 26 space
+  default map,threads,caps,stop
+kind reserved_thread 27 thread
+  default configure
 
 # The root capabilities, at the well-known slots of the root task's table
 # ("The root task"): each slot's creation kind fixes its object type and
 # the rights the kernel installs it with. The boot information page
-# supplies each value with its generation. A slot marked optional holds
+# supplies each value with its generation, in erx_boot_root_extension, which
+# the generator derives from these lines: one value per slot, slot 1 first.
+# So slots run from 1 without a gap. A slot marked optional holds
 # ERX_CAP_NULL when the boot has nothing for it: the previous crash
 # record, when the boot found none.
 cap root_budget 1 root_budget

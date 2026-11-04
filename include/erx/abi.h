@@ -25,10 +25,17 @@ struct erx_rights {
 #define ERX_ARCH_ASID_BITS UINT32_C(16)
 #define ERX_ARCH_ELF_MACHINE UINT16_C(183)
 #define ERX_ARCH_USER_LIMIT UINT64_C(281474976710656)
+#define ERX_BOOT_ARGS_MAX UINT32_C(2048)
 #define ERX_BOOT_DET UINT32_C(1)
 #define ERX_BOOT_INSTALLED_ONLY UINT32_C(2)
 #define ERX_BOOT_ROOT UINT32_C(4)
+#define ERX_BOOT_SLOT_A UINT32_C(1)
+#define ERX_BOOT_SLOT_B UINT32_C(2)
+#define ERX_BOOT_SLOT_NONE UINT32_C(0)
 #define ERX_BOOT_STRINGS_MAX UINT32_C(2048)
+#define ERX_BOOT_VALUE_NORMAL UINT32_C(2)
+#define ERX_BOOT_VALUE_TRIAL UINT32_C(3)
+#define ERX_BOOT_VALUE_UNKNOWN UINT32_C(1)
 #define ERX_BOOT_VERSION UINT32_C(1)
 #define ERX_BUDGET_DEPTH_MAX UINT32_C(16)
 #define ERX_BUDGET_ELASTIC UINT32_C(2)
@@ -37,6 +44,8 @@ struct erx_rights {
 #define ERX_CAP_GENERATION_BITS UINT32_C(40)
 #define ERX_CAP_NULL UINT64_C(0)
 #define ERX_CAP_PAGE_SLOTS UINT32_C(64)
+#define ERX_CAP_SELF UINT64_C(16777215)
+#define ERX_CAP_SELF_THREAD UINT64_C(16777214)
 #define ERX_CAP_SLOT_BITS UINT32_C(24)
 #define ERX_CAP_SLOT_STATE_FREE UINT32_C(0)
 #define ERX_CAP_SLOT_STATE_LIVE UINT32_C(2)
@@ -54,6 +63,10 @@ struct erx_rights {
 #define ERX_CRASH_SIZE UINT32_C(16384)
 #define ERX_CRASH_VERSION UINT32_C(1)
 #define ERX_CTL_MAX UINT32_C(4096)
+#define ERX_DEVICE_SECRET_STATUS_NEVER_PROVISIONED UINT32_C(3)
+#define ERX_DEVICE_SECRET_STATUS_NO_KEY UINT32_C(2)
+#define ERX_DEVICE_SECRET_STATUS_PRESENT UINT32_C(1)
+#define ERX_DEVICE_SECRET_STATUS_READ_FAILED UINT32_C(4)
 #define ERX_EBUSY (-INT32_C(8))
 #define ERX_EDEAD (-INT32_C(15))
 #define ERX_EEXIST (-INT32_C(11))
@@ -92,6 +105,9 @@ struct erx_rights {
 #define ERX_ENOCALLER (-INT32_C(13))
 #define ERX_ENOMEM (-INT32_C(6))
 #define ERX_ENOTSUP (-INT32_C(12))
+#define ERX_ENTROPY_QUALITY_FIXED UINT32_C(3)
+#define ERX_ENTROPY_QUALITY_GOOD UINT32_C(1)
+#define ERX_ENTROPY_QUALITY_WEAK UINT32_C(2)
 #define ERX_ENTRY_FILE UINT8_C(1)
 #define ERX_ENTRY_IMAGE UINT8_C(2)
 #define ERX_ENTRY_SEAL UINT8_C(2)
@@ -187,6 +203,8 @@ struct erx_rights {
 #define ERX_KIND_PAGED_MEMORY UINT32_C(11)
 #define ERX_KIND_PHYSICAL_MEMORY UINT32_C(8)
 #define ERX_KIND_PREVIOUS_CRASH UINT32_C(18)
+#define ERX_KIND_RESERVED_SPACE UINT32_C(26)
+#define ERX_KIND_RESERVED_THREAD UINT32_C(27)
 #define ERX_KIND_ROOT_BUDGET UINT32_C(1)
 #define ERX_KIND_ROOT_RESOURCE UINT32_C(23)
 #define ERX_KIND_SHARED_MEMORY UINT32_C(7)
@@ -197,6 +215,8 @@ struct erx_rights {
 #define ERX_LANE_MIN UINT32_C(4096)
 #define ERX_LANE_SIDE_DATA UINT32_C(8192)
 #define ERX_LANE_SIDE_RPAGE UINT32_C(4096)
+#define ERX_MACHINE_CRASH_FOUND UINT32_C(2)
+#define ERX_MACHINE_DET UINT32_C(1)
 #define ERX_MANIFEST_BYTES_MAX UINT32_C(16777216)
 #define ERX_MANIFEST_DEVELOPMENT UINT16_C(1)
 #define ERX_MANIFEST_MAGIC UINT32_C(1297633861)
@@ -307,6 +327,10 @@ typedef uint8_t erx_abi_note_section_t[13];
 
 typedef uint32_t erx_boot_flags_t;
 
+typedef uint32_t erx_boot_slot_t;
+
+typedef uint32_t erx_boot_value_t;
+
 typedef uint32_t erx_budget_kind_t;
 
 typedef struct erx_cap erx_cap_t;
@@ -359,6 +383,58 @@ _Static_assert(offsetof(erx_boot_connection_t, out_size) ==
 _Static_assert(offsetof(erx_boot_connection_t, in_size) ==
     ERX_BOOT_CONNECTION_OFF_IN_SIZE, "erx_boot_connection.in_size offset");
 
+#define ERX_BOOT_ROOT_EXTENSION_SIZE 88
+#define ERX_BOOT_ROOT_EXTENSION_ALIGN 8
+#define ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_BUDGET 0
+#define ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_GROUP 8
+#define ERX_BOOT_ROOT_EXTENSION_OFF_SYSTEM_GROUP 16
+#define ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_RESOURCE 24
+#define ERX_BOOT_ROOT_EXTENSION_OFF_BOOT_IMAGE 32
+#define ERX_BOOT_ROOT_EXTENSION_OFF_TIME_PAGE 40
+#define ERX_BOOT_ROOT_EXTENSION_OFF_SELF_SPACE 48
+#define ERX_BOOT_ROOT_EXTENSION_OFF_SELF_THREAD 56
+#define ERX_BOOT_ROOT_EXTENSION_OFF_DEVICE_SECRET 64
+#define ERX_BOOT_ROOT_EXTENSION_OFF_MACHINE_PAGE 72
+#define ERX_BOOT_ROOT_EXTENSION_OFF_PREVIOUS_CRASH 80
+typedef struct erx_boot_root_extension erx_boot_root_extension_t;
+struct erx_boot_root_extension {
+	_Alignas(8) erx_cap_t	root_budget;
+	erx_cap_t	root_group;
+	erx_cap_t	system_group;
+	erx_cap_t	root_resource;
+	erx_cap_t	boot_image;
+	erx_cap_t	time_page;
+	erx_cap_t	self_space;
+	erx_cap_t	self_thread;
+	erx_cap_t	device_secret;
+	erx_cap_t	machine_page;
+	erx_cap_t	previous_crash;
+};
+_Static_assert(sizeof(erx_boot_root_extension_t) == ERX_BOOT_ROOT_EXTENSION_SIZE, "erx_boot_root_extension size");
+_Static_assert(_Alignof(erx_boot_root_extension_t) == ERX_BOOT_ROOT_EXTENSION_ALIGN, "erx_boot_root_extension alignment");
+_Static_assert(offsetof(erx_boot_root_extension_t, root_budget) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_BUDGET, "erx_boot_root_extension.root_budget offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, root_group) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_GROUP, "erx_boot_root_extension.root_group offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, system_group) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_SYSTEM_GROUP, "erx_boot_root_extension.system_group offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, root_resource) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_ROOT_RESOURCE, "erx_boot_root_extension.root_resource offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, boot_image) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_BOOT_IMAGE, "erx_boot_root_extension.boot_image offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, time_page) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_TIME_PAGE, "erx_boot_root_extension.time_page offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, self_space) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_SELF_SPACE, "erx_boot_root_extension.self_space offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, self_thread) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_SELF_THREAD, "erx_boot_root_extension.self_thread offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, device_secret) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_DEVICE_SECRET, "erx_boot_root_extension.device_secret offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, machine_page) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_MACHINE_PAGE, "erx_boot_root_extension.machine_page offset");
+_Static_assert(offsetof(erx_boot_root_extension_t, previous_crash) ==
+    ERX_BOOT_ROOT_EXTENSION_OFF_PREVIOUS_CRASH, "erx_boot_root_extension.previous_crash offset");
+
 #define ERX_MSG_ITEM_SIZE 16
 #define ERX_MSG_ITEM_ALIGN 8
 #define ERX_MSG_ITEM_OFF_DESC 0
@@ -381,10 +457,19 @@ typedef uint32_t erx_crash_cause_t;
 
 typedef uint32_t erx_crash_form_t;
 
+typedef uint8_t erx_device_secret_label_t[19];
+#define ERX_DEVICE_SECRET_LABEL_SIZE 19
+#define ERX_DEVICE_SECRET_LABEL_BYTES { 0x65, 0x72, 0x58, 0x6f, 0x73, 0x20, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x20, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74 }
+#define ERX_DEVICE_SECRET_LABEL_STRING "erXos device secret"
+
+typedef uint32_t erx_device_secret_status_t;
+
 typedef uint8_t erx_elf_magic_t[4];
 #define ERX_ELF_MAGIC_SIZE 4
 #define ERX_ELF_MAGIC_BYTES { 0x7f, 0x45, 0x4c, 0x46 }
 #define ERX_ELF_MAGIC_STRING "\177ELF"
+
+typedef uint32_t erx_entropy_quality_t;
 
 typedef uint8_t erx_entry_flags_t;
 
@@ -429,6 +514,23 @@ _Static_assert(offsetof(erx_pack_entry_t, manifest_off) ==
 #define ERX_CAP_SLOT_SIZE 64
 #define ERX_CAP_SLOT_ALIGN 8
 typedef struct erx_cap_slot erx_cap_slot_t;
+
+#define ERX_DEVICE_SECRET_PAGE_SIZE 40
+#define ERX_DEVICE_SECRET_PAGE_ALIGN 8
+#define ERX_DEVICE_SECRET_PAGE_OFF_STATUS 0
+#define ERX_DEVICE_SECRET_PAGE_OFF_SECRET 8
+typedef struct erx_device_secret_page erx_device_secret_page_t;
+struct erx_device_secret_page {
+	_Alignas(8) _Atomic uint32_t	status;
+	uint8_t	padding_0[4];
+	_Atomic uint8_t	secret[32];
+};
+_Static_assert(sizeof(erx_device_secret_page_t) == ERX_DEVICE_SECRET_PAGE_SIZE, "erx_device_secret_page size");
+_Static_assert(_Alignof(erx_device_secret_page_t) == ERX_DEVICE_SECRET_PAGE_ALIGN, "erx_device_secret_page alignment");
+_Static_assert(offsetof(erx_device_secret_page_t, status) ==
+    ERX_DEVICE_SECRET_PAGE_OFF_STATUS, "erx_device_secret_page.status offset");
+_Static_assert(offsetof(erx_device_secret_page_t, secret) ==
+    ERX_DEVICE_SECRET_PAGE_OFF_SECRET, "erx_device_secret_page.secret offset");
 
 #define ERX_ELF64_DYN_SIZE 16
 #define ERX_ELF64_DYN_ALIGN 8
@@ -658,6 +760,72 @@ _Static_assert(offsetof(erx_lane_rpage_t, rpos) ==
     ERX_LANE_RPAGE_OFF_RPOS, "erx_lane_rpage.rpos offset");
 _Static_assert(offsetof(erx_lane_rpage_t, wake) ==
     ERX_LANE_RPAGE_OFF_WAKE, "erx_lane_rpage.wake offset");
+
+#define ERX_MACHINE_PAGE_SIZE 4096
+#define ERX_MACHINE_PAGE_ALIGN 4096
+#define ERX_MACHINE_PAGE_OFF_LEASE_SEQ 0
+#define ERX_MACHINE_PAGE_OFF_LEASE_DEADLINE_NS 8
+#define ERX_MACHINE_PAGE_OFF_BOOT_VALUE 16
+#define ERX_MACHINE_PAGE_OFF_BOOT_SLOT 20
+#define ERX_MACHINE_PAGE_OFF_FLAGS 24
+#define ERX_MACHINE_PAGE_OFF_ENTROPY_QUALITY 28
+#define ERX_MACHINE_PAGE_OFF_MEMORY_BYTES 32
+#define ERX_MACHINE_PAGE_OFF_CPU_COUNT 40
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_PERIOD_S 44
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_DEADLINE_S 48
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S 52
+#define ERX_MACHINE_PAGE_OFF_BUILD_ID 56
+#define ERX_MACHINE_PAGE_OFF_BOOT_ARGS_LEN 64
+#define ERX_MACHINE_PAGE_OFF_BOOT_ARGS 72
+typedef struct erx_machine_page erx_machine_page_t;
+struct erx_machine_page {
+	_Alignas(4096) _Atomic uint64_t	lease_seq;
+	_Atomic uint64_t	lease_deadline_ns;
+	_Atomic uint32_t	boot_value;
+	_Atomic uint32_t	boot_slot;
+	_Atomic uint32_t	flags;
+	_Atomic uint32_t	entropy_quality;
+	_Atomic uint64_t	memory_bytes;
+	_Atomic uint32_t	cpu_count;
+	_Atomic uint32_t	watchdog_period_s;
+	_Atomic uint32_t	watchdog_deadline_s;
+	_Atomic uint32_t	watchdog_boot_s;
+	_Atomic uint8_t	build_id[8];
+	_Atomic uint32_t	boot_args_len;
+	uint8_t	padding_0[4];
+	_Atomic uint8_t	boot_args[2048];
+	uint8_t	padding_1[1976];
+};
+_Static_assert(sizeof(erx_machine_page_t) == ERX_MACHINE_PAGE_SIZE, "erx_machine_page size");
+_Static_assert(_Alignof(erx_machine_page_t) == ERX_MACHINE_PAGE_ALIGN, "erx_machine_page alignment");
+_Static_assert(offsetof(erx_machine_page_t, lease_seq) ==
+    ERX_MACHINE_PAGE_OFF_LEASE_SEQ, "erx_machine_page.lease_seq offset");
+_Static_assert(offsetof(erx_machine_page_t, lease_deadline_ns) ==
+    ERX_MACHINE_PAGE_OFF_LEASE_DEADLINE_NS, "erx_machine_page.lease_deadline_ns offset");
+_Static_assert(offsetof(erx_machine_page_t, boot_value) ==
+    ERX_MACHINE_PAGE_OFF_BOOT_VALUE, "erx_machine_page.boot_value offset");
+_Static_assert(offsetof(erx_machine_page_t, boot_slot) ==
+    ERX_MACHINE_PAGE_OFF_BOOT_SLOT, "erx_machine_page.boot_slot offset");
+_Static_assert(offsetof(erx_machine_page_t, flags) ==
+    ERX_MACHINE_PAGE_OFF_FLAGS, "erx_machine_page.flags offset");
+_Static_assert(offsetof(erx_machine_page_t, entropy_quality) ==
+    ERX_MACHINE_PAGE_OFF_ENTROPY_QUALITY, "erx_machine_page.entropy_quality offset");
+_Static_assert(offsetof(erx_machine_page_t, memory_bytes) ==
+    ERX_MACHINE_PAGE_OFF_MEMORY_BYTES, "erx_machine_page.memory_bytes offset");
+_Static_assert(offsetof(erx_machine_page_t, cpu_count) ==
+    ERX_MACHINE_PAGE_OFF_CPU_COUNT, "erx_machine_page.cpu_count offset");
+_Static_assert(offsetof(erx_machine_page_t, watchdog_period_s) ==
+    ERX_MACHINE_PAGE_OFF_WATCHDOG_PERIOD_S, "erx_machine_page.watchdog_period_s offset");
+_Static_assert(offsetof(erx_machine_page_t, watchdog_deadline_s) ==
+    ERX_MACHINE_PAGE_OFF_WATCHDOG_DEADLINE_S, "erx_machine_page.watchdog_deadline_s offset");
+_Static_assert(offsetof(erx_machine_page_t, watchdog_boot_s) ==
+    ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S, "erx_machine_page.watchdog_boot_s offset");
+_Static_assert(offsetof(erx_machine_page_t, build_id) ==
+    ERX_MACHINE_PAGE_OFF_BUILD_ID, "erx_machine_page.build_id offset");
+_Static_assert(offsetof(erx_machine_page_t, boot_args_len) ==
+    ERX_MACHINE_PAGE_OFF_BOOT_ARGS_LEN, "erx_machine_page.boot_args_len offset");
+_Static_assert(offsetof(erx_machine_page_t, boot_args) ==
+    ERX_MACHINE_PAGE_OFF_BOOT_ARGS, "erx_machine_page.boot_args offset");
 
 #define ERX_MF_BOOT_ORDER_SIZE 4
 #define ERX_MF_BOOT_ORDER_ALIGN 4
@@ -1465,6 +1633,8 @@ _Static_assert(offsetof(erx_mf_principal_t, ceiling_limits) ==
 
 typedef uint32_t erx_image_flags_t;
 
+typedef uint32_t erx_machine_flags_t;
+
 typedef uint16_t erx_manifest_flags_t;
 
 typedef uint16_t erx_manifest_mode_t;
@@ -2176,6 +2346,11 @@ _Static_assert(offsetof(erx_manifest_t, partial_boot) ==
 _Static_assert(offsetof(erx_manifest_t, strings) ==
     ERX_MANIFEST_OFF_STRINGS, "erx_manifest.strings offset");
 
+typedef uint8_t erx_sealing_secret_label_t[20];
+#define ERX_SEALING_SECRET_LABEL_SIZE 20
+#define ERX_SEALING_SECRET_LABEL_BYTES { 0x65, 0x72, 0x58, 0x6f, 0x73, 0x20, 0x73, 0x65, 0x61, 0x6c, 0x69, 0x6e, 0x67, 0x20, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74 }
+#define ERX_SEALING_SECRET_LABEL_STRING "erXos sealing secret"
+
 typedef uint32_t erx_seg_flags_t;
 
 #define ERX_IMAGE_SEGMENT_SIZE 40
@@ -2301,6 +2476,28 @@ _Static_assert(sizeof(erx_utcb_length_t) == 4, "erx_utcb_length size");
 
 /* Each successful accessor performs one atomic element access. */
 static inline bool
+erx_device_secret_page_status_load(const erx_device_secret_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->status,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_device_secret_page_secret_load(const erx_device_secret_page_t *record, size_t index, uint8_t *value)
+{
+	if (record == NULL || value == NULL || index >= 32)
+		return (false);
+	*value = atomic_load_explicit(&record->secret[index],
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
 erx_lane_hdr_wpos_load(const erx_lane_hdr_t *record, uint64_t *value)
 {
 	if (record == NULL || value == NULL)
@@ -2381,6 +2578,190 @@ erx_lane_rpage_wake_store(erx_lane_rpage_t *record, uint64_t value)
 	atomic_store_explicit(&record->wake, value,
 	    memory_order_release);
 	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_lease_seq_load(const erx_machine_page_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->lease_seq,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_machine_page_lease_seq_store(erx_machine_page_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->lease_seq, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_lease_deadline_ns_load(const erx_machine_page_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->lease_deadline_ns,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_machine_page_lease_deadline_ns_store(erx_machine_page_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->lease_deadline_ns, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_boot_value_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->boot_value,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_boot_slot_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->boot_slot,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_flags_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->flags,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_entropy_quality_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->entropy_quality,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_memory_bytes_load(const erx_machine_page_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->memory_bytes,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_cpu_count_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->cpu_count,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_watchdog_period_s_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->watchdog_period_s,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_watchdog_deadline_s_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->watchdog_deadline_s,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_watchdog_boot_s_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->watchdog_boot_s,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_build_id_load(const erx_machine_page_t *record, size_t index, uint8_t *value)
+{
+	if (record == NULL || value == NULL || index >= 8)
+		return (false);
+	*value = atomic_load_explicit(&record->build_id[index],
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_boot_args_len_load(const erx_machine_page_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->boot_args_len,
+	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_machine_page_boot_args_load(const erx_machine_page_t *record, size_t index, uint8_t *value)
+{
+	if (record == NULL || value == NULL || index >= 2048)
+		return (false);
+	*value = atomic_load_explicit(&record->boot_args[index],
+	    memory_order_acquire);
+	return (true);
+}
+
+#define ERX_MACHINE_PAGE_LEASE_SEQ_TERMINAL UINT64_C(18446744073709551615)
+#define ERX_MACHINE_PAGE_LEASE_SEQ_EXHAUSTION ERX_ELIMIT
+
+/* Tests a captured sequence value; it does not validate a snapshot. */
+static inline erx_status_t
+erx_machine_page_lease_seq_status(uint64_t captured)
+{
+	return (captured == ERX_MACHINE_PAGE_LEASE_SEQ_TERMINAL ? ERX_MACHINE_PAGE_LEASE_SEQ_EXHAUSTION : ERX_OK);
 }
 
 static inline uint64_t
@@ -3054,6 +3435,8 @@ erx_kind_ktype(erx_create_kind_t kind)
 		[ERX_KIND_PAGED_MEMORY] = ERX_K_MEMORY,
 		[ERX_KIND_PHYSICAL_MEMORY] = ERX_K_MEMORY,
 		[ERX_KIND_PREVIOUS_CRASH] = ERX_K_MEMORY,
+		[ERX_KIND_RESERVED_SPACE] = ERX_K_SPACE,
+		[ERX_KIND_RESERVED_THREAD] = ERX_K_THREAD,
 		[ERX_KIND_ROOT_BUDGET] = ERX_K_BUDGET,
 		[ERX_KIND_ROOT_RESOURCE] = ERX_K_RESOURCE,
 		[ERX_KIND_SHARED_MEMORY] = ERX_K_MEMORY,
@@ -3212,6 +3595,11 @@ erx_kind_default_mask(erx_create_kind_t kind)
 		    ERX_HR_INSPECT |
 		    ERX_HR_MAP |
 		    ERX_HR_READ,
+		[ERX_KIND_RESERVED_SPACE] = ERX_HR_CAPS |
+		    ERX_HR_MAP |
+		    ERX_HR_STOP |
+		    ERX_HR_THREADS,
+		[ERX_KIND_RESERVED_THREAD] = ERX_HR_CONFIGURE,
 		[ERX_KIND_ROOT_BUDGET] = ERX_HR_ALLOC |
 		    ERX_HR_CARVE |
 		    ERX_HR_CODE |

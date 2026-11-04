@@ -62,6 +62,14 @@ _Static_assert(ERX_CAP_SLOT_BITS + ERX_CAP_GENERATION_BITS == 64,
     "a capability value is a slot index and a generation");
 _Static_assert(ERX_CAPS_MAX <= CAP_SLOT_MASK, "slot indices fit a value");
 _Static_assert(ERX_CAPS_MAX % ERX_CAP_PAGE_SLOTS == 0, "whole pages");
+_Static_assert((ERX_CAP_SELF & CAP_SLOT_MASK) >= ERX_CAPS_MAX &&
+    (ERX_CAP_SELF_THREAD & CAP_SLOT_MASK) >= ERX_CAPS_MAX,
+    "no slot can bear a reserved value");
+_Static_assert(ERX_CAP_SELF >> ERX_CAP_SLOT_BITS == 0 &&
+    ERX_CAP_SELF_THREAD >> ERX_CAP_SLOT_BITS == 0,
+    "a reserved value holds generation 0");
+_Static_assert(ERX_CAP_SELF != ERX_CAP_SELF_THREAD,
+    "each reserved value names one object");
 
 /* The fields one write gives a slot; the count is the write's own. */
 typedef struct cap_fields {
@@ -82,6 +90,10 @@ static uint32_t		 cap_next(const erx_cap_slot_t *);
 static uint64_t		 cap_generation(const erx_cap_slot_t *);
 static uint32_t		 cap_state(const erx_cap_slot_t *);
 static void		 cap_load(const erx_cap_slot_t *, cap_fields_t *);
+static bool		 cap_self_fields(const erx_cap_self_t *, erx_cap_t,
+			    cap_fields_t *);
+static erx_status_t	 cap_read_slot(const erx_cap_table_t *, uint32_t,
+			    cap_fields_t *);
 static void		 cap_store_fields(erx_cap_slot_t *, const cap_fields_t *);
 static void		 cap_slot_write(erx_cap_slot_t *, const cap_fields_t *);
 static bool		 cap_slot_close(erx_cap_slot_t *, uint64_t);
@@ -458,19 +470,47 @@ erx_cap_table_set_emptied(erx_cap_table_t *table)
 /* The lookup. */
 
 /*
- * A writer holds its count odd only between two stores under the table's
- * lock, so each attempt below waits at most for one write to finish; the
- * attempts repeat for as long as writers keep writing that one slot, so
- * the loop has no fixed bound.
+ * Whether cap is a reserved value that self resolves, and the state of a live
+ * slot it reads as: generation 0, which is what a reserved value holds.
  */
-erx_status_t
-erx_cap_read(const erx_cap_table_t *table, erx_cap_t cap, erx_ktype_t type,
-    uint32_t required, erx_cap_view_t *viewp)
+static bool
+cap_self_fields(const erx_cap_self_t *self, erx_cap_t cap, cap_fields_t *fields)
 {
-	uint32_t index = (uint32_t)(cap.raw & CAP_SLOT_MASK);
-	uint64_t generation = cap.raw >> ERX_CAP_SLOT_BITS;
+	erx_create_kind_t kind;
+	uint64_t object;
+
+	if (self == NULL)
+		return (false);
+	if (cap.raw == ERX_CAP_SELF) {
+		kind = ERX_KIND_RESERVED_SPACE;
+		object = self->space;
+	} else if (cap.raw == ERX_CAP_SELF_THREAD) {
+		kind = ERX_KIND_RESERVED_THREAD;
+		object = self->thread;
+	} else
+		return (false);
+	if (object == 0)
+		return (false);
+	*fields = (cap_fields_t){
+		.object = object,
+		.generation = 0,
+		.rights = erx_kind_default_mask(kind),
+		.type = erx_kind_ktype(kind),
+		.state = ERX_CAP_SLOT_STATE_LIVE,
+	};
+	return (true);
+}
+
+/*
+ * One consistent state of slot index. A writer holds its count odd only
+ * between two stores under the table's lock, so each attempt below waits at
+ * most for one write to finish; the attempts repeat for as long as writers
+ * keep writing that one slot, so the loop has no fixed bound.
+ */
+static erx_status_t
+cap_read_slot(const erx_cap_table_t *table, uint32_t index, cap_fields_t *copy)
+{
 	const erx_cap_slot_t *slot;
-	cap_fields_t copy;
 	uint64_t before, after;
 
 	if (index == 0 || index >= atomic_load_explicit(&table->capacity,
@@ -483,10 +523,32 @@ erx_cap_read(const erx_cap_table_t *table, erx_cap_t cap, erx_ktype_t type,
 			return (ERX_ESTALE);
 		if ((before & 1) != 0)
 			continue;
-		cap_load(slot, &copy);
+		cap_load(slot, copy);
 		after = cap_seq(slot);
 		if (after == before)
-			break;
+			return (ERX_OK);
+	}
+}
+
+/*
+ * A reserved value that self resolves reads as a live slot, so it meets the
+ * same checks as a real one; its index becomes 0, which names no slot.
+ */
+erx_status_t
+erx_cap_read(const erx_cap_table_t *table, const erx_cap_self_t *self,
+    erx_cap_t cap, erx_ktype_t type, uint32_t required, erx_cap_view_t *viewp)
+{
+	uint32_t index = (uint32_t)(cap.raw & CAP_SLOT_MASK);
+	uint64_t generation = cap.raw >> ERX_CAP_SLOT_BITS;
+	cap_fields_t copy;
+	erx_status_t status;
+
+	if (cap_self_fields(self, cap, &copy))
+		index = 0;
+	else {
+		status = cap_read_slot(table, index, &copy);
+		if (status != ERX_OK)
+			return (status);
 	}
 	if (copy.state != ERX_CAP_SLOT_STATE_LIVE ||
 	    copy.generation != generation)
@@ -617,6 +679,9 @@ cap_plan_item(const erx_pass_request_t *request,
 	/* A view is valid only on ERX_OK, so nothing reads it before. */
 	if (sources[i].status != ERX_OK)
 		return (sources[i].status);
+	/* A reserved value names no slot, so there is nothing to pass. */
+	if (view->slot == 0)
+		return (ERX_ESTALE);
 	pass = erx_ktype_pass_mask(view->type);
 	for (j = 0; j < i; j++)
 		if (sources[j].view.slot == view->slot)

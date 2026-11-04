@@ -719,12 +719,14 @@ document's "residual risks accepted" paragraph.
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
 * [Medium] kernel dispatch, the effect loop: `erx_dispatch`, which decodes
   the shape, performs the admission core's actions (`kernel/core/admit.c`)
-  with `erx_cap_lookup`, `erx_object_lock_existence`,
-  `erx_object_lock_existence2` and `erx_object_unlock_existence`, and
+  with `erx_cap_lookup`, `erx_object_lock_existence` and
+  `erx_object_unlock_existence`, and
   calls the handler, lands with the object store those functions belong
-  to, with the build check that only the dispatch takes admission's locks
-  and with `erx_object_lock_existence2`'s refusal of two references to one
-  object; `erx_cap_lookup`'s design signature takes an `erx_rights_t` where
+  to, with the build check that only the dispatch takes admission's lock,
+  with the handlers' `erx_object_lock_existence2`, its refusal of two
+  references to one object and the one wrapper each such handler has, and with `erx_cap_lookup`'s reading of the calling
+  thread's space and thread for `erx_cap_read`'s `erx_cap_self_t`;
+  `erx_cap_lookup`'s design signature takes an `erx_rights_t` where
   the plan and `erx_cap_read` hold a mask, which the loop reconciles. Until
   then the plan and the core are driven only by the host probe of
   `test/fixtures/abi_call_marshal.txt`, since no shipped call takes a
@@ -737,9 +739,26 @@ document's "residual risks accepted" paragraph.
   (`erx_cap_dup`, `erx_cap_close`, `erx_object_destroy`, `erx_object_info`),
   rights that follow a flag (`erx_mem_create_paged`), and typed items in the
   UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
-  `carries_capability?` refuses as a plain aggregate. `ERX_CAP_SELF` and
-  `ERX_CAP_SELF_THREAD` have no value in `abi/*.txt` either
+  `carries_capability?` refuses as a plain aggregate
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
+* [Medium] machine page, `boot_args` has no agreed reader:
+  [design-kernel.md](docs/design-kernel.md#configuration) says the words the
+  kernel did not take reach the root task and the system domain reports an
+  unknown `erx.` key, while [design-system.md](docs/design-system.md#interfaces)
+  says the system domain reads no boot argument. The page is also given to the
+  slot writer and the block driver, which need only the boot value. Recommended:
+  delete the field, and have the kernel report an unknown `erx.` key itself.
+* [Medium] boot records, their writers and readers: the ABI file declares
+  `erx_machine_page`, `erx_device_secret_page` and `erx_boot_root_extension`,
+  and no code writes or reads them yet. The kernel's writers land with the root
+  task's construction. `liberx`'s root-task entry reads them, refuses a boot
+  value and slot outside the pairs the design lists, treats a status outside
+  its enum as no secret, and derives only from a status of present. With it
+  land its fuzz targets, known-answer vectors for both HMACs, and the link
+  check that only the entry's one derivation function reads the device-secret
+  page or references its slot
+  ([design-kernel.md](docs/design-kernel.md#the-root-task),
+  [design.md](docs/design.md)).
 * [Medium] kernel dispatch and stopgap send glue, the retry action: the
   generator gives only a call declared `retry` a handler that takes
   `erx_sys_action_t`. The generated dispatch loop that runs such a call

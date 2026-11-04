@@ -13,6 +13,8 @@
 /* Prefix decoders borrow immutable bytes; references remain untrusted. */
 bool erx_boot_connection_decode(const uint8_t *bytes, size_t length,
     erx_boot_connection_t *result);
+bool erx_boot_root_extension_decode(const uint8_t *bytes, size_t length,
+    erx_boot_root_extension_t *result);
 bool erx_msg_item_decode(const uint8_t *bytes, size_t length,
     erx_msg_item_t *result);
 bool erx_pack_entry_decode(const uint8_t *bytes, size_t length,

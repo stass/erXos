@@ -15,6 +15,8 @@
  *   install T OBJECT TYPE RIGHTS
  *   clear T VALUE OBJECT
  *   read T VALUE TYPE REQUIRED
+ *   self T VALUE TYPE REQUIRED read as a call of a thread of T's space,
+ *                              whose space is object 5a and thread 7b
  *   reserve T N                T's one reservation takes N slots
  *   release T
  *   empty T
@@ -57,6 +59,7 @@ typedef struct driver_table {
 
 static driver_table_t	 tables[2];
 static driver_table_t	 saved[2];
+static const erx_cap_self_t driver_self = { 0x5a, 0x7b };
 static erx_cap_slot_t	 saved_slots[2][DRIVER_PAGES][ERX_CAP_PAGE_SLOTS];
 static unsigned long	 lineno;
 
@@ -231,7 +234,8 @@ driver_pass(const char *line)
 		    &items[i].required) != 5)
 			driver_fail("bad item");
 		memset(&sources[i], 0, sizeof(sources[i]));
-		sources[i].status = erx_cap_read(&from->table, items[i].cap,
+		sources[i].status = erx_cap_read(&from->table,
+		    own != 0 ? &driver_self : NULL, items[i].cap,
 		    ERX_CAP_ANY_TYPE, 0, &sources[i].view);
 	}
 	request.items = items;
@@ -331,9 +335,18 @@ driver_command(const char *line)
 	    &a, &x, &c) == 4) {
 		cap.raw = a;
 		memset(&view, 0, sizeof(view));
-		status = erx_cap_read(&driver_table(t)->table, cap, x,
+		status = erx_cap_read(&driver_table(t)->table, NULL, cap, x,
 		    (uint32_t)c, &view);
 		printf("read %d %" PRIx64 " %" PRIx32 " %" PRIx32 " %" PRIx32
+		    " %" PRIx64 "\n", status, view.object, view.type,
+		    view.rights.bits, view.slot, view.generation);
+	} else if (sscanf(line, "self %x %" SCNx64 " %" SCNx32 " %" SCNx64, &t,
+	    &a, &x, &c) == 4) {
+		cap.raw = a;
+		memset(&view, 0, sizeof(view));
+		status = erx_cap_read(&driver_table(t)->table, &driver_self, cap,
+		    x, (uint32_t)c, &view);
+		printf("self %d %" PRIx64 " %" PRIx32 " %" PRIx32 " %" PRIx32
 		    " %" PRIx64 "\n", status, view.object, view.type,
 		    view.rights.bits, view.slot, view.generation);
 	} else if (sscanf(line, "reserve %x %" SCNx32, &t, &x) == 2) {

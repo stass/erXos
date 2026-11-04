@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/abi_model'
 require_relative '../../tools/lib/erx/abi_emit_c'
+require_relative '../../tools/lib/erx/abi_emit_calls'
 require_relative '../../tools/lib/erx/abi_emit_reader'
 require_relative '../../tools/lib/erx/runner'
 require 'tmpdir'
@@ -281,14 +282,13 @@ class AbiSchemaTest < Minitest::Test
                         waits: 'yes', executor: 'refuse')
   end
 
-  # The dispatch takes at most two existence locks, together; a result is
+  # The dispatch takes at most one existence lock; a result is
   # never looked up, so it cannot hold one.
-  def test_a_call_holds_at_most_two_existence_locks
+  def test_a_call_holds_at_most_one_existence_lock
+    one = "  arg s0 cap space stop register 0 exists\n  arg s1 cap space stop register 1"
+    assert_equal [true, false], call_model(one).fetch(:arguments).map { |argument| argument.fetch(:exists) }
     two = (0..1).map { |slot| "  arg s#{slot} cap space stop register #{slot} exists" }.join("\n")
-    call = call_model(two)
-    assert_equal [true, true], call.fetch(:arguments).map { |argument| argument.fetch(:exists) }
-    three = (0..2).map { |slot| "  arg s#{slot} cap space stop register #{slot} exists" }.join("\n")
-    assert_call_refused(three, /at most two existence locks/)
+    assert_call_refused(two, /at most one existence lock/)
     assert_call_refused('  result made cap space stop register 0 exists', /result cannot hold an existence lock/)
   end
 
@@ -371,17 +371,24 @@ class AbiSchemaTest < Minitest::Test
         pass none
       kind new_space 1 space
         default stop
+      scalar cap u64
     ABI
-    caps = schema(context + "cap new_space 7 new_space\ncap spare 8 new_space optional\n").caps
-    assert_equal({ slot: 7, kind: 'new_space', type: 'space', optional: false }, caps.fetch('new_space'))
+    caps = schema(context + "cap new_space 1 new_space\ncap spare 2 new_space optional\n").caps
+    assert_equal({ slot: 1, kind: 'new_space', type: 'space', optional: false }, caps.fetch('new_space'))
     assert caps.fetch('spare').fetch(:optional)
+    extension = schema(context + "cap second 2 new_space\ncap first 1 new_space\n").types.fetch('erx_boot_root_extension')
+    assert_equal [['first', 0], ['second', 8]], extension.fields.map { |field| [field.name, field.offset] }
+    assert_equal 16, extension.size
     { 'cap self 7 space stop' => /unknown root capability presence stop/,
       'cap self 7 missing' => /undefined root capability kind/,
       'cap self 7 new_space maybe' => /unknown root capability presence/,
       'cap self 0 new_space' => /positive/,
       "cap self 7 new_space\ncap other 7 new_space" => /duplicate root slot/,
       "cap self 7 new_space\ncap self 8 new_space" => /duplicate root capability/,
-      'cap self 7' => /needs a slot, a kind/ }.each do |line, pattern|
+      'cap self 7' => /needs a slot, a kind/,
+      "cap self 1 new_space\ncap other 3 new_space" => /run from 1 without a gap/,
+      'cap self 2 new_space' => /run from 1 without a gap/,
+      "cap self 1 new_space\nlayout erx_boot_root_extension 1 wire_le 8 8\n  field a u64 0" => /duplicate definition/ }.each do |line, pattern|
       error = assert_raises(Erx::ABI::SchemaError) { schema(context + line + "\n") }
       assert_match(pattern, error.message)
     end

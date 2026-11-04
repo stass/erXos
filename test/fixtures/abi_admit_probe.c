@@ -12,10 +12,10 @@
  * of that order, explored over every shape of plan and every failure point
  * (docs/style.md, "Functional core"), so neither the generator nor the
  * machine supplies its own answers. The model refuses a lock taken twice,
- * a release of a lock not held and a finish with a lock still held.
+ * a release of a lock not held and a finish with the lock still held.
  *
- * Trace tokens: lN lookup of position N, k lock of position 0, k+ lock of
- * positions 0 and 1 together, r run, uN release of N, dS done with status S.
+ * Trace tokens: lN lookup of position N, k lock of position 0, r run,
+ * u release of position 0, dS done with status S.
  */
 
 #include <stdbool.h>
@@ -38,12 +38,12 @@
 #define NO_FAILURE	(-1)
 #define FAILURE		(-77)
 
-/* The model of the effects: which positions are locked, and the trace. */
+/* The model of the effects: whether position 0 is locked, and the trace. */
 typedef struct model {
 	const erx_sys_admit_plan_t *plan;
 	int		 fail_at;	/* the action whose effect fails */
 	erx_status_t	 failure;	/* its status */
-	bool		 locked[ERX_SYS_ADMIT_CAPS_MAX];
+	bool		 locked;
 	bool		 broken;	/* a lock or release out of turn */
 	char		 trace[TRACE_MAX];
 } model_t;
@@ -56,15 +56,6 @@ note(char *trace, const char *format, int value)
 	if (used != 0)
 		trace[used++] = ' ';
 	(void)snprintf(trace + used, TRACE_MAX - used, format, value);
-}
-
-static void
-lock(model_t *model, uint32_t position)
-{
-	if (position >= ERX_SYS_ADMIT_CAPS_MAX || model->locked[position])
-		model->broken = true;
-	else
-		model->locked[position] = true;
 }
 
 /* Perform one action and return the status the dispatch reports. */
@@ -85,26 +76,18 @@ perform(model_t *model, const erx_sys_admit_action_t *action, int number)
 		break;
 	case ERX_SYS_ADMIT_LOCK:
 		note(model->trace, "k", 0);
-		if (!fails)
-			lock(model, 0);
-		break;
-	case ERX_SYS_ADMIT_LOCK2:
-		note(model->trace, "k+", 0);
-		if (!fails) {
-			lock(model, 0);
-			lock(model, 1);
-		}
+		if (model->locked)
+			model->broken = true;
+		model->locked = !fails;
 		break;
 	case ERX_SYS_ADMIT_RUN:
 		note(model->trace, "r", 0);
 		break;
 	case ERX_SYS_ADMIT_UNLOCK:
-		note(model->trace, "u%d", (int)action->position);
-		if (action->position >= ERX_SYS_ADMIT_CAPS_MAX ||
-		    !model->locked[action->position])
+		note(model->trace, "u", 0);
+		if (!model->locked)
 			model->broken = true;
-		else
-			model->locked[action->position] = false;
+		model->locked = false;
 		/* A release cannot fail: the machine ignores what comes back. */
 		return (ERX_EBUSY);
 	case ERX_SYS_ADMIT_DONE:
@@ -141,9 +124,8 @@ admits(const erx_sys_shape_t *shape, int fail_at, erx_status_t failure,
 	}
 	status = action.status;
 	note(model.trace, "d%d", (int)status);
-	for (size_t position = 0; position < ERX_SYS_ADMIT_CAPS_MAX; position++)
-		if (model.locked[position])
-			return (false);
+	if (model.locked)
+		return (false);
 	if (strcmp(model.trace, expected) != 0) {
 		printf("trace \"%s\", expected \"%s\"\n", model.trace, expected);
 		return (false);
@@ -166,9 +148,9 @@ decode(uint64_t number, const uint64_t registers[6], erx_sys_shape_t *shape)
 
 /*
  * The order of docs/design-kernel.md, stated over a plan's two counts: the
- * locked lookups, the lock step, the other lookups, the run, the releases,
- * the end. An action at or past fail_at does not happen, except for the
- * releases and the end that the failure itself calls for.
+ * locked lookup, the lock, the other lookups, the run, the release, the
+ * end. An action at or past fail_at does not happen, except for the
+ * release and the end that the failure itself calls for.
  */
 static void
 expected_trace(uint32_t count, uint32_t exists, int fail_at, char *trace)
@@ -179,12 +161,12 @@ expected_trace(uint32_t count, uint32_t exists, int fail_at, char *trace)
 	bool failed = false;
 
 	trace[0] = '\0';
-	for (uint32_t position = 0; position < exists && !failed; position++) {
-		note(trace, "l%d", (int)position);
+	if (exists > 0) {
+		note(trace, "l%d", 0);
 		failed = number++ == fail_at;
 	}
 	if (exists > 0 && !failed) {
-		note(trace, exists == 2 ? "k+" : "k", 0);
+		note(trace, "k", 0);
 		failed = number++ == fail_at;
 		held = !failed;
 	}
@@ -198,8 +180,8 @@ expected_trace(uint32_t count, uint32_t exists, int fail_at, char *trace)
 	}
 	if (failed)
 		status = FAILURE;
-	for (uint32_t position = exists; position > 0 && held; position--)
-		note(trace, "u%d", (int)position - 1);
+	if (held)
+		note(trace, "u", 0);
 	note(trace, "d%d", status);
 }
 
@@ -220,10 +202,9 @@ check_every_shape(void)
 		{ ERX_CALL_ADMIT_1_1, 1, 1 },
 		{ ERX_CALL_ADMIT_2_0, 2, 0 },
 		{ ERX_CALL_SPACE_PAUSE, 2, 1 },
-		{ ERX_CALL_ADMIT_2_2, 2, 2 },
 		{ ERX_CALL_ADMIT_3_0, 3, 0 },
 		{ ERX_CALL_ADMIT_3_1, 3, 1 },
-		{ ERX_CALL_SPACE_COPY, 3, 2 },
+		{ ERX_CALL_SPACE_COPY, 2, 0 },
 	};
 	uint64_t registers[6] = { 0x11, 0x22, 0x33, 0x44 };
 	char expected[TRACE_MAX];
@@ -249,41 +230,60 @@ check_every_shape(void)
 }
 
 /*
- * space_copy declares gate, from (exists), ticket, to (exists): the plan
- * puts the two existence-locked capabilities first. Rights by bit: stop
- * is bit 0, call bit 1, map bit 2.
+ * erx_space_copy(from (MAP, STOP), to (MAP, CAPS), ticket), as
+ * docs/design-kernel.md ("Copying a space") gives it, marks neither space
+ * exists: the dispatch looks both up in declaration order and holds no lock,
+ * and the handler takes both spaces' locks itself with
+ * erx_object_lock_existence2, as its first act. So the machine has no lock
+ * action for it, and a failure at either lookup or in the handler releases
+ * nothing. Rights by bit: stop is bit 0, map bit 2, caps bit 3.
  */
 static int
-check_two_locks(void)
+check_space_copy(void)
 {
-	uint64_t registers[6] = { 0x10, 0x21, 7, 0x32 };
+	uint64_t registers[6] = { 0x21, 0x32, 7 };
 	erx_sys_shape_t shape;
 	erx_sys_admit_plan_t plan;
 
 	CHECK(decode(ERX_CALL_SPACE_COPY, registers, &shape) == 0);
+	CHECK(shape.arguments.space_copy.from.raw == 0x21);
+	CHECK(shape.arguments.space_copy.to.raw == 0x32);
+	CHECK(shape.arguments.space_copy.ticket == 7);
 	CHECK(erx_sys_admit_plan(&shape, &plan) == ERX_OK);
-	CHECK(plan.count == 3 && plan.exists == 2);
-	CHECK(plan.caps[0].raw == 0x21 && plan.types[0] == 1 && plan.rights[0] == 1);
-	CHECK(plan.caps[1].raw == 0x32 && plan.types[1] == 1 && plan.rights[1] == 1);
-	CHECK(plan.caps[2].raw == 0x10 && plan.types[2] == 2 && plan.rights[2] == 2);
-	CHECK(ERX_SYS_POSITION_SPACE_COPY_FROM == 0 && ERX_SYS_POSITION_SPACE_COPY_TO == 1 &&
-	    ERX_SYS_POSITION_SPACE_COPY_GATE == 2);
+	CHECK(plan.count == 2 && plan.exists == 0);
+	CHECK(plan.caps[0].raw == 0x21 && plan.types[0] == 1 && plan.rights[0] == 5);
+	CHECK(plan.caps[1].raw == 0x32 && plan.types[1] == 1 && plan.rights[1] == 12);
+	CHECK(ERX_SYS_POSITION_SPACE_COPY_FROM == 0 && ERX_SYS_POSITION_SPACE_COPY_TO == 1);
 
-	CHECK(admits(&shape, NO_FAILURE, ERX_OK, "l0 l1 k+ l2 r u1 u0 d0"));
+	CHECK(admits(&shape, NO_FAILURE, ERX_OK, "l0 l1 r d0"));
 	CHECK(admits(&shape, 0, ERX_ESTALE, "l0 d-2"));
-	CHECK(admits(&shape, 1, ERX_ETYPE, "l0 l1 d-3"));
-	CHECK(admits(&shape, 2, ERX_ESTALE, "l0 l1 k+ d-2"));
-	CHECK(admits(&shape, 3, ERX_ERIGHTS, "l0 l1 k+ l2 u1 u0 d-4"));
-	CHECK(admits(&shape, 4, ERX_EBUSY, "l0 l1 k+ l2 r u1 u0 d-8"));
+	CHECK(admits(&shape, 1, ERX_ERIGHTS, "l0 l1 d-4"));
 
 	/*
-	 * What the machine does with erx_object_lock_existence2's refusal of
-	 * two values naming one object: nothing held, nothing released. The
-	 * refusal itself is the object store's to test.
+	 * The handler's status is the call's, whichever it is: here
+	 * erx_object_lock_existence2's refusal of two values naming one
+	 * object. The refusal itself is the object store's to test.
 	 */
-	registers[3] = registers[1];
+	registers[1] = registers[0];
 	CHECK(decode(ERX_CALL_SPACE_COPY, registers, &shape) == 0);
-	CHECK(admits(&shape, 2, ERX_EINVAL, "l0 l1 k+ d-1"));
+	CHECK(admits(&shape, 2, ERX_EINVAL, "l0 l1 r d-1"));
+	return (0);
+}
+
+/* One lock: taken after its own lookup, before the others, released last. */
+static int
+check_one_lock(void)
+{
+	uint64_t registers[6] = { 0x10, 0x21 };
+	erx_sys_shape_t shape;
+
+	CHECK(decode(ERX_CALL_SPACE_PAUSE, registers, &shape) == 0);
+	CHECK(ERX_SYS_POSITION_SPACE_PAUSE_SPACE == 0 && ERX_SYS_POSITION_SPACE_PAUSE_GATE == 1);
+	CHECK(admits(&shape, NO_FAILURE, ERX_OK, "l0 k l1 r u d0"));
+	CHECK(admits(&shape, 0, ERX_ESTALE, "l0 d-2"));
+	CHECK(admits(&shape, 1, ERX_ESTALE, "l0 k d-2"));
+	CHECK(admits(&shape, 2, ERX_ERIGHTS, "l0 k l1 u d-4"));
+	CHECK(admits(&shape, 3, ERX_EBUSY, "l0 k l1 r u d-8"));
 	return (0);
 }
 
@@ -342,7 +342,8 @@ check_unsupported(void)
 int
 main(void)
 {
-	if (check_two_locks() != 0 || check_declaration_order() != 0 ||
+	if (check_space_copy() != 0 || check_one_lock() != 0 ||
+	    check_declaration_order() != 0 ||
 	    check_every_shape() != 0 || check_unsupported() != 0)
 		return (1);
 	puts("admission checks passed");

@@ -597,7 +597,8 @@ not, from which the vault's `device` backend derives its sealing secret
 ([design-system.md](design-system.md#the-vault)). At boot, before the
 system domain starts, code in the kernel's boot-only section reads the
 board's key, within 1 s, derives the device secret from it with
-HMAC-SHA-256 under the fixed label the ABI file defines, zeroes the key
+HMAC-SHA-256 keyed by the key, over the ABI file's `device_secret_label`, the
+19 public bytes of the ASCII text `erXos device secret`, zeroes the key
 and every buffer that held it, and writes the secret into the
 **device-secret page**, a page among the root capabilities that `liberx`'s
 root-task entry receives, whose capability carries no right to duplicate
@@ -608,11 +609,23 @@ the direct map leaves out and no allocator receives, and the kernel
 unmaps the section before the system domain starts, so nothing after boot
 reads the key again. A read that misses its deadline leaves that page to
 the firmware: a completion after the deadline writes the key there alone,
-where no mapping and no later use of memory reaches it. On a platform
-without a key, and when the read fails, times out or finds rows never
-programmed, the page carries the ABI file's encoding of none and the
-banner says which, so every platform has the same interface and an
-operator can tell a board never provisioned from a read that failed:
+where no mapping and no later use of memory reaches it. The page's layout
+is the ABI file's `erx_device_secret_page_t`, 40 bytes, and the rest of the
+page is zero:
+
+| Offset | Field | Holds |
+| --- | --- | --- |
+| 0 | `status`, u32 | `ERX_DEVICE_SECRET_STATUS_PRESENT` (1), `_NO_KEY` (2), a platform without a key; `_NEVER_PROVISIONED` (3), rows never programmed; or `_READ_FAILED` (4), a read that failed or timed out |
+| 4 | 4 bytes | zero |
+| 8 | `secret`, 32 bytes | the device secret when the status is present, and zero otherwise |
+
+A zero status is outside the enum, so a page the kernel never wrote reads as
+no secret. The layout is a shared one, read through the page's own mapping,
+so no generated decoder copies the secret into a frame the root-task entry
+could not zero. The banner prints the status, so every platform has the same
+interface and an operator can tell a board never provisioned from a read
+that failed. The device secret itself appears in no log, banner, crash record
+or inspection record. The platforms' keys are:
 
 * **On the Raspberry Pi boards** the key is the board's device-specific
   private key in OTP: 256 bits on the Pi 4, and the first 256 of the Pi

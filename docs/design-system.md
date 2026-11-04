@@ -681,14 +681,19 @@ reaches when the boot information page carries `ERX_BOOT_ROOT`
    record's deadline and nothing else; the domain service's NIF module,
    `erx_domain_lib`, enters the library from dirty CPU schedulers under
    the library's lock, since no entry of the library waits.
-4. **Derives the sealing secret** from the device-secret page with
-   HMAC-SHA-256 under the fixed label the ABI file defines, writes it into
+4. **Derives the sealing secret** when the device-secret page's status is
+   present, with HMAC-SHA-256 keyed by the device secret, over the ABI file's
+   `sealing_secret_label`, the 20 public bytes of the ASCII text
+   `erXos sealing secret`, and writes it into
    the **sealing page**, a memory object of the root budget that the
    library keeps and maps into the vault's domain alone
-   ([The vault](#the-vault)), then unmaps and closes the device-secret page
+   ([The vault](#the-vault)). With any other status, one outside the enum
+   included, it derives nothing and makes no sealing page, so the zero bytes of
+   the page never become a secret, and the vault's `device` backend answers
+   `unavailable`. Either way it then unmaps and closes the device-secret page
    and zeroes its own buffers with stores the compiler cannot remove. From
    then on the system domain's memory holds neither the device secret nor
-   the sealing secret: it holds a capability to a page it does not map.
+   the sealing secret: it holds at most a capability to a page it does not map.
 5. **Slices the boot image** for the system release with `erx_image_slice`
    and the `SYSTEM` right, maps the slice read-only, and completes the
    boot information page the kernel gave it, in the layout every domain
@@ -2504,7 +2509,9 @@ as for any service ([design-domains.md](design-domains.md#facets)).
     into the sealing page and then closes the device-secret page, and the
     domain library maps the sealing page read-only into the vault's domain
     alone, keeping no mapping of its own ([The root task](#the-root-task)),
-    so after boot neither secret is in the system domain's memory. A
+    so after boot neither secret is in the system domain's memory. On a
+    machine without a device secret there is no sealing page, so `seal_addr`
+    is zero and `start/1` answers `unavailable`. A
     medium read away
     from the board then yields no guess without the board's key, and a
     slot forged without it does not open. Code in kernel mode on the board
@@ -3256,8 +3263,9 @@ under test ran.
   fresh installation over a TPM an earlier installation provisioned serves
   logins, offers the clear at the console, and after it provisions the TPM
   as at a first start. On each board, under `device`: a file copied to
-  another board opens no slot, and a board whose key was never provisioned
-  has no device secret.
+  another board opens no slot, and a board whose key was never provisioned,
+  or whose read failed, has no device secret and no sealing page, and its
+  vault answers `unavailable`.
 * **Identifiers:** `erx_ident`'s property test against a reference
   regular expression, with every byte value at every position and
   lengths 0, 1, 63 and 64; the build check seeded with a record built

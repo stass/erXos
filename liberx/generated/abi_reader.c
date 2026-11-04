@@ -69,6 +69,31 @@ erx_boot_connection_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_boot_root_extension_decode(const uint8_t *bytes, size_t length,
+    erx_boot_root_extension_t *result)
+{
+	erx_boot_root_extension_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_BOOT_ROOT_EXTENSION_SIZE)
+		return (false);
+
+	value.root_budget.raw = erx_abi_load_u64(bytes + 0);
+	value.root_group.raw = erx_abi_load_u64(bytes + 8);
+	value.system_group.raw = erx_abi_load_u64(bytes + 16);
+	value.root_resource.raw = erx_abi_load_u64(bytes + 24);
+	value.boot_image.raw = erx_abi_load_u64(bytes + 32);
+	value.time_page.raw = erx_abi_load_u64(bytes + 40);
+	value.self_space.raw = erx_abi_load_u64(bytes + 48);
+	value.self_thread.raw = erx_abi_load_u64(bytes + 56);
+	value.device_secret.raw = erx_abi_load_u64(bytes + 64);
+	value.machine_page.raw = erx_abi_load_u64(bytes + 72);
+	value.previous_crash.raw = erx_abi_load_u64(bytes + 80);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_msg_item_decode(const uint8_t *bytes, size_t length,
     erx_msg_item_t *result)
 {

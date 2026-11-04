@@ -357,9 +357,9 @@ module Erx
         end
         waits = properties.fetch('waits') == 'yes'
         [arguments, results].each { |parameters| validate_locations(parameters, declaration) }
-        # The dispatch takes at most two existence locks, together, and a
+        # The dispatch takes at most one existence lock, and a
         # result is returned to the caller, never looked up.
-        declaration.fail!('a call holds at most two existence locks') if arguments.count { |argument| argument.fetch(:exists) } > 2
+        declaration.fail!('a call holds at most one existence lock') if arguments.count { |argument| argument.fetch(:exists) } > 1
         declaration.fail!('a result cannot hold an existence lock') if results.any? { |result| result.fetch(:exists) }
         validate_executor(executor, arguments, waits: waits)
         if retry_lookup && !(waits && arguments.any? { |argument| argument[:object] })

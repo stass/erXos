@@ -192,7 +192,7 @@ module Erx
       end
 
       # The capability arguments in the order the dispatch admits them:
-      # those whose existence lock the call holds, then the rest, each in
+      # the one whose existence lock it holds, if any, then the rest, in
       # declaration order (docs/design-kernel.md, "System-call dispatch").
       def admission_order(call)
         capabilities = call.fetch(:arguments).select { |argument| argument[:object] }
@@ -204,8 +204,8 @@ module Erx
         positions = [schema.calls.values.map { |call| admission_order(call).size }.max, 1].max
         ['/*',
          ' * A decoded shape\'s capability arguments in the one order the dispatch',
-         ' * admits them: first those whose existence lock the call holds, then',
-         ' * the rest, each in declaration order, with the object type and the',
+         ' * admits them: first the one whose existence lock it holds, if any,',
+         ' * then the rest, in declaration order, with the object type and the',
          ' * rights each lookup checks. A plan holds values, not authority: a value',
          ' * reaches an object only through a lookup that checks the same type and',
          ' * rights. Each ERX_SYS_POSITION_<CALL>_<ARGUMENT> names an argument\'s',
@@ -216,7 +216,7 @@ module Erx
          'typedef struct erx_sys_admit_plan erx_sys_admit_plan_t;',
          'struct erx_sys_admit_plan {',
          "\tuint32_t\tcount;\t\t/* capability arguments */",
-         "\tuint32_t\texists;\t\t/* the first ones existence-locked: 0 to 2 */",
+         "\tuint32_t\texists;\t\t/* 1: position 0 is existence-locked; else 0 */",
          "\terx_cap_t\tcaps[ERX_SYS_ADMIT_CAPS_MAX];",
          "\tuint32_t\ttypes[ERX_SYS_ADMIT_CAPS_MAX];\t/* ERX_K_* */",
          "\tuint32_t\trights[ERX_SYS_ADMIT_CAPS_MAX];\t/* the rights required */",
