@@ -1,4 +1,3 @@
-// Modified by erXos: erXos's system-call trap reaches its glue.
 INTERFACE [arm]:
 
 class Trap_state;
@@ -702,8 +701,6 @@ Thread::ex_regs_arch(Mword ops)
 //-----------------------------------------------------------------------------
 IMPLEMENTATION [arm && arm_esr_traps]:
 
-#include "erx_syscall.h"
-
 EXTENSION class Thread
 {
   static void arm_esr_entry(Trap_state *ts) asm ("arm_esr_entry");
@@ -749,14 +746,7 @@ Thread::arm_esr_entry(Trap_state *ts)
     case 0x12: // HVC instruction execution on AArch32
     case 0x15: // SVC instruction execution on AArch64
     case 0x16: // HVC instruction execution on AArch64
-      // erXos's kernel call: its own trap immediate, from a thread that runs
-      // normally. Fiasco's own calls and its alien and vCPU-user states stay
-      // on Fiasco's path.
-      if (esr.ec() == 0x15 && !(state & (Thread_vcpu_user | Thread_alien))
-          && Erx_syscall::is_call(esr.raw()))
-        Erx_syscall::enter(ts);
-      else
-        current_thread()->handle_svc(ts);
+      current_thread()->handle_svc(ts);
       return;
 
     case 0x00: // Unknown reason, undefined opcode with HCR.TGE=1

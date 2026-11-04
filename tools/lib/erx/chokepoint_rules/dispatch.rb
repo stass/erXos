@@ -26,7 +26,8 @@ module Erx
         # A second caller could name another space's number and rate state.
         Chokepoints::Forbidden.new(
           name: 'dispatch-one-caller',
-          rule: 'each kernel has one trap handler, the one code that names the caller of erx_dispatch',
+          rule: 'each kernel, and each backend that runs the cores without one, has one code that names the ' \
+                'caller of erx_dispatch',
           design: "#{KERNEL}#system-call-dispatch",
           scope: ERXOS_C,
           pattern: /\berx_dispatch\b/,
@@ -35,6 +36,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'include/erx/core/dispatch.h'),
                   Chokepoints::Site.new(glob: 'fiasco/kernel/src/erx/erx_syscall.cpp'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/dispatch_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/dispatch_fuzz.c')],
           seed: { 'fiasco/kernel/src/erx/seeded.cpp' => "void f() { erx_dispatch(0, 0, 0, 0); }\n" }

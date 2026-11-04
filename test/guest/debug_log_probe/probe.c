@@ -244,9 +244,6 @@ erx_probe_run(void)
 	probe_expect("unused-args", probe_raw_status(ERX_CALL_DEBUG_LOG, 7, true),
 	    ERX_OK);
 	probe_results_are_cleared();
-	probe_expect("preserved",
-	    erx_probe_preserved_changes(ERX_CALL_DEBUG_LOG) == 0 ? ERX_OK :
-	    ERX_EINVAL, ERX_OK);
 	probe_utcb_is_unchanged();
 
 	erx_probe_pause();

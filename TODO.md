@@ -77,6 +77,31 @@ it; git history is the record of completed work.
 * [Medium] stopgap, untested glue paths: `erx_log_lock` has never run under
   contention, since the probe has one thread and no call makes another, and
   nothing exercises the alien and vCPU-user guard in `Thread::arm_esr_entry`.
+* [Medium] stopgap, `erx_debug_log` on the target: until the root service
+  lands, `liberx/backend/fiasco/log.c` runs the kernel's dispatch core in the
+  root task with one static public UTCB, a hand-written copy of the generated
+  stub, and `liberx/backend/fiasco/arch/aarch64/generated/trap.c` and `utcb.c`
+  have no consumer; the service's request stub replaces them. The probe's
+  calls run the same core in process on both backends, so its transcript shows
+  the console path, the clock and the cross-compiled core, not a kernel entry.
+  The test that a call keeps the caller's registers left with the trap route
+  and returns with the `erx` backend's kernel.
+* [Low] stopgap, `fiasco/kernel/src/erx/erx_probe.cpp` and `erx_syscall.cpp`
+  are reference text for erXos's kernel, out of the build: `erx_syscall.cpp`
+  names `Space::erx_log`, which is gone, so it no longer compiles.
+  `tools/lib/erx/glue_imports.rb`'s `OUT_OF_BUILD` repeats
+  `Modules.generic` by hand.
+* [Medium] stopgap, native boot's seeded failures: `user_ptr` left 0, the
+  archive's sub-type removed and shutdown removed were each run by hand and
+  failed as [the verification table](docs/design-stopgap.md#verification) says;
+  nothing in the tree repeats them, as `check-qemu-mutant` does for the debug
+  log, and nothing shows that a write to the archive faults.
+* [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
+  from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
+  Settle both with the `erx_machine_end` case.
+* [Low] stopgap, `ERX_ROOT_KIP_WINDOW` and `root.ld`'s load address in
+  `liberx/backend/fiasco` fit QEMU `virt` only; they move to the platform layer
+  with the Raspberry Pi 4.
 * [Medium] kernel, `kernel/core/debug_log.c` keeps the ring and its console
   buffers in file statics, and `tools/fuzz/dispatch_fuzz.c` a static UTCB and
   rate, so a fuzz crash can depend on earlier inputs. Make the log an object
@@ -86,9 +111,8 @@ it; git history is the record of completed work.
   `_ZN13Irq_chip_soft7sw_chipE` on or off the list and fail the build.
 * [Medium] stopgap, the debug-log probe's report: `tools/erx check-debug-log`
   compares its own transcript, because the conformance guest's protocol
-  needs lines that start with `erx-test:` and a guest that ends the machine,
-  and a program's only output here is a log record with the kernel's prefix
-  and no call ends the machine. `debug_log.statuses` stays `pending` in the
+  needs lines that start with `erx-test:`, and a program's only output here
+  is a log record with the kernel's prefix. `debug_log.statuses` stays `pending` in the
   roster until the conformance guest can report.
 
 ## Bugs by subsystem
@@ -739,6 +763,20 @@ it; git history is the record of completed work.
   gives them values from `erx_pool_plan` (`docs/design-kernel.md`) and a
   reader in erXos's kernel, and settles where `kip_size` and the kernel's
   alignment live; they are limits of `abi/erx_abi.txt` today.
+* [Medium] stopgap boot, `kernel/core/boot_place.c`: `bootstrap` places two
+  entries the target design does not have, `boot/sigma0` and `boot/stopgap-root`,
+  because the kernel still starts sigma0 and a root task from its information
+  page; sigma0 pages that root with read, write and execute over its
+  whole range, since one range cannot tell its segments apart, gaps between
+  segments included, which nothing zeroes. Delete both roles, their ABI paths and the record of the recipe in
+  `tools/lib/erx/boot_image.rb` when the kernel maps the root task from the
+  startup plan. `tools/lib/erx/boot_image.rb` builds on the structural fixture's
+  unadmitted manifest until production packing lands.
+* [Medium] stopgap boot, `kernel/core/boot_place.c`: the handoff record's
+  `pool_usable`, `pool_heap` and `pool_regions` are zero and `kmemsize` keeps
+  Fiasco's default until `erx_pool_plan` and `abi/backend/fiasco.txt` land; the
+  kernel does not read them yet. `kip_size` and the kernel's alignment are limits
+  of `abi/erx_abi.txt` until that backend file exists to hold them.
 * [Medium] stopgap boot, `fiasco/bootstrap/server/src/init_kip.cc`: `init_kip_md`
   writes the memory descriptors at the offset the kernel image's information page
   names, unchecked against the view's size or its count, though
@@ -805,7 +843,7 @@ it; git history is the record of completed work.
   `Attribution`'s parser instead.
 * [Medium] build, stopgap glue: the design compiles the glue with GCC's
   `-fstack-usage` and checks it (B2, B3, B9, B11, the import allowlist);
-  `fiasco/kernel/src/erx/erx_probe.cpp`, the one glue module, gets only
+  `fiasco/kernel/src/erx/erx_handoff.cpp`, the one glue module built, gets only
   `ERX_GLUE_CXXFLAGS` (`fiasco/kernel/src/Makeconf`). The glue checks
   package adds the flag beside the include path.
 * [Medium] stopgap kernel, FP state: the fork switches FP state eagerly,
@@ -1034,7 +1072,7 @@ document's "residual risks accepted" paragraph.
   closes the include-path gap the text rules cannot see, an `-I` flag
   reaching l4sys's headers); the linked-kernel call-site reader the raw
   allocator and pmem converter rules need; the glue-imports allowlist over
-  the glue's GCC objects (`erx_probe.cpp` already exists, and its imports
+  the glue's GCC objects (`erx_handoff.cpp` already exists, and its imports
   are unchecked until then); the vector route; and the syntax-tree rule of
   the budgets' counters. Each fails the check as soon as a file
   it awaits lands, except the files it lists as existing: the budgets' rule

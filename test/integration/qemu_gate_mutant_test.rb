@@ -8,21 +8,21 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/debug_log_probe'
 require_relative '../../tools/lib/erx/qemu_gate'
 
-# Proves the QEMU gate fails when the kernel's result for a call breaks. The
-# probe guest is built from a copy of the sources in which the user-side trap
-# stub asks the kernel for one byte more than a full message holds, so
-# the real kernel on QEMU answers differently while the hosted backend, which
-# does not use that stub, still agrees with the expected transcript. A control
-# run of an unmutated copy must pass, so the failure is the mutation's.
+# Proves the QEMU gate fails when a call's result on the target breaks. The
+# probe guest is built from a copy of the sources in which the Fiasco backend's
+# native call asks for one byte more than a full message holds, so the guest
+# on QEMU answers differently while the hosted backend, which does not use that
+# code, still agrees with the expected transcript. A control run of an
+# unmutated copy must pass, so the failure is the mutation's.
 #
 # Needs ERX_CLANG and ERX_LLD (the run builds the kernel), and boots QEMU under TCG, so
 # `make check` excuses it (STANDALONE_INTEGRATION_TESTS in tools/erx) and
 # `make check-qemu-mutant` runs it. A missing tool is a failure, not a skip.
 class QemuGateMutantTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  STUB = 'liberx/backend/fiasco/arch/aarch64/generated/trap.c'
-  CALL = '(uint64_t)(uint32_t)len.raw;'
-  MUTANT = '(uint64_t)(uint32_t)len.raw + (len.raw == 504);'
+  STUB = 'liberx/backend/fiasco/log.c'
+  CALL = '{ (uint64_t)len.raw };'
+  MUTANT = '{ (uint64_t)len.raw + (len.raw == 504) };'
   COPIED = %w[include kernel liberx test].freeze
 
   def source_copy(directory, mutate:)
@@ -31,7 +31,7 @@ class QemuGateMutantTest < Minitest::Test
 
     path = File.join(directory, STUB)
     text = File.read(path)
-    assert_includes text, CALL, 'the trap stub changed shape; update the mutation'
+    assert_includes text, CALL, 'the native call changed shape; update the mutation'
     File.write(path, text.sub(CALL, MUTANT))
   end
 

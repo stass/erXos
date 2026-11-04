@@ -4,58 +4,39 @@
  */
 
 /*
- * The debug-log probe as a guest program on the stopgap kernel: the root task,
- * freestanding, with the kernel's call as its only service. After the cases it
- * spins, and the harness ends the guest at the "probe end" line.
+ * The debug-log probe as the root task on Fiasco, over the backend's native
+ * path: a raw call runs the kernel's dispatch core in this task, and each
+ * record reaches the console through the kernel's log object. After the cases
+ * the machine powers off.
  */
 
-#include <stddef.h>
 #include <stdint.h>
 
+#include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/log.h"
 #include "probe.h"
 
-void *memcpy(void *, const void *, size_t);
-void *memset(void *, int, size_t);
-void erx_probe_main(void);
+void erx_fiasco_root_main(void);
 
-/* The compiler may call these for a structure copy or an initializer. */
-void *
-memcpy(void *target, const void *source, size_t length)
+void
+erx_probe_raw_call(uint64_t number, const uint64_t args[ERX_TRAP_ARG_COUNT],
+    uint64_t results[ERX_TRAP_RESULT_COUNT])
 {
-	volatile uint8_t *to = target;
-	const uint8_t *from = source;
-
-	while (length-- > 0)
-		*to++ = *from++;
-	return (target);
-}
-
-void *
-memset(void *target, int value, size_t length)
-{
-	volatile uint8_t *to = target;
-
-	while (length-- > 0)
-		*to++ = (uint8_t)value;
-	return (target);
+	erx_fiasco_call(number, args, results);
 }
 
 void
 erx_probe_pause(void)
 {
-	uint64_t frequency, start, now;
+	uint64_t start = erx_fiasco_clock_ns();
 
-	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
-	__asm__ volatile("mrs %0, cntvct_el0" : "=r"(start));
-	do {
-		__asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
-	} while (now - start < frequency + frequency / 5);
+	while (erx_fiasco_clock_ns() - start < UINT64_C(1200000000))
+		continue;
 }
 
 void
-erx_probe_main(void)
+erx_fiasco_root_main(void)
 {
 	erx_probe_run();
-	for (;;)
-		__asm__ volatile("yield");
+	erx_fiasco_machine_off();
 }

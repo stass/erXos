@@ -18,6 +18,9 @@ module Erx
     MAX_ALLOWLIST_BYTES = 1 << 20
     # The linker's own helpers and the cores' interface need no entry.
     IMPLICIT = /\A(?:erx_[a-z0-9_]{1,1000}|__stack_chk_[a-z]{1,16})\z/
+    # The kernel-call route: its sources stay, and Fiasco's Modules.generic
+    # builds neither (docs/design-stopgap.md, "Boot handoff").
+    OUT_OF_BUILD = %w[erx_probe.cpp erx_syscall.cpp].freeze
     Entry = Data.define(:symbol, :effect, :file)
 
     module_function
@@ -54,10 +57,13 @@ module Erx
       end.uniq.freeze
     end
 
+    # The glue a kernel build holds, of the files in its directory.
+    def built_glue(names) = (names - OUT_OF_BUILD).sort.freeze
+
     # The effect: reads each glue object of a kernel build and refuses it.
     def check(source:, allowlist:, objects:, runner:, env: {})
       entries = parse(BoundedFile.read(allowlist, maximum: MAX_ALLOWLIST_BYTES))
-      undefined = Dir.glob('*.cpp', base: File.join(source, GLUE)).sort.to_h do |name|
+      undefined = built_glue(Dir.glob('*.cpp', base: File.join(source, GLUE))).to_h do |name|
         object = File.join(objects, "#{File.basename(name, '.cpp')}.o")
         raise Error, "glue object not built: #{object}" unless File.file?(object)
 

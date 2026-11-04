@@ -138,13 +138,8 @@ module Erx
 
   class Qemu
     BANNER = [
-      { name: 'fiasco-banner', pattern: /Welcome to the L4Re Microkernel!\r?\n/n,
-        seconds: 30 }.freeze,
+      { name: 'erxos-banner', pattern: /erXos\r?\n/n, seconds: 30 }.freeze,
       { name: 'development-warning', pattern: /development build: trusted code only\r?\n/n,
-        seconds: 30 }.freeze,
-      # The kernel's call into the C17 cores' archive and the core's answer
-      # (fiasco/kernel/src/erx/erx_probe.cpp).
-      { name: 'core-probe', pattern: /erx: C17 core probe: erx\.watchdog=2,5,60 is valid: 2,5,60\r?\n/n,
         seconds: 30 }.freeze
     ].freeze
 
@@ -163,7 +158,11 @@ module Erx
       @program = program
     end
 
-    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil)
+    # With machine_end the guest must end the machine itself: the run lasts
+    # until QEMU exits, and a guest still running at the deadline fails it, as
+    # does one that exits before its transcript is complete. Otherwise the
+    # harness ends the guest at the last checkpoint.
+    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false)
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
@@ -181,8 +180,11 @@ module Erx
         version = @runner.run([@program, '--version'], name: 'qemu-version', deadline: 10)
         report['qemu_version'] = File.binread(version.fetch('log')).lines.first.to_s.strip
         guest_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @runner.run(argv, name: "qemu-#{accel}", deadline: deadline,
-                    success: ->(_log) { matcher.consume(serial, elapsed: elapsed(guest_started)) })
+        stop_guest = lambda do |_log|
+          transcript_whole = matcher.consume(serial, elapsed: elapsed(guest_started))
+          transcript_whole && !machine_end
+        end
+        @runner.run(argv, name: "qemu-#{accel}", deadline: deadline, success: stop_guest)
         matcher.drain(serial, elapsed: elapsed(guest_started))
         raise Error, 'QEMU exited before completing its transcript' unless matcher.done?
         report['state'] = 'passed'

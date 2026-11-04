@@ -131,22 +131,25 @@ Inherited code reads no executable and no modules.
    region. A refusal prints `erXos image: <where>: <reason>` and stops, having copied nothing.
 3. `apply` reserves the whole archive first, unmoved and never released, then the images, then
    copies. The archive so reaches `init_kip_md` whole. A `Region::Root` region's sub-type is what
-   `sigma0` may page to the root (`init_mem.cc:73`): `Root_section_rwx` for the root's image,
-   whose segments one range cannot tell apart, and `Root_section_ro` for the archive.
+   `sigma0` answers a page fault of the root with (`init_mem.cc:73`, `memmap.cc:170-176`):
+   `Root_section_rwx` for the root's image, whose segments one range cannot tell apart, and
+   `Root_section_ro` for the archive.
 4. `erx_boot_handoff_write` writes the `erx_boot_handoff` record of `abi/kernel.txt` (flags, build
    identifier, index hash, the archive's range, and `/chosen/bootargs` cut at the last whole word)
    into the options block for the kernel. That block is mapped into no task, so it also writes the
-   record into the **handoff page**, a free page from `mem_manager->find_free_ram`, reserved as
-   `Region::Root` with `Root_section_ro`. The record's pool fields stay zero, with no reader.
+   record, by `erx_image_load`, into the **handoff page**, a free page from
+   `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
+   refuses the boot, after the copy. The record's pool fields stay zero, with no reader.
 5. `init_kip_infos` assigns the page's address to the kernel information page's `user_ptr`
    (`init_kip.cc:30`), which `boot_info_t` carries there.
 
-**The kernel.** Its options are a constant, `Fiasco::KERNEL_OPTIONS` (`fiasco.rb:67`), built into
+**The kernel.** Its options are a constant, `Fiasco::KERNEL_OPTIONS` (`fiasco.rb`), built into
 `bootstrap`, with neither `-serial_esc` nor `-serial_input`, and it is built without JDB. Its own
 changes are `erx_handoff.cpp`: it accepts the record, prints the banner (`development build: trusted
 code only`, the build identifier, the index hash) and panics if no bootloader descriptor covers the
 archive. The fork's kernel-call route, `erx_probe` and `erx_syscall`, is out of its build
-(`Modules.generic:112`). It starts `sigma0` and then the root (`std_workload.cpp`), with capabilities
+(`Modules.generic:112`), and its sources stay in `fiasco/kernel/src/erx/` for erXos's kernel to draw on. It
+greets as erXos (`kip.cpp`). It starts `sigma0` and then the root (`std_workload.cpp`), with capabilities
 at `L4_BASE_TASK_CAP`, `L4_BASE_FACTORY_CAP`, `L4_BASE_THREAD_CAP`, `L4_BASE_PAGER_CAP` (a gate to
 `sigma0`), `L4_BASE_LOG_CAP`, `L4_BASE_ICU_CAP` (also the platform control object) and
 `L4_BASE_SCHEDULER_CAP`; a stack pointer of 0; one page of UTCB slots (`std_workload.cpp:95`);
@@ -156,10 +159,12 @@ Fiasco's default priority, on the boot CPU.
 service's bodies directly.
 
 1. Sets its stack, inside its image. Touching it faults to `sigma0`, which maps it one to one.
-2. Maps the kernel information page with `l4sigma0_map_kip`, and from `user_ptr` the handoff page,
-   and accepts the record with `erx_boot_handoff_accept`.
-3. Maps its whole image, and the archive read-only, at their physical addresses with
-   `l4sigma0_map_mem`. After this step no page of the root is mapped on demand.
+2. Maps the kernel information page with `l4sigma0_map_kip`, reads the handoff page at `user_ptr`
+   through a page fault, and accepts the record with `erx_boot_handoff_accept`.
+3. Maps its whole image at its physical addresses with `l4sigma0_map_mem`, and touches each page of
+   the archive, so the fault path maps it read-only by its sub-type: `l4sigma0_map_mem` is `sigma0`'s
+   RAM request, which maps read, write and execute whatever the sub-type says (`memmap.cc:125`). After
+   this step no page of the root is mapped on demand.
 4. Reads the manifest through its generated C reader, which allocates nothing. Later steps take
    device entries, wall offset, seed and watchdog period from it.
 5. Builds the pool window and contiguous pools ([The pool](#the-pool)).
@@ -691,8 +696,9 @@ the tests.
 
 | Case | Seeded failure, and what it shows |
 | --- | --- |
-| **Image and banner.** `tools/erx check-boot-image`: the banner image, the two-file form, and the damage cases, each refusing with its reason | a damaged entry that boots fails the case |
-| **Native boot.** The root accepts the record through `user_ptr`, reads the archive's last entry, writes one line through `l4_vcon_write`, and shuts down | shutdown removed: the deadline fires. `user_ptr` left 0: the root's accept refuses. The archive's sub-type removed: `sigma0` refuses the map |
+| **Image and banner.** `tools/erx check-boot-image` and the QEMU gate's `boot_image` suite: the banner image, the two-file form, and the damage cases, each refusing with its reason | a damaged entry that boots fails the case |
+| **Native boot.** The QEMU gate's `native_boot` suite: the root accepts the record through `user_ptr`, checks the archive's last entry, writes one line through `l4_vcon_write`, and shuts down, so QEMU exits by itself | shutdown removed: the deadline fires. `user_ptr` left 0: the root's accept refuses. The archive's sub-type removed: `sigma0` refuses the page fault and the root's line never comes |
+| **Debug log.** `tools/erx check-debug-log` and the gate's `debug_log` suite: the probe's calls, good and malformed, on the hosted backend and as the root over the native path to `l4_vcon_write`, compared record by record | `make check-qemu-mutant`: the native call asks for one byte more than a full message, and only the target's transcript differs |
 | **Memory**, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros |
 | **Protection**, in a test task: a page of code runs in RX; a write in RX and a run in RW each give the expected fault | the drop step skipped: Fiasco adds rights, so the write succeeds and its fault is missing |
 | A stack through `PROT_NONE` then RW; a refused protect, with the pool short, changes nothing | commit on access change removed: a fault. Plan applied page by page: the first page changed |
@@ -738,18 +744,13 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
-`tools/erx check-boot-image` and `check-debug-log` have run the load plan, the region reservations, the banner, the descriptor check and `sigma0`'s paging of the root's image, under TCG and
-HVF at 1 and 4 CPUs. Everything below was read at the cited lines and has not been executed.
-
-**The native boot package:**
-
-* `user_ptr` reaches the root unchanged, and `sigma0` pages the archive and handoff page read-only by their sub-type: `init_kip.cc:30,80-82`, `init_mem.cc:71-77`.
-* `l4_vcon_write`, the ICU capability as platform control object, and shutdown, including power-off, on QEMU `virt`: `platform_control_object.cpp:9,31,88`, `irq_controller.cpp:76`.
-* `l4sys` links against freestanding musl: `ipc.h:25-26`. The configuration names for no JDB: `koptions-def.h`, `config.cpp:278-282`.
-* Console behaviour under TCG and HVF without `-serial_esc`: `vlog.cpp`, `irq_chip_generic.cpp:77-81`.
+The gate's `boot_image`, `native_boot` and `debug_log` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
+handoff page and of the archive, `user_ptr`, `l4_vcon_write` and power-off, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
+`libsigma0.a` linked freestanding. Everything below was read at the cited lines and has not been executed.
 
 **The memory package:**
 
+* `l4sigma0_map_mem` maps read, write and execute whatever a region's sub-type: `memmap.cc:125`.
 * `l4_task_map` accepts the root as sender and receiver, and a second map raises rights: `lock_guard.cpp:245-256`, `mapdb.cpp`, `map_util.cpp:640-660,715-770`, `mem_space-arm.cpp:241-270`.
 * A window superpage is a parent of page mappings, and unmapping a child leaves it: `map_util.cpp`, `to_fit_size`.
 * `l4_task_unmap` of one right leaves the rest, and `L4_FP_OTHER_SPACES` keeps the window's mapping: `task.h:101-135`, `consts.h:200-222`; `fpage_unmap`'s memory path not read.
@@ -766,6 +767,8 @@ HVF at 1 and 4 CPUs. Everything below was read at the cited lines and has not be
 
 **Later packages:**
 
+* `l4sys` links beside musl, in the root's start path: `ipc.h:25-26`.
+* The UART's receive line stays free for the driver without `-serial_esc`: `config.cpp:278-282`, `irq_chip_generic.cpp:77-81`.
 * A bound line stays masked until `l4_irq_unmask`, and a software trigger arrives with the bound label: `irq.h` only; `irq.cpp` not read.
 * `enif_send` from a dirty NIF's callback, and its report of a dead receiver: `erl_nif.c:883`.
 * Fiasco's boot is deterministic under instruction counting, with medium confidence: its delay calibration and timer setup are unread.

@@ -5,7 +5,7 @@
 
 /*
  * The debug-log probe on the hosted backend: a raw call is erx_hosted_call,
- * which runs the kernel's dispatch, and no registers exist to change.
+ * which runs the kernel's dispatch.
  */
 
 #include <stdint.h>
@@ -19,16 +19,6 @@ erx_probe_raw_call(uint64_t number, const uint64_t args[ERX_TRAP_ARG_COUNT],
     uint64_t results[ERX_TRAP_RESULT_COUNT])
 {
 	erx_hosted_call(number, args, results);
-}
-
-uint64_t
-erx_probe_preserved_changes(uint64_t debug_log_number)
-{
-	uint64_t args[ERX_TRAP_ARG_COUNT] = { 0 };
-	uint64_t results[ERX_TRAP_RESULT_COUNT];
-
-	erx_hosted_call(debug_log_number, args, results);
-	return (0);
 }
 
 void

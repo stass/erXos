@@ -19,7 +19,7 @@ module Erx
   module BootImageCheck
     MEMORY_MIB = 512
     SERIAL_BYTES = 16 * 1024 * 1024
-    KERNEL_LINE = /Welcome to the L4Re Microkernel!/n
+    KERNEL_LINE = /erXos\r?\n/n
     # The header's offsets are the format's, which a literal keeps independent
     # of the writer under test, as test/fixtures/pack_fixture.rb does.
     HEADER_VERSION = 8
@@ -156,8 +156,8 @@ module Erx
       # Every accelerator and CPU count on the good images, each form; the damage
       # cases on the first accelerator alone, since they stop before the second
       # CPU starts and their code is the same under both. Any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4)
-        @fiasco.build(jobs: jobs)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+        @fiasco.build(jobs: jobs) if build
         recipe = BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
         built = recipe.build(directory: File.join(@build, 'banner'))
         @digest = recipe.method(:digest)
@@ -174,9 +174,7 @@ module Erx
         line = BootImageCheck.handoff_line(built)
         handoff = { name: 'handoff', pattern: /\Aerx: boot image build /n, seconds: 30,
                     verify: ->(text) { raise Error, "the kernel reports #{text.inspect}, not this image" unless line.match?(text) } }.freeze
-        # The kernel prints this line in its banner, before the core's probe line.
-        *before, probe = Qemu.boot_transcript(memory_mib: MEMORY_MIB)
-        ordered = [*before, handoff, probe]
+        ordered = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), handoff]
         report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: image, initrd: initrd,
                                                             memory_mib: MEMORY_MIB, checkpoints: ordered)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),

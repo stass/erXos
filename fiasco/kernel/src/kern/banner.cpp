@@ -1,6 +1,5 @@
 // Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
-// Modified by erXos: the banner reports the boot image bootstrap validated and
-// runs the C17 cores' link probe.
+// Modified by erXos: the banner reports the boot image bootstrap validated.
 INTERFACE:
 
 #include "initcalls.h"
@@ -14,7 +13,6 @@ IMPLEMENTATION:
 #include <cstdio>
 #include "config.h"
 #include "erx_handoff.h"
-#include "erx_probe.h"
 
 PUBLIC static FIASCO_INIT
 void
@@ -24,7 +22,6 @@ Banner::init()
   extern char _initkip_start[];
   printf("\n%s\n", _initkip_start);
   Erx_handoff::banner();
-  Erx_probe::run();
 
   if constexpr (Config::kernel_warn_config_string()
                 && *Config::kernel_warn_config_string())

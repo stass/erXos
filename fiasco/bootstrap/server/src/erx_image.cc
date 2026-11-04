@@ -6,7 +6,8 @@
 // order the design gives (docs/design-stopgap.md, "Boot handoff"). Where things
 // go is decided by the plan; what is left to refuse after the copy is what only
 // the copied kernel can show: the magic of its two views, the options block's
-// version, and a handoff record that does not fit. The boot CPU runs alone with
+// version, and a handoff record that does not fit; and no free page for the
+// record's copy, which the plan does not choose. The boot CPU runs alone with
 // translation off, so a physical address is a pointer.
 
 #include <libfdt.h>
@@ -37,6 +38,8 @@ static_assert(offsetof(L4_kernel_options::Options, erx_handoff) % 8 == 0,
 static_assert(sizeof(L4_kernel_options::Options::erx_handoff)
               == ERX_BOOT_HANDOFF_RECORD_SIZE,
               "the options block embeds the whole handoff record");
+static_assert(ERX_BOOT_HANDOFF_RECORD_SIZE <= L4_PAGESIZE,
+              "the handoff page holds the whole handoff record");
 
 // No stack holds these; each serves the one call this boot makes.
 static erx_boot_workspace_t workspace;
@@ -150,13 +153,12 @@ reserve(erx_boot_range_t range, char const *name, Region::Type type,
 static void
 apply(void)
 {
-  reserve(plan.archive, ".erxpack", Region::Root);
+  reserve(plan.archive, ".erxpack", Region::Root, Region::Root_section_ro);
   reserve({plan.kernel.start, plan.kernel.size}, ".kernel", Region::Kernel);
   reserve({plan.sigma0.start, plan.sigma0.size}, ".sigma0", Region::Sigma0);
-  // A root region's subtype is what sigma0 may page to the root task. The
-  // archive gets none, since nothing pages it. The stand-in root runs its
-  // image through sigma0, and one range cannot tell its segments apart, so it
-  // gets all rights over the whole range.
+  // A root region's subtype is what sigma0 may page to the root task. The root
+  // runs its image through sigma0, and one range cannot tell its segments
+  // apart, so it gets all rights over the whole range.
   if (plan.has_stand_in_root)
     reserve({plan.stand_in_root.start, plan.stand_in_root.size}, ".root",
             Region::Root, Region::Root_section_rwx);
@@ -177,6 +179,25 @@ apply(void)
         }
       memset(target + copy.file_size, 0, copy.mem_size - copy.file_size);
     }
+}
+
+// The options block is mapped into no task, so the root reads the record from
+// a page of its own, which sigma0 pages to it read-only. The kernel information
+// page's user_ptr names it (init_kip_infos).
+static l4_addr_t
+write_handoff_page(l4_uint8_t const *record)
+{
+  l4_addr_t page = mem_manager->find_free_ram(L4_PAGESIZE);
+  if (!page)
+    refuse("handoff page", "no_free_page");
+  reserve({page, L4_PAGESIZE}, ".erxhandoff", Region::Root, Region::Root_section_ro);
+
+  char *target = reinterpret_cast<char *>(page);
+  memset(target, 0, L4_PAGESIZE);
+  memcpy(target, record, ERX_BOOT_HANDOFF_RECORD_SIZE);
+  if (Cache::Data::enabled())
+    Cache::Data::clean(page, L4_PAGESIZE);
+  return page;
 }
 
 static void
@@ -253,6 +274,7 @@ erx_image_load(Platform_base *plat)
          static_cast<unsigned long long>(plan.archive.size));
 
   Erx_image_loaded loaded = {};
+  loaded.boot_info.handoff_page = write_handoff_page(options->erx_handoff);
   loaded.boot_info.kernel_start = plan.kernel.entry;
   loaded.boot_info.sigma0_start = plan.sigma0.entry;
   loaded.boot_info.roottask_start

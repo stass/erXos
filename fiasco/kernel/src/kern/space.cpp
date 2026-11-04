@@ -1,4 +1,3 @@
-// Modified by erXos: a space holds its kernel log state.
 INTERFACE [!io]:
 
 class Io_space
@@ -20,7 +19,6 @@ typedef Generic_io_space<Space> Io_space;
 //--------------------------------------------------------------------------
 INTERFACE:
 
-#include "erx_syscall.h"
 #include "mem_space.h"
 #include "member_offs.h"
 #include "obj_space.h"
@@ -46,10 +44,6 @@ class Space
 {
   MEMBER_OFFSET();
   friend class Jdb_space;
-
-public:
-  /// erXos's kernel log state of this space.
-  Erx_space_log erx_log;
 
 public:
 

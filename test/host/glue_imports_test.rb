@@ -42,6 +42,10 @@ class GlueImportsTest < Minitest::Test
     assert_includes error.message, ':1'
   end
 
+  def test_the_kernel_call_route_stays_out_of_the_build
+    assert_equal ['erx_handoff.cpp'], M.built_glue(%w[erx_syscall.cpp erx_handoff.cpp erx_probe.cpp])
+  end
+
   def test_nm_output_is_read_as_undefined_symbols
     assert_equal %w[printf erx_dispatch], M.undefined_symbols(<<~LISTING)
       erx_syscall.o:

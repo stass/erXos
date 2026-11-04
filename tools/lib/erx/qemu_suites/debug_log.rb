@@ -11,6 +11,7 @@ require_relative '../qemu_gate'
 # DebugLogProbe::Run raises on the first disagreement, which the gate reports
 # as this suite failing. An accelerator the host lacks leaves its cells
 # not_run.
+# check_qemu builds the kernel before any suite runs, so this suite does not.
 Erx::QemuGate.declare_suite(
   run: lambda do |context|
     cpus = [1, 4]
@@ -18,7 +19,7 @@ Erx::QemuGate.declare_suite(
             {}
           else
             Erx::DebugLogProbe::Run.new(root: context.root)
-                                   .call(accels: context.runnable, cpus: cpus, jobs: context.jobs)
+                                   .call(accels: context.runnable, cpus: cpus, jobs: context.jobs, build: false)
                                    .transform_values { 'passed' }
           end
     skipped = context.missing.product(cpus).to_h { |accel, count| ["#{accel}-#{count}cpu", 'not_run'] }

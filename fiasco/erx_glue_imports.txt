@@ -6,11 +6,6 @@
 # the effect that needs it and the glue file that may hold the reference. A
 # glue object with an undefined symbol its file does not list fails the build.
 # The cores' own erx_ functions need no entry.
-printf probe-report erx_probe.cpp
-__cxa_pure_virtual console-class-vtable erx_syscall.cpp
-_ZN13Irq_chip_soft7sw_chipE thread-header-inline erx_syscall.cpp
-_ZN5Timer22_scaler_shift_ts_to_usE clock erx_syscall.cpp
-_ZN8Kconsole2_cE console erx_syscall.cpp
 _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp
 _ZN8Koptions1oEv boot-handoff erx_handoff.cpp
 panic boot-handoff erx_handoff.cpp

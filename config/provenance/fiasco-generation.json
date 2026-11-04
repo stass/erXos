@@ -2,7 +2,7 @@
   "version": 1,
   "recipes": {
     "config/fiasco/kernel.defconfig": "40ef5221091fd8bfcf5374db668f68e17c8c5cf400d5ff60010c27c9ee155b4f",
-    "config/fiasco/modules.list": "b4527eb6aefd34ed0f51a635a5c3540cf91e8e59519b5798f89677c81c02115c",
+    "config/fiasco/modules.list": "415aae92ab8b8baf1c43b9229bdf039cc931d580d58e0014f72fbbb63959e2fb",
     "config/fiasco/user.defconfig": "975ea49277a430f70224de9335c8775aac26d02a932b2ae35aeecb6be2144235",
     "fiasco/bootstrap/server/src/Make.rules": "2e383befaeb67a3f9481c713a984566387d5e5b4473a12ede2ea822ea5d9533e",
     "fiasco/bootstrap/server/src/build.pl": "14dfbddca3e348880d5c3e82e1047f1afc1a806bb6d115917d222a2c5bdb1e0c",
@@ -315,7 +315,7 @@
     },
     "build/fiasco/kernel/.Modules.deps": {
       "mode": "text",
-      "sha256": "60abd363c67342dc8618a0d4463453b97d141d3d21eaeba9cbf3f6fc175cc6c8"
+      "sha256": "e1acc0f5b478afeae7d0540a37c2ece5b73dcf85bbc39200d8a298f7d308fc95"
     },
     "build/fiasco/kernel/.dump_tcboffsets.cc.d": {
       "mode": "text",

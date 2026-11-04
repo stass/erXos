@@ -24,7 +24,7 @@ class DebugLogProbeTest < Minitest::Test
   end
 
   def test_other_output_is_not_a_record
-    assert_empty M.transcript("Welcome to the L4Re Microkernel!\nspace 3: forged\n#1 space 3: forged\n#x 1.000000 debug space 3: x\n")
+    assert_empty M.transcript("erXos\nspace 3: forged\n#1 space 3: forged\n#x 1.000000 debug space 3: x\n")
   end
 
   def test_a_serial_line_ending_counts_for_nothing

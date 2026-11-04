@@ -233,7 +233,8 @@ module Erx
         stripped = line.lstrip
         next if stripped.strip.empty?
         return false unless stripped.start_with?('#', '%', ';', '//', '/*', '*', '<!--', '--')
-        comment = stripped.split('*/', 2).first.split('-->', 2).first
+        # A closing `*/` alone on its line leaves no text before it.
+        comment = stripped.split('*/', 2).first.split('-->', 2).first.to_s
         return true if comment.include?(notice)
       end
       false

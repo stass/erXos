@@ -1,3 +1,4 @@
+// Modified by erXos: the boot greets as erXos (docs/design-stopgap.md, "Boot handoff").
 INTERFACE:
 
 #include <cxx/static_vector>
@@ -273,7 +274,7 @@ char const *Kip::version_string() const
 
 asm(".section .initkip.version, \"a\", %progbits        \n\t"
     ".ascii \"" GREETING_COLOR_ANSI_TITLE
-     "Welcome to the L4Re Microkernel!\\n\"\n\t"
+     "erXos\\n\"\n\t"
     ".ascii \"" GREETING_COLOR_ANSI_INFO
      "L4Re Microkernel on " DISPLAY_ARCH "-" TARGET_WORD_LEN "\\n\"\n\t"
     ".ascii \""

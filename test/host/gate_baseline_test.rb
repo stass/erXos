@@ -84,7 +84,7 @@ class GateBaselineTest < Minitest::Test
 
   # The suites the QEMU gate runs. The conformance roster's pending cases are
   # not a floor: they come and go as the calls they wait for land.
-  QEMU_SUITES = %w[conformance debug_log].freeze
+  QEMU_SUITES = %w[boot_image conformance debug_log native_boot].freeze
 
   def test_the_qemu_gate_still_runs_every_suite
     assert_empty QEMU_SUITES - Erx::QemuGate.suites.map(&:name)

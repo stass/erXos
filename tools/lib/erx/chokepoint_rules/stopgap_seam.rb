@@ -19,10 +19,19 @@ module Erx
       # and reader, and the ELF planner.
       unchecked_objects: %w[
         liberx/backend/erx/arch/aarch64/generated/calls.c
+        liberx/backend/fiasco/arch/aarch64/clock.c
         liberx/backend/fiasco/arch/aarch64/generated/trap.c
+        liberx/backend/fiasco/arch/aarch64/root_start.S
         liberx/backend/fiasco/arch/aarch64/utcb.c
+        liberx/backend/fiasco/console.c
+        liberx/backend/fiasco/console.h
         liberx/backend/fiasco/generated/calls.c
         liberx/backend/fiasco/generated/calls.h
+        liberx/backend/fiasco/log.c
+        liberx/backend/fiasco/log.h
+        liberx/backend/fiasco/root.c
+        liberx/backend/fiasco/root.ld
+        liberx/backend/fiasco/root_mem.c
         liberx/backend/hosted/generated/calls.c
         liberx/backend/hosted/generated/calls.h
         liberx/elf_plan.c
@@ -54,6 +63,8 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C_OUTSIDE_FIASCO_BACKEND,
           pattern: %r{backend/fiasco/}i,
+          # The debug-log probe as the root task is this backend's own test.
+          sites: [Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c')],
           seed: { 'kernel/core/seeded.c' => "#include \"liberx/backend/fiasco/generated/calls.h\"\n" }
         ),
         Chokepoints::Forbidden.new(
@@ -65,19 +76,30 @@ module Erx
           seed: { 'kernel/core/seeded.c' => "void f(void) { l4_ipc_call(0, 0, 0, 0); }\n",
                   'liberx/seeded.c' => "void f(void) { l4re_env(); }\n" }
         ),
+        # Bytes on this console reach the operator's terminal, so every caller
+        # is one that has escaped what is not its own.
+        Chokepoints::Forbidden.new(
+          name: 'fiasco-console-sink',
+          rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report " \
+                'and the debug log call it',
+          design: "#{STOPGAP}#the-console",
+          scope: ERXOS_C,
+          pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
+          sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/console.[ch]'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/)],
+          seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
+                  'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
+        ),
         Chokepoints::Forbidden.new(
           name: 'one-erx-trap',
-          rule: "kernel calls only through liberx: the ABI's trap only in liberx's erx and fiasco backends and " \
-                'the debug-log probe, and no other trap or raw instruction word in erXos C',
+          rule: "kernel calls only through liberx: the ABI's trap only in liberx's erx and fiasco backends, " \
+                'and no other trap or raw instruction word in erXos C',
           design: "#{STOPGAP}#verification-and-testing",
           scope: ERXOS_C,
           pattern: TRAP,
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/erx/arch/aarch64/**/*', permits: ERX_TRAP),
-                  # The fiasco backend's transport is the ABI's trap, which the
-                  # fork hands to erXos's call path. The debug-log probe makes
-                  # the calls no typed wrapper can express, in a test guest.
                   Chokepoints::Site.new(glob: FIASCO_BACKEND, permits: ERX_TRAP),
-                  Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/start.S', permits: ERX_TRAP),
                   # The stack proof's host fixtures plant raw instruction
                   # words its extractor must refuse; no build links them.
                   Chokepoints::Site.new(glob: 'test/fixtures/stack_graph/*.c', permits: /\A\.inst\z/)],

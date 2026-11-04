@@ -76,7 +76,7 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 0.2) }
   end
 
-  def fake_guest(output:, version_delay: 0, guest_delay: 0)
+  def fake_guest(output:, version_delay: 0, guest_delay: 0, linger: 0)
     path = File.join(@directory, 'fake-qemu')
     source = <<~RUBY
       #!/usr/bin/env ruby
@@ -89,6 +89,7 @@ class QemuTest < Minitest::Test
       serial = ARGV.fetch(ARGV.index('-serial') + 1).delete_prefix('file:')
       sleep #{guest_delay}
       File.binwrite(serial, #{output.dump})
+      sleep #{linger}
     RUBY
     File.write(path, source)
     File.chmod(0o700, path)
@@ -156,28 +157,45 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
-  PROBE = "erx: C17 core probe: erx.watchdog=2,5,60 is valid: 2,5,60\r\n"
-
-  def boot_transcript(available:, probe: PROBE)
+  def boot_transcript(available:, warning: "development build: trusted code only\r\n")
     "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000005fffffff: 512.0 MiB\r\n" \
       "  Total RAM: 512.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
-      "Welcome to the L4Re Microkernel!\r\ndevelopment build: trusted code only\r\n#{probe}"
+      "\e[1;32merXos\r\n#{warning}"
   end
 
-  # A kernel whose link lost the cores' archive prints no probe line, and
-  # one whose core answered otherwise prints another; both boots fail.
-  def test_boot_without_the_core_probe_fails
-    [+'', "erx: C17 core probe: erx.watchdog=2,5,60 is a field has no digits: 1,5,60\r\n"].each do |probe|
-      qemu = Erx::Qemu.new(root: @directory,
-                           program: fake_guest(output: boot_transcript(available: '512.0 MiB', probe: probe)))
-      assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+  def test_boot_without_the_development_warning_fails
+    qemu = Erx::Qemu.new(root: @directory,
+                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: '')))
+    assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+  end
+
+  def test_a_guest_that_must_end_the_machine_may_exit_once_its_transcript_is_whole
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
+    assert_equal 'passed', qemu.run(accel: 'tcg', image: image, machine_end: true).fetch('state')
+  end
+
+  def test_a_guest_that_ends_the_machine_early_fails
+    qemu = Erx::Qemu.new(root: @directory,
+                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: '')))
+    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image, machine_end: true) }
+    assert_match(/before completing its transcript/, error.message)
+  end
+
+  # What a root task that never calls shutdown looks like: the transcript is
+  # whole and QEMU stays up, so the run must fail at its deadline.
+  def test_a_guest_that_never_ends_the_machine_fails_at_the_deadline
+    points = [{ name: 'only', pattern: /line\r?\n/n, seconds: 1 }].freeze
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: "line\r\n", linger: 60))
+    error = assert_raises(Erx::CommandError) do
+      qemu.run(accel: 'tcg', image: image, checkpoints: points, machine_end: true)
     end
+    assert_equal 'timed_out', error.result.fetch('state')
   end
 
   def test_boot_with_consistent_bootstrap_memory_passes
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
     report = qemu.run(accel: 'tcg', image: image)
-    assert_equal %w[bootstrap-memory fiasco-banner development-warning core-probe],
+    assert_equal %w[bootstrap-memory erxos-banner development-warning],
                  report.fetch('checkpoints').map { |entry| entry.fetch('name') }
     assert_equal 'passed', report.fetch('state')
   end

@@ -63,8 +63,10 @@ module Erx
       uart/include/device.h uart/include/uart_base.h uart/include/uart_pl011.h
       uart/src/Makefile uart/src/uart_pl011.cc
     ].freeze
-    # Fiasco's own options, the recipe's: bootstrap passes them to the kernel.
-    KERNEL_OPTIONS = '-serial_esc'
+    # Fiasco's own options, which bootstrap passes to the kernel. None: without
+    # -serial_esc or -serial_input the kernel leaves the UART's interrupt free
+    # for the console driver (docs/design-stopgap.md, "The console").
+    KERNEL_OPTIONS = ''
     # Where the inherited build leaves bootstrap's objects and images.
     BOOTSTRAP_OBJECTS = 'pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain'
     # Upper bound of a record this tool writes into the build tree.
@@ -139,6 +141,14 @@ module Erx
     # The kernel and sigma0 the recipe packs, once built.
     def kernel_path = File.join(@build, 'kernel/fiasco')
     def sigma0_path = File.join(@build, 'users/bin/arm64_armv8a/std/l4f/sigma0')
+
+    # What a native root task compiles and links against, once built.
+    def user_include_directories
+      %w[include/arm64/l4f include/arm64 include/l4f include].map { |path| File.join(@build, 'users', path) }
+    end
+
+    def user_library(name) = File.join(@build, 'users/lib/arm64_armv8a/std/l4f', name)
+    def boot_core_archive = File.join(@build, 'boot-cores', CoreArchive::BOOT_ARCHIVE)
 
     def input_catalog
       @input_catalog || raise(Error, 'Fiasco build has not produced checked source inputs')

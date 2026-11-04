@@ -1,3 +1,4 @@
+// Modified by erXos: the boot information carries the handoff page (docs/design-stopgap.md, "Boot handoff").
 /*
  * Copyright (C) 2008-2009 Technische Universität Dresden.
  * Author(s): Adam Lackorzynski <adam@os.inf.tu-dresden.de>
@@ -21,6 +22,7 @@ typedef struct
   unsigned long kernel_start;
   unsigned long sigma0_start;
   unsigned long roottask_start;
+  unsigned long handoff_page;
   unsigned long mbi_low, mbi_high;
 } boot_info_t;
 

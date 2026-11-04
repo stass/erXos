@@ -126,3 +126,4 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   dispatch loop lands, against the same call with the admission inlined.
   Fixes: let the dispatch loop and the core share a translation unit at
   -O2, or emit the per-call steps from the plan as straight-line code.
+

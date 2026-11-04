@@ -2,22 +2,22 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
 require_relative 'boot_image'
 require_relative 'bounded_file'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'qemu'
 require_relative 'runner'
 
 module Erx
-  # The first call across the kernel interface on the stopgap, end to end: the
-  # probe of test/guest/debug_log_probe makes good and malformed erx_debug_log
-  # calls on the hosted backend and as the root task on QEMU, and each run's
-  # transcript must equal the expected one, so the backends agree case by case.
+  # The debug log end to end: the probe of test/guest/debug_log_probe makes good
+  # and malformed erx_debug_log calls on the hosted backend and as the root task
+  # on QEMU, through the Fiasco backend's native path to the console, and each
+  # run's transcript must equal the expected one, so the backends agree case by
+  # case.
   module DebugLogProbe
-    GUEST = 'test/guest/debug_log_probe'
     EXPECTED = 'test/fixtures/debug_log_probe.expected'
     MEMORY_MIB = 512
     SERIAL_BYTES = 16 * 1024 * 1024
@@ -37,13 +37,13 @@ module Erx
     HOSTED_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
                       -I include -I kernel/generated -I kernel/core -I . -I test/guest/debug_log_probe].freeze
     GUEST_SOURCES = %w[
-      liberx/backend/fiasco/arch/aarch64/generated/trap.c liberx/backend/fiasco/arch/aarch64/utcb.c
-      liberx/backend/fiasco/generated/calls.c
-      test/guest/debug_log_probe/guest.c test/guest/debug_log_probe/probe.c test/guest/debug_log_probe/start.S
+      kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
+      kernel/generated/abi_decode.c kernel/generated/abi_run.c
+      liberx/backend/fiasco/arch/aarch64/clock.c liberx/backend/fiasco/generated/calls.c liberx/backend/fiasco/log.c
+      test/guest/debug_log_probe/guest.c test/guest/debug_log_probe/probe.c
     ].freeze
-    GUEST_FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
-                     -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics
-                     -I include -I . -I liberx/backend/fiasco/generated -I test/guest/debug_log_probe].freeze
+    GUEST_FLAGS = %w[-I kernel/generated -I kernel/core -I liberx/backend/fiasco/generated
+                     -I test/guest/debug_log_probe].freeze
 
     module_function
 
@@ -111,16 +111,16 @@ module Erx
       # run can never judge an old kernel, then runs the probe under each
       # accelerator at each CPU count. Returns each run's serial log and image
       # hash; any disagreement raises.
-      def call(accels:, cpus: [1, 4], jobs: 4)
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
         expected = DebugLogProbe.transcript(BoundedFile.read(File.join(@source, EXPECTED), maximum: SERIAL_BYTES))
         raise Error, 'the expected debug-log transcript is empty' if expected.empty?
 
         judge('hosted', expected, hosted_output)
-        Fiasco.new(root: @root, runner: @runner, compiler: @compiler).build(jobs: jobs)
+        Fiasco.new(root: @root, runner: @runner, compiler: @compiler).build(jobs: jobs) if build
         image = guest_image
         accels.product(cpus).to_h do |accel, count|
           report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: image,
-                                                              memory_mib: MEMORY_MIB, checkpoints: checkpoints)
+                                                              memory_mib: MEMORY_MIB, checkpoints: checkpoints, machine_end: true)
           serial = report.fetch('serial_log')
           judge("#{accel}-#{count}cpu", expected, BoundedFile.read(serial, maximum: SERIAL_BYTES))
           ["#{accel}-#{count}cpu", { serial: serial, image_sha256: report.fetch('image_sha256') }.freeze]
@@ -153,20 +153,9 @@ module Erx
       end
 
       def guest_image
-        raise Error, 'set ERX_CLANG to the installed LLVM clang' if @compiler.empty?
-        raise Error, 'set ERX_LLD to the installed ld.lld' if @linker.empty?
-
-        directory = File.join(@build, 'guest')
-        FileUtils.mkdir_p(directory)
-        objects = GUEST_SOURCES.map do |source|
-          object = File.join(directory, "#{File.basename(source).tr('.', '_')}.o")
-          @runner.run([@compiler, *GUEST_FLAGS, '-c', source, '-o', object],
-                      name: "debug-log-guest-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source)
-          object
-        end
-        guest = File.join(directory, 'debug_log_probe')
-        @runner.run([@linker, '-T', File.join(GUEST, 'link.ld'), '-o', guest, *objects],
-                    name: 'debug-log-guest-link', deadline: 60, chdir: @source)
+        guest = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker)
+                          .build(name: 'debug_log_probe', sources: [*NativeRoot::RUNTIME, *GUEST_SOURCES],
+                                 directory: File.join(@build, 'guest'), flags: GUEST_FLAGS)
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: guest).fetch(:single)
       end

@@ -29,7 +29,7 @@ begin
     until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
       payload = random.bytes(random.rand(131_073))
       if random.rand(2).zero?
-        payload = "Welcome to the L4Re Microkernel!\n".b + payload
+        payload = "erXos\n".b + payload
       end
       if random.rand(2).zero?
         # The memory summary opens the boot transcript; a mutated copy

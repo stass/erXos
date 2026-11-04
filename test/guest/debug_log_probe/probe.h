@@ -29,12 +29,6 @@ erx_utcb_t *erx_utcb_self(void);
 void erx_probe_raw_call(uint64_t number, const uint64_t args[ERX_TRAP_ARG_COUNT],
     uint64_t results[ERX_TRAP_RESULT_COUNT]);
 
-/*
- * Makes an empty debug-log call with every other register holding a known
- * value and returns how many of those values the call changed.
- */
-uint64_t erx_probe_preserved_changes(uint64_t debug_log_number);
-
 /* Waits past the current one-second window of the log's rate limit. */
 void erx_probe_pause(void);
 

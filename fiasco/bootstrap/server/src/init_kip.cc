@@ -27,7 +27,7 @@ init_kip_infos(l4_kernel_info_t *l4i, boot_info_t *bi)
   if (L4_KIP_VERSION_FIASCO != l4_kip_version(l4i))
     panic("Cannot load kernels other than Fiasco");
 
-  l4i->user_ptr = 0;
+  l4i->user_ptr = bi->handoff_page;
 
   /* set up sigma0 info */
   l4i->sigma0_ip = bi->sigma0_start;

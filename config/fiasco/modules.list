@@ -5,5 +5,5 @@ modaddr 0x01100000
 
 entry[no-defaults] banner
 bootstrap bootstrap
-kernel fiasco -serial_esc
+kernel fiasco
 sigma0 sigma0

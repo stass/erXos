@@ -130,6 +130,18 @@ class OriginTest < Minitest::Test
     assert @origin.check
   end
 
+  # A block comment that closes on its own line, as an imported licence header
+  # does, leaves nothing of that line to read: the check answers, not crashes.
+  def test_a_header_comment_closed_on_its_own_line_is_read
+    write_file('source.c', "int value;\n")
+    write_origin
+    write_file('source.c', "/*\n * Licence.\n */\nint changed;\n")
+    error = assert_raises(Erx::Error) { @origin.check }
+    assert_match(/lacks its erXos change notice/, error.message)
+    write_file('source.c', "/*\n * Licence.\n */\n// Modified by erXos\nint changed;\n")
+    assert @origin.check
+  end
+
   def test_new_source_requires_erxos_notice
     write_origin
     write_file('new.c', "int value;\n")
