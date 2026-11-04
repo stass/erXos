@@ -19,8 +19,9 @@ class GateBaselineTest < Minitest::Test
 
   SANITIZER_TESTS = %w[
     test/host/abi_calls_test.rb test/host/blake3_test.rb test/host/boot_file_test.rb test/host/budget_test.rb
-    test/host/cap_test.rb test/host/crypto_test.rb test/host/elf_plan_test.rb test/host/lane_test.rb test/host/manifest_reader_test.rb
-    test/host/pack_test.rb test/host/rng_test.rb test/host/tlb_plan_test.rb test/host/watchdog_test.rb
+    test/host/cap_test.rb test/host/crypto_test.rb test/host/elf_plan_test.rb test/host/lane_test.rb
+    test/host/log_test.rb test/host/manifest_reader_test.rb test/host/pack_test.rb test/host/rng_test.rb
+    test/host/tlb_plan_test.rb test/host/watchdog_test.rb
     test/integration/sanitizer_gate_test.rb test/integration/structural_pack_test.rb
     test/integration/terminal_tables_test.rb
   ].freeze
@@ -28,12 +29,15 @@ class GateBaselineTest < Minitest::Test
   # Each native fuzz target's least seed count and sources.
   FUZZ_TARGETS = {
     'blake3' => { seeds: 10, sources: %w[kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c] },
-    'boot' => { seeds: 6, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c] },
+    'boot' => { seeds: 6, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
+                                           kernel/crypto/blake3/blake3_portable.c] },
     'cap' => { seeds: 4, sources: %w[kernel/core/cap.c] },
     'chacha20' => { seeds: 16, sources: %w[kernel/crypto/chacha20/chacha.c] },
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
-    'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c] },
+    'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
+    'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
+                                            kernel/crypto/blake3/blake3_portable.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                                      kernel/crypto/blake3/blake3_portable.c] },
     'sha256' => { seeds: 8, sources: %w[kernel/crypto/sha2/sha256c.c] },
@@ -50,9 +54,9 @@ class GateBaselineTest < Minitest::Test
     'cap-slot-clear-named' => 5, 'cap-slot-private' => 8, 'cap-table-private' => 10, 'core-archive-imports' => 0,
     'core-records-private' => 2, 'fiasco-backend-headers-private' => 1, 'fiasco-headers-in-backend' => 2,
     'fiasco-symbols-in-backend' => 2, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
-    'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4, 'object-leg' => 0,
-    'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0, 'seam-only-from-glue' => 1,
-    'vector-route' => 0
+    'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
+    'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'object-leg' => 0, 'one-erx-trap' => 5, 'pmem-converter-sites' => 0,
+    'raw-allocator-sites' => 0, 'seam-only-from-glue' => 1, 'vector-route' => 0
   }.freeze
 
   IMPORTS = %w[fiasco/bootstrap fiasco/drivers-frst fiasco/kernel fiasco/l4re-core fiasco/libfdt fiasco/mk

@@ -81,6 +81,8 @@ bool erx_share_decode(const uint8_t *bytes, size_t length,
     erx_share_t *result);
 bool erx_mf_principal_decode(const uint8_t *bytes, size_t length,
     erx_mf_principal_t *result);
+bool erx_log_record_decode(const uint8_t *bytes, size_t length,
+    erx_log_record_t *result);
 bool erx_mf_image_decode(const uint8_t *bytes, size_t length,
     erx_mf_image_t *result);
 bool erx_mf_domain_decode(const uint8_t *bytes, size_t length,

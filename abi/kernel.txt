@@ -45,6 +45,22 @@ limit watchdog_period_default u32 1
 limit watchdog_deadline_default u32 5
 limit watchdog_boot_default u32 60
 
+enum log_level u32
+  value error 1
+  value warning 2
+  value info 3
+  value debug 4
+flags log_record_flags u32
+  bit truncated 0
+layout erx_log_record 1 wire_le 8 32
+  field seq u64 0
+  field time_ns u64 8
+  field level log_level 16
+  field flags log_record_flags 20
+  field reserved u32 24
+  field length u32 28
+  zero reserved all
+  tail text u8 length @log_text_max
 enum fault_kind u32
   value memory 1
   value deleted 2

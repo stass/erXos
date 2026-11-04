@@ -154,6 +154,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_mf_principal_decode(bytes, length, &value);
 	}
 	{
+		erx_log_record_t value;
+		(void)erx_log_record_decode(bytes, length, &value);
+	}
+	{
 		erx_mf_image_t value;
 		(void)erx_mf_image_decode(bytes, length, &value);
 	}

@@ -29,4 +29,8 @@ static const uint8_t erx_terminal_ascii_safe[256] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
+/* A byte outside the class is written as this prefix and uppercase hex digits. */
+#define ERX_TERMINAL_KERNEL_TOKEN_PREFIX "\\x"
+#define ERX_TERMINAL_KERNEL_TOKEN_DIGITS 2
+
 #endif

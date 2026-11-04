@@ -217,6 +217,14 @@ struct erx_rights {
 #define ERX_LANE_MIN UINT32_C(4096)
 #define ERX_LANE_SIDE_DATA UINT32_C(8192)
 #define ERX_LANE_SIDE_RPAGE UINT32_C(4096)
+#define ERX_LOG_LEVEL_DEBUG UINT32_C(4)
+#define ERX_LOG_LEVEL_ERROR UINT32_C(1)
+#define ERX_LOG_LEVEL_INFO UINT32_C(3)
+#define ERX_LOG_LEVEL_WARNING UINT32_C(2)
+#define ERX_LOG_RATE_BYTES UINT32_C(16384)
+#define ERX_LOG_RECORD_TRUNCATED UINT32_C(1)
+#define ERX_LOG_RING_BYTES UINT32_C(65536)
+#define ERX_LOG_TEXT_MAX UINT32_C(2112)
 #define ERX_MACHINE_CRASH_FOUND UINT32_C(2)
 #define ERX_MACHINE_DET UINT32_C(1)
 #define ERX_MANIFEST_BYTES_MAX UINT32_C(16777216)
@@ -1717,6 +1725,45 @@ _Static_assert(offsetof(erx_mf_principal_t, ceiling_limits) ==
     ERX_MF_PRINCIPAL_OFF_CEILING_LIMITS, "erx_mf_principal.ceiling_limits offset");
 
 typedef uint32_t erx_image_flags_t;
+
+typedef uint32_t erx_log_level_t;
+
+typedef uint32_t erx_log_record_flags_t;
+
+#define ERX_LOG_RECORD_SIZE 32
+#define ERX_LOG_RECORD_ALIGN 8
+#define ERX_LOG_RECORD_OFF_SEQ 0
+#define ERX_LOG_RECORD_OFF_TIME_NS 8
+#define ERX_LOG_RECORD_OFF_LEVEL 16
+#define ERX_LOG_RECORD_OFF_FLAGS 20
+#define ERX_LOG_RECORD_OFF_RESERVED 24
+#define ERX_LOG_RECORD_OFF_LENGTH 28
+typedef struct erx_log_record erx_log_record_t;
+struct erx_log_record {
+	_Alignas(8) uint64_t	seq;
+	uint64_t	time_ns;
+	erx_log_level_t	level;
+	erx_log_record_flags_t	flags;
+	uint32_t	reserved;
+	uint32_t	length;
+	uint8_t	text[];
+};
+_Static_assert(sizeof(erx_log_record_t) == ERX_LOG_RECORD_SIZE, "erx_log_record size");
+_Static_assert(_Alignof(erx_log_record_t) == ERX_LOG_RECORD_ALIGN, "erx_log_record alignment");
+_Static_assert(offsetof(erx_log_record_t, seq) ==
+    ERX_LOG_RECORD_OFF_SEQ, "erx_log_record.seq offset");
+_Static_assert(offsetof(erx_log_record_t, time_ns) ==
+    ERX_LOG_RECORD_OFF_TIME_NS, "erx_log_record.time_ns offset");
+_Static_assert(offsetof(erx_log_record_t, level) ==
+    ERX_LOG_RECORD_OFF_LEVEL, "erx_log_record.level offset");
+_Static_assert(offsetof(erx_log_record_t, flags) ==
+    ERX_LOG_RECORD_OFF_FLAGS, "erx_log_record.flags offset");
+_Static_assert(offsetof(erx_log_record_t, reserved) ==
+    ERX_LOG_RECORD_OFF_RESERVED, "erx_log_record.reserved offset");
+_Static_assert(offsetof(erx_log_record_t, length) ==
+    ERX_LOG_RECORD_OFF_LENGTH, "erx_log_record.length offset");
+_Static_assert(offsetof(erx_log_record_t, text) == ERX_LOG_RECORD_SIZE,
+    "erx_log_record.text offset");
 
 typedef uint32_t erx_machine_flags_t;
 

@@ -776,6 +776,26 @@ erx_mf_principal_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_log_record_decode(const uint8_t *bytes, size_t length,
+    erx_log_record_t *result)
+{
+	erx_log_record_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_LOG_RECORD_SIZE)
+		return (false);
+
+	value.seq = erx_abi_load_u64(bytes + 0);
+	value.time_ns = erx_abi_load_u64(bytes + 8);
+	value.level = erx_abi_load_u32(bytes + 16);
+	value.flags = erx_abi_load_u32(bytes + 20);
+	value.reserved = erx_abi_load_u32(bytes + 24);
+	value.length = erx_abi_load_u32(bytes + 28);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_mf_image_decode(const uint8_t *bytes, size_t length,
     erx_mf_image_t *result)
 {

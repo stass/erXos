@@ -211,6 +211,14 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_LANE_MIN` | 4096 |
 | `ERX_LANE_SIDE_DATA` | 8192 |
 | `ERX_LANE_SIDE_RPAGE` | 4096 |
+| `ERX_LOG_LEVEL_DEBUG` | 4 |
+| `ERX_LOG_LEVEL_ERROR` | 1 |
+| `ERX_LOG_LEVEL_INFO` | 3 |
+| `ERX_LOG_LEVEL_WARNING` | 2 |
+| `ERX_LOG_RATE_BYTES` | 16384 |
+| `ERX_LOG_RECORD_TRUNCATED` | 1 |
+| `ERX_LOG_RING_BYTES` | 65536 |
+| `ERX_LOG_TEXT_MAX` | 2112 |
 | `ERX_MACHINE_CRASH_FOUND` | 2 |
 | `ERX_MACHINE_DET` | 1 |
 | `ERX_MANIFEST_BYTES_MAX` | 16777216 |
@@ -885,6 +893,20 @@ Storage: `wire_le`. Prefix size: 80. Alignment: 8.
 | `names` | `u32` | 68 | 1 |
 | `default_limits` | `u32` | 72 | 1 |
 | `ceiling_limits` | `u32` | 76 | 1 |
+
+### `erx_log_record_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `seq` | `u64` | 0 | 1 |
+| `time_ns` | `u64` | 8 | 1 |
+| `level` | `log_level` | 16 | 1 |
+| `flags` | `log_record_flags` | 20 | 1 |
+| `reserved` | `u32` | 24 | 1 |
+| `length` | `u32` | 28 | 1 |
+| `text` | `u8` | 32 | `length` (maximum 2112) |
 
 ### `erx_mf_image_t`
 

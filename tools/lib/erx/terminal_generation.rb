@@ -77,11 +77,19 @@ module Erx
       first, last = rule.fetch('range')
       values = (0..255).map { |byte| byte.between?(first, last) || rule.fetch('extra').include?(byte) ? 1 : 0 }
       rows = values.each_slice(16).map { |slice| "\t" + slice.join(', ') + ',' }
+      token = model.fetch('token').fetch('kernel')
+      unless token.fetch('minimum') == token.fetch('maximum') && token.fetch('suffix').empty?
+        raise Error, 'the kernel escape token must be a prefix and a fixed count of hex digits'
+      end
+      prefix = token.fetch('prefix').gsub(/[\\"]/) { |character| "\\#{character}" }
       "/*\n * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
         " * SPDX-License-Identifier: BSD-2-Clause\n * Generated from abi/terminal.txt; do not edit.\n */\n\n" \
         "#ifndef ERX_TERMINAL_ASCII_H\n#define ERX_TERMINAL_ASCII_H\n\n#include <stdint.h>\n\n" \
         "/* A byte index is always in bounds; values grant kernel text passthrough. */\n" \
-        "static const uint8_t erx_terminal_ascii_safe[256] = {\n#{rows.join("\n")}\n};\n\n#endif\n"
+        "static const uint8_t erx_terminal_ascii_safe[256] = {\n#{rows.join("\n")}\n};\n\n" \
+        "/* A byte outside the class is written as this prefix and uppercase hex digits. */\n" \
+        "#define ERX_TERMINAL_KERNEL_TOKEN_PREFIX \"#{prefix}\"\n" \
+        "#define ERX_TERMINAL_KERNEL_TOKEN_DIGITS #{token.fetch('minimum')}\n\n#endif\n"
     end
     private_class_method :ascii_header
 

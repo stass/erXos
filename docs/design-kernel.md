@@ -7126,25 +7126,54 @@ its device-tree path; the kernel knows nothing of it. So no byte a domain
 sends reaches a terminal through the kernel, and the only text the kernel
 writes on a terminal is its own, escaped.
 
-**The kernel log** is a ring of 64 KiB of records, each with a sequence
-number, a timestamp, a level and its text. Text that came from outside the
+**The kernel log** is a ring of 64 KiB of records, each an `erx_log_record`
+of the ABI file: a sequence number, a timestamp, a level and its text, with
+a flag for text cut at `log_text_max`. Its core is `kernel/core/log.c`,
+which reads no clock and writes no device, and its host holds one lock
+around each call. Every byte of a record's text enters
+through `erx_log_escape`, the kernel's own format strings included, so text
+that came from outside the
 trusted base (an `erx_debug_log` call, an object name, a device-tree string)
-enters it only through `erx_log_escape`, which writes every byte other than
+needs no separate path. It writes every byte other than
 printable ASCII and tab as `\xNN`, newlines included, using the byte classes
 generated from `abi/terminal.txt`, so untrusted text can neither move the
-cursor nor start a line that looks like another party's. Each record
-renders as one line. `erx_debug_log(len)` logs `len` bytes of the caller's
-UTCB, at most its 63 message words, prefixes the line with the caller's
-space, and is limited to 16 KiB per second per space (an estimate of a
-generous debugging rate), beyond which lines are dropped and counted.
+cursor nor start a line that looks like another party's. A backslash is
+printable and passes as itself, so a line that reads `\x1B` may have held
+either; the rendering is for reading and is not a reversible encoding. A
+token is never cut: text that does not fit a record ends at the last whole
+token and is flagged. Each record renders as one line:
+`#SEQ SECONDS.MICROSECONDS LEVEL TEXT`.
+
+`erx_debug_log(len)` logs `len` bytes of the caller's
+UTCB, at most its 63 message words, each word loaded once, and prefixes the
+line with the caller's space and, when lines were lost before this one, how
+many: `space 7 dropped 12: text`. What comes first on the line is the
+kernel's, so a space cannot show another's number or a false count. `log_text_max`
+holds the longest such line, so one is never truncated. The call
+is limited to 16 KiB per second per space (an estimate of a
+generous debugging rate), in windows of one second that open at the first
+line after the last one ended; the record's whole size in the ring counts
+against it, header, escaping and padding included, so a line of control
+bytes costs what it occupies and a flood of empty lines is not free. Beyond
+the limit lines are dropped and counted, and the call still returns
+`ERX_OK`: logging is not something a program waits on or handles. A length
+beyond the UTCB is `ERX_EINVAL`, and a log whose sequence numbers have run
+out refuses further lines with `ERX_ELIMIT` and never reuses a number.
+
 During boot every record is also written to the early console;
 afterwards the system domain's log service reads records with
 `erx_log_read(resource (TRACE), cursor, window)` into a memory window and
 renders them on the console through the console's driver, so log lines
 never break into the shell's output
-([design-live.md](design-live.md#the-console)). A reader that falls more
+([design-live.md](design-live.md#the-console)). The cursor is a sequence
+number. A reader that falls more
 than the ring behind is told how many records it lost, never shown a
-partial record.
+partial record, and a read returns the cursor to pass next, so each loss is
+told once. A window shorter than the longest record, or a cursor past the
+newest record, is `ERX_EINVAL`, so a read that returns nothing means nothing
+new. The bytes of a window are memory another party may reach, so its reader
+copies each record's text out and checks the copy before using it, and
+rendering passes everything but the newline through the escaper. A window that a party other than the log service can write could forge whole printable lines, so attribution holds only while the window stays that service's own.
 
 
 **Panic.** A failed kernel assertion and an exception that violates a
@@ -8203,7 +8232,8 @@ advances, so nothing it checked changes unseen before it is applied.
 | the kernel touches no PCIe configuration space | no register accessor of a PCIe bridge is linked into the kernel: the platform's register sources mark bridges as the PCIe enumerator's, and the generator emits no kernel accessor for them | relocations, the generator |
 | device registers only through generated accessors | the `volatile` qualifier only in generated headers | syntax trees |
 | only the early-console writer writes a UART's registers in the kernel | each UART's register accessors referenced only from the early-console writer in `kernel/platform/`, which the boot path, `erx_panic` and `erx_machine_end_effect` alone call | relocations |
-| untrusted text reaches the log and the panic report only escaped | every call of the log's formatting function has a string-literal format (`-Werror=format-nonliteral`), the function escapes every argument, and its raw append is referenced only from `kernel/core/log.c` | the compiler, relocations |
+| untrusted text reaches the log and the panic report only escaped | every call of the log's formatting function goes through `ERX_LOG_FORMAT`, which joins `""` to its format so that only a string literal compiles, the function escapes every argument and its own text, and its raw append, ring and text store are named only in `kernel/core/log.c` and its header | the compiler, the source text |
+| the hosted backend's log reaches its console only through one sink | only `liberx/backend/hosted/log.c` of the hosted backend names a write or a standard stream, and it is given only rendered lines | the source text |
 | data holds no code pointer outside an allowlist | every absolute relocation in a data section of the image that targets text belongs to an allowlisted table: the generated handler table | relocations of the linked image |
 | only `liberx`'s `fiasco` backend issues Fiasco calls | outside `liberx/backend/fiasco/`, no object includes an `l4sys` header or contains a system-call trap other than erXos's, and no erXos source outside it references `l4_` symbols | syntax trees, disassembly |
 | an architecture's terms appear only in its layer and its documents | `make check-arch-terms`: no term of an architecture's checked-in term list, `hw/arch_terms/<arch>.txt`, appears in generic sources, generic generated files, `abi/erx_abi.txt` or a generic design document; `kernel/arch/<arch>/`, `liberx`'s per-architecture directories, `abi/arch/<arch>.txt`, `hw/sysreg/<arch>.json`, the term list itself, the architecture's binding document, the platform binding, the research records and [design.md](design.md#dependencies)'s dependency table, which names every dependency, board firmware included, are exempt; an architecture's name is not one of its terms | text search |

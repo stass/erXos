@@ -659,6 +659,15 @@ it; git history is the record of completed work.
   in the registers a callee may change until they are overwritten, and an
   interrupt taken in kernel mode in that window saves them to the stack,
   below any burn. Reading them needs another kernel bug.
+* [Medium] The kernel log's limit is per space, and the ring is shared
+  (`kernel/core/log.c`, `erx_log_rate_t`): 16 KiB per second lets one space
+  push every record, the kernel's included, out of the 64 KiB ring in about
+  four seconds, N spaces in a fraction of that, and a domain that creates
+  and ends sub-spaces gets a fresh allowance with each one. Nothing is lost
+  silently, since a reader is told how many records it lost, but a space that
+  floods and then ends never reports its own drop count. Charge the rate at
+  the domain, a sub-space drawing on its parent's state, and show a space's
+  count through inspection, when the kernel handler and spaces land.
 
 * [Medium] Lane reader chokepoint, `lane-pages-reader` in
   `tools/lib/erx/chokepoint_rules/`: a text rule over the names of a

@@ -4604,6 +4604,131 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["log_level"] = EnumType.new(
+        name: "log_level".b,
+        base: types.fetch("u32"),
+        members: {
+          "debug".b => 4,
+          "error".b => 1,
+          "info".b => 3,
+          "warning".b => 2
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
+      types["log_record_flags"] = EnumType.new(
+        name: "log_record_flags".b,
+        base: types.fetch("u32"),
+        members: {
+          "truncated".b => 1
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_log_record"] = Layout.new(
+        name: "erx_log_record".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 32,
+        fields: [
+          Field.new(
+            name: "seq".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "time_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "level".b,
+            type: types.fetch("log_level"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("log_record_flags"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 4294967295,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "length".b,
+            type: types.fetch("u32"),
+            offset: 28,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: Tail.new(
+          name: "text".b,
+          type: types.fetch("u8"),
+          count_field: "length".b,
+          maximum: 2112,
+          line: source_line
+        ).freeze,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["machine_flags"] = EnumType.new(
         name: "machine_flags".b,
         base: types.fetch("u32"),
@@ -7447,6 +7572,9 @@ module Erx
           "erx_share".b,
           "erx_mf_principal".b,
           "image_flags".b,
+          "log_level".b,
+          "log_record_flags".b,
+          "erx_log_record".b,
           "machine_flags".b,
           "manifest_flags".b,
           "manifest_mode".b,
@@ -8665,6 +8793,54 @@ module Erx
           "lane_side_rpage".b => Constant.new(
             name: "lane_side_rpage".b,
             value: 4096,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_level_debug".b => Constant.new(
+            name: "log_level_debug".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_level_error".b => Constant.new(
+            name: "log_level_error".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_level_info".b => Constant.new(
+            name: "log_level_info".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_level_warning".b => Constant.new(
+            name: "log_level_warning".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_rate_bytes".b => Constant.new(
+            name: "log_rate_bytes".b,
+            value: 16384,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_record_truncated".b => Constant.new(
+            name: "log_record_truncated".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_ring_bytes".b => Constant.new(
+            name: "log_ring_bytes".b,
+            value: 65536,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "log_text_max".b => Constant.new(
+            name: "log_text_max".b,
+            value: 2112,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

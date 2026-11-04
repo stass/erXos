@@ -51,6 +51,10 @@ limit crash_version u32 2
 limit crash_size u32 16384
 limit crash_magic u64 0x4853415243585245
 limit budget_depth_max u32 16
+limit log_ring_bytes u32 65536
+# Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
+limit log_text_max u32 2112
+limit log_rate_bytes u32 16384
 
 status ok 0 "success"
 status inval -1 "invalid argument"

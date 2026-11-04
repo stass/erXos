@@ -3,10 +3,10 @@
   "architecture": "aarch64",
   "inputs": {
     "abi/arch/aarch64.txt": "c1c34763b9be38f04f16da015d96015d73b9ce95b8461be53c7bb3c05fcbbd16",
-    "abi/erx_abi.txt": "bb9c92b14d8938371b234e7b943a90d3f105791760e05c1fb6217d1ce2a8c892",
+    "abi/erx_abi.txt": "bf5dbf027f486eb85f5e1fcb5602491e41ad8eb50826202fe796e73154411ed0",
     "abi/formats/elf64.txt": "1594378a9e8e52f3d0ae0df6fb4a0d94a750d72f2da32baa30e6e265419e1fa7",
     "abi/inspection.txt": "562dd4cf5e7a97ea7fa7b9a185abc328dbbef6ebae0920997a572007302fada0",
-    "abi/kernel.txt": "9c55b5f5eb9f5b1ba1cb0f945681598adea080b9521c59963a75b25e9cd973c0",
+    "abi/kernel.txt": "f1380bc967ae264803349625c0d7c870bc8d5e2f1cfc888089e49ea7577c4585",
     "abi/manifest.txt": "7ec1b83f34d2124fbc7f25f2c6277e1e4a18134eb09eb10205b4148e927794ee",
     "abi/services/console.txt": "67df2f5a331a042ca54edbab1a625f18d6eab48ce0c5274158a50edf875b9152",
     "tools/gen_abi.rb": "a67ea4c1fe8648248e2e1b3260211e42723a4f52a49d88ee67bd5603f394ee7b",
