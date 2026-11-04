@@ -34,7 +34,7 @@ int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
  * kind is ERX_IRQ_SOFT, or ERX_IRQ_LINE with selector the line. budget and
  * resource are ignored. A line the kernel will not attach, taken or not there, is ERX_EBUSY.
  */
-int	erx_irq_create(uint64_t budget, uint64_t resource, uint64_t kind, uint64_t selector,
+int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;
 /*
  * Binds the object to the group with the label its deliveries report, and lets a

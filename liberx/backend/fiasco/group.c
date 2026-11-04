@@ -107,7 +107,7 @@ erx_group_take_ready(uint32_t max)
 }
 
 int
-erx_irq_create(uint64_t budget, uint64_t resource, uint64_t kind, uint64_t selector, uint64_t *irq)
+erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
 {
 	const erx_fiasco_irq_create_request_t request = { .caller = erx_fiasco_thread_self()->index,
 	    .kind = kind, .selector = selector };
