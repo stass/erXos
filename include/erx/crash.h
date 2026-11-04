@@ -45,7 +45,8 @@ typedef enum erx_crash_check {
 	ERX_CRASH_CHECK_FAULT,		/* the fault record contradicts the cause */
 	ERX_CRASH_CHECK_REGS,		/* registers where the cause has none */
 	ERX_CRASH_CHECK_FRAMES,		/* frames past nframes */
-	ERX_CRASH_CHECK_TEXT		/* a byte neither printable nor a newline */
+	ERX_CRASH_CHECK_TEXT,		/* a byte neither printable nor a newline */
+	ERX_CRASH_CHECK_NOT_RUN		/* the reader stopped before the record */
 } erx_crash_check_t;
 
 typedef enum erx_crash_read_status {

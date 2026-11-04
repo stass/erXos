@@ -17,7 +17,8 @@ module Erx
 
     module_function
 
-    def seeds
+    # A well-formed brief record, for seeds and tests to start past the CRC.
+    def brief_record
       fault = { 'kind' => 0, 'cause' => 0, 'addr' => 0, 'pc' => 0, 'thread' => 0, 'space' => 0, 'status' => 0 }
       fields = { 'magic' => FRAME::CODEC.constant('crash_magic'), 'version' => FRAME::CODEC.constant('crash_version'),
                  'length' => FRAME::BRIEF_SIZE, 'crc' => 0, 'form' => FRAME::FORMS.fetch('brief'),
@@ -26,8 +27,19 @@ module Erx
                  'nframes' => 0, 'fault' => fault }
       record = FRAME::CODEC.encode_layout('erx_crash_brief', fields).dup
       record[FRAME::CRC_START - 4, 4] = [FRAME.crc32c(record.byteslice(FRAME::CRC_START..))].pack('L<')
-      lines = record.scan(/.{1,#{FRAME::LINE_BYTES}}/mn).map { |line| [line].pack('m0') }
-      frame = ["#{FRAME::BEGIN_MARKER} brief #{record.bytesize}", *lines, FRAME::END_MARKER].join("\n") << "\n"
+      record
+    end
+
+    # The frame of a record's bytes, under the header line asked for.
+    def frame_of(record, form_name: nil, length: nil)
+      length ||= record.bytesize
+      form_name ||= record.bytesize == FRAME::BRIEF_SIZE ? 'brief' : 'full'
+      payload = record.b.scan(/.{1,#{FRAME::LINE_BYTES}}/mn).map { |line| [line].pack('m0') }
+      ["#{FRAME::BEGIN_MARKER} #{form_name} #{length}", *payload, FRAME::END_MARKER].join("\n") << "\n"
+    end
+
+    def seeds
+      frame = frame_of(brief_record)
       [frame, "text\n#{frame}tail\n", frame.gsub("\n", "\r\n"), "#{FRAME::BEGIN_MARKER} full 904\n", frame.lines[0...-1].join]
     end
 

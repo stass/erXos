@@ -41,11 +41,17 @@ static erx_crash_line_t erx_crash_line_next(const uint8_t *, size_t, size_t);
 static int erx_crash_read_base64_value(uint8_t);
 static bool erx_crash_read_decode(const erx_crash_line_t *, uint32_t, uint8_t *);
 static erx_crash_read_t erx_crash_read_frame(const uint8_t *, size_t,
-    erx_crash_line_t, size_t, uint8_t *);
+    const erx_crash_line_t *, size_t, uint8_t *);
 static bool erx_crash_read_header(const erx_crash_line_t *, erx_crash_header_t *);
 static bool erx_crash_read_number(const uint8_t *, size_t, uint32_t *);
-static erx_crash_read_t erx_crash_read_done(erx_crash_read_t,
-    erx_crash_read_status_t, erx_crash_read_reason_t, size_t);
+static erx_crash_read_reason_t erx_crash_end_reason(const erx_crash_line_t *);
+static erx_crash_read_reason_t erx_crash_payload_reason(const erx_crash_line_t *,
+    uint32_t);
+static erx_crash_read_reason_t erx_crash_read_body(const uint8_t *, size_t,
+    size_t *, uint32_t, uint8_t *);
+static erx_crash_check_t erx_crash_read_check(const uint8_t *,
+    const erx_crash_header_t *);
+static erx_crash_read_status_t erx_crash_read_status_of(erx_crash_read_reason_t);
 
 /* The cores link no memcmp, and nothing here is secret. */
 static bool
@@ -206,91 +212,120 @@ erx_crash_read_decode(const erx_crash_line_t *line, uint32_t raw, uint8_t *out)
 	return (true);
 }
 
-static erx_crash_read_t
-erx_crash_read_done(erx_crash_read_t result, erx_crash_read_status_t status,
-    erx_crash_read_reason_t reason, size_t frame_end)
+/* A line where a payload line of raw bytes belongs: what is wrong with its shape. */
+static erx_crash_read_reason_t
+erx_crash_payload_reason(const erx_crash_line_t *line, uint32_t raw)
 {
-	result.status = status;
-	result.reason = reason;
-	result.frame_end = frame_end;
-	return (result);
+	if (!line->terminated)
+		return (ERX_CRASH_REASON_CUT);
+	if (erx_crash_line_is(line, ERX_CRASH_FRAME_END_STRING,
+	    ERX_CRASH_FRAME_END_SIZE))
+		return (ERX_CRASH_REASON_EARLY_END);
+	if (erx_crash_line_is_header(line))
+		return (ERX_CRASH_REASON_SECOND_HEADER);
+	if (line->length != (raw + 2) / 3 * 4)
+		return (ERX_CRASH_REASON_LINE_LENGTH);
+	return (ERX_CRASH_REASON_NONE);
 }
 
-/* Reads the frame whose header line is first, at offset start of the log. */
+/* A line where the end line belongs. */
+static erx_crash_read_reason_t
+erx_crash_end_reason(const erx_crash_line_t *line)
+{
+	if (!line->terminated)
+		return (ERX_CRASH_REASON_CUT);
+	if (erx_crash_line_is_header(line))
+		return (ERX_CRASH_REASON_SECOND_HEADER);
+	if (!erx_crash_line_is(line, ERX_CRASH_FRAME_END_STRING,
+	    ERX_CRASH_FRAME_END_SIZE))
+		return (ERX_CRASH_REASON_NO_END);
+	return (ERX_CRASH_REASON_NONE);
+}
+
+/* Decodes the payload lines and the end line, moving *cursor past each one. */
+static erx_crash_read_reason_t
+erx_crash_read_body(const uint8_t *log, size_t length, size_t *cursor,
+    uint32_t record_length, uint8_t *record)
+{
+	erx_crash_read_reason_t reason;
+	erx_crash_line_t line;
+	uint32_t lines, offset, raw;
+
+	lines = erx_crash_frame_line_count(record_length) - 2;
+	for (uint32_t index = 0; index < lines; index++) {
+		line = erx_crash_line_next(log, length, *cursor);
+		*cursor = line.next;
+		offset = index * ERX_CRASH_FRAME_RAW;
+		raw = record_length - offset < ERX_CRASH_FRAME_RAW ?
+		    record_length - offset : ERX_CRASH_FRAME_RAW;
+		reason = erx_crash_payload_reason(&line, raw);
+		if (reason != ERX_CRASH_REASON_NONE)
+			return (reason);
+		if (!erx_crash_read_decode(&line, raw, record + offset))
+			return (ERX_CRASH_REASON_BASE64);
+	}
+	line = erx_crash_line_next(log, length, *cursor);
+	*cursor = line.next;
+	return (erx_crash_end_reason(&line));
+}
+
+/* The record's check, and that its own form and length equal the frame's. */
+static erx_crash_check_t
+erx_crash_read_check(const uint8_t *record, const erx_crash_header_t *header)
+{
+	erx_crash_check_t check;
+
+	check = erx_crash_check(record, header->length);
+	if (check != ERX_CRASH_CHECK_OK)
+		return (check);
+	if (!erx_crash_bytes_equal(record + ERX_CRASH_BRIEF_OFF_FORM, &header->form,
+	    sizeof(header->form)))
+		return (ERX_CRASH_CHECK_FORM);
+	if (!erx_crash_bytes_equal(record + ERX_CRASH_BRIEF_OFF_LENGTH,
+	    &header->length, sizeof(header->length)))
+		return (ERX_CRASH_CHECK_LENGTH);
+	return (ERX_CRASH_CHECK_OK);
+}
+
+static erx_crash_read_status_t
+erx_crash_read_status_of(erx_crash_read_reason_t reason)
+{
+	if (reason == ERX_CRASH_REASON_NONE)
+		return (ERX_CRASH_READ_VALID);
+	if (reason == ERX_CRASH_REASON_CUT || reason == ERX_CRASH_REASON_EARLY_END)
+		return (ERX_CRASH_READ_TRUNCATED);
+	return (ERX_CRASH_READ_CORRUPT);
+}
+
+/* Reads the frame whose header line is line, at offset start of the log. */
 static erx_crash_read_t
-erx_crash_read_frame(const uint8_t *log, size_t length, erx_crash_line_t line,
-    size_t start, uint8_t *record)
+erx_crash_read_frame(const uint8_t *log, size_t length,
+    const erx_crash_line_t *line, size_t start, uint8_t *record)
 {
 	erx_crash_read_t result;
 	erx_crash_header_t header;
-	uint32_t lines, offset, raw;
-	size_t expected, cursor;
-	uint32_t index;
+	size_t cursor;
 
-	result = (erx_crash_read_t){ .frame_start = start, .frame_end = line.next };
-	if (!line.terminated)
-		return (erx_crash_read_done(result, ERX_CRASH_READ_TRUNCATED,
-		    ERX_CRASH_REASON_CUT, line.next));
-	if (!erx_crash_read_header(&line, &header))
-		return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-		    ERX_CRASH_REASON_HEADER, line.next));
-	result.length = header.length;
-
-	lines = erx_crash_frame_line_count(header.length) - 2;
-	cursor = line.next;
-	for (index = 0; index < lines; index++) {
-		line = erx_crash_line_next(log, length, cursor);
-		cursor = line.next;
-		if (!line.terminated)
-			return (erx_crash_read_done(result, ERX_CRASH_READ_TRUNCATED,
-			    ERX_CRASH_REASON_CUT, cursor));
-		if (erx_crash_line_is(&line, ERX_CRASH_FRAME_END_STRING,
-		    ERX_CRASH_FRAME_END_SIZE))
-			return (erx_crash_read_done(result, ERX_CRASH_READ_TRUNCATED,
-			    ERX_CRASH_REASON_EARLY_END, cursor));
-		if (erx_crash_line_is_header(&line))
-			return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-			    ERX_CRASH_REASON_SECOND_HEADER, cursor));
-		offset = index * ERX_CRASH_FRAME_RAW;
-		raw = header.length - offset < ERX_CRASH_FRAME_RAW ?
-		    header.length - offset : ERX_CRASH_FRAME_RAW;
-		expected = (raw + 2) / 3 * 4;
-		if (line.length != expected)
-			return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-			    ERX_CRASH_REASON_LINE_LENGTH, cursor));
-		if (!erx_crash_read_decode(&line, raw, record + offset))
-			return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-			    ERX_CRASH_REASON_BASE64, cursor));
+	result = (erx_crash_read_t){ .frame_start = start,
+	    .check = ERX_CRASH_CHECK_NOT_RUN };
+	cursor = line->next;
+	if (!line->terminated) {
+		result.reason = ERX_CRASH_REASON_CUT;
+	} else if (!erx_crash_read_header(line, &header)) {
+		result.reason = ERX_CRASH_REASON_HEADER;
+	} else {
+		result.length = header.length;
+		result.reason = erx_crash_read_body(log, length, &cursor,
+		    header.length, record);
+		if (result.reason == ERX_CRASH_REASON_NONE) {
+			result.check = erx_crash_read_check(record, &header);
+			if (result.check != ERX_CRASH_CHECK_OK)
+				result.reason = ERX_CRASH_REASON_RECORD;
+		}
 	}
-
-	line = erx_crash_line_next(log, length, cursor);
-	cursor = line.next;
-	if (!line.terminated)
-		return (erx_crash_read_done(result, ERX_CRASH_READ_TRUNCATED,
-		    ERX_CRASH_REASON_CUT, cursor));
-	if (erx_crash_line_is_header(&line))
-		return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-		    ERX_CRASH_REASON_SECOND_HEADER, cursor));
-	if (!erx_crash_line_is(&line, ERX_CRASH_FRAME_END_STRING,
-	    ERX_CRASH_FRAME_END_SIZE))
-		return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-		    ERX_CRASH_REASON_NO_END, cursor));
-
-	/* The record's own form and length equal the frame's. */
-	result.check = erx_crash_check(record, header.length);
-	if (result.check == ERX_CRASH_CHECK_OK &&
-	    !erx_crash_bytes_equal(record + ERX_CRASH_BRIEF_OFF_FORM, &header.form,
-	    sizeof(header.form)))
-		result.check = ERX_CRASH_CHECK_FORM;
-	if (result.check == ERX_CRASH_CHECK_OK &&
-	    !erx_crash_bytes_equal(record + ERX_CRASH_BRIEF_OFF_LENGTH, &header.length,
-	    sizeof(header.length)))
-		result.check = ERX_CRASH_CHECK_LENGTH;
-	if (result.check != ERX_CRASH_CHECK_OK)
-		return (erx_crash_read_done(result, ERX_CRASH_READ_CORRUPT,
-		    ERX_CRASH_REASON_RECORD, cursor));
-	return (erx_crash_read_done(result, ERX_CRASH_READ_VALID,
-	    ERX_CRASH_REASON_NONE, cursor));
+	result.status = erx_crash_read_status_of(result.reason);
+	result.frame_end = cursor;
+	return (result);
 }
 
 erx_crash_read_t
@@ -301,11 +336,12 @@ erx_crash_frame_read(const uint8_t *log, size_t length, uint8_t *record)
 	size_t cursor;
 
 	__builtin_memset(record, 0, ERX_CRASH_SIZE);
-	result = (erx_crash_read_t){ .status = ERX_CRASH_READ_ABSENT };
+	result = (erx_crash_read_t){ .status = ERX_CRASH_READ_ABSENT,
+	    .check = ERX_CRASH_CHECK_NOT_RUN };
 	for (cursor = 0; cursor < length; cursor = line.next) {
 		line = erx_crash_line_next(log, length, cursor);
 		if (erx_crash_line_is_header(&line)) {
-			result = erx_crash_read_frame(log, length, line, cursor, record);
+			result = erx_crash_read_frame(log, length, &line, cursor, record);
 			break;
 		}
 	}

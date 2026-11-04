@@ -10,11 +10,15 @@ module Erx
       rules: [
         Chokepoints::Forbidden.new(
           name: 'dispatch-console-write',
-          rule: 'among the cores only the debug-log handler writes to the early console, and only its hosts provide the write',
+          rule: 'among the cores only the debug-log handler and the crash frame write to the early console, and only their hosts ' \
+                'provide the write',
           design: "#{KERNEL}#console-log-and-panic",
           scope: ERXOS_C,
           pattern: /\berx_effect_console_write\b/,
           sites: [Chokepoints::Site.new(glob: 'kernel/core/debug_log.c'),
+                  Chokepoints::Site.new(glob: 'kernel/core/crash_frame.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/crash_driver.c'),
+                  Chokepoints::Site.new(glob: 'tools/fuzz/crash_fuzz.c'),
                   Chokepoints::Site.new(glob: 'include/erx/core/effects.h'),
                   Chokepoints::Site.new(glob: 'fiasco/kernel/src/erx/erx_syscall.cpp'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c'),

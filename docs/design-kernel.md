@@ -2587,8 +2587,8 @@ typedef struct erx_crash_record {
 					 * ERX_CRASH_SIZE for FULL */
 	uint32_t	crc;		/* CRC-32C of the bytes after this field,
 					 * up to length */
-	uint32_t	form;		/* ERX_CRASH_BRIEF or ERX_CRASH_FULL */
-	uint32_t	cause;		/* ERX_CRASH_FAULT, _HALT, _WATCHDOG, _PANIC */
+	uint32_t	form;		/* ERX_CRASH_FORM_BRIEF or ERX_CRASH_FORM_FULL */
+	uint32_t	cause;		/* ERX_CRASH_CAUSE_FAULT, _HALT, _WATCHDOG, _PANIC */
 	uint32_t	cpu;		/* the CPU that wrote it */
 	uint64_t	uptime_ns;	/* monotonic time at the end */
 	uint64_t	since_pet_ns;	/* time since the root task's last pet, or
@@ -2695,18 +2695,18 @@ the two is written as brief, and the brief form never reads the registers,
 the backtrace, the message or the log. The message passes `erx_log_escape`;
 the log's newest whole lines that fit follow it, each read through the
 log's own check of a record, since a panic may have stopped a CPU halfway
-through an append.
+through an append, and the walk has a bound of its own, since a wild store may
+have reached the log's counters.
 
 At boot step 4 the kernel reads the region before it carves the buffer. A
 record that passes the reader's checks, and whose form is
 the one the running build writes, is the **previous crash record**: the
 kernel copies it into fresh pages wrapped in a read-only physical memory
 object, hands that object to the root task among the root capabilities,
-and clears the region's magic, so a record is reported once; the machine
-page says one was found. Anything else that holds the magic, a record of
-the other form or one that fails a check, is refused and its bytes zeroed,
-so a release build never hands on, or keeps, a full record that a
-development build left. The decision, `erx_crash_previous_plan`, is a pure function over the
+and the machine page says one was found. It then zeroes the whole region,
+whatever the region held, so a record is reported once and a release build
+never hands on, or keeps, a full record that a development build left. The
+decision, `erx_crash_previous_length`, is a pure function over the
 bytes, bounded by `ERX_CRASH_SIZE`, with a fuzz target over both forms,
 since the region is memory that firmware and the previous boot wrote. The
 system domain shows the record in the inspector after the reboot, to a

@@ -15,7 +15,7 @@
  *
  * The end path calls erx_crash_record_write once, then
  * erx_crash_frame_write, after every other CPU has stopped. Boot step 4
- * calls erx_crash_previous_plan on the crash buffer's region before it
+ * calls erx_crash_previous_length on the crash buffer's region before it
  * carves the buffer.
  */
 
@@ -69,49 +69,35 @@ typedef struct erx_crash_input {
 } erx_crash_input_t;
 
 /*
- * Boot step 4's decision on the region. HAND_ON: copy the first length bytes
- * into fresh pages for the root task and clear the region's magic. ZERO: the
- * region holds a record it must not keep; zero all of it and report none.
- * NONE: no magic, nothing to do and nothing to report.
- */
-typedef enum erx_crash_previous_action {
-	ERX_CRASH_PREVIOUS_NONE = 1,
-	ERX_CRASH_PREVIOUS_HAND_ON,
-	ERX_CRASH_PREVIOUS_ZERO
-} erx_crash_previous_action_t;
-
-typedef struct erx_crash_previous {
-	erx_crash_previous_action_t action;
-	uint32_t	length;		/* HAND_ON only, else zero */
-} erx_crash_previous_t;
-
-/*
  * The one writer of a crash record. Zeroes the ERX_CRASH_SIZE bytes of buffer
  * and writes a record that erx_crash_check accepts, whatever input holds: it
  * cannot refuse, since nothing can report a refusal at the machine's end, so
  * an input that contradicts itself is written as what it is, a kernel bug
  * (see kernel/core/crash.c, erx_crash_settle). Returns the record's length.
  * buffer and scratch are ERX_CRASH_BUFFER_ALIGN aligned. No lock is taken:
- * the log is read trusting none of its records.
+ * the log is read trusting neither its records nor its counters.
  */
 size_t erx_crash_record_write(const erx_crash_input_t *input, void *buffer,
     void *scratch);
 
 /*
  * Prints the record in buffer as the crash frame through the console effect,
- * after a newline that ends whatever line the report left open. A buffer
- * that holds no record the writer could have made prints nothing.
+ * after a newline that ends whatever line the report left open. A buffer whose
+ * form and length break the frame's rules prints nothing; the writer's never do.
  */
 void erx_crash_frame_write(const void *buffer);
 
 /*
- * Decides what boot step 4 does with region_size bytes that firmware and the
- * previous boot wrote; build_form is the form this build writes. Reads at
- * most ERX_CRASH_SIZE bytes. No other party writes the region at that step,
- * so the check holds for the copy made right after it.
+ * Boot step 4's decision on region_size bytes that firmware and the previous
+ * boot wrote; build_form is the form this build writes. Returns how many bytes
+ * to copy into fresh pages for the root task, or 0 when no record is to be
+ * handed on. The caller then zeroes the whole region in every case, so a record
+ * is reported once and no record, of either form, stays there. Reads at most
+ * ERX_CRASH_SIZE bytes. No other party writes the region at that step, so the
+ * check holds for the copy made right after it.
  */
-erx_crash_previous_t erx_crash_previous_plan(const void *region,
-    size_t region_size, uint32_t build_form);
+uint32_t erx_crash_previous_length(const void *region, size_t region_size,
+    uint32_t build_form);
 
 #ifdef __cplusplus
 }

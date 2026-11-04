@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/crash_frame'
+require_relative '../../tools/fuzz/crash_frame'
 require_relative '../../tools/lib/erx/runner'
 
 # Judges the crash record and the crash frame on both sides: the C17 core's
@@ -29,6 +30,7 @@ class CrashTest < Minitest::Test
   MEMORY = CODEC.member('fault_kind', 'memory')
   CRC_OFFSET = FRAME::CRC_START - 4
   CAUSE_OFFSET = 24
+  DRIVER_SECONDS = 30
 
   ReadAnswer = Data.define(:status, :reason, :check, :length, :frame_start, :frame_end, :record)
   Written = Data.define(:length, :check, :record, :frame)
@@ -67,7 +69,7 @@ class CrashTest < Minitest::Test
     input = File.join(@directory, "commands-#{@commands}")
     File.write(input, commands.join("\n") << "\n")
     log = File.join(@directory, "output-#{@commands}")
-    pid = Process.spawn(driver, input, out: log, err: "#{log}.err", in: File::NULL)
+    pid = Process.spawn('gtimeout', '-k', '5', DRIVER_SECONDS.to_s, driver, input, out: log, err: "#{log}.err", in: File::NULL)
     _, status = Process.wait2(pid)
     assert status.success?, "driver failed: #{File.read("#{log}.err")}"
     File.readlines(log, chomp: true)
@@ -106,7 +108,7 @@ class CrashTest < Minitest::Test
     label = hex(log.b[0, 200])
     assert_equal native.status, ruby.status, label
     assert_equal native.reason, ruby.reason || :none, label
-    assert_equal native.check, ruby.check || :ok, label
+    assert_equal native.check, ruby.check || :not_run, label
     assert_equal native.length, ruby.length, label
     if ruby.status == :valid
       assert_equal :ok, FRAME.check(native.record), label
@@ -134,12 +136,7 @@ class CrashTest < Minitest::Test
     recrc(changed)
   end
 
-  def frame_of(record, form_name: nil, length: nil)
-    length ||= record.bytesize
-    form_name ||= record.bytesize == FRAME::BRIEF_SIZE ? 'brief' : 'full'
-    payload = record.b.scan(/.{1,#{FRAME::LINE_BYTES}}/mn).map { |line| [line].pack('m0') }
-    ["#{FRAME::BEGIN_MARKER} #{form_name} #{length}", *payload, FRAME::END_MARKER].join("\n") << "\n"
-  end
+  def frame_of(record, **header) = Erx::CrashFrameFuzz.frame_of(record, **header)
 
   # The vectors of RFC 3720, B.4, and the catalogue's check value.
   def test_crc32c_matches_published_vectors
@@ -263,6 +260,14 @@ class CrashTest < Minitest::Test
     assert_equal (numbers.first..799).to_a, numbers
     assert_operator written.frame.lines.size, :<=, CODEC.constant('crash_frame_lines_max') + 2
     written.frame.lines[1...-3].each { |line| assert_equal FRAME::LINE_CHARS + 1, line.bytesize }
+  end
+
+  # Memory corruption is a common reason to panic: the walk of the log must end
+  # however wrong its counters are, or the machine never does.
+  def test_corrupted_log_counters_do_not_stop_the_record
+    written = write(lines: -2)
+    assert_equal 'ok', written.check
+    assert_equal :valid, FRAME.read(written.frame).status
   end
 
   def test_a_buffer_full_of_stale_bytes_does_not_reach_the_record
@@ -448,7 +453,7 @@ class CrashTest < Minitest::Test
   def test_the_report_escapes_everything_it_prints
     _, brief = clean_records
     poisoned = frame_of(brief).lines
-    poisoned[1] = "\e]0;owned\a‮#{'A' * 40}\n"
+    poisoned[1] = "\e]0;owned\a\u202e#{'A' * 40}\n"
     report = FRAME.report(FRAME.read(poisoned.join))
     report.each { |line| assert_match(/\A[\x20-\x7e]*\z/, line) }
     refute_empty report.grep(/\\u\{1b\}/)
@@ -467,21 +472,20 @@ class CrashTest < Minitest::Test
     assert_equal :valid, FRAME.read("#{frame.sub('brief', 'bad')}banner\n#{frame}", after: 'banner').status
   end
 
-  def plan(form, bytes) = drive(["plan #{form} #{hex(bytes)}"]).fetch(0).split.drop(1)
+  def plan(form, bytes) = drive(["plan #{form} #{hex(bytes)}"]).fetch(0).split.fetch(1).to_i
 
-  def test_the_previous_record_plan
+  def test_only_a_record_of_the_builds_form_is_handed_on
     full, brief = clean_records
-    assert_equal ['hand_on', brief.bytesize.to_s], plan(BRIEF, brief)
-    assert_equal ['hand_on', full.bytesize.to_s], plan(FULL, full)
-    assert_equal ['hand_on', brief.bytesize.to_s], plan(BRIEF, brief + "\xEE".b * 4096)
-    assert_equal ['zero', '0'], plan(BRIEF, full)
-    assert_equal ['zero', '0'], plan(FULL, brief)
-    assert_equal ['zero', '0'], plan(BRIEF, brief.dup.tap { |record| record.setbyte(100, record.getbyte(100) ^ 1) })
-    assert_equal ['zero', '0'], plan(BRIEF, brief.byteslice(0, 119))
-    assert_equal ['none', '0'], plan(BRIEF, "\xEE".b * 4096)
-    assert_equal ['none', '0'], plan(BRIEF, "\0".b * 4096)
-    assert_equal ['none', '0'], plan(BRIEF, ''.b)
-    assert_equal ['none', '0'], plan(BRIEF, 'short'.b)
+    assert_equal brief.bytesize, plan(BRIEF, brief)
+    assert_equal full.bytesize, plan(FULL, full)
+    assert_equal brief.bytesize, plan(BRIEF, brief + "\xEE".b * 4096)
+    assert_equal 0, plan(BRIEF, full)
+    assert_equal 0, plan(FULL, brief)
+    assert_equal 0, plan(BRIEF, brief.dup.tap { |record| record.setbyte(100, record.getbyte(100) ^ 1) })
+    assert_equal 0, plan(BRIEF, brief.byteslice(0, 119))
+    assert_equal 0, plan(BRIEF, "\xEE".b * 4096)
+    assert_equal 0, plan(BRIEF, "\0".b * 4096)
+    assert_equal 0, plan(BRIEF, ''.b)
   end
 
   # One-line mutants of the core: each must change what these cases see.

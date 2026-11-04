@@ -590,6 +590,7 @@ module Erx
             "#define ERX_#{name.upcase}_#{member.upcase} UINT32_C(#{value})"
           end
         end
+        kinds = schema.types.fetch('fault_kind').members.values.sum { |value| 1 << value }
         regs = schema.types.fetch('erx_regs')
         brief = schema.types.fetch('erx_crash_brief')
         build_id = brief.fields.find { |member| member.name == 'build_id' }
@@ -597,6 +598,7 @@ module Erx
          '#include <stdint.h>', '',
          *enums,
          "#define ERX_CRASH_SIZE UINT32_C(#{schema.constants.fetch('crash_size').value})",
+         "#define ERX_CRASH_FAULT_KINDS UINT32_C(#{format('0x%x', kinds)})",
          "#define ERX_CRASH_REGS_BYTES #{regs.size}",
          "#define ERX_CRASH_BUILD_ID_BYTES #{build_id.count}",
          '', '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")

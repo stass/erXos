@@ -7,8 +7,8 @@
  * The crash frame's writer: the record in base64 between a header line and an
  * end line (docs/design-kernel.md, "The root task"). erx_crash_frame_line is
  * pure; erx_crash_frame_write only hands its lines to the console effect, whose
- * bounded poll drops what a hung UART cannot take, and the reader then reports
- * the frame as truncated.
+ * bounded poll drops what a hung UART cannot take. A UART that stays hung leaves
+ * a truncated frame; one that loses bytes mid-line leaves a corrupt one.
  */
 
 #include <stdbool.h>

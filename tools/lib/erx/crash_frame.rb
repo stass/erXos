@@ -58,6 +58,9 @@ module Erx
     # valid. lines are the frame's lines as the log held them, unescaped.
     Result = Data.define(:status, :reason, :check, :length, :record, :text, :lines)
     Line = Data.define(:text, :next_offset, :terminated)
+    Header = Data.define(:form, :length)
+    Body = Data.define(:reason, :cursor, :record)
+    TRUNCATING = %i[cut early_end].freeze
 
     CRC_TABLE = (0..255).map do |byte|
       8.times.reduce(byte) { |crc, _| crc.odd? ? (crc >> 1) ^ 0x82f63b78 : crc >> 1 }
@@ -88,11 +91,11 @@ module Erx
 
     # The first thing wrong with a record, as a symbol; :ok when nothing is.
     # The order and the rules are the design's, as erx_crash_check has them.
-    def check(bytes, available: bytes.bytesize)
-      return :short if available < BRIEF_SIZE
+    def check(bytes)
+      return :short if bytes.bytesize < BRIEF_SIZE
 
       header = CODEC.decode_layout('erx_crash_brief', bytes, prefix: true)
-      framing(header, available) || crc_check(header, bytes) || fields(header, bytes) || body(header, bytes) || :ok
+      framing(header, bytes.bytesize) || crc_check(header, bytes) || fields(header, bytes) || body(header, bytes) || :ok
     end
 
     # Lines for a terminal, each one already escaped.
@@ -132,83 +135,98 @@ module Erx
     def header_line?(text) = text == BEGIN_MARKER || text.start_with?("#{BEGIN_MARKER} ")
     private_class_method :header_line?
 
-    # Refuses what the frame's rules do not allow before any payload is read.
+    # Refuses what the frame's rules do not allow before any payload is read:
+    # a Header, or nil.
     def parse_header(text)
       match = /\A#{Regexp.escape(BEGIN_MARKER)} (brief|full) (0|[1-9][0-9]{0,4})\z/n.match(text)
       return nil if match.nil?
 
       length = match[2].to_i
       legal = match[1] == 'brief' ? length == BRIEF_SIZE : length.between?(RECORD_SIZE, CRASH_SIZE)
-      legal ? [FORMS.fetch(match[1]), length] : nil
+      legal ? Header.new(form: FORMS.fetch(match[1]), length: length) : nil
     end
     private_class_method :parse_header
 
-    def read_frame(bytes, header_line, start)
-      refuse = lambda do |status, reason, finish, length: 0, check: nil|
-        kept = bytes.byteslice(start, [finish - start, KEPT_BYTES_MAX].min).lines.map(&:freeze).freeze
-        Result.new(status: status, reason: reason, check: check, length: length, record: nil, text: nil, lines: kept)
-      end
-      return refuse.call(:truncated, :cut, header_line.next_offset) unless header_line.terminated
+    def read_frame(bytes, line, start)
+      return refusal(bytes, start, line.next_offset, :cut) unless line.terminated
 
-      form, length = parse_header(header_line.text)
-      return refuse.call(:corrupt, :header, header_line.next_offset) if form.nil?
+      header = parse_header(line.text)
+      return refusal(bytes, start, line.next_offset, :header) if header.nil?
 
-      read_payload(bytes, header_line.next_offset, length, refuse) do |record, finish|
-        finish_record(record, form, length, finish, refuse)
-      end
+      body = read_body(bytes, line.next_offset, header.length)
+      return refusal(bytes, start, body.cursor, body.reason, length: header.length) if body.reason
+
+      failed = record_check(body.record, header)
+      return refusal(bytes, start, body.cursor, :record, length: header.length, check: failed) unless failed == :ok
+
+      Result.new(status: :valid, reason: nil, check: :ok, length: header.length, record: decode_valid(body.record),
+                 text: text_of(body.record), lines: [].freeze)
     end
     private_class_method :read_frame
 
-    def read_payload(bytes, cursor, length, refuse)
-      count = (length + LINE_BYTES - 1) / LINE_BYTES
+    def refusal(bytes, start, finish, reason, length: 0, check: nil)
+      kept = bytes.byteslice(start, [finish - start, KEPT_BYTES_MAX].min).lines.map(&:freeze).freeze
+      Result.new(status: TRUNCATING.include?(reason) ? :truncated : :corrupt, reason: reason, check: check, length: length,
+                 record: nil, text: nil, lines: kept)
+    end
+    private_class_method :refusal
+
+    # The payload lines and the end line.
+    def read_body(bytes, cursor, length)
       record = String.new(capacity: length, encoding: Encoding::BINARY)
-      count.times do |index|
+      ((length + LINE_BYTES - 1) / LINE_BYTES).times do |index|
         line = line_at(bytes, cursor)
         cursor = line.next_offset
         raw = [length - index * LINE_BYTES, LINE_BYTES].min
-        problem = payload_problem(line, raw)
-        return refuse.call(*problem, cursor, length: length) if problem
+        reason = payload_reason(line, raw)
+        decoded = reason.nil? ? decode(line.text, raw) : nil
+        reason ||= :base64 if decoded.nil?
+        return Body.new(reason: reason, cursor: cursor, record: nil) if reason
 
-        record << line.text.unpack1('m0')
+        record << decoded
       end
       line = line_at(bytes, cursor)
-      cursor = line.next_offset
-      return refuse.call(:truncated, :cut, cursor, length: length) unless line.terminated
-      return refuse.call(:corrupt, :second_header, cursor, length: length) if header_line?(line.text)
-      return refuse.call(:corrupt, :no_end, cursor, length: length) unless line.text == END_MARKER
-
-      yield record, cursor
+      Body.new(reason: end_reason(line), cursor: line.next_offset, record: record)
     end
-    private_class_method :read_payload
+    private_class_method :read_body
 
-    def payload_problem(line, raw)
-      return %i[truncated cut] unless line.terminated
-      return %i[truncated early_end] if line.text == END_MARKER
-      return %i[corrupt second_header] if header_line?(line.text)
-      return %i[corrupt line_length] unless line.text.bytesize == (raw + 2) / 3 * 4
+    def payload_reason(line, raw)
+      return :cut unless line.terminated
+      return :early_end if line.text == END_MARKER
+      return :second_header if header_line?(line.text)
 
-      decoded = begin
-        line.text.unpack1('m0')
-      rescue ArgumentError
-        nil
-      end
-      decoded&.bytesize == raw ? nil : %i[corrupt base64]
+      line.text.bytesize == (raw + 2) / 3 * 4 ? nil : :line_length
     end
-    private_class_method :payload_problem
+    private_class_method :payload_reason
 
-    def finish_record(record, form, length, finish, refuse)
+    def end_reason(line)
+      return :cut unless line.terminated
+      return :second_header if header_line?(line.text)
+
+      line.text == END_MARKER ? nil : :no_end
+    end
+    private_class_method :end_reason
+
+    # Strict base64 of exactly raw bytes, or nil.
+    def decode(text, raw)
+      decoded = text.unpack1('m0')
+      decoded.bytesize == raw ? decoded : nil
+    rescue ArgumentError
+      nil
+    end
+    private_class_method :decode
+
+    # The record's check, and that its own form and length equal the frame's.
+    def record_check(record, header)
       failed = check(record)
-      if failed == :ok
-        header = CODEC.decode_layout('erx_crash_brief', record, prefix: true)
-        failed = :form unless header.fetch('form') == form
-        failed = :length if failed == :ok && header.fetch('length') != length
-      end
-      return refuse.call(:corrupt, :record, finish, length: length, check: failed) unless failed == :ok
+      return failed unless failed == :ok
 
-      Result.new(status: :valid, reason: nil, check: :ok, length: length, record: decode_valid(record), text: text_of(record),
-                 lines: [].freeze)
+      fields = CODEC.decode_layout('erx_crash_brief', record, prefix: true)
+      return :form unless fields.fetch('form') == header.form
+
+      fields.fetch('length') == header.length ? :ok : :length
     end
-    private_class_method :finish_record
+    private_class_method :record_check
 
     def decode_valid(record)
       return CODEC.decode_layout('erx_crash_brief', record, prefix: true) if record.bytesize == BRIEF_SIZE

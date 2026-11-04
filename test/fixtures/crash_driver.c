@@ -11,7 +11,7 @@
  *
  *   crc HEX                 -> crc VALUE
  *   check HEX               -> check NAME
- *   plan FORM HEX           -> plan ACTION LENGTH
+ *   plan FORM HEX           -> plan LENGTH
  *   read HEX                -> read STATUS REASON CHECK LENGTH START END RECORD-HEX
  *   write FORM CAUSE CPU VALUE SLOT NFRAMES FRAMES REGS KIND MESSAGE-HEX LOG-LINES
  *                           -> record LENGTH CHECK HEX
@@ -19,7 +19,8 @@
  *
  * FRAMES and REGS are 0 for a NULL pointer and 1 for a filled array. The fault
  * record is zero when KIND is 0 and otherwise filled. MESSAGE-HEX "-" is NULL.
- * LOG-LINES is how many lines the log holds, -1 for a NULL log.
+ * LOG-LINES is how many lines the log holds, -1 for a NULL log and -2 for a log
+ * whose counters a wild store has corrupted.
  */
 
 #include <stdbool.h>
@@ -34,6 +35,7 @@
 #define DRIVER_HEX_MAX	(4 * ERX_CRASH_SIZE + 16)
 #define DRIVER_LINE_MAX	(2 * DRIVER_HEX_MAX + 256)
 #define DRIVER_FRAME_MAX (2 * ERX_CRASH_SIZE)
+#define DRIVER_LOG_CORRUPT (-2)
 
 static _Alignas(8) uint8_t driver_record[ERX_CRASH_SIZE];
 static _Alignas(8) uint8_t driver_scratch[ERX_CRASH_SCRATCH_BYTES];
@@ -51,7 +53,7 @@ static void driver_write(char *);
 
 static const char *const driver_checks[] = {
 	"ok", "short", "magic", "version", "form", "length", "crc", "cause", "cpu",
-	"boot", "padding", "nframes", "fault", "regs", "frames", "text",
+	"boot", "padding", "nframes", "fault", "regs", "frames", "text", "not_run",
 };
 static const char *const driver_statuses[] = {
 	"none", "absent", "valid", "truncated", "corrupt",
@@ -59,9 +61,6 @@ static const char *const driver_statuses[] = {
 static const char *const driver_reasons[] = {
 	"none", "cut", "early_end", "header", "second_header", "line_length",
 	"base64", "no_end", "record",
-};
-static const char *const driver_actions[] = {
-	"unset", "none", "hand_on", "zero",
 };
 
 /* The core's one effect: this file keeps what a console would show. */
@@ -156,7 +155,9 @@ driver_write(char *arguments)
 		    "line %d of the log, with padding to make it longer", index) != ERX_OK)
 			driver_fail("the log refused a line");
 	}
-	input.log = lines >= 0 ? &driver_log : NULL;
+	if (lines == DRIVER_LOG_CORRUPT)
+		driver_log.next_seq = UINT64_C(0x7fffffffffffffff);
+	input.log = lines >= 0 || lines == DRIVER_LOG_CORRUPT ? &driver_log : NULL;
 
 	/* A stale buffer must not reach the record. */
 	memset(driver_record, 0xa5, sizeof(driver_record));
@@ -180,7 +181,6 @@ driver_write(char *arguments)
 static void
 driver_command(char *line)
 {
-	erx_crash_previous_t plan;
 	erx_crash_read_t read;
 	char *name, *rest, *hex;
 	size_t length;
@@ -195,8 +195,7 @@ driver_command(char *line)
 		form = (unsigned int)strtoul(strtok_r(NULL, " \n", &rest), NULL, 10);
 		hex = strtok_r(NULL, " \n", &rest);
 		length = driver_unhex(hex);
-		plan = erx_crash_previous_plan(driver_bytes, length, form);
-		printf("plan %s %u\n", driver_actions[plan.action], plan.length);
+		printf("plan %u\n", erx_crash_previous_length(driver_bytes, length, form));
 	} else {
 		hex = strtok_r(NULL, " \n", &rest);
 		if (hex == NULL)

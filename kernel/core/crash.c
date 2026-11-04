@@ -62,6 +62,21 @@ _Static_assert(sizeof(erx_crash_scratch_t) <= ERX_CRASH_SCRATCH_BYTES,
 _Static_assert(_Alignof(erx_crash_scratch_t) <= ERX_CRASH_BUFFER_ALIGN,
     "the seam's alignment holds the scratch");
 
+/*
+ * One walk over the log. Each step reads a record or a window, and a legal ring
+ * holds at most ERX_LOG_RING_BYTES / ERX_LOG_RECORD_SIZE records.
+ */
+#define ERX_CRASH_LOG_STEPS	(2 * ERX_LOG_RING_BYTES / ERX_LOG_RECORD_SIZE)
+
+typedef struct erx_crash_log_walk {
+	const erx_log_t	*log;
+	erx_crash_scratch_t *scratch;
+	uint64_t	cursor;
+	size_t		offset;
+	size_t		filled;
+	uint32_t	steps;
+} erx_crash_log_walk_t;
+
 static bool erx_crash_all_zero(const uint8_t *, size_t);
 static bool erx_crash_boot_pair(uint32_t, uint32_t);
 static bool erx_crash_cause_known(uint32_t);
@@ -69,8 +84,9 @@ static erx_crash_check_t erx_crash_check_body(const uint8_t *, uint32_t, uint32_
     uint32_t);
 static bool erx_crash_fault_fits(uint32_t, const erx_crash_fault_t *);
 static bool erx_crash_kind_known(uint32_t);
-static size_t erx_crash_log_lines(const erx_log_t *, erx_crash_scratch_t *,
-    char *, size_t, size_t);
+static bool erx_crash_log_next(erx_crash_log_walk_t *, size_t *);
+static erx_crash_log_walk_t erx_crash_log_start(const erx_log_t *,
+    erx_crash_scratch_t *);
 static size_t erx_crash_log_tail(const erx_log_t *, erx_crash_scratch_t *, char *,
     size_t);
 static void erx_crash_settle(const erx_crash_input_t *, erx_crash_brief_t *);
@@ -120,14 +136,7 @@ erx_crash_cause_known(uint32_t cause)
 static bool
 erx_crash_kind_known(uint32_t kind)
 {
-	static const uint32_t known =
-	    (UINT32_C(1) << ERX_FAULT_MEMORY) | (UINT32_C(1) << ERX_FAULT_DELETED) |
-	    (UINT32_C(1) << ERX_FAULT_UNDEFINED) | (UINT32_C(1) << ERX_FAULT_ALIGNMENT) |
-	    (UINT32_C(1) << ERX_FAULT_BREAKPOINT) | (UINT32_C(1) << ERX_FAULT_FOREIGN_TRAP) |
-	    (UINT32_C(1) << ERX_FAULT_ASYNC_ERROR) | (UINT32_C(1) << ERX_FAULT_BUDGET) |
-	    (UINT32_C(1) << ERX_FAULT_EXIT);
-
-	return (kind < 32 && ((known >> kind) & 1) != 0);
+	return (kind < 32 && ((ERX_CRASH_FAULT_KINDS >> kind) & 1) != 0);
 }
 
 /*
@@ -207,59 +216,82 @@ erx_crash_settle(const erx_crash_input_t *input, erx_crash_brief_t *header)
 }
 
 /*
- * Appends the rendered records from the first with skip bytes of lines before
- * it, as far as they fit, and returns the bytes appended; with room 0 it only
- * counts every record's line. A window that fails the log's check is skipped:
- * a panic may have stopped a CPU halfway through an append.
+ * The next rendered line of the log, in the scratch, and its length; false at
+ * the log's end. A window that fails the log's check of a record is skipped:
+ * a panic may have stopped a CPU halfway through an append. The steps bound
+ * the walk whatever the counters say, since memory corruption is a common
+ * reason to panic and the machine must still end.
  */
-static size_t
-erx_crash_log_lines(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst,
-    size_t room, size_t skip)
+static bool
+erx_crash_log_next(erx_crash_log_walk_t *walk, size_t *length)
 {
+	erx_crash_scratch_t *scratch;
 	erx_log_copy_result_t copied;
 	erx_log_view_t view;
-	uint64_t cursor;
-	size_t total, seen, offset, line;
 
-	cursor = 0;
-	total = 0;
-	seen = 0;
-	for (;;) {
-		copied = erx_log_copy(log, cursor, scratch->window,
+	scratch = walk->scratch;
+	while (walk->steps > 0) {
+		walk->steps--;
+		if (walk->offset < walk->filled &&
+		    erx_log_next_record(scratch->window, walk->filled, &walk->offset,
+		    scratch->text, &view) == ERX_LOG_NEXT_RECORD) {
+			*length = erx_log_render(&view, scratch->line,
+			    sizeof(scratch->line));
+			return (true);
+		}
+		copied = erx_log_copy(walk->log, walk->cursor, scratch->window,
 		    sizeof(scratch->window));
 		if (copied.status != ERX_OK || copied.written == 0)
-			return (dst == NULL ? seen : total);
-		cursor = copied.next_cursor;
-		offset = 0;
-		while (erx_log_next_record(scratch->window, copied.written, &offset,
-		    scratch->text, &view) == ERX_LOG_NEXT_RECORD) {
-			line = erx_log_render(&view, scratch->line,
-			    sizeof(scratch->line));
-			seen += line;
-			if (dst == NULL || seen - line < skip)
-				continue;
-			if (line > room - total)
-				return (total);
-			__builtin_memcpy(dst + total, scratch->line, line);
-			total += line;
-		}
+			return (false);
+		walk->cursor = copied.next_cursor;
+		walk->offset = 0;
+		walk->filled = copied.written;
 	}
+	return (false);
+}
+
+static erx_crash_log_walk_t
+erx_crash_log_start(const erx_log_t *log, erx_crash_scratch_t *scratch)
+{
+	return ((erx_crash_log_walk_t){
+		.log = log,
+		.scratch = scratch,
+		.steps = ERX_CRASH_LOG_STEPS,
+	});
 }
 
 /*
- * The newest whole lines that fit in room, newest last. A first walk measures
- * the log and a second copies its tail; the other CPUs have stopped, and a
- * log that differs between the walks only ends the copy early.
+ * The newest whole lines that fit in room, newest last. One walk measures the
+ * log and a second copies the lines past the part that does not fit; the other
+ * CPUs have stopped, and a log that differs between the walks only ends the
+ * copy early.
  */
 static size_t
 erx_crash_log_tail(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst,
     size_t room)
 {
-	size_t all;
+	erx_crash_log_walk_t walk;
+	size_t all, line, seen, skip, used;
 
-	all = erx_crash_log_lines(log, scratch, NULL, 0, 0);
-	return (erx_crash_log_lines(log, scratch, dst, room,
-	    all > room ? all - room : 0));
+	all = 0;
+	walk = erx_crash_log_start(log, scratch);
+	while (erx_crash_log_next(&walk, &line))
+		all += line;
+	skip = all > room ? all - room : 0;
+
+	seen = 0;
+	used = 0;
+	walk = erx_crash_log_start(log, scratch);
+	while (erx_crash_log_next(&walk, &line)) {
+		seen += line;
+		if (seen - line < skip)
+			continue;
+		if (line > room - used)
+			break;
+		__builtin_memcpy(dst + used, scratch->line, line);
+		used += line;
+	}
+	return (used);
 }
 
 /* The full form's fields past the brief form's end; returns the record's length. */
@@ -420,6 +452,7 @@ erx_crash_check_reason(erx_crash_check_t status)
 		[ERX_CRASH_CHECK_REGS] = "registers are set where the cause has none",
 		[ERX_CRASH_CHECK_FRAMES] = "frames are set past the frame count",
 		[ERX_CRASH_CHECK_TEXT] = "the text holds a byte neither printable nor a newline",
+		[ERX_CRASH_CHECK_NOT_RUN] = "the frame stopped before the record",
 	};
 
 	if ((size_t)status >= sizeof(reasons) / sizeof(reasons[0]))
@@ -427,30 +460,19 @@ erx_crash_check_reason(erx_crash_check_t status)
 	return (reasons[status]);
 }
 
-erx_crash_previous_t
-erx_crash_previous_plan(const void *region, size_t region_size, uint32_t build_form)
+uint32_t
+erx_crash_previous_length(const void *region, size_t region_size,
+    uint32_t build_form)
 {
-	uint64_t magic;
 	uint32_t form, length;
 	size_t available;
 
 	available = region_size < ERX_CRASH_SIZE ? region_size : ERX_CRASH_SIZE;
-	if (region == NULL || available < sizeof(magic))
-		return ((erx_crash_previous_t){ .action = ERX_CRASH_PREVIOUS_NONE });
-	__builtin_memcpy(&magic, (const uint8_t *)region + ERX_CRASH_BRIEF_OFF_MAGIC,
-	    sizeof(magic));
-	if (magic != ERX_CRASH_MAGIC)
-		return ((erx_crash_previous_t){ .action = ERX_CRASH_PREVIOUS_NONE });
 	if (erx_crash_check(region, available) != ERX_CRASH_CHECK_OK)
-		return ((erx_crash_previous_t){ .action = ERX_CRASH_PREVIOUS_ZERO });
+		return (0);
 	__builtin_memcpy(&form, (const uint8_t *)region + ERX_CRASH_BRIEF_OFF_FORM,
 	    sizeof(form));
-	if (form != build_form)
-		return ((erx_crash_previous_t){ .action = ERX_CRASH_PREVIOUS_ZERO });
 	__builtin_memcpy(&length, (const uint8_t *)region + ERX_CRASH_BRIEF_OFF_LENGTH,
 	    sizeof(length));
-	return ((erx_crash_previous_t){
-		.action = ERX_CRASH_PREVIOUS_HAND_ON,
-		.length = length,
-	});
+	return (form == build_form ? length : 0);
 }
