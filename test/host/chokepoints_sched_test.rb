@@ -30,4 +30,21 @@ class ChokepointsSchedTest < Minitest::Test
     refute_empty evaluate([rule('core-records-private')], { Rules::SCHED_CORE => "#include \"cap_impl.h\"\n" }),
                  'a core outside kernel/core includes only its own private headers'
   end
+
+  # The core's own stores of a thread's resolve pass, read from the tree, and
+  # every other write, in the core or out of it, fails on that line; reads and
+  # a decision's own urgency are not writes.
+  def test_a_stored_urgency_is_only_ever_the_threads_own_resolve
+    store = [rule('sched-urgency-store')]
+    core = File.read(File.expand_path("../../#{Rules::SCHED_CORE}", __dir__))
+    assert_empty evaluate(store, { Rules::SCHED_CORE => core })
+    assert_empty evaluate(store, { 'tools/fuzz/sched_fuzz.c' => "\tif (t->urgency != level || run->urgency == 1)\n",
+                                   Rules::SCHED_CORE => "\tdecision->urgency.raw = thread->urgency;\n" })
+    ["other->urgency = erx_sched_resolve(thread).raw;", 'thread->urgency = 63;', 'threads[i].urgency = 1;',
+     '(*thread).urgency += 1;', 'thread->urgency++;', '--thread->urgency;', 'uint8_t *p = &thread->urgency;'].each do |line|
+      found = evaluate(store, { Rules::SCHED_CORE => "\t#{line}\n" })
+      assert_equal ["sched-urgency-store: #{Rules::SCHED_CORE}:1"], found.map { |v| "#{v.rule}: #{v.path}:#{v.line}" }, line
+    end
+    refute_empty evaluate(store, { 'kernel/sched/switch.c' => "\tthread->urgency = erx_sched_resolve(thread).raw;\n" })
+  end
 end

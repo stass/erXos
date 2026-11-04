@@ -77,9 +77,9 @@ struct erx_sched_thread {
 	erx_sched_thread_t	*next;		/* its level's FIFO, while ready */
 	erx_sched_thread_t	*prev;
 	uint64_t		 slice_left_ns;	/* 0: a fresh slice at its dispatch */
-	uint64_t		 decided_in;	/* the pick it was resolved in; 0: none */
-	uint8_t			 level;		/* its FIFO's level, while ready */
-	uint8_t			 urgency;	/* as resolved in decided_in */
+	uint8_t			 urgency;	/* while ready, its FIFO's level; while ready or
+						 * running, written only as its own resolve
+						 * (S5) */
 };
 
 typedef struct sched_fifo {
@@ -90,7 +90,6 @@ typedef struct sched_fifo {
 struct erx_sched_cpu {
 	sched_fifo_t		 levels[SCHED_LEVELS];
 	uint64_t		 ready;		/* bit n: levels[n] is not empty */
-	uint64_t		 picks;		/* picks so far; names the current one */
 	erx_sched_thread_t	*running;	/* NULL while it idles */
 	uint32_t		 index;
 };

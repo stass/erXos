@@ -21,6 +21,7 @@
  *   urgency T U          sets T's base
  *   affinity T MASK      sets T's affinity
  *   wake C T             wakes T on CPU C; prints whether C must pick
+ *   refresh C T          resolves T again on CPU C; prints whether C must pick
  *   remove C T           takes T off C's queues; prints whether it did
  *   pick C WHY RAN       picks on CPU C; prints the decision
  *   place T IDLE         prints the CPU a wake of T goes to
@@ -134,7 +135,7 @@ print_level(const erx_sched_cpu_t *cpu, int level)
 		return;
 	printf(";%d=", level);
 	for (thread = fifo->head; thread != NULL; thread = thread->next) {
-		if (thread->prev != last || thread->level != level ||
+		if (thread->prev != last || thread->urgency != level ||
 		    thread->where != sched_where(SCHED_THREAD_READY, cpu->index))
 			die("a queued thread's record disagrees with its list");
 		printf("%s%d", last == NULL ? "" : "+", thread_id(thread));
@@ -165,14 +166,14 @@ print_state(void)
 		print_grant(&grant);
 	}
 	for (i = 0; i < nthreads; i++) {
-		printf(" t%d:%u,%" PRIu64 ",%c,%" PRIu64 ",%u,%u,%" PRIu64, i,
+		printf(" t%d:%u,%" PRIu64 ",%c,%" PRIu64 ",%u,%u,%" PRIu64 ",%u", i,
 		    erx_sched_resolve(&threads[i]).raw,
 		    erx_sched_thread_cpus(&threads[i]),
 		    state_names[sched_where_state(threads[i].where)],
 		    threads[i].slice_left_ns, threads[i].last_cpu,
-		    erx_sched_thread_home(&threads[i]),
+		    erx_sched_thread_on_cpu(&threads[i]),
 		    erx_sched_group_slice_ns(
-		    erx_sched_thread_group(&threads[i])));
+		    erx_sched_thread_group(&threads[i])), threads[i].urgency);
 	}
 	for (i = 0; i < CPUS; i++) {
 		if (cpus[i].running != NULL)
@@ -376,7 +377,8 @@ operands_of(const char *name)
 		{ "machine", 1 }, { "root", GRANT_WORDS },
 		{ "group", GRANT_WORDS + 1 }, { "configure", GRANT_WORDS + 1 },
 		{ "normalize", GRANT_WORDS }, { "thread", 1 }, { "urgency", 2 },
-		{ "affinity", 2 }, { "wake", 2 }, { "remove", 2 }, { "pick", 3 },
+		{ "affinity", 2 }, { "wake", 2 }, { "refresh", 2 }, { "remove", 2 },
+		{ "pick", 3 },
 		{ "place", 2 }, { "state", 0 }, { "race", 2 }
 	};
 	size_t i;
@@ -414,7 +416,7 @@ run_command(const char *name, const uint64_t *word, int nwords)
 		erx_grant_t result;
 
 		grant = grant_of(word);
-		status = erx_grant_normalize(&grant, cap, &result);
+		status = erx_grant_normalize(&grant, MACHINE_CPUS, cap, &result);
 		printf("= %d", status);
 		if (status == ERX_OK) {
 			printf(" ");
@@ -436,6 +438,9 @@ run_command(const char *name, const uint64_t *word, int nwords)
 		printf("= 0\n");
 	} else if (strcmp(name, "wake") == 0) {
 		printf("= %d\n", erx_sched_wake(cpu_at(word[0]),
+		    thread_at(word[1])));
+	} else if (strcmp(name, "refresh") == 0) {
+		printf("= %d\n", erx_sched_refresh(cpu_at(word[0]),
 		    thread_at(word[1])));
 	} else if (strcmp(name, "remove") == 0) {
 		printf("= %d\n", erx_sched_remove(cpu_at(word[0]),

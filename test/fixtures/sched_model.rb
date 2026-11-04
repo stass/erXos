@@ -33,7 +33,7 @@ class SchedModel
   end
 
   Group = Struct.new(:parent, :grant)
-  Member = Struct.new(:id, :group, :own_base, :affinity, :state, :left, :last)
+  Member = Struct.new(:id, :group, :own_base, :affinity, :state, :left, :last, :urgency)
   Cpu = Struct.new(:queues, :running)
 
   # A grant as the driver's eleven numbers; every field has a usable default.
@@ -94,7 +94,7 @@ class SchedModel
   end
 
   def thread(group_id)
-    @threads << Member.new(@threads.size, fetch_group(group_id), nil, (1 << 64) - 1, :off, 0, NO_CPU)
+    @threads << Member.new(@threads.size, fetch_group(group_id), nil, (1 << 64) - 1, :off, 0, NO_CPU, 0)
     '= 0'
   end
 
@@ -115,11 +115,26 @@ class SchedModel
     return '= 0' unless thread.state == :off
 
     cpu = @cpus.fetch(cpu_id)
-    level = resolve(thread)
-    cpu.queues[level] << thread
+    thread.urgency = resolve(thread)
+    cpu.queues[thread.urgency] << thread
     thread.state = [:ready, cpu_id]
-    must_pick = cpu.running.nil? || level > resolve(cpu.running)
-    "= #{must_pick ? 1 : 0}"
+    "= #{must_pick?(cpu, thread.urgency) ? 1 : 0}"
+  end
+
+  # A thread's base or a ceiling above it changed: its home CPU resolves it.
+  def refresh(cpu_id, id)
+    thread = @threads.fetch(id)
+    cpu = @cpus.fetch(cpu_id)
+    return refresh_running(cpu, thread) if cpu.running == thread
+    return '= 0' unless thread.state == [:ready, cpu_id]
+
+    old = thread.urgency
+    thread.urgency = resolve(thread)
+    unless thread.urgency == old
+      cpu.queues[old].delete(thread)
+      cpu.queues[thread.urgency] << thread
+    end
+    "= #{must_pick?(cpu, thread.urgency) ? 1 : 0}"
   end
 
   def remove(cpu_id, id)
@@ -165,13 +180,12 @@ class SchedModel
 
   def slice_ns(thread) = thread.group.grant.slice * 1000
 
-  # One pick: its own record of what it has resolved and how many it moved.
+  # One pick: its own record of how many it moved.
   class Pick
     def initialize(model, cpu, cpu_id)
       @model = model
       @cpu = cpu
       @cpu_id = cpu_id
-      @resolved = {}
       @leaving = []
       @moves = 0
     end
@@ -180,25 +194,21 @@ class SchedModel
       give_up(@cpu.running, why, ran) if @cpu.running
       until (level = @cpu.queues.select { |_, queue| queue.any? }.keys.max).nil?
         thread = @cpu.queues[level].first
-        urgency = urgency_of(thread)
-        return dispatch(level, thread, urgency) if urgency == level && allowed?(thread)
+        return dispatch(level, thread) if allowed?(thread)
         return report(nil, again: true) if @moves == PICK_MOVES
 
         @moves += 1
         @cpu.queues[level].shift
-        allowed?(thread) ? join_tail(thread, urgency) : leave(thread)
+        leave(thread)
       end
       report(nil, again: false)
     end
 
     private
 
-    def urgency_of(thread) = @resolved[thread.id] ||= @model.resolve(thread)
     def allowed?(thread) = @model.cpus_of(thread)[@cpu_id] == 1
-    def join_tail(thread, urgency) = @cpu.queues[urgency].push(thread)
 
     def give_up(thread, why, ran)
-      urgency = urgency_of(thread)
       thread.left = [thread.left - ran, 0].max
       @cpu.running = nil
       thread.left = 0 if why == SLICE_END
@@ -211,11 +221,12 @@ class SchedModel
         return leave(thread)
       end
 
+      thread.urgency = @model.resolve(thread)
       thread.state = [:ready, @cpu_id]
       if why == PREEMPTED && thread.left.positive?
-        @cpu.queues[urgency].unshift(thread)
+        @cpu.queues[thread.urgency].unshift(thread)
       else
-        join_tail(thread, urgency)
+        @cpu.queues[thread.urgency].push(thread)
       end
     end
 
@@ -224,14 +235,14 @@ class SchedModel
       @leaving << thread.id
     end
 
-    def dispatch(level, thread, urgency)
+    def dispatch(level, thread)
       @cpu.queues[level].shift
       whole = @model.slice_ns(thread)
       thread.left = thread.left.zero? ? whole : [thread.left, whole].min
       thread.state = :running
       thread.last = @cpu_id
       @cpu.running = thread
-      report(thread, urgency: urgency, again: false)
+      report(thread, urgency: thread.urgency, again: false)
     end
 
     def report(thread, again:, urgency: 0)
@@ -244,6 +255,14 @@ class SchedModel
   private
 
   def parse(words) = Grant.new(*words)
+  def must_pick?(cpu, urgency) = cpu.running.nil? || urgency > cpu.running.urgency
+
+  def refresh_running(cpu, thread)
+    thread.urgency = resolve(thread)
+    highest = cpu.queues.select { |_, queue| queue.any? }.keys.max
+    "= #{!highest.nil? && highest > thread.urgency ? 1 : 0}"
+  end
+
   def fetch_group(id) = @groups.fetch(id)
   def depth(group) = group.parent ? depth(group.parent) + 1 : 0
   def bit?(mask, cpu) = cpu < 64 && mask[cpu] == 1
@@ -263,7 +282,9 @@ class SchedModel
     return nil if [grant.base, grant.ceiling].max > URGENCY_MAX
     return nil if (grant.flags & ~FLAGS_DEFINED) != 0 || grant.padding != 0
 
-    grant.with(period: grant.period.clamp(PERIOD), slice: grant.slice.clamp(SLICE), grace: grant.grace.clamp(GRACE),
+    period = grant.period.clamp(PERIOD)
+    quota = grant.quota == QUOTA_NONE ? QUOTA_NONE : [grant.quota, period * CPUS].min
+    grant.with(quota: quota, period: period, slice: grant.slice.clamp(SLICE), grace: grant.grace.clamp(GRACE),
                base: [grant.base, grant.ceiling].min, flags: grant.flags & @cap)
   end
 
@@ -292,7 +313,7 @@ class SchedModel
            when :running then thread.last
            else thread.state.last
            end
-    "t#{thread.id}:#{resolve(thread)},#{cpus_of(thread)},#{letter},#{thread.left},#{thread.last},#{home},#{slice_ns(thread)}"
+    "t#{thread.id}:#{resolve(thread)},#{cpus_of(thread)},#{letter},#{thread.left},#{thread.last},#{home},#{slice_ns(thread)},#{thread.urgency}"
   end
 
   def cpu_line(cpu, index)

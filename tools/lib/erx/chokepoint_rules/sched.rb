@@ -9,6 +9,10 @@ module Erx
     SCHED_IMPL = 'kernel/sched/sched_impl.h'
     SCHED_IMPL_INCLUDE = include_of(SCHED_IMPL)
     SCHED_RECORD_USE = record_use('erx_sched_group', 'erx_sched_thread', 'erx_sched_cpu')
+    # A store, compound store, increment or address of a thread's stored urgency,
+    # with its whole statement; a member below it, as in urgency.raw, is another's.
+    SCHED_URGENCY_MEMBER = /[\w\]\)\*\(]*(?:->|\.)\s*urgency\b(?!\.)/
+    SCHED_URGENCY_WRITE = /#{SCHED_URGENCY_MEMBER}\s*(?:(?:[-+*\/|&^%]|<<|>>)?=(?!=)[^;]*;?|\+\+|--)|(?:\+\+|--|&)\s*#{SCHED_URGENCY_MEMBER}/
 
     declare_group(
       private_headers: [SCHED_IMPL],
@@ -35,7 +39,24 @@ module Erx
                   'fiasco/kernel/src/erx/erx_sched.h' => "struct erx_sched_group { long ceiling; };\n",
                   'kernel/core/watchdog.c' => "union erx_sched_thread {\n\tint base;\n};\n",
                   'kernel/sched/aligned.c' => "struct __attribute__((aligned(8))) erx_sched_cpu { int ready; };\n" }
-        )
+        ),
+        # S5: a thread's stored urgency is written only as its own resolve, in
+        # the core, so no writer can store anything but what its path allows.
+        # A permit judges the whole match, so the pattern takes the statement.
+        Chokepoints::Forbidden.new(
+          name: 'sched-urgency-store',
+          rule: "only #{SCHED_CORE} stores a thread's urgency, and only as that thread's own resolve",
+          design: "#{KERNEL}#chokepoint-checks",
+          scope: Chokepoints::Scope.new(own: true),
+          pattern: SCHED_URGENCY_WRITE,
+          sites: [Chokepoints::Site.new(glob: SCHED_CORE,
+                                        permits: /\Athread->urgency = erx_sched_resolve\(thread\)\.raw;\z/)],
+          seed: { 'kernel/sched/sched.c' => "\tthread->urgency = 63;\n",
+                  'kernel/sched/sched_x.c' => "\tthread->urgency = erx_sched_resolve(thread).raw;\n",
+                  'kernel/sched/other.c' => "\tother->urgency = erx_sched_resolve(thread).raw;\n",
+                  'kernel/sched/plus.c' => "\tthreads[i].urgency += 1;\n",
+                  'kernel/sched/inc.c' => "\t(*thread).urgency++;\n",
+                  'kernel/sched/addr.c' => "\tuint8_t *p = &thread->urgency;\n" }        )
       ]
     )
   end

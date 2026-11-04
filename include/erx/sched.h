@@ -20,10 +20,11 @@
  *
  * - what a grant from user mode may be: erx_grant_normalize checks it and
  *   applies every limit that depends on nothing but the grant;
- * - what a thread's limits are now: its urgency and its CPUs are derived
- *   from the current grants on its group path at each decision, and kept
- *   for no longer than one pick (S5), so a change anywhere on the path
- *   reaches every thread below it at that thread's next decision;
+ * - what a thread's limits are now: its CPUs are derived from the current
+ *   grants on its group path at each decision; its urgency is resolved from
+ *   them and stored at each of its own transitions and by erx_sched_refresh,
+ *   which the caller makes for every thread a changed base or ceiling reaches
+ *   before that change's call returns (S5);
  * - what each CPU runs next: erx_sched_pick, over that CPU's ready queues.
  *
  * Who may touch what. A group's grant and a thread's base and affinity are
@@ -33,16 +34,14 @@
  * are serialized by the caller. Every record is published to other CPUs with
  * release ordering or stronger before any of them is given its address.
  *
- * Each CPU's queues belong to that CPU: the caller enters erx_sched_wake,
- * erx_sched_remove and erx_sched_pick on it with interrupts masked. This core
- * decides on one CPU and defines no protocol between CPUs: the caller also
- * serializes every call that names a thread, so no two CPUs act on one thread
- * at once, and keeps a thread a pick gave up from any other CPU until the
- * switch off its stack is done. TODO.md records what that protocol has to
- * settle.
+ * Each CPU's queues belong to that CPU: its caller is the home CPU of every
+ * thread it names, in erx_sched_wake, erx_sched_refresh, erx_sched_remove and
+ * erx_sched_pick, with interrupts masked. This core decides on one CPU and
+ * defines no protocol between CPUs: docs/design-scheduler.md, "Concurrency",
+ * does, and no code calls erx_sched_pick across CPUs before that protocol's
+ * model passes.
  *
- * The records are opaque
- outside the core: their definitions are in
+ * The records are opaque outside the core: their definitions are in
  * kernel/sched/sched_impl.h, which only kernel/sched/sched.c and its host
  * tests include. So the group a thread is charged to is written once, by
  * erx_sched_thread_init (S6), and every grant in a record has passed
@@ -59,7 +58,7 @@ typedef struct erx_sched_cpu erx_sched_cpu_t;
 /* The features configuration C0 lets a group enable: none. */
 #define ERX_SCHED_C0_FLAGS	((erx_group_flags_t)0)
 
-/* The most threads one pick moves to another level or away from its CPU. */
+/* The most threads one pick moves away from its CPU. */
 #define ERX_PICK_MOVES		8
 
 /* The CPU of a thread that has none; no cpuset names it. */
@@ -77,12 +76,12 @@ typedef enum erx_sched_why {
  * What a pick leaves for the caller to do. run is the thread to switch to,
  * for slice_ns at the given urgency; NULL means the idle thread, and the
  * thread that gave up the CPU means no switch at all, as a yield with nothing
- * else ready at its level or above finds. again means
- * the pick reached ERX_PICK_MOVES before it found a thread: the idle thread
- * takes pending interrupts and the CPU picks again, so a pick's work never
- * grows with the number of ready threads. Each thread in leaving may no
- * longer run on this CPU and is on no queue: the caller places it with
- * erx_sched_place and has it woken there, after the switch.
+ * else ready at its level or above finds. again means the pick reached
+ * ERX_PICK_MOVES before it found a thread: the idle thread takes pending
+ * interrupts and the CPU picks again, so a pick's work never grows with the
+ * number of ready threads. Each thread in leaving may no longer run on this CPU
+ * and is on no queue: the caller places it with erx_sched_place and has it woken
+ * there, after the switch.
  */
 typedef struct erx_sched_decision {
 	erx_sched_thread_t	*run;
@@ -111,14 +110,15 @@ size_t	erx_sched_cpu_record_align(void);
  * Checks a grant whose every field a domain chose and writes it with the
  * limits that depend on nothing but the grant applied. raw is a private
  * copy the caller made once from the caller's UTCB, never the UTCB itself,
- * since this reads each field more than once. Period, slice and
- * grace clamped into their ranges, base clamped to the ceiling, flags masked
- * by the machine-wide cap. ERX_EINVAL for an urgency above ERX_URGENCY_MAX,
- * a flag erXos does not define, or non-zero padding; nothing else in a grant
- * is refused. result is written only on success, and normalizing a
- * normalized grant changes nothing.
+ * since this reads each field more than once. Period, slice and grace clamped
+ * into their ranges, a finite quota capped at the period times the CPUs of
+ * machine, more than any period can spend, so it fits a pool's int64_t, base
+ * clamped to the ceiling, flags masked by the machine-wide cap. ERX_EINVAL for
+ * an urgency above ERX_URGENCY_MAX, a flag erXos does not define, or non-zero
+ * padding; nothing else in a grant is refused. result is written only on
+ * success, and normalizing a normalized grant changes nothing.
  */
-erx_status_t	erx_grant_normalize(const erx_grant_t *raw,
+erx_status_t	erx_grant_normalize(const erx_grant_t *raw, uint64_t machine,
 		    erx_group_flags_t cap, erx_grant_t *result);
 
 /*
@@ -138,7 +138,8 @@ erx_status_t	erx_sched_group_init(erx_sched_group_t *group,
 /*
  * Replaces a group's grant whole, or on ERX_EINVAL leaves it as it was. A
  * cpuset that misses the machine is ERX_EINVAL at the root, as at its
- * creation. Every limit applies at each thread's next decision.
+ * creation. A changed base or ceiling reaches a thread through
+ * erx_sched_refresh, and every other limit at the thread's next decision.
  */
 erx_status_t	erx_sched_group_configure(erx_sched_group_t *group,
 		    const erx_grant_t *raw, erx_group_flags_t cap);
@@ -183,10 +184,12 @@ const erx_sched_group_t *erx_sched_thread_group(const erx_sched_thread_t *thread
 
 /*
  * The CPU whose queues or running slot hold the thread now, or
- * ERX_SCHED_CPU_NONE. Readable anywhere, but only a hint unless the caller
- * has serialized the thread: it can change as soon as this returns.
+ * ERX_SCHED_CPU_NONE for a sleeper. Readable anywhere, but only a hint unless
+ * the caller has serialized the thread: it can change as soon as this returns.
+ * This is not the thread's home CPU, and a poster of a refresh never skips a
+ * thread on what this says.
  */
-uint32_t	erx_sched_thread_home(const erx_sched_thread_t *thread);
+uint32_t	erx_sched_thread_on_cpu(const erx_sched_thread_t *thread);
 
 /* Sets the thread's base: ERX_EINVAL above ERX_URGENCY_MAX. */
 erx_status_t	erx_sched_thread_set_urgency(erx_sched_thread_t *thread,
@@ -208,6 +211,9 @@ uint64_t	erx_sched_thread_cpus(const erx_sched_thread_t *thread);
  * The CPU a woken thread goes to, given the CPUs that idle: the one it last
  * ran on if allowed and idle, else the lowest-numbered allowed idle CPU,
  * else the one it last ran on if allowed, else the lowest-numbered allowed.
+ * The idle search is ERX_GROUP_PLACE's: in C0 and C1 the caller passes no
+ * idle CPU, so a thread stays where it last ran unless that CPU has left its
+ * set.
  */
 uint32_t	erx_sched_place(const erx_sched_thread_t *thread, uint64_t idle);
 
@@ -224,6 +230,16 @@ erx_status_t	erx_sched_cpu_init(erx_sched_cpu_t *cpu, uint32_t index);
 bool		erx_sched_wake(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread);
 
 /*
+ * Resolves a thread again after its base or a ceiling on its path changed, on
+ * its home CPU. A ready thread whose urgency changed moves to the tail of its
+ * new level. Returns true when the CPU must pick now, in which case the caller
+ * passes ERX_PICK_PREEMPTED: a ready thread now outranks what the CPU runs, or
+ * the CPU runs nothing. Returns false, changing nothing, for a thread neither
+ * ready nor running on this CPU: a sleeper resolves at its wake.
+ */
+bool		erx_sched_refresh(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread);
+
+/*
  * Takes a ready thread off this CPU's queues, for a kill or a stop. Returns
  * false, changing nothing, for a thread not ready on this CPU; a running
  * thread leaves through erx_sched_pick with ERX_PICK_BLOCKED.
@@ -235,10 +251,9 @@ bool		erx_sched_remove(erx_sched_cpu_t *cpu,
  * The one scheduling decision of a CPU: the running thread, having run for
  * ran_ns since it was dispatched, gives up the CPU for the reason given and
  * the next thread is chosen. On a CPU that runs nothing, why and ran_ns mean
- * nothing. Takes the highest non-empty level; a thread at its head whose
- * urgency has changed moves to the tail of its own level, and one that may
- * no longer run here leaves, ERX_PICK_MOVES in all, each thread resolved once
- * in the pick.
+ * nothing. Takes the head of the highest non-empty level, whose level is its
+ * urgency; one that may no longer run here leaves, ERX_PICK_MOVES in all. The
+ * outgoing thread is resolved if it rejoins the queues.
  */
 void		erx_sched_pick(erx_sched_cpu_t *cpu, erx_sched_why_t why,
 		    uint64_t ran_ns, erx_sched_decision_t *result);

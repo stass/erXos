@@ -29,7 +29,7 @@ class SchedTest < Minitest::Test
                       'thread 1', 'thread 1', 'thread 0'].freeze
   EXHAUSTIVE_STEPS = ['wake 0 0', 'wake 0 1', 'wake 1 2', 'wake 0 2', "pick 0 #{BLOCKED} 100",
                       "pick 0 #{SLICE_END} 0", "pick 0 #{YIELD} 2000", "pick 0 #{PREEMPTED} 6000", "pick 1 #{BLOCKED} 50",
-                      'remove 0 0',
+                      'remove 0 0', 'refresh 0 0', 'refresh 0 1', 'refresh 1 2',
                       "configure 1 #{M.grant(ceiling: 2, cpuset: 2, slice: 1000)}", 'urgency 1 20',
                       'affinity 0 2'].freeze
 
@@ -69,13 +69,25 @@ class SchedTest < Minitest::Test
     'a leaving slice end keeps the old slice' => ["if (why == ERX_PICK_SLICE_END)\n\t\tthread->slice_left_ns = 0;\n\tcpu->running = NULL;",
                                                   "if (why == ERX_PICK_SLICE_END && may_run_here(cpu, thread))\n\t\tthread->slice_left_ns = 0;\n\tcpu->running = NULL;"],
     'depth allows one level too many' => ['parent->depth + 1 >= ERX_GROUP_DEPTH_MAX', 'parent->depth + 1 > ERX_GROUP_DEPTH_MAX'],
-    'a wake preempts an equal urgency' => ['urgency > erx_sched_resolve(cpu->running).raw',
-                                           'urgency >= erx_sched_resolve(cpu->running).raw'],
-    'a wake joins a thread twice' => ["SCHED_WHERE_OFF)\n\t\treturn (false);\n\turgency",
-                                      "SCHED_WHERE_OFF) {}\n\turgency"],
-    'a stale pick number stands in for a resolve' => ['thread->decided_in = 0;', ''],
-    'a preempted thread joins the tail' => ['fifo_prepend(cpu, thread, urgency);',
-                                            'fifo_append(cpu, thread, urgency);'],
+    'a wake preempts an equal urgency' => ['urgency > cpu->running->urgency', 'urgency >= cpu->running->urgency'],
+    'a wake joins a thread twice' => ["SCHED_WHERE_OFF)\n\t\treturn (false);\n\tthread->urgency",
+                                      "SCHED_WHERE_OFF) {}\n\tthread->urgency"],
+    'a wake stores nothing' => ["thread->urgency = erx_sched_resolve(thread).raw;\n\tthread_set_here(thread, cpu, SCHED_THREAD_READY);\n\tfifo_append", "thread_set_here(thread, cpu, SCHED_THREAD_READY);\n\tfifo_append"],
+    'a rejoining thread keeps its old urgency' => ["thread->urgency = erx_sched_resolve(thread).raw;\n\tthread_set_here(thread, cpu, SCHED_THREAD_READY);\n\t/*", "thread_set_here(thread, cpu, SCHED_THREAD_READY);\n\t/*"],
+    'a refresh leaves a ready thread on its old level' => ['if (thread->urgency != old) {', 'if (0) {'],
+    'an unchanged urgency loses its place' => ['if (thread->urgency != old) {', 'if (1) {'],
+    'a refreshed thread takes the head of its level' => ["fifo_unlink(cpu, thread, old);\n\t\tfifo_append(cpu, thread);", "fifo_unlink(cpu, thread, old);\n\t\tfifo_prepend(cpu, thread);"],
+    'a refresh of a running thread ignores the cpu' => ['if (where == sched_where(SCHED_THREAD_RUNNING, cpu->index)) {', 'if (sched_where_state(where) == SCHED_THREAD_RUNNING) {'],
+    'a refresh of a running thread stores nothing' => ["{\n\t\tthread->urgency = erx_sched_resolve(thread).raw;\n\t\treturn (ready_outranks", "{\n\t\treturn (ready_outranks"],
+    'a running thread a ready one outranks stays' => ['return (ready_outranks(cpu, thread->urgency));', 'return (false);'],
+    'an equal ready level preempts a refreshed thread' => ['highest_level(cpu) > urgency', 'highest_level(cpu) >= urgency'],
+    'a raised ready thread does not preempt' => ["}\n\treturn (must_pick(cpu, thread->urgency));\n}\n\nbool\nerx_sched_remove", "}\n\treturn (false);\n}\n\nbool\nerx_sched_remove"],
+    'a refresh acts on another cpu' => ["if (where != sched_where(SCHED_THREAD_READY, cpu->index))\n\t\treturn (false);", "if (sched_where_state(where) != SCHED_THREAD_READY)\n\t\treturn (false);"],
+    'a refresh of a sleeper stores' => ["if (where != sched_where(SCHED_THREAD_READY, cpu->index))\n\t\treturn (false);", "if (where != sched_where(SCHED_THREAD_READY, cpu->index)) {\n\t\tthread->urgency = erx_sched_resolve(thread).raw;\n\t\treturn (false);\n\t}"],
+    'a finite quota stays uncapped' => ["grant.quota_ns = min_u64(grant.quota_ns,\n\t\t    grant.period_ns * cpuset_size(machine));", ';'],
+    'no quota caps too' => ['if (grant.quota_ns != ERX_QUOTA_NONE)', 'if (1)'],
+    'a group caps its quota by no machine' => ['for (level = group; level->parent != NULL; level = level->parent)', 'for (level = group; 0; level = level->parent)'],
+    'a preempted thread joins the tail' => ['fifo_prepend(cpu, thread);', 'fifo_append(cpu, thread);'],
     'a slice end rejoins the head' => ['if (why == ERX_PICK_PREEMPTED && thread->slice_left_ns != 0)',
                                        'if (thread->slice_left_ns != 0)'],
     'a slice end keeps the old slice' => ["if (why == ERX_PICK_SLICE_END)\n\t\tthread->slice_left_ns = 0;\n", ''],
@@ -85,10 +97,8 @@ class SchedTest < Minitest::Test
                                                        'thread->slice_left_ns != 0'],
     'no time is taken from the slice' => ['thread->slice_left_ns - ran_ns : 0;', 'thread->slice_left_ns : 0;'],
     'a pick has no bound' => ['if (moves == ERX_PICK_MOVES) {', 'if (moves == 1000) {'],
-    'a thread that left stays eligible here' => ['leaves = !may_run_here(cpu, thread);', 'leaves = false;'],
+    'a thread that left stays eligible here' => ['if (may_run_here(cpu, thread)) {', 'if (1) {'],
     'a running thread that left stays' => ["if (!may_run_here(cpu, thread)) {\n\t\tdecision_add_leaving(decision, thread);\n\t\treturn;\n\t}\n", ''],
-    'the level of a moved thread is not its urgency' => ['fifo_append(cpu, thread, urgency);' \
-                                                         "\n\t}\n\t*result", "fifo_append(cpu, thread, level);\n\t}\n\t*result"],
     'place prefers the lowest over the last' => ["if (cpuset_has(allowed_idle, last))\n\t\treturn (last);", ''],
     'place ignores idleness' => ['allowed_idle = allowed & idle;', 'allowed_idle = allowed & idle & 0;'],
     'capacity ignores the cpuset' => ['limit = cpus * MCPU_PER_CPU;', 'limit = UINT64_MAX;'],
@@ -188,24 +198,83 @@ class SchedTest < Minitest::Test
     assert_includes state_of(base_machine + ['urgency 0 5', 'urgency 0 64']), 't0:5,', 'a refusal changes nothing'
   end
 
-  # S5: an ancestor's change reaches a descendant's next decision, whether
-  # the thread is ready or running, with nothing stored in between.
-  def test_an_ancestor_change_applies_at_each_next_decision
+  # S5: an ancestor's change reaches each descendant by its refresh, ready or
+  # running, and a pick moves nothing for its urgency.
+  def test_an_ancestor_change_reaches_a_thread_by_its_refresh
     script = base_machine + ['thread 1', 'thread 1', 'wake 0 0', 'wake 0 1', 'wake 0 2', "pick 0 #{BLOCKED} 0",
-                             "configure 0 #{M.grant(ceiling: 3, base: 1)}"]
-    assert_includes state_of(script), 't0:3,', 'the very next resolve'
-    assert_includes state_of(script), 'c0:0,10000;16=1+2', 'queues are moved by picks alone'
-    lines = drive(script + ["pick 0 #{SLICE_END} 0", 'state'])
-    assert_match(/run=0 urgency=3 /, lines[-2])
-    assert_includes lines[-1], 'c0:0,8;3=1+2', 'moved in queue order behind the outgoing thread'
+      "configure 0 #{M.grant(ceiling: 3, base: 1)}"]
+    assert_includes state_of(script), 't0:3,', 'resolving reads the grants as they are'
+    assert_includes state_of(script), 'c0:0,10000;16=1+2', 'the queues wait for the refresh'
+    lines = drive(script + ['refresh 0 1', 'refresh 0 2', 'refresh 0 0', 'state', "pick 0 #{SLICE_END} 0"])
+    assert_equal ['= 0', '= 0', '= 0'], lines[-5, 3]
+    assert_includes lines[-2], 'c0:0,8;3=1+2', 'moved to their new level in refresh order'
+    assert_match(/run=1 urgency=3 /, lines[-1])
   end
 
-  def test_a_raised_ceiling_applies_at_each_next_decision_too
+  # A raised urgency is not left behind a more urgent thread: the pick examines
+  # only the head of the highest level, so the refresh has to move it.
+  def test_a_raised_urgency_is_seen_behind_a_more_urgent_thread
+    script = ['machine 0', "root #{M.grant(ceiling: 63)}", 'thread 0', 'thread 0', 'urgency 1 30', 'wake 0 0', 'wake 0 1',
+      'urgency 0 40', 'refresh 0 0']
+    assert_equal '= 1', result(script), 'an idle CPU must pick'
+    assert_includes state_of(script), 'c0:-,10040000000;30=1;40=0'
+    assert_match(/run=0 urgency=40 /, result(script + ["pick 0 #{BLOCKED} 0"]))
+    assert_includes state_of(script + ['urgency 1 40', 'refresh 0 1']), ';40=0+1', 'a refreshed thread joins the tail'
+  end
+
+  def test_a_raised_ceiling_reaches_a_ready_thread_by_its_refresh
     script = ['machine 0', "root #{M.grant(ceiling: 5, base: 5)}", 'thread 0', 'urgency 0 30', 'wake 0 0']
     assert_includes state_of(script), 't0:5,'
     assert_includes state_of(script), 'c0:-,20;5=0'
-    lines = drive(script + ["configure 0 #{M.grant(ceiling: 40, base: 5)}", "pick 0 #{BLOCKED} 0"])
+    lines = drive(script + ["configure 0 #{M.grant(ceiling: 40, base: 5)}", 'refresh 0 0', "pick 0 #{BLOCKED} 0"])
     assert_match(/run=0 urgency=30 /, lines.last)
+  end
+
+  # What a refresh tells the caller: a ready thread that outranks what runs, or
+  # a running thread that a ready one now outranks, but not an equal.
+  def test_a_refresh_says_when_the_cpu_must_pick
+    script = ['machine 0', "root #{M.grant(ceiling: 63)}", 'thread 0', 'thread 0', 'urgency 0 30', 'urgency 1 20',
+      'wake 0 0', "pick 0 #{BLOCKED} 0", 'wake 0 1']
+    assert_equal '= 0', result(script + ['refresh 0 1']), 'it does not outrank what runs'
+    assert_equal '= 0', result(script + ['urgency 1 30', 'refresh 0 1']), 'an equal does not preempt'
+    assert_equal '= 1', result(script + ['urgency 1 31', 'refresh 0 1']), 'it outranks what runs'
+    assert_equal '= 0', result(script + ['urgency 0 20', 'refresh 0 0']), 'an equal ready level does not preempt'
+    assert_equal '= 1', result(script + ['urgency 0 19', 'refresh 0 0']), 'a ready thread outranks what runs'
+    assert_match(/run=1 urgency=20 /, result(script + ['urgency 0 19', 'refresh 0 0', "pick 0 #{PREEMPTED} 0"]))
+  end
+
+  # A refresh acts only on the CPU that holds the thread; a sleeper resolves at
+  # its wake, and a refresh on another CPU changes nothing.
+  def test_a_refresh_changes_nothing_but_on_the_cpu_that_holds_the_thread
+    script = base_machine + ['wake 0 0']
+    assert_equal '= 0', result(script + ["configure 1 #{M.grant(base: 5, ceiling: 5)}", 'refresh 1 0'])
+    assert_includes state_of(script + ["configure 1 #{M.grant(base: 5, ceiling: 5)}", 'refresh 1 0']), ';16=0'
+    sleeping = base_machine + ["configure 1 #{M.grant(base: 5, ceiling: 5)}", 'refresh 0 0']
+    assert_equal '= 0', result(sleeping)
+    assert_includes state_of(sleeping + ['wake 0 0']), ';5=0', 'its wake resolves it'
+  end
+
+  # A pick never moves a thread for its urgency, whatever the grants say now.
+  def test_a_pick_takes_the_head_of_the_highest_level_as_it_stands
+    threads = (1..11).map { 'thread 1' }
+    wakes = (0..11).map { |thread| "wake 0 #{thread}" }
+    lines = drive(base_machine + threads + wakes + ["configure 1 #{M.grant(base: 5, ceiling: 5)}", "pick 0 #{BLOCKED} 0", 'state'])
+    assert_match(/\A= run=0 urgency=16 slice=5000000 again=0 leaving=\z/, lines[-2])
+    assert_includes lines[-1], ';16=1+2+3+4+5+6+7+8+9+10+11'
+  end
+
+  # A finite quota is capped at what the machine's CPUs can spend in a period,
+  # so it fits a pool's int64_t; no quota stays none, and a smaller one as it is.
+  def test_a_finite_quota_is_capped_at_the_machine_per_period
+    quota = ->(**grant) { Integer(result(["normalize #{M.grant(**grant)}"])[/\A= 0 (\d+),/, 1]) }
+    assert_equal 4_000_000, quota.call(quota: 1 << 62, period: 1_000_000)
+    assert_equal 4_000_000_000, quota.call(quota: M::QUOTA_NONE - 1, period: 1 << 40), 'of the clamped period'
+    assert_equal 4_000_000, quota.call(quota: 4_000_000, period: 1_000_000)
+    assert_equal 3_999_999, quota.call(quota: 3_999_999, period: 1_000_000)
+    assert_equal M::QUOTA_NONE, quota.call(quota: M::QUOTA_NONE, period: 1_000_000)
+    assert_equal 0, quota.call(quota: 0)
+    child = base_machine + ["configure 1 #{M.grant(quota: 1 << 62, period: 1_000_000)}", 'state']
+    assert_includes drive(child).last, "/4000000,1000000,", 'on a group below the root too'
   end
 
   # S7: each level is a FIFO, a slice end goes to the tail with a fresh slice,
@@ -381,20 +450,9 @@ class SchedTest < Minitest::Test
     assert_equal '= 1', drive(moved + ['place 0 0']).last, 'nothing idle and the last CPU left: the lowest'
   end
 
-  # K13: however many threads have the wrong level, a pick moves at most
+  # K13: however many threads may no longer run here, a pick moves at most
   # ERX_PICK_MOVES of them, and the next pick goes on from there.
-  def test_a_pick_moves_at_most_its_bound_and_each_thread_once
-    threads = (1..11).map { 'thread 1' }
-    wakes = (0..11).map { |thread| "wake 0 #{thread}" }
-    script = base_machine + threads + wakes + ["configure 1 #{M.grant(base: 5, ceiling: 5)}", "pick 0 #{BLOCKED} 0"]
-    lines = drive(script + ['state'])
-    assert_match(/\A= run=- urgency=0 slice=0 again=1 leaving=\z/, lines[-2])
-    assert_includes lines[-1], ';5=0+1+2+3+4+5+6+7', 'eight moved, in queue order'
-    assert_includes lines[-1], ';16=8+9+10+11', 'the rest wait their pick'
-    assert_match(/\A= run=0 urgency=5 slice=5000000 again=0 /, drive(script + ["pick 0 #{BLOCKED} 0"]).last)
-  end
-
-  def test_a_pick_bound_stops_threads_leaving_too
+  def test_a_pick_bound_stops_threads_leaving
     threads = (1..9).map { 'thread 1' }
     affinities = (0..9).map { |thread| "affinity #{thread} 2" }
     wakes = (0..9).map { |thread| "wake 0 #{thread}" }
@@ -405,10 +463,9 @@ class SchedTest < Minitest::Test
     assert_equal '= run=- urgency=0 slice=0 again=1 leaving=0+1+2+3+4+5+6+7', lines.last, 'the outgoing counts'
   end
 
-  # A pick number is a CPU's own, so one a thread brings from another CPU
-  # must not stand in for a resolve there.
-  def test_a_thread_from_another_cpu_is_resolved_afresh
-    assert_match(/run=0 urgency=5 /, drive(stale_pick_script).last)
+  # A thread that wakes on another CPU resolves the limits as they are then.
+  def test_a_wake_resolves_the_limits_as_they_are
+    assert_match(/run=0 urgency=5 /, drive(rewake_script).last)
   end
 
   def test_a_tree_is_refused_below_its_depth_limit
@@ -487,11 +544,11 @@ class SchedTest < Minitest::Test
     state_of(['machine 0', "root #{M.grant(**grant)}"])
   end
 
-  # CPU 0's next pick has the number of the pick that last resolved thread 0
-  # on CPU 1, and its ceiling changes in between.
-  def stale_pick_script
-    base_machine + ["pick 0 #{BLOCKED} 0", 'wake 1 0', "pick 1 #{BLOCKED} 0", "pick 1 #{BLOCKED} 0", 'wake 0 0',
-                    "configure 1 #{M.grant(base: 5, ceiling: 5)}", "pick 0 #{BLOCKED} 0"]
+  # Thread 0 sleeps after running on CPU 1, its ceiling changes, and it wakes on
+  # CPU 0.
+  def rewake_script
+    base_machine + ["pick 0 #{BLOCKED} 0", 'wake 1 0', "pick 1 #{BLOCKED} 0", "pick 1 #{BLOCKED} 0",
+      "configure 1 #{M.grant(base: 5, ceiling: 5)}", 'wake 0 0', "pick 0 #{BLOCKED} 0"]
   end
 
   def seeded_scripts
@@ -499,13 +556,21 @@ class SchedTest < Minitest::Test
                      "pick 0 #{PREEMPTED} 1000000", 'state', "pick 0 #{BLOCKED} 0", 'state'],
      base_machine + ['thread 1', 'wake 0 0', 'wake 0 1', "pick 0 #{BLOCKED} 0", 'thread 0', 'urgency 2 30', 'wake 0 2',
                      "pick 0 #{PREEMPTED} 5000000", "pick 0 #{BLOCKED} 0", 'state'],
-     stale_pick_script + ['state'],
+     rewake_script + ['state'],
+     ['machine 0', "root #{M.grant(ceiling: 63)}", 'thread 0', 'thread 0', 'thread 0', 'urgency 0 30', 'urgency 1 30',
+      'urgency 2 20', 'wake 0 0', 'wake 0 1', 'wake 0 2', 'urgency 2 30', 'refresh 0 2', 'state'],
+     ['machine 0', "root #{M.grant(ceiling: 63)}", 'thread 0', 'thread 0', 'urgency 0 30', 'urgency 1 20', 'wake 0 0',
+      "pick 0 #{BLOCKED} 0", 'wake 0 1', 'state', 'urgency 1 31', 'refresh 0 1', 'state', 'urgency 1 30', 'refresh 0 1',
+      'urgency 0 30', 'refresh 0 0', 'urgency 0 29', 'refresh 0 0', 'state', "pick 0 #{PREEMPTED} 0", 'state',
+      'refresh 1 0', 'refresh 1 1', 'state', 'wake 1 0', 'state'],
+     base_machine + ["configure 1 #{M.grant(quota: 1 << 62, period: 1_000_000)}", 'state',
+                     "normalize #{M.grant(quota: 1 << 62, period: 1 << 40)}", "normalize #{M.grant}"],
      base_machine + ['wake 0 0', "pick 0 #{BLOCKED} 0", 'affinity 0 2', "pick 0 #{SLICE_END} 1000", 'wake 1 0',
                      "pick 1 #{BLOCKED} 0", 'state'],
      base_machine + ['wake 0 0', "pick 0 #{BLOCKED} 1000000", "configure 1 #{M.grant(slice: 500)}", 'wake 0 0',
                      "pick 0 #{BLOCKED} 0", 'state'],
      base_machine + (1..11).map { 'thread 1' } + (0..11).map { |thread| "wake 0 #{thread}" } +
-       ["configure 1 #{M.grant(base: 5, ceiling: 5)}", "pick 0 #{BLOCKED} 0", 'state'],
+       (0..11).map { |thread| "affinity #{thread} 2" } + ["pick 0 #{BLOCKED} 0", 'state'],
      ['machine 0', "root #{M.grant(mcpu: 9000, quota: M::QUOTA_NONE - 1, period: 1_000_000, first: 5)}", 'state'],
      ['machine 0', "root #{M.grant(cpuset: 0)}", "root #{M.grant}", "configure 0 #{M.grant(cpuset: 0)}", 'state']]
   end
@@ -616,8 +681,9 @@ class SchedTest < Minitest::Test
   def random_command(groups, threads, rng)
     thread = rng.rand(threads)
     cpu = rng.rand(M::CPUS)
-    case rng.rand(16)
+    case rng.rand(18)
     when 0..4 then "wake #{cpu} #{thread}"
+    when 15, 16 then "refresh #{cpu} #{thread}"
     when 5..9 then "pick #{cpu} #{rng.rand(4)} #{[0, 1, 1_000_000, 5_000_000, 1 << 40].sample(random: rng)}"
     when 10 then "remove #{cpu} #{thread}"
     when 11 then "urgency #{thread} #{random_urgency(rng)}"

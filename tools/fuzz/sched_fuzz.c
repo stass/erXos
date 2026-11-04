@@ -13,7 +13,10 @@
  *   a normalized grant is within every limit, and normalizing it again
  *   changes nothing;
  *   a refused grant or depth changes no record;
- *   S5: a thread's urgency is at most every ceiling on its path, and its
+ *   a normalized finite quota is at most its period times the machine's CPUs;
+ *   S5: a thread's urgency is at most every ceiling on its path, a ready or
+ *   running thread's stored urgency is what it resolves to once it has been
+ *   refreshed, and a ready thread's level is that urgency, and its
  *   CPUs are not empty and are within the machine's, the root's and the
  *   group's effective cpuset, so its placement is a CPU that exists;
  *   capacity is within the effective cpuset, and the first position within
@@ -97,9 +100,11 @@ check_grant(const erx_grant_t *grant)
 	    grant->grace_us > ERX_GRACE_MAX_US ||
 	    grant->ceiling.raw > ERX_URGENCY_MAX ||
 	    grant->base.raw > grant->ceiling.raw ||
-	    (grant->flags & (erx_group_flags_t)~cap) != 0)
+	    (grant->flags & (erx_group_flags_t)~cap) != 0 ||
+	    (grant->quota_ns != ERX_QUOTA_NONE && grant->quota_ns > grant->period_ns *
+	    (uint64_t)__builtin_popcountll(FUZZ_MACHINE)))
 		abort();
-	if (erx_grant_normalize(grant, cap, &again) != ERX_OK ||
+	if (erx_grant_normalize(grant, FUZZ_MACHINE, cap, &again) != ERX_OK ||
 	    memcmp(grant, &again, sizeof(again)) != 0)
 		abort();
 }
@@ -173,9 +178,11 @@ check_queues(void)
 			if ((fifo->head != NULL) != ((c->ready >> level & 1) != 0))
 				abort();
 			for (t = fifo->head; t != NULL; t = t->next) {
-				if (t->prev != last || t->level != level || t->where !=
+				if (t->prev != last || t->urgency != level ||
+				    t->urgency != erx_sched_resolve(t).raw ||
+				    t->where !=
 				    sched_where(SCHED_THREAD_READY, c->index) ||
-				    erx_sched_thread_home(t) != c->index)
+				    erx_sched_thread_on_cpu(t) != c->index)
 					abort();
 				seen++;
 				if (seen > nthreads)
@@ -210,11 +217,30 @@ check_decision(const erx_sched_cpu_t *cpu, const erx_sched_decision_t *decision)
 		abort();
 	if (run == NULL)
 		return;
-	if (decision->urgency.raw != erx_sched_resolve(run).raw ||
+	if (decision->urgency.raw != run->urgency ||
+	    run->urgency != erx_sched_resolve(run).raw ||
 	    (erx_sched_thread_cpus(run) >> cpu->index & 1) == 0 ||
 	    decision->slice_ns == 0 ||
 	    decision->slice_ns > erx_sched_group_slice_ns(run->group))
 		abort();
+}
+
+/*
+ * What a changed base or a ceiling above it needs, on each CPU that holds a
+ * thread. The effect layer posts to every thread's home CPU, sleepers included;
+ * here a sleeper has nothing to do, and no other CPU runs meanwhile.
+ */
+static void
+refresh_all(void)
+{
+	uint32_t i;
+
+	for (i = 0; i < nthreads; i++) {
+		uint32_t cpu = erx_sched_thread_on_cpu(&threads[i]);
+
+		if (cpu != ERX_SCHED_CPU_NONE)
+			(void)erx_sched_refresh(&cpus[cpu], &threads[i]);
+	}
 }
 
 static void
@@ -226,7 +252,7 @@ op_group(fuzz_input_t *in)
 
 	if (ngroups == FUZZ_GROUPS)
 		return;
-	if (erx_grant_normalize(&raw, cap, &normalized) == ERX_OK)
+	if (erx_grant_normalize(&raw, FUZZ_MACHINE, cap, &normalized) == ERX_OK)
 		check_grant(&normalized);
 	if (erx_sched_group_init(&groups[ngroups], &groups[parent % ngroups],
 	    &raw, cap) == ERX_OK)
@@ -246,6 +272,7 @@ op_configure(fuzz_input_t *in)
 		if (memcmp(&before, &after, sizeof(after)) != 0)
 			abort();
 	}
+	refresh_all();
 }
 
 static void
@@ -272,6 +299,7 @@ op_urgency(fuzz_input_t *in, erx_sched_thread_t *thread)
 	    erx_sched_resolve(thread).raw != before.raw) {
 		abort();
 	}
+	refresh_all();
 }
 
 /* Places every thread that left, as the effect layer does, on a CPU it has. */
@@ -360,6 +388,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			break;
 		case 8:
 			(void)erx_sched_remove(cpu, &threads[fuzz_take(&in, 1) % nthreads]);
+			break;
+		case 9:
+			(void)erx_sched_refresh(cpu, &threads[fuzz_take(&in, 1) % nthreads]);
 			break;
 		default:
 			op_pick(&in, cpu);

@@ -8,12 +8,11 @@
  * "Urgency resolution", "Pick and dispatch", "Placement and affinity").
  *
  * Grants are the only input a domain chooses. Each is normalized before it
- * enters a record, so a stored field is always in range, and each limit that
- * depends on the rest of the tree is derived again at every decision from
- * what the records hold then. Nothing derived outlives a pick, but for the
- * level a ready thread waits on, which a pick corrects when it reaches it. A
- * thread resolved during a replacement still runs beneath a ceiling its path
- * really had.
+ * enters a record, so a stored field is always in range. A thread's CPUs are
+ * derived again at every decision from what the records hold then. Its urgency
+ * is stored: every store is the thread's own resolve, at its wake, when it
+ * rejoins the queues, or in erx_sched_refresh, so a thread never runs above a
+ * ceiling its path had at its last store, and the pick moves nothing for it.
  *
  * Every walk up a group path is bounded by ERX_GROUP_DEPTH_MAX, which
  * erx_sched_group_init enforces. Every pick is bounded by ERX_PICK_MOVES.
@@ -32,6 +31,8 @@
 #define NS_PER_US		UINT64_C(1000)
 
 _Static_assert(SCHED_LEVELS == 64, "a 64-bit bitmap covers every level");
+_Static_assert(ERX_PERIOD_MAX <= INT64_MAX / CPUSET_BITS,
+    "a capped quota fits a pool's int64_t, and the cap does not overflow");
 
 size_t
 erx_sched_group_record_size(void)
@@ -119,8 +120,8 @@ cpuset_size(uint64_t cpuset)
 }
 
 erx_status_t
-erx_grant_normalize(const erx_grant_t *raw, erx_group_flags_t cap,
-    erx_grant_t *result)
+erx_grant_normalize(const erx_grant_t *raw, uint64_t machine,
+    erx_group_flags_t cap, erx_grant_t *result)
 {
 	erx_grant_t grant = *raw;
 	size_t i;
@@ -135,6 +136,9 @@ erx_grant_normalize(const erx_grant_t *raw, erx_group_flags_t cap,
 	}
 	grant.period_ns = clamp_u64(grant.period_ns, ERX_PERIOD_MIN,
 	    ERX_PERIOD_MAX);
+	if (grant.quota_ns != ERX_QUOTA_NONE)
+		grant.quota_ns = min_u64(grant.quota_ns,
+		    grant.period_ns * cpuset_size(machine));
 	grant.slice_us = clamp_u32(grant.slice_us, ERX_SLICE_MIN_US,
 	    ERX_SLICE_MAX_US);
 	grant.grace_us = clamp_u32(grant.grace_us, ERX_GRACE_MIN_US,
@@ -171,6 +175,17 @@ group_store(erx_sched_group_t *group, const erx_grant_t *grant)
 	    memory_order_relaxed);
 }
 
+/* The machine's CPUs, which only the root's record holds. */
+static uint64_t
+path_machine(const erx_sched_group_t *group)
+{
+	const erx_sched_group_t *level;
+
+	for (level = group; level->parent != NULL; level = level->parent)
+		continue;
+	return (level->machine);
+}
+
 erx_status_t
 erx_sched_root_init(erx_sched_group_t *root, uint64_t machine,
     const erx_grant_t *raw, erx_group_flags_t cap)
@@ -178,7 +193,7 @@ erx_sched_root_init(erx_sched_group_t *root, uint64_t machine,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, cap, &grant);
+	error = erx_grant_normalize(raw, machine, cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if ((grant.cpuset & machine) == 0)
@@ -197,7 +212,7 @@ erx_sched_group_init(erx_sched_group_t *group, const erx_sched_group_t *parent,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, cap, &grant);
+	error = erx_grant_normalize(raw, path_machine(parent), cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if (parent->depth + 1 >= ERX_GROUP_DEPTH_MAX)
@@ -216,7 +231,7 @@ erx_sched_group_configure(erx_sched_group_t *group, const erx_grant_t *raw,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, cap, &grant);
+	error = erx_grant_normalize(raw, path_machine(group), cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if (group->parent == NULL && (grant.cpuset & group->machine) == 0)
@@ -317,9 +332,9 @@ erx_sched_group_slice_ns(const erx_sched_group_t *group)
 }
 
 /*
- * Thousandths of a CPU a quota per period pays for. Divided first, so no
- * quota overflows: a stored period is at least ERX_PERIOD_MIN, so the whole
- * periods are below 2^45, and the remainder is below ERX_PERIOD_MAX.
+ * Thousandths of a CPU a quota per period pays for. Divided first, so that a
+ * quota read from before a replacement and a period read from after one cannot
+ * overflow: the remainder is below ERX_PERIOD_MAX.
  */
 static uint64_t
 quota_mcpu(uint64_t quota_ns, uint64_t period_ns)
@@ -372,7 +387,7 @@ erx_sched_thread_group(const erx_sched_thread_t *thread)
 }
 
 uint32_t
-erx_sched_thread_home(const erx_sched_thread_t *thread)
+erx_sched_thread_on_cpu(const erx_sched_thread_t *thread)
 {
 	uint32_t where;
 
@@ -450,10 +465,11 @@ erx_sched_cpu_init(erx_sched_cpu_t *cpu, uint32_t index)
 	return (ERX_OK);
 }
 
+/* A ready thread waits on the level of its stored urgency. */
 static void
-fifo_append(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t level)
+fifo_append(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
 {
-	sched_fifo_t *fifo = &cpu->levels[level];
+	sched_fifo_t *fifo = &cpu->levels[thread->urgency];
 
 	thread->next = NULL;
 	thread->prev = fifo->tail;
@@ -462,14 +478,13 @@ fifo_append(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t level)
 	else
 		fifo->head = thread;
 	fifo->tail = thread;
-	thread->level = level;
-	cpu->ready |= UINT64_C(1) << level;
+	cpu->ready |= UINT64_C(1) << thread->urgency;
 }
 
 static void
-fifo_prepend(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t level)
+fifo_prepend(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
 {
-	sched_fifo_t *fifo = &cpu->levels[level];
+	sched_fifo_t *fifo = &cpu->levels[thread->urgency];
 
 	thread->prev = NULL;
 	thread->next = fifo->head;
@@ -478,14 +493,14 @@ fifo_prepend(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t level)
 	else
 		fifo->tail = thread;
 	fifo->head = thread;
-	thread->level = level;
-	cpu->ready |= UINT64_C(1) << level;
+	cpu->ready |= UINT64_C(1) << thread->urgency;
 }
 
+/* Takes the thread off level, which is its stored urgency or the one before. */
 static void
-fifo_unlink(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
+fifo_unlink(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t level)
 {
-	sched_fifo_t *fifo = &cpu->levels[thread->level];
+	sched_fifo_t *fifo = &cpu->levels[level];
 
 	if (thread->prev != NULL)
 		thread->prev->next = thread->next;
@@ -498,9 +513,8 @@ fifo_unlink(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
 	thread->next = NULL;
 	thread->prev = NULL;
 	if (fifo->head == NULL)
-		cpu->ready &= ~(UINT64_C(1) << thread->level);
+		cpu->ready &= ~(UINT64_C(1) << level);
 }
-
 static void
 thread_set_off(erx_sched_thread_t *thread)
 {
@@ -516,24 +530,58 @@ thread_set_here(erx_sched_thread_t *thread, const erx_sched_cpu_t *cpu,
 	    memory_order_relaxed);
 }
 
+static uint8_t
+highest_level(const erx_sched_cpu_t *cpu)
+{
+	return ((uint8_t)(CPUSET_BITS - 1 -
+	    (uint32_t)__builtin_clzll(cpu->ready)));
+}
+
+/* Whether a thread ready at urgency outranks what the CPU runs. */
+static bool
+must_pick(const erx_sched_cpu_t *cpu, uint8_t urgency)
+{
+	return (cpu->running == NULL || urgency > cpu->running->urgency);
+}
+
+/* Whether a ready thread outranks the running thread's urgency. */
+static bool
+ready_outranks(const erx_sched_cpu_t *cpu, uint8_t urgency)
+{
+	return (cpu->ready != 0 && highest_level(cpu) > urgency);
+}
+
 bool
 erx_sched_wake(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
 {
-	uint8_t urgency;
-
 	if (atomic_load_explicit(&thread->where, memory_order_relaxed) !=
 	    SCHED_WHERE_OFF)
 		return (false);
-	urgency = erx_sched_resolve(thread).raw;
-	/*
-	 * Picks are numbered per CPU, so a number left from another CPU could
-	 * pass for this CPU's current pick and stand in for a resolve.
-	 */
-	thread->decided_in = 0;
+	thread->urgency = erx_sched_resolve(thread).raw;
 	thread_set_here(thread, cpu, SCHED_THREAD_READY);
-	fifo_append(cpu, thread, urgency);
-	return (cpu->running == NULL ||
-	    urgency > erx_sched_resolve(cpu->running).raw);
+	fifo_append(cpu, thread);
+	return (must_pick(cpu, thread->urgency));
+}
+
+bool
+erx_sched_refresh(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
+{
+	uint32_t where;
+	uint8_t old = thread->urgency;
+
+	where = atomic_load_explicit(&thread->where, memory_order_relaxed);
+	if (where == sched_where(SCHED_THREAD_RUNNING, cpu->index)) {
+		thread->urgency = erx_sched_resolve(thread).raw;
+		return (ready_outranks(cpu, thread->urgency));
+	}
+	if (where != sched_where(SCHED_THREAD_READY, cpu->index))
+		return (false);
+	thread->urgency = erx_sched_resolve(thread).raw;
+	if (thread->urgency != old) {
+		fifo_unlink(cpu, thread, old);
+		fifo_append(cpu, thread);
+	}
+	return (must_pick(cpu, thread->urgency));
 }
 
 bool
@@ -542,20 +590,9 @@ erx_sched_remove(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
 	if (atomic_load_explicit(&thread->where, memory_order_relaxed) !=
 	    sched_where(SCHED_THREAD_READY, cpu->index))
 		return (false);
-	fifo_unlink(cpu, thread);
+	fifo_unlink(cpu, thread, thread->urgency);
 	thread_set_off(thread);
 	return (true);
-}
-
-/* The thread's urgency for the rest of the current pick, resolved once. */
-static uint8_t
-pick_urgency(const erx_sched_cpu_t *cpu, erx_sched_thread_t *thread)
-{
-	if (thread->decided_in != cpu->picks) {
-		thread->urgency = erx_sched_resolve(thread).raw;
-		thread->decided_in = cpu->picks;
-	}
-	return (thread->urgency);
 }
 
 static bool
@@ -573,7 +610,7 @@ decision_add_leaving(erx_sched_decision_t *decision, erx_sched_thread_t *thread)
 
 /* The running thread gets the CPU for its slice: the rest it has, or a whole one. */
 static void
-pick_dispatch(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t urgency,
+pick_dispatch(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread,
     erx_sched_decision_t *decision)
 {
 	uint64_t slice_ns = erx_sched_group_slice_ns(thread->group);
@@ -587,7 +624,7 @@ pick_dispatch(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread, uint8_t urgency,
 	cpu->running = thread;
 	decision->run = thread;
 	decision->slice_ns = slice_ns;
-	decision->urgency.raw = urgency;
+	decision->urgency.raw = thread->urgency;
 }
 
 /* The running thread gives up the CPU: it waits, leaves, or rejoins a level. */
@@ -595,8 +632,6 @@ static void
 pick_outgoing(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread,
     erx_sched_why_t why, uint64_t ran_ns, erx_sched_decision_t *decision)
 {
-	uint8_t urgency = pick_urgency(cpu, thread);
-
 	thread->slice_left_ns = thread->slice_left_ns > ran_ns ?
 	    thread->slice_left_ns - ran_ns : 0;
 	if (why == ERX_PICK_SLICE_END)
@@ -610,12 +645,13 @@ pick_outgoing(erx_sched_cpu_t *cpu, erx_sched_thread_t *thread,
 		decision_add_leaving(decision, thread);
 		return;
 	}
+	thread->urgency = erx_sched_resolve(thread).raw;
 	thread_set_here(thread, cpu, SCHED_THREAD_READY);
 	/* A preempted thread with no slice left has come to its slice end. */
 	if (why == ERX_PICK_PREEMPTED && thread->slice_left_ns != 0)
-		fifo_prepend(cpu, thread, urgency);
+		fifo_prepend(cpu, thread);
 	else
-		fifo_append(cpu, thread, urgency);
+		fifo_append(cpu, thread);
 }
 
 void
@@ -625,23 +661,16 @@ erx_sched_pick(erx_sched_cpu_t *cpu, erx_sched_why_t why, uint64_t ran_ns,
 	erx_sched_decision_t decision = {0};
 	erx_sched_thread_t *thread = cpu->running;
 	uint32_t moves;
-	uint8_t level, urgency;
-	bool leaves;
 
-	cpu->picks++;
 	if (thread != NULL)
 		pick_outgoing(cpu, thread, why, ran_ns, &decision);
 	/* An outgoing thread that left was this pick's first move. */
 	moves = decision.nleaving;
 	while (cpu->ready != 0) {
-		level = (uint8_t)(CPUSET_BITS - 1 -
-		    (uint32_t)__builtin_clzll(cpu->ready));
-		thread = cpu->levels[level].head;
-		urgency = pick_urgency(cpu, thread);
-		leaves = !may_run_here(cpu, thread);
-		if (urgency == level && !leaves) {
-			fifo_unlink(cpu, thread);
-			pick_dispatch(cpu, thread, urgency, &decision);
+		thread = cpu->levels[highest_level(cpu)].head;
+		if (may_run_here(cpu, thread)) {
+			fifo_unlink(cpu, thread, thread->urgency);
+			pick_dispatch(cpu, thread, &decision);
 			break;
 		}
 		if (moves == ERX_PICK_MOVES) {
@@ -649,11 +678,8 @@ erx_sched_pick(erx_sched_cpu_t *cpu, erx_sched_why_t why, uint64_t ran_ns,
 			break;
 		}
 		moves++;
-		fifo_unlink(cpu, thread);
-		if (leaves)
-			decision_add_leaving(&decision, thread);
-		else
-			fifo_append(cpu, thread, urgency);
+		fifo_unlink(cpu, thread, thread->urgency);
+		decision_add_leaving(&decision, thread);
 	}
 	*result = decision;
 }
