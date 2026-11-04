@@ -6,8 +6,9 @@
 /*
  * The native root task on Fiasco: it finds bootstrap's handoff record through
  * the kernel information page, accepts it, opens the archive the record names,
- * checks the archive's last entry, reports what it saw on the console, and
- * powers off (docs/design-stopgap.md, "Boot handoff").
+ * checks the archive's last entry, takes the machine's memory from sigma0 into
+ * the pool, reports what it saw on the console, and powers off
+ * (docs/design-stopgap.md, "Boot handoff").
  *
  * Only this one thread exists. Every page it reads comes from a page fault that
  * sigma0 answers one to one, with the rights bootstrap gave the page's region;
@@ -28,6 +29,7 @@
 #include "erx/pack.h"
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/vm.h"
 
 /* Where the root sees the kernel information page: no RAM on QEMU virt is here. */
 #define ERX_ROOT_KIP_WINDOW	UINT64_C(0x10000000)
@@ -100,6 +102,9 @@ root_boot(void)
 	if (!erx_pack_file_check(&pack, pack.header.nentries - 1, &root_hasher,
 	    &pack_error))
 		return (pack_error.reason);
+	reason = erx_fiasco_vm_init();
+	if (reason != NULL)
+		return (reason);
 	root_report(&handoff, pack.header.nentries);
 	return (NULL);
 }

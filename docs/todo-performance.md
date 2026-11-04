@@ -14,6 +14,11 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Low] Fiasco backend, the cost of a commit in the root.** Each committed
+  page zeroes through `root_mem.c`'s word loop and makes one `l4_task_map` call.
+  Settled by a `tools/erx bench` workload of committing and touching a large
+  range on HVF; the fixes on the table are musl's `bzero` and mapping runs of
+  contiguous window pages in one call.
 * **[Medium] scheduler, the cost of one machine-wide scheduling lock.** The
   fallback to the cross-CPU protocol of
   [design-scheduler.md](design-scheduler.md#concurrency) serialises every

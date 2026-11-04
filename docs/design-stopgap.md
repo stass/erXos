@@ -243,7 +243,7 @@ seeds Track K's conformance roster.
 
 | erXos call | Phase 1 consumer | Body | Result and refusals | erXos's kernel instead |
 | --- | --- | --- | --- | --- |
-| `erx_vm_reserve`, `_commit`, `_decommit`, `_release`, `erx_space_protect` | musl `malloc`, ERTS allocators, stacks | service: [Budgets](#budgets-and-the-ownership-of-pages) | correct contents; `ERX_ENOMEM` from the pool; write and execute together `ERX_EINVAL`; a touch of a decommitted page is a fault | lazy population with committed memory reserved (K6); protection beneath a ceiling (K4) |
+| `erx_vm_reserve`, `_commit`, `_decommit`, `_release`, `erx_space_protect` | musl `malloc`, ERTS allocators, stacks | service: [Budgets](#budgets-and-the-ownership-of-pages) | correct contents; `ERX_ENOMEM` from the pool, or with no free range, or with a task's runs full, which refuses a new reserve even where it would merge; write and execute together `ERX_EINVAL`; a touch of a decommitted page is a fault | lazy population with committed memory reserved (K6); protection beneath a ceiling (K4), so `_RX` over private memory is `ERX_ERIGHTS`; a refused call keeps the parts before it (K6); `erx_vm_reserve` without `ERX_VM_FIXED` searches below the placement base, where this one takes the lowest free range of its area |
 | `erx_mem_create`, `erx_vm_map` | BeamAsm's JIT object in its test task; the time page, a group's areas | service: pool pages recorded as an object; each map is `l4_task_map` from the window. `ERX_MEM_JIT` only from a task made with `ERX_SPACE_JIT` | any number of mappings; `erx_mem_grow`, sealing `ERX_ENOTSUP` | grow and seal work |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | the device NIF: UART (M3), virtio-mmio block (M6) | service: `l4sigma0_map_iomem` into the root at a reserved address, from the manifest's device entry; for the console UART also [the handoff](#the-console) | a second `erx_vm_map` `ERX_ENOTSUP` | any count, within rights |
@@ -275,24 +275,33 @@ ask for, recording `phys`; then everything else, at 2 MiB until refused and then
 `sigma0` maps RAM read, write and execute (`memmap.cc:96,125`). QEMU `virt` is coherent, so cached
 memory serves for devices.
 
-The window starts at a constant of the backend's address layout, above all RAM, and is never unmapped.
+The window starts at a constant of the backend's address layout, above all RAM, and is never unmapped. The
+window's first pages hold [the range table's page index](#the-range-table), sized from how many pages the window holds,
+and every page after them goes to the pool.
 **A page's identity is its window address.** Only a contiguous pool records a physical address. Free
 pages are a list threaded through the pages, and a page is zeroed when taken. An exhausted pool is
 `ERX_ENOMEM`.
 
 ### The range table
 
-One table per task, a pure core that builds for the host and returns plans. Each record is a reserved
-range, whose pages are each *uncommitted* or *committed* with a window address, with a protection. Each
-mapping of a shared object has its own record. A call computes a whole plan (take-page, zero, map and
-unmap steps, and the pages needed), refuses it if the pool cannot cover it, and only then applies it, so
-a refused call changes nothing.
+A pure core that builds for the host and returns plans (`liberx/backend/fiasco/vm_table.c`). It holds two
+facts, runs per task and one index for the machine. The **runs** are the task's reserved addresses, sorted and disjoint, in a fixed array; adjacent runs merge, so a range is
+wholly reserved exactly when one run covers it. The **page index** is a hash from a committed page's address and its task to its
+window address and protection. A page absent from it is uncommitted, and has no protection to remember, since giving it access
+commits it. Each entry owns a distinct window page and the index has two slots for each page the window holds, so committing
+never finds the index full and needs no pages for it, and every probe ends at an empty slot.
 
-* **Commit:** take a page, zero it, and `l4_task_map(task, L4_BASE_TASK_CAP, l4_fpage(window,
-  L4_PAGESHIFT, prot), l4_map_control(addr, 0, 0))`. A committed page is present.
-* **Decommit:** `l4_task_unmap(task, l4_fpage(addr, L4_PAGESHIFT, L4_FPAGE_RWX), L4_FP_ALL_SPACES)`, and
-  the page returns to the pool.
-* **Release:** decommit what is committed, drop the record.
+A call computes a whole plan (its range, the state each reserved page in it becomes, and the pages needed), refuses it if the pool
+cannot cover it, and only then applies it, so a refused call changes nothing. Applying walks the range's reserved pages in ascending
+address order and gives each its steps from one table of state against target ([Protection](#protection)): take and zero a page, unmap,
+map, give the page back. A map or an unmap the kernel refuses after that leaves no state worth continuing from, and ends the machine with
+the reason. Commit and decommit pass over holes, as the kernel's do; a protect that meets a hole is `ERX_ERANGE`.
+
+* **Commit:** an uncommitted page takes a page, zeroes it, and `l4_task_map(task, L4_BASE_TASK_CAP, l4_fpage(window,
+  L4_PAGESHIFT, prot), l4_map_control(addr, 0, 0))`. A committed page is present, and one already committed becomes read-write as [Protection](#protection) says.
+* **Decommit:** `l4_task_unmap(task, l4_fpage(addr, L4_PAGESHIFT, L4_FPAGE_RWX), L4_FP_ALL_SPACES)`, unless the page has
+  no access and so no mapping, and the page returns to the pool.
+* **Release:** decommit what is committed, drop the addresses from the runs. `ERX_VM_FIXED` over reserved addresses does this first.
 * **Revoke** (destroying a shared object): `l4_task_unmap(L4_BASE_TASK_CAP, l4_fpage(window, L4_PAGESHIFT,
   L4_FPAGE_RWX), L4_FP_OTHER_SPACES)`, which removes every derived mapping and keeps the window's, then
   the pages return to the pool.
@@ -307,9 +316,9 @@ directions drops first. Write means read and write, execute means read and execu
 
 | From | To | Steps, in this order |
 | --- | --- | --- |
-| uncommitted | no access | record only |
+| uncommitted | no access | nothing: the page stays uncommitted |
 | uncommitted | R, RW or RX | take a page, zero it, map it with the target: K4's commit on access change, and musl's guarded stack (`pthread_create.c:295-297`) |
-| no access, or R | R, RW or RX | map the same window page with the target |
+| no access, or R | R, RW or RX | map the same window page with the target; nothing from R to R |
 | RW or RX | R | unmap the write or the execute right |
 | RW | RX | unmap write, then map RX |
 | RX | RW | unmap execute, then map RW |
@@ -319,8 +328,7 @@ Pages change in ascending address order. A thread touching a page against the ch
 own bug, as it raced its own `mprotect`.
 
 **The root as sender and receiver.** The root's own ranges use the same call, with `L4_BASE_TASK_CAP` as both
-destination and source (`lock_guard.cpp:255`). If Fiasco refuses it, they map from `sigma0` with
-`l4sigma0_map_mem`, keeping each page's physical address, and tasks keep the window path.
+destination and source (`lock_guard.cpp:255`), which Fiasco accepts.
 
 ### Shared objects and the JIT alias
 
@@ -338,7 +346,7 @@ records". `guarantee`, `cap`, `carved`, `lent` and `pinned` are `unsupported`.
 ### Kernel memory and the root budget
 
 Fiasco's objects, page tables and mapping records come from its own allocator, sized at boot, charged to nothing
-erXos can see. A call that fails for lack of it is `ERX_ENOMEM`; exhaustion on a path that cannot fail is inherited.
+erXos can see. A call that fails for lack of it is `ERX_ENOMEM`, except a map or an unmap under a [range call](#the-range-table), which ends the machine; exhaustion on a path that cannot fail is inherited.
 
 ## Threads, waits and exit
 
@@ -710,10 +718,10 @@ the tests.
 | **Image and banner.** `tools/erx check-boot-image` and the QEMU gate's `boot_image` suite: the banner image, the two-file form, and the damage cases, each refusing with its reason | a damaged entry that boots fails the case |
 | **Native boot.** The QEMU gate's `native_boot` suite: the root accepts the record through `user_ptr`, checks the archive's last entry, writes one line through `l4_vcon_write`, and shuts down, so QEMU exits by itself | shutdown removed: the deadline fires. `user_ptr` left 0: the root's accept refuses. The archive's sub-type removed: `sigma0` refuses the page fault and the root's line never comes |
 | **Debug log.** `tools/erx check-debug-log` and the gate's `debug_log` suite: the probe's calls, good and malformed, on the hosted backend and as the root over the native path to `l4_vcon_write`, compared record by record | `make check-qemu-mutant`: the native call asks for one byte more than a full message, and only the target's transcript differs |
-| **Memory**, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros |
+| **Memory.** The QEMU gate's `native_memory` suite, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents; every protection change keeps contents and its one page; the whole pool committed at once; the pool's count before and after agree | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros. Pool check removed: a refused protect is not refused |
 | **Protection**, in a test task: a page of code runs in RX; a write in RX and a run in RW each give the expected fault | the drop step skipped: Fiasco adds rights, so the write succeeds and its fault is missing |
 | A stack through `PROT_NONE` then RW; a refused protect, with the pool short, changes nothing | commit on access change removed: a fault. Plan applied page by page: the first page changed |
-| **Range table**, host, exhaustive over page states and target protections | a target with write and execute admitted |
+| **Range table.** `test/host/fiasco_vm_test.rb`, host, exhaustive over page states, ranges and calls against a fake memory unit that adds rights as Fiasco does, plus random sequences; each seed is a mutant there | a target with write and execute admitted. Each of the other seeds of this table's memory rows, and a page given back still mapped |
 | **Thread start**: TLS in the new thread equals the value given | trampoline omits the thread pointer |
 | **Failed start**, a hook failing each of the three steps: the status returns, `l4_task_cap_valid` is 0 for the thread, its stack canary is untouched, the next create works | the deletion skipped: the capability stays valid |
 | **Claim**, host, a fake kernel writing the marker late, over every order of exit and create | the claim ignores the marker: the fake's write lands on a live thread |
@@ -755,16 +763,13 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
-The gate's `boot_image`, `native_boot` and `debug_log` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
-handoff page and of the archive, `user_ptr`, `l4_vcon_write` and power-off, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
+The gate's `boot_image`, `native_boot`, `native_memory` and `debug_log` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
+handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. Everything below was read at the cited lines and has not been executed.
 
-**The memory package:**
-
-* `l4sigma0_map_mem` maps read, write and execute whatever a region's sub-type: `memmap.cc:125`.
-* `l4_task_map` accepts the root as sender and receiver, and a second map raises rights: `lock_guard.cpp:245-256`, `mapdb.cpp`, `map_util.cpp:640-660,715-770`, `mem_space-arm.cpp:241-270`.
-* A window superpage is a parent of page mappings, and unmapping a child leaves it: `map_util.cpp`, `to_fit_size`.
-* `l4_task_unmap` of one right leaves the rest, and `L4_FP_OTHER_SPACES` keeps the window's mapping: `task.h:101-135`, `consts.h:200-222`; `fpage_unmap`'s memory path not read.
+**Run by hand, not kept in a suite**, a root with a helper thread whose pager it was, under TCG and HVF: a write in R, a run in R or RW, a touch of an
+uncommitted or no-access page and a write in RX each fault and the same page keeps its contents; `L4_FP_OTHER_SPACES` on a window page removes the
+derived mapping and leaves the window's; mapping RX over RW without the drop leaves the write right. The suites that keep these need the service thread.
 
 **The thread package:**
 

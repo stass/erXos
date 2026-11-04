@@ -21,7 +21,7 @@ class GateBaselineTest < Minitest::Test
   SANITIZER_TESTS = %w[
     test/host/abi_calls_test.rb test/host/blake3_test.rb test/host/boot_file_test.rb test/host/budget_test.rb
     test/host/cap_test.rb test/host/crypto_test.rb test/host/debug_log_probe_test.rb test/host/dispatch_test.rb
-    test/host/elf_plan_test.rb test/host/lane_test.rb
+    test/host/elf_plan_test.rb test/host/fiasco_vm_test.rb test/host/lane_test.rb
     test/host/log_test.rb test/host/manifest_reader_test.rb test/host/map_test.rb test/host/pack_test.rb
     test/host/rng_test.rb
     test/host/sched_test.rb test/host/space_test.rb test/host/tlb_plan_test.rb test/host/watchdog_test.rb

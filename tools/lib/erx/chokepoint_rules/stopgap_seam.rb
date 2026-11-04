@@ -29,9 +29,16 @@ module Erx
         liberx/backend/fiasco/generated/calls.h
         liberx/backend/fiasco/log.c
         liberx/backend/fiasco/log.h
+        liberx/backend/fiasco/page_pool.c
+        liberx/backend/fiasco/page_pool.h
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_mem.c
+        liberx/backend/fiasco/root_mem.h
+        liberx/backend/fiasco/vm.c
+        liberx/backend/fiasco/vm.h
+        liberx/backend/fiasco/vm_table.c
+        liberx/backend/fiasco/vm_table.h
         liberx/backend/hosted/generated/calls.c
         liberx/backend/hosted/generated/calls.h
         liberx/elf_plan.c
@@ -63,8 +70,11 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C_OUTSIDE_FIASCO_BACKEND,
           pattern: %r{backend/fiasco/}i,
-          # The debug-log probe as the root task is this backend's own test.
-          sites: [Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c')],
+          # The debug-log and memory probes as the root task are this backend's own
+          # tests, and the host driver tests its pure cores.
+          sites: [Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c')],
           seed: { 'kernel/core/seeded.c' => "#include \"liberx/backend/fiasco/generated/calls.h\"\n" }
         ),
         Chokepoints::Forbidden.new(
@@ -80,14 +90,16 @@ module Erx
         # is one that has escaped what is not its own.
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
-          rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report " \
-                'and the debug log call it',
+          rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
+                "the root's memory effects' fixed refusals, the memory transcript and the debug log call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
           pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/console.[ch]'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
         ),

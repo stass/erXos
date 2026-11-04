@@ -16,9 +16,11 @@ module Erx
     LINK_SCRIPT = "#{BACKEND}/root.ld"
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
+    # The root's own memory: the effects over sigma0 and the two pure cores.
+    VM = %W[#{BACKEND}/vm.c #{BACKEND}/page_pool.c #{BACKEND}/vm_table.c].freeze
     # The system's root task. The archive's core comes from Fiasco's boot archive,
     # which does not hold the handoff record's core, since bootstrap only writes it.
-    SYSTEM = [*RUNTIME, "#{BACKEND}/root.c", 'kernel/core/boot_handoff.c'].freeze
+    SYSTEM = [*RUNTIME, *VM, "#{BACKEND}/root.c", 'kernel/core/boot_handoff.c'].freeze
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
                -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
