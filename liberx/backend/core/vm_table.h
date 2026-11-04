@@ -47,6 +47,9 @@ typedef struct erx_backend_vm_range {
 	uint64_t	end;
 } erx_backend_vm_range_t;
 
+/* The low bits of an address or size that lie within a page. */
+#define ERX_BACKEND_VM_PAGE_MASK	((uint64_t)ERX_PAGE_SIZE - 1)
+
 /*
  * A slot of the page index, whose key is the page's address with its table's label in
  * the low bits, which a page's address leaves clear. A key of 0 is empty: no area may
@@ -147,7 +150,10 @@ void	erx_backend_vm_index_init(erx_backend_vm_page_t *, size_t);
 
 /*
  * An empty table of this label over [area_start, area_end), in an index whose pages
- * hold none of the label's. The caller keeps both arrays for the table's life.
+ * hold none of the label's. The caller keeps both arrays for the table's life. A
+ * reserve's search starts on ERX_PAGE_SIZE boundaries; a caller whose own pages are
+ * larger sets the table's placement to that size, a power of two, before its first
+ * reserve.
  */
 void	erx_backend_vm_table_init(erx_backend_vm_table_t *, uint32_t, erx_backend_vm_range_t *,
 	    size_t, erx_backend_vm_page_t *, size_t, uint64_t, uint64_t);

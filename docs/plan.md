@@ -404,7 +404,7 @@ the root task, reading the manifest through its generated C reader; the
 backend: the physical pool from `sigma0` in the root's pool window, the
 range table, the VM calls and `erx_space_protect`, shared objects with the
 JIT alias, physical and contiguous objects with the DMA address, IRQ
-objects bound to a group's dispatcher with the ready ring and
+objects bound to a group's dispatcher with the ready list and
 `erx_group_take_ready`, threads with one semaphore each and TLS set by the
 start trampoline, park and wake under the group's park lock, the umtx
 table, exit through each task's reaper, the test-task launcher over
@@ -1836,7 +1836,7 @@ Each is small, adds its tests, and leaves `make check` green.
     the watchdog.
 13. **A second task.** The launcher, the root service, a JIT object's two
     aliases, a task's end.
-14. **An interrupt.** IRQ objects, the dispatcher, the ready ring.
+14. **An interrupt.** IRQ objects, the dispatcher, the ready list.
 15. **The production image.** The Phase 1 manifest check and a full boot to
     the point where ERTS would start.
 

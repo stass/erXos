@@ -47,8 +47,8 @@
 #define REAPER_STACK_BYTES	16384u
 
 _Static_assert(sizeof(erx_fiasco_start_t) <= sizeof(((erx_utcb_t *)0)->mr), "the starting registers fit the public UTCB");
-_Static_assert(sizeof(erx_fiasco_thread_record_t) <= 2048, "a record is 2 KiB");
-_Static_assert(ERX_FIASCO_THREADS_MAX * 2048 == 64 * ERX_PAGE_SIZE, "the table is 64 pages");
+_Static_assert(sizeof(erx_fiasco_thread_record_t) <= ERX_FIASCO_THREAD_RECORD_BYTES, "a record fits its slot");
+_Static_assert(ERX_FIASCO_THREAD_TABLE_BYTES == 64 * ERX_PAGE_SIZE, "the table is 64 pages");
 _Static_assert(L4_UTCB_OFFSET << 7 == UINT64_C(1) << ERX_FIASCO_UTCB_AREA_ORDER, "128 slots fill the area");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, gpr) ==
     ERX_FIASCO_RECORD_OFF_ARG, "the trampoline's argument");
@@ -91,7 +91,7 @@ erx_fiasco_thread_first_utcb(void)
 erx_fiasco_thread_record_t *
 erx_fiasco_thread_record(uint32_t index)
 {
-	return ((erx_fiasco_thread_record_t *)(uintptr_t)(THREAD_TABLE + (uint64_t)index * 2048));
+	return ((erx_fiasco_thread_record_t *)(uintptr_t)(THREAD_TABLE + (uint64_t)index * ERX_FIASCO_THREAD_RECORD_BYTES));
 }
 
 erx_fiasco_thread_record_t *
@@ -122,6 +122,12 @@ uint64_t
 erx_fiasco_thread_cap(uint32_t index)
 {
 	return (THREAD_SLOT(ERX_FIASCO_THREADS_MAX + index));
+}
+
+uint64_t
+erx_fiasco_root_slot_cap(uint32_t slot)
+{
+	return (erx_fiasco_thread_cap(slot));
 }
 
 void

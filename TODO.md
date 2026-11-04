@@ -119,6 +119,13 @@ it; git history is the record of completed work.
   again on another, so instruction-cache coherence across CPUs and the reuse of an executable page are unverified:
   the native suites inspect only data after protection changes. The `native_memory` suite needs
   that case once BeamAsm's JIT alias exists.
+* [Medium] stopgap, `liberx/backend/api.h:100` and `liberx/backend/fiasco/group.h:37`: `erx_irq_create` takes a
+  `uint32_t` kind in one and a `uint64_t` in the other, and no file sees both, so the build misses it; a
+  non-constant kind reaches `group.c` with unspecified upper bits. One declaration, in the ABI's width.
+* [Low] stopgap, `test/guest/native_task/guest.c`, `request_against_exit`: no seed shows the dropped-request
+  count can move, as the thread deletion seed stops the suite at its earlier `service` case.
+* [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
+  seed under `make check-native-seeds` does, and no gate runs it under HVF.
 * [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than
   the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode. It has one waker in flight, and judges a lost wake only with
   no event or timeout left, so a stuck absorb with no work passes. A two-waker variant and a check of every

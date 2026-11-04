@@ -38,7 +38,7 @@ static irq_object_t irq_objects[IRQ_OBJECTS_MAX];
 static l4_cap_idx_t
 irq_cap(uint32_t index)
 {
-	return ((l4_cap_idx_t)erx_fiasco_thread_cap(ERX_FIASCO_SLOT_IRQS + index));
+	return ((l4_cap_idx_t)erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_IRQS + index));
 }
 
 int

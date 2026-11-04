@@ -72,7 +72,7 @@ watchdog_main(void)
 const char *
 erx_fiasco_watchdog_start(const erx_watchdog_config_t *config, erx_watchdog_mode_t mode)
 {
-	const l4_cap_idx_t thread = (l4_cap_idx_t)erx_fiasco_thread_cap(ERX_FIASCO_SLOT_WATCHDOG);
+	const l4_cap_idx_t thread = (l4_cap_idx_t)erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_WATCHDOG);
 	const l4_sched_param_t param = l4_sched_param(WATCHDOG_PRIORITY, 0);
 
 	watchdog_config = *config;

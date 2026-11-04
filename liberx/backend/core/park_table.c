@@ -18,6 +18,7 @@ static bool	park_leave(erx_backend_park_t *, uint32_t);
 static bool	park_on_list(const erx_backend_park_t *, uint32_t);
 static erx_backend_park_result_t park_take_oldest(erx_backend_park_t *);
 static erx_backend_park_result_t park_take_ready(erx_backend_park_t *);
+static bool	park_event_names_slot(const erx_backend_park_event_t *);
 static erx_backend_park_result_t park_locked_step(erx_backend_park_group_t *, const erx_backend_park_effects_t *,
     void *, const erx_backend_park_event_t *);
 static void	park_mirror_slot(erx_backend_park_group_t *, uint32_t);
@@ -152,6 +153,25 @@ park_mirror_slot(erx_backend_park_group_t *group, uint32_t slot)
 	atomic_store_explicit(&exec->epoch, park->slot_epoch[slot], memory_order_release);
 }
 
+/* Whether an event's .slot means anything: only these ops are about one given slot. */
+static bool
+park_event_names_slot(const erx_backend_park_event_t *event)
+{
+	switch (event->op) {
+	case ERX_BACKEND_PARK_OP_RELEASE:
+	case ERX_BACKEND_PARK_OP_PARK:
+	case ERX_BACKEND_PARK_OP_TIMEOUT:
+	case ERX_BACKEND_PARK_OP_WAKE:
+		return (event->slot < ERX_GROUP_EXECUTORS_MAX);
+	case ERX_BACKEND_PARK_OP_CLAIM:
+	case ERX_BACKEND_PARK_OP_TRIGGER:
+	case ERX_BACKEND_PARK_OP_TAKE:
+	case ERX_BACKEND_PARK_OP_SIGNAL:
+		return (false);
+	}
+	return (false);
+}
+
 /*
  * The step and its mirror, whose release stores pair with the executor's acquire
  * loads: an executor that read an epoch sees the work published before that advance.
@@ -166,9 +186,7 @@ park_locked_step(erx_backend_park_group_t *group, const erx_backend_park_effects
 	result = erx_backend_park_step(&group->park, event);
 	atomic_store_explicit(&group->status->parked, group->park.parked_count, memory_order_relaxed);
 	atomic_store_explicit(&group->status->ready, group->park.ready_count, memory_order_relaxed);
-	if (event->op != ERX_BACKEND_PARK_OP_CLAIM && event->op != ERX_BACKEND_PARK_OP_TRIGGER &&
-	    event->op != ERX_BACKEND_PARK_OP_SIGNAL &&
-	    event->slot < ERX_GROUP_EXECUTORS_MAX)
+	if (park_event_names_slot(event))
 		park_mirror_slot(group, event->slot);
 	if (result.action == ERX_BACKEND_PARK_UP || result.action == ERX_BACKEND_PARK_CLAIMED)
 		park_mirror_slot(group, result.slot);

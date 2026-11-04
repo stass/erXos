@@ -38,8 +38,9 @@
 #define SERVICE_STACK_BYTES	16384u
 /* The default priority of every thread but the watchdog. */
 #define SERVICE_THREAD_PRIORITY	1u
-/* A task's index is its gate's label. */
-#define SERVICE_ROOT_TASK	ERX_FIASCO_TASK_ROOT
+/* The task's part of another task's thread handle: a task's own handles are indices. */
+#define SERVICE_HANDLE_TASK_SHIFT	8u
+#define SERVICE_HANDLE_INDEX_MASK	((UINT64_C(1) << SERVICE_HANDLE_TASK_SHIFT) - 1)
 /* A thread the fault cannot name. */
 #define SERVICE_THREAD_UNKNOWN	UINT64_MAX
 /* The fault word's low bits say how the page was touched. */
@@ -90,13 +91,13 @@ static _Atomic uint64_t service_dropped;
 uint64_t
 erx_fiasco_service_gate(void)
 {
-	return (erx_fiasco_thread_cap(ERX_FIASCO_SLOT_SERVICE_GATE));
+	return (erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_SERVICE_GATE));
 }
 
 uint64_t
 erx_fiasco_service_thread(void)
 {
-	return (erx_fiasco_thread_cap(ERX_FIASCO_SLOT_SERVICE_THREAD));
+	return (erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_SERVICE_THREAD));
 }
 
 const char *
@@ -138,10 +139,9 @@ service_thread_table_init(void)
 	l4_fpage_t area = l4_fpage(erx_fiasco_thread_native_slot(0), ERX_FIASCO_UTCB_AREA_ORDER, L4_FPAGE_RW);
 	uint64_t reserved;
 
-	if (erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048),
-	    ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048), 0,
-	    NULL) != ERX_OK)
+	if (erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
+	    &reserved) != ERX_OK ||
+	    erx_fiasco_vm_body(ERX_FIASCO_TASK_ROOT, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) != ERX_OK)
 		return ("threads: no memory for the thread table");
 	if (l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP, &area)) < 0)
 		return ("threads: the kernel refused the UTCB area");
@@ -176,7 +176,7 @@ service_start(void)
 	if (service_failed(l4_thread_control_commit(erx_fiasco_service_thread())))
 		return ("service: the kernel refused its thread's control");
 	if (service_failed(l4_factory_create_gate(L4_BASE_FACTORY_CAP, erx_fiasco_service_gate(), erx_fiasco_service_thread(),
-	    SERVICE_ROOT_TASK << ERX_FIASCO_WIRE_LABEL_SHIFT)))
+	    ERX_FIASCO_TASK_ROOT << ERX_FIASCO_WIRE_LABEL_SHIFT)))
 		return ("service: the kernel refused the root's gate");
 
 	l4_thread_control_start();
@@ -325,19 +325,27 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 }
 
 /*
- * What a handle names, for the calling task: a task's own handle is an index, and the
- * root's handle of another task's thread carries that task above the index.
+ * A thread handle, for the calling task: a task's own handle is an index, and the
+ * root's handle of another task's thread carries that task above the index. These
+ * two are the service's directions; the stubs in thread.c and irq.c read a task's
+ * own handle as its index.
  */
+static uint64_t
+service_thread_handle(uint32_t caller, uint32_t task, uint32_t index)
+{
+	return (task == caller ? index : (uint64_t)task << SERVICE_HANDLE_TASK_SHIFT | index);
+}
+
 static bool
 service_thread_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
 {
-	const uint64_t named = handle >> ERX_FIASCO_HANDLE_TASK_SHIFT;
+	const uint64_t named = handle >> SERVICE_HANDLE_TASK_SHIFT;
 
-	if ((named != 0 && caller != SERVICE_ROOT_TASK) || named >= ERX_FIASCO_TASKS_MAX ||
-	    (handle & ((UINT64_C(1) << ERX_FIASCO_HANDLE_TASK_SHIFT) - 1)) >= ERX_FIASCO_THREADS_MAX)
+	if ((named != 0 && caller != ERX_FIASCO_TASK_ROOT) || named >= ERX_FIASCO_TASKS_MAX ||
+	    (handle & SERVICE_HANDLE_INDEX_MASK) >= ERX_FIASCO_THREADS_MAX)
 		return (false);
 	*task = named != 0 ? (uint32_t)named : caller;
-	*index = (uint32_t)(handle & ((UINT64_C(1) << ERX_FIASCO_HANDLE_TASK_SHIFT) - 1));
+	*index = (uint32_t)(handle & SERVICE_HANDLE_INDEX_MASK);
 	return (erx_fiasco_task(*task)->state == ERX_FIASCO_TASK_LIVE);
 }
 
@@ -357,9 +365,8 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	uint32_t index, task = caller;
 
 	if (request->space != 0) {
-		if (caller != SERVICE_ROOT_TASK || request->space >= ERX_FIASCO_TASKS_MAX || request->index != 0)
+		if (caller != ERX_FIASCO_TASK_ROOT || !erx_fiasco_task_space_decode(request->space, &task) || request->index != 0)
 			return (ERX_EINVAL);
-		task = (uint32_t)request->space;
 	}
 	row = erx_fiasco_task(task);
 	if (request->index >= ERX_FIASCO_THREADS_MAX || row->state != ERX_FIASCO_TASK_LIVE ||
@@ -374,7 +381,7 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 		return (ERX_ENOMEM);
 	if (service_failed(l4_factory_create(L4_BASE_FACTORY_CAP, L4_PROTO_SEMAPHORE,
 	    erx_fiasco_task_semaphore_cap(task, index))) ||
-	    (task != SERVICE_ROOT_TASK && service_failed(l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
+	    (task != ERX_FIASCO_TASK_ROOT && service_failed(l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
 	    l4_obj_fpage(erx_fiasco_task_semaphore_cap(task, index), 0, L4_CAP_FPAGE_RWS),
 	    l4_map_obj_control(erx_fiasco_thread_semaphore_cap(index), L4_MAP_ITEM_MAP))))) {
 		service_thread_delete(task, index);
@@ -385,7 +392,7 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	for (size_t word = 0; word < sizeof(record->start) / sizeof(uint64_t); word++)
 		start[word] = atomic_load_explicit(&from->utcb.mr[word], memory_order_relaxed);
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_CREATED;
-	reply->first = task == caller ? index : (uint64_t)task << ERX_FIASCO_HANDLE_TASK_SHIFT | index;
+	reply->first = service_thread_handle(caller, task, index);
 	reply->second = erx_fiasco_thread_semaphore_cap(index);
 	return (ERX_OK);
 }
@@ -516,7 +523,7 @@ service_thread_delete(uint32_t task, uint32_t index)
 bool
 erx_fiasco_test_thread_caps_gone(uint32_t index)
 {
-	return (l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, erx_fiasco_task_thread_cap(SERVICE_ROOT_TASK, index))) == 0 &&
+	return (l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, erx_fiasco_task_thread_cap(ERX_FIASCO_TASK_ROOT, index))) == 0 &&
 	    l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, erx_fiasco_thread_semaphore_cap(index))) == 0);
 }
 
@@ -548,7 +555,7 @@ erx_fiasco_test_thread_priority(uint32_t index, uint32_t priority, uint64_t mask
 static void
 service_fault(uint32_t task, const erx_crash_fault_t *fault)
 {
-	if (task == SERVICE_ROOT_TASK)
+	if (task == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_end(fault, ERX_END_OFF);
 	erx_fiasco_task_fault(task, fault);
 }

@@ -38,13 +38,13 @@
 #define TASK_SLOT_SPACE		(TASK_SLOT_GATE + 1)
 #define TASK_SLOT_ENDED		(TASK_SLOT_GATE + 2)
 #define TASK_SLOTS		(TASK_SLOT_GATE + 3)
-#define TASK_TABLE_BYTES	(ERX_FIASCO_THREADS_MAX * UINT64_C(2048))
-#define TASK_PAGE_MASK		((uint64_t)ERX_PAGE_SIZE - 1)
 
 _Static_assert(ERX_FIASCO_TASKS_MAX <= 64, "the decoder's mask holds every task");
 
 static uint64_t	task_slot(uint32_t, uint32_t);
 static bool	task_failed(l4_msgtag_t);
+static bool	task_objects_make(uint32_t);
+static void	task_teardown(uint32_t);
 static void	task_end(uint32_t, int64_t);
 static void	task_delete(uint64_t);
 static bool	task_segment_load(uint32_t, const uint8_t *, const erx_elf_load_t *, uint64_t);
@@ -84,10 +84,32 @@ erx_fiasco_task_set_archive(const erx_pack_view_t *view)
 	task_archive = view;
 }
 
+/*
+ * A space handle, as the root holds one, is the task's index: these two turn one into
+ * the other for a child of the root. A handle that names the root, or no task, names
+ * no child, and which state the child must be in is the caller's to say.
+ * erx_fiasco_task_stop_body reads the handle itself, because a stop also takes the
+ * root and ERX_CAP_SELF.
+ */
+uint64_t
+erx_fiasco_task_space_encode(uint32_t task)
+{
+	return (task);
+}
+
+bool
+erx_fiasco_task_space_decode(uint64_t space, uint32_t *task)
+{
+	if (space == ERX_FIASCO_TASK_ROOT || space >= ERX_FIASCO_TASKS_MAX)
+		return (false);
+	*task = (uint32_t)space;
+	return (true);
+}
+
 static uint64_t
 task_slot(uint32_t task, uint32_t slot)
 {
-	return (erx_fiasco_thread_cap(ERX_FIASCO_SLOT_TASK_RUNS + (task - 1) * TASK_SLOTS + slot));
+	return (erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_TASK_RUNS + (task - 1) * TASK_SLOTS + slot));
 }
 
 /* The first thread's capability is the one the kernel gave it. */
@@ -135,9 +157,9 @@ void *
 erx_fiasco_task_record(uint32_t task, uint32_t index)
 {
 	const uint64_t record = (uint64_t)(uintptr_t)erx_fiasco_thread_record(index);
-	const uintptr_t window = erx_fiasco_vm_task_window(task, record & ~TASK_PAGE_MASK);
+	const uintptr_t window = erx_fiasco_vm_task_window(task, record & ~ERX_BACKEND_VM_PAGE_MASK);
 
-	return (window != 0 ? (void *)(window + (uintptr_t)(record & TASK_PAGE_MASK)) : NULL);
+	return (window != 0 ? (void *)(window + (uintptr_t)(record & ERX_BACKEND_VM_PAGE_MASK)) : NULL);
 }
 
 static bool
@@ -148,15 +170,32 @@ task_failed(l4_msgtag_t tag)
 
 /*
  * Everything a task has before its first thread: its space, with the thread table's
- * UTCB area, its gate mapped where its threads call, and its committed thread table.
- * A failure undoes what ran, through the one path a task ends by.
+ * UTCB area, its ended semaphore, its gate mapped where its threads call, and its
+ * committed thread table. False at the first step that fails, with what ran still there.
  */
-int
-erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
+static bool
+task_objects_make(uint32_t task)
 {
 	l4_fpage_t area = l4_fpage(erx_fiasco_thread_native_slot(0), ERX_FIASCO_UTCB_AREA_ORDER, L4_FPAGE_RW);
 	const uint64_t table = (uint64_t)(uintptr_t)erx_fiasco_thread_record(0);
 	uint64_t reserved;
+
+	if (task_failed(l4_factory_create_task(L4_BASE_FACTORY_CAP, erx_fiasco_task_cap(task), &area)) ||
+	    task_failed(l4_factory_create(L4_BASE_FACTORY_CAP, L4_PROTO_SEMAPHORE, erx_fiasco_task_ended_cap(task))) ||
+	    task_failed(l4_factory_create_gate(L4_BASE_FACTORY_CAP, erx_fiasco_task_gate_cap(task),
+	    erx_fiasco_service_thread(), task << ERX_FIASCO_WIRE_LABEL_SHIFT)) ||
+	    task_failed(l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
+	    l4_obj_fpage(erx_fiasco_task_gate_cap(task), 0, L4_CAP_FPAGE_RWS),
+	    l4_map_obj_control(L4_BASE_PAGER_CAP, L4_MAP_ITEM_MAP))))
+		return (false);
+	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREAD_TABLE_BYTES, ERX_VM_FIXED,
+	    &reserved) == ERX_OK &&
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREAD_TABLE_BYTES, 0, NULL) == ERX_OK);
+}
+
+int
+erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
+{
 	uint32_t task = 1;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
@@ -170,21 +209,14 @@ erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
 
 	task_rows[task] = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_LIVE, .flags = (uint32_t)flags };
 	erx_fiasco_vm_task_open(task);
-	if (task_failed(l4_factory_create_task(L4_BASE_FACTORY_CAP, erx_fiasco_task_cap(task), &area)) ||
-	    task_failed(l4_factory_create(L4_BASE_FACTORY_CAP, L4_PROTO_SEMAPHORE, erx_fiasco_task_ended_cap(task))) ||
-	    task_failed(l4_factory_create_gate(L4_BASE_FACTORY_CAP, erx_fiasco_task_gate_cap(task),
-	    erx_fiasco_service_thread(), task << ERX_FIASCO_WIRE_LABEL_SHIFT)) ||
-	    task_failed(l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
-	    l4_obj_fpage(erx_fiasco_task_gate_cap(task), 0, L4_CAP_FPAGE_RWS),
-	    l4_map_obj_control(L4_BASE_PAGER_CAP, L4_MAP_ITEM_MAP))) ||
-	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, TASK_TABLE_BYTES, ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, TASK_TABLE_BYTES, 0, NULL) != ERX_OK) {
-		task_end(task, 0);
+	if (!task_objects_make(task)) {
+		/* No thread ever ran, so nobody waits on the ended semaphore and no status is owed. */
+		task_teardown(task);
 		task_delete(erx_fiasco_task_ended_cap(task));
-		task_rows[task].state = ERX_FIASCO_TASK_ABSENT;
+		task_rows[task] = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ABSENT };
 		return (ERX_ENOMEM);
 	}
-	*space = task;
+	*space = erx_fiasco_task_space_encode(task);
 	return (ERX_OK);
 }
 
@@ -197,7 +229,7 @@ static bool
 task_segment_load(uint32_t task, const uint8_t *image, const erx_elf_load_t *load, uint64_t base)
 {
 	const uint64_t start = base + load->segment.mem_offset;
-	const uint64_t size = (load->segment.mem_size + TASK_PAGE_MASK) & ~TASK_PAGE_MASK;
+	const uint64_t size = (load->segment.mem_size + ERX_BACKEND_VM_PAGE_MASK) & ~ERX_BACKEND_VM_PAGE_MASK;
 	uint64_t reserved;
 
 	if (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, start, size, ERX_VM_FIXED | ERX_VM_NOREPLACE, &reserved) != ERX_OK ||
@@ -228,11 +260,12 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	erx_pack_entry_t file;
 	erx_elf_error_t error;
 	const uint8_t *image;
+	uint32_t task;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if (space == ERX_FIASCO_TASK_ROOT || space >= ERX_FIASCO_TASKS_MAX || entry > UINT32_MAX ||
-	    task_rows[space].state != ERX_FIASCO_TASK_LIVE || task_archive == NULL ||
+	if (!erx_fiasco_task_space_decode(space, &task) || entry > UINT32_MAX ||
+	    task_rows[task].state != ERX_FIASCO_TASK_LIVE || task_archive == NULL ||
 	    !erx_pack_entry_at(task_archive, (uint32_t)entry, &file))
 		return (ERX_EINVAL);
 	image = task_archive->bytes + file.data_off;
@@ -240,10 +273,10 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, 
 	    (task_plan.flags & ERX_IMAGE_FIXED) == 0)
 		return (ERX_EINVAL);
 	for (uint32_t load = 0; load < task_plan.nloads; load++)
-		if (!task_segment_load((uint32_t)space, image, &task_plan.loads[load], task_plan.fixed_base))
+		if (!task_segment_load(task, image, &task_plan.loads[load], task_plan.fixed_base))
 			return (ERX_ENOMEM);
-	task_rows[space].entry = task_plan.fixed_base + task_plan.entry;
-	*start = task_rows[space].entry;
+	task_rows[task].entry = task_plan.fixed_base + task_plan.entry;
+	*start = task_rows[task].entry;
 	return (ERX_OK);
 }
 
@@ -259,14 +292,15 @@ task_delete(uint64_t cap)
 }
 
 /*
- * The design's steps, in order. Deleting a thread leaves its slots empty and its
- * IPC gone, so a thread blocked on the gate is no request any more. Deleting what a
- * failed create never made is a no-op to the kernel.
+ * The design's steps up to the status, in order. Deleting a thread leaves its slots
+ * empty and its IPC gone, so a thread blocked on the gate is no request any more.
+ * Deleting what a failed create never made is a no-op to the kernel. The row and the
+ * ended semaphore are the caller's.
  */
 static void
-task_end(uint32_t task, int64_t status)
+task_teardown(uint32_t task)
 {
-	erx_fiasco_task_t *const row = &task_rows[task];
+	const erx_fiasco_task_t *const row = &task_rows[task];
 
 	for (uint32_t index = ERX_FIASCO_THREADS_MAX; index-- > 0;)
 		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT)
@@ -277,7 +311,14 @@ task_end(uint32_t task, int64_t status)
 	task_delete(erx_fiasco_task_gate_cap(task));
 	task_delete(erx_fiasco_task_cap(task));
 	erx_fiasco_vm_task_close(task);
-	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .status = status };
+}
+
+/* A task that ran ends here. The row keeps its status for the join, which the ended semaphore's up lets go. */
+static void
+task_end(uint32_t task, int64_t status)
+{
+	task_teardown(task);
+	task_rows[task] = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .status = status };
 	(void)l4_semaphore_up(erx_fiasco_task_ended_cap(task));
 }
 
@@ -301,20 +342,22 @@ erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status)
 int
 erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status)
 {
+	uint32_t task;
+
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
-	if (space == ERX_FIASCO_TASK_ROOT || space >= ERX_FIASCO_TASKS_MAX || task_rows[space].state != ERX_FIASCO_TASK_ENDED)
+	if (!erx_fiasco_task_space_decode(space, &task) || task_rows[task].state != ERX_FIASCO_TASK_ENDED)
 		return (ERX_EINVAL);
-	*status = task_rows[space].status;
-	task_delete(erx_fiasco_task_ended_cap((uint32_t)space));
-	task_rows[space].state = ERX_FIASCO_TASK_ABSENT;
+	*status = task_rows[task].status;
+	task_delete(erx_fiasco_task_ended_cap(task));
+	task_rows[task].state = ERX_FIASCO_TASK_ABSENT;
 	return (ERX_OK);
 }
 
 int
 erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, uint64_t *mem)
 {
-	if ((flags & ~(uint64_t)ERX_MEM_JIT) != 0 || size == 0 || (size & TASK_PAGE_MASK) != 0)
+	if ((flags & ~(uint64_t)ERX_MEM_JIT) != 0 || size == 0 || (size & ERX_BACKEND_VM_PAGE_MASK) != 0)
 		return (ERX_EINVAL);
 	if ((flags & ERX_MEM_JIT) != 0 && (task_rows[caller].flags & ERX_SPACE_JIT) == 0)
 		return (ERX_ERIGHTS);

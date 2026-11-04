@@ -406,7 +406,7 @@ race_executor(void *argument)
 		}
 		if (atomic_exchange_explicit(&race_flag[slot], 0, memory_order_acq_rel) != 0)
 			found = true;
-		/* Only for ThreadSanitizer's view of the ring: the counters above say what is found. */
+		/* Only for ThreadSanitizer's view of the ready list: the counters above say what is found. */
 		(void)erx_backend_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, taken);
 		if (!found)
 			(void)erx_backend_park_wait(&race_group, &race_effects, NULL, slot, group, epoch,
@@ -448,7 +448,7 @@ run_race(void)
 
 	(void)erx_backend_park_take(&race_group, &race_effects, NULL, RACE_OBJECTS, drained);
 	if (atomic_load_explicit(&race_status.ready, memory_order_relaxed) != 0 || race_group.park.listed != 0) {
-		puts("race: a take left the ring or the flags behind");
+		puts("race: a take left the ready list or the flags behind");
 		return (1);
 	}
 	for (uint32_t slot = 0; slot < RACE_EXECUTORS; slot++)
@@ -541,7 +541,7 @@ run_calls(void)
 	return (0);
 }
 
-/* The ring through the calls: a repeat lists nothing, max bounds a take, the mirror follows. */
+/* The ready list through the calls: a repeat lists nothing, max bounds a take, the mirror follows. */
 static int
 run_ready_calls(void)
 {
@@ -580,7 +580,7 @@ run_ready_calls(void)
 		(void)erx_backend_park_signal(&group, &race_effects, NULL, object);
 	if (erx_backend_park_take(&group, &race_effects, NULL, ERX_BACKEND_PARK_OBJECTS_MAX, objects) !=
 	    ERX_BACKEND_PARK_OBJECTS_MAX || objects[ERX_BACKEND_PARK_OBJECTS_MAX - 1] != ERX_BACKEND_PARK_OBJECTS_MAX - 1) {
-		puts("calls: the full ring lost an object");
+		puts("calls: the full ready list lost an object");
 		return (1);
 	}
 	epoch = group.park.group_epoch;
@@ -592,7 +592,7 @@ run_ready_calls(void)
 	return (0);
 }
 
-/* The ready ring: each object once however often it fires, oldest first, every fire an advance. */
+/* The ready list: each object once however often it fires, oldest first, every fire an advance. */
 static int
 run_ready(void)
 {
@@ -602,7 +602,7 @@ run_ready(void)
 	uint64_t checked = 0;
 
 	if (erx_backend_park_signal(&group, &race_effects, NULL, ERX_BACKEND_PARK_OBJECTS_MAX) != ERX_EINVAL) {
-		puts("ready: an object past the ring was not refused");
+		puts("ready: an object past the limit was not refused");
 		return (1);
 	}
 	for (uint32_t round = 0; round < 200; round++) {
@@ -617,7 +617,7 @@ run_ready(void)
 			return (1);
 		}
 		if (atomic_load(&status.ready) != ERX_BACKEND_PARK_OBJECTS_MAX) {
-			puts("ready: the status page miscounts the ring");
+			puts("ready: the status page miscounts the ready list");
 			return (1);
 		}
 		/* A short take leaves the rest in order, for the take after it. */
@@ -629,7 +629,7 @@ run_ready(void)
 		if (erx_backend_park_take(&group, &race_effects, NULL, ERX_BACKEND_PARK_OBJECTS_MAX, objects) !=
 		    ERX_BACKEND_PARK_OBJECTS_MAX - round % 7 || group.park.listed != 0 ||
 		    atomic_load(&status.ready) != 0)
-			return (puts("ready: the ring did not drain"), 1);
+			return (puts("ready: the ready list did not drain"), 1);
 		checked++;
 	}
 	printf("ready: %llu rounds\n", (unsigned long long)checked);

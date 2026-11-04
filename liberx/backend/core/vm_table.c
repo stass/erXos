@@ -11,7 +11,6 @@
 #include "liberx/backend/core/mem.h"
 #include "liberx/backend/core/vm_table.h"
 
-#define VM_PAGE_MASK		((uint64_t)ERX_PAGE_SIZE - 1)
 #define VM_STATE_MASK		UINT64_C(7)
 /* Native's page numbers stay below this bit, as its addresses stop at 2^39. Only the hash's quality rests on it: a lookup compares the whole key. */
 #define VM_LABEL_SHIFT		27u
@@ -108,8 +107,7 @@ erx_backend_vm_index_init(erx_backend_vm_page_t *pages, size_t slots)
 
 void
 erx_backend_vm_table_init(erx_backend_vm_table_t *table, uint32_t label, erx_backend_vm_range_t *ranges,
-    size_t ranges_max, erx_backend_vm_page_t *pages, size_t slots, uint64_t area_start,
-    uint64_t area_end)
+    size_t ranges_max, erx_backend_vm_page_t *pages, size_t slots, uint64_t area_start, uint64_t area_end)
 {
 	*table = (erx_backend_vm_table_t){ .label = label, .ranges = ranges, .ranges_max = ranges_max,
 	    .pages = pages, .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end,
@@ -269,7 +267,7 @@ page_move(erx_backend_vm_table_t *table,
 	const size_t slot = page_find(table, addr);
 	erx_backend_vm_page_t *page = &table->pages[slot];
 	const erx_backend_vm_steps_t steps = erx_backend_vm_steps(page_state(page), target);
-	uintptr_t window = (uintptr_t)(page->window_and_state & ~VM_PAGE_MASK);
+	uintptr_t window = (uintptr_t)(page->window_and_state & ~ERX_BACKEND_VM_PAGE_MASK);
 
 	/* The plan counted this page, so the pool holds one for it. */
 	if (steps.take)
@@ -297,7 +295,7 @@ page_key(const erx_backend_vm_table_t *table, uint64_t addr)
 static size_t
 page_home(const erx_backend_vm_table_t *table, uint64_t key)
 {
-	const uint64_t mixed = (key / ERX_PAGE_SIZE) | ((key & VM_PAGE_MASK) << VM_LABEL_SHIFT);
+	const uint64_t mixed = (key / ERX_PAGE_SIZE) | ((key & ERX_BACKEND_VM_PAGE_MASK) << VM_LABEL_SHIFT);
 
 	return ((size_t)((mixed * VM_HASH_MULTIPLIER) >> 32) & table->pages_mask);
 }
@@ -373,7 +371,7 @@ erx_backend_vm_window(const erx_backend_vm_table_t *table, uint64_t addr)
 
 	if (page->key == 0)
 		return (0);
-	return ((uintptr_t)(page->window_and_state & ~VM_PAGE_MASK));
+	return ((uintptr_t)(page->window_and_state & ~ERX_BACKEND_VM_PAGE_MASK));
 }
 
 int
@@ -383,7 +381,7 @@ erx_backend_vm_map_object(const erx_backend_vm_table_t *table, const erx_backend
 	uint64_t end, first, object_end;
 	int error;
 
-	if ((prot != ERX_PROT_R && prot != ERX_PROT_RW && prot != ERX_PROT_RX) || (offset & VM_PAGE_MASK) != 0)
+	if ((prot != ERX_PROT_R && prot != ERX_PROT_RW && prot != ERX_PROT_RX) || (offset & ERX_BACKEND_VM_PAGE_MASK) != 0)
 		return (ERX_EINVAL);
 	error = range_decode(table, addr, size, &end);
 	if (error != 0)
@@ -442,7 +440,7 @@ find_free_range(const erx_backend_vm_table_t *table, uint64_t size, uint64_t *st
 static int
 range_decode(const erx_backend_vm_table_t *table, uint64_t addr, uint64_t size, uint64_t *end)
 {
-	if ((addr & VM_PAGE_MASK) != 0 || (size & VM_PAGE_MASK) != 0 || size == 0)
+	if ((addr & ERX_BACKEND_VM_PAGE_MASK) != 0 || (size & ERX_BACKEND_VM_PAGE_MASK) != 0 || size == 0)
 		return (ERX_EINVAL);
 	if (__builtin_add_overflow(addr, size, end) || addr < table->area_start ||
 	    *end > table->area_end)

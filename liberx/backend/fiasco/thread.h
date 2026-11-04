@@ -40,7 +40,11 @@ typedef enum erx_fiasco_thread_state {
 	ERX_FIASCO_THREAD_STARTED
 } erx_fiasco_thread_state_t;
 
-/* One thread's 2 KiB, in a table at a constant address. */
+/* A record's size, and the table of them that each task commits at one constant address. */
+#define ERX_FIASCO_THREAD_RECORD_BYTES	2048u
+#define ERX_FIASCO_THREAD_TABLE_BYTES	((uint64_t)ERX_FIASCO_THREADS_MAX * ERX_FIASCO_THREAD_RECORD_BYTES)
+
+/* One thread's record. */
 typedef struct erx_fiasco_thread_record {
 	erx_utcb_t		utcb;	/* the public UTCB, first */
 	erx_fiasco_start_t	start;
@@ -63,8 +67,6 @@ erx_utcb_t *erx_utcb_self(void);
 
 /* The order of the area holding a task's 128 native UTCB slots. */
 #define ERX_FIASCO_UTCB_AREA_ORDER	17u
-/* The task's part of another task's thread handle: a task's own handles are indices. */
-#define ERX_FIASCO_HANDLE_TASK_SHIFT	8u
 
 /* The first thread's own record, once its table's pages and its semaphore exist. */
 void		erx_fiasco_thread_first_init(void);
@@ -94,8 +96,9 @@ uint64_t	erx_fiasco_thread_semaphore_cap(uint32_t);
 uint64_t	erx_fiasco_thread_cap(uint32_t);
 
 /*
- * The root's capability slots past both per-thread runs, as indexes for
- * erx_fiasco_thread_cap. One list, so that no two users can pick the same slot.
+ * The root's capability slots past both per-thread runs, as erx_fiasco_root_slot_cap
+ * takes them: its numbering continues the thread capabilities'. One list, so that no
+ * two users can pick the same slot.
  */
 enum {
 	ERX_FIASCO_SLOT_SERVICE_GATE = ERX_FIASCO_THREADS_MAX,
@@ -106,6 +109,8 @@ enum {
 	/* Each task's run of slots: service_task.c divides them. */
 	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_BACKEND_PARK_OBJECTS_MAX
 };
+
+uint64_t	erx_fiasco_root_slot_cap(uint32_t);
 
 /* The first thread's kernel-given UTCB: its page holds the service's and the watchdog's too. */
 void		*erx_fiasco_thread_first_utcb(void);

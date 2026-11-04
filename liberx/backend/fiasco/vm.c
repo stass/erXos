@@ -36,7 +36,6 @@
 
 /* The backend's address layout: above all RAM, and below 2^39, Fiasco's user limit here. */
 #define VM_WINDOW_BASE	UINT64_C(0x1000000000)
-#define VM_AREA_START	ERX_FIASCO_AREA_START
 #define VM_AREA_END	UINT64_C(0x8000000000)
 /* The window's two grains: sigma0 gives 2 MiB until refused, then 4 KiB until refused. */
 #define VM_SUPERPAGE_ORDER	21u
@@ -46,7 +45,7 @@
 #define VM_OBJECTS_MAX	16u
 /* An object's offsets, as addresses of its own table: page zero stays an empty key. */
 #define VM_OBJECT_AREA_START	((uint64_t)ERX_PAGE_SIZE)
-#define VM_OBJECT_AREA_END	(VM_AREA_END - VM_AREA_START)
+#define VM_OBJECT_AREA_END	(VM_AREA_END - ERX_FIASCO_AREA_START)
 #define VM_OBJECT_LABEL(task, handle)	(ERX_FIASCO_TASKS_MAX + (task) * VM_OBJECTS_MAX + (handle))
 
 _Static_assert(VM_OBJECT_LABEL(ERX_FIASCO_TASKS_MAX, 0) <= ERX_PAGE_SIZE, "every label fits a page address's low bits");
@@ -133,7 +132,7 @@ void
 erx_fiasco_vm_task_open(uint32_t task)
 {
 	erx_backend_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, VM_RANGES_MAX, vm_index,
-	    vm_index_slots, VM_AREA_START, VM_AREA_END);
+	    vm_index_slots, ERX_FIASCO_AREA_START, VM_AREA_END);
 }
 
 void
@@ -158,32 +157,34 @@ erx_fiasco_vm_task_window(uint32_t task, uint64_t addr)
 int
 erx_fiasco_vm_object_create(uint32_t task, uint64_t size, uint64_t *handle)
 {
+	const erx_backend_vm_request_t reserve = { .op = ERX_BACKEND_VM_RESERVE, .addr = VM_OBJECT_AREA_START,
+	    .size = size, .flags = ERX_VM_FIXED };
+	const erx_backend_vm_request_t commit = { .op = ERX_BACKEND_VM_COMMIT, .addr = VM_OBJECT_AREA_START, .size = size };
 	vm_task_t *const row = &vm_tasks[task];
+	vm_object_t *object;
+	uint32_t slot = 0;
+	int status;
 
-	for (uint32_t free = 0; free < VM_OBJECTS_MAX; free++) {
-		vm_object_t *const object = &row->objects[free];
-		const erx_backend_vm_request_t reserve = { .op = ERX_BACKEND_VM_RESERVE, .addr = VM_OBJECT_AREA_START,
-		    .size = size, .flags = ERX_VM_FIXED };
-		const erx_backend_vm_request_t commit = { .op = ERX_BACKEND_VM_COMMIT, .addr = VM_OBJECT_AREA_START, .size = size };
-		int status;
+	while (slot < VM_OBJECTS_MAX && row->objects[slot].used)
+		slot++;
+	if (slot == VM_OBJECTS_MAX)
+		return (ERX_ENOMEM);
+	object = &row->objects[slot];
+	erx_backend_vm_table_init(&object->table, VM_OBJECT_LABEL(task, slot), object->ranges,
+	    sizeof(object->ranges) / sizeof(object->ranges[0]), vm_index, vm_index_slots, VM_OBJECT_AREA_START,
+	    VM_OBJECT_AREA_END);
 
-		if (object->used)
-			continue;
-		erx_backend_vm_table_init(&object->table, VM_OBJECT_LABEL(task, free), object->ranges, 2, vm_index,
-		    vm_index_slots, VM_OBJECT_AREA_START, VM_OBJECT_AREA_END);
-		status = erx_backend_vm_call(&object->table, &vm_no_effects, &reserve, NULL);
-		if (status != ERX_OK)
-			return (status == ERX_ERANGE ? ERX_ENOMEM : status);
-		status = erx_backend_vm_call(&object->table, &vm_no_effects, &commit, NULL);
-		if (status != ERX_OK) {
-			erx_backend_vm_table_clear(&object->table, &vm_no_effects);
-			return (status);
-		}
-		object->used = true;
-		*handle = free;
-		return (ERX_OK);
+	status = erx_backend_vm_call(&object->table, &vm_no_effects, &reserve, NULL);
+	if (status != ERX_OK)
+		return (status == ERX_ERANGE ? ERX_ENOMEM : status);
+	status = erx_backend_vm_call(&object->table, &vm_no_effects, &commit, NULL);
+	if (status != ERX_OK) {
+		erx_backend_vm_table_clear(&object->table, &vm_no_effects);
+		return (status);
 	}
-	return (ERX_ENOMEM);
+	object->used = true;
+	*handle = slot;
+	return (ERX_OK);
 }
 
 int
@@ -215,7 +216,7 @@ window_grow(uint64_t cursor, unsigned order)
 {
 	l4_addr_t physical;
 
-	while (cursor < VM_AREA_START &&
+	while (cursor < ERX_FIASCO_AREA_START &&
 	    l4sigma0_map_anypage(L4_BASE_PAGER_CAP, (l4_addr_t)cursor, order, &physical, order) == 0)
 		cursor += UINT64_C(1) << order;
 	return (cursor);

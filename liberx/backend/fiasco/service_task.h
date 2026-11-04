@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_SERVICE_TASK_H
 #define ERX_FIASCO_SERVICE_TASK_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -75,6 +76,9 @@ int	erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space
 int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start);
 int	erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status);
 int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status);
+/* A space handle's two directions: decode is false for a handle that names no child of the root. */
+uint64_t	erx_fiasco_task_space_encode(uint32_t task);
+bool	erx_fiasco_task_space_decode(uint64_t space, uint32_t *task);
 int	erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, uint64_t *mem);
 int	erx_fiasco_task_vm_map_body(uint32_t caller, const erx_fiasco_vm_map_request_t *request);
 

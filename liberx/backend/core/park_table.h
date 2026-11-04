@@ -13,11 +13,11 @@
 
 /*
  * The park protocol's core (docs/design-stopgap.md, "The park protocol"), which
- * both backends run: one
- * state machine over the group's epoch, each slot's epoch, the parked list in order,
- * the ready ring and the listed flags. It reads no clock and calls no kernel. Each step says what its caller
- * does once the lock is released, and a slot taken off the list is owed exactly
- * one up, so a semaphore holds 0 whenever its executor enters a park.
+ * both backends run: one state machine over the group's epoch, each slot's epoch,
+ * the parked list in order, the ready list in order and the listed flags. It reads
+ * no clock and calls no kernel. Each step says what its caller does once the lock is
+ * released, and a slot taken off the parked list is owed exactly one up, so a
+ * semaphore holds 0 whenever its executor enters a park.
  */
 
 #define ERX_BACKEND_PARK_NO_SLOT	UINT32_MAX
@@ -42,8 +42,8 @@ typedef enum erx_backend_park_op {
 	ERX_BACKEND_PARK_OP_PARK,
 	ERX_BACKEND_PARK_OP_TIMEOUT,
 	ERX_BACKEND_PARK_OP_WAKE,
-	ERX_BACKEND_PARK_OP_TAKE,	/* the oldest listed object leaves the ring */
-	ERX_BACKEND_PARK_OP_SIGNAL	/* an object fired: on the ring at most once, then as a trigger */
+	ERX_BACKEND_PARK_OP_TAKE,	/* the oldest listed object leaves the ready list */
+	ERX_BACKEND_PARK_OP_SIGNAL	/* an object fired: on the ready list at most once, then as a trigger */
 } erx_backend_park_op_t;
 
 typedef struct erx_backend_park_event {
@@ -63,7 +63,7 @@ typedef enum erx_backend_park_action {
 	ERX_BACKEND_PARK_TIMED_OUT,	/* the park returns ERX_ETIMEDOUT */
 	ERX_BACKEND_PARK_OWED,		/* a waker took the slot: an unbounded down, then ERX_OK */
 	ERX_BACKEND_PARK_UP,		/* up result.slot's semaphore */
-	ERX_BACKEND_PARK_TAKEN		/* result.object left the ring */
+	ERX_BACKEND_PARK_TAKEN		/* result.object left the ready list */
 } erx_backend_park_action_t;
 
 typedef struct erx_backend_park_result {
@@ -97,7 +97,7 @@ typedef struct erx_backend_park_group {
 uint32_t erx_backend_park_claim(erx_backend_park_group_t *, const erx_backend_park_effects_t *, void *);
 void	erx_backend_park_release(erx_backend_park_group_t *, const erx_backend_park_effects_t *, void *, uint32_t);
 void	erx_backend_park_trigger(erx_backend_park_group_t *, const erx_backend_park_effects_t *, void *);
-/* ERX_OK, or ERX_EINVAL for an object past the ring. */
+/* ERX_OK, or ERX_EINVAL for an object index of ERX_BACKEND_PARK_OBJECTS_MAX or more. */
 int	erx_backend_park_signal(erx_backend_park_group_t *, const erx_backend_park_effects_t *, void *, uint32_t);
 /* Moves up to max listed objects into objects, oldest first, and returns how many. Never blocks. */
 uint32_t erx_backend_park_take(erx_backend_park_group_t *, const erx_backend_park_effects_t *, void *, uint32_t, uint32_t *);

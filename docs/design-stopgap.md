@@ -105,7 +105,7 @@ or a request, and no thread holds two. A wake or `l4_semaphore_up` follows the u
 | --- | --- | --- |
 | thread lock | one per task | the records' free states, the reaper's list |
 | umtx lock | one per task | the umtx table |
-| park lock | one per group | a group's epochs, parked list, ready ring |
+| park lock | one per group | a group's epochs, parked list, ready list |
 | trace lock | root | [the trace ring](#the-trace-ring) |
 
 The service takes only the trace lock, and otherwise waits only on Fiasco's calls and `sigma0`.
@@ -541,13 +541,13 @@ environment and the ELF headers, which `root.ld` loads first so that musl finds 
 
 ## Interrupts and readiness
 
-A group is a backend record in its task: executor slots, status page, park lock, parked list, ready ring, listed flags and
+A group is a backend record in its task: executor slots, status page, park lock, parked list, ready list, listed flags and
 dispatcher thread.
 
 * **The dispatcher** blocks in `l4_ipc_wait`. Every message is one IRQ object firing, whose label is the index of its record
   in the group, which the `erx_irq_bind` stub chose. It runs a trigger for that record and waits again, for a device line and
   a software `l4_irq_trigger` alike.
-* **The ready ring** has one entry per bound object, of at most 64, and an object is on it at most once, by its listed flag, so it
+* **The ready list** is an array in firing order, which a take shifts down. It has one entry per bound object, of at most 64, and an object is on it at most once, by its listed flag, so it
   cannot overflow and a trigger allocates nothing. A fire the dispatcher has not received yet is one delivery however often it
   repeats (`Irq_sender::queue`, `irq.cpp:984`), which the listed flag would report as one anyway.
 * **`erx_group_take_ready(max)`** drains up to `max` entries, at most `ERX_MSG_WORDS`, under the park lock, clears their flags
@@ -559,7 +559,7 @@ dispatcher thread.
 
 The protocol of [design-scheduler.md](design-scheduler.md) is kept, with a semaphore per thread, as L4Re's pthread has
 (`restart.h:26-37`), in place of the kernel's switch. The operations are one pure state machine, `park_step`, over the
-group's epoch, each slot's epoch, the parked list in order, the ready ring and the listed flags. It reads no clock, makes no
+group's epoch, each slot's epoch, the parked list in order, the ready list and the listed flags. It reads no clock, makes no
 Fiasco call, and returns what the caller does after unlocking.
 
 | Operation | Under the park lock | After the lock |
@@ -809,9 +809,9 @@ the tests.
 | Affinity to each CPU, read back: the `native_threads` suite pins a thread of raised priority to each CPU in turn while a probe counts on every CPU, and only that CPU's probe stops | mask ignored: every CPU but the first shows the wrong probe stopping |
 | **A second task**, the QEMU gate's `native_task` suite: a program from the boot image, built through `elf_plan.c`, commits memory and creates a thread through the service, writes code through a JIT object's read-write alias and runs it through the read-execute alias, then rewrites the page on one CPU and runs it on each other CPU in turn, 2,000 times each, with a status of 0. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show. A write in the read-execute alias and a run in the read-write alias each end the task with a crash frame the suite reads back, and the machine continues | RW alias mapped RX: the write faults, and the case's status is not 0. The range table's own seeds, in `fiasco_vm_test.rb`, catch an index that ignores the label |
 | **Task exit**: with a thread spinning on each CPU, the first thread stops the task; `l4_task_cap_valid` is 0 for every thread, semaphore, gate and space of the task; the pool's count returns; the root's stop does the same | thread deletion skipped: the capability stays valid. Memory step skipped: the pool is short |
-| **Request against exit**, in `native_task`: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the dead-label counter stays 0 | thread and gate deletion skipped: requests arrive for a freed label and the counter moves |
+| **Request against exit**, in `native_task`: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the service's count of dropped requests, `erx_fiasco_test_dropped`, stays 0, and the pool's count returns | no seed of its own: **Task exit**'s thread deletion seed stops the suite at its earlier `service` case, before this one runs |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
-| **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ring and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
+| **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ready list and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
 | **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
 | **A semaphore's wake across CPUs**, `tools/lib/erx/native_semaphore_race.rb` under `make check-native-seeds`, under TCG at 4 CPUs as every seed runs, on a test kernel whose up holds itself between the dequeue and the activation until the waiter is queued again or half a second passes: at least three raced downs each, followed by an IPC wait that lasts its whole length and by a down that times out; too few raced downs fail the case | the bit's wait removed: the IPC wait ends early and the second down reports an up that never came |

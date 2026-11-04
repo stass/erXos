@@ -4,7 +4,7 @@
  */
 
 /*
- * The IRQ objects' and the ready ring's row. function_api_irq_cases is what both
+ * The IRQ objects' and the ready list's row. function_api_irq_cases is what both
  * backends pass. function_api_hosted_irq_cases adds what holds only where an object
  * fires in the caller's thread, each fire counted, with no lines to bind
  * (docs/design-stopgap.md, "The hosted backend").
@@ -21,8 +21,6 @@
 
 #define LABEL_A	UINT64_C(0xa11ce)
 #define LABEL_B	UINT64_C(0xb0b)
-/* The space's one group is what a bind names. */
-#define GROUP	function_api_group()
 #define IRQ_ROUNDS 2000u
 
 static _Atomic uint32_t helper_ok;
@@ -49,7 +47,7 @@ case_irq_refusals(void)
 
 	return (erx_irq_create(0, 0, ERX_IRQ_MSI, 0, &irq) == ERX_ENOTSUP &&
 	    erx_irq_create(0, 0, 77, 0, &irq) == ERX_EINVAL &&
-	    erx_irq_bind(0, GROUP, LABEL_A) == ERX_EINVAL && erx_irq_trigger(0) == ERX_EINVAL &&
+	    erx_irq_bind(0, function_api_group(), LABEL_A) == ERX_EINVAL && erx_irq_trigger(0) == ERX_EINVAL &&
 	    erx_irq_ack(UINT64_C(1) << 40) == ERX_EINVAL && erx_group_take_ready(1) == ERX_ETYPE);
 }
 
@@ -71,7 +69,8 @@ ready_once_helper(uint64_t arg)
 	uint64_t irq_b;
 	bool ok;
 
-	ok = erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_b) == ERX_OK && erx_irq_bind(irq_b, GROUP, LABEL_B) == ERX_OK;
+	ok = erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_b) == ERX_OK &&
+	    erx_irq_bind(irq_b, function_api_group(), LABEL_B) == ERX_OK;
 	ok = ok && erx_group_take_ready(ERX_MSG_WORDS) == 0;
 	ok = ok && erx_irq_trigger(irq_a) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK && erx_irq_trigger(irq_a) == ERX_OK;
 	ok = ok && atomic_load(&status->epoch) >= epoch + 3 && atomic_load(&status->ready) == 2;
@@ -80,7 +79,7 @@ ready_once_helper(uint64_t arg)
 	ok = ok && erx_group_take_ready(ERX_MSG_WORDS) == 0 && atomic_load(&status->ready) == 0;
 	ok = ok && erx_irq_ack(irq_a) == ERX_OK;
 	/* Free to fire again; bound again, under the new label; unbound, it delivers nothing. */
-	ok = ok && erx_irq_bind(irq_b, GROUP, LABEL_A + 1) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK;
+	ok = ok && erx_irq_bind(irq_b, function_api_group(), LABEL_A + 1) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK;
 	ok = ok && erx_group_take_ready(1) == 1 && label_at(0) == LABEL_A + 1;
 	ok = ok && erx_irq_bind(irq_b, ERX_CAP_NULL, 0) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK;
 	ok = ok && erx_group_take_ready(1) == 0;
@@ -95,7 +94,8 @@ case_irq_ready_once(void)
 	uint64_t irq;
 
 	atomic_store(&function_api_done, 0);
-	if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq) != ERX_OK || erx_irq_bind(irq, GROUP, LABEL_A) != ERX_OK ||
+	if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq) != ERX_OK ||
+	    erx_irq_bind(irq, function_api_group(), LABEL_A) != ERX_OK ||
 	    function_api_spawn_executor(ready_once_helper, irq) != ERX_OK ||
 	    !function_api_wait_for(&function_api_done, 1))
 		return (false);
@@ -136,7 +136,7 @@ case_irq_wakes_parked(void)
 	atomic_store(&function_api_done, 0);
 	atomic_store(&helper_ok, 0);
 	if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &helper_irq) != ERX_OK ||
-	    erx_irq_bind(helper_irq, GROUP, LABEL_A) != ERX_OK ||
+	    erx_irq_bind(helper_irq, function_api_group(), LABEL_A) != ERX_OK ||
 	    function_api_spawn_executor(irq_wakes_helper, 0) != ERX_OK)
 		return (false);
 	for (uint32_t round = 1; round <= IRQ_ROUNDS; round++) {

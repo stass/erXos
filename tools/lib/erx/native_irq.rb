@@ -51,7 +51,7 @@ module Erx
     # Raises on a failure the guest named, which a transcript's timeout would only imply.
     def judge(serial)
       failed = FAILED_LINE.match(serial)
-      raise Error, "the guest says #{failed[0]}" if failed
+      raise Error, "the guest says #{failed[0].inspect}" if failed
     end
 
     class Run

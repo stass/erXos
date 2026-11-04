@@ -197,7 +197,7 @@ case_trigger_before_park(void)
 	const uint64_t group = group_epoch(), slot = slot_epoch();
 
 	if (erx_group_take_ready(ERX_MSG_WORDS) != 0)
-		fail("erx: irq: the ring was not empty FAILED\n");
+		fail("erx: irq: the ready list was not empty FAILED\n");
 	trigger_and_see(irq_soft);
 	if (erx_park(group, slot, erx_fiasco_clock_ns() + PATIENCE_NS) != ERX_OK)
 		fail("erx: irq: a trigger before the park was lost FAILED\n");
