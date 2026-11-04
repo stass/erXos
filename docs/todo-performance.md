@@ -91,6 +91,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Measure lock hold and wait times under a page-churn workload at 4 CPUs
   before G1's numbers are taken; per-CPU lists belong to erXos's own kernel
   if the contention is real.
+* **[Low] kernel, a part of a range call goes through a tree split and join.**
+  `erx_map_apply` (`kernel/core/map.c`) takes every edit out of the tree by two
+  splits and puts it back by joins, up to about ten walks of a path of at most
+  23 nodes, each rewriting a record of about 100 bytes, under the space's lock,
+  where a boundary move inside one record needs only one walk up to refresh
+  the summaries. A commit of 1 GiB runs this 4,096 times. Measure: `tools/erx
+  bench mmap` with commits and protects over a space with many records. Fixes:
+  an in-place path for a plan that keeps its records, behind the same plan.
 * **[Low] kernel, admission as a step machine.** Every kernel call fills
   its admission plan (`erx_sys_admit_plan`, 16 bytes per position plus 8,
   for the positions of the ABI's largest call whatever this call's count)

@@ -148,6 +148,18 @@ it; git history is the record of completed work.
   syntax-tree check the design's row names, which stays the pending
   `budget-counters` rule; a layout-compatible record under another name,
   cast from an `erx_budget_t` pointer, escapes the text rule.
+* [Medium] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_apply`
+  takes no proof that the caller charged a part's `charge_pages`, and
+  `erx_map_edges` no proof that it runs after the apply, though it reads the
+  records as they stand. A caller that gets either order wrong makes a
+  read-write record with no pages behind it, or keeps a table past its
+  promise. The reserve plans of `erx_vm_plan` should take both into the one
+  plan, so no caller orders them.
+* [Low] Kernel mapping-record core, `kernel/core/map.c`: `erx_map_check` judges
+  a node's summary with the core's own `map_update`, so a bug in that function
+  shows only through the behaviour tests, not the check; and `MapModel` shares
+  the core's choice of which record a split reuses. Compute the summary a second
+  way in the check.
 * [Medium] Kernel space core, `kernel/core/space.c`: the core keeps a
   space's place in the tree and its run state, and decides creations
   and the steps of the stop and deletion walks; what the design puts

@@ -57,6 +57,10 @@ limit log_text_max u32 2112
 limit log_rate_bytes u32 16384
 limit group_depth_max u32 8
 limit space_depth_max u32 64
+# The mapping records of one space, and the most pages one part of a range call
+# charges and backs.
+limit mappings_max u32 65536
+limit range_part_pages u32 64
 
 status ok 0 "success"
 status inval -1 "invalid argument"
@@ -107,6 +111,9 @@ flags boot_flags u32
   bit det 0
   bit installed_only 1
   bit root 2
+flags vm_flags u32
+  bit fixed 0
+  bit noreplace 1
 flags space_flags u32
   bit jit 0
 enum exit_kind i64

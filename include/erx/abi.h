@@ -241,6 +241,7 @@ struct erx_rights {
 #define ERX_MANIFEST_RECORDS_MAX UINT32_C(65536)
 #define ERX_MANIFEST_STRINGS_MAX UINT32_C(4194304)
 #define ERX_MANIFEST_VERSION UINT16_C(1)
+#define ERX_MAPPINGS_MAX UINT32_C(65536)
 #define ERX_MF_DEVICE_HOSTILE UINT32_C(1)
 #define ERX_MF_DEVICE_ROLE_BLOCK UINT32_C(5)
 #define ERX_MF_DEVICE_ROLE_CONFIGURATION UINT32_C(3)
@@ -298,6 +299,7 @@ struct erx_rights {
 #define ERX_PROT_RW UINT32_C(3)
 #define ERX_PROT_RX UINT32_C(5)
 #define ERX_QUOTA_NONE UINT64_C(18446744073709551615)
+#define ERX_RANGE_PART_PAGES UINT32_C(64)
 #define ERX_REC_FRAME UINT32_C(1)
 #define ERX_ROOT_SLOT_BOOT_IMAGE UINT32_C(5)
 #define ERX_ROOT_SLOT_DEVICE_SECRET UINT32_C(9)
@@ -323,6 +325,8 @@ struct erx_rights {
 #define ERX_USER_BASE_MIN UINT64_C(65536)
 #define ERX_UTCB_BRS UINT32_C(58)
 #define ERX_UTCB_BYTES_MAX UINT32_C(504)
+#define ERX_VM_FIXED UINT32_C(1)
+#define ERX_VM_NOREPLACE UINT32_C(2)
 #define ERX_WATCHDOG_BOOT_DEFAULT UINT32_C(60)
 #define ERX_WATCHDOG_BOOT_MAX UINT32_C(600)
 #define ERX_WATCHDOG_DEADLINE_DEFAULT UINT32_C(5)
@@ -2614,6 +2618,8 @@ struct erx_utcb_length {
 	uint32_t	raw;
 };
 _Static_assert(sizeof(erx_utcb_length_t) == 4, "erx_utcb_length size");
+
+typedef uint32_t erx_vm_flags_t;
 
 /* Emit once from target startup; the linker keeps this note section. */
 #define ERX_DECLARE_ABI_NOTE(symbol) \

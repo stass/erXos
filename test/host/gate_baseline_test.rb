@@ -21,7 +21,8 @@ class GateBaselineTest < Minitest::Test
     test/host/abi_calls_test.rb test/host/blake3_test.rb test/host/boot_file_test.rb test/host/budget_test.rb
     test/host/cap_test.rb test/host/crypto_test.rb test/host/debug_log_probe_test.rb test/host/dispatch_test.rb
     test/host/elf_plan_test.rb test/host/lane_test.rb
-    test/host/log_test.rb test/host/manifest_reader_test.rb test/host/pack_test.rb test/host/rng_test.rb
+    test/host/log_test.rb test/host/manifest_reader_test.rb test/host/map_test.rb test/host/pack_test.rb
+    test/host/rng_test.rb
     test/host/sched_test.rb test/host/space_test.rb test/host/tlb_plan_test.rb test/host/watchdog_test.rb
     test/integration/sanitizer_gate_test.rb test/integration/structural_pack_test.rb
     test/integration/terminal_tables_test.rb
@@ -40,6 +41,7 @@ class GateBaselineTest < Minitest::Test
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
     'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
+    'map' => { seeds: 6, sources: %w[kernel/core/map.c] },
     'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
                                             kernel/crypto/blake3/blake3_portable.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
@@ -62,7 +64,8 @@ class GateBaselineTest < Minitest::Test
     'glue-reads-no-utcb' => 1, 'fiasco-backend-headers-private' => 1, 'fiasco-headers-in-backend' => 2,
     'fiasco-symbols-in-backend' => 2, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
     'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
-    'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'object-leg' => 0,
+    'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'map-core-members' => 3, 'map-records-private' => 6,
+    'object-leg' => 0,
     'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0,
     'sched-records-private' => 5, 'seam-only-from-glue' => 1, 'space-holds-callers' => 2, 'space-parent-callers' => 2,
     'space-records-private' => 6, 'vector-route' => 0
@@ -72,7 +75,7 @@ class GateBaselineTest < Minitest::Test
                kernel/crypto/blake3 kernel/crypto/chacha20 kernel/crypto/sha2 musl otp test/oracle/common_test].freeze
 
   ARCHIVE_SOURCES = %w[kernel/core/admit.c kernel/core/budget.c kernel/core/cap.c kernel/core/debug_log.c
-                       kernel/core/dispatch.c kernel/core/log.c kernel/core/rng.c
+                       kernel/core/dispatch.c kernel/core/log.c kernel/core/map.c kernel/core/rng.c
                        kernel/core/space.c kernel/core/tlb_plan.c kernel/core/watchdog.c kernel/crypto/blake3/blake3.c
                        kernel/crypto/blake3/blake3_portable.c kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                        kernel/generated/abi_decode.c kernel/generated/abi_run.c

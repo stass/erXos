@@ -235,6 +235,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MANIFEST_RECORDS_MAX` | 65536 |
 | `ERX_MANIFEST_STRINGS_MAX` | 4194304 |
 | `ERX_MANIFEST_VERSION` | 1 |
+| `ERX_MAPPINGS_MAX` | 65536 |
 | `ERX_MF_DEVICE_HOSTILE` | 1 |
 | `ERX_MF_DEVICE_ROLE_BLOCK` | 5 |
 | `ERX_MF_DEVICE_ROLE_CONFIGURATION` | 3 |
@@ -292,6 +293,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_PROT_RW` | 3 |
 | `ERX_PROT_RX` | 5 |
 | `ERX_QUOTA_NONE` | 18446744073709551615 |
+| `ERX_RANGE_PART_PAGES` | 64 |
 | `ERX_REC_FRAME` | 1 |
 | `ERX_ROOT_SLOT_BOOT_IMAGE` | 5 |
 | `ERX_ROOT_SLOT_DEVICE_SECRET` | 9 |
@@ -317,6 +319,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
 | `ERX_UTCB_BYTES_MAX` | 504 |
+| `ERX_VM_FIXED` | 1 |
+| `ERX_VM_NOREPLACE` | 2 |
 | `ERX_WATCHDOG_BOOT_DEFAULT` | 60 |
 | `ERX_WATCHDOG_BOOT_MAX` | 600 |
 | `ERX_WATCHDOG_DEADLINE_DEFAULT` | 5 |

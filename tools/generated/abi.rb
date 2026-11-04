@@ -7490,6 +7490,16 @@ module Erx
         maximum: 504,
         multiple: 1
       ).freeze
+      types["vm_flags"] = EnumType.new(
+        name: "vm_flags".b,
+        base: types.fetch("u32"),
+        members: {
+          "fixed".b => 1,
+          "noreplace".b => 2
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
       SCHEMA = Model.freeze_value(Schema.new(
         version: 1,
         architecture: {
@@ -7641,7 +7651,8 @@ module Erx
           "erx_manifest".b,
           "erx_mf_limits".b,
           "erx_mf_principal".b,
-          "utcb_length".b
+          "utcb_length".b,
+          "vm_flags".b
         ].freeze,
         constants: {
           "abi_note_type".b => Constant.new(
@@ -8970,6 +8981,12 @@ module Erx
             type: types.fetch("u16"),
             description: nil
           ).freeze,
+          "mappings_max".b => Constant.new(
+            name: "mappings_max".b,
+            value: 65536,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "mf_device_hostile".b => Constant.new(
             name: "mf_device_hostile".b,
             value: 1,
@@ -9312,6 +9329,12 @@ module Erx
             type: types.fetch("u64"),
             description: nil
           ).freeze,
+          "range_part_pages".b => Constant.new(
+            name: "range_part_pages".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "rec_frame".b => Constant.new(
             name: "rec_frame".b,
             value: 1,
@@ -9459,6 +9482,18 @@ module Erx
           "utcb_bytes_max".b => Constant.new(
             name: "utcb_bytes_max".b,
             value: 504,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "vm_fixed".b => Constant.new(
+            name: "vm_fixed".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "vm_noreplace".b => Constant.new(
+            name: "vm_noreplace".b,
+            value: 2,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
