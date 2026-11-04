@@ -23,8 +23,18 @@
  *               generator starts all zeroes, never initialized
  *     -> rng, then per OP " r:ok:OUT:STATE", " r:refused:STATE",
  *        " m:ok:STATE", " m:refused:STATE", " i:STATE" or " c:STATE",
- *        where STATE is KEY:READY, READY 1 or 0. A spent digest that
- *        is not all zeroes stops the driver.
+ *        where STATE is KEY:READY, READY 1 or 0. A spent digest, or a
+ *        hash after its digest, that is not all zeroes stops the driver.
+ *   rng-residue KIND HEX HEX   KIND "hash", of two messages of one length,
+ *               or "read" or "mix", under two 32-byte keys
+ *     -> rng-residue DIFFERING TOUCHED
+ *        Makes the call with each secret from one frame over one painted
+ *        stretch of the stack below it, and counts the bytes of that
+ *        stretch that the call changed (TOUCHED) and the bytes that end
+ *        up different between the two secrets (DIFFERING). Only the
+ *        secrets differ, so a differing byte is one that depends on them:
+ *        a secret the generator left on the stack. Not under a sanitizer,
+ *        whose frames are not the ones the burn is sized for.
  */
 
 #define _DEFAULT_SOURCE
@@ -43,7 +53,17 @@
 #include "chacha20/chacha.h"
 #include "sha2/sha256.h"
 
+/* How much of the stack rng-residue paints: past every hash and burn. */
+#define DRIVER_RESIDUE_BYTES	8192
+#define DRIVER_PAINT		0xa5
+
 typedef struct driver_bytes driver_bytes_t;
+
+typedef enum driver_residue {
+	DRIVER_RESIDUE_HASH,
+	DRIVER_RESIDUE_READ,
+	DRIVER_RESIDUE_MIX
+} driver_residue_t;
 
 struct driver_bytes {
 	uint8_t	*bytes;
@@ -53,10 +73,14 @@ struct driver_bytes {
 static void driver_answer_chacha20(char *);
 static void driver_answer_chacha20_bound(char *);
 static void driver_answer_rng(char *);
+static void driver_answer_rng_residue(char *);
 static void driver_answer_sha256(char *);
 static void driver_answer_sha256_repeat(char *);
+static void driver_residue_run(driver_residue_t, erx_rng_hash_t *, erx_rng_t *,
+    const driver_bytes_t *, uint8_t *);
 static void driver_rng_digest(erx_rng_digest_t *, const char *);
 static void driver_rng_spent(const erx_rng_digest_t *);
+static uintptr_t driver_stack_edge(void);
 static driver_bytes_t driver_hex(const char *);
 static void driver_print_hex(const uint8_t *, size_t);
 static void driver_print_sha256(erx_sha256_ctx_t *);
@@ -262,8 +286,16 @@ static void
 driver_rng_digest(erx_rng_digest_t *digest, const char *text)
 {
 	driver_bytes_t bytes = driver_hex(*text == '\0' ? "-" : text);
+	uint8_t *hash = malloc(ERX_RNG_HASH_BYTES);
 
-	erx_rng_digest(digest, bytes.bytes, bytes.length);
+	if (hash == NULL)
+		driver_usage("out of memory");
+	memset(hash, DRIVER_PAINT, ERX_RNG_HASH_BYTES);
+	erx_rng_digest(digest, (erx_rng_hash_t *)hash, bytes.bytes, bytes.length);
+	for (size_t index = 0; index < ERX_RNG_HASH_BYTES; index++)
+		if (hash[index] != 0)
+			driver_usage("a spent hash was not erased");
+	free(hash);
 	free(bytes.bytes);
 }
 
@@ -328,6 +360,108 @@ driver_answer_rng(char *cursor)
 	fputs("\n", stdout);
 }
 
+/*
+ * This function's saved frame record, which lies just below its caller's
+ * frame, where the frame of the caller's next callee starts too. Only that
+ * callee's saved registers lie between here and the caller's frame.
+ */
+static __attribute__((__noinline__)) uintptr_t
+driver_stack_edge(void)
+{
+	return ((uintptr_t)__builtin_frame_address(0));
+}
+
+/*
+ * Paints the stretch below this frame, makes the call, and copies out what
+ * is left there. Reading the stack below the frame is what the check is;
+ * nothing but the loops and the call runs between the painting and the
+ * copying, so every change is the call's.
+ */
+static __attribute__((__noinline__)) void
+driver_residue_run(driver_residue_t kind, erx_rng_hash_t *hash, erx_rng_t *rng,
+    const driver_bytes_t *secret, uint8_t *left)
+{
+	uint8_t out[ERX_RNG_READ_MAX];
+	erx_rng_digest_t digest;
+	volatile uint8_t *stretch;
+	bool served = true;
+
+	memset(&digest, 0, sizeof(digest));
+	if (kind != DRIVER_RESIDUE_HASH) {
+		memcpy(rng->key, secret->bytes, sizeof(rng->key));
+		rng->ready = true;
+	}
+	stretch = (volatile uint8_t *)(driver_stack_edge() - DRIVER_RESIDUE_BYTES);
+	for (size_t index = 0; index < DRIVER_RESIDUE_BYTES; index++)
+		stretch[index] = DRIVER_PAINT;
+	switch (kind) {
+	case DRIVER_RESIDUE_HASH:
+		erx_rng_digest(&digest, hash, secret->bytes, secret->length);
+		break;
+	case DRIVER_RESIDUE_READ:
+		served = erx_rng_read(rng, out, sizeof(out));
+		break;
+	case DRIVER_RESIDUE_MIX:
+		served = erx_rng_mix(rng, &digest);
+		break;
+	}
+	for (size_t index = 0; index < DRIVER_RESIDUE_BYTES; index++)
+		left[index] = stretch[index];
+	if (!served)
+		driver_usage("a residue call was refused");
+}
+
+static void
+driver_answer_rng_residue(char *cursor)
+{
+	const char *name = driver_token(&cursor);
+	driver_residue_t kind = strcmp(name, "hash") == 0 ? DRIVER_RESIDUE_HASH :
+	    strcmp(name, "read") == 0 ? DRIVER_RESIDUE_READ : DRIVER_RESIDUE_MIX;
+	driver_bytes_t first = driver_hex(driver_token(&cursor));
+	driver_bytes_t second = driver_hex(driver_token(&cursor));
+	driver_bytes_t secret;
+	erx_rng_hash_t *hash = malloc(ERX_RNG_HASH_BYTES);
+	erx_rng_t *rng = malloc(sizeof(*rng));
+	uint8_t *first_left, *left;
+	size_t differing = 0, touched = 0;
+
+	first_left = malloc(DRIVER_RESIDUE_BYTES);
+	left = malloc(DRIVER_RESIDUE_BYTES);
+	secret.length = first.length;
+	secret.bytes = malloc(first.length == 0 ? 1 : first.length);
+	if (hash == NULL || rng == NULL || first_left == NULL || left == NULL ||
+	    secret.bytes == NULL)
+		driver_usage("out of memory");
+	if (first.length != second.length ||
+	    (kind != DRIVER_RESIDUE_HASH && first.length != ERX_RNG_KEY_LENGTH))
+		driver_usage("rng-residue compares secrets of one length");
+
+	/*
+	 * The same buffers and generator every time: the saved registers in the
+	 * call's frames hold their addresses, which must differ in nothing. The
+	 * first run is discarded: it may bind the C library's functions, which
+	 * runs the dynamic linker on the painted stack.
+	 */
+	memcpy(secret.bytes, first.bytes, first.length);
+	driver_residue_run(kind, hash, rng, &secret, left);
+	driver_residue_run(kind, hash, rng, &secret, left);
+	memcpy(first_left, left, DRIVER_RESIDUE_BYTES);
+	memcpy(secret.bytes, second.bytes, second.length);
+	driver_residue_run(kind, hash, rng, &secret, left);
+	for (size_t index = 0; index < DRIVER_RESIDUE_BYTES; index++) {
+		differing += first_left[index] != left[index];
+		touched += first_left[index] != DRIVER_PAINT;
+	}
+	printf("rng-residue %zu %zu\n", differing, touched);
+	free(secret.bytes);
+	free(left);
+	free(first_left);
+	free(rng);
+	free(hash);
+	free(second.bytes);
+	free(first.bytes);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -355,6 +489,8 @@ main(int argc, char **argv)
 			driver_answer_chacha20_bound(cursor);
 		else if (strcmp(command, "rng") == 0)
 			driver_answer_rng(cursor);
+		else if (strcmp(command, "rng-residue") == 0)
+			driver_answer_rng_residue(cursor);
 		else
 			driver_usage("unknown request");
 	}

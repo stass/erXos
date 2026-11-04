@@ -16,6 +16,7 @@ class StackProofRunTest < Minitest::Test
 
   ROOT = File.expand_path('../..', __dir__)
   FIXTURES = File.expand_path('../fixtures', __dir__)
+  RNG_BURN_SHIFT_BYTES = Integer(File.read(File.join(ROOT, 'kernel/core/rng.c'))[/ERX_RNG_BURN_SHIFT_BYTES\s+(\d+)/, 1])
   FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
              -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections].freeze
   BUDGET = Erx::StackProofInput::Budget.new(block_bytes: 8192, allowances: { 'call' => 2048, 'tick' => 1024 }.freeze,
@@ -116,6 +117,30 @@ class StackProofRunTest < Minitest::Test
     refute_empty Erx::StackProofRun.call(root: root, compiler: @compiler, runner: @runner, output: 'proof')
   end
 
+  # erx_rng_digest overwrites what BLAKE3 leaves on the stack, a secret when
+  # the bytes are one. The burn's nearer pass, which the report does not
+  # show since the deeper one is the deepest chain, must reach as deep as the
+  # hash at each level the proof reads, measured from the frame both are
+  # called from, and past that frame's own bytes too, should the compiler
+  # make the burn a tail call. The passes' frames must also lie far enough
+  # apart that the padding of one cannot fall on the padding of the other.
+  def assert_the_generators_burn_covers_its_hash(lines)
+    assert_operator RNG_BURN_SHIFT_BYTES, :>=, 64, 'the passes must not lie on each other'
+    %w[-O0 -O2].each do |level|
+      section = lines.drop_while { |line| line != "stack proof of the C17 cores at #{level}:" }.drop(1)
+                     .take_while { |line| line.start_with?('  ') }
+      hash_depth = %w[erx_blake3_update erx_blake3_final].map do |entry|
+        Integer(section.find { |line| line.start_with?("  #{entry} (call): ") }[/: (\d+) bytes:/, 1])
+      end.max
+      chain = section.find { |line| line.start_with?('  erx_rng_digest (call): ') }.split(': ').last.split(/ [-=]> /)
+      names = chain.map { |frame| frame[/\A\w+/] }
+      assert_equal %w[erx_rng_digest erx_rng_burn_deep erx_rng_burn_stack], names, "the deepest chain at #{level}"
+      digest_frame, *burn_frames = chain.map { |frame| Integer(frame[/(\d+) bytes\)\z/, 1]) }
+      assert_operator burn_frames.sum - RNG_BURN_SHIFT_BYTES, :>=, hash_depth + digest_frame,
+                      "the burn against the hash at #{level}"
+    end
+  end
+
   def test_the_cores_pass_and_the_report_claims_their_bound_alone
     output = File.join('build', 'tests', "stack-proof-#{Process.pid}")
     lines = Erx::StackProofRun.call(root: ROOT, compiler: @compiler, runner: @runner, output: output)
@@ -130,6 +155,7 @@ class StackProofRunTest < Minitest::Test
     assert lines.any? { |line| line.start_with?('  erx_watchdog_step (call, tick): ') }
     refute lines.any? { |line| line.include?('erx_pack_open') }
     assert_bounded_claim(lines)
+    assert_the_generators_burn_covers_its_hash(lines)
   ensure
     FileUtils.remove_entry(File.join(ROOT, output)) if output && File.directory?(File.join(ROOT, output))
   end

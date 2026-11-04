@@ -8,14 +8,18 @@ require_relative '../fixtures/crypto_fixture'
 
 # Judges the kernel's entropy generator, kernel/core/rng.c, against
 # CryptoFixture::Generator, a model written from the design's statements
-# on OpenSSL's ChaCha20 and Ruby's SHA-256. Seeded random sequences of
+# on OpenSSL's ChaCha20 and b3sum's BLAKE3. Seeded random sequences of
 # inits, reads, mixes and clears must agree with the model in every output,
 # every key and every refusal. Hand cases pin the refusals of a generator
 # nobody seeded, the read bound, the first key against RFC 8439's published
 # zero-key block, the fast key erasure (a read's new key never appears in
 # what it returned, and every read moves the key) and the mixing rule. The
 # driver stops if a spent digest is left unerased. Seeded one-line mutants
-# of each rule must each fail.
+# of each rule must each fail. A differential run over the dead stack finds
+# what the calls leave there: two messages, or two keys, must leave the same
+# bytes, at the levels the stack proof reads, and a missing or too shallow burn
+# must not. That run builds for the host, whose frames resemble but are not the
+# kernel's: the stack proof holds the depth on the kernel's own objects.
 class RngTest < Minitest::Test
   F = CryptoFixture
   SEED = 57
@@ -25,10 +29,11 @@ class RngTest < Minitest::Test
 
   def setup
     @driver = F::Driver.new(name: 'rng')
+    @level_drivers = {}
   end
 
   def teardown
-    @driver.remove if passed?
+    [@driver, *@level_drivers.values].each(&:remove) if passed?
   end
 
   def test_random_sequences_agree_with_the_model
@@ -37,15 +42,16 @@ class RngTest < Minitest::Test
       Array.new(random.rand(1..12)) do
         case random.rand(12)
         when 0..4 then [:read, [0, 1, 31, 32, 33, 63, 64, 65, 255, 256, 257, random.rand(0..300)].sample(random: random)]
-        when 5..7 then [:mix, random.bytes(random.rand(0..300))]
+        when 5..7 then [:mix, random.bytes(random.rand(0..(random.rand(4).zero? ? 6000 : 300)))]
         when 8..10 then [:init, random.bytes(random.rand(0..64))]
         else [:clear]
         end
       end
     end
     answers = @driver.ask(sequences.map { |ops| request(ops) })
+    digests = @driver.blake3_table(sequences.flatten(1).filter_map { |op| op[1] if %i[mix init].include?(op[0]) })
     sequences.zip(answers).each do |ops, answer|
-      assert_equal expected(ops), answer, "operations #{ops.map(&:first).inspect}"
+      assert_equal expected(ops, digests), answer, "operations #{ops.map(&:first).inspect}"
     end
   end
 
@@ -61,7 +67,8 @@ class RngTest < Minitest::Test
   def test_init_spends_the_zero_key_on_the_seeds_digest
     seed = 'seed'.b
     answer = parse(@driver.ask(["rng i:#{F.hex(seed)}"]).first)
-    expected = F.unhex(ZERO_KEY_BLOCK0).bytes.zip(F.sha256(seed).bytes).map { |a, b| a ^ b }.pack('C*')
+    digest = @driver.blake3_table([seed]).fetch(seed)
+    expected = F.unhex(ZERO_KEY_BLOCK0).bytes.zip(digest.bytes).map { |a, b| a ^ b }.pack('C*')
     assert_equal [[:init, F.hex(expected), '1']], answer
     assert_equal ZERO_KEY_BLOCK0, F.hex(F.chacha20(key: F::ZERO_KEY, counter: 0, nonce: F::ZERO_NONCE,
                                                    data: "\0".b * 32))
@@ -96,13 +103,14 @@ class RngTest < Minitest::Test
                      .map { |line| parse(line) }
     first = F.unhex(answers[0][0][1])
     block0 = F.chacha20(key: first, counter: 0, nonce: F::ZERO_NONCE, data: "\0".b * 32)
-    expected = block0.bytes.zip(F.sha256(message).bytes).map { |a, b| a ^ b }.pack('C*')
+    digest = @driver.blake3_table([message]).fetch(message)
+    expected = block0.bytes.zip(digest.bytes).map { |a, b| a ^ b }.pack('C*')
     assert_equal [:mix, F.hex(expected), '1'], answers[0][1]
     # Mixing nothing still spends the key; the same bytes from another key
     # give another key; the key is never the bare digest.
     refute_equal answers[1][0][1], answers[1][1][1]
     refute_equal answers[0][1][1], answers[2][1][1]
-    refute_equal F.hex(F.sha256(message)), answers[0][1][1]
+    refute_equal F.hex(digest), answers[0][1][1]
   end
 
   def test_clear_erases_the_key
@@ -120,8 +128,8 @@ class RngTest < Minitest::Test
                                   'rng->key[index] ^= digest->bytes[index] ^ (next[index] & 0);'],
       'bound off by one' => ['length > ERX_RNG_READ_MAX)', 'length > ERX_RNG_READ_MAX + 1)'],
       'unseeded reads' => ['if (!rng->ready || length > ERX_RNG_READ_MAX)', 'if (length > ERX_RNG_READ_MAX)'],
-      'clear keeps the generator ready' => ["\terx_explicit_bzero(rng, sizeof(*rng));\n}\n\nvoid\nerx_rng_digest",
-                                            "\terx_explicit_bzero(rng->key, sizeof(rng->key));\n}\n\nvoid\nerx_rng_digest"]
+      'clear keeps the generator ready' => ["erx_rng_clear(erx_rng_t *rng)\n{\n\terx_explicit_bzero(rng, sizeof(*rng));",
+                                            "erx_rng_clear(erx_rng_t *rng)\n{\n\terx_explicit_bzero(rng->key, sizeof(rng->key));"]
     }
     requests = ['rng r:8 i:00 r:32 r:257 m:6162 r:16 c r:4', 'rng i: m: r:0']
     expected = @driver.ask(requests)
@@ -131,11 +139,90 @@ class RngTest < Minitest::Test
     end
   end
 
+  # Message lengths reaching every frame of the hash: a block alone, a
+  # chunk's several blocks, a chunk boundary (hasher_finish_chunk), and
+  # merges of the chaining-value stack.
+  RESIDUE_LENGTHS = [1, 64, 65, 1025, 2049, 4097, 5121].freeze
+
+  def test_the_generators_calls_leave_nothing_secret_on_the_stack
+    skip 'a sanitizer changes the frames the burn is sized for' if sanitized?
+
+    requests = residue_requests
+    %w[-O0 -O2].each do |level|
+      residue(driver_at(level).ask(requests)).zip(requests).each do |found, request|
+        assert_equal 0, found.differing, "#{request.split[1]} of #{request.split[2].size / 2} bytes at #{level}"
+        assert_operator found.touched, :>, 0, 'the stretch read is not where the call ran'
+      end
+    end
+  end
+
+  BurnMutant = Data.define(:name, :original, :replacement, :levels)
+  HASH_BURN = "\terx_rng_burn_deep();\n\terx_rng_burn_deep_shifted();\n"
+  NO_HASH_BURN = "\tif (length == SIZE_MAX) {\n#{HASH_BURN.gsub(/^/, "\t")}\t}\n".freeze
+  # One burn frame reaches past the whole hash at -O2 on this measure, so
+  # 'one frame' is judged at -O0, where the hash goes deeper than it. 'one
+  # pass', tail-called, leaves only what a frame's padding skips, which at -O2
+  # on the host is a message word; the kernel's objects lay out their padding
+  # elsewhere.
+  BURN_MUTANTS = [
+    BurnMutant.new(name: 'hash without a burn', original: HASH_BURN, replacement: NO_HASH_BURN, levels: %w[-O0 -O2]),
+    BurnMutant.new(name: 'hash with one frame', original: HASH_BURN,
+                   replacement: "#{NO_HASH_BURN}\terx_rng_burn_stack();\n", levels: %w[-O0]),
+    BurnMutant.new(name: 'hash with one pass', original: HASH_BURN,
+                   replacement: "\tif (length == SIZE_MAX)\n\t\terx_rng_burn_deep_shifted();\n\terx_rng_burn_deep();\n",
+                   levels: %w[-O2]),
+    BurnMutant.new(name: 'read without a burn', original: "\terx_rng_burn_stack();\n\treturn (served);",
+                   replacement: "\tif (rng == NULL)\n\t\terx_rng_burn_stack();\n\treturn (served);", levels: %w[-O0 -O2]),
+    BurnMutant.new(name: 'mix without a burn', original: "\terx_rng_burn_stack();\n\treturn (keyed);",
+                   replacement: "\tif (rng == NULL)\n\t\terx_rng_burn_stack();\n\treturn (keyed);", levels: %w[-O0 -O2])
+  ].freeze
+
+  def test_a_missing_or_shallow_burn_is_caught
+    skip 'a sanitizer changes the frames the burn is sized for' if sanitized?
+
+    requests = residue_requests
+    BURN_MUTANTS.each_with_index do |mutant, index|
+      mutant.levels.each do |level|
+        driver = driver_at(level)
+        _path, program = driver.mutant('kernel/core/rng.c', mutant.original, mutant.replacement, index: index)
+        found = residue(driver.ask_with(program, requests)).map(&:differing)
+        assert_operator found.max, :>, 0, "mutant survived at #{level}: #{mutant.name}"
+      end
+    end
+  end
+
   def test_core_builds_freestanding_for_the_target
     @driver.compile_for_target(File.join(F::ROOT, 'kernel/core/rng.c'))
   end
 
   private
+
+  def sanitized? = !ENV.fetch('ERX_SANITIZERS', '').empty?
+
+  def driver_at(level)
+    @level_drivers[level] ||= F::Driver.new(name: "rng#{level.delete('-').downcase}", level: level)
+  end
+
+  # Two secrets that differ in every byte, so no word of either can pass for
+  # the other's: messages of each length, then keys for a read and a mix.
+  def residue_requests
+    random = Random.new(SEED)
+    calls = RESIDUE_LENGTHS.map { |length| ['hash', length] } + [['read', F::KEY_BYTES], ['mix', F::KEY_BYTES]]
+    calls.map do |kind, length|
+      first = random.bytes(length)
+      second = first.bytes.map { |byte| byte ^ 0x5a }.pack('C*')
+      "rng-residue #{kind} #{F.hex(first)} #{F.hex(second)}"
+    end
+  end
+
+  Residue = Data.define(:differing, :touched)
+
+  def residue(lines)
+    lines.map do |line|
+      line.split => ['rng-residue', differing, touched]
+      Residue.new(differing: Integer(differing), touched: Integer(touched))
+    end
+  end
 
   def request(ops)
     words = ops.map do |op|
@@ -149,8 +236,8 @@ class RngTest < Minitest::Test
     "rng #{words.join(' ')}"
   end
 
-  def expected(ops)
-    model = F::Generator.new
+  def expected(ops, digests)
+    model = F::Generator.new(digests: digests)
     words = ops.map do |op|
       head = case op
              in [:read, length]

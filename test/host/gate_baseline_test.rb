@@ -33,7 +33,8 @@ class GateBaselineTest < Minitest::Test
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
     'pack' => { seeds: 10, sources: %w[kernel/core/pack.c] },
-    'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c] },
+    'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
+                                     kernel/crypto/blake3/blake3_portable.c] },
     'sha256' => { seeds: 8, sources: %w[kernel/crypto/sha2/sha256c.c] },
     'watchdog' => { seeds: 11, sources: %w[kernel/core/watchdog.c] }
   }.freeze

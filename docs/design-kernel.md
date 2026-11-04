@@ -6344,13 +6344,30 @@ counter conversion. The page's sequence is never reset during a boot.
   when its first seed source is mixed into the all-zero key, and refuses
   reads and mixes until then, so no output comes from a key nobody
   seeded; the other seed sources below are mixed in after it. A mix
-  takes the SHA-256 digest of its bytes, computed before the lock is
+  takes the BLAKE3 digest of its bytes, computed before the lock is
   taken, so the lock is held for one ChaCha20 block whatever length a
-  domain mixes. The working words ChaCha20 and SHA-256 leave on the
-  kernel stack are overwritten before each call returns. ChaCha20 and
-  SHA-256 are FreeBSD's, imported as erXos's code into
-  `kernel/crypto/` ([design.md](design.md#dependencies)); the generator
-  around them is the C17 core `kernel/core/rng.c`.
+  domain mixes. The hasher's state, 1912 bytes, and the kernel's copy of
+  the bytes from the UTCB, at most 504, live in one page that the call
+  charges to the caller's budget, as [the boot image's
+  hash](#the-boot-image) does, so no kernel stack holds either; the
+  digest leaves the state all zeroes and the call erases the copy before
+  it releases the page. The boot's seeds, hashed before any budget
+  exists, use a page of boot memory the same way. The working words
+  ChaCha20 and BLAKE3 leave
+  on the kernel stack are overwritten before each call returns. A read
+  or a mix, whose ChaCha20 frames the stack proof measures under 600
+  bytes, burns one frame of 768 bytes. A hash goes deeper, 1088 bytes at
+  `-O0` and 784 at `-O2`, past what one frame may hold under the proof's
+  1024-byte cap, so it burns two frames below the one that called it,
+  and does so twice, about 256 bytes apart, because a frame's padding is
+  never written and what one pass skips among the hash's frames lies in
+  the other's array. The registers the calls may change are not erased;
+  a return to user mode restores or clears them. The
+  deepest chain is 1664 bytes, within the 2048 bytes the proof allows
+  the cores on the 8 KiB kernel stack. ChaCha20 is FreeBSD's and BLAKE3
+  its authors', imported as erXos's code into `kernel/crypto/`
+  ([design.md](design.md#dependencies)); the generator around them is
+  the C17 core `kernel/core/rng.c`.
 * **Seed.** At boot, `/chosen/rng-seed`, `/chosen/kaslr-seed`, 32 bytes
   from the board's random generator where the platform layer drives one
   ([design-platforms.md](design-platforms.md#entropy-sources)), for which
@@ -6366,7 +6383,7 @@ counter conversion. The page's sequence is never reset during a boot.
   pointer-signing keys and placement base.
 * **Mixing.** Any holder of a resource with `CARVE` may mix bytes in:
   the key becomes 32 bytes of the generator's own output, the first 32
-  bytes of block 0, XORed with the SHA-256 digest of the bytes, so whoever
+  bytes of block 0, XORed with the BLAKE3 digest of the bytes, so whoever
   does not know the key cannot choose or weaken the next one.
 
 Its quality:
@@ -7353,7 +7370,7 @@ same property on the other:
 | asynchronous errors | weaker | existing: Fiasco's handler, which counts each error per CPU and resumes (`thread-jdb.cpp`) | no containment: an error is counted, not contained as [Interrupts, time and entropy](#interrupts-time-and-entropy) describes; a documented difference with its tests | |
 | the early console and the kernel log | in full | modified: Fiasco's own UART driver for the console port, written until the console's driver carves the UART from the root resource and at a panic or the machine's end, with Fiasco's own console output turned off once the root task starts and the UART's registers in the root resource; the kernel log as a ring the stopgap adds, written through `erx_log_escape` and read with `erx_log_read` | Fiasco's own start-up lines precede erXos's banner on the console (**Differences that remain** below) | M1, M3 |
 | the time page and timers | in full | added: the time page as kernel memory mapped read-only, updated from Fiasco's clock; kernel deadlines as Fiasco's timeouts | | M1, M3 |
-| entropy | in full | added: the C17 generator core over FreeBSD's ChaCha20 and SHA-256 (`kernel/crypto/`) behind a kernel object | | M1 |
+| entropy | in full | added: the C17 generator core over FreeBSD's ChaCha20 and the imported BLAKE3 (`kernel/crypto/`) behind a kernel object | | M1 |
 | the trace ring and `erx_object_info` | in full | added: erXos's trace ring and inspection topics as kernel objects beside Fiasco's objects, recording the ABI file's trace event types | Fiasco's own trace buffer stays in its kernel debugger | M4 |
 | deterministic mode | in full | added: with `erx.det=1` the stopgap starts no secondary CPU, seeds the generator with the fixed value, fixes the placement bases of the objects it adds, reads time only from the instruction-counted virtual counter and fixes the wall clock, as erXos's kernel does ([Deterministic mode](#deterministic-mode)) | Fiasco's own start-up lines are part of the transcript | M3 |
 | the boot image, its validation, its slices and maps, and the banner | in full | modified: `bootstrap` is the first stage of the bootable file, finds the archive with `erx_boot_locate`, runs erXos's C17 `ERXPACK` validator, checks the kernel's file and finds the kernel and the root task in the image, there being no `sigma0` executable; the image's pages go to the root task as a module, which the kernel wraps in the boot image's object, so `erx_image_slice` and `erx_image_map` slice and map it as on erXos's kernel; `bootstrap` passes the boot image's flags and build identifier to the kernel, which prints erXos's banner after its own start-up lines and before it starts the root task | | M1, M3 |

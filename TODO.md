@@ -636,14 +636,17 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
-* [Medium] BLAKE3 stack residue (`kernel/crypto/blake3/`): after
-  `erx_blake3_update` and `erx_blake3_final` return, message words and
-  chaining values remain in their dead frames (`block_words` and `state`
-  in `erx_blake3_compress_in_place`, `output_t.block`, `parent_block`,
-  `chunk_cv`); only the context is erased. Harmless for the boot image's
-  public files; before the entropy pool mixes secrets with BLAKE3, give
-  it one shared stack-burn function (the entropy generator's
-  `erx_rng_burn_stack` generalised) or an erasing compression, measured.
+* [Medium] Entropy generator's burn on the kernel's objects
+  (`kernel/core/rng.c`, `test/host/rng_test.rb`): the residue test runs
+  the host build, whose frames differ from the kernel's, and the stack
+  proof holds only the depth, so a flag or compiler change that moves a
+  frame's padding onto a message word in the kernel's objects goes
+  unseen. Run the residue check on objects built with the core archive's
+  flags, under QEMU or reassembled for the host.
+* [Low] Entropy generator's registers (`kernel/core/rng.c`): secrets stay
+  in the registers a callee may change until they are overwritten, and an
+  interrupt taken in kernel mode in that window saves them to the stack,
+  below any burn. Reading them needs another kernel bug.
 
 * [Medium] Lane reader chokepoint, `lane-pages-reader` in
   `tools/lib/erx/chokepoint_rules/`: a text rule over the names of a

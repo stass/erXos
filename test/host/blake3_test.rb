@@ -9,6 +9,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/json_input'
 require_relative '../../tools/lib/erx/core_archive'
+require_relative '../fixtures/crypto_fixture'
 
 # The imported BLAKE3 (kernel/crypto/blake3/) against two oracles that share
 # no code with it: the official test vectors imported beside it, and
@@ -214,20 +215,5 @@ class Blake3Test < Minitest::Test
   end
 
   # BLAKE3's Rust implementation, as the b3sum tool installs it.
-  def b3sum(messages)
-    tool = ENV.fetch('ERX_B3SUM') do
-      ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |entry| File.join(entry, 'b3sum') }
-         .find { |path| File.executable?(path) }
-    end
-    flunk 'b3sum is the differential oracle and is not installed (brew install b3sum)' if tool.nil?
-
-    paths = messages.each_with_index.map do |message, index|
-      File.join(@directory, "message-#{index}").tap { |path| File.binwrite(path, message) }
-    end
-    record = @runner.run([tool, '--no-names', *paths], name: 'b3sum', deadline: 120)
-    digests = File.readlines(record.fetch('log'), chomp: true)
-    raise Erx::Error, "b3sum gave #{digests.size} digests for #{paths.size} messages" unless digests.size == paths.size
-
-    digests
-  end
+  def b3sum(messages) = CryptoFixture.b3sum(messages, directory: @directory, runner: @runner)
 end

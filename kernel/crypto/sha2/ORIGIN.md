@@ -4,8 +4,7 @@ Repository: https://github.com/freebsd/freebsd-src
 
 Revision: release/15.1.0-p6 (95719d8a895bf8170851e9844d9b4092b1d2b6fe)
 
-FreeBSD's SHA-256, imported as erXos's code for the kernel's entropy
-generator (`kernel/core/rng.c`) and every other C caller of the
+FreeBSD's SHA-256, imported as erXos's code for every C caller of the
 per-byte primitives. This directory mirrors FreeBSD's
 `sys/crypto/sha2/`; only the two files below were imported, each
 fetched once from

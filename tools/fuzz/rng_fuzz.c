@@ -11,8 +11,8 @@
 
 #include "erx/core/rng.h"
 
+#include "blake3/blake3.h"
 #include "chacha20/chacha.h"
-#include "sha2/sha256.h"
 
 /* A read's length spans the bound and beyond it. */
 #define FUZZ_READ_SPAN	(ERX_RNG_READ_MAX + 64)
@@ -100,18 +100,25 @@ static void
 fuzz_mix(erx_rng_t *rng, const uint8_t *bytes, size_t length, bool init)
 {
 	static const uint8_t zero[ERX_RNG_KEY_LENGTH];
-	erx_sha256_ctx_t ctx;
+	erx_blake3_ctx_t ctx;
 	erx_rng_digest_t digest;
-	uint8_t expected[ERX_SHA256_DIGEST_LENGTH], next[ERX_RNG_KEY_LENGTH];
+	uint8_t expected[ERX_BLAKE3_OUT_LEN], next[ERX_RNG_KEY_LENGTH];
 	uint8_t old[ERX_RNG_KEY_LENGTH];
+	uint8_t *hash;
 	bool ready;
 
-	erx_sha256_init(&ctx);
-	erx_sha256_update(&ctx, bytes, length);
-	erx_sha256_final(expected, &ctx);
-	erx_rng_digest(&digest, bytes, length);
+	erx_blake3_init(&ctx);
+	erx_blake3_update(&ctx, bytes, length);
+	erx_blake3_final(&ctx, expected);
+	/* At its exact size, so a sanitizer sees any access past it. */
+	if ((hash = malloc(ERX_RNG_HASH_BYTES)) == NULL)
+		abort();
+	memset(hash, 0xa5, ERX_RNG_HASH_BYTES);
+	erx_rng_digest(&digest, (erx_rng_hash_t *)hash, bytes, length);
 	if (memcmp(digest.bytes, expected, sizeof(expected)) != 0)
 		abort();
+	fuzz_erased(hash, ERX_RNG_HASH_BYTES);
+	free(hash);
 
 	memcpy(old, rng->key, sizeof(old));
 	ready = rng->ready;
@@ -140,7 +147,7 @@ fuzz_mix(erx_rng_t *rng, const uint8_t *bytes, size_t length, bool init)
  * the next two bytes, little-endian, modulo FUZZ_READ_SPAN), a mix or an
  * init (of as many of the following bytes as the next byte says), or a
  * clear. Every outcome is checked against the generator's rules,
- * recomputed from ChaCha20 and SHA-256.
+ * recomputed from ChaCha20 and BLAKE3.
  */
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)

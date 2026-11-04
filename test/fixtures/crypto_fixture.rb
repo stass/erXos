@@ -8,15 +8,17 @@ require 'openssl'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 
-# Builds test/fixtures/crypto_driver.c with the imported SHA-256 and
-# ChaCha20 and the entropy generator, runs batches of requests through it,
+# Builds test/fixtures/crypto_driver.c with the imported SHA-256, ChaCha20
+# and BLAKE3 and the entropy generator, runs batches of requests through it,
 # and holds the references the host tests judge it by: Ruby's Digest for
-# SHA-256 and the host's OpenSSL for RFC 8439 ChaCha20, both independent of
-# the code under test, and a model of the generator written from the
-# design's statements on top of them.
+# SHA-256, the host's OpenSSL for RFC 8439 ChaCha20 and b3sum, BLAKE3's Rust
+# implementation, for BLAKE3, all independent of the code under test, and a
+# model of the generator written from the design's statements on top of
+# them.
 module CryptoFixture
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[kernel/crypto/sha2/sha256c.c kernel/crypto/chacha20/chacha.c kernel/core/rng.c].freeze
+  SOURCES = %w[kernel/crypto/sha2/sha256c.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
+               kernel/crypto/blake3/blake3_portable.c kernel/core/rng.c].freeze
   KEY_BYTES = 32
   NONCE_BYTES = 12
   BLOCK_BYTES = 64
@@ -31,7 +33,10 @@ module CryptoFixture
   class Driver
     attr_reader :directory
 
-    def initialize(name:, sources: SOURCES.map { |source| File.join(ROOT, source) })
+    # level is the optimization level the driver and the code under test
+    # build at.
+    def initialize(name:, sources: SOURCES.map { |source| File.join(ROOT, source) }, level: '-O1')
+      @level = level
       @directory = Dir.mktmpdir("erx-#{name}-")
       @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
       sanitizers = ENV.fetch('ERX_SANITIZERS', '').split(',').reject(&:empty?)
@@ -84,6 +89,13 @@ module CryptoFixture
       @program = saved
     end
 
+    # BLAKE3 digests of messages, as a table from each message to its bytes.
+    def blake3_table(messages)
+      unique = messages.uniq
+      unique.zip(CryptoFixture.b3sum(unique, directory: @directory, runner: @runner)
+                              .map { |digest| CryptoFixture.unhex(digest) }).to_h
+    end
+
     def remove = FileUtils.remove_entry(@directory)
 
     private
@@ -91,14 +103,14 @@ module CryptoFixture
     def build(sources, name:)
       output = File.join(@directory, name)
       # rng.c and the driver include the imported headers as
-      # "sha2/sha256.h" and "chacha20/chacha.h", found through
-      # -I kernel/crypto. A mutant's copy lives outside the tree, so the
+      # "blake3/blake3.h", "sha2/sha256.h" and "chacha20/chacha.h", found
+      # through -I kernel/crypto. A mutant's copy lives outside the tree, so the
       # imported sources' own includes of the header beside them
       # ("sha256.h", "chacha.h") need those directories on the path too.
       includes = %w[include kernel/crypto kernel/crypto/sha2 kernel/crypto/chacha20].flat_map do |directory|
         ['-I', File.join(ROOT, directory)]
       end
-      @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
+      @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', @level, '-g',
                    *@sanitizer_flags, *includes, *sources,
                    File.join(ROOT, 'test/fixtures/crypto_driver.c'), '-o', output],
                   name: "compile-#{name}", deadline: 120)
@@ -126,16 +138,41 @@ module CryptoFixture
 
   def sha256(bytes) = Digest::SHA256.digest(bytes)
 
+  # The hexadecimal BLAKE3 digest of each message, in order, from b3sum,
+  # BLAKE3's Rust implementation. directory receives the messages' files.
+  def b3sum(messages, directory:, runner:)
+    return [] if messages.empty?
+
+    tool = ENV.fetch('ERX_B3SUM') do
+      ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |entry| File.join(entry, 'b3sum') }
+         .find { |path| File.executable?(path) }
+    end
+    raise Erx::Error, 'b3sum is the differential oracle and is not installed (brew install b3sum)' if tool.nil?
+
+    paths = messages.each_with_index.map do |message, index|
+      File.join(directory, "message-#{index}").tap { |path| File.binwrite(path, message) }
+    end
+    record = runner.run([tool, '--no-names', *paths], name: 'b3sum', deadline: 120)
+    digests = File.readlines(record.fetch('log'), chomp: true)
+    raise Erx::Error, "b3sum gave #{digests.size} digests for #{paths.size} messages" unless digests.size == paths.size
+
+    digests
+  end
+
   # The generator from the design: a read's output is the key stream from
   # block 1 and its new key the first 32 bytes of block 0; a mix's new key
-  # is those 32 bytes XORed with the SHA-256 digest of the mixed bytes.
-  # From the core's interface: init mixes its seed into the zero key and
-  # makes the generator ready; it starts, and a clear leaves it, not
-  # ready, all zeroes, refusing reads and mixes.
+  # is those 32 bytes XORed with the BLAKE3 digest of the mixed bytes, which
+  # digests, a table from messages to digests, holds. From the core's
+  # interface: init mixes its seed into the zero key and makes the generator
+  # ready; it starts, and a clear leaves it, not ready, all zeroes, refusing
+  # reads and mixes.
   class Generator
     attr_reader :key, :ready
 
-    def initialize = clear
+    def initialize(digests:)
+      @digests = digests
+      clear
+    end
 
     def read(length)
       return nil if !@ready || length > READ_MAX
@@ -148,7 +185,7 @@ module CryptoFixture
     def mix(bytes)
       return false unless @ready
 
-      @key = next_block_key.bytes.zip(CryptoFixture.sha256(bytes).bytes).map { |a, b| a ^ b }.pack('C*')
+      @key = next_block_key.bytes.zip(@digests.fetch(bytes).bytes).map { |a, b| a ^ b }.pack('C*')
       true
     end
 
