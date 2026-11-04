@@ -13,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "test/guest/function_api/cases.h"
 
@@ -24,10 +25,16 @@ function_api_say(const char *text)
 	(void)write(STDOUT_FILENO, text, strlen(text));
 }
 
+uint64_t
+function_api_group(void)
+{
+	return (ERX_CAP_SELF);
+}
+
 int
 main(void)
 {
 	(void)alarm(RUN_SECONDS);
-	function_api_run(function_api_irq_cases, function_api_irq_case_count);
+	function_api_run(function_api_hosted_irq_cases, function_api_hosted_irq_case_count);
 	return (1);
 }

@@ -839,7 +839,8 @@ These differ from the native backend, and a caller must not depend on either sid
 * **A thread's stack switches at its start.** The pthread starts on its own stack and moves to the one the start record names, and back to end, in `arch/aarch64/switch_stack.S`, and `thread.c` tells the address sanitizer of each move. The thread pointer is a field read through `erx_thread_pointer`, since the host owns the register. The first thread is a worker with no thread pointer, and its `erx_thread_exit_release` releases nothing.
 * **Affinity is checked, not applied.** macOS cannot hold a thread to a CPU.
 * **The wake order is the host's.** Natively the oldest waiter wakes first; `os_sync_wake_by_address_any` promises no order, so that case stays with the native guest. A wake's count is of the host's wakes, so a waiter that waits again at once on the same word may count twice.
-* **No lines.** `ERX_IRQ_LINE` and `ERX_IRQ_MSI` are `ERX_ENOTSUP`. A trigger of an object not bound delivers nothing, and a bind takes any nonzero group, since there is one.
+* **No lines.** `ERX_IRQ_LINE` is `ERX_ENOTSUP` hosted, and `ERX_IRQ_MSI` on both. A trigger of an object not bound delivers nothing, and a bind takes any nonzero group, since there is one.
+* **An object fires in the caller's thread.** A trigger has listed its object and advanced the epoch by the time it returns, each fire counted, and a bound object rebinds under a new label or unbinds. Natively a trigger reaches the dispatcher later, the kernel keeps two fires not yet received as one, and a second bind is `ERX_ENOTSUP`; a caller must wait on the epoch, as an executor does. So `irq_ready_once` and `irq_line_refused` run hosted only, and the rest of the IRQ row on both.
 * **A reset is exit status 75**, an end `exit(0)`.
 * **A fault is the host's**: the process ends with the host's signal, under `lldb` or a sanitizer, and writes no crash record.
 

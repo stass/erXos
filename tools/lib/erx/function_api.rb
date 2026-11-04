@@ -25,8 +25,9 @@ module Erx
       umtx_timeout_races_wake memory_from_threads affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake many_threads machine_end_refused
     ].freeze
-    # A backend without their row's bodies does not link these: TODO.md tracks native Fiasco's.
-    IRQ_CASES = %w[irq_refusals irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
+    # The IRQ row: what both backends pass, and what holds only hosted (irq_cases.c).
+    IRQ_CASES = %w[irq_refusals irq_wakes_parked irq_objects_run_out].freeze
+    HOSTED_IRQ_CASES = %w[irq_refusals irq_line_refused irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
     LAST_CASE = 'indices_run_out'
     GUEST = 'test/guest/function_api'
     HOSTED_SOURCES = %W[
@@ -39,7 +40,7 @@ module Erx
       #{GUEST}/cases.c #{GUEST}/hosted.c #{GUEST}/irq_cases.c
     ].freeze
     NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
-                      'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c"].freeze
+                      'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c"].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.
     CASE_SECONDS = 90
     # The join loop's deletions each wait for a grace period, which across CPUs under TCG takes far longer.
@@ -48,13 +49,13 @@ module Erx
     module_function
 
     def hosted_lines
-      [*(CASES + IRQ_CASES + [LAST_CASE]).map { |name| "#{PREFIX}#{name} ok" }, "#{PREFIX}done"]
+      [*(CASES + HOSTED_IRQ_CASES + [LAST_CASE]).map { |name| "#{PREFIX}#{name} ok" }, "#{PREFIX}done"]
     end
 
     def checkpoints
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
        { name: 'function-api-up', pattern: /\A#{Regexp.escape(PREFIX)}service up/n, seconds: 30 }.freeze,
-       *[*CASES, LAST_CASE].map do |name|
+       *[*CASES, *IRQ_CASES, LAST_CASE].map do |name|
          { name: "function-api-#{name}", pattern: /\A#{Regexp.escape(PREFIX)}#{name} ok/n,
            seconds: LONG_CASES.fetch(name, CASE_SECONDS) }.freeze
        end,

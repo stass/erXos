@@ -46,6 +46,8 @@ erx_fiasco_irq_create_body(uint64_t kind, uint64_t selector, uint64_t *irq)
 {
 	uint32_t index = 0;
 
+	if (kind == ERX_IRQ_MSI)
+		return (ERX_ENOTSUP);
 	if ((kind != ERX_IRQ_SOFT && kind != ERX_IRQ_LINE) || selector > UINT32_MAX)
 		return (ERX_EINVAL);
 	while (index < IRQ_OBJECTS_MAX && irq_objects[index].present)

@@ -4,9 +4,10 @@
  */
 
 /*
- * The IRQ objects' and the ready ring's row. Backend-independent like cases.c, and
- * apart from it because only a backend with this row's bodies links it: TODO.md
- * tracks the other backend's.
+ * The IRQ objects' and the ready ring's row. function_api_irq_cases is what both
+ * backends pass. function_api_hosted_irq_cases adds what holds only where an object
+ * fires in the caller's thread, each fire counted, with no lines to bind
+ * (docs/design-stopgap.md, "The hosted backend").
  */
 
 #include <stdatomic.h>
@@ -21,7 +22,7 @@
 #define LABEL_A	UINT64_C(0xa11ce)
 #define LABEL_B	UINT64_C(0xb0b)
 /* The space's one group is what a bind names. */
-#define GROUP	ERX_CAP_SELF
+#define GROUP	function_api_group()
 #define IRQ_ROUNDS 2000u
 
 static _Atomic uint32_t helper_ok;
@@ -46,11 +47,18 @@ case_irq_refusals(void)
 {
 	uint64_t irq;
 
-	return (erx_irq_create(0, 0, ERX_IRQ_LINE, 0, &irq) == ERX_ENOTSUP &&
-	    erx_irq_create(0, 0, ERX_IRQ_MSI, 0, &irq) == ERX_ENOTSUP &&
+	return (erx_irq_create(0, 0, ERX_IRQ_MSI, 0, &irq) == ERX_ENOTSUP &&
 	    erx_irq_create(0, 0, 77, 0, &irq) == ERX_EINVAL &&
 	    erx_irq_bind(0, GROUP, LABEL_A) == ERX_EINVAL && erx_irq_trigger(0) == ERX_EINVAL &&
 	    erx_irq_ack(UINT64_C(1) << 40) == ERX_EINVAL && erx_group_take_ready(1) == ERX_ETYPE);
+}
+
+static bool
+case_irq_line_refused(void)
+{
+	uint64_t irq;
+
+	return (erx_irq_create(0, 0, ERX_IRQ_LINE, 0, &irq) == ERX_ENOTSUP);
 }
 
 /* A label comes once however often its object fired; each fire moves the epoch; rebinding moves the label. */
@@ -153,8 +161,16 @@ case_irq_objects_run_out(void)
 
 const function_api_case_t function_api_irq_cases[] = {
 	{ "irq_refusals", case_irq_refusals },
-	{ "irq_ready_once", case_irq_ready_once },
 	{ "irq_wakes_parked", case_irq_wakes_parked },
 	{ "irq_objects_run_out", case_irq_objects_run_out },
 };
 const size_t function_api_irq_case_count = sizeof(function_api_irq_cases) / sizeof(function_api_irq_cases[0]);
+
+const function_api_case_t function_api_hosted_irq_cases[] = {
+	{ "irq_refusals", case_irq_refusals },
+	{ "irq_line_refused", case_irq_line_refused },
+	{ "irq_ready_once", case_irq_ready_once },
+	{ "irq_wakes_parked", case_irq_wakes_parked },
+	{ "irq_objects_run_out", case_irq_objects_run_out },
+};
+const size_t function_api_hosted_irq_case_count = sizeof(function_api_hosted_irq_cases) / sizeof(function_api_hosted_irq_cases[0]);
