@@ -45,6 +45,7 @@ module Erx
           'fuzz/generated/abi.c' => SupportEmitter.fuzz(schema)
         }
         files.merge!(CEmitter.private_headers(schema))
+        files['include/erx/core/abi_crash.h'] = CallEmitter.crash_seam(schema)
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
         files.each do |path, bytes|

@@ -63,7 +63,6 @@ module Erx
           'kernel/generated/abi_decode.c' => decoder(schema),
           'kernel/generated/abi_run.c' => run_source(schema),
           'include/erx/core/abi_trap.h' => trap_seam(schema),
-          'include/erx/core/abi_crash.h' => crash_seam(schema),
           'liberx/backend/erx/arch/aarch64/generated/calls.c' => trap_source(schema),
           'liberx/backend/fiasco/generated/calls.h' => backend_header(schema, 'fiasco'),
           'liberx/backend/fiasco/generated/calls.c' => backend_source(schema, 'fiasco'),
