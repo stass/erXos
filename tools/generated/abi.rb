@@ -10879,7 +10879,7 @@ module Erx
                   offset: 172,
                   field: types.fetch("erx_manifest").fields.fetch(15)
                 ).freeze,
-                :values => [1, 65536].freeze,
+                :values => [0, 65536].freeze,
                 :line => source_line
               }.freeze,
               {

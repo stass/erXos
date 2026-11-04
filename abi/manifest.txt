@@ -292,7 +292,7 @@ reader manifest erx_manifest @manifest_bytes_max
   value root.magic @manifest_magic
   value root.version @manifest_version
   value root.header_size 368
-  range root.max_domains 1 65536
+  range root.max_domains 0 65536
   range root.max_connections 1 65536
   range root.system_reserve 1 1000
   choice root.flags manifest_mode root.domains.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.partial_boot.count

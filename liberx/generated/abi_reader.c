@@ -1511,7 +1511,7 @@ erx_manifest_check_root(const uint8_t *bytes ERX_UNUSED,
 	if (!(header->header_size == UINT32_C(368)))
 		return (erx_abi_fail(error, "value",
 		    "root.header_size", base + 12));
-	if (!(header->max_domains >= UINT32_C(1) && header->max_domains <= UINT32_C(65536)))
+	if (!(header->max_domains <= UINT32_C(65536)))
 		return (erx_abi_fail(error, "range",
 		    "root.max_domains", base + 172));
 	if (!(header->max_connections >= UINT32_C(1) && header->max_connections <= UINT32_C(65536)))

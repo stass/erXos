@@ -64,7 +64,7 @@ class StructuralPackTest < Minitest::Test
     assert_operator first.fetch('provenance').size, :>, 11
   end
 
-  def test_production_admission_stays_unsupported_and_preserves_existing_output
+  def test_a_platform_without_the_reserve_is_not_admitted_and_preserves_existing_output
     structural = fixture('structural')
     native = structural.fetch('native')
     output = File.join(@directory, 'production.erxpack')
@@ -86,5 +86,28 @@ class StructuralPackTest < Minitest::Test
     assert_equal 4, error.property
     assert_equal 'root_startup', error.field
     assert_equal 'existing output', File.binread(output)
+  end
+
+  def test_the_real_development_manifest_is_admitted_and_packed
+    native = fixture('admitted').fetch('native')
+    planner = Erx::ElfPlanner.new(helper: @tools.fetch('planner'), runner: @runner, codec: @codec)
+    resolver = Erx::PackProvenance.new(root: @root, catalog: native.fetch('catalog'), external: @external, runner: @runner)
+    production = Erx::Pack.new(root: @root, output_root: @directory, codec: @codec, planner: planner,
+                               checker: @tools.fetch('checker'), hasher: @tools.fetch('hasher'), runner: @runner,
+                               provenance: resolver)
+    entries = [{ 'path' => 'system/root', 'kind' => @codec.member('entry_kind', 'image'),
+                 'flags' => @codec.member('entry_flags', 'system'), 'id' => 'root',
+                 'artifact' => native.fetch('artifact'), 'receipt' => native.fetch('receipt') }]
+    output = File.join(@directory, 'development.erxpack')
+    result = production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
+                              platform: JSON.parse(File.read(File.join(@root, 'config/platforms/qemu-virt.json'))),
+                              artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } },
+                              manifest_source: File.binread(File.join(@root, 'config/manifest/qemu-virt-development.txt')),
+                              output: output)
+    assert_equal 'system_only', result.fetch('manifest').fetch('mode')
+    assert_equal 'declared', result.fetch('manifest').fetch('root_startup')
+    bytes = File.binread(output)
+    assert_equal "ERXPACK\0".b, bytes.byteslice(0, 8)
+    assert_equal bytes.bytesize, @codec.decode_layout('erx_pack_header', bytes).fetch('total_size')
   end
 end

@@ -1412,7 +1412,7 @@ reader_spec() ->
                     'size' => 4,
                     'label' => <<"root.max_domains">>
                 },
-                'values' => [1, 65536]
+                'values' => [0, 65536]
             },
             #{
                 'kind' => 'range',

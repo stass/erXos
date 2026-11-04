@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'json'
 require 'optparse'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
@@ -45,9 +46,13 @@ module AbiFuzz
     random = Random.new(seed)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
     count = 0
+    top = File.expand_path('../..', __dir__)
+    system_seed = File.binread(File.join(top, 'config/manifest/qemu-virt-development.txt'))
+    system_platform = JSON.parse(File.read(File.join(top, 'config/platforms/qemu-virt.json')))
+    system_context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(codec).merge(platform: system_platform))
     until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
       begin
-        case count % 3
+        case count % 4
         when 0
           declarations = Erx::ABI::Syntax.parse(mutate(declaration_seed, random))
           parsed = Erx::ABI::SourceSet.new(declarations: declarations, inputs: {}).freeze
@@ -59,6 +64,8 @@ module AbiFuzz
           schema.readers.find { |reader| reader.name == 'manifest' }.tables.each_key do |table|
             view.each(table) { |_record| }
           end
+        when 3
+          Erx::Manifest.admit(source: mutate(system_seed, random), codec: codec, context: system_context)
         end
       rescue Erx::Error
         # A bounded, typed diagnostic is a valid parser result.

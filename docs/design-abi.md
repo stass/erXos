@@ -700,7 +700,7 @@ starts at its first required alignment boundary after the preceding
 table. The final span's count is bytes. This is the sole packed order.
 
 `root_memory` is nonzero and page-aligned. Table capacities are 1 through
-65,536, `system_reserve` is 1 through 1,000, and the system grant has a
+65,536, except that `max_domains` may be 0 when no domains are configured, `system_reserve` is 1 through 1,000, and the system grant has a
 positive rate and nonempty allowed CPU set. The lane is a
 power of two within the lane contract. Queue, peer-held and baseline
 limits are positive and satisfy their existing admission constraints.

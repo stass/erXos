@@ -1,0 +1,124 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The development manifest of QEMU virt: the system domain alone, as
+# docs/design-stopgap.md's "The Phase 1 manifest check" admits it. Fixed
+# medium roles carry partition 0, as docs/design-abi.md says, and root_memory
+# leaves 64 MiB below RAM less fiasco_reserve for the boot archive.
+manifest 1
+share system
+  quota_ns 30000000
+  period_ns 10000000
+  cpuset 15
+  capacity_mcpu 3000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 24
+  ceiling 47
+  flags none
+share users
+  quota_ns 10000000
+  period_ns 10000000
+  cpuset 15
+  capacity_mcpu 1000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
+runtime_limits system
+  max_frame 65536
+  max_message_heap 1048576
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 65536
+  foreign_atoms 1024
+  processes 4096
+limits native
+  memory 16777216
+  outer 1048576
+  grant @share.users
+  spaces none
+  lane 4096
+  connections 0
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.system
+  peer_held 4096
+  peer_held_total 4096
+principal system
+  memory 134217728
+  grant @share.users
+  domains 0
+  names 0
+  default_limits @limits.native
+  ceiling_limits @limits.native
+machine
+  flags development
+  host "erxos"
+  console "/pl011@9000000"
+  hostlink "/pl011@9040000"
+  platform "qemu-virt"
+  root_memory 402653184
+  system_baseline 134217728
+  system_share @share.system
+  users_share @share.users
+  system_principal @principal.system
+  max_domains 0
+  max_connections 4
+  system_lane 4096
+  system_queue 16384
+  peer_held 4096
+  system_reserve 250
+  sealing none
+  system_runtime_limits @runtime_limits.system
+  native_limits @limits.native
+unit console
+  placement "console-uart"
+  holder system
+unit hostlink
+  placement "hostlink-uart"
+  holder system
+unit block
+  placement "block"
+  holder system
+window slot_a
+  holder system
+  device "/virtio_mmio@a003e00"
+  role slot_a
+  partition 0
+  rights read,write
+  image none
+window slot_b
+  holder system
+  device "/virtio_mmio@a003e00"
+  role slot_b
+  partition 0
+  rights read,write
+  image none
+window boot_selection
+  holder system
+  device "/virtio_mmio@a003e00"
+  role boot_selection
+  partition 0
+  rights read,write
+  image none
+window reset_count
+  holder system
+  device "/virtio_mmio@a003e00"
+  role reset_count
+  partition 0
+  rights read,write
+  image none
+window data
+  holder system
+  device "/virtio_mmio@a003e00"
+  role data
+  partition 0
+  rights read,write
+  image none
+shell_principal @principal.system

@@ -263,24 +263,65 @@ module Erx
       end
     end
 
-    # Initial-root feasibility requires the production bootstrap planner.
-    # Source-declared costs and structural fixtures cannot mint this private
-    # publication token when that evidence is unavailable.
+    # The root startup rule: a declared sanity check, not a proof. It compares
+    # the manifest's numbers with the platform record's, so a wrong
+    # fiasco_reserve shows at boot, when the root's pool falls short. A report
+    # therefore says root_startup: declared, never validated.
+    module RootStartup
+      module_function
+
+      # The platform's declared memory. Without it no rule can be stated, so
+      # nothing is admitted.
+      def declared(platform)
+        ram, reserve = platform.values_at('ram_bytes', 'fiasco_reserve')
+        unless ram.is_a?(Integer) && reserve.is_a?(Integer) && reserve.positive? && reserve < ram
+          raise Unsupported.new('the platform record states no RAM size and fiasco_reserve to check root startup against',
+                                property: 4, field: 'root_startup')
+        end
+        { 'ram_bytes' => ram, 'fiasco_reserve' => reserve }.freeze
+      end
+
+      def check(loadable:, baseline:, root_memory:, platform:)
+        memory = declared(platform)
+        if loadable + baseline > root_memory
+          raise Invalid.new("the root's loadable segments and system_baseline exceed root_memory",
+                            property: 4, field: 'root_startup')
+        end
+        if root_memory > memory.fetch('ram_bytes') - memory.fetch('fiasco_reserve')
+          raise Invalid.new('root_memory exceeds RAM less fiasco_reserve', property: 4, field: 'root_startup')
+        end
+      end
+    end
+
+    # Phase 1's admission: SystemOnly over a manifest with the system domain
+    # alone, and the declared root startup rule. This factory alone mints the
+    # private publication token, so a structural fixture cannot pass for it.
     class Admitted
       attr_reader :bytes, :report
 
       def self.admit(source:, codec:, context:, planner: nil, consumers: {})
-        StructuralFixture.prepare(source: source, codec: codec, context: context,
-                                  planner: planner, consumers: consumers)
-        raise Unsupported.new('production initial-root startup feasibility is unavailable',
-                              property: 4, field: 'root_startup')
+        raise Invalid.new('checked context required', property: 'context', field: 'input') unless context.is_a?(Context)
+        RootStartup.declared(context.platform)
+        parsed = Frontend.parse(source, version: codec.constant('manifest_version'))
+        checker = SystemOnly.new(parsed, codec: codec, context: context,
+                                 planner: planner, consumers: consumers)
+        normalized, report = checker.check
+        bytes = Encoder.new(codec).encode(normalized)
+        codec.open('manifest', bytes)
+        new(bytes: bytes, report: report, context: context)
       end
+
+      def initialize(bytes:, report:, context:)
+        @bytes = bytes.freeze
+        @report = Snapshot.copy(report)
+        @fingerprint = context.fingerprint
+        freeze
+      end
+      private_class_method :new
 
       def matches?(context)
         context.is_a?(Context) && context.fingerprint == @fingerprint
       end
-
-      private_class_method :new
     end
 
     def self.admit(source:, codec:, context:, planner: nil, consumers: {})
@@ -292,7 +333,12 @@ module Erx
       StructuralFixture.prepare(source: source, codec: codec, context: context)
     end
 
-    class EmptyNative
+    # The readers and the normalization of a manifest with no child domains:
+    # every holder is the system domain and nothing is reserved for a child. A subclass
+    # states which modes and records it takes (check_mode), what it allows of a
+    # platform device (check_device), what else it places (check_and_place)
+    # and what its report claims (claims).
+    class SystemDomainCheck
       TABLES = { 'principal' => 'principals', 'limits' => 'limits',
                  'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes' }.freeze
 
@@ -318,16 +364,8 @@ module Erx
         end
         partial = (flags & @codec.member('manifest_flags', 'partial_boot')) != 0
         invalid('partial boot requires development mode', 9, 'machine.flags') if partial && !development
-        unless partial
-          unsupported('full boot needs the production sizing, planner and service consumers', 'mode')
-        end
-        %w[domain partial_boot].each do |kind|
-          unsupported('child domain planning is unavailable', kind) unless records(kind).empty?
-        end
-        %w[window service facet introduce image liveness].each do |kind|
-          invalid('empty native boot has no service or child assignments', 9, kind) unless records(kind).empty?
-        end
-        check_catalog
+        check_mode(development: development, partial: partial)
+        root_private_bytes = check_catalog
         platform_name = text(machine, 'platform')
         invalid('configuration names a different checked platform', 1, 'machine.platform') unless platform_name == @context.platform['name']
         parent_cpus = @context.platform['cpuset']
@@ -345,27 +383,31 @@ module Erx
         page = @codec.constant('page_size')
         invalid('root memory must be positive and page-aligned', 4, 'machine.root_memory') unless root_memory.positive? && (root_memory % page).zero?
         invalid('system baseline must be positive', 4, 'machine.system_baseline') unless baseline.positive?
-        if baseline < @root_private_bytes
+        if baseline < root_private_bytes
           invalid('baseline is smaller than the checked private image memory', 4, 'machine.system_baseline')
         end
         rows = @reader.tables.keys.to_h { |name| [name, []] }
         normalize_profiles(rows)
         principals = normalize_principals(rows, users_cpus, users_rate)
-        invalid('principal budgets and system baseline exceed root memory', 4, 'principals.memory') if principals.sum { |row| row.fetch('memory') } + baseline > root_memory
         max_domains = number(machine, 'max_domains')
         invalid('principal domain quotas exceed max_domains', 4, 'principals.domains') if principals.sum { |row| row.fetch('domains') } > max_domains
         normalize_units(rows)
+        device_memory = rows.fetch('devices').sum { |device| device.fetch('dma_memory') }
+        if principals.sum { |row| row.fetch('memory') } + baseline + device_memory > root_memory
+          invalid('principal budgets, system baseline and device memory exceed root memory', 4, 'principals.memory')
+        end
         console = text(machine, 'console')
         hostlink = text(machine, 'hostlink')
         check_uarts(rows, console, hostlink)
         unless enum(machine, 'sealing', 'seal') == @codec.member('seal', 'none')
-          invalid('empty native boot has no sealing service', 7, 'machine.sealing')
+          invalid('no sealing service exists to hold a sealing secret', 7, 'machine.sealing')
         end
         shell = records('shell_principal').map do |record|
           { 'principal' => reference_token(record.properties.fetch('targets').first, 'principal', record.line) }
         end
         invalid('duplicate shell principal', 5, 'shell_principals') unless shell.map { |row| row.fetch('principal') }.uniq.size == shell.size
         rows['shell_principals'] = shell.sort_by { |row| row.fetch('principal') }
+        check_and_place(rows, root_memory: root_memory, baseline: baseline, max_domains: max_domains)
         header = {
           'magic' => @codec.constant('manifest_magic'), 'version' => @codec.constant('manifest_version'),
           'flags' => flags, 'host' => text(machine, 'host'), 'console' => console,
@@ -384,14 +426,14 @@ module Erx
         %w[system_queue peer_held].each do |key|
           invalid('limit must be positive', 4, "machine.#{key}") unless header.fetch(key).positive?
         end
-        report = { 'mode' => 'empty_native', 'structure' => 'validated',
+        report = { 'structure' => 'validated',
                    'executable' => 'supplied_catalog', 'provenance' => 'supplied_context',
-                   'root_startup' => 'unsupported', 'policy_admission' => 'unsupported',
+                   'policy_admission' => 'unsupported',
                    'child_plan_instances' => 0, 'dynamic_domain_reservation' => 0,
-                   'root_image_private_bytes' => @root_private_bytes,
+                   'root_image_private_bytes' => root_private_bytes,
                    'effective_system_cpuset' => system_cpus,
                    'effective_users_cpuset' => users_cpus,
-                   'context_sha256' => @context.fingerprint }
+                   'context_sha256' => @context.fingerprint }.merge(claims)
         [{ 'header' => header, 'tables' => rows }, report]
       end
 
@@ -593,7 +635,7 @@ module Erx
           invalid('unit is assigned more than once', 1, 'unit.placement') if placed.include?(key)
           placed << key
           holder = one(record, 'holder')
-          invalid('empty native units belong to the system domain', 1, 'unit.holder') unless !holder.quoted && holder.value == 'system'
+          invalid('units belong to the system domain', 1, 'unit.holder') unless !holder.quoted && holder.value == 'system'
           first = rows.fetch('devices').size
           invalid('platform unit has no devices', 'context', 'platform.units') if unit.fetch('devices').empty?
           unit.fetch('devices').sort_by { |device| device.fetch('placement_key').b }.each do |device|
@@ -607,8 +649,7 @@ module Erx
             end
             normalized['flags'] = normalized.fetch('flags', 0)
             normalized['dma_memory'] = normalized.fetch('dma_memory', 0)
-            unsupported('device allocation needs a checked sizing provider', 'devices.dma') unless normalized.fetch('dma') == @codec.member('mf_dma', 'none')
-            invalid('non-DMA device has a DMA reservation', 4, 'devices.dma_memory') unless normalized.fetch('dma_memory').zero?
+            check_device(normalized)
             rows.fetch('devices') << normalized
           end
           rows.fetch('units') << { 'name' => record.name, 'holder' => @codec.constant('mf_none'),
@@ -622,7 +663,7 @@ module Erx
           device.fetch('selector') == @codec.member('mf_selector', 'dt') && device.fetch('role') == @codec.member('mf_device_role', 'uart')
         end.map { |device| device.fetch('path') }
         [console, hostlink].reject(&:empty?).each do |path|
-          invalid('UART is not assigned to the system domain', 8, 'machine.console') unless paths.include?(path)
+          invalid('UART is not assigned to the system domain', 8, path == console ? 'machine.console' : 'machine.hostlink') unless paths.include?(path)
         end
         unless @context.platform['console'] == console && (@context.platform.fetch('hostlink', '') == hostlink)
           invalid('UART paths disagree with checked platform', 8, 'machine.console')
@@ -656,7 +697,7 @@ module Erx
         end
         @codec.encode_layout('erx_image_manifest', image)
         page = @codec.constant('page_size')
-        @root_private_bytes = image.fetch('segments').sum do |segment|
+        image.fetch('segments').sum do |segment|
           if segment.fetch('prot') == @codec.member('prot', 'rw')
             bytes = segment.fetch('mem_size')
             invalid('root writable segment exceeds its bound', 6, 'catalog.root') if bytes > @codec.constant('image_writable_max')
@@ -665,6 +706,203 @@ module Erx
             0
           end
         end
+      end
+    end
+
+    # M0's structural fixtures: a partial boot with no services or children.
+    class EmptyNative < SystemDomainCheck
+      private
+
+      def check_mode(development:, partial:)
+        unless partial
+          unsupported('full boot needs the production sizing, planner and service consumers', 'mode')
+        end
+        %w[domain partial_boot].each do |kind|
+          unsupported('child domain planning is unavailable', kind) unless records(kind).empty?
+        end
+        %w[window service facet introduce image liveness].each do |kind|
+          invalid('empty native boot has no service or child assignments', 9, kind) unless records(kind).empty?
+        end
+      end
+
+      def check_device(device)
+        unsupported('device allocation needs a checked sizing provider', 'devices.dma') unless device.fetch('dma') == @codec.member('mf_dma', 'none')
+        invalid('non-DMA device has a DMA reservation', 4, 'devices.dma_memory') unless device.fetch('dma_memory').zero?
+      end
+
+      def check_and_place(_rows, root_memory:, baseline:, max_domains:) = nil
+
+      def claims = { 'mode' => 'empty_native', 'root_startup' => 'unsupported' }
+    end
+
+    # Phase 1's check (docs/design-stopgap.md, "The Phase 1 manifest check"): a
+    # development manifest, full or partial boot, with the system domain alone.
+    # Every holder and server is the system domain, so properties 10 to 13 have
+    # nothing to check and what would bring them is refused here.
+    class SystemOnly < SystemDomainCheck
+      REFUSED = {
+        'domain' => 'configured domains arrive at M5',
+        'partial_boot' => 'child domains of a partial boot arrive at M5',
+        'introduce' => 'introductions connect configured domains, which arrive at M5',
+        'image' => 'a verified image needs the hash tree sizing that M6 brings'
+      }.freeze
+
+      private
+
+      def check_mode(development:, partial:)
+        unless development
+          raise Unsupported.new('a release build needs the confinement check that M11 brings', property: 9, field: 'machine.flags')
+        end
+        REFUSED.each { |kind, reason| unsupported(reason, kind) unless records(kind).empty? }
+        return unless partial
+        %w[service facet liveness].each do |kind|
+          invalid('a partial boot runs no services', 2, kind) unless records(kind).empty?
+        end
+      end
+
+      def check_device(device)
+        invalid('no domain holds a PCIe function until M9', 3, 'devices.selector') if device.fetch('selector') == @codec.member('mf_selector', 'pci')
+        role = device.fetch('role')
+        invalid('no domain holds PCIe configuration space until M9', 3, 'devices.role') if role == device_role('configuration')
+        invalid('no domain holds a network device until M9', 8, 'devices.role') if role == device_role('network')
+        invalid('no domain holds a TPM until M11', 7, 'devices.role') if role == device_role('tpm')
+        case device.fetch('dma')
+        when @codec.member('mf_dma', 'confined')
+          unsupported('a confined device needs a DMA window, which M9 brings', 'devices.dma')
+        when @codec.member('mf_dma', 'unconfined')
+          invalid('an unconfined device needs a memory reservation', 4, 'devices.dma_memory') unless device.fetch('dma_memory').positive?
+        else
+          invalid('non-DMA device has a DMA reservation', 4, 'devices.dma_memory') unless device.fetch('dma_memory').zero?
+        end
+      end
+
+      def check_and_place(rows, root_memory:, baseline:, max_domains:)
+        check_system_domain_alone(rows.fetch('devices'), max_domains)
+        services = records('service').sort_by { |record| service_name(record).b }
+        rows['services'] = normalize_services(services)
+        check_facets(services)
+        rows['liveness'] = normalize_liveness(services)
+        rows['windows'] = normalize_windows(rows.fetch('devices'))
+        RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
+                          root_memory: root_memory, platform: @context.platform)
+      end
+
+      def claims
+        { 'mode' => 'system_only', 'root_startup' => 'declared',
+          'root_image_loadable_bytes' => root_loadable_bytes }.merge(RootStartup.declared(@context.platform))
+      end
+
+      def check_system_domain_alone(devices, max_domains)
+        invalid('no domains are configured until M5, so max_domains is 0', 4, 'machine.max_domains') unless max_domains.zero?
+        invalid('host name is not a system identifier', 5, 'machine.host') unless text(@source.machine, 'host').match?(Frontend::IDENTIFIER)
+        check_one_holder(devices)
+        check_no_sealed_entry
+      end
+
+      def root_loadable_bytes
+        page = @codec.constant('page_size')
+        @context.catalog.fetch(@context.root_entry).fetch('image').fetch('segments').sum do |segment|
+          ((segment.fetch('mem_size') + page - 1) / page) * page
+        end
+      end
+
+      def service_name(record) = record.properties.key?('name') ? text(record, 'name') : record.name.b
+
+      def device_role(name) = @codec.member('mf_device_role', name)
+
+      def check_one_holder(devices)
+        paths = devices.filter_map { |device| device['path'] }
+        invalid('a device appears in more than one unit', 1, 'devices.path') unless paths.uniq.size == paths.size
+      end
+
+      def check_no_sealed_entry
+        seal = @codec.member('entry_flags', 'seal')
+        return if @context.catalog.none? { |row| (row.fetch('flags') & seal) != 0 }
+        invalid('no entry carries the sealing secret until the vault at M11', 7, 'catalog.flags')
+      end
+
+      def normalize_services(services)
+        rows = services.map do |record|
+          server = one(record, 'server')
+          invalid('every service runs in the system domain until M5', 2, 'service.server') unless !server.quoted && server.value == 'system'
+          name = service_name(record)
+          invalid('service name is not a system identifier', 5, 'service.name') unless name.match?(Frontend::IDENTIFIER)
+          { 'name' => name, 'server' => @codec.constant('mf_none'), 'interface' => number(record, 'interface') }
+        end
+        invalid('two services share a name', 5, 'service.name') unless rows.map { |row| row.fetch('name') }.uniq.size == rows.size
+        rows
+      end
+
+      # The reader's facet grantee is a domain and the system domain has no
+      # row, so a facet that names its service has still no holder before M5.
+      def check_facets(services)
+        records('facet').each do |record|
+          token = one(record, 'service')
+          known = !token.quoted && services.any? { |service| "@service.#{service.name}" == token.value }
+          invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless known
+          unsupported('a facet is granted to a configured domain, and those arrive at M5', 'facet')
+        end
+      end
+
+      def normalize_liveness(services)
+        rows = records('liveness').map do |record|
+          token = record.properties.fetch('targets').first
+          index = services.index { |service| !token.quoted && "@service.#{service.name}" == token.value }
+          invalid('liveness names a service the manifest does not contain', 2, 'liveness') unless index
+          { 'service' => index }
+        end
+        invalid('a service is watched twice', 2, 'liveness') unless rows.uniq.size == rows.size
+        rows.sort_by { |row| row.fetch('service') }
+      end
+
+      def normalize_windows(devices)
+        rows = records('window').map do |record|
+          holder = one(record, 'holder')
+          invalid('the system domain holds every window until the storage domain at M9', 8, 'window.holder') unless !holder.quoted && holder.value == 'system'
+          role = window_role(record)
+          { 'holder' => @codec.constant('mf_none'), 'device' => window_device(record, devices),
+            'role' => role, 'partition' => window_partition(record, role),
+            'rights' => window_rights(record), 'image' => window_image(record) }
+        end
+        placed = rows.map { |row| row.values_at('device', 'role', 'partition') }
+        invalid('two windows name one role and partition', 8, 'window.partition') unless placed.uniq.size == placed.size
+        rows.sort_by { |row| row.values_at('holder', 'device', 'role', 'partition') }
+      end
+
+      # design-abi.md: fixed-medium roles have partition 0, because the medium
+      # layout determines their sectors; FAT names a primary partition.
+      def window_partition(record, role)
+        partition = number(record, 'partition')
+        allowed = role == @codec.member('mf_window_role', 'fat') ? (1..4) : (0..0)
+        invalid('a fixed role has partition 0 and FAT a primary partition, 1 to 4', 8, 'window.partition') unless allowed.cover?(partition)
+        partition
+      end
+
+      def window_rights(record)
+        rights = flags(record, 'rights', 'mf_window_rights')
+        invalid('a window grants at least read', 8, 'window.rights') if (rights & @codec.member('mf_window_rights', 'read')).zero?
+        rights
+      end
+
+      def window_device(record, devices)
+        path = text(record, 'device')
+        index = devices.index { |device| device['path'] == path && device.fetch('role') == device_role('block') }
+        index || invalid('window names no block device the system domain holds', 8, 'window.device')
+      end
+
+      def window_role(record)
+        role = enum(record, 'role', 'mf_window_role')
+        invalid('no vault partition until M11', 8, 'window.role') if role == @codec.member('mf_window_role', 'vault')
+        if role == @codec.member('mf_window_role', 'verified_image')
+          unsupported('a verified image window needs the hash tree sizing that M6 brings', 'window.role')
+        end
+        role
+      end
+
+      def window_image(record)
+        token = one(record, 'image')
+        return @codec.constant('mf_none') if !token.quoted && token.value == 'none'
+        unsupported('a verified image needs the hash tree sizing that M6 brings', 'window.image')
       end
     end
 

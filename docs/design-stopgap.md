@@ -193,29 +193,40 @@ every `domain`, `partial_boot`, `window`, `service`, `facet`, `introduce`,
 `image` and `liveness` record. **`SystemOnly`** sits beside `EmptyNative` and
 shares its readers: a development manifest, full or partial boot, with the
 system domain alone. It accepts the records the system release's services need
-and refuses `domain` and `partial_boot` records with a diagnostic naming the
-milestone that brings them. Its scope, against
+and refuses `domain`, `partial_boot`, `introduce` and `image` records with a
+diagnostic naming the milestone that brings them; an `image` record and a
+`verified_image` window wait for M6's hash tree sizing. QEMU `virt`'s record is
+[config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
+manifest
+[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt).
+Its scope, against
 [design-system.md](design-system.md)'s properties, each kept property with a
 seeded violation and each refusal with a seeded record:
 
 | Property | Phase 1 | Whole again at |
 | --- | --- | --- |
 | 1 one holder per device and unit | kept; every holder is the system domain | |
-| 2 facets name servers | kept, over the system release's services; no introductions | M5 |
-| 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed | M9 |
-| 4 budgets and grants sum | kept for `root_memory`, baseline and shares, `max_domains` 0; `root_startup` by the rule below | Track K (`root_startup`), M5 (`max_domains`) |
+| 2 facets name servers | kept: every service's server is the system domain, and a facet must name a service of the manifest; a facet that does is then refused, since the reader's grantee is a domain and the system domain has no row; no introductions | M5 |
+| 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed and no `pci` device is placed | M9 |
+| 4 budgets and grants sum | kept for `root_memory`, baseline and shares, `max_domains` 0, which the manifest reader accepts; `root_startup` by the rule below | Track K (`root_startup`), M5 (`max_domains`) |
 | 5 names | kept | |
-| 6 no JIT in the root | kept | |
+| 6 no JIT in the root | kept; a full boot may use the native root image, since the interpreter image is not yet the root | |
 | 7 the sealing secret | `sealing` is `none`, no entry carries `ERX_ENTRY_SEAL`, no TPM | M11 |
 | 8 partitions and devices reach holders | the UARTs part kept; the system domain holds the slot and data windows, as M6 places them; no vault partition, no network device | M9 (storage domain), M11 (vault) |
-| 9 a release build's confinement | release builds refused; the unconfined block device is allowed | M11 |
+| 9 a release build's confinement | release builds refused; the unconfined block device is allowed, and the packer leaves `ERX_PACK_UNCONFINED_DMA` clear, which nothing reads | M11 |
 | 10 boot order, 11 rescue, 12 child domains, 13 headroom | no configured domains, so nothing to check; `domain` records refused | M5 |
 
 **The root startup rule** is a sanity check, not a proof: the root entry's
 loadable segments plus `system_baseline` fit `root_memory`, and `root_memory`
 fits the platform's RAM less `fiasco_reserve`. `fiasco_reserve` is a number in
-the platform record, taken from what `sigma0` offers the root at the harness's
-RAM size. If it is wrong, the pool fails at boot with a diagnostic. The
+the platform record beside `ram_bytes`, the harness's RAM size. `sigma0`'s
+resource dump at 512 MiB on a 4-CPU HVF boot of the fork shows 33.8 MiB it does
+not offer the root: 32 MiB of kernel memory, the kernel's image, the device
+tree's 1 MiB and `sigma0` itself. QEMU `virt`'s `fiasco_reserve` is 64 MiB,
+deliberately generous. The rule leaves the archive out: `bootstrap` reserves it
+whole and it is never released, so a manifest's `root_memory` must leave it room
+below RAM less the reserve; QEMU `virt`'s 384 MiB leaves it 64 MiB. If either is wrong, the pool fails at boot with a
+diagnostic. A platform record without these numbers is not admitted. The
 `Admitted` value records `root_startup: declared` in its report, and
 `erx_root_plan` replaces the rule behind the same value in Track K.
 
