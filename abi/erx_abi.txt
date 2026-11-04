@@ -291,6 +291,59 @@ layout erx_boot_info 1 wire_le 8 272
   field hwcap2 u64 200
   field limits erx_runtime_limits 208
 
+# How a machine ends (docs/design-stopgap.md, "The end path").
+enum end u32
+  value off 1
+  value reset 2
+
+# The Phase 1 root service's wire, in a native UTCB's message registers
+# (docs/design-stopgap.md, "The root service"). A request's tag label is its
+# fiasco_call number and its first word names the calling thread; a layout's
+# size fixes the request's word count, which the service's decoder checks. A
+# reply is erx_fiasco_reply. Number 1 is the ABI's debug_log.
+enum fiasco_call u32
+  value thread_create 2
+  value thread_start 3
+  value vm_reserve 4
+  value vm_commit 5
+  value vm_decommit 6
+  value vm_release 7
+  value space_protect 8
+  value machine_end 9
+
+layout erx_fiasco_thread_create_request 1 wire_le 8 48
+  field caller u64 0
+  field budget u64 8
+  field space u64 16
+  field group u64 24
+  field thread_class u64 32
+  field index u64 40
+
+layout erx_fiasco_thread_start_request 1 wire_le 8 16
+  field caller u64 0
+  field thread u64 8
+
+layout erx_fiasco_vm_range_request 1 wire_le 8 24
+  field caller u64 0
+  field addr u64 8
+  field size u64 16
+
+layout erx_fiasco_vm_flagged_request 1 wire_le 8 32
+  field caller u64 0
+  field addr u64 8
+  field size u64 16
+  field flags u64 24
+
+layout erx_fiasco_machine_end_request 1 wire_le 8 24
+  field caller u64 0
+  field res u64 8
+  field how u64 16
+
+layout erx_fiasco_reply 1 wire_le 8 24
+  field status i64 0
+  field first u64 8
+  field second u64 16
+
 call debug_log 1
   waits no
   executor allow

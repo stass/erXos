@@ -6,8 +6,9 @@
 /*
  * The memory transcript: a root task that runs the five calls over real pages and
  * reports each case on one line, which tools/lib/erx/native_memory.rb judges. Too
- * few rights show up as a fault nothing answers, so the run's deadline fires. No
- * case touches a page on purpose to see it fault: that needs a thread to answer.
+ * few rights show up as a fault, which ends the machine with a crash record before
+ * the case's line. A page with too many rights shows only in a touch that must
+ * fault: test/guest/native_crash does that.
  */
 
 #include <stdbool.h>
@@ -16,6 +17,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/vm.h"
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
@@ -309,7 +311,7 @@ erx_fiasco_root_main(void)
 	const char *reason;
 	uint64_t free_before;
 
-	reason = erx_fiasco_vm_init();
+	reason = erx_fiasco_root_up(NULL, 0);
 	if (reason != NULL) {
 		line_write("erx: memory: init FAILED: ");
 		line_write(reason);

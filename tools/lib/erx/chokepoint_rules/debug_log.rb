@@ -23,6 +23,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'fiasco/kernel/src/erx/erx_syscall.cpp'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/dispatch_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/dispatch_fuzz.c')],
           seed: { 'kernel/core/seeded.c' => "void f(void) { erx_effect_console_write(\"x\", 1); }\n" }

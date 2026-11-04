@@ -31,7 +31,7 @@
 
 /* The backend's address layout: above all RAM, and below 2^39, Fiasco's user limit here. */
 #define VM_WINDOW_BASE	UINT64_C(0x1000000000)
-#define VM_AREA_START	UINT64_C(0x4000000000)
+#define VM_AREA_START	ERX_FIASCO_AREA_START
 #define VM_AREA_END	UINT64_C(0x8000000000)
 /* The window's two grains: sigma0 gives 2 MiB until refused, then 4 KiB until refused. */
 #define VM_SUPERPAGE_ORDER	21u
@@ -45,7 +45,6 @@ static unsigned	fpage_rights(uint32_t);
 static void	vm_map(uintptr_t, uint64_t, uint32_t);
 static void	vm_unmap(uint64_t, uint32_t);
 static uint64_t	window_grow(uint64_t, unsigned);
-static int	vm_call(erx_fiasco_vm_op_t, uint64_t, uint64_t, uint32_t, uint32_t, uint64_t *);
 static _Noreturn void vm_refused(const char *);
 
 static const erx_fiasco_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap };
@@ -82,41 +81,11 @@ erx_fiasco_vm_free_pages(void)
 }
 
 int
-erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
-{
-	return (vm_call(ERX_FIASCO_VM_RESERVE, addr, size, flags, ERX_PROT_NONE, reserved));
-}
-
-int
-erx_vm_commit(uint64_t addr, uint64_t size)
-{
-	return (vm_call(ERX_FIASCO_VM_COMMIT, addr, size, 0, ERX_PROT_NONE, NULL));
-}
-
-int
-erx_vm_decommit(uint64_t addr, uint64_t size)
-{
-	return (vm_call(ERX_FIASCO_VM_DECOMMIT, addr, size, 0, ERX_PROT_NONE, NULL));
-}
-
-int
-erx_vm_release(uint64_t addr, uint64_t size)
-{
-	return (vm_call(ERX_FIASCO_VM_RELEASE, addr, size, 0, ERX_PROT_NONE, NULL));
-}
-
-int
-erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot)
-{
-	return (vm_call(ERX_FIASCO_VM_PROTECT, addr, size, 0, prot, NULL));
-}
-
-static int
-vm_call(erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot,
-    uint64_t *reserved)
+erx_fiasco_vm_body(erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t word, uint64_t *reserved)
 {
 	const erx_fiasco_vm_request_t request = { .op = op, .addr = addr, .size = size,
-	    .flags = flags, .prot = prot };
+	    .flags = op == ERX_FIASCO_VM_RESERVE ? word : 0,
+	    .prot = op == ERX_FIASCO_VM_PROTECT ? word : ERX_PROT_NONE };
 
 	return (erx_fiasco_vm_call(&vm_table, &vm_pool, &vm_effects, &request, reserved));
 }

@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_CONSOLE_H
 #define ERX_FIASCO_CONSOLE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /*
@@ -15,5 +16,7 @@
  */
 void erx_fiasco_console_write(const char *, size_t);
 _Noreturn void erx_fiasco_machine_off(void);
+_Noreturn void	erx_fiasco_machine_end(bool reboot);
+_Noreturn void	erx_fiasco_sleep_forever(void);
 
 #endif /* ERX_FIASCO_CONSOLE_H */

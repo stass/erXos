@@ -7,13 +7,14 @@
  * The native root task on Fiasco: it finds bootstrap's handoff record through
  * the kernel information page, accepts it, opens the archive the record names,
  * checks the archive's last entry, takes the machine's memory from sigma0 into
- * the pool, reports what it saw on the console, and powers off
- * (docs/design-stopgap.md, "Boot handoff").
+ * the pool, starts the root service, reports what it saw on the console, and
+ * powers off through the service (docs/design-stopgap.md, "Boot handoff").
  *
- * Only this one thread exists. Every page it reads comes from a page fault that
- * sigma0 answers one to one, with the rights bootstrap gave the page's region;
- * that is what keeps the handoff page and the archive read-only. A refusal
- * prints its reason and ends the machine, with no crash record.
+ * Until erx_fiasco_root_up returns, only this one thread exists, and every page
+ * it reads comes from a page fault that sigma0 answers one to one, with the
+ * rights bootstrap gave the page's region; that is what keeps the handoff page
+ * and the archive read-only. A refusal prints its reason and ends the machine,
+ * with no crash record.
  */
 
 #include <stdbool.h>
@@ -29,7 +30,7 @@
 #include "erx/pack.h"
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/console.h"
-#include "liberx/backend/fiasco/vm.h"
+#include "liberx/backend/fiasco/service.h"
 
 /* Where the root sees the kernel information page: no RAM on QEMU virt is here. */
 #define ERX_ROOT_KIP_WINDOW	UINT64_C(0x10000000)
@@ -64,7 +65,8 @@ erx_fiasco_root_main(void)
 	reason = root_boot();
 	if (reason != NULL)
 		root_refuse(reason);
-	erx_fiasco_machine_off();
+	(void)erx_machine_end(0, ERX_END_OFF);
+	root_refuse("the service refused the machine's end");
 }
 
 static const char *
@@ -102,7 +104,8 @@ root_boot(void)
 	if (!erx_pack_file_check(&pack, pack.header.nentries - 1, &root_hasher,
 	    &pack_error))
 		return (pack_error.reason);
-	reason = erx_fiasco_vm_init();
+	reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start,
+	    (size_t)handoff.image.size);
 	if (reason != NULL)
 		return (reason);
 	root_report(&handoff, pack.header.nentries);

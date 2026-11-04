@@ -289,6 +289,116 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_machine_end_request_t *result)
+{
+	erx_fiasco_machine_end_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_MACHINE_END_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.res = erx_abi_load_u64(bytes + 8);
+	value.how = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_reply_t *result)
+{
+	erx_fiasco_reply_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_REPLY_SIZE)
+		return (false);
+
+	{
+		uint64_t raw;
+
+		raw = erx_abi_load_u64(bytes + 0);
+		value.status = (raw <= UINT64_C(9223372036854775807) ? (int64_t)raw : -INT64_C(1) - (int64_t)(UINT64_C(18446744073709551615) - (uint64_t)raw));
+	}
+	value.first = erx_abi_load_u64(bytes + 8);
+	value.second = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_create_request_t *result)
+{
+	erx_fiasco_thread_create_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_THREAD_CREATE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.budget = erx_abi_load_u64(bytes + 8);
+	value.space = erx_abi_load_u64(bytes + 16);
+	value.group = erx_abi_load_u64(bytes + 24);
+	value.thread_class = erx_abi_load_u64(bytes + 32);
+	value.index = erx_abi_load_u64(bytes + 40);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_start_request_t *result)
+{
+	erx_fiasco_thread_start_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_THREAD_START_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.thread = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_flagged_request_t *result)
+{
+	erx_fiasco_vm_flagged_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_VM_FLAGGED_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.addr = erx_abi_load_u64(bytes + 8);
+	value.size = erx_abi_load_u64(bytes + 16);
+	value.flags = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_range_request_t *result)
+{
+	erx_fiasco_vm_range_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_VM_RANGE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.addr = erx_abi_load_u64(bytes + 8);
+	value.size = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_frame_header_decode(const uint8_t *bytes, size_t length,
     erx_frame_header_t *result)
 {

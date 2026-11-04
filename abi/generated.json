@@ -3,7 +3,7 @@
   "architecture": "aarch64",
   "inputs": {
     "abi/arch/aarch64.txt": "c1c34763b9be38f04f16da015d96015d73b9ce95b8461be53c7bb3c05fcbbd16",
-    "abi/erx_abi.txt": "62d3ade6c370e4041fcdb8a184b20592b0dbf635cc3ddae3b218de8455d1d96e",
+    "abi/erx_abi.txt": "ed518d84d3ee5484ed26f77602076c556cbaaf215137ec8de27ad52cca92afaa",
     "abi/formats/elf64.txt": "1594378a9e8e52f3d0ae0df6fb4a0d94a750d72f2da32baa30e6e265419e1fa7",
     "abi/inspection.txt": "562dd4cf5e7a97ea7fa7b9a185abc328dbbef6ebae0920997a572007302fada0",
     "abi/kernel.txt": "cd1fc2463b59021b32f16b7e0213193d9e182adc37efcb7d719bbf5cb206e885",

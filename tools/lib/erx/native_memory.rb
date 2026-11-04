@@ -12,13 +12,13 @@ require_relative 'runner'
 module Erx
   # The root task's memory end to end on QEMU (docs/design-stopgap.md,
   # "Verification", "Memory"): test/guest/native_memory runs as the root over
-  # the backend's five calls and reports each case on one line. A page with too
-  # few rights faults with nothing to answer it, so the run's deadline fires, and
-  # a case that sees wrong contents says FAILED. A page with too many rights shows
-  # nothing here: only a touch that must fault can see it.
+  # the backend's five calls through the root service and reports each case on one
+  # line. A page with too few rights faults and ends the machine with a crash record
+  # before its case's line, and a case that sees wrong contents says FAILED. A page
+  # with too many rights shows only in a touch that must fault: see NativeCrash.
   module NativeMemory
     MEMORY_MIB = 512
-    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, 'test/guest/native_memory/guest.c'].freeze
+    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_memory/guest.c'].freeze
     CASES = %w[
       decommit_recommit_reads_zeros no_access_and_back_keeps_contents read_only_raises_to_read_write
       stack_through_no_access refused_protect_changes_nothing write_and_execute_refused refusals

@@ -22,11 +22,13 @@ module Erx
         liberx/backend/fiasco/arch/aarch64/clock.c
         liberx/backend/fiasco/arch/aarch64/generated/trap.c
         liberx/backend/fiasco/arch/aarch64/root_start.S
-        liberx/backend/fiasco/arch/aarch64/utcb.c
+        liberx/backend/fiasco/arch/aarch64/thread_start.S
         liberx/backend/fiasco/console.c
         liberx/backend/fiasco/console.h
+        liberx/backend/fiasco/end.c
         liberx/backend/fiasco/generated/calls.c
         liberx/backend/fiasco/generated/calls.h
+        liberx/backend/fiasco/lock.h
         liberx/backend/fiasco/log.c
         liberx/backend/fiasco/log.h
         liberx/backend/fiasco/page_pool.c
@@ -35,6 +37,18 @@ module Erx
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_mem.c
         liberx/backend/fiasco/root_mem.h
+        liberx/backend/fiasco/service.c
+        liberx/backend/fiasco/service.h
+        liberx/backend/fiasco/service_stubs.c
+        liberx/backend/fiasco/service_wire.c
+        liberx/backend/fiasco/service_wire.h
+        liberx/backend/fiasco/thread.c
+        liberx/backend/fiasco/thread.h
+        liberx/backend/fiasco/thread_offsets.h
+        liberx/backend/fiasco/umtx.c
+        liberx/backend/fiasco/umtx.h
+        liberx/backend/fiasco/umtx_table.c
+        liberx/backend/fiasco/umtx_table.h
         liberx/backend/fiasco/vm.c
         liberx/backend/fiasco/vm.h
         liberx/backend/fiasco/vm_table.c
@@ -70,11 +84,16 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C_OUTSIDE_FIASCO_BACKEND,
           pattern: %r{backend/fiasco/}i,
-          # The debug-log and memory probes as the root task are this backend's own
-          # tests, and the host driver tests its pure cores.
+          # The debug-log, memory, thread and crash probes as the root task are this
+          # backend's own tests, and the host drivers and the wire's fuzz target test
+          # its pure cores.
           sites: [Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
-                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c')],
+                  Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
+                  Chokepoints::Site.new(glob: 'tools/fuzz/service_wire_fuzz.c')],
           seed: { 'kernel/core/seeded.c' => "#include \"liberx/backend/fiasco/generated/calls.h\"\n" }
         ),
         Chokepoints::Forbidden.new(
@@ -91,7 +110,8 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
-                "the root's memory effects' fixed refusals, the memory transcript and the debug log call it",
+                "the root's memory effects' fixed refusals, the end path's crash frame, the service's fixed refusal, " \
+                "the memory, thread and crash transcripts and the debug log call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
           pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
@@ -99,9 +119,26 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
+        ),
+        # The range table and the pool take no lock, because the service alone runs a
+        # body once it is up, and the first thread only before that.
+        Chokepoints::Forbidden.new(
+          name: 'fiasco-vm-body-callers',
+          rule: "only the root service, and the thread table's setup before the service runs, call the vm bodies",
+          design: "#{STOPGAP}#the-root-service",
+          scope: ERXOS_C,
+          pattern: /\berx_fiasco_vm_body\b/,
+          sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.[ch]'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c')],
+          seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { erx_fiasco_vm_body(0, 0, 0, 0, 0); }\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'one-erx-trap',

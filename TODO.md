@@ -95,7 +95,28 @@ it; git history is the record of completed work.
   archive's sub-type removed and shutdown removed were each run by hand and
   failed as [the verification table](docs/design-stopgap.md#verification) says;
   nothing in the tree repeats them, as `check-qemu-mutant` does for the debug
-  log, and nothing shows that a write to the archive faults.
+  log, and nothing shows that a write to the archive faults. The same holds
+  for the root service's seeds: the crash frame's write removed, the
+  trampoline omitting the thread pointer and a failed start's deletion skipped.
+* [Medium] stopgap, `test/guest/native_threads`: every root thread stays on the
+  first CPU, so the suite's 4-CPU cells do not exercise a wake or a service call
+  across CPUs. A hand-run seed giving each thread a CPU of its own passed under
+  TCG and HVF. The suite should keep that form once the backend sets affinity.
+* [Medium] stopgap, `liberx/backend/fiasco/thread.c`, `thread_claim`: the check of
+  a UTCB's marker has no test that can fail, since no thread exits yet and
+  `case_indices_run_out` passes with it removed. Its decision belongs in a pure
+  core tested with a late-marker fake, the verification table's Claim row.
+* [Low] stopgap, the crash suite's end-path row: `erx_machine_end` runs only with
+  `ERX_END_OFF`; under `-no-reboot` both ends exit QEMU, so the suite cannot tell
+  them apart, and the refusal of a bad `how` has no case.
+* [Low] tooling, `tools/lib/erx/native_crash.rb`: the pc check has no upper bound
+  and `test/guest/native_threads`'s `QUEUE_SETTLE_NS` trusts a 50 ms sleep to order
+  waiters, which a starved vCPU can break.
+* [Medium] stopgap, `liberx/backend/fiasco/service.c`: a root thread's handle is
+  its index, with no generation, so a stale handle names the index's next
+  thread. The handle table of
+  [design-stopgap.md](docs/design-stopgap.md#capabilities-in-fiascos-object-space)
+  replaces it.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

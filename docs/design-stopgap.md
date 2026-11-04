@@ -367,7 +367,9 @@ group slot, the word to clear, the range to release and the umtx node.
 
 The same indices own 128 native UTCB slots of 1 KiB, the most one Fiasco area holds (`task.cpp:356`), zeroed by
 Fiasco (`task.cpp:253`). `l4_factory_create_task`'s `utcb_area` makes them for a task, and one
-`l4_task_add_ku_mem` for the root, whose first thread keeps its kernel-given slot as index 0.
+`l4_task_add_ku_mem` for the root, whose first thread keeps its kernel-given slot as index 0. The root's service
+thread holds no index: it runs before the table's area exists and is no client of it, so it takes the next free
+slot of the kernel-given UTCB page.
 
 **Claiming an index.** Fiasco writes `free_marker` when finished with a UTCB, in `do_kill`, some time after the
 deletion call returns (`thread.cpp:603-604`, `utcb.h:176-185`). So an index is claimable when **its record is
@@ -378,8 +380,11 @@ Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears 
 **`erx_thread_create`.** The stub claims an index. The service runs `l4_factory_create_thread` and
 `l4_factory_create(factory, L4_PROTO_SEMAPHORE, cap)` (`factory.h:470`, `semaphore.cpp:329`), maps the semaphore
 at the index's slot, copies the starting registers from the caller's public UTCB into the record, and replies
-with the handle and the slot, which in the root is the root's own capability. On failure the stub frees the
-record and returns `ERX_ENOMEM`. A task names only itself as the space; the root may also name a task with no
+with the handle and the slot, which in the root is the root's own capability. The starting registers are
+`erx_fiasco_start_t`: the ABI's `erx_regs` and, beside them, the thread pointer, which `erx_regs` does not hold.
+In the root, a thread's handle is its index, so it carries no generation and a stale one names the index's
+next thread. On failure the stub frees the
+record and returns the service's status. A task names only itself as the space; the root may also name a task with no
 thread yet, which takes index 0.
 
 **`erx_thread_start`.** The stub writes the marker 1. The service, in order:
@@ -428,7 +433,9 @@ word between tasks.
 
 ### Deadlines
 
-A deadline is absolute monotonic nanoseconds. The backend reads the time page, takes the remainder, rounds it up to
+A deadline is absolute monotonic nanoseconds. The backend reads the architecture's user-mode counter directly, through
+`erx_fiasco_clock_ns` in the architecture layer's `clock.c`, and not the time page, which only a caller of
+`erx_time_page` needs. It takes the remainder, rounds it up to
 microseconds and passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
 wait is never early, and is late by up to Fiasco's timer granularity plus one part in 512. A deadline already past
 returns without a kernel call.
@@ -534,12 +541,15 @@ on. This is `moe`'s shape, not a second kernel: the service implements only the 
 task_index << 2)`. The receive gives the label, with the sender's rights in its low bits (`ipc_gate.cpp:504`), so the decoder masks
 them and the rest names the calling task. A task can name only itself. The root's own threads call through the root's gate.
 
-**The wire**, generated from the ABI file, in the native UTCB's message registers:
+**The wire**, in the native UTCB's message registers, is `enum fiasco_call` and the request layouts of
+`abi/erx_abi.txt`, with a hand-written word-count table over their `sizeof` in `service_wire.c` and no emitter of
+its own. It is this stopgap's internal wire, not a seam: no number or layout reaches a caller of the function API,
+and erXos's kernel has none of it, so [Transport](#transport) records it as a difference and not as ABI to keep.
 
 | Message | Tag label | Words |
 | --- | --- | --- |
-| request | the call number, or a private number above the ABI's (`reap`) | `mr[0]` the caller's thread index; `mr[1..]` the register arguments in ABI order, then any private word such as the new thread's index |
-| reply | zero | `mr[0]` the status; `mr[1..]` the register results |
+| request | its `fiasco_call` number | `mr[0]` the caller's thread index; `mr[1..]` the rest of the request's layout |
+| reply | zero | `erx_fiasco_reply`: `mr[0]` the status; `mr[1]` and `mr[2]` the results |
 | fault | Fiasco's negative `L4_PROTO_PAGE_FAULT` or `L4_PROTO_EXCEPTION` | as Fiasco sends them |
 
 **Payloads never cross the native UTCB.** What the ABI puts in the caller's UTCB (the bytes of `erx_debug_log`, up to
@@ -557,6 +567,9 @@ row is `ERX_ENOTSUP`. The decoder has a fuzz target. Addresses cross as values, 
 
 A fault is one more message to the service, which never answers it, because every committed page is already mapped. It names the task,
 by the gate, and not the thread, so a crash record's thread field is `unknown`, and it carries the address and instruction pointer.
+A page fault is recorded as kind `memory`, with the low three bits of Fiasco's fault word in `cause`, where bit 1 says the access was a
+write. Every exception is recorded as kind `undefined`, with the architecture's syndrome in `cause`: the record is for a reader, and
+Phase 1 acts on no finer kind.
 
 * **A test task's fault:** the record goes to the log, then [task exit](#task-exit). The machine continues.
 * **The root's fault:** [the end path](#the-end-path).
@@ -699,7 +712,9 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 * A fault of the root service hangs every client until the watchdog or the harness's deadline ends the run.
 * One thread serves the whole machine, so a long body, such as a task stop's grace periods, delays every other service call.
 * A task has at most 128 live threads, and `erx_thread_create` is also `ERX_ENOMEM` while every free record waits for Fiasco's marker write.
-* A failed start that did not reach Fiasco's kill path loses that index until the task ends.
+* A failed start that did not reach Fiasco's kill path loses that index until the task ends, and so does a start the service refused for a handle whose create is still in flight, since the stub writes the marker first.
+* The root's image is mapped read, write and execute from `sigma0`, so a stray write to its code or read-only data does not fault.
+* A label naming no live task is counted, and nothing reads the count.
 * When the watchdog ends the machine, log lines the reader had not taken are lost.
 * The crash frame may interleave with a console driver that is writing, and a kernel `WARN` or panic line may interleave at any time.
 * Any littlefs block error, deadline or driver restart makes the volume unavailable until reboot.
@@ -722,8 +737,8 @@ the tests.
 | **Protection**, in a test task: a page of code runs in RX; a write in RX and a run in RW each give the expected fault | the drop step skipped: Fiasco adds rights, so the write succeeds and its fault is missing |
 | A stack through `PROT_NONE` then RW; a refused protect, with the pool short, changes nothing | commit on access change removed: a fault. Plan applied page by page: the first page changed |
 | **Range table.** `test/host/fiasco_vm_test.rb`, host, exhaustive over page states, ranges and calls against a fake memory unit that adds rights as Fiasco does, plus random sequences; each seed is a mutant there | a target with write and execute admitted. Each of the other seeds of this table's memory rows, and a page given back still mapped |
-| **Thread start**: TLS in the new thread equals the value given | trampoline omits the thread pointer |
-| **Failed start**, a hook failing each of the three steps: the status returns, `l4_task_cap_valid` is 0 for the thread, its stack canary is untouched, the next create works | the deletion skipped: the capability stays valid |
+| **Thread start**, the QEMU gate's `native_threads` suite: TLS in the new thread equals the value given | trampoline omits the thread pointer: the case's line reports a failure |
+| **Failed start**, a hook built only into the suite's image (`ERX_FIASCO_TEST_HOOKS`) failing each of the three steps: the status returns, `l4_task_cap_valid` is 0 for the thread, its stack canary is untouched, the next create works | the deletion skipped: the capability stays valid |
 | **Claim**, host, a fake kernel writing the marker late, over every order of exit and create | the claim ignores the marker: the fake's write lands on a live thread |
 | **Umtx**: a timed wait is never early; host model and TSan, a wake between compare and sleep, a timeout racing a wake | deadline rounded down. Compare outside the lock: a lost wake. Absorb removed: a stale count |
 | **Join loop, 10,000 times**: stack and index reused; the joined handle is stale after each join | reaper's steps 1 and 3 swapped: a live handle. Step 3 removed: the deadline fires |
@@ -738,7 +753,7 @@ the tests.
 | **Interrupt**: a UART receive and a software object wake a parked executor; `erx_group_take_ready` returns each label once; ack lets the next through | ack removed: the second character never arrives. Listed flag ignored: a label twice |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
 | **Watchdog**: a stopped pet ends the machine, its cause in the record | watchdog skipped: the deadline fires |
-| **End path**, on a quiet console: a root fault gives the undrained lines and a whole crash frame; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
+| **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
 | **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
 | littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost |
@@ -754,7 +769,9 @@ The last column of [the call table](#the-call-table) is this list.
 ### Transport
 
 The function API is the seam. The `erx` backend's stubs trap into the kernel with the registers of `abi/arch/<arch>.txt`; here the same functions run locally or send
-[a request](#the-root-service). No call number or register reaches a caller.
+[a request](#the-root-service). No call number or register reaches a caller. The two wires differ in how they are made: every kernel
+call's trap is generated from the ABI file, while [the service's wire](#the-root-service) has generated layouts under a hand-written
+word-count table, since it ends with this backend.
 
 **The public UTCB is not the native one.** `erx_utcb_self` returns the thread's public block, the start of its record, found through the native UTCB's first user word and the
 register user mode can read. It has the ABI's `erx_utcb` layout, with `self` holding its own address and `reserved` zero. Fiasco's native UTCB is the backend's alone: its
@@ -763,9 +780,12 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
-The gate's `boot_image`, `native_boot`, `native_memory` and `debug_log` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
+The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads` and `native_crash` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
 handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
-`libsigma0.a` linked freestanding. Everything below was read at the cited lines and has not been executed.
+`libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
+`l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. Every thread in those
+suites runs on the first CPU, since `l4_sched_param(priority, 0)` leaves the mask whole and a thread stays on the CPU it was created on (`scheduler.cpp:98-103`), so a run at 4 CPUs does not by itself exercise a wake across CPUs.
+Everything below was read at the cited lines and has not been executed.
 
 **Run by hand, not kept in a suite**, a root with a helper thread whose pager it was, under TCG and HVF: a write in R, a run in R or RW, a touch of an
 uncommitted or no-access page and a write in RX each fault and the same page keeps its contents; `L4_FP_OTHER_SPACES` on a window page removes the
@@ -773,10 +793,8 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 
 **The thread package:**
 
-* A 128 KiB area works in `utcb_area` and in `l4_task_add_ku_mem` on the root itself: `task.cpp:253,356,645-649,887`.
-* One gate serves as pager and request target, with a root thread calling its own task's gate: `thread-ipc.cpp:254,1020`, `ipc_gate.cpp:504`.
+* A 128 KiB area works in `utcb_area`: `task.cpp:253,356,645-649,887`.
 * A return from `l4_task_delete_obj` means the thread never reaches user mode again, whether or not it ever ran, and the marker goes to 0 only when the kernel has finished with the UTCB: `thread.cpp:603-604,657-690`, `thread_object.cpp:157-166,650`, `kobject.cpp:224-233`, `utcb.h:176-185`.
-* An unbound thread that never started can be deleted: `thread_object.cpp:161-164`. The semaphore object is built into near-stock Fiasco: `factory.h:470`, `semaphore.cpp:329`, `l4_types.cpp:458`.
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
 * Grace periods proceed while the service's clients wait: `kobject.cpp:224-233`, `thread.cpp:479-489`.
 * Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.

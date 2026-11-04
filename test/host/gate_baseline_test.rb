@@ -21,7 +21,7 @@ class GateBaselineTest < Minitest::Test
   SANITIZER_TESTS = %w[
     test/host/abi_calls_test.rb test/host/blake3_test.rb test/host/boot_file_test.rb test/host/budget_test.rb
     test/host/cap_test.rb test/host/crypto_test.rb test/host/debug_log_probe_test.rb test/host/dispatch_test.rb
-    test/host/elf_plan_test.rb test/host/fiasco_vm_test.rb test/host/lane_test.rb
+    test/host/elf_plan_test.rb test/host/fiasco_umtx_test.rb test/host/fiasco_vm_test.rb test/host/lane_test.rb
     test/host/log_test.rb test/host/manifest_reader_test.rb test/host/map_test.rb test/host/pack_test.rb
     test/host/rng_test.rb
     test/host/sched_test.rb test/host/space_test.rb test/host/tlb_plan_test.rb test/host/watchdog_test.rb
@@ -63,7 +63,7 @@ class GateBaselineTest < Minitest::Test
     'cap-slot-clear-named' => 5, 'cap-slot-private' => 8, 'cap-table-private' => 10, 'core-archive-imports' => 0,
     'core-records-private' => 2, 'dispatch-console-write' => 1, 'dispatch-one-caller' => 1, 'dispatch-one-run' => 2,
     'glue-reads-no-utcb' => 1, 'fiasco-backend-headers-private' => 1, 'fiasco-headers-in-backend' => 2,
-    'fiasco-symbols-in-backend' => 2, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
+    'fiasco-symbols-in-backend' => 2, 'fiasco-vm-body-callers' => 1, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
     'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
     'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'map-core-opaque' => 3, 'map-records-private' => 6,
     'object-leg' => 0,

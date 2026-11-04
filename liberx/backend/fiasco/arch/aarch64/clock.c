@@ -21,7 +21,7 @@ erx_fiasco_clock_ns(void)
 	uint64_t frequency, ticks;
 
 	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
-	__asm__ volatile("mrs %0, cntvct_el0" : "=r"(ticks));
+	__asm__ volatile("isb\n\tmrs %0, cntvct_el0" : "=r"(ticks));
 	if (frequency == 0)
 		return (0);
 	return (ticks / frequency * ERX_NS_PER_SECOND +

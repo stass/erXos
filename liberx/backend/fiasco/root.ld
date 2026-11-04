@@ -9,11 +9,14 @@
 ENTRY(_start)
 SECTIONS {
 	. = 0x44000000;
+	erx_fiasco_image_start = .;
 	.text : { *(.text .text.*) }
 	. = ALIGN(4096);
 	.rodata : { *(.rodata .rodata.*) }
 	. = ALIGN(4096);
 	.data : { *(.data .data.*) }
 	.bss : { *(.bss .bss.* COMMON) }
+	. = ALIGN(4096);
+	erx_fiasco_image_end = .;
 	/DISCARD/ : { *(.comment .note .note.*) }
 }

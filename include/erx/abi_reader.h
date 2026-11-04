@@ -33,6 +33,18 @@ bool erx_abi_note_decode(const uint8_t *bytes, size_t length,
     erx_abi_note_t *result);
 bool erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
     erx_elf64_phdr_t *result);
+bool erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_machine_end_request_t *result);
+bool erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_reply_t *result);
+bool erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_create_request_t *result);
+bool erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_start_request_t *result);
+bool erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_flagged_request_t *result);
+bool erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_vm_range_request_t *result);
 bool erx_frame_header_decode(const uint8_t *bytes, size_t length,
     erx_frame_header_t *result);
 bool erx_lane_rec_decode(const uint8_t *bytes, size_t length,

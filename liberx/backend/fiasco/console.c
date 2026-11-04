@@ -37,14 +37,26 @@ erx_fiasco_console_write(const char *text, size_t length)
 }
 
 /*
- * Power-off, which QEMU turns into its own exit. A kernel that returns from the
- * call has no way to power off, so the thread sleeps and the harness's deadline
- * reports the boot as hung.
+ * The machine's end, which under -no-reboot QEMU turns into its own exit,
+ * whichever is asked. A kernel that returns from the call has no way to do it,
+ * so the thread sleeps and the harness's deadline reports the boot as hung.
  */
+_Noreturn void
+erx_fiasco_machine_end(bool reboot)
+{
+	(void)l4_platform_ctl_system_shutdown(L4_BASE_ICU_CAP, reboot ? 1 : 0);
+	erx_fiasco_sleep_forever();
+}
+
 _Noreturn void
 erx_fiasco_machine_off(void)
 {
-	(void)l4_platform_ctl_system_shutdown(L4_BASE_ICU_CAP, 0);
+	erx_fiasco_machine_end(false);
+}
+
+_Noreturn void
+erx_fiasco_sleep_forever(void)
+{
 	for (;;)
 		(void)l4_ipc_sleep(L4_IPC_NEVER);
 }
