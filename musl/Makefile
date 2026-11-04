@@ -1,3 +1,4 @@
+# Modified by erXos: an arch may layer on a CPU's arch (ARCH_CPU).
 #
 # Makefile for musl (requires GNU make)
 #
@@ -25,8 +26,13 @@ BASE_SRCS = $(sort $(wildcard $(BASE_GLOBS)))
 ARCH_SRCS = $(sort $(wildcard $(ARCH_GLOBS)))
 BASE_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(BASE_SRCS)))
 ARCH_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(ARCH_SRCS)))
-REPLACED_OBJS = $(sort $(subst /$(ARCH)/,/,$(ARCH_OBJS)))
-ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS))))
+# An arch may name a CPU's arch as ARCH_CPU in its arch.mak: it then layers on that
+# arch's headers and sources, and its own files replace both those and the generic ones.
+CPU_SRCS = $(if $(ARCH_CPU),$(sort $(wildcard $(addsuffix /$(ARCH_CPU)/*.[csS],$(SRC_DIRS)))))
+CPU_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(CPU_SRCS)))
+LAYERED_OBJS = $(filter-out $(subst /$(ARCH)/,/$(ARCH_CPU)/,$(ARCH_OBJS)),$(CPU_OBJS))
+REPLACED_OBJS = $(sort $(subst /$(ARCH)/,/,$(ARCH_OBJS)) $(subst /$(ARCH_CPU)/,/,$(LAYERED_OBJS)))
+ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS) $(LAYERED_OBJS))))
 
 LIBC_OBJS = $(filter obj/src/%,$(ALL_OBJS)) $(filter obj/compat/%,$(ALL_OBJS))
 LDSO_OBJS = $(filter obj/ldso/%,$(ALL_OBJS:%.o=%.lo))
@@ -47,7 +53,7 @@ CFLAGS_AUTO = -Os -pipe
 CFLAGS_C99FSE = -std=c99 -ffreestanding -nostdinc 
 
 CFLAGS_ALL = $(CFLAGS_C99FSE)
-CFLAGS_ALL += -D_XOPEN_SOURCE=700 -I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic -Iobj/src/internal -I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include
+CFLAGS_ALL += -D_XOPEN_SOURCE=700 -I$(srcdir)/arch/$(ARCH) $(ARCH_CPU:%=-I$(srcdir)/arch/%) -I$(srcdir)/arch/generic -Iobj/src/internal -I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include
 CFLAGS_ALL += $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS)
 
 LDFLAGS_ALL = $(LDFLAGS_AUTO) $(LDFLAGS)
@@ -57,6 +63,7 @@ RANLIB  = $(CROSS_COMPILE)ranlib
 INSTALL = $(srcdir)/tools/install.sh
 
 ARCH_INCLUDES = $(wildcard $(srcdir)/arch/$(ARCH)/bits/*.h)
+ARCH_BITS = $(srcdir)/arch/$(or $(ARCH_CPU),$(ARCH))/bits
 GENERIC_INCLUDES = $(wildcard $(srcdir)/arch/generic/bits/*.h)
 INCLUDES = $(wildcard $(srcdir)/include/*.h $(srcdir)/include/*/*.h)
 ALL_INCLUDES = $(sort $(INCLUDES:$(srcdir)/%=%) $(GENH:obj/%=%) $(ARCH_INCLUDES:$(srcdir)/arch/$(ARCH)/%=include/%) $(GENERIC_INCLUDES:$(srcdir)/arch/generic/%=include/%))
@@ -95,10 +102,10 @@ $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(GENH) $(GENH_INT): |
 $(OBJ_DIRS):
 	mkdir -p $@
 
-obj/include/bits/alltypes.h: $(srcdir)/arch/$(ARCH)/bits/alltypes.h.in $(srcdir)/include/alltypes.h.in $(srcdir)/tools/mkalltypes.sed
-	sed -f $(srcdir)/tools/mkalltypes.sed $(srcdir)/arch/$(ARCH)/bits/alltypes.h.in $(srcdir)/include/alltypes.h.in > $@
+obj/include/bits/alltypes.h: $(ARCH_BITS)/alltypes.h.in $(srcdir)/include/alltypes.h.in $(srcdir)/tools/mkalltypes.sed
+	sed -f $(srcdir)/tools/mkalltypes.sed $(ARCH_BITS)/alltypes.h.in $(srcdir)/include/alltypes.h.in > $@
 
-obj/include/bits/syscall.h: $(srcdir)/arch/$(ARCH)/bits/syscall.h.in
+obj/include/bits/syscall.h: $(ARCH_BITS)/syscall.h.in
 	cp $< $@
 	sed -n -e s/__NR_/SYS_/p < $< >> $@
 

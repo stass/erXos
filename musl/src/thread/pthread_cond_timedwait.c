@@ -1,3 +1,4 @@
+/* Modified by erXos: no requeue, the next waiter is always woken. */
 #include "pthread_impl.h"
 
 /*
@@ -45,12 +46,11 @@ static inline void unlock(volatile int *l)
 		__wake(l, 1, 1);
 }
 
-static inline void unlock_requeue(volatile int *l, volatile int *r, int w)
+/* erXos's umtx has no requeue: the next waiter is always woken, and takes the mutex itself. */
+static inline void unlock_next(volatile int *l)
 {
 	a_store(l, 0);
-	if (w) __wake(l, 1, 1);
-	else __syscall(SYS_futex, l, FUTEX_REQUEUE|FUTEX_PRIVATE, 0, 1, r) != -ENOSYS
-		|| __syscall(SYS_futex, l, FUTEX_REQUEUE, 0, 1, r);
+	__wake(l, 1, 1);
 }
 
 enum {
@@ -154,7 +154,7 @@ relock:
 	if (node.prev) {
 		int val = m->_m_lock;
 		if (val>0) a_cas(&m->_m_lock, val, val|0x80000000);
-		unlock_requeue(&node.prev->barrier, &m->_m_lock, m->_m_type & (8|128));
+		unlock_next(&node.prev->barrier);
 	} else if (!(m->_m_type & 8)) {
 		a_dec(&m->_m_waiters);		
 	}

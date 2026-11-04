@@ -22,5 +22,5 @@ _start:
 
 	.bss
 	.balign	16
-	.space	16384
+	.space	65536
 root_stack_top:

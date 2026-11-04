@@ -476,7 +476,7 @@ The first thread exits the same way: its capability is the one the kernel gave i
 **Join: musl's code stays.** The word to clear is `&__thread_list_lock`, the contract of Linux's exit futex address
 (`pthread_create.c:142-146`). `__pthread_exit` holds `__tl_lock`, sets `self->tid` to 0 and unlinks itself, leaving the
 lock word holding the old identifier, then wakes the joiner, whose `__tl_sync` (`pthread_join.c:22`) waits on that
-word. The one change is that the tail `for (;;) __syscall(SYS_exit, 0)` becomes `erx_thread_exit`. The joiner returns
+word. The tail `for (;;) __syscall(SYS_exit, 0)` lands in `erx_thread_exit`. The joiner returns
 only after step 3, and only then calls `__munmap` on the stack (`pthread_join.c:24`). Nothing can create a thread with
 the same identifier meanwhile, since `pthread_create` holds that lock across `__clone`. The reaper calls no musl
 function, so it cannot wait on the lock it clears.
@@ -484,9 +484,9 @@ function, so it cannot wait on the lock it clears.
 **Detached.** `__unmapself` (`pthread_create.c:165`) becomes `erx_thread_exit_release(base, size)`, a private `liberx`
 entry that puts the range in the record and then does as `erx_thread_exit`.
 
-**Condition variables.** `unlock_requeue` (`pthread_cond_timedwait.c:48-53`) already wakes the next waiter, instead of
-requeueing it, for priority-inheriting and process-shared mutexes. The port always takes that branch and deletes
-`FUTEX_REQUEUE`, so neither umtx needs a requeue. The cost, one extra wake per waiter, is on
+**Condition variables.** Upstream's `unlock_requeue` wakes the next waiter, instead of requeueing it, for
+priority-inheriting and process-shared mutexes. erXos's `unlock_next` (`pthread_cond_timedwait.c`) always does so and
+never uses `FUTEX_REQUEUE`, so neither umtx needs a requeue. The cost, one extra wake per waiter, is on
 [the performance watch list](todo-performance.md).
 
 #### Task exit
@@ -507,6 +507,37 @@ status)`, which musl's `exit` does, the launcher's `erx_space_stop(task, status)
 the task from the gate's label and each handle in that task's table, and keeps no pointer across a receive. Fiasco IPC
 queues no messages: a request is a live thread blocked on the gate, and deleting the thread removes it. So once a stop
 returns to the receive, nothing can name that task, and its label is reusable once the status is taken.
+
+### musl over the backend
+
+`ARCH=erxos` layers on `arch/aarch64`: `arch/erxos/arch.mak` names it as `ARCH_CPU`, so the CPU's headers and assembly
+stay, and a file under an `erxos` directory replaces both the CPU's and the generic file of its name. Every system
+call site lands in `__erx_syscall` (`src/internal/erxos/syscall.c`), one switch onto `liberx`. `tools/lib/erx/musl.rb`
+refuses a build in which a CPU source that traps has no replacement, and the chokepoint rules read the `erxos` directories, so only
+`liberx` reaches the kernel. The switch is the current form behind [the C library seam](design-runtime.md#the-c-library-seam), whose target deletes
+the `SYS_` names, so that a call not ported fails at link rather than at run time.
+
+| Call | Over | Limit |
+| --- | --- | --- |
+| `futex` wait and wake | `erx_umtx_wait`, `erx_umtx_wake` | no priority inheritance: its probe reads `ENOSYS` |
+| `mmap`, `mprotect`, `munmap` | `erx_vm_reserve`, `erx_space_protect`, which commits what it makes accessible, `erx_vm_release` | anonymous memory only; write and execute together is `EACCES` |
+| `brk` | reports no room | mallocng uses `mmap` alone |
+| `__clone` | `erx_thread_create`, `erx_fiasco_thread_set_clear_word`, `erx_thread_start` | only `CLONE_THREAD` |
+| `exit`, `__unmapself` | `erx_thread_exit`, `erx_thread_exit_release` | |
+| `exit_group` | `erx_machine_end` | the root's form |
+| `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
+| `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
+| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_console_write` | other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
+| `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: the machine runs one program, with no users |
+| `sched_yield`, `set_robust_list`, `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
+
+Everything else is `ENOSYS`. No signal is delivered, so `pthread_cancel` returns 0 and acts at the target's next
+cancellation point rather than interrupting a call it is blocked in.
+
+`liberx/backend/fiasco/libc_start.c` brings the service up and calls `__libc_start_main` with one argument, no
+environment and the ELF headers, which `root.ld` loads first so that musl finds the TLS image. The program links with
+`libl4sys.p.a`, which defines four symbols and needs none, and with Fiasco's `libgcc.a` for binary128 arithmetic.
 
 ## Interrupts and readiness
 
@@ -765,6 +796,7 @@ the tests.
 | **Memory.** The QEMU gate's `native_memory` suite, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents; every protection change keeps contents and its one page; the whole pool committed at once; the pool's count before and after agree | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros. Pool check removed: a refused protect is not refused |
 | **Protection**, in a test task: a page of code runs in RX; a write in RX and a run in RW each give the expected fault | the drop step skipped: Fiasco adds rights, so the write succeeds and its fault is missing |
 | A stack through `PROT_NONE` then RW; a refused protect, with the pool short, changes nothing | commit on access change removed: a fault. Plan applied page by page: the first page changed |
+| **musl.** The QEMU gate's `native_musl` suite, a C program using the C library's interface as the root: `printf` of floats, TLS from `.tdata` and `.tbss`, 1,000 create-and-join rounds and 1,000 detached exits pinned across CPUs with the pool's count restored, `pthread_cond_broadcast` over 64 waiters for 20 rounds, timed waits on both clocks never early, a contended mutex, `malloc` and `free` under 8 threads with blocks freed by another thread, `realloc` through `mmap` sizes, `mprotect` to a page's own protection under a running thread and over a hole, `pthread_cancel`, a constructor, and the refusals; `exit` ends the machine after its `atexit` handler and destructor | `FUTEX_REQUEUE` restored: a broadcast stalls. `__unmapself` not releasing: the pool's count stays down. `mprotect` committing first: the thread running on the page faults |
 | **Range table.** `test/host/fiasco_vm_test.rb`, host, exhaustive over page states, ranges and calls against a fake memory unit that adds rights as Fiasco does, plus random sequences; each seed is a mutant there | a target with write and execute admitted. Each of the other seeds of this table's memory rows, and a page given back still mapped |
 | **Thread start**, the QEMU gate's `native_threads` suite: TLS in the new thread equals the value given | trampoline omits the thread pointer: the case's line reports a failure |
 | **Failed start**, a hook built only into the suite's image (`ERX_FIASCO_TEST_HOOKS`) failing each of the three steps: the status returns, `l4_task_cap_valid` is 0 for the thread, its stack canary is untouched, the next create works | the deletion skipped: the capability stays valid |
@@ -810,6 +842,8 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
+The gate's `native_musl` suite has run `libl4sys.p.a` linked beside musl, and musl's start, TLS, identifiers, join, detached exit and condition variables on the root, under TCG and HVF at 1 and 4 CPUs.
+
 The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads`, `native_crash` and `native_task` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
 handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
@@ -825,16 +859,14 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 **The thread package:**
 
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
-* Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.
 
 The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
 
 **Later packages:**
 
-* `l4sys` links beside musl, in the root's start path: `ipc.h:25-26`.
 * `enif_send` from a dirty NIF's callback, and its report of a dead receiver: `erl_nif.c:883`.
 * Fiasco's boot is deterministic under instruction counting, with medium confidence: its delay calibration and timer setup are unread.
-* The size estimates: backend packages 1 to 6, 3,000 to 4,500 lines of C17; the musl port 1,000 to 2,000; NIF glue about 500.
+* The size estimates: backend packages 1 to 6, 3,000 to 4,500 lines of C17; the musl port 1,000 to 2,000, of which threads and `malloc` measure 600; NIF glue about 500.
 
 ## Open decisions
 

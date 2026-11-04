@@ -150,9 +150,27 @@ it; git history is the record of completed work.
   `erx.watchdog` is parsed only by the suite's guest and `erx.det=1` does not reach it.
   Nothing pets it either until M3's root does, so a system root that outlives its
   60-second boot deadline ends the machine.
-* [Low] stopgap, the threads package's verification rows that need musl's port:
-  `pthread_cond_broadcast` with 64 waiters, and the join and detached loops through
-  `pthread_join` and `__unmapself` rather than the suite's own form of them.
+* [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
+  the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
+  and handles with generations; the next part of the port settles it with `libc-test` in a task.
+* [Medium] musl, `musl/src/internal/erxos/syscall.c`: a program's standard output reaches the console through
+  `erx_fiasco_console_write` with no escaping. The root's one program is trusted; the strict escape for a program's
+  own output belongs here before a program prints text from another source.
+* [Low] stopgap, `liberx/backend/fiasco/arch/aarch64/root_start.S`: `main` runs on 64 KiB in `.bss` with no guard page,
+  so a large frame overruns other `.bss` silently.
+* [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
+  registers travel in the UTCB. One call taking the start state and the word to clear ends the order and the leak
+  a failed clear-word call would leave, with the thread package's `erx_fiasco_reaper_start` as its second user.
+* [Low] musl, `musl/Makefile`: `ARCH_CPU` layering reaches `lib/libc.a` only; `crt1.o`, the dynamic linker and
+  `install-headers` still name `arch/$(ARCH)` and `crt/$(ARCH)`.
+* [Low] musl, `musl/arch/erxos`: `docs/design-runtime.md` deletes `__syscallN` and the `SYS_` numbers; the seam
+  keeps them as the tokens of one switch, so all of musl still compiles and refuses at run time. Delete them when
+  the personality has replaced what they name.
+* [Low] musl, `tools/lib/erx/native_musl.rb`: binary128 arithmetic comes from Fiasco's `libgcc.a`, built by GCC.
+  Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
+* [Low] musl, `musl/src/internal/erxos/syscall.c`: `sched_getaffinity` is refused, so
+  `sysconf(_SC_NPROCESSORS_ONLN)` does not count CPUs; `native_musl` counts them by the refused pin. `AT_RANDOM`
+  is absent, so mallocng's secret comes from an address alone. `sched_yield` does nothing.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

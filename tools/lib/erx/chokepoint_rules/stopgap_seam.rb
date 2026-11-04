@@ -45,6 +45,7 @@ module Erx
         liberx/backend/fiasco/park.h
         liberx/backend/fiasco/park_table.c
         liberx/backend/fiasco/park_table.h
+        liberx/backend/fiasco/libc_start.c
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_open.c
@@ -114,7 +115,10 @@ module Erx
           # The debug-log, memory, thread and crash probes as the root task are this
           # backend's own tests, and the host drivers and the wire's fuzz target test
           # its pure cores.
-          sites: [Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
+          # musl's seam is this backend's first client, until a neutral liberx header stands in front of it.
+          sites: [Chokepoints::Site.new(glob: 'musl/src/internal/erxos/syscall.c'),
+                  Chokepoints::Site.new(glob: 'musl/src/thread/erxos/clone.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
@@ -152,6 +156,8 @@ module Erx
           pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/console.[ch]'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_start.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'musl/src/internal/erxos/syscall.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),

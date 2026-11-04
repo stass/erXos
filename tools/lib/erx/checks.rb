@@ -144,7 +144,10 @@ module Erx
     # kernel/ (kernel/crypto/*) is compiled into the cores' archive and linked
     # into the kernel as kernel/core is, so every rule over erXos's own C
     # reads it too.
-    def chokepoint_upstream?(relative) = imported?(relative) && !relative.start_with?('kernel/')
+    # musl's erxos directories are erXos's own code in an import's tree, so those rules read them too.
+    def chokepoint_upstream?(relative)
+      imported?(relative) && !relative.start_with?('kernel/') && !relative.match?(%r{\Amusl/(?:arch|src/[^/]+)/erxos/})
+    end
 
     # A listed name must reach, through no directory alias, a regular file or
     # a link to another listed regular file. A tracked file deleted from the
