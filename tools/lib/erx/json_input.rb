@@ -16,21 +16,45 @@ module Erx
     # This is a fault of the host, not of any input.
     class Unsupported < Error; end
 
-    PARSE_OPTIONS = { max_nesting: 64, allow_duplicate_key: false }.freeze
+    # Raised by DistinctKeys when an object repeats a key. It is a
+    # JSON::ParserError so that it leaves the parser the way json's own
+    # refusal does, and its message never quotes the key.
+    class DuplicateKey < JSON::ParserError
+      def initialize = super('duplicate key')
+    end
 
-    # json reports a refused duplicate as a ParserError whose message starts
-    # with this text and then quotes the key. This chooses only the wording
-    # of a diagnostic: a json that words it differently still refuses the
-    # input, which is then reported as malformed.
+    # The object class json builds each parsed object from. A json that
+    # calls []= once per member (json 2.9 does) refuses a repeated key here.
+    # The result is converted to a plain Hash before it is returned.
+    class DistinctKeys < Hash
+      def []=(key, value)
+        raise DuplicateKey if key?(key)
+
+        super
+      end
+    end
+    private_constant :DistinctKeys
+
+    # Two independent mechanisms refuse a duplicate, and both are always
+    # requested: json 2.13 and later refuse it themselves
+    # (allow_duplicate_key) and no longer call []= per member, while older
+    # json ignores that option and relies on DistinctKeys. Neither
+    # is selected by version.
+    PARSE_OPTIONS = { max_nesting: 64, allow_duplicate_key: false, object_class: DistinctKeys }.freeze
+
+    # json reports its own refused duplicate as a ParserError whose message
+    # starts with this text and then quotes the key. This chooses only the
+    # wording of a diagnostic: a json that words it differently still refuses
+    # the input, which is then reported as malformed.
     def self.duplicate_key_error?(error) = error.message.start_with?('duplicate key')
 
     # Metadata has one spelling per key. Accepting a duplicate would let the
-    # reviewed text disagree with the value a consumer sees, so the json
-    # parser refuses it. json ignores options it does not know, so whether
-    # this json honors allow_duplicate_key is probed once by behavior, not by
-    # version: two objects that differ only in whether a key repeats must be
-    # accepted and refused respectively. Any other json makes every parse fail
-    # rather than accept duplicates silently.
+    # reviewed text disagree with the value a consumer sees. json ignores
+    # options it does not know, so whether some mechanism above works is
+    # probed once by behavior, not by version: two objects that differ only
+    # in whether a key repeats must be accepted and refused respectively.
+    # If this json refuses neither way, every parse fails rather than accept
+    # duplicates silently.
     def self.refuses_only_duplicate_keys?
       parses?('{"key":0,"other":0}') && !parses?('{"key":0,"key":0}')
     end
@@ -56,34 +80,38 @@ module Erx
       end
       text = bytes.dup.force_encoding(Encoding::UTF_8)
       raise Error, "#{label} is not valid UTF-8" unless text.valid_encoding?
-      value = JSON.parse(text, **PARSE_OPTIONS)
-      validate_values(value, label: label)
-      value
+      validated(JSON.parse(text, **PARSE_OPTIONS), label: label)
     rescue JSON::ParserError => error
       # Only the kind of failure is kept, so input never reaches a diagnostic.
       kind = duplicate_key_error?(error) ? 'duplicate JSON object key' : 'malformed JSON'
       raise Error, "invalid #{label}: #{kind}"
     end
 
-    def self.validate_values(value, label:)
-      pending = [value]
-      until pending.empty?
-        item = pending.pop
-        case item
-        when Hash
-          item.each do |key, member|
-            raise Error, "#{label} has an invalid UTF-8 key" unless key.valid_encoding?
-            pending << member
-          end
-        when Array
-          pending.concat(item)
-        when String
-          raise Error, "#{label} has an invalid UTF-8 value" unless item.valid_encoding?
-        when Float
-          raise Error, "#{label} has a non-finite number" unless item.finite?
+    # Checks every string and number and returns the same value with each
+    # object turned into a plain Hash. The parser's max_nesting bounds the
+    # recursion.
+    def self.validated(value, label:)
+      case value
+      when Hash
+        value.to_h do |key, member|
+          raise Error, "#{label} has an invalid UTF-8 key" unless key.valid_encoding?
+
+          [key, validated(member, label: label)]
         end
+      when Array
+        value.map { |member| validated(member, label: label) }
+      when String
+        raise Error, "#{label} has an invalid UTF-8 value" unless value.valid_encoding?
+
+        value
+      when Float
+        raise Error, "#{label} has a non-finite number" unless value.finite?
+
+        value
+      else
+        value
       end
     end
-    private_class_method :validate_values
+    private_class_method :validated
   end
 end

@@ -11,8 +11,8 @@ class JsonInputTest < Minitest::Test
   JSON_INPUT = File.expand_path('../../tools/lib/erx/json_input.rb', __dir__)
 
   # A child process stands in for another json, named by its second argument:
-  # 'optionless' ignores allow_duplicate_key, as a json without the option
-  # does, and keeps the last duplicate; 'refuses-objects' refuses every object
+  # 'optionless' ignores both allow_duplicate_key and object_class, as a json
+  # with neither mechanism does, and keeps the last duplicate; 'refuses-objects' refuses every object
   # with json's duplicate-key error, so refusing the probe's duplicate proves
   # nothing; 'reworded' refuses duplicates with a differently worded error.
   # The child prints how JsonInput reads one object without and one with a
@@ -23,7 +23,7 @@ class JsonInputTest < Minitest::Test
       def parse(source, options = nil)
         mode = ARGV.fetch(1)
         raise JSON::ParserError, 'duplicate key "key"' if mode == 'refuses-objects'
-        options = (options || {}).reject { |key, _| key == :allow_duplicate_key } if mode == 'optionless'
+        options = (options || {}).except(:allow_duplicate_key, :object_class) if mode == 'optionless'
         super(source, options)
       rescue JSON::ParserError => error
         raise if mode != 'reworded'
@@ -89,6 +89,16 @@ class JsonInputTest < Minitest::Test
     result = Erx::JsonInput.parse('{"key":[1,true,null,"value"],"Key":{}}')
     assert_equal({ 'key' => [1, true, nil, 'value'], 'Key' => {} }, result)
     assert_instance_of Hash, result
+  end
+
+  # The objects the parser builds are internal; callers see only plain
+  # Hashes and Arrays at every depth.
+  def test_nested_objects_are_plain_hashes
+    result = Erx::JsonInput.parse('{"outer":[{"inner":{"key":1}}],"empty":{}}')
+    assert_instance_of Hash, result.fetch('outer').first
+    assert_instance_of Hash, result.fetch('outer').first.fetch('inner')
+    assert_instance_of Hash, result.fetch('empty')
+    assert_equal 'inner', result.fetch('outer').first.keys.first
   end
 
   def test_malformed_json_diagnostic_does_not_echo_input_contents
