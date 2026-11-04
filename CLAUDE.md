@@ -64,6 +64,10 @@ supervision and inspection span them all.
   belong to the component that replaces it; on the stopgap they are
   recorded as residuals, not engineered into inherited code. Its reviews
   check those commitments, not the target design's.
+* **Nothing ships until I say so.** No one deploys erXos with stopgaps in
+  production, so polishing a stopgap is throwaway work, even where untrusted
+  input reaches it. What we need is to know where its gaps are: each is
+  recorded accurately as a residual, and does not have to be fixed.
 * **No backward compatibility in development.** Until a release promises
   compatibility, nothing erXos defines owes any to its own earlier forms.
   A change to a format, protocol, interface or stored state replaces the
