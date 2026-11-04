@@ -12,7 +12,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
-#include "liberx/backend/fiasco/park_table.h"
+#include "liberx/backend/core/park_table.h"
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/umtx_table.h"
 
@@ -48,7 +48,7 @@ typedef struct erx_fiasco_thread_record {
 	uint32_t		index;
 	uint64_t		semaphore;	/* the capability, from the create's reply */
 	erx_fiasco_umtx_node_t	node;
-	uint32_t		executor_slot;	/* its slot in the group, or ERX_FIASCO_PARK_NO_SLOT for a worker */
+	uint32_t		executor_slot;	/* its slot in the group, or ERX_BACKEND_PARK_NO_SLOT for a worker */
 	uint64_t		clear_word;	/* the reaper stores 0 here and wakes it; 0 for none */
 	uint64_t		release_base;	/* a detached thread's range, for the reaper to release */
 	uint64_t		release_size;
@@ -104,7 +104,7 @@ enum {
 	/* One slot for each IRQ object. */
 	ERX_FIASCO_SLOT_IRQS,
 	/* Each task's run of slots: service_task.c divides them. */
-	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_FIASCO_PARK_OBJECTS_MAX
+	ERX_FIASCO_SLOT_TASK_RUNS = ERX_FIASCO_SLOT_IRQS + ERX_BACKEND_PARK_OBJECTS_MAX
 };
 
 /* The first thread's kernel-given UTCB: its page holds the service's and the watchdog's too. */

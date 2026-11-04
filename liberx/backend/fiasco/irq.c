@@ -26,7 +26,7 @@
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/thread.h"
 
-#define IRQ_OBJECTS_MAX		ERX_FIASCO_PARK_OBJECTS_MAX
+#define IRQ_OBJECTS_MAX		ERX_BACKEND_PARK_OBJECTS_MAX
 
 typedef struct irq_object {
 	bool	present;

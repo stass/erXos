@@ -18,12 +18,12 @@ module Erx
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory: the effects over sigma0 and the two pure cores.
-    VM = %W[#{BACKEND}/vm.c #{BACKEND}/page_pool.c #{BACKEND}/vm_table.c].freeze
+    VM = %W[#{BACKEND}/vm.c #{BACKEND}/page_pool.c liberx/backend/core/vm_table.c].freeze
     # The root service and what it runs on: threads, waits and the end path. The
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
     SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
-                 #{BACKEND}/park.c #{BACKEND}/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
+                 #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c].freeze

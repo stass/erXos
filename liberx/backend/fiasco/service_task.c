@@ -177,8 +177,8 @@ erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
 	    task_failed(l4_task_map(erx_fiasco_task_cap(task), L4_BASE_TASK_CAP,
 	    l4_obj_fpage(erx_fiasco_task_gate_cap(task), 0, L4_CAP_FPAGE_RWS),
 	    l4_map_obj_control(L4_BASE_PAGER_CAP, L4_MAP_ITEM_MAP))) ||
-	    erx_fiasco_vm_body(task, ERX_FIASCO_VM_RESERVE, table, TASK_TABLE_BYTES, ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(task, ERX_FIASCO_VM_COMMIT, table, TASK_TABLE_BYTES, 0, NULL) != ERX_OK) {
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, table, TASK_TABLE_BYTES, ERX_VM_FIXED, &reserved) != ERX_OK ||
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, table, TASK_TABLE_BYTES, 0, NULL) != ERX_OK) {
 		task_end(task, 0);
 		task_delete(erx_fiasco_task_ended_cap(task));
 		task_rows[task].state = ERX_FIASCO_TASK_ABSENT;
@@ -200,8 +200,8 @@ task_segment_load(uint32_t task, const uint8_t *image, const erx_elf_load_t *loa
 	const uint64_t size = (load->segment.mem_size + TASK_PAGE_MASK) & ~TASK_PAGE_MASK;
 	uint64_t reserved;
 
-	if (erx_fiasco_vm_body(task, ERX_FIASCO_VM_RESERVE, start, size, ERX_VM_FIXED | ERX_VM_NOREPLACE, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(task, ERX_FIASCO_VM_COMMIT, start, size, 0, NULL) != ERX_OK)
+	if (erx_fiasco_vm_body(task, ERX_BACKEND_VM_RESERVE, start, size, ERX_VM_FIXED | ERX_VM_NOREPLACE, &reserved) != ERX_OK ||
+	    erx_fiasco_vm_body(task, ERX_BACKEND_VM_COMMIT, start, size, 0, NULL) != ERX_OK)
 		return (false);
 	for (uint64_t done = 0; done < size; done += ERX_PAGE_SIZE) {
 		const uintptr_t window = erx_fiasco_vm_task_window(task, start + done);
@@ -214,7 +214,7 @@ task_segment_load(uint32_t task, const uint8_t *image, const erx_elf_load_t *loa
 		if (load->segment.prot == ERX_PROT_RX)
 			erx_fiasco_cache_make_coherent(window, ERX_PAGE_SIZE);
 	}
-	return (erx_fiasco_vm_body(task, ERX_FIASCO_VM_PROTECT, start, size, load->segment.prot, NULL) == ERX_OK);
+	return (erx_fiasco_vm_body(task, ERX_BACKEND_VM_PROTECT, start, size, load->segment.prot, NULL) == ERX_OK);
 }
 
 /*

@@ -138,9 +138,9 @@ service_thread_table_init(void)
 	l4_fpage_t area = l4_fpage(erx_fiasco_thread_native_slot(0), ERX_FIASCO_UTCB_AREA_ORDER, L4_FPAGE_RW);
 	uint64_t reserved;
 
-	if (erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_FIASCO_VM_RESERVE, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048),
+	if (erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_BACKEND_VM_RESERVE, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048),
 	    ERX_VM_FIXED, &reserved) != ERX_OK ||
-	    erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_FIASCO_VM_COMMIT, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048), 0,
+	    erx_fiasco_vm_body(SERVICE_ROOT_TASK, ERX_BACKEND_VM_COMMIT, table, ERX_FIASCO_THREADS_MAX * UINT64_C(2048), 0,
 	    NULL) != ERX_OK)
 		return ("threads: no memory for the thread table");
 	if (l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP, &area)) < 0)
@@ -269,18 +269,18 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_VM_RESERVE:
 		if (flagged->flags > UINT32_MAX)
 			return (ERX_EINVAL);
-		return (erx_fiasco_vm_body(decoded->task, ERX_FIASCO_VM_RESERVE, flagged->addr, flagged->size,
+		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_RESERVE, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, &reply->first));
 	case ERX_FIASCO_CALL_VM_COMMIT:
-		return (erx_fiasco_vm_body(decoded->task, ERX_FIASCO_VM_COMMIT, range->addr, range->size, 0, NULL));
+		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_COMMIT, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_VM_DECOMMIT:
-		return (erx_fiasco_vm_body(decoded->task, ERX_FIASCO_VM_DECOMMIT, range->addr, range->size, 0, NULL));
+		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_DECOMMIT, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_VM_RELEASE:
-		return (erx_fiasco_vm_body(decoded->task, ERX_FIASCO_VM_RELEASE, range->addr, range->size, 0, NULL));
+		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_RELEASE, range->addr, range->size, 0, NULL));
 	case ERX_FIASCO_CALL_SPACE_PROTECT:
 		if (flagged->flags > UINT32_MAX)
 			return (ERX_EINVAL);
-		return (erx_fiasco_vm_body(decoded->task, ERX_FIASCO_VM_PROTECT, flagged->addr, flagged->size,
+		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_PROTECT, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, NULL));
 	case ERX_FIASCO_CALL_IRQ_CREATE:
 		return (erx_fiasco_irq_create_body(((const erx_fiasco_irq_create_request_t *)words)->kind,

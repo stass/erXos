@@ -25,10 +25,10 @@ static bool park_down(void *, uint32_t, uint64_t);
 static void park_absorb(void *, uint32_t);
 static void park_up(void *, uint32_t);
 
-static const erx_fiasco_park_effects_t park_effects = { .lock = park_lock, .unlock = park_unlock,
+static const erx_backend_park_effects_t park_effects = { .lock = park_lock, .unlock = park_unlock,
     .down = park_down, .absorb = park_absorb, .up = park_up };
 static _Alignas(ERX_PAGE_SIZE) erx_group_stat_t park_status;
-static erx_fiasco_park_group_t park_group = { .status = &park_status };
+static erx_backend_park_group_t park_group = { .status = &park_status };
 static erx_fiasco_lock_t park_group_lock;
 /* Which thread index runs in each slot, written by the claim before the thread starts. */
 static _Atomic uint32_t park_slot_index[ERX_GROUP_EXECUTORS_MAX];
@@ -77,9 +77,9 @@ park_up(void *context, uint32_t slot)
 uint32_t
 erx_fiasco_executor_claim(uint32_t index)
 {
-	const uint32_t slot = erx_fiasco_park_claim(&park_group, &park_effects, NULL);
+	const uint32_t slot = erx_backend_park_claim(&park_group, &park_effects, NULL);
 
-	if (slot != ERX_FIASCO_PARK_NO_SLOT)
+	if (slot != ERX_BACKEND_PARK_NO_SLOT)
 		atomic_store_explicit(&park_slot_index[slot], index, memory_order_relaxed);
 	return (slot);
 }
@@ -87,7 +87,7 @@ erx_fiasco_executor_claim(uint32_t index)
 void
 erx_fiasco_executor_release(uint32_t slot)
 {
-	erx_fiasco_park_release(&park_group, &park_effects, NULL, slot);
+	erx_backend_park_release(&park_group, &park_effects, NULL, slot);
 }
 
 const erx_group_stat_t *
@@ -97,15 +97,22 @@ erx_fiasco_group_status(void)
 }
 
 void
-erx_fiasco_group_trigger(uint32_t object)
+erx_fiasco_group_trigger(void)
 {
-	erx_fiasco_park_trigger(&park_group, &park_effects, NULL, object);
+	erx_backend_park_trigger(&park_group, &park_effects, NULL);
+}
+
+void
+erx_fiasco_group_signal(uint32_t object)
+{
+	/* The dispatcher's label is an index of ours, so no refusal comes back. */
+	(void)erx_backend_park_signal(&park_group, &park_effects, NULL, object);
 }
 
 uint32_t
 erx_fiasco_group_take(uint32_t max, uint32_t *objects)
 {
-	return (erx_fiasco_park_take(&park_group, &park_effects, NULL, max, objects));
+	return (erx_backend_park_take(&park_group, &park_effects, NULL, max, objects));
 }
 
 int
@@ -113,13 +120,13 @@ erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline)
 {
 	const uint32_t slot = erx_fiasco_thread_self()->executor_slot;
 
-	if (slot == ERX_FIASCO_PARK_NO_SLOT)
+	if (slot == ERX_BACKEND_PARK_NO_SLOT)
 		return (ERX_ETYPE);
-	return (erx_fiasco_park_wait(&park_group, &park_effects, NULL, slot, group_epoch, slot_epoch, deadline));
+	return (erx_backend_park_wait(&park_group, &park_effects, NULL, slot, group_epoch, slot_epoch, deadline));
 }
 
 int
 erx_executor_wake(uint32_t slot)
 {
-	return (erx_fiasco_park_wake(&park_group, &park_effects, NULL, slot));
+	return (erx_backend_park_wake(&park_group, &park_effects, NULL, slot));
 }

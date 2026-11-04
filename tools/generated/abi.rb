@@ -5941,6 +5941,7 @@ module Erx
         base: types.fetch("u32"),
         members: {
           "line".b => 1,
+          "msi".b => 2,
           "soft".b => 0
         }.freeze,
         flags: false,
@@ -10674,6 +10675,12 @@ module Erx
           "irq_line".b => Constant.new(
             name: "irq_line".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "irq_msi".b => Constant.new(
+            name: "irq_msi".b,
+            value: 2,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

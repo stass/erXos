@@ -133,7 +133,7 @@ erx_fiasco_thread_first_init(void)
 	atomic_store_explicit(&first->used, ERX_FIASCO_THREAD_STARTED, memory_order_relaxed);
 	first->index = 0;
 	first->semaphore = erx_fiasco_thread_semaphore_cap(0);
-	first->executor_slot = ERX_FIASCO_PARK_NO_SLOT;
+	first->executor_slot = ERX_BACKEND_PARK_NO_SLOT;
 	thread_first_utcb = l4_utcb();
 	atomic_store_explicit(&first->utcb.self, (uint64_t)(uintptr_t)&first->utcb, memory_order_relaxed);
 	l4_utcb_tcr()->user[0] = (l4_umword_t)(uintptr_t)first;
@@ -175,7 +175,7 @@ int
 erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thread_class,
     uint64_t *thread)
 {
-	uint32_t index, slot = ERX_FIASCO_PARK_NO_SLOT;
+	uint32_t index, slot = ERX_BACKEND_PARK_NO_SLOT;
 	erx_fiasco_thread_record_t *record;
 	erx_fiasco_reply_t reply;
 	int status;
@@ -197,7 +197,7 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 	record = erx_fiasco_thread_record(index);
 	if (thread_class == ERX_THREAD_CLASS_EXECUTOR) {
 		slot = erx_fiasco_executor_claim(index);
-		if (slot == ERX_FIASCO_PARK_NO_SLOT) {
+		if (slot == ERX_BACKEND_PARK_NO_SLOT) {
 			atomic_store_explicit(&record->used, ERX_FIASCO_THREAD_FREE, memory_order_release);
 			return (ERX_ENOMEM);
 		}
@@ -208,7 +208,7 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 
 	status = erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_CREATE, &request, sizeof(request), &reply);
 	if (status != ERX_OK) {
-		if (slot != ERX_FIASCO_PARK_NO_SLOT)
+		if (slot != ERX_BACKEND_PARK_NO_SLOT)
 			erx_fiasco_executor_release(slot);
 		atomic_store_explicit(&record->used, ERX_FIASCO_THREAD_FREE, memory_order_release);
 		return (status);
@@ -259,7 +259,7 @@ erx_thread_start(uint64_t thread)
 	status = erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &request, sizeof(request), &reply);
 	/* A created record has its kernel objects, so a refusal here deleted them. It leaves the marker it wrote, a recorded gap. */
 	if (status != ERX_OK) {
-		if (record->executor_slot != ERX_FIASCO_PARK_NO_SLOT)
+		if (record->executor_slot != ERX_BACKEND_PARK_NO_SLOT)
 			erx_fiasco_executor_release(record->executor_slot);
 		atomic_store_explicit(&record->used, ERX_FIASCO_THREAD_FREE, memory_order_release);
 	}
@@ -389,7 +389,7 @@ reaper_reap(erx_fiasco_thread_record_t *record)
 		atomic_store_explicit((_Atomic uint32_t *)(uintptr_t)record->clear_word, 0, memory_order_release);
 		(void)erx_umtx_wake(record->clear_word, 1);
 	}
-	if (record->executor_slot != ERX_FIASCO_PARK_NO_SLOT)
+	if (record->executor_slot != ERX_BACKEND_PARK_NO_SLOT)
 		erx_fiasco_executor_release(record->executor_slot);
 	atomic_store_explicit(&record->used, ERX_FIASCO_THREAD_FREE, memory_order_release);
 }

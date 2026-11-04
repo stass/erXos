@@ -132,4 +132,6 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Fixes: let the dispatch loop and the core share a translation unit at
   -O2, or emit the per-call steps from the plan as straight-line code.
 
-* **A task's exit over a large reservation** (`erx_fiasco_vm_table_clear`, Phase 1 backend): it probes the page index for every reserved page, committed or not, on the one service thread. Settled by timing a stop of a task holding a 1 GiB reservation under `tools/erx bench`.
+* **A task's exit over a large reservation** (`erx_backend_vm_table_clear`, Phase 1 backend): it probes the page index for every reserved page, committed or not, on the one service thread. Settled by timing a stop of a task holding a 1 GiB reservation under `tools/erx bench`.
+
+* **Hosted commits take a host call per host page** (`liberx/backend/hosted/vm.c`, `host_refresh`). It sets one protection a page at a time, where a run could be one `mprotect`. A hosted ERTS allocator's commit may notice. Settled by timing a hosted boot's commits against a coalesced version.

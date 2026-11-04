@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#ifndef ERX_FIASCO_VM_TABLE_H
-#define ERX_FIASCO_VM_TABLE_H
+#ifndef ERX_BACKEND_VM_TABLE_H
+#define ERX_BACKEND_VM_TABLE_H
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "erx/cdefs.h"
-#include "liberx/backend/fiasco/page_pool.h"
 
 /*
  * The range table of a task (docs/design-stopgap.md, "The range table" and
@@ -28,11 +27,11 @@
  *           table's label to its window page and protection. A page absent here is uncommitted, and has no protection
  *           to remember: access to it means committing it. Each entry owns a
  *           distinct window page, and the index has two slots for every page the
- *           window holds (erx_fiasco_vm_layout), so committing never finds it
+ *           window holds (erx_backend_vm_layout), so committing never finds it
  *           full and every probe ends at an empty slot.
  *
- * A call is one plan, then one apply. erx_fiasco_vm_plan validates the whole
- * request and counts the pages it needs, changing nothing; erx_fiasco_vm_call
+ * A call is one plan, then one apply. erx_backend_vm_plan validates the whole
+ * request and counts the pages it needs, changing nothing; erx_backend_vm_call
  * refuses a plan the pool cannot cover and only then applies it, so a refused
  * call changes nothing and an applied one cannot fail. The effects it calls have
  * no way to report failure: a kernel that refuses a map the plan allows leaves
@@ -43,10 +42,10 @@
  */
 
 /* A reserved run of addresses, page-aligned; end is exclusive. */
-typedef struct erx_fiasco_vm_range {
+typedef struct erx_backend_vm_range {
 	uint64_t	start;
 	uint64_t	end;
-} erx_fiasco_vm_range_t;
+} erx_backend_vm_range_t;
 
 /*
  * A slot of the page index, whose key is the page's address with its table's label in
@@ -56,62 +55,62 @@ typedef struct erx_fiasco_vm_range {
 typedef struct erx_fiasco_vm_page {
 	uint64_t	key;
 	uint64_t	window_and_state;	/* a window page's address, low bits the state */
-} erx_fiasco_vm_page_t;
+} erx_backend_vm_page_t;
 
-typedef struct erx_fiasco_vm_table {
-	erx_fiasco_vm_range_t	*ranges;
+typedef struct erx_backend_vm_table {
+	erx_backend_vm_range_t	*ranges;
 	size_t			 nranges;
 	size_t			 ranges_max;
-	erx_fiasco_vm_page_t	*pages;
+	erx_backend_vm_page_t	*pages;
 	size_t			 pages_mask;	/* slots - 1; slots are a power of two */
 	uint32_t		 label;		/* below ERX_PAGE_SIZE, and no other table's */
 	uint64_t		 area_start;	/* where reservations may lie */
 	uint64_t		 area_end;
-} erx_fiasco_vm_table_t;
+} erx_backend_vm_table_t;
 
 /* What the window's first pages must hold for an index covering the whole window. */
-typedef struct erx_fiasco_vm_layout {
+typedef struct erx_backend_vm_layout {
 	uint64_t	index_pages;
 	uint64_t	index_slots;
-} erx_fiasco_vm_layout_t;
+} erx_backend_vm_layout_t;
 
-typedef enum erx_fiasco_vm_op {
-	ERX_FIASCO_VM_RESERVE,
-	ERX_FIASCO_VM_COMMIT,
-	ERX_FIASCO_VM_DECOMMIT,
-	ERX_FIASCO_VM_RELEASE,
-	ERX_FIASCO_VM_PROTECT
-} erx_fiasco_vm_op_t;
+typedef enum erx_backend_vm_op {
+	ERX_BACKEND_VM_RESERVE,
+	ERX_BACKEND_VM_COMMIT,
+	ERX_BACKEND_VM_DECOMMIT,
+	ERX_BACKEND_VM_RELEASE,
+	ERX_BACKEND_VM_PROTECT
+} erx_backend_vm_op_t;
 
-typedef struct erx_fiasco_vm_request {
-	erx_fiasco_vm_op_t	op;
+typedef struct erx_backend_vm_request {
+	erx_backend_vm_op_t	op;
 	uint64_t		addr;	/* a reserve without ERX_VM_FIXED ignores it */
 	uint64_t		size;
 	uint32_t		flags;	/* ERX_VM_*, for a reserve */
 	uint32_t		prot;	/* ERX_PROT_*, for a protect */
-} erx_fiasco_vm_request_t;
+} erx_backend_vm_request_t;
 
 /*
  * Each state a page can be in. A protection is a committed page's; holes have no
  * state here, since no record covers them.
  */
-typedef enum erx_fiasco_vm_state {
-	ERX_FIASCO_PAGE_UNCOMMITTED,
-	ERX_FIASCO_PAGE_NONE,
-	ERX_FIASCO_PAGE_R,
-	ERX_FIASCO_PAGE_RW,
-	ERX_FIASCO_PAGE_RX
-} erx_fiasco_vm_state_t;
-#define ERX_FIASCO_PAGE_STATES	5u
+typedef enum erx_backend_vm_state {
+	ERX_BACKEND_PAGE_UNCOMMITTED,
+	ERX_BACKEND_PAGE_NONE,
+	ERX_BACKEND_PAGE_R,
+	ERX_BACKEND_PAGE_RW,
+	ERX_BACKEND_PAGE_RX
+} erx_backend_vm_state_t;
+#define ERX_BACKEND_PAGE_STATES	5u
 
 /* A plan. Its range is the request's, or the one a reserve chose. */
-typedef struct erx_fiasco_vm_plan {
-	erx_fiasco_vm_op_t	op;
-	erx_fiasco_vm_state_t	target;		/* what each reserved page in the range becomes */
+typedef struct erx_backend_vm_plan {
+	erx_backend_vm_op_t	op;
+	erx_backend_vm_state_t	target;		/* what each reserved page in the range becomes */
 	uint64_t		start;
 	uint64_t		end;
 	uint64_t		pages_needed;
-} erx_fiasco_vm_plan_t;
+} erx_backend_vm_plan_t;
 
 /*
  * What moving one page between two states takes, in this order: take and zero a
@@ -120,34 +119,39 @@ typedef struct erx_fiasco_vm_plan {
  * rights, so a change in both directions drops first. Moving an uncommitted page
  * to no access changes nothing: it stays uncommitted, as `after` says.
  */
-typedef struct erx_fiasco_vm_steps {
+typedef struct erx_backend_vm_steps {
 	bool			take;
 	bool			give_back;
 	uint8_t			drop;
 	uint8_t			map;
-	erx_fiasco_vm_state_t	after;
-} erx_fiasco_vm_steps_t;
+	erx_backend_vm_state_t	after;
+} erx_backend_vm_steps_t;
 
 /* The kernel-facing half, in the space of the table's label. Each ends the machine rather than report a refusal. */
-typedef struct erx_fiasco_vm_effects {
+typedef struct erx_backend_vm_effects {
 	void	(*map)(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot);
 	void	(*unmap)(uint32_t label, uint64_t addr, uint32_t rights);
-} erx_fiasco_vm_effects_t;
+	/* A page for addr, reading zeros, its address page-aligned and nonzero. The plan counted it, so there is one. */
+	uintptr_t (*take)(uint64_t addr);
+	/* Gives back the page addr held; nothing maps it any more. */
+	void	(*give)(uintptr_t window, uint64_t addr);
+	uint64_t (*free_pages)(void);
+} erx_backend_vm_effects_t;
 
 /* The index a window of this many pages needs; never empty. */
-erx_fiasco_vm_layout_t	erx_fiasco_vm_layout(uint64_t);
+erx_backend_vm_layout_t	erx_backend_vm_layout(uint64_t);
 
 /* Empties the machine's index, of a power of two slots. Every table then shares it. */
-void	erx_fiasco_vm_index_init(erx_fiasco_vm_page_t *, size_t);
+void	erx_backend_vm_index_init(erx_backend_vm_page_t *, size_t);
 
 /*
  * An empty table of this label over [area_start, area_end), in an index whose pages
  * hold none of the label's. The caller keeps both arrays for the table's life.
  */
-void	erx_fiasco_vm_table_init(erx_fiasco_vm_table_t *, uint32_t, erx_fiasco_vm_range_t *,
-	    size_t, erx_fiasco_vm_page_t *, size_t, uint64_t, uint64_t);
+void	erx_backend_vm_table_init(erx_backend_vm_table_t *, uint32_t, erx_backend_vm_range_t *,
+	    size_t, erx_backend_vm_page_t *, size_t, uint64_t, uint64_t);
 
-erx_fiasco_vm_steps_t	erx_fiasco_vm_steps(erx_fiasco_vm_state_t, erx_fiasco_vm_state_t);
+erx_backend_vm_steps_t	erx_backend_vm_steps(erx_backend_vm_state_t, erx_backend_vm_state_t);
 
 /*
  * Plans a request, changing nothing. Refuses:
@@ -163,20 +167,20 @@ erx_fiasco_vm_steps_t	erx_fiasco_vm_steps(erx_fiasco_vm_state_t, erx_fiasco_vm_s
  *
  * Commit and decommit act on the reserved pages in the range and pass over holes.
  */
-int	erx_fiasco_vm_plan(const erx_fiasco_vm_table_t *, const erx_fiasco_vm_request_t *,
-	    erx_fiasco_vm_plan_t *) ERX_WARN_UNUSED_RESULT;
+int	erx_backend_vm_plan(const erx_backend_vm_table_t *, const erx_backend_vm_request_t *,
+	    erx_backend_vm_plan_t *) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Carries out a request whole, or refuses it with nothing changed: the plan's
  * refusals, and ERX_ENOMEM when the pool holds fewer pages than the plan needs.
  * A reserve reports its address in the last argument, which it may leave NULL.
  */
-int	erx_fiasco_vm_call(erx_fiasco_vm_table_t *, erx_fiasco_pool_t *,
-	    const erx_fiasco_vm_effects_t *, const erx_fiasco_vm_request_t *,
+int	erx_backend_vm_call(erx_backend_vm_table_t *,
+	    const erx_backend_vm_effects_t *, const erx_backend_vm_request_t *,
 	    uint64_t *) ERX_WARN_UNUSED_RESULT;
 
 /* The window page behind a committed address of the table, or 0 for any other. */
-uintptr_t	erx_fiasco_vm_window(const erx_fiasco_vm_table_t *, uint64_t);
+uintptr_t	erx_backend_vm_window(const erx_backend_vm_table_t *, uint64_t);
 
 /*
  * Maps pages of an object, itself a table whose committed pages it owns, at reserved
@@ -190,11 +194,10 @@ uintptr_t	erx_fiasco_vm_window(const erx_fiasco_vm_table_t *, uint64_t);
  *   ERX_ERANGE  addresses not wholly reserved, or pages the object does not hold;
  *   ERX_EEXIST  a committed page among the addresses.
  */
-int	erx_fiasco_vm_map_object(const erx_fiasco_vm_table_t *, const erx_fiasco_vm_table_t *,
-	    const erx_fiasco_vm_effects_t *, uint64_t, uint64_t, uint64_t, uint32_t) ERX_WARN_UNUSED_RESULT;
+int	erx_backend_vm_map_object(const erx_backend_vm_table_t *, const erx_backend_vm_table_t *,
+	    const erx_backend_vm_effects_t *, uint64_t, uint64_t, uint64_t, uint32_t) ERX_WARN_UNUSED_RESULT;
 
 /* Releases every run, so the table's pages go back to the pool and its label is free. */
-void	erx_fiasco_vm_table_clear(erx_fiasco_vm_table_t *, erx_fiasco_pool_t *,
-	    const erx_fiasco_vm_effects_t *);
+void	erx_backend_vm_table_clear(erx_backend_vm_table_t *, const erx_backend_vm_effects_t *);
 
-#endif /* ERX_FIASCO_VM_TABLE_H */
+#endif /* ERX_BACKEND_VM_TABLE_H */

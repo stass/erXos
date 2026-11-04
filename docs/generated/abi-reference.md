@@ -215,6 +215,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_IMAGE_VERSION` | 1 |
 | `ERX_IMAGE_WRITABLE_MAX` | 67108864 |
 | `ERX_IRQ_LINE` | 1 |
+| `ERX_IRQ_MSI` | 2 |
 | `ERX_IRQ_SOFT` | 0 |
 | `ERX_K_BUDGET` | 1 |
 | `ERX_K_DMA` | 9 |

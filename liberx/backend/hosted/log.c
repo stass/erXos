@@ -14,8 +14,10 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,6 +26,7 @@
 #include "erx/core/effects.h"
 #include "erx/log.h"
 #include "liberx/backend/hosted/generated/calls.h"
+#include "liberx/backend/hosted/internal.h"
 #include "liberx/backend/hosted/log.h"
 
 static void erx_hosted_log_sink(const char *, size_t);
@@ -39,6 +42,8 @@ static _Thread_local erx_utcb_t erx_hosted_utcb;
 erx_utcb_t *
 erx_utcb_self(void)
 {
+	/* The block holds its own address, as natively; each thread sets its own, once. */
+	atomic_store_explicit(&erx_hosted_utcb.self, (uint64_t)(uintptr_t)&erx_hosted_utcb, memory_order_relaxed);
 	return (&erx_hosted_utcb);
 }
 
@@ -75,6 +80,17 @@ erx_hosted_log_sink(const char *line, size_t length)
 		line += written;
 		length -= (size_t)written;
 	}
+}
+
+_Noreturn void
+erx_hosted_fatal(const char *why)
+{
+	size_t length = 0;
+
+	while (why[length] != '\0')
+		length++;
+	erx_hosted_log_sink(why, length);
+	abort();
 }
 
 void

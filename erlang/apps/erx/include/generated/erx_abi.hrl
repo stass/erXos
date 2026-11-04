@@ -207,6 +207,7 @@
 -define(ERX_IMAGE_VERSION, 1).
 -define(ERX_IMAGE_WRITABLE_MAX, 67108864).
 -define(ERX_IRQ_LINE, 1).
+-define(ERX_IRQ_MSI, 2).
 -define(ERX_IRQ_SOFT, 0).
 -define(ERX_K_BUDGET, 1).
 -define(ERX_K_DMA, 9).

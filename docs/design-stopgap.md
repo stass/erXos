@@ -240,8 +240,8 @@ A test task's program is a boot-image entry named by the boot argument
 Every consumer kept in Phase 1 has a row, and `ERX_ENOTSUP` answers everything else. This one table
 lists calls, refusals and differences. M7's parity review works from its last column: a difference
 not listed is a bug in one backend. "Service" and "local" say where the body runs. The hosted
-backend gives the same rows and refusals (Track H), and both pass one function-API test set, which
-seeds Track K's conformance roster.
+backend gives the same rows and refusals ([The hosted backend](#the-hosted-backend)), and both pass one function-API test set,
+`test/guest/function_api`, which seeds Track K's conformance roster.
 
 | erXos call | Phase 1 consumer | Body | Result and refusals | erXos's kernel instead |
 | --- | --- | --- | --- | --- |
@@ -286,7 +286,7 @@ pages are a list threaded through the pages, and a page is zeroed when taken. An
 
 ### The range table
 
-A pure core that builds for the host and returns plans (`liberx/backend/fiasco/vm_table.c`). It holds two
+A pure core that builds for the host and returns plans (`liberx/backend/core/vm_table.c`). It holds two
 facts, runs per task and one index for the machine. The **runs** are the task's reserved addresses, sorted and disjoint, in a fixed array; adjacent runs merge, so a range is
 wholly reserved exactly when one run covers it. The **page index** is a hash from a committed page's address and its task to its
 window address and protection. A page absent from it is uncommitted, and has no protection to remember, since giving it access
@@ -827,6 +827,21 @@ the tests.
 ## Differences from erXos's kernel
 
 The last column of [the call table](#the-call-table) is this list.
+
+### The hosted backend
+
+`liberx/backend/hosted/` gives the call table's rows in a macOS process, for the sanitizers and `lldb`. `liberx/backend/api.h` declares the function API both backends give, and `liberx/backend/core/` holds what they share: the park core, the range table and the calls both refuse, so the same refusals and the same park protocol come from one source. A space is the process, a thread is a pthread, a memory object's pages are one `mmap`ped area, a umtx wait is `os_sync_wait_on_address`, and an IRQ object fires in the caller's thread, with no dispatcher. `test/guest/function_api` is the one test set: its cases read no backend's identifier, and its harnesses, `hosted.c` and `guest.c`, give it a place to print.
+
+These differ from the native backend, and a caller must not depend on either side:
+
+* **The host's page is larger.** Apple Silicon's page is 16 KiB and the ABI's is 4 KiB. A host page's protection is the union of its pages', so a touch that must fault natively may succeed hosted when a neighbour in the same host page allows it. A writable and an executable page in one host page cannot be represented, and end the process with a diagnostic. A decommitted page's bytes stay readable while a neighbour keeps its host page, and are cleaned before the page is next taken.
+* **The pool is a count**, of 1 GiB, over a 64 GiB area. Nothing is touched until written.
+* **A thread's stack switches at its start.** The pthread starts on its own stack and moves to the one the start record names, and back to end, in `arch/aarch64/switch_stack.S`, which tells the address sanitizer of each move. The thread pointer is a field read through `erx_thread_pointer`, since the host owns the register. The first thread is a worker with no thread pointer.
+* **Affinity is checked, not applied.** macOS cannot hold a thread to a CPU.
+* **The wake order is the host's.** Natively the oldest waiter wakes first; `os_sync_wake_by_address_any` promises no order, so that case stays with the native guest.
+* **No lines.** `ERX_IRQ_LINE` and `ERX_IRQ_MSI` are `ERX_ENOTSUP`. A trigger of an object not bound delivers nothing.
+* **A reset is exit status 75**, an end `exit(0)`.
+* **A fault is the host's**: the process ends with the host's signal, under `lldb` or a sanitizer, and writes no crash record.
 
 ### Transport
 

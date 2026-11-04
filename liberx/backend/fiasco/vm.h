@@ -9,8 +9,8 @@
 #include <stdint.h>
 
 #include "erx/cdefs.h"
+#include "liberx/backend/core/vm_table.h"
 #include "liberx/backend/fiasco/service_wire.h"
-#include "liberx/backend/fiasco/vm_table.h"
 
 /* The first address of the area the root's range table hands out. */
 #define ERX_FIASCO_AREA_START	UINT64_C(0x4000000000)
@@ -43,7 +43,7 @@ uintptr_t	erx_fiasco_vm_task_window(uint32_t task, uint64_t addr);
  * One call's body, for this task. word is the flags of a reserve or the protection
  * of a protect, and otherwise 0; *reserved is set by a reserve alone.
  */
-int	erx_fiasco_vm_body(uint32_t task, erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size,
+int	erx_fiasco_vm_body(uint32_t task, erx_backend_vm_op_t op, uint64_t addr, uint64_t size,
 	    uint32_t word, uint64_t *reserved) ERX_WARN_UNUSED_RESULT;
 
 /*

@@ -327,11 +327,6 @@ enum fiasco_call u32
   value irq_trigger 35
   value time_set_wall 36
 
-# What erx_irq_create makes (docs/design-kernel.md, "IRQ objects").
-enum irq_kind u32
-  value soft 0
-  value line 1
-
 layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field caller u64 0
   field budget u64 8

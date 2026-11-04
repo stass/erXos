@@ -32,7 +32,7 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/page_pool.h"
 #include "liberx/backend/fiasco/vm.h"
-#include "liberx/backend/fiasco/vm_table.h"
+#include "liberx/backend/core/vm_table.h"
 
 /* The backend's address layout: above all RAM, and below 2^39, Fiasco's user limit here. */
 #define VM_WINDOW_BASE	UINT64_C(0x1000000000)
@@ -56,13 +56,13 @@ _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
 
 typedef struct vm_object {
 	bool			used;
-	erx_fiasco_vm_table_t	table;
-	erx_fiasco_vm_range_t	ranges[2];
+	erx_backend_vm_table_t	table;
+	erx_backend_vm_range_t	ranges[2];
 } vm_object_t;
 
 typedef struct vm_task {
-	erx_fiasco_vm_table_t	table;
-	erx_fiasco_vm_range_t	ranges[VM_RANGES_MAX];
+	erx_backend_vm_table_t	table;
+	erx_backend_vm_range_t	ranges[VM_RANGES_MAX];
 	vm_object_t		objects[VM_OBJECTS_MAX];
 } vm_task_t;
 
@@ -71,34 +71,52 @@ static void	vm_map(uint32_t, uintptr_t, uint64_t, uint32_t);
 static void	vm_unmap(uint32_t, uint64_t, uint32_t);
 static void	vm_no_map(uint32_t, uintptr_t, uint64_t, uint32_t);
 static void	vm_no_unmap(uint32_t, uint64_t, uint32_t);
+static uintptr_t vm_take(uint64_t);
+static void	vm_give(uintptr_t, uint64_t);
 static uint64_t	window_grow(uint64_t, unsigned);
 static _Noreturn void vm_refused(const char *);
 
-static const erx_fiasco_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap };
+static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_unmap, .take = vm_take,
+    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages };
 /* For a table no space sees: an object's, or a task's whose mappings went with it. */
-static const erx_fiasco_vm_effects_t vm_no_effects = { .map = vm_no_map, .unmap = vm_no_unmap };
+static const erx_backend_vm_effects_t vm_no_effects = { .map = vm_no_map, .unmap = vm_no_unmap, .take = vm_take,
+    .give = vm_give, .free_pages = erx_fiasco_vm_free_pages };
 static vm_task_t vm_tasks[ERX_FIASCO_TASKS_MAX];
-static erx_fiasco_vm_page_t *vm_index;
+static erx_backend_vm_page_t *vm_index;
 static size_t vm_index_slots;
 static erx_fiasco_pool_t vm_pool;
+
+static uintptr_t
+vm_take(uint64_t addr)
+{
+	(void)addr;
+	return (erx_fiasco_pool_take(&vm_pool));
+}
+
+static void
+vm_give(uintptr_t window, uint64_t addr)
+{
+	(void)addr;
+	erx_fiasco_pool_put(&vm_pool, window);
+}
 
 const char *
 erx_fiasco_vm_init(void)
 {
 	uint64_t cursor = VM_WINDOW_BASE;
 	uint64_t window_pages;
-	erx_fiasco_vm_layout_t layout;
+	erx_backend_vm_layout_t layout;
 
 	cursor = window_grow(cursor, VM_SUPERPAGE_ORDER);
 	cursor = window_grow(cursor, L4_PAGESHIFT);
 	window_pages = (cursor - VM_WINDOW_BASE) >> L4_PAGESHIFT;
-	layout = erx_fiasco_vm_layout(window_pages);
+	layout = erx_backend_vm_layout(window_pages);
 	if (layout.index_pages >= window_pages)
 		return ("memory: sigma0 gave too little to hold the page index");
 
-	vm_index = (erx_fiasco_vm_page_t *)(uintptr_t)VM_WINDOW_BASE;
+	vm_index = (erx_backend_vm_page_t *)(uintptr_t)VM_WINDOW_BASE;
 	vm_index_slots = (size_t)layout.index_slots;
-	erx_fiasco_vm_index_init(vm_index, vm_index_slots);
+	erx_backend_vm_index_init(vm_index, vm_index_slots);
 	erx_fiasco_vm_task_open(0);
 	for (uint64_t page = layout.index_pages; page < window_pages; page++)
 		erx_fiasco_pool_put(&vm_pool, (uintptr_t)(VM_WINDOW_BASE + (page << L4_PAGESHIFT)));
@@ -114,7 +132,7 @@ erx_fiasco_vm_free_pages(void)
 void
 erx_fiasco_vm_task_open(uint32_t task)
 {
-	erx_fiasco_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, VM_RANGES_MAX, vm_index,
+	erx_backend_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, VM_RANGES_MAX, vm_index,
 	    vm_index_slots, VM_AREA_START, VM_AREA_END);
 }
 
@@ -123,10 +141,10 @@ erx_fiasco_vm_task_close(uint32_t task)
 {
 	vm_task_t *const row = &vm_tasks[task];
 
-	erx_fiasco_vm_table_clear(&row->table, &vm_pool, &vm_no_effects);
+	erx_backend_vm_table_clear(&row->table, &vm_no_effects);
 	for (uint32_t handle = 0; handle < VM_OBJECTS_MAX; handle++) {
 		if (row->objects[handle].used)
-			erx_fiasco_vm_table_clear(&row->objects[handle].table, &vm_pool, &vm_no_effects);
+			erx_backend_vm_table_clear(&row->objects[handle].table, &vm_no_effects);
 		row->objects[handle].used = false;
 	}
 }
@@ -134,7 +152,7 @@ erx_fiasco_vm_task_close(uint32_t task)
 uintptr_t
 erx_fiasco_vm_task_window(uint32_t task, uint64_t addr)
 {
-	return (erx_fiasco_vm_window(&vm_tasks[task].table, addr));
+	return (erx_backend_vm_window(&vm_tasks[task].table, addr));
 }
 
 int
@@ -144,21 +162,21 @@ erx_fiasco_vm_object_create(uint32_t task, uint64_t size, uint64_t *handle)
 
 	for (uint32_t free = 0; free < VM_OBJECTS_MAX; free++) {
 		vm_object_t *const object = &row->objects[free];
-		const erx_fiasco_vm_request_t reserve = { .op = ERX_FIASCO_VM_RESERVE, .addr = VM_OBJECT_AREA_START,
+		const erx_backend_vm_request_t reserve = { .op = ERX_BACKEND_VM_RESERVE, .addr = VM_OBJECT_AREA_START,
 		    .size = size, .flags = ERX_VM_FIXED };
-		const erx_fiasco_vm_request_t commit = { .op = ERX_FIASCO_VM_COMMIT, .addr = VM_OBJECT_AREA_START, .size = size };
+		const erx_backend_vm_request_t commit = { .op = ERX_BACKEND_VM_COMMIT, .addr = VM_OBJECT_AREA_START, .size = size };
 		int status;
 
 		if (object->used)
 			continue;
-		erx_fiasco_vm_table_init(&object->table, VM_OBJECT_LABEL(task, free), object->ranges, 2, vm_index,
+		erx_backend_vm_table_init(&object->table, VM_OBJECT_LABEL(task, free), object->ranges, 2, vm_index,
 		    vm_index_slots, VM_OBJECT_AREA_START, VM_OBJECT_AREA_END);
-		status = erx_fiasco_vm_call(&object->table, &vm_pool, &vm_no_effects, &reserve, NULL);
+		status = erx_backend_vm_call(&object->table, &vm_no_effects, &reserve, NULL);
 		if (status != ERX_OK)
 			return (status == ERX_ERANGE ? ERX_ENOMEM : status);
-		status = erx_fiasco_vm_call(&object->table, &vm_pool, &vm_no_effects, &commit, NULL);
+		status = erx_backend_vm_call(&object->table, &vm_no_effects, &commit, NULL);
 		if (status != ERX_OK) {
-			erx_fiasco_vm_table_clear(&object->table, &vm_pool, &vm_no_effects);
+			erx_backend_vm_table_clear(&object->table, &vm_no_effects);
 			return (status);
 		}
 		object->used = true;
@@ -175,17 +193,17 @@ erx_fiasco_vm_object_map(uint32_t task, uint64_t handle, uint64_t addr, uint64_t
 
 	if (handle >= VM_OBJECTS_MAX || !row->objects[handle].used)
 		return (ERX_EINVAL);
-	return (erx_fiasco_vm_map_object(&row->table, &row->objects[handle].table, &vm_effects, addr, size, offset, prot));
+	return (erx_backend_vm_map_object(&row->table, &row->objects[handle].table, &vm_effects, addr, size, offset, prot));
 }
 
 int
-erx_fiasco_vm_body(uint32_t task, erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t word, uint64_t *reserved)
+erx_fiasco_vm_body(uint32_t task, erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t word, uint64_t *reserved)
 {
-	const erx_fiasco_vm_request_t request = { .op = op, .addr = addr, .size = size,
-	    .flags = op == ERX_FIASCO_VM_RESERVE ? word : 0,
-	    .prot = op == ERX_FIASCO_VM_PROTECT ? word : ERX_PROT_NONE };
+	const erx_backend_vm_request_t request = { .op = op, .addr = addr, .size = size,
+	    .flags = op == ERX_BACKEND_VM_RESERVE ? word : 0,
+	    .prot = op == ERX_BACKEND_VM_PROTECT ? word : ERX_PROT_NONE };
 
-	return (erx_fiasco_vm_call(&vm_tasks[task].table, &vm_pool, &vm_effects, &request, reserved));
+	return (erx_backend_vm_call(&vm_tasks[task].table, &vm_effects, &request, reserved));
 }
 
 /*

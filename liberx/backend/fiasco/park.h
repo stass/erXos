@@ -10,7 +10,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
-#include "liberx/backend/fiasco/park_table.h"
+#include "liberx/backend/core/park_table.h"
 
 /*
  * The task's one group of executors, over the park core (docs/design-stopgap.md,
@@ -18,18 +18,17 @@
  * holds its dispatcher and its objects' labels.
  */
 
-/* A slot for the thread of this index, or ERX_FIASCO_PARK_NO_SLOT when the group is full. */
+/* A slot for the thread of this index, or ERX_BACKEND_PARK_NO_SLOT when the group is full. */
 uint32_t	erx_fiasco_executor_claim(uint32_t index);
 void		erx_fiasco_executor_release(uint32_t slot);
 
 /* The page the epochs are mirrored in: an executor reads them before its empty check. */
 const erx_group_stat_t *erx_fiasco_group_status(void);
 
-/*
- * What the dispatcher runs for an object's delivery: it lists the object, the epoch
- * advances and the longest parked wakes.
- */
-void		erx_fiasco_group_trigger(uint32_t object);
+/* The epoch advances and the longest parked wakes. */
+void		erx_fiasco_group_trigger(void);
+/* What the dispatcher runs for an object's delivery: it lists the object, then as a trigger. */
+void		erx_fiasco_group_signal(uint32_t object);
 /* Moves up to max listed objects into objects, oldest first, and returns how many. */
 uint32_t	erx_fiasco_group_take(uint32_t max, uint32_t *objects);
 

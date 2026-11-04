@@ -1,0 +1,98 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require_relative 'boot_image'
+require_relative 'error'
+require_relative 'fiasco'
+require_relative 'native_root'
+require_relative 'qemu'
+require_relative 'runner'
+
+module Erx
+  # The function-API set that both backends pass (docs/design-stopgap.md, "The call
+  # table"): test/guest/function_api compiled hosted, which test/host/hosted_function_api_test.rb
+  # runs under each sanitizer, and for native Fiasco's root task, which Run boots here.
+  module FunctionApi
+    MEMORY_MIB = 512
+    PREFIX = 'erx: function-api: '
+    CASES = %w[
+      decommit_recommit_reads_zeros released_pages_read_zeros no_access_and_back_keeps_contents
+      read_only_raises_to_read_write stack_through_no_access refused_protect_changes_nothing
+      write_and_execute_refused refusals fixed_reserve_replaces every_protection_change whole_pool_commits
+      pool_count_steady tls_and_arg utcb_is_each_threads double_start_refused bad_handle_refused unsupported_refused
+      umtx_word_differs umtx_past_deadline umtx_timeout_not_early umtx_wake_counts umtx_ping_pong
+      umtx_timeout_races_wake memory_from_threads affinity_refused join_loop detached_loop park_refusals park_alone
+      park_trigger_in_window park_ping park_timeout_races_wake many_threads machine_end_refused
+    ].freeze
+    # A backend without their row's bodies does not link these: TODO.md tracks native Fiasco's.
+    IRQ_CASES = %w[irq_refusals irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
+    LAST_CASE = 'indices_run_out'
+    GUEST = 'test/guest/function_api'
+    HOSTED_SOURCES = %W[
+      kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
+      kernel/generated/abi_decode.c kernel/generated/abi_run.c
+      liberx/backend/core/park_table.c liberx/backend/core/refused.c liberx/backend/core/vm_table.c
+      liberx/backend/hosted/arch/aarch64/switch_stack.S liberx/backend/hosted/generated/calls.c
+      liberx/backend/hosted/group.c liberx/backend/hosted/log.c liberx/backend/hosted/thread.c
+      liberx/backend/hosted/vm.c liberx/backend/hosted/wait.c
+      #{GUEST}/cases.c #{GUEST}/hosted.c #{GUEST}/irq_cases.c
+    ].freeze
+    NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
+                      'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c"].freeze
+    # Each case's patience in the guest is 60 seconds: a stall fails its own line.
+    CASE_SECONDS = 90
+    # The join loop's deletions each wait for a grace period, which across CPUs under TCG takes far longer.
+    LONG_CASES = { 'join_loop' => 300 }.freeze
+
+    module_function
+
+    def hosted_lines
+      [*(CASES + IRQ_CASES + [LAST_CASE]).map { |name| "#{PREFIX}#{name} ok" }, "#{PREFIX}done"]
+    end
+
+    def checkpoints
+      [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+       { name: 'function-api-up', pattern: /\A#{Regexp.escape(PREFIX)}service up/n, seconds: 30 }.freeze,
+       *[*CASES, LAST_CASE].map do |name|
+         { name: "function-api-#{name}", pattern: /\A#{Regexp.escape(PREFIX)}#{name} ok/n,
+           seconds: LONG_CASES.fetch(name, CASE_SECONDS) }.freeze
+       end,
+       { name: 'function-api-done', pattern: /\A#{Regexp.escape(PREFIX)}done/n, seconds: 30 }.freeze].freeze
+    end
+
+    class Run
+      def initialize(root:, source: root, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+        @root = File.expand_path(root)
+        @source = File.expand_path(source)
+        @runner = runner
+        @compiler = compiler
+        @linker = linker
+        @build = File.join(@root, 'build/function-api')
+      end
+
+      # Boots the image under each accelerator at each CPU count, with the kernel
+      # as last built unless asked to rebuild. Any disagreement raises.
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build(jobs: jobs) if build
+        built = image(fiasco)
+        accels.product(cpus).to_h do |accel, count|
+          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB,
+                                                              checkpoints: FunctionApi.checkpoints, machine_end: true)
+          ["#{accel}-#{count}cpu", { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds') }.freeze]
+        end
+      end
+
+      private
+
+      def image(fiasco)
+        root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+                              .build(name: 'function-api-root', sources: NATIVE_SOURCES, directory: File.join(@build, 'root'))
+        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
+                 .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
+      end
+    end
+  end
+end

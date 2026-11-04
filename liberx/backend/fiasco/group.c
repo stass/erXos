@@ -36,8 +36,8 @@ static _Atomic bool group_up;
 static uint64_t group_dispatcher;
 /* Guards the claim of a record. A record's label is written before its object can fire. */
 static erx_fiasco_lock_t group_lock;
-static bool group_record_used[ERX_FIASCO_PARK_OBJECTS_MAX];
-static uint64_t group_label[ERX_FIASCO_PARK_OBJECTS_MAX];
+static bool group_record_used[ERX_BACKEND_PARK_OBJECTS_MAX];
+static uint64_t group_label[ERX_BACKEND_PARK_OBJECTS_MAX];
 
 /*
  * Every message is one IRQ object firing, whose kernel label is its record's index,
@@ -56,7 +56,7 @@ dispatcher_main(uint64_t unused)
 	for (;;) {
 		tag = l4_ipc_wait(utcb, &record, L4_IPC_NEVER);
 		if (l4_ipc_error(tag, utcb) == 0)
-			erx_fiasco_group_trigger((uint32_t)record);
+			erx_fiasco_group_signal((uint32_t)record);
 	}
 }
 
@@ -98,7 +98,7 @@ erx_group_take_ready(uint32_t max)
 	uint32_t objects[ERX_MSG_WORDS];
 	uint32_t count;
 
-	if (erx_fiasco_thread_self()->executor_slot == ERX_FIASCO_PARK_NO_SLOT)
+	if (erx_fiasco_thread_self()->executor_slot == ERX_BACKEND_PARK_NO_SLOT)
 		return (ERX_ETYPE);
 	count = erx_fiasco_group_take(max < ERX_MSG_WORDS ? max : ERX_MSG_WORDS, objects);
 	for (uint32_t index = 0; index < count; index++)
@@ -122,16 +122,16 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint64_t kind, uint64_t selec
 	return (status);
 }
 
-/* Returns ERX_FIASCO_PARK_OBJECTS_MAX when every record is taken. */
+/* Returns ERX_BACKEND_PARK_OBJECTS_MAX when every record is taken. */
 static uint32_t
 group_record_claim(void)
 {
 	uint32_t record = 0;
 
 	erx_fiasco_lock(&group_lock);
-	while (record < ERX_FIASCO_PARK_OBJECTS_MAX && group_record_used[record])
+	while (record < ERX_BACKEND_PARK_OBJECTS_MAX && group_record_used[record])
 		record++;
-	if (record < ERX_FIASCO_PARK_OBJECTS_MAX)
+	if (record < ERX_BACKEND_PARK_OBJECTS_MAX)
 		group_record_used[record] = true;
 	erx_fiasco_unlock(&group_lock);
 	return (record);
@@ -147,7 +147,7 @@ erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
 	if (group != GROUP_HANDLE || !atomic_load_explicit(&group_up, memory_order_acquire))
 		return (ERX_EINVAL);
 	record = group_record_claim();
-	if (record == ERX_FIASCO_PARK_OBJECTS_MAX)
+	if (record == ERX_BACKEND_PARK_OBJECTS_MAX)
 		return (ERX_ENOMEM);
 	group_label[record] = label;
 

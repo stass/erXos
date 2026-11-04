@@ -26,7 +26,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/page_pool.h"
-#include "liberx/backend/fiasco/vm_table.h"
+#include "liberx/backend/core/vm_table.h"
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
 #define AREA_START	(UINT64_C(0x4000000000))
@@ -42,7 +42,7 @@
 #define RIGHTS_ALL	7u
 
 /* What a page should be: the core's states, plus lying in a hole. */
-#define PAGE_HOLE	(ERX_FIASCO_PAGE_RX + 1)
+#define PAGE_HOLE	(ERX_BACKEND_PAGE_RX + 1)
 #define PAGE_KINDS	(PAGE_HOLE + 1)
 
 typedef struct model_page {
@@ -59,9 +59,9 @@ typedef struct mmu_page {
 static mmu_page_t	mmu[RANDOM_AREA_PAGES];
 static uint8_t		*window_memory;
 static erx_fiasco_pool_t pool;
-static erx_fiasco_vm_table_t table;
-static erx_fiasco_vm_range_t ranges[RANGES_MAX];
-static erx_fiasco_vm_page_t index_slots[SLOTS];
+static erx_backend_vm_table_t table;
+static erx_backend_vm_range_t ranges[RANGES_MAX];
+static erx_backend_vm_page_t index_slots[SLOTS];
 static const char	*current_case = "setup";
 static unsigned long	 checks;
 
@@ -111,7 +111,28 @@ fake_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 		*page = (mmu_page_t){ 0 };
 }
 
-static const erx_fiasco_vm_effects_t effects = { .map = fake_map, .unmap = fake_unmap };
+static uintptr_t
+fake_take(uint64_t addr)
+{
+	(void)addr;
+	return (erx_fiasco_pool_take(&pool));
+}
+
+static void
+fake_give(uintptr_t window, uint64_t addr)
+{
+	(void)addr;
+	erx_fiasco_pool_put(&pool, window);
+}
+
+static uint64_t
+fake_free_pages(void)
+{
+	return (pool.free_pages);
+}
+
+static const erx_backend_vm_effects_t effects = { .map = fake_map, .unmap = fake_unmap, .take = fake_take,
+    .give = fake_give, .free_pages = fake_free_pages };
 
 static void
 world_reset(unsigned pool_pages)
@@ -119,8 +140,8 @@ world_reset(unsigned pool_pages)
 	memset(mmu, 0, sizeof(mmu));
 	memset(&pool, 0, sizeof(pool));
 	memset(ranges, 0xa5, sizeof(ranges));
-	erx_fiasco_vm_index_init(index_slots, SLOTS);
-	erx_fiasco_vm_table_init(&table, 0, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
+	erx_backend_vm_index_init(index_slots, SLOTS);
+	erx_backend_vm_table_init(&table, 0, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
 	    AREA_START + RANDOM_AREA_PAGES * PAGE);
 	for (unsigned page = 0; page < pool_pages; page++)
 		erx_fiasco_pool_put(&pool, (uintptr_t)(window_memory + page * PAGE));
@@ -130,11 +151,11 @@ static uint32_t
 prot_of(int kind)
 {
 	switch (kind) {
-	case ERX_FIASCO_PAGE_R:
+	case ERX_BACKEND_PAGE_R:
 		return (ERX_PROT_R);
-	case ERX_FIASCO_PAGE_RW:
+	case ERX_BACKEND_PAGE_RW:
 		return (ERX_PROT_RW);
-	case ERX_FIASCO_PAGE_RX:
+	case ERX_BACKEND_PAGE_RX:
 		return (ERX_PROT_RX);
 	default:
 		return (ERX_PROT_NONE);
@@ -144,16 +165,16 @@ prot_of(int kind)
 static bool
 kind_committed(int kind)
 {
-	return (kind == ERX_FIASCO_PAGE_NONE || kind == ERX_FIASCO_PAGE_R ||
-	    kind == ERX_FIASCO_PAGE_RW || kind == ERX_FIASCO_PAGE_RX);
+	return (kind == ERX_BACKEND_PAGE_NONE || kind == ERX_BACKEND_PAGE_R ||
+	    kind == ERX_BACKEND_PAGE_RW || kind == ERX_BACKEND_PAGE_RX);
 }
 
 static int
-call(erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot, uint64_t *out)
+call(erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot, uint64_t *out)
 {
-	const erx_fiasco_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
+	const erx_backend_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
 
-	return (erx_fiasco_vm_call(&table, &pool, &effects, &request, out));
+	return (erx_backend_vm_call(&table, &effects, &request, out));
 }
 
 /* Every fact the core and the fake memory unit hold agrees with the model. */
@@ -201,17 +222,17 @@ world_build(model_page_t *model, const int *kinds, size_t npages, uint64_t *next
 		model[index] = (model_page_t){ .kind = kinds[index] };
 		if (kinds[index] == PAGE_HOLE)
 			continue;
-		if (call(ERX_FIASCO_VM_RESERVE, addr, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, 0, NULL) != 0)
+		if (call(ERX_BACKEND_VM_RESERVE, addr, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, 0, NULL) != 0)
 			fail("a fixed reserve failed", addr);
-		if (kinds[index] == ERX_FIASCO_PAGE_UNCOMMITTED)
+		if (kinds[index] == ERX_BACKEND_PAGE_UNCOMMITTED)
 			continue;
-		if (call(ERX_FIASCO_VM_COMMIT, addr, PAGE, 0, 0, NULL) != 0)
+		if (call(ERX_BACKEND_VM_COMMIT, addr, PAGE, 0, 0, NULL) != 0)
 			fail("a commit failed", addr);
 		if (mmu[index].window == 0)
 			fail("a commit mapped nothing", addr);
 		model[index].contents = ++(*next_word);
 		*(uint64_t *)mmu[index].window = model[index].contents;
-		if (call(ERX_FIASCO_VM_PROTECT, addr, PAGE, 0, prot_of(kinds[index]), NULL) != 0)
+		if (call(ERX_BACKEND_VM_PROTECT, addr, PAGE, 0, prot_of(kinds[index]), NULL) != 0)
 			fail("a protect failed", addr);
 	}
 }
@@ -222,10 +243,10 @@ model_page_move(model_page_t *page, int target)
 {
 	if (page->kind == PAGE_HOLE)
 		return;
-	if (target == ERX_FIASCO_PAGE_UNCOMMITTED) {
-		*page = (model_page_t){ .kind = ERX_FIASCO_PAGE_UNCOMMITTED };
-	} else if (page->kind == ERX_FIASCO_PAGE_UNCOMMITTED) {
-		if (target != ERX_FIASCO_PAGE_NONE)
+	if (target == ERX_BACKEND_PAGE_UNCOMMITTED) {
+		*page = (model_page_t){ .kind = ERX_BACKEND_PAGE_UNCOMMITTED };
+	} else if (page->kind == ERX_BACKEND_PAGE_UNCOMMITTED) {
+		if (target != ERX_BACKEND_PAGE_NONE)
 			*page = (model_page_t){ .kind = target };
 	} else {
 		page->kind = target;
@@ -237,21 +258,21 @@ model_pages_needed(const model_page_t *model, size_t first, size_t count, int ta
 {
 	uint64_t needed = 0;
 
-	if (target == ERX_FIASCO_PAGE_UNCOMMITTED || target == ERX_FIASCO_PAGE_NONE)
+	if (target == ERX_BACKEND_PAGE_UNCOMMITTED || target == ERX_BACKEND_PAGE_NONE)
 		return (0);
 	for (size_t index = first; index < first + count; index++)
-		if (model[index].kind == ERX_FIASCO_PAGE_UNCOMMITTED)
+		if (model[index].kind == ERX_BACKEND_PAGE_UNCOMMITTED)
 			needed++;
 	return (needed);
 }
 
 /* One call, its model and the bytes of a refusal, then the whole world's check. */
 static void
-call_and_check(model_page_t *model, size_t npages, erx_fiasco_vm_op_t op, size_t first, size_t count,
+call_and_check(model_page_t *model, size_t npages, erx_backend_vm_op_t op, size_t first, size_t count,
     uint32_t flags, int target, uint64_t pool_total)
 {
-	static erx_fiasco_vm_range_t ranges_before[RANGES_MAX];
-	static erx_fiasco_vm_page_t index_before[SLOTS];
+	static erx_backend_vm_range_t ranges_before[RANGES_MAX];
+	static erx_backend_vm_page_t index_before[SLOTS];
 	static mmu_page_t mmu_before[RANDOM_AREA_PAGES];
 	const uint64_t addr = AREA_START + first * PAGE;
 	const uint64_t size = count * PAGE;
@@ -265,9 +286,9 @@ call_and_check(model_page_t *model, size_t npages, erx_fiasco_vm_op_t op, size_t
 		any_hole = any_hole || model[index].kind == PAGE_HOLE;
 		any_range = any_range || model[index].kind != PAGE_HOLE;
 	}
-	if (op == ERX_FIASCO_VM_PROTECT && any_hole)
+	if (op == ERX_BACKEND_VM_PROTECT && any_hole)
 		expected = ERX_ERANGE;
-	else if (op == ERX_FIASCO_VM_RESERVE && (flags & ERX_VM_NOREPLACE) != 0 && any_range)
+	else if (op == ERX_BACKEND_VM_RESERVE && (flags & ERX_VM_NOREPLACE) != 0 && any_range)
 		expected = ERX_EEXIST;
 	else if (model_pages_needed(model, first, count, target) > pool.free_pages)
 		expected = ERX_ENOMEM;
@@ -285,10 +306,10 @@ call_and_check(model_page_t *model, size_t npages, erx_fiasco_vm_op_t op, size_t
 		    memcmp(mmu_before, mmu, sizeof(mmu)) != 0 || nranges_before != table.nranges ||
 		    pool_before.head != pool.head || pool_before.free_pages != pool.free_pages)
 			fail("a refused call changed something", (uint64_t)(int64_t)error);
-	} else if (op == ERX_FIASCO_VM_RESERVE) {
+	} else if (op == ERX_BACKEND_VM_RESERVE) {
 		for (size_t index = first; index < first + count; index++)
-			model[index] = (model_page_t){ .kind = ERX_FIASCO_PAGE_UNCOMMITTED };
-	} else if (op == ERX_FIASCO_VM_RELEASE) {
+			model[index] = (model_page_t){ .kind = ERX_BACKEND_PAGE_UNCOMMITTED };
+	} else if (op == ERX_BACKEND_VM_RELEASE) {
 		for (size_t index = first; index < first + count; index++)
 			model[index] = (model_page_t){ .kind = PAGE_HOLE };
 	} else {
@@ -301,7 +322,7 @@ call_and_check(model_page_t *model, size_t npages, erx_fiasco_vm_op_t op, size_t
 static void
 check_every_state_range_and_call(void)
 {
-	static const int prot_targets[] = { ERX_FIASCO_PAGE_NONE, ERX_FIASCO_PAGE_R, ERX_FIASCO_PAGE_RW, ERX_FIASCO_PAGE_RX };
+	static const int prot_targets[] = { ERX_BACKEND_PAGE_NONE, ERX_BACKEND_PAGE_R, ERX_BACKEND_PAGE_RW, ERX_BACKEND_PAGE_RX };
 	unsigned long combinations = 1, runs = 0;
 	model_page_t model[FEW_PAGES];
 	int kinds[FEW_PAGES];
@@ -332,13 +353,13 @@ check_every_state_range_and_call(void)
 		    (target), pool_total);					\
 		runs++;								\
 	} while (0)
-					ONE_CALL(ERX_FIASCO_VM_COMMIT, 0, ERX_FIASCO_PAGE_RW);
-					ONE_CALL(ERX_FIASCO_VM_DECOMMIT, 0, ERX_FIASCO_PAGE_UNCOMMITTED);
-					ONE_CALL(ERX_FIASCO_VM_RELEASE, 0, ERX_FIASCO_PAGE_UNCOMMITTED);
-					ONE_CALL(ERX_FIASCO_VM_RESERVE, ERX_VM_FIXED, ERX_FIASCO_PAGE_UNCOMMITTED);
-					ONE_CALL(ERX_FIASCO_VM_RESERVE, ERX_VM_FIXED | ERX_VM_NOREPLACE, ERX_FIASCO_PAGE_UNCOMMITTED);
+					ONE_CALL(ERX_BACKEND_VM_COMMIT, 0, ERX_BACKEND_PAGE_RW);
+					ONE_CALL(ERX_BACKEND_VM_DECOMMIT, 0, ERX_BACKEND_PAGE_UNCOMMITTED);
+					ONE_CALL(ERX_BACKEND_VM_RELEASE, 0, ERX_BACKEND_PAGE_UNCOMMITTED);
+					ONE_CALL(ERX_BACKEND_VM_RESERVE, ERX_VM_FIXED, ERX_BACKEND_PAGE_UNCOMMITTED);
+					ONE_CALL(ERX_BACKEND_VM_RESERVE, ERX_VM_FIXED | ERX_VM_NOREPLACE, ERX_BACKEND_PAGE_UNCOMMITTED);
 					for (size_t index = 0; index < sizeof(prot_targets) / sizeof(prot_targets[0]); index++)
-						ONE_CALL(ERX_FIASCO_VM_PROTECT, 0, prot_targets[index]);
+						ONE_CALL(ERX_BACKEND_VM_PROTECT, 0, prot_targets[index]);
 #undef ONE_CALL
 				}
 			}
@@ -352,19 +373,19 @@ static void
 check_steps_table(void)
 {
 	current_case = "steps";
-	for (int from = 0; from < (int)ERX_FIASCO_PAGE_STATES; from++) {
-		for (int to = 0; to < (int)ERX_FIASCO_PAGE_STATES; to++) {
-			const erx_fiasco_vm_steps_t steps = erx_fiasco_vm_steps((erx_fiasco_vm_state_t)from, (erx_fiasco_vm_state_t)to);
+	for (int from = 0; from < (int)ERX_BACKEND_PAGE_STATES; from++) {
+		for (int to = 0; to < (int)ERX_BACKEND_PAGE_STATES; to++) {
+			const erx_backend_vm_steps_t steps = erx_backend_vm_steps((erx_backend_vm_state_t)from, (erx_backend_vm_state_t)to);
 			const bool from_committed = kind_committed(from);
 			const uint32_t from_prot = prot_of(from);
 			uint32_t rights = from_prot;
-			const int after = from == ERX_FIASCO_PAGE_UNCOMMITTED && to == ERX_FIASCO_PAGE_NONE ?
-			    ERX_FIASCO_PAGE_UNCOMMITTED : to;
+			const int after = from == ERX_BACKEND_PAGE_UNCOMMITTED && to == ERX_BACKEND_PAGE_NONE ?
+			    ERX_BACKEND_PAGE_UNCOMMITTED : to;
 
 			/* Only an uncommitted page given access takes one; only leaving commitment gives one back. */
-			if (steps.take != (!from_committed && kind_committed(to) && to != ERX_FIASCO_PAGE_NONE))
+			if (steps.take != (!from_committed && kind_committed(to) && to != ERX_BACKEND_PAGE_NONE))
 				fail("steps take a page they should not", (uint64_t)from * 16 + (uint64_t)to);
-			if (steps.give_back != (from_committed && to == ERX_FIASCO_PAGE_UNCOMMITTED))
+			if (steps.give_back != (from_committed && to == ERX_BACKEND_PAGE_UNCOMMITTED))
 				fail("steps give back a page they should not", (uint64_t)from * 16 + (uint64_t)to);
 			if ((int)steps.after != after)
 				fail("steps end in the wrong state", (uint64_t)from * 16 + (uint64_t)to);
@@ -392,52 +413,52 @@ check_refusals(void)
 
 	current_case = "refusals";
 	world_reset(POOL_PAGES);
-	if (call(ERX_FIASCO_VM_RESERVE, 0, PAGE, 0, 0, &reserved) != 0 || reserved != AREA_START)
+	if (call(ERX_BACKEND_VM_RESERVE, 0, PAGE, 0, 0, &reserved) != 0 || reserved != AREA_START)
 		fail("the first free range is not the area's start", reserved);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START + 1, PAGE, ERX_VM_FIXED, 0, NULL) != ERX_EINVAL)
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START + 1, PAGE, ERX_VM_FIXED, 0, NULL) != ERX_EINVAL)
 		fail("a misaligned reserve passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START, 1, ERX_VM_FIXED, 0, NULL) != ERX_EINVAL)
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START, 1, ERX_VM_FIXED, 0, NULL) != ERX_EINVAL)
 		fail("a misaligned size passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, 0, 0, 0, 0, NULL) != ERX_EINVAL)
+	if (call(ERX_BACKEND_VM_RESERVE, 0, 0, 0, 0, NULL) != ERX_EINVAL)
 		fail("an empty reserve passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START, PAGE, ERX_VM_NOREPLACE, 0, NULL) != ERX_EINVAL)
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START, PAGE, ERX_VM_NOREPLACE, 0, NULL) != ERX_EINVAL)
 		fail("noreplace without fixed passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START, PAGE, 4, 0, NULL) != ERX_EINVAL)
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START, PAGE, 4, 0, NULL) != ERX_EINVAL)
 		fail("unknown flags passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, 0, RANDOM_AREA_PAGES * PAGE, 0, 0, NULL) != ERX_ENOMEM)
+	if (call(ERX_BACKEND_VM_RESERVE, 0, RANDOM_AREA_PAGES * PAGE, 0, 0, NULL) != ERX_ENOMEM)
 		fail("a reserve too large for the free space passed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, 0, UINT64_MAX - PAGE + 1, 0, 0, NULL) != ERX_ENOMEM)
+	if (call(ERX_BACKEND_VM_RESERVE, 0, UINT64_MAX - PAGE + 1, 0, 0, NULL) != ERX_ENOMEM)
 		fail("a wrapping reserve passed", 0);
-	if (call(ERX_FIASCO_VM_COMMIT, area_end, PAGE, 0, 0, NULL) != ERX_ERANGE ||
-	    call(ERX_FIASCO_VM_COMMIT, AREA_START - PAGE, PAGE, 0, 0, NULL) != ERX_ERANGE ||
-	    call(ERX_FIASCO_VM_COMMIT, UINT64_MAX - PAGE + 1, PAGE, 0, 0, NULL) != ERX_ERANGE)
+	if (call(ERX_BACKEND_VM_COMMIT, area_end, PAGE, 0, 0, NULL) != ERX_ERANGE ||
+	    call(ERX_BACKEND_VM_COMMIT, AREA_START - PAGE, PAGE, 0, 0, NULL) != ERX_ERANGE ||
+	    call(ERX_BACKEND_VM_COMMIT, UINT64_MAX - PAGE + 1, PAGE, 0, 0, NULL) != ERX_ERANGE)
 		fail("a range outside the area passed", 0);
 	for (size_t index = 0; index < sizeof(bad_prots) / sizeof(bad_prots[0]); index++)
-		if (call(ERX_FIASCO_VM_PROTECT, AREA_START, PAGE, 0, bad_prots[index], NULL) != ERX_EINVAL)
+		if (call(ERX_BACKEND_VM_PROTECT, AREA_START, PAGE, 0, bad_prots[index], NULL) != ERX_EINVAL)
 			fail("a protection that is not one passed", bad_prots[index]);
 
 	/* A full table, of runs with gaps too wide for a page to touch either side. */
 	world_reset(POOL_PAGES);
 	table.ranges_max = FULL_RANGES;
 	for (unsigned run = 0; run < FULL_RANGES; run++)
-		if (call(ERX_FIASCO_VM_RESERVE, AREA_START + 6 * run * PAGE, 3 * PAGE, ERX_VM_FIXED, 0, NULL) != 0)
+		if (call(ERX_BACKEND_VM_RESERVE, AREA_START + 6 * run * PAGE, 3 * PAGE, ERX_VM_FIXED, 0, NULL) != 0)
 			fail("filling the table failed", run);
-	if (call(ERX_FIASCO_VM_RESERVE, 0, PAGE, 0, 0, NULL) != ERX_ENOMEM)
+	if (call(ERX_BACKEND_VM_RESERVE, 0, PAGE, 0, 0, NULL) != ERX_ENOMEM)
 		fail("a reserve passed with the table full", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START + 4 * PAGE, PAGE, ERX_VM_FIXED, 0, NULL) != ERX_ENOMEM)
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START + 4 * PAGE, PAGE, ERX_VM_FIXED, 0, NULL) != ERX_ENOMEM)
 		fail("a reserve needing a run passed with the table full", 0);
-	if (call(ERX_FIASCO_VM_RELEASE, AREA_START + PAGE, PAGE, 0, 0, NULL) != ERX_ENOMEM)
+	if (call(ERX_BACKEND_VM_RELEASE, AREA_START + PAGE, PAGE, 0, 0, NULL) != ERX_ENOMEM)
 		fail("a splitting release passed with the table full", 0);
 	if (table.nranges != FULL_RANGES)
 		fail("a refusal changed the table", table.nranges);
-	if (call(ERX_FIASCO_VM_RELEASE, AREA_START, PAGE, 0, 0, NULL) != 0 || table.nranges != FULL_RANGES)
+	if (call(ERX_BACKEND_VM_RELEASE, AREA_START, PAGE, 0, 0, NULL) != 0 || table.nranges != FULL_RANGES)
 		fail("a release that adds no run failed", 0);
 
 	/* One below full: a fixed reserve inside a run splits it, then merges back. */
-	if (call(ERX_FIASCO_VM_RELEASE, AREA_START + 6 * (FULL_RANGES - 1) * PAGE, 3 * PAGE, 0, 0, NULL) != 0 ||
+	if (call(ERX_BACKEND_VM_RELEASE, AREA_START + 6 * (FULL_RANGES - 1) * PAGE, 3 * PAGE, 0, 0, NULL) != 0 ||
 	    table.nranges != FULL_RANGES - 1)
 		fail("a release of a whole run failed", 0);
-	if (call(ERX_FIASCO_VM_RESERVE, AREA_START + 7 * PAGE, PAGE, ERX_VM_FIXED, 0, NULL) != 0 ||
+	if (call(ERX_BACKEND_VM_RESERVE, AREA_START + 7 * PAGE, PAGE, ERX_VM_FIXED, 0, NULL) != 0 ||
 	    table.nranges != FULL_RANGES - 1)
 		fail("a fixed reserve inside a run changed the count", table.nranges);
 }
@@ -456,12 +477,12 @@ call_lowest_fit(model_page_t *model, size_t count)
 		if (run == count)
 			found = index + 1 - count;
 	}
-	error = call(ERX_FIASCO_VM_RESERVE, 0, count * PAGE, 0, 0, &reserved);
+	error = call(ERX_BACKEND_VM_RESERVE, 0, count * PAGE, 0, 0, &reserved);
 	if (error != (found == RANDOM_AREA_PAGES ? ERX_ENOMEM : 0) ||
 	    (error == 0 && reserved != AREA_START + found * PAGE))
 		fail("a non-fixed reserve landed wrong", reserved);
 	if (error == 0)
-		model_set_reserved(&model[found], count, ERX_FIASCO_PAGE_UNCOMMITTED);
+		model_set_reserved(&model[found], count, ERX_BACKEND_PAGE_UNCOMMITTED);
 	world_check(model, RANDOM_AREA_PAGES, POOL_PAGES);
 }
 
@@ -470,7 +491,7 @@ static void
 check_random_calls(unsigned seed, unsigned calls)
 {
 	static model_page_t model[RANDOM_AREA_PAGES];
-	static const int targets[] = { ERX_FIASCO_PAGE_NONE, ERX_FIASCO_PAGE_R, ERX_FIASCO_PAGE_RW, ERX_FIASCO_PAGE_RX };
+	static const int targets[] = { ERX_BACKEND_PAGE_NONE, ERX_BACKEND_PAGE_R, ERX_BACKEND_PAGE_RW, ERX_BACKEND_PAGE_RX };
 
 	current_case = "random";
 	world_reset(POOL_PAGES);
@@ -490,20 +511,20 @@ check_random_calls(unsigned seed, unsigned calls)
 		case 0:
 			/* Too many separate runs refuses for its own reason: keep clear of it. */
 			if (table.nranges + 2 < RANGES_MAX)
-				call_and_check(model, RANDOM_AREA_PAGES, ERX_FIASCO_VM_RESERVE, first, count, ERX_VM_FIXED, ERX_FIASCO_PAGE_UNCOMMITTED, POOL_PAGES);
+				call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RESERVE, first, count, ERX_VM_FIXED, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		case 1:
-			call_and_check(model, RANDOM_AREA_PAGES, ERX_FIASCO_VM_COMMIT, first, count, 0, ERX_FIASCO_PAGE_RW, POOL_PAGES);
+			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_COMMIT, first, count, 0, ERX_BACKEND_PAGE_RW, POOL_PAGES);
 			break;
 		case 2:
-			call_and_check(model, RANDOM_AREA_PAGES, ERX_FIASCO_VM_DECOMMIT, first, count, 0, ERX_FIASCO_PAGE_UNCOMMITTED, POOL_PAGES);
+			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_DECOMMIT, first, count, 0, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		case 3:
 			if (table.nranges + 2 < RANGES_MAX)
-				call_and_check(model, RANDOM_AREA_PAGES, ERX_FIASCO_VM_RELEASE, first, count, 0, ERX_FIASCO_PAGE_UNCOMMITTED, POOL_PAGES);
+				call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_RELEASE, first, count, 0, ERX_BACKEND_PAGE_UNCOMMITTED, POOL_PAGES);
 			break;
 		default:
-			call_and_check(model, RANDOM_AREA_PAGES, ERX_FIASCO_VM_PROTECT, first, count, 0, target, POOL_PAGES);
+			call_and_check(model, RANDOM_AREA_PAGES, ERX_BACKEND_VM_PROTECT, first, count, 0, target, POOL_PAGES);
 			break;
 		}
 		/* New contents through a writable page, so a mix-up of window pages shows. */
@@ -573,22 +594,23 @@ label_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 		label_rights[(addr - AREA_START) / PAGE] &= ~rights;
 }
 
-static const erx_fiasco_vm_effects_t label_effects = { .map = label_map, .unmap = label_unmap };
+static const erx_backend_vm_effects_t label_effects = { .map = label_map, .unmap = label_unmap, .take = fake_take,
+    .give = fake_give, .free_pages = fake_free_pages };
 
 static int
-table_call(erx_fiasco_vm_table_t *which, erx_fiasco_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot)
+table_call(erx_backend_vm_table_t *which, erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, uint32_t prot)
 {
-	const erx_fiasco_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
+	const erx_backend_vm_request_t request = { .op = op, .addr = addr, .size = size, .flags = flags, .prot = prot };
 
-	return (erx_fiasco_vm_call(which, &pool, &label_effects, &request, NULL));
+	return (erx_backend_vm_call(which, &label_effects, &request, NULL));
 }
 
 /* Two tables and an object share one index: the same address names a page per label, and each clears alone. */
 static void
 check_labels(void)
 {
-	static erx_fiasco_vm_range_t ranges_a[4], ranges_b[4], ranges_object[2];
-	erx_fiasco_vm_table_t a, b, object;
+	static erx_backend_vm_range_t ranges_a[4], ranges_b[4], ranges_object[2];
+	erx_backend_vm_table_t a, b, object;
 	uintptr_t window_a, window_b, window_object;
 	uint64_t full;
 
@@ -596,58 +618,58 @@ check_labels(void)
 	world_reset(POOL_PAGES);
 	memset(label_rights, 0, sizeof(label_rights));
 	full = pool.free_pages;
-	erx_fiasco_vm_table_init(&a, 1, ranges_a, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
-	erx_fiasco_vm_table_init(&b, 2, ranges_b, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
-	erx_fiasco_vm_table_init(&object, 3, ranges_object, 2, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE);
-	if (table_call(&a, ERX_FIASCO_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
-	    table_call(&b, ERX_FIASCO_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
-	    table_call(&a, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
-	    table_call(&b, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0)
+	erx_backend_vm_table_init(&a, 1, ranges_a, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
+	erx_backend_vm_table_init(&b, 2, ranges_b, 4, index_slots, SLOTS, AREA_START, AREA_START + 16 * PAGE);
+	erx_backend_vm_table_init(&object, 3, ranges_object, 2, index_slots, SLOTS, PAGE, PAGE + 16 * PAGE);
+	if (table_call(&a, ERX_BACKEND_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&b, ERX_BACKEND_VM_RESERVE, AREA_START, 4 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&a, ERX_BACKEND_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    table_call(&b, ERX_BACKEND_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0)
 		fail("two tables' calls were refused", 0);
-	window_a = erx_fiasco_vm_window(&a, AREA_START);
-	window_b = erx_fiasco_vm_window(&b, AREA_START);
+	window_a = erx_backend_vm_window(&a, AREA_START);
+	window_b = erx_backend_vm_window(&b, AREA_START);
 	if (window_a == 0 || window_b == 0 || window_a == window_b)
 		fail("two tables share a page", window_a);
-	if (erx_fiasco_vm_window(&a, AREA_START + PAGE) != 0 || erx_fiasco_vm_window(&object, AREA_START) != 0)
+	if (erx_backend_vm_window(&a, AREA_START + PAGE) != 0 || erx_backend_vm_window(&object, AREA_START) != 0)
 		fail("a window for an uncommitted page", 0);
-	if (table_call(&a, ERX_FIASCO_VM_DECOMMIT, AREA_START, PAGE, 0, 0) != 0 ||
-	    erx_fiasco_vm_window(&b, AREA_START) != window_b)
+	if (table_call(&a, ERX_BACKEND_VM_DECOMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    erx_backend_vm_window(&b, AREA_START) != window_b)
 		fail("one table's decommit reached another's page", window_b);
 
-	if (table_call(&object, ERX_FIASCO_VM_RESERVE, PAGE, 2 * PAGE, ERX_VM_FIXED, 0) != 0 ||
-	    table_call(&object, ERX_FIASCO_VM_COMMIT, PAGE, 2 * PAGE, 0, 0) != 0)
+	if (table_call(&object, ERX_BACKEND_VM_RESERVE, PAGE, 2 * PAGE, ERX_VM_FIXED, 0) != 0 ||
+	    table_call(&object, ERX_BACKEND_VM_COMMIT, PAGE, 2 * PAGE, 0, 0) != 0)
 		fail("the object's pages were refused", 0);
-	window_object = erx_fiasco_vm_window(&object, 2 * PAGE);
+	window_object = erx_backend_vm_window(&object, 2 * PAGE);
 	label_nmaps = 0;
-	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RW) != 0 ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 3 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
+	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RW) != 0 ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 3 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
 		fail("two aliases of one page were refused", 0);
 	if (label_nmaps != 2 || label_maps[0].window != window_object || label_maps[1].window != window_object ||
 	    label_maps[0].label != 1 || label_maps[0].addr != AREA_START + 2 * PAGE || label_maps[0].prot != ERX_PROT_RW ||
 	    label_maps[1].addr != AREA_START + 3 * PAGE || label_maps[1].prot != ERX_PROT_RX)
 		fail("an alias landed wrong", label_nmaps);
-	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
+	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, PAGE, ERX_PROT_RX) != 0)
 		fail("a second map of an alias was refused", 0);
 	label_nmaps = 0;
-	if (erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_NONE) != ERX_EINVAL ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_RW | ERX_PROT_RX) != ERX_EINVAL ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 1, ERX_PROT_RW) != ERX_EINVAL ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START + 8 * PAGE, PAGE, 0, ERX_PROT_RW) != ERX_ERANGE ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 2 * PAGE, ERX_PROT_RW) != ERX_ERANGE ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, 2 * PAGE, PAGE, ERX_PROT_RW) != ERX_ERANGE)
+	if (erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_NONE) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 0, ERX_PROT_RW | ERX_PROT_RX) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 2 * PAGE, PAGE, 1, ERX_PROT_RW) != ERX_EINVAL ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START + 8 * PAGE, PAGE, 0, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 2 * PAGE, ERX_PROT_RW) != ERX_ERANGE ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, 2 * PAGE, PAGE, ERX_PROT_RW) != ERX_ERANGE)
 		fail("a bad alias passed", label_nmaps);
-	if (table_call(&a, ERX_FIASCO_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
-	    erx_fiasco_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 0, ERX_PROT_RW) != ERX_EEXIST)
+	if (table_call(&a, ERX_BACKEND_VM_COMMIT, AREA_START, PAGE, 0, 0) != 0 ||
+	    erx_backend_vm_map_object(&a, &object, &label_effects, AREA_START, PAGE, 0, ERX_PROT_RW) != ERX_EEXIST)
 		fail("an alias over a committed page passed", label_nmaps);
 	if (label_nmaps != 1)
 		fail("a refused alias mapped", label_nmaps);
 
-	erx_fiasco_vm_table_clear(&a, &pool, &label_effects);
-	if (a.nranges != 0 || erx_fiasco_vm_window(&a, AREA_START) != 0 || erx_fiasco_vm_window(&b, AREA_START) != window_b ||
-	    erx_fiasco_vm_window(&object, 2 * PAGE) != window_object)
+	erx_backend_vm_table_clear(&a, &label_effects);
+	if (a.nranges != 0 || erx_backend_vm_window(&a, AREA_START) != 0 || erx_backend_vm_window(&b, AREA_START) != window_b ||
+	    erx_backend_vm_window(&object, 2 * PAGE) != window_object)
 		fail("clearing one table reached another's page", window_b);
-	erx_fiasco_vm_table_clear(&b, &pool, &label_effects);
-	erx_fiasco_vm_table_clear(&object, &pool, &label_effects);
+	erx_backend_vm_table_clear(&b, &label_effects);
+	erx_backend_vm_table_clear(&object, &label_effects);
 	if (pool.free_pages != full)
 		fail("the pool's count did not return", pool.free_pages);
 	for (size_t slot = 0; slot < SLOTS; slot++)
@@ -663,11 +685,11 @@ check_layout(void)
 
 	current_case = "layout";
 	for (size_t index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++) {
-		const erx_fiasco_vm_layout_t layout = erx_fiasco_vm_layout(sizes[index]);
+		const erx_backend_vm_layout_t layout = erx_backend_vm_layout(sizes[index]);
 
 		if (layout.index_slots < 2 * sizes[index] ||
 		    (layout.index_slots & (layout.index_slots - 1)) != 0 ||
-		    layout.index_pages * PAGE != layout.index_slots * sizeof(erx_fiasco_vm_page_t) ||
+		    layout.index_pages * PAGE != layout.index_slots * sizeof(erx_backend_vm_page_t) ||
 		    layout.index_pages == 0)
 			fail("the index does not suit the window", sizes[index]);
 	}

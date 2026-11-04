@@ -1,5 +1,8 @@
 # TODO
 
+* [Medium] liberx native backend (`liberx/backend/fiasco/`): the call table's IRQ row and `erx_group_take_ready` have no native body, so `test/guest/function_api/irq_cases.c` and the ready ring in `liberx/backend/core/park_table.c` run hosted only until they land with their consumer; add the cases to `guest.c`'s `function_api_run` call.
+* [Low] liberx hosted backend (`liberx/backend/hosted/`): macOS and AArch64 only (`os_sync_wait_on_address`, `switch_stack.S`); a Linux host skips `test/host/hosted_function_api_test.rb`.
+
 Open work outside the roadmap in [docs/plan.md](docs/plan.md). Each item has
 a `[Severity]` tag and a component pointer. When an item is closed, delete
 it; git history is the record of completed work.
