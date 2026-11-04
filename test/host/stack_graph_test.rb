@@ -28,7 +28,7 @@ class StackGraphTest < Minitest::Test
 
   # The archive's sources, the bootstrap core it leaves out, and the reader.
   def core_sources
-    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/generated/abi_reader.c']
+    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/elf_plan.c', 'liberx/generated/abi_reader.c']
   end
 
   Name = Erx::StackGraph::Name

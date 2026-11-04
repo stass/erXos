@@ -112,6 +112,7 @@ class CoreArchiveTest < Minitest::Test
     %w[kernel/core kernel/generated include/erx/core].each { |path| FileUtils.mkdir_p(File.join(root, path)) }
     File.write(File.join(root, 'kernel/core/value.c'), core)
     File.write(File.join(root, 'kernel/core/pack.c'), "int erx_bootstrap_only(void) { return 2; }\n")
+    File.write(File.join(root, 'kernel/core/boot_place.c'), "int erx_bootstrap_place_only(void) { return 3; }\n")
     File.write(File.join(root, 'include/erx/core/seam.h'), "#define ERX_SEAM_VALUE 3\n")
   end
 

@@ -187,6 +187,7 @@ class StackProofRunTest < Minitest::Test
                "block 8192\nallowance call 2048\nallowance tick 1024\ntick erx_rogue_clear\n")
     File.write(File.join(root, 'kernel/stack_targets.txt'), '')
     File.write(File.join(root, 'kernel/core/pack.c'), '')
+    File.write(File.join(root, 'kernel/core/boot_place.c'), '')
     File.write(File.join(root, 'kernel/core/clear.c'), <<~C)
       void erx_cap_slot_clear(int *slot);
 
