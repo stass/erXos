@@ -24,7 +24,7 @@ main(void)
 	    ERX_TERMINAL_KERNEL_TOKEN_PREFIX[1] != 'x')
 		return (1);
 	for (uint32_t byte = 0; byte < 256; byte++) {
-		expected = (byte >= 0x20 && byte <= 0x7e) || byte == 9;
+		expected = byte >= 0x20 && byte <= 0x7e;
 		if (erx_terminal_ascii_safe[byte] != (uint8_t)expected)
 			return (1);
 	}

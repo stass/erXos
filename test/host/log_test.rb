@@ -28,7 +28,8 @@ class LogTest < Minitest::Test
     'bidirectional override in UTF-8' => "abc\xE2\x80\xAEevil\xE2\x80\xAC".b,
     'invisible format characters' => "a\xE2\x80\x8Bb\xE2\x81\xA0c\xEF\xBB\xBF".b,
     'invalid UTF-8' => "\xC0\x80\xFF\xFE\xED\xA0\x80".b,
-    'nul, delete and bell' => "\0\x7f\a".b
+    'nul, delete and bell' => "\0\x7f\a".b,
+    'tab that moves the cursor into a forged column' => "ok\t\t\tkernel: panic"
   }.freeze
 
   def setup
@@ -54,10 +55,19 @@ class LogTest < Minitest::Test
     end
   end
 
+  # Written out rather than through the model: a tab moves the cursor, so it
+  # is a token like any other control. A backslash is printable and stays
+  # itself: the form is for reading, and a line that shows \x1B may have held
+  # either, which no one can use to reach the terminal.
+  def test_a_tab_is_a_token_and_a_backslash_is_itself
+    assert_equal ["escape 1 4 #{hex('\\x09')}"], run_driver(["escape #{hex("\t")} 16"])
+    assert_equal ["escape 1 1 #{hex('\\')}"], run_driver(["escape #{hex('\\')} 16"])
+  end
+
   def test_no_forgery_reaches_the_line
     FORGERIES.each do |name, bytes|
       text = M.escape_whole(bytes.b)
-      refute_match(/[^\t -~]/, text, name)
+      refute_match(/[^ -~]/, text, name)
       refute_includes text, "\n", name
       assert_equal ["escape #{bytes.bytesize} #{text.bytesize} #{hex(text)}"],
                    run_driver(["escape #{hex(bytes)} 4096"]), name
@@ -279,9 +289,10 @@ class LogTest < Minitest::Test
   end
 
   def test_the_window_reader_refuses_every_malformed_record
-    good = wire_record(seq: 4, time_ns: 9, level: 3, flags: 0, text: "ok\tok!")
+    good = wire_record(seq: 4, time_ns: 9, level: 3, flags: 0, text: 'ok ok!')
     assert_equal 'end 40', run_driver(["parse #{good.unpack1('H*')}"]).last
     cases = {
+      'a raw tab in the text' => wire_record(seq: 4, time_ns: 9, level: 3, flags: 0, text: "ok\tok!"),
       'short header' => good.byteslice(0, 31),
       'text past the window' => good.byteslice(0, 37),
       'padding past the window' => wire_record(seq: 0, time_ns: 0, level: 3, flags: 0, text: 'a').byteslice(0, 33),
@@ -323,7 +334,7 @@ class LogTest < Minitest::Test
     assert all_cases_pass?(@driver), 'the sweep the mutants must fail has to pass on the core itself'
     source = File.read(File.join(@root, CORE))
     mutants = {
-      'tab is escaped too' => ['if (erx_terminal_ascii_safe[byte] != 0) {', 'if (erx_terminal_ascii_safe[byte] != 0 && byte != 9) {'],
+      'a tab passes raw' => ['if (erx_terminal_ascii_safe[byte] != 0) {', 'if (erx_terminal_ascii_safe[byte] != 0 || byte == 9) {'],
       'a record across the ring end reads shifted text' => ['log->raw_ring, length - first);', 'log->raw_ring + 1, length - first);'],
       'a record across the ring end is written shifted' => ['__builtin_memcpy(log->raw_ring, (const uint8_t *)bytes + first,', '__builtin_memcpy(log->raw_ring + 1, (const uint8_t *)bytes + first,'],
       'a token may be cut' => ['if (capacity - written < ERX_LOG_TOKEN_BYTES)', 'if (capacity == written)'],
@@ -525,7 +536,7 @@ class LogTest < Minitest::Test
 
   def known_answers(driver)
     expectations = {
-      ["escape 09 16"] => ["escape 1 1 09"],
+      ['escape 09 16'] => ["escape 1 4 #{hex('\\x09')}"],
       ['escape 1b 3'] => ['escape 0 0 -'],
       ['debug 1 0 505 -'] => ['debug -1'],
       ["cursor #{M::SEQ_LAST}", 'debug 1 2 1 62'] => ['debug -7'],

@@ -7135,7 +7135,7 @@ through `erx_log_escape`, the kernel's own format strings included, so text
 that came from outside the
 trusted base (an `erx_debug_log` call, an object name, a device-tree string)
 needs no separate path. It writes every byte other than
-printable ASCII and tab as `\xNN`, newlines included, using the byte classes
+printable ASCII as `\xNN`, tabs and newlines included, using the byte classes
 generated from `abi/terminal.txt`, so untrusted text can neither move the
 cursor nor start a line that looks like another party's. A backslash is
 printable and passes as itself, so a line that reads `\x1B` may have held

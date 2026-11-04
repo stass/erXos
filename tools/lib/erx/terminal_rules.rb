@@ -63,10 +63,10 @@ module Erx
         raise Error, 'invalid scalar interval' unless values.size == 2
         interval(values.join('..'))
       when 'kernel_ascii'
-        raise Error, 'invalid kernel ASCII rule' unless values.size >= 2
-        first, last, *extras = points(values)
-        raise Error, 'kernel rule exceeds ASCII' unless first <= last && ([last] + extras).all? { |point| point < 128 }
-        { 'range' => [first, last], 'extra' => extras }
+        raise Error, 'invalid kernel ASCII rule' unless values.size == 2
+        first, last = points(values)
+        raise Error, 'kernel rule exceeds printable ASCII' unless first >= 0x20 && first <= last && last <= 0x7e
+        { 'range' => [first, last] }
       when 'grammar'
         fields = assignments(values, %w[sequence_bytes parameters digits separator intermediates])
         { 'sequence_bytes' => decimal(fields.fetch('sequence_bytes'), maximum: 256),
@@ -90,7 +90,7 @@ module Erx
       when 'pass'
         name, *characters = values
         raise Error, 'unknown text escape profile' unless %w[strict line].include?(name)
-        [name, points(characters)]
+        [name, characters.empty? ? [] : points(characters)]
       when 'token'
         name, prefix, first, last, suffix = values
         unless values.size == 5 && %w[codepoint byte kernel].include?(name) &&

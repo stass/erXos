@@ -855,7 +855,7 @@ module Erx
         "maximum_count" => 2,
         "minimum_count" => 0,
         "zero_is_default" => true}.freeze}.freeze,
-        "pass" => {"line" => [9].freeze,
+        "pass" => {"line" => [].freeze,
         "strict" => [9, 10].freeze}.freeze,
         "resets" => {"alternate_screen" => [27, 91, 63, 49, 48, 52, 57, 108].freeze,
         "cursor_keys" => [27, 91, 63, 49, 108].freeze,

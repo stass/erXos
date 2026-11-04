@@ -796,13 +796,6 @@ document's "residual risks accepted" paragraph.
   UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
   `carries_capability?` refuses as a plain aggregate
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
-* [Medium] kernel log, a tab passes `erx_log_escape` raw:
-  `kernel_ascii` in `abi/terminal.txt` admits 0x09, though
-  [design-kernel.md](docs/design-kernel.md#console-log-and-panic) says escaped
-  text cannot move the cursor, and the crash frame's reader accepts only
-  printable ASCII and newlines, so an `erx_debug_log` tab in a full record's
-  tail reads as `corrupt`. A backslash also passes raw, so a literal `\x1b`
-  reads the same as an escaped ESC. Escape both.
 * [Low] crash record, the crash frame's constants: the design says the ABI
   file declares `crash_frame_begin`, `crash_frame_end`, `crash_frame_line` and
   `crash_frame_lines_max`, and it does not yet. They land with the frame's

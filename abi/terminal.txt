@@ -1,6 +1,8 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 # Profiles are separate: renderer output never grants permission to raw text.
+# Tab is layout only in strict, whose text already holds newlines; a line of
+# attributed text and the kernel log escape it, since it moves the cursor.
 terminal 1
 unicode 17.0.0
 input unicode_data otp/lib/stdlib/uc_spec/UnicodeData.txt
@@ -14,8 +16,8 @@ unsafe_property Default_Ignorable_Code_Point
 exceptions 200C 200D FE0E FE0F
 invalid_scalars D800 DFFF
 pass strict 0009 000A
-pass line 0009
-kernel_ascii 0020 007E 0009
+pass line
+kernel_ascii 0020 007E
 token codepoint <U+ 4 6 >
 token byte <0x 2 2 >
 token kernel \x 2 2 -

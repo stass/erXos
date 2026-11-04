@@ -858,7 +858,7 @@ catalog() ->
       <<"maximum_count">> => 2,
       <<"minimum_count">> => 0,
       <<"zero_is_default">> => true}},
-      <<"pass">> => #{<<"line">> => [9],
+      <<"pass">> => #{<<"line">> => [],
       <<"strict">> => [9, 10]},
       <<"resets">> => #{<<"alternate_screen">> => [27, 91, 63, 49, 48, 52, 57, 108],
       <<"cursor_keys">> => [27, 91, 63, 49, 108],

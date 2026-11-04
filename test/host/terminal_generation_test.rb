@@ -28,10 +28,20 @@ class TerminalGenerationTest < Minitest::Test
     assert_equal 4, notice.fetch('inputs').size
   end
 
+  # The kernel's class is a printable range and nothing else: no line of the
+  # source can admit a control to it.
+  def test_the_kernel_class_admits_no_control
+    assert_equal({ 'range' => [0x20, 0x7e] }, Erx::TerminalRules.source(source).fetch('kernel_ascii'))
+    ['kernel_ascii 0020 007E 0009', 'kernel_ascii 001F 007E', 'kernel_ascii 0020 007F'].each do |line|
+      forged = source.sub(/^kernel_ascii .*$/, line)
+      assert_raises(Erx::Error, line) { Erx::TerminalRules.source(forged) }
+    end
+  end
+
   def test_policy_profiles_and_color_operands_are_separate
     model = Erx::TerminalRules.source(source)
     assert_equal [9, 10], model.fetch('pass').fetch('strict')
-    assert_equal [9], model.fetch('pass').fetch('line')
+    assert_empty model.fetch('pass').fetch('line')
     assert_equal [0x200c, 0x200d, 0xfe0e, 0xfe0f], model.fetch('exceptions')
     assert_equal({ 'sequence_bytes' => 64, 'parameters' => 16, 'digits' => 5,
                    'separator' => 59, 'intermediates' => [32, 47] }, model.fetch('grammar'))

@@ -33,7 +33,7 @@ static char fuzz_line[ERX_LOG_LINE_MAX];
 static bool
 passes(uint8_t byte)
 {
-	return (byte == '\t' || (byte >= 0x20 && byte <= 0x7e));
+	return (byte >= 0x20 && byte <= 0x7e);
 }
 
 /* A record's text or a rendered line: nothing outside the class. */

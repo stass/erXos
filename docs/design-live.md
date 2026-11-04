@@ -512,9 +512,9 @@ three bytes per stream, and writes it as bytes when the stream ends or the
 next byte cannot continue it.
 
 The **strict escape**, `erx_text:escape/1`, applies these and passes tab
-and newline; the **line escape**, `erx_text:escape_line/1`, escapes
-newline as well, so one record is one line under its source's name and no
-domain can write a line that looks like another's. Log records and other
+and newline, a program's own layout; the **line escape**,
+`erx_text:escape_line/1`, escapes tab and newline as well, so one record
+is one line under its source's name and no domain can write a line that looks like another's. Log records and other
 text attributed to a source render with the line escape. The allowlist of
 `to_terminal/1` holds exactly the control sequences `prim_tty` emits in
 this mode, less screen clearing, recorded by a test that renders every
@@ -523,7 +523,7 @@ mode switches, mouse reporting, concealed text and every operating system
 command, device control, application program command, privacy message and
 start of string sequence, is written escaped. The host tool prints through
 the same tables, generated as Ruby. The kernel log, which carries no
-Unicode table, writes every byte outside printable ASCII and tab in text
+Unicode table, writes every byte outside printable ASCII in text
 it did not write as `\xNN`
 ([design-kernel.md](design-kernel.md#console-log-and-panic)). Each class
 has a test at each writer, and each escaper has a fuzz target. Implicit

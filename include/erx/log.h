@@ -17,7 +17,7 @@
  *
  * Every byte of a record's text passes erx_log_escape on its way in, the
  * kernel's own format strings included, so a record's text holds only
- * printable ASCII and tabs and a record cannot span lines.
+ * printable ASCII and a record cannot span lines.
  */
 
 #include <stdbool.h>
@@ -98,7 +98,7 @@ typedef enum erx_log_next {
 
 /*
  * The one escaping function of the kernel log: copies text to dst, writing
- * printable ASCII and tab as themselves and every other byte, newlines,
+ * printable ASCII as themselves and every other byte, tabs, newlines,
  * escape sequences and every byte of a multi-byte character included, as
  * \xNN. It stops before the first byte whose whole form does not fit, so
  * no token is ever cut. It loads each input byte once; a caller holding

@@ -73,9 +73,8 @@ module Erx
     private_class_method :reset_sequences
 
     def ascii_header(model)
-      rule = model.fetch('kernel_ascii')
-      first, last = rule.fetch('range')
-      values = (0..255).map { |byte| byte.between?(first, last) || rule.fetch('extra').include?(byte) ? 1 : 0 }
+      first, last = model.fetch('kernel_ascii').fetch('range')
+      values = (0..255).map { |byte| byte.between?(first, last) ? 1 : 0 }
       rows = values.each_slice(16).map { |slice| "\t" + slice.join(', ') + ',' }
       token = model.fetch('token').fetch('kernel')
       unless token.fetch('minimum') == token.fetch('maximum') && token.fetch('suffix').empty?

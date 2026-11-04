@@ -8,7 +8,7 @@
 # it shares neither the ring's positions nor its walks with the core.
 #
 # From the design (docs/design-kernel.md, "Console, log and panic"):
-# * Every byte other than printable ASCII and tab becomes \xNN.
+# * Every byte other than printable ASCII becomes \xNN, a tab included.
 # * A record has a sequence number, a timestamp, a level and its text, and
 #   the ring holds 64 KiB of them, the oldest giving way.
 # * A debug line opens with the caller's space, and a space writes 16 KiB per
@@ -39,7 +39,7 @@ class LogModel
   Rate = Struct.new(:start, :bytes, :dropped)
 
   def self.record_bytes(length) = HEADER + (length + 7) / 8 * 8
-  def self.safe?(byte) = byte == 9 || byte.between?(0x20, 0x7e)
+  def self.safe?(byte) = byte.between?(0x20, 0x7e)
   def self.token(byte) = format('\\x%02X', byte)
 
   def self.escape_whole(bytes)
