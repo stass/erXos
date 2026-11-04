@@ -62,19 +62,12 @@ _Static_assert(sizeof(erx_crash_scratch_t) <= ERX_CRASH_SCRATCH_BYTES,
 _Static_assert(_Alignof(erx_crash_scratch_t) <= ERX_CRASH_BUFFER_ALIGN,
     "the seam's alignment holds the scratch");
 
-/*
- * One walk over the log. Each step reads a record or a window, and a legal ring
- * holds at most ERX_LOG_RING_BYTES / ERX_LOG_RECORD_SIZE records.
- */
-#define ERX_CRASH_LOG_STEPS	(2 * ERX_LOG_RING_BYTES / ERX_LOG_RECORD_SIZE)
-
 typedef struct erx_crash_log_walk {
 	const erx_log_t	*log;
 	erx_crash_scratch_t *scratch;
 	uint64_t	cursor;
 	size_t		offset;
 	size_t		filled;
-	uint32_t	steps;
 } erx_crash_log_walk_t;
 
 static bool erx_crash_all_zero(const uint8_t *, size_t);
@@ -217,10 +210,11 @@ erx_crash_settle(const erx_crash_input_t *input, erx_crash_brief_t *header)
 
 /*
  * The next rendered line of the log, in the scratch, and its length; false at
- * the log's end. A window that fails the log's check of a record is skipped:
- * a panic may have stopped a CPU halfway through an append. The steps bound
- * the walk whatever the counters say, since memory corruption is a common
- * reason to panic and the machine must still end.
+ * the log's end. A window that holds a record the log's check refuses is left
+ * for the next: a panic may have stopped a CPU halfway through an append. Each
+ * copy moves the cursor forward and the cursor ends at next_seq, which
+ * erx_crash_log_tail has checked is within a ring's worth of records, so the
+ * walk is bounded however wrong the ring's bytes are.
  */
 static bool
 erx_crash_log_next(erx_crash_log_walk_t *walk, size_t *length)
@@ -230,8 +224,7 @@ erx_crash_log_next(erx_crash_log_walk_t *walk, size_t *length)
 	erx_log_view_t view;
 
 	scratch = walk->scratch;
-	while (walk->steps > 0) {
-		walk->steps--;
+	for (;;) {
 		if (walk->offset < walk->filled &&
 		    erx_log_next_record(scratch->window, walk->filled, &walk->offset,
 		    scratch->text, &view) == ERX_LOG_NEXT_RECORD) {
@@ -247,7 +240,6 @@ erx_crash_log_next(erx_crash_log_walk_t *walk, size_t *length)
 		walk->offset = 0;
 		walk->filled = copied.written;
 	}
-	return (false);
 }
 
 static erx_crash_log_walk_t
@@ -256,12 +248,12 @@ erx_crash_log_start(const erx_log_t *log, erx_crash_scratch_t *scratch)
 	return ((erx_crash_log_walk_t){
 		.log = log,
 		.scratch = scratch,
-		.steps = ERX_CRASH_LOG_STEPS,
 	});
 }
 
 /*
- * The newest whole lines that fit in room, newest last. One walk measures the
+ * The newest whole lines that fit in room, newest last; none when a wild store
+ * has reached the log's counters. One walk measures the
  * log and a second copies the lines past the part that does not fit; the other
  * CPUs have stopped, and a log that differs between the walks only ends the
  * copy early.
@@ -273,6 +265,8 @@ erx_crash_log_tail(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst
 	erx_crash_log_walk_t walk;
 	size_t all, line, seen, skip, used;
 
+	if (!erx_log_counters_plausible(log))
+		return (0);
 	all = 0;
 	walk = erx_crash_log_start(log, scratch);
 	while (erx_crash_log_next(&walk, &line))

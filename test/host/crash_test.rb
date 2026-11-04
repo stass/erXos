@@ -265,9 +265,17 @@ class CrashTest < Minitest::Test
   # Memory corruption is a common reason to panic: the walk of the log must end
   # however wrong its counters are, or the machine never does.
   def test_corrupted_log_counters_do_not_stop_the_record
-    written = write(lines: -2)
-    assert_equal 'ok', written.check
-    assert_equal :valid, FRAME.read(written.frame).status
+      written = write(lines: -2, message: 'boom')
+      assert_equal 'ok', written.check
+      result = FRAME.read(written.frame)
+      assert_equal :valid, result.status
+      assert_equal "boom\n", result.text
+  end
+
+  def test_a_log_past_its_wrap_still_gives_its_newest_lines
+    lines = FRAME.read(write(lines: 3000).frame).text.split("\n")
+    assert_includes lines.last, 'line 2999'
+    assert_operator lines.size, :>, 100
   end
 
   def test_a_buffer_full_of_stale_bytes_does_not_reach_the_record
@@ -472,20 +480,20 @@ class CrashTest < Minitest::Test
     assert_equal :valid, FRAME.read("#{frame.sub('brief', 'bad')}banner\n#{frame}", after: 'banner').status
   end
 
-  def plan(form, bytes) = drive(["plan #{form} #{hex(bytes)}"]).fetch(0).split.fetch(1).to_i
+  def handed_on(form, bytes) = drive(["previous #{form} #{hex(bytes)}"]).fetch(0).split.fetch(1).to_i
 
   def test_only_a_record_of_the_builds_form_is_handed_on
     full, brief = clean_records
-    assert_equal brief.bytesize, plan(BRIEF, brief)
-    assert_equal full.bytesize, plan(FULL, full)
-    assert_equal brief.bytesize, plan(BRIEF, brief + "\xEE".b * 4096)
-    assert_equal 0, plan(BRIEF, full)
-    assert_equal 0, plan(FULL, brief)
-    assert_equal 0, plan(BRIEF, brief.dup.tap { |record| record.setbyte(100, record.getbyte(100) ^ 1) })
-    assert_equal 0, plan(BRIEF, brief.byteslice(0, 119))
-    assert_equal 0, plan(BRIEF, "\xEE".b * 4096)
-    assert_equal 0, plan(BRIEF, "\0".b * 4096)
-    assert_equal 0, plan(BRIEF, ''.b)
+    assert_equal brief.bytesize, handed_on(BRIEF, brief)
+    assert_equal full.bytesize, handed_on(FULL, full)
+    assert_equal brief.bytesize, handed_on(BRIEF, brief + "\xEE".b * 4096)
+    assert_equal 0, handed_on(BRIEF, full)
+    assert_equal 0, handed_on(FULL, brief)
+    assert_equal 0, handed_on(BRIEF, brief.dup.tap { |record| record.setbyte(100, record.getbyte(100) ^ 1) })
+    assert_equal 0, handed_on(BRIEF, brief.byteslice(0, 119))
+    assert_equal 0, handed_on(BRIEF, "\xEE".b * 4096)
+    assert_equal 0, handed_on(BRIEF, "\0".b * 4096)
+    assert_equal 0, handed_on(BRIEF, ''.b)
   end
 
   # One-line mutants of the core: each must change what these cases see.

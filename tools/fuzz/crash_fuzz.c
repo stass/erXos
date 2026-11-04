@@ -19,8 +19,10 @@
  *   1: the same over any bytes with the magic, version and CRC made right, so
  *      that the fields past the CRC are reached
  *   2: erx_crash_frame_read over any log
- *   3: erx_crash_record_write from any input, the log's counters and ring
- *      scribbled on when the input asks, through the frame and back
+ *   3: erx_crash_record_write from any input, through the frame and back. The
+ *      next byte selects: 1 registers, 2 frames, 4 a log, 8 the full form, 0x40
+ *      the form as the input has it, 0x80 scribble on the log's counters and
+ *      ring; 0x30 scales the log's lines
  */
 
 #define FUZZ_FRAME_MAX	(2 * ERX_CRASH_SIZE)
@@ -28,12 +30,12 @@
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 static void fuzz_check(const uint8_t *, size_t);
+static bool fuzz_expected(const uint8_t *);
 static void fuzz_fixed(const uint8_t *, size_t);
+static void fuzz_handed_on(const uint8_t *, size_t);
 static void fuzz_read(const uint8_t *, size_t);
 static void fuzz_scribble(const uint8_t *, size_t);
 static void fuzz_write(const uint8_t *, size_t);
-static bool fuzz_expected(const uint8_t *);
-static void fuzz_plans(const uint8_t *, size_t);
 
 static _Alignas(8) uint8_t fuzz_record[ERX_CRASH_SIZE];
 static _Alignas(8) uint8_t fuzz_copy[ERX_CRASH_SIZE];
@@ -113,7 +115,7 @@ fuzz_expected(const uint8_t *bytes)
 
 /* A record is handed on only in its own form, and only when it checks. */
 static void
-fuzz_plans(const uint8_t *bytes, size_t length)
+fuzz_handed_on(const uint8_t *bytes, size_t length)
 {
 	uint32_t brief, full, form, used;
 	erx_crash_check_t status;
@@ -141,7 +143,7 @@ fuzz_check(const uint8_t *bytes, size_t length)
 	status = erx_crash_check(bytes, length);
 	if (erx_crash_check_reason(status) == NULL)
 		abort();
-	fuzz_plans(bytes, length);
+	fuzz_handed_on(bytes, length);
 	if (status == ERX_CRASH_CHECK_OK && !fuzz_expected(bytes))
 		abort();
 }
@@ -176,7 +178,7 @@ fuzz_fixed(const uint8_t *bytes, size_t length)
 	if ((erx_crash_check(fuzz_copy, used) == ERX_CRASH_CHECK_OK) !=
 	    fuzz_expected(fuzz_copy))
 		abort();
-	fuzz_plans(fuzz_copy, used);
+	fuzz_handed_on(fuzz_copy, used);
 }
 
 static void
@@ -217,18 +219,27 @@ fuzz_read(const uint8_t *bytes, size_t length)
 }
 
 /*
- * What a wild store or a CPU stopped mid-append leaves: the input over the
- * log's counters at its start and over the ring at its end.
+ * What a wild store or a CPU stopped mid-append leaves: the first bytes over
+ * the log's counters, the next two as an offset into the ring, and the rest
+ * over the ring there. The ring is the log's last member.
  */
 static void
 fuzz_scribble(const uint8_t *bytes, size_t length)
 {
-	size_t counters, ring;
+	uint8_t *ring;
+	size_t counters, offset;
 
 	counters = length < 4 * sizeof(uint64_t) ? length : 4 * sizeof(uint64_t);
-	ring = length < sizeof(fuzz_log) / 2 ? length : sizeof(fuzz_log) / 2;
 	memcpy(&fuzz_log, bytes, counters);
-	memcpy((uint8_t *)&fuzz_log + sizeof(fuzz_log) - ring, bytes, ring);
+	if (length < counters + 2)
+		return;
+	offset = (bytes[counters] | (size_t)bytes[counters + 1] << 8) % ERX_LOG_RING_BYTES;
+	bytes += counters + 2;
+	length -= counters + 2;
+	if (length > ERX_LOG_RING_BYTES - offset)
+		length = ERX_LOG_RING_BYTES - offset;
+	ring = (uint8_t *)&fuzz_log + sizeof(fuzz_log) - ERX_LOG_RING_BYTES;
+	memcpy(ring + offset, bytes, length);
 }
 
 /*
@@ -243,28 +254,40 @@ fuzz_write(const uint8_t *bytes, size_t length)
 	static _Alignas(8) uint8_t back[ERX_CRASH_SIZE];
 	erx_crash_input_t input;
 	erx_crash_read_t result;
-	size_t used, split;
+size_t used;
+uint8_t selector;
 
-	memset(&input, 0, sizeof(input));
-	used = length < sizeof(input) ? length : sizeof(input);
-	memcpy(&input, bytes, used);
-	split = used;
-	input.regs = (split > 0 && (bytes[0] & 1) != 0) ? regs : NULL;
-	input.frames = (split > 0 && (bytes[0] & 2) != 0) ? frames : NULL;
-	input.message = (const char *)bytes + split;
-	input.message_length = length - split;
+if (length == 0)
+	return;
+selector = bytes[0];
+bytes++;
+length--;
+memset(&input, 0, sizeof(input));
+used = length < sizeof(input) ? length : sizeof(input);
+memcpy(&input, bytes, used);
+bytes += used;
+length -= used;
+if ((selector & 0x40) == 0) {
+	input.form = (selector & 8) != 0 ? ERX_CRASH_FORM_FULL :
+	    ERX_CRASH_FORM_BRIEF;
+}
+input.regs = (selector & 1) != 0 ? regs : NULL;
+input.frames = (selector & 2) != 0 ? frames : NULL;
+input.message = (const char *)bytes;
+input.message_length = length;
+input.log = NULL;
+if ((selector & 4) != 0) {
 	memset(&fuzz_log, 0, sizeof(fuzz_log));
-	input.log = NULL;
-	if (split > 0 && (bytes[0] & 4) != 0) {
-		for (size_t index = 0; index < (size_t)(bytes[0] >> 3) * 8; index++) {
-			if (ERX_LOG_FORMAT(&fuzz_log, ERX_LOG_LEVEL_INFO, index,
-			    "a line of the log %zu", index) != ERX_OK)
-				abort();
-		}
-		if ((bytes[0] & 0x80) != 0)
-			fuzz_scribble(bytes, length);
-		input.log = &fuzz_log;
+	for (size_t index = 0; index < (size_t)((selector >> 4) & 3) * 700;
+	    index++) {
+		if (ERX_LOG_FORMAT(&fuzz_log, ERX_LOG_LEVEL_INFO, index,
+		    "a line of the log %zu", index) != ERX_OK)
+			abort();
 	}
+	if ((selector & 0x80) != 0)
+		fuzz_scribble(bytes, length);
+	input.log = &fuzz_log;
+}
 
 	used = erx_crash_record_write(&input, fuzz_record, fuzz_scratch);
 	if (used > ERX_CRASH_SIZE || erx_crash_check(fuzz_record, used) != ERX_CRASH_CHECK_OK)

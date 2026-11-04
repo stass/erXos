@@ -590,7 +590,10 @@ module Erx
             "#define ERX_#{name.upcase}_#{member.upcase} UINT32_C(#{value})"
           end
         end
-        kinds = schema.types.fetch('fault_kind').members.values.sum { |value| 1 << value }
+        values = schema.types.fetch('fault_kind').members.values
+        raise SchemaError, 'a fault kind does not fit the crash seam\'s mask' unless values.all? { |value| value.between?(0, 31) }
+
+        kinds = values.reduce(0) { |mask, value| mask | (1 << value) }
         regs = schema.types.fetch('erx_regs')
         brief = schema.types.fetch('erx_crash_brief')
         build_id = brief.fields.find { |member| member.name == 'build_id' }

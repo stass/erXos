@@ -173,6 +173,15 @@ erx_log_next_t erx_log_next_record(const uint8_t *window, size_t window_size,
     size_t *offset, char *text, erx_log_view_t *view);
 
 /*
+ * Whether the counters could be the ring's: at most one minimal record per
+ * record's worth of ring, and no more bytes than the ring holds. Every point
+ * of an append that a stopped CPU leaves passes. A reader that cannot trust the
+ * log, the crash record's at a panic, treats a log that fails as having no
+ * lines, which also bounds how far erx_log_copy's cursor can walk.
+ */
+bool erx_log_counters_plausible(const erx_log_t *log);
+
+/*
  * Writes a record as one line, "#SEQ SECONDS.MICROSECONDS LEVEL TEXT" and
  * a newline, with " [truncated]" before the newline when the record says
  * so. Everything but the newline passes erx_log_escape, so no view of any

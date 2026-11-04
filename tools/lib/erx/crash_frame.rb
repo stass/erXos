@@ -179,9 +179,10 @@ module Erx
         cursor = line.next_offset
         raw = [length - index * LINE_BYTES, LINE_BYTES].min
         reason = payload_reason(line, raw)
-        decoded = reason.nil? ? decode(line.text, raw) : nil
-        reason ||= :base64 if decoded.nil?
         return Body.new(reason: reason, cursor: cursor, record: nil) if reason
+
+        decoded = decode(line.text, raw)
+        return Body.new(reason: :base64, cursor: cursor, record: nil) if decoded.nil?
 
         record << decoded
       end

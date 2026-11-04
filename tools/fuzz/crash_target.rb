@@ -18,6 +18,7 @@ Erx::PackFuzz.declare_target(
     ["\x00#{record}", "\x00#{record * 2}", "\x01\x01#{"\x00" * 1000}", "\x01\x00#{record}",
      "\x02#{log}", "\x02text\r\n#{log.gsub("\n", "\r\n")}tail\n", "\x02#{log.lines[0...-1].join}",
      "\x02#{marker} full 16385\n", "\x02#{marker} brief 0120\n",
-     "\x03\x07#{"\x00" * 200}message", "\x03\xff#{"\xff" * 300}\e[31m\nx", "\x03\x84#{"\xff" * 300}", "\x03"]
+     "\x03\x0f#{"\x00" * 200}message", "\x03\xff#{"\xff" * 300}\e[31m\nx", "\x03\x1e#{"\x00" * 200}",
+       "\x03\x9e#{"\x00" * 120}#{"\x00" * 34}#{"\xee" * 200}", "\x03\x9e#{"\x00" * 120}#{"\xff" * 300}", "\x03"]
   )
 )

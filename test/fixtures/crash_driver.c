@@ -11,7 +11,7 @@
  *
  *   crc HEX                 -> crc VALUE
  *   check HEX               -> check NAME
- *   plan FORM HEX           -> plan LENGTH
+ *   previous FORM HEX       -> previous LENGTH
  *   read HEX                -> read STATUS REASON CHECK LENGTH START END RECORD-HEX
  *   write FORM CAUSE CPU VALUE SLOT NFRAMES FRAMES REGS KIND MESSAGE-HEX LOG-LINES
  *                           -> record LENGTH CHECK HEX
@@ -191,11 +191,11 @@ driver_command(char *line)
 		return;
 	if (strcmp(name, "write") == 0) {
 		driver_write(rest);
-	} else if (strcmp(name, "plan") == 0) {
+	} else if (strcmp(name, "previous") == 0) {
 		form = (unsigned int)strtoul(strtok_r(NULL, " \n", &rest), NULL, 10);
 		hex = strtok_r(NULL, " \n", &rest);
 		length = driver_unhex(hex);
-		printf("plan %u\n", erx_crash_previous_length(driver_bytes, length, form));
+		printf("previous %u\n", erx_crash_previous_length(driver_bytes, length, form));
 	} else {
 		hex = strtok_r(NULL, " \n", &rest);
 		if (hex == NULL)

@@ -2695,8 +2695,8 @@ the two is written as brief, and the brief form never reads the registers,
 the backtrace, the message or the log. The message passes `erx_log_escape`;
 the log's newest whole lines that fit follow it, each read through the
 log's own check of a record, since a panic may have stopped a CPU halfway
-through an append, and the walk has a bound of its own, since a wild store may
-have reached the log's counters.
+through an append; a log whose counters could not be the ring's, since a wild
+store may have reached them, gives no lines.
 
 At boot step 4 the kernel reads the region before it carves the buffer. A
 record that passes the reader's checks, and whose form is

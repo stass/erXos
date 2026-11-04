@@ -130,6 +130,15 @@ static bool erx_log_text_open(erx_log_t *, erx_log_text_t *);
 static erx_log_text_t erx_log_text_over(char *, size_t);
 static void erx_log_text_string(erx_log_text_t *, const char *);
 
+bool
+erx_log_counters_plausible(const erx_log_t *log)
+{
+	return (log->oldest_seq <= log->next_seq &&
+	    log->next_seq - log->oldest_seq <=
+	    ERX_LOG_RING_BYTES / ERX_LOG_RECORD_SIZE &&
+	    log->tail <= log->head && log->head - log->tail <= ERX_LOG_RING_BYTES);
+}
+
 erx_log_escape_result_t
 erx_log_escape(const void *text, size_t length, char *dst, size_t capacity)
 {

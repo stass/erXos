@@ -75,7 +75,8 @@ typedef struct erx_crash_input {
  * an input that contradicts itself is written as what it is, a kernel bug
  * (see kernel/core/crash.c, erx_crash_settle). Returns the record's length.
  * buffer and scratch are ERX_CRASH_BUFFER_ALIGN aligned. No lock is taken:
- * the log is read trusting neither its records nor its counters.
+ * a log whose counters could not be the ring's gives no lines, and each of its
+ * records is read through the log's own check.
  */
 size_t erx_crash_record_write(const erx_crash_input_t *input, void *buffer,
     void *scratch);

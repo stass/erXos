@@ -14,7 +14,7 @@
     "tools/lib/erx/abi_binary.rb": "4353d2e34b76269c7b3f381d6f33b6b537d265c7020b93b52d558b514b684a5b",
     "tools/lib/erx/abi_contracts.rb": "e198dc626ad54178d48459c3e96a176e4b5b2a16f1ec07e651da236d1920cf3d",
     "tools/lib/erx/abi_emit_c.rb": "4e4aafd6928fb31bf2bf5979f083ff565152efe0b39d162774a9c2b9f31a3d65",
-    "tools/lib/erx/abi_emit_calls.rb": "3fc6f7cf4e67f4ecfb84d18a69d300aa129cefe13fa40aeea7512b1217ca1dae",
+    "tools/lib/erx/abi_emit_calls.rb": "46505be5b3ef2648ce62b43e21a75aba323e4de1fde8aa55bb2a0ad3f28df6af",
     "tools/lib/erx/abi_emit_erlang.rb": "ed268665537f513687c9b0c391507e219c0af5d19f32919aa417d07c1f48c817",
     "tools/lib/erx/abi_emit_reader.rb": "1642e90ae6210dccb969563475914ca1e117409b7bea79483decf0c1fa2847d6",
     "tools/lib/erx/abi_emit_ruby.rb": "08a52cd535cd50354ba45d79fe9aff709700f1468d4d4a66df1e91d4d998bcd9",
