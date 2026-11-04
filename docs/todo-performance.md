@@ -14,6 +14,17 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Medium] scheduler, the cost of one machine-wide scheduling lock.** The
+  fallback to the cross-CPU protocol of
+  [design-scheduler.md](design-scheduler.md#concurrency) serialises every
+  context switch and wake on the machine through one lock held across the
+stack switch. The estimate, unmeasured on any host, is a hold of 100 to 200 ns
+per switch against an IPC call round trip estimated at 150 to 250 ns
+([design-kernel.md](design-kernel.md)), so on four CPUs the lock may dominate
+IPC-heavy work. Measure: a contended ticket lock across a switch, on four vCPUs
+under HVF, with the `tools/erx bench` IPC workloads, against M7's gate, if
+the protocol fails its model or its implementation. Fix: none is needed while
+the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Medium] kernel, first-use hash of large boot image files.** The kernel
   checks each boot image file's BLAKE3 hash the first time it is mapped or
   read, once per file per boot, and runs BLAKE3's portable code because it

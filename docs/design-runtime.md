@@ -661,10 +661,11 @@ ERTS's scheduler is the second level, kept whole except at these points:
   of the group's **run**, which the capacity word names
   ([design-scheduler.md](design-scheduler.md#status-words-and-capacity)),
   online scheduler `i` on the `i`-th CPU of the run, as `+sbt` binding
-  does on a host. Dirty CPU schedulers are left unpinned within the run,
-  so the kernel places each on an idle CPU of the run at its wake, and a
-  dirty NIF that starts while one idles does not wait behind a busy normal
-  scheduler. The domain's normal and dirty CPU work thus stay on its run,
+  does on a host. Dirty CPU schedulers are left unpinned within the run;
+  with `ERX_GROUP_PLACE` the kernel places each on an idle CPU of the run
+  at its wake, so a dirty NIF that starts while one idles does not wait
+  behind a busy normal scheduler, and without it each stays on its home
+  CPU. The domain's normal and dirty CPU work thus stay on its run,
   where the policy places no other domain's share. Dirty I/O schedulers,
   ERTS's helper threads (the aux thread and the system-message
   dispatcher) and the gate worker are workers in the same group, unpinned.

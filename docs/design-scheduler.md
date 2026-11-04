@@ -193,13 +193,16 @@ policy that sizes grants prevents that, the kernel does not repair it
 
 Functional requirements:
 
-1. **Every ready thread runs.** Within an urgency level and within its
-   group's quota, no ready thread waits forever. Sustained work at a higher
+1. **Every ready thread runs.** Within a level and a CPU, while its group
+   can supply quota there, no ready thread waits forever. A quota is a cap
+   and promises no minimum, so a group's throttled CPUs get no fair share
+   of its pool between them. Sustained work at a higher
    level can starve a lower one; that is what levels mean, and quotas bound
    it.
 2. **Isolation between groups.** A group's CPU time per period, summed over
    all CPUs, never exceeds its quota by more than one accounting quantum
-   per CPU, whatever its threads or its runtime do.
+   per CPU, plus one grace per CPU when `ERX_GROUP_DEFER` is on, whatever
+   its threads or its runtime do.
 3. **Hierarchy.** A group's limits never exceed its parent's: quota,
    cpuset and ceiling are intersected along the path to the root.
 4. **Runtime contract.** A runtime can create executors, park and wake
@@ -316,13 +319,13 @@ domain's principal ([design-system.md](design-system.md#creating-a-domain)),
 and a domain may hold more than one group when its parts need different
 grants, such as an ERTS runtime and a native helper, or a runtime of its
 own in a sub-space. A group serves one runtime: its executors at any
-moment belong to one space, since `erx_thread_create` refuses an executor
-for a group whose executors belong to another space that has not stopped,
-and only executors take its ready list, so a sub-space's runtime never
-takes its creator's wake-ups. A group whose executors' space stopped
-serves the next runtime at once, as `exec` needs: from the stop on, the
-old executors count for no rule, take no wake-up and give up their slots
-to the next runtime's executors ([Park and wake](#park-and-wake)).
+moment belong to one space, from the first creation until the last of
+them has died, since `erx_thread_create` refuses an executor for a group
+whose slots name a thread of another space, dying or not, and only
+executors take its ready list, so a sub-space's runtime never takes its
+creator's wake-ups. `exec` creates the next image's executor after the
+old image's exit record, when every old executor has died and freed its
+slot ([Park and wake](#park-and-wake)).
 
 **What the kernel decides.** On each CPU the kernel keeps ready queues by
 **urgency**, a level from 0 to 63. It runs the most urgent ready thread
@@ -399,12 +402,12 @@ measurement shows that it pays.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **S1.** The kernel never runs runtime code on a preemption, and never transfers control into an executor | preemption saves the thread's user registers into its thread record and later restores them; the kernel enters user mode only by resuming a thread's saved state or, for a worker armed with `erx_vcpu_control`, by Fiasco's vCPU upcall ([design-kernel.md](design-kernel.md#vcpu-upcalls)); `erx_vcpu_control` refuses an executor, and a thread's class is fixed at creation; wake-ups and status are written to memory, never delivered to an executor as a control transfer | an upcall into an executor; a path that arms an executor or changes a thread's class; a resumption at an address other than the saved one | the kernel's only exception-return paths are listed in the chokepoint table ([design-kernel.md](design-kernel.md#chokepoint-checks)); a domain test that `erx_vcpu_control` on an executor fails with `ERX_ETYPE`; a domain test preempts an executor at every instruction of a loop in deterministic mode and checks its registers on resumption |
-| **S2.** No wakeup is lost | `erx_park` compares the caller's group and slot epochs with the kernel's under the group's park lock and sleeps only if both match; every trigger of an IRQ object bound to the group, listed already or not, every capacity change and every executor wake advances an epoch under the same lock before choosing whom to wake; whoever publishes work does so before it triggers; the runtime reads the epochs before it looks for work | a park that compares outside the lock; a trigger that skips the advance because its IRQ object is already listed; a runtime that reads epochs after checking for work | the park protocol's state machine explored exhaustively on the host for two executors, two IRQ objects with repeated triggers, a capacity change, a timeout, and an old executor of a stopped space dying while a new one holds its slot; a stress test with random triggers and parks requires every trigger to be followed by a return from `erx_park` or by the runtime finding the work at a safe point |
+| **S2.** No wakeup is lost | `erx_park` compares the caller's group and slot epochs with the kernel's under the group's park lock and sleeps only if both match; every trigger of an IRQ object bound to the group, listed already or not, every capacity change and every executor wake advances an epoch under the same lock before choosing whom to wake; whoever publishes work does so before it triggers; the runtime reads the epochs before it looks for work | a park that compares outside the lock; a trigger that skips the advance because its IRQ object is already listed; a runtime that reads epochs after checking for work | the park protocol's state machine explored exhaustively on the host for two executors, two IRQ objects with repeated triggers, a capacity change, a timeout and an executor's death; a stress test with random triggers and parks requires every trigger to be followed by a return from `erx_park` or by the runtime finding the work at a safe point |
 | **S3.** An executor never blocks except in `erx_park` or a umtx wait on private memory | every blocking call in `abi/erx_abi.txt` declares whether an executor may make it, and the generated dispatch checks the caller's class before the call can block; the umtx wait refuses an executor on a shared memory object; a thread's class is fixed at creation | a blocking call without the declaration, or a path that blocks before the check | the ABI generator rejects a blocking call without the attribute; a domain test calls every blocking call from an executor and requires `ERX_EWOULDBLOCK`, with a seeded call lacking the attribute failing the generator |
-| **S4.** A group's usage per period exceeds its quota by at most one accounting quantum per CPU | every charge goes to every group on the running thread's group path; a dispatch requires local quota from every finite-quota group on that path; the CPU's one-shot timer is armed no later than the earliest local exhaustion; overruns are debts repaid from the next draw, and replacing a grant carries the debt into the period the replacement starts; a killed thread is dispatched without the check and charged to no pool, so its time is no group's usage (Finishing, in [Charging and quota](#charging-and-quota)) | a dispatch that skips the path check, a charge that skips a level, a timer armed past an exhaustion, or a replacement that forgives a debt | a host property test over random trees, charges, draws and grant replacements; a domain test with a spinning group at 10% on four CPUs measuring its usage per period, with a seeded charge that skips one level failing it |
-| **S5.** No group exceeds its parent | quota caps are conjunctive along the path (every level is charged and checked); a thread's CPUs are its affinity within its group's effective cpuset, itself narrowed down the path from the root's within the machine's CPUs; a published urgency is clamped to the minimum ceiling along the thread's path, and a thread's base never exceeds its own ceiling; none of these is stored per thread, all are derived at decision time from the current grants | storing a derived limit and missing an update | host tests that change an ancestor's grant and check the next decision of every descendant thread |
-| **S6.** Every interval a thread runs is charged to the thread's own group path and to no other: until its kill to the path's usage, from its kill on, for the accounting alone, to the path's `finishing_ns` | the group a thread is charged to is the `group` field of its thread record, written at creation and by nothing else; no kernel call, kill, IPC transfer or control-area field names a group to charge; the charge function is the one writer of a group's usage and of its `finishing_ns`, derives its path from that field alone and its counter from whether the thread is killed; a finishing thread's charge reaches no pool and no slice, so it admits nothing and throttles nothing (Finishing, in [Charging and quota](#charging-and-quota)) | a path that charges a group other than the running thread's; a call or shared-page field through which a runtime names a group to charge; a kill that names a group, or a finishing charge that reaches a pool or `used_ns` | the charge function is a chokepoint ([design-kernel.md](design-kernel.md#chokepoint-checks)): a seeded second writer of usage fails the build; a native server serving callers of several groups and a service runtime serving clients of several domains, each with usage per group against a cycle-counter ground truth under QEMU, with a seeded charge to the caller's group failing the test; the finishing case of [Verification and testing](#verification-and-testing), whose seeded failures charge a finishing thread's time to its own group's pool and to its stopper's path |
-| **S7.** A ready thread waits for at most the threads ahead of it at its level and above | each level is a FIFO; a thread is appended on wake, on slice end and on yield, and a preempted thread returns to the head of its level; throttled threads leave the queues and return when their group replenishes; the finishing level stands above every urgency level while its CPU's share lasts and below them all for the rest of the period ([Pick and dispatch](#pick-and-dispatch)) | a requeue at the head on slice end, or an unbounded repositioning loop | the pick core's model-based test against a reference queue; the bound on repositioning in [Pick](#pick-and-dispatch) |
+| **S4.** A group's usage per period exceeds its quota by at most one accounting quantum per CPU, plus one grace per CPU when `ERX_GROUP_DEFER` is on, which is an explicit debt | every charge goes to every group on the running thread's group path; a dispatch requires local quota from every finite-quota group on that path; the CPU's one-shot timer is armed no later than the earliest local exhaustion; overruns are debts repaid from the next draw, and replacing a grant carries the debt into the period the replacement starts; a killed thread is dispatched without the check and charged to no pool, so its time is no group's usage (Finishing, in [Charging and quota](#charging-and-quota)) | a dispatch that skips the path check, a charge that skips a level, a timer armed past an exhaustion, or a replacement that forgives a debt | a host property test over random trees, charges, draws and grant replacements; a domain test with a spinning group at 10% on four CPUs measuring its usage per period, with a seeded charge that skips one level failing it |
+| **S5.** No group exceeds its parent | quota caps are conjunctive along the path (every level is charged and checked); a thread's CPUs are its affinity within its group's effective cpuset, itself narrowed down the path from the root's within the machine's CPUs; a published urgency is clamped to the minimum ceiling along the thread's path, and a thread's base never exceeds its own ceiling; quotas and CPUs are derived at decision time from the current grants; urgency is stored per thread, written only at the thread's own transitions and by a refresh, which every change of a base or a ceiling makes for each thread it reaches before that call returns ([Urgency resolution](#urgency-resolution)) | a change of a base or a ceiling that refreshes nothing; a store of anything but a thread's own resolve; a walk that runs before its store | a chokepoint admits only the core's store of a thread's own resolve, and a seeded other store fails the build; host tests that change an ancestor's grant, apply its refreshes and check every descendant thread's level and next decision |
+| **S6.** Every interval a thread runs is charged to the thread's own group path and to no other: until its kill to the path's usage, from its kill on, for the accounting alone, to the path's `finishing_ns`; during help the executing stack is the holder's and the charged group is the helper's, a dying holder's included | the group a thread is charged to is the `group` field of its thread record, written at creation and by nothing else; no kernel call, kill, IPC transfer or control-area field names a group to charge; the charge function is the one writer of a group's usage and of its `finishing_ns`, derives its path from that field alone and its counter from whether the thread is killed; a finishing thread's charge reaches no pool and no slice, so it admits nothing and throttles nothing (Finishing, in [Charging and quota](#charging-and-quota)) | a path that charges a group other than the running thread's; a call or shared-page field through which a runtime names a group to charge; a kill that names a group, or a finishing charge that reaches a pool or `used_ns` | the charge function is a chokepoint ([design-kernel.md](design-kernel.md#chokepoint-checks)): a seeded second writer of usage fails the build; a native server serving callers of several groups and a service runtime serving clients of several domains, each with usage per group against a cycle-counter ground truth under QEMU, with a seeded charge to the caller's group failing the test; the finishing case of [Verification and testing](#verification-and-testing), whose seeded failures charge a finishing thread's time to its own group's pool and to its stopper's path |
+| **S7.** A ready thread waits for at most the threads ahead of it at its level and above | each level is a FIFO; a thread is appended on wake, on slice end and on yield, and a preempted thread returns to the head of its level; throttled threads leave the queues and return when their group replenishes; the finishing level stands above every urgency level while its CPU's share lasts and below them all for the rest of the period ([Pick and dispatch](#pick-and-dispatch)) | a requeue at the head on slice end, or an unbounded loop of moves in a pick | the pick core's model-based test against a reference queue; the bound on a pick's moves in [Pick](#pick-and-dispatch) |
 | **S8.** In deterministic mode the dispatch sequence is a function of the inputs | the core reads no clock or global state, only its arguments; with one CPU there are no cross-CPU requests; timers fire at instruction counts | a decision that reads the counter or an address | replay tests of the core; the deterministic transcript test of [plan.md](plan.md) |
 | **S9.** A client cannot make a service spend beyond the service's own grant, nor beyond its own share of it per period by more than the cost of the requests it has in flight when the share runs out | the service's threads are charged to the service's group (S6), which never exceeds its quota (S4) or its parent (S5); the client's facet admits its requests only while the reductions they cost, read from the service's runtime, are within the client's share for the period ([Service work](#service-work), [design-domains.md](design-domains.md#facets)); a single request is finite because the generated decoder bounds its input, and its cost reaches the account only with its reply, while the facet takes requests up to the grant's limit in flight, so the overrun is at most that limit times the costliest request's cost, which the facet carries into the next period as a debt; no fault is a request, since every fault resolves from its object or ends the thread | a kernel path that charged a client's work to anyone but the service; a facet that admits without its account, or accounts from anything but what the runtime measured; a serving path that returns no cost with its reply | a flooding client against a capped service under QEMU: the service's usage stays within its quota per period, the flooder's lane fills and blocks the flooder, the reductions spent on the flooder per period stay within its share plus the cost of the requests it had in flight when the share ran out, and the overrun is repaid in the next period, and a second client's requests are answered within the policy's bound; a client whose requests grow costlier with state it built in the service is held to its share the same way; a seeded facet that skips the account fails the test |
 
@@ -430,7 +433,7 @@ typedef enum erx_thread_class {
 A thread's class and its group are fixed when it is created. A thread's
 base is the value `erx_thread_set_urgency` last gave it, by a holder of
 the thread's capability with the `CONFIGURE` right, and its group's base
-until then; either is clamped at each decision. An executor with hints
+until then; either is clamped when it is resolved. An executor with hints
 on takes its published value from its control slot. Bases, ceilings and
 published urgencies share the one generated type, so none can name a
 level above `ERX_URGENCY_MAX`.
@@ -460,7 +463,7 @@ typedef struct erx_grant {
 | `capacity_first` | 0 | published modulo the size of the group's effective cpuset; with the capacity, it names the group's run ([Status words and capacity](#status-words-and-capacity)) |
 | `slice_us` | 5,000 | clamped to 500 .. 50,000 |
 | `grace_us` | 50 | clamped to 5 .. 1,000 |
-| `base`, `ceiling` | 16; 31 | `base` is clamped to `ceiling`; both are clamped to the parent's effective ceiling at each decision |
+| `base`, `ceiling` | 16; 31 | `base` is clamped to `ceiling`; both are clamped to the parent's effective ceiling whenever a thread is resolved |
 | `flags` | the features the default `erx.sched=` enables | masked by the machine-wide cap from `erx.sched=` |
 
 The defaults of slice, grace and period are estimates for the experiments
@@ -559,10 +562,11 @@ struct erx_group {
 	erx_dlist_t		att_members;	/* its member threads */
 	erx_dlist_t		att_children;	/* its child groups */
 	erx_dlist_t		att_bound;	/* the IRQ objects bound to it */
-	erx_grant_t		grant;		/* as configured; limits are derived at use */
+	erx_grant_t		grant;		/* as configured */
 	uint64_t		period_origin_ns;
 	uint64_t		origin_index;	/* the period that began at period_origin_ns */
-	erx_spin_t		pool_lock;	/* protects pool, the two fields above and
+	uint64_t		grant_gen;	/* advanced by every replacement */
+	erx_spin_t		pool_lock;	/* protects pool, the three fields above and
 						 * the grant's quota and period */
 	struct {
 		uint64_t	index;		/* the period the remainder belongs to */
@@ -600,19 +604,15 @@ struct erx_thread_sched {
 	uint8_t			slot;		/* executors only */
 	_Atomic erx_urgency_t	base;		/* workers: as configured */
 	uint64_t		affinity;
-	uint16_t		cpu;		/* the CPU whose queues hold it */
+	uint16_t		cpu;		/* its home CPU (Concurrency) */
 	struct erx_group	*group;		/* member of, and charged to, its finishing
 						 * time included; on its att_members;
 						 * written at creation only */
-	struct erx_decision	last;		/* urgency at the last decision */
+	erx_urgency_t		urgency;	/* its level; written on its home CPU, at its
+						 * transitions and by a refresh */
 	uint64_t		charged_to_ns;	/* time up to which it has been charged */
 	uint64_t		slice_left_ns;
 	erx_defer_t		defer;		/* deferred-preemption state */
-};
-
-struct erx_decision {
-	uint64_t		pick;		/* the pick it was made in */
-	erx_urgency_t		urgency;
 };
 ```
 
@@ -724,12 +724,43 @@ cross-CPU requests and stores to the status area. The core lives in
 stopgap, and is the same file in all three
 ([design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)).
 
+**What each section binds.** A configuration names the rung of the ladder
+that needs the mechanism. A frozen section's shape is decided and it is
+excluded from review rounds until something can check it: Track K's kernel
+for the finishing share, M8's experiments for the C2 mechanisms. A finding
+against a frozen section's details waits for that check.
+
+| Section | Configuration | Frozen |
+| --- | --- | --- |
+| [Urgency resolution](#urgency-resolution), [Pick and dispatch](#pick-and-dispatch), [Placement and affinity](#placement-and-affinity) without `ERX_GROUP_PLACE` | C0 | no |
+| **The finishing level** in [Pick and dispatch](#pick-and-dispatch), **Finishing** in [Charging and quota](#charging-and-quota) | erXos's kernel, every configuration | yes |
+| the rest of [Charging and quota](#charging-and-quota) | C1 | no |
+| [Park and wake](#park-and-wake) | C0 | no |
+| [Deferred preemption](#deferred-preemption), status words in [Status words and capacity](#status-words-and-capacity), idle-first placement in [Placement and affinity](#placement-and-affinity) | C2 | yes |
+| capacity and runs in [Status words and capacity](#status-words-and-capacity) | C1 | no |
+| [Concurrency](#concurrency) | erXos's kernel, every configuration; its protocol is model-checked first | no |
+
 ### Urgency resolution
 
-At every decision about a thread (dispatch, wake, preemption, slice end,
-yield, and each accounting point) the effect layer resolves the thread's
-urgency once and caches the result in `last` for the rest of that
-decision:
+A thread's urgency is a stored value: the `urgency` field of its record,
+which is also the level of the ready queues it waits on. It is set on the
+thread's home CPU alone, in two closed cases, and every store is that
+thread's own resolve in the core, which a chokepoint holds
+([design-kernel.md](design-kernel.md#chokepoint-checks)):
+
+* **A thread's own transition.** Its wake, yield, slice end and preemption
+  each resolve its urgency once and store it. A thread that parks or
+  blocks is resolved again at its wake.
+* **A refresh.** `erx_thread_set_urgency` and an `erx_group_configure` that
+  changes a base or a ceiling each refresh the threads they reach before
+  they return. A refresh is a request on the thread ([Concurrency](#concurrency))
+  whose answer the caller waits for by a bounded spin, the request's record on
+  the caller's kernel stack: its home CPU resolves the thread, a ready thread
+  whose urgency changed moves to the tail of its new level, a running thread
+  that a ready one now outranks is preempted, and a sleeper changes nothing,
+  since its wake resolves it.
+
+To resolve a thread:
 
 * An executor whose group enables `ERX_GROUP_HINTS` contributes the
   `urgency` byte loaded once from its slot; any other thread contributes
@@ -747,9 +778,38 @@ published = ERX_GROUP_HINTS ? slot.urgency : base
 urgency   = max(min(published, ceil(own)), base)
 ```
 
-Every term is read at the decision, so a ceiling lowered or a base
-changed anywhere on the path takes effect at the thread's next decision,
-and nothing derived is stored (S5). The group a thread is charged to is
+`erx_group_configure` stores the grant first, then walks the members of the
+group and of the groups below it, refreshing each in turn, in bounded parts.
+It holds each group's existence lock while it is in that group, from the group
+it was called on down
+([design-kernel.md](design-kernel.md#execution-model-and-locking)), and a
+member joins or leaves a group's list, and a child its parent's, only under
+that lock, helping the walk if it must. So the lists hold still: the walk
+needs no cursor that a dying thread can invalidate, and creations in a loop
+wait for the walk and cannot lengthen it. A child whose existence lock a
+destroy has invalidated is skipped, since its members are killed anyway, and a
+configuring thread killed mid-walk finishes the walk, as every call finishes
+the bounded work it began.
+
+The walk posts to every member, sleepers included, and never skips one on a
+reading of its state. A thread created after the store resolves the new
+limits. A refresh is applied on the home CPU after its poster's store, which
+the request's posting makes visible there, and a wake on that CPU is applied
+either before the refresh, which then corrects it, or after, and resolves
+from the stored grant itself. Of two replacements that race, the walk of the
+one stored last reaches every thread after both stores.
+
+**How long a limit lags.** When the call returns, every thread on a queue has
+its new urgency (S5). Before that, a thread the walk has not reached keeps its
+level on the queue, one it was entitled to before the change. It resolves
+again at its next transition from the grant already stored, so it runs above
+a lowered ceiling for at most the slice it was dispatched with: one slice per
+thread per change, however the walk fares. A configure's length is bounded by
+the threads the budgets below the group have paid for, in preemptible parts,
+and its caller pays, so a child with many threads lengthens its parent's call
+that far (**What a refresh exposes**, in [Security](#security)).
+
+The group a thread is charged to is
 not resolved at all: it is the `group` field of its thread record, fixed
 at creation, and a killed thread's time goes to the same path's
 `finishing_ns` (S6; Finishing, in [Charging and
@@ -757,11 +817,14 @@ quota](#charging-and-quota)). A killed
 thread is not resolved either: it runs at the finishing level ([Pick and
 dispatch](#pick-and-dispatch)).
 
-A value a runtime writes between two decisions takes effect at the next
-one. A runtime that raises an executor's urgency while the executor runs
+A value a runtime writes takes effect at that executor's next sample: the
+kernel loads a slot at the executor's own transitions, a wake by
+`erx_executor_wake` among them, and never in a pick. So a runtime can
+reclassify only its own executors, each time paying a transition or a
+call. A runtime that raises an executor's urgency while the executor runs
 gains nothing until it is preempted or calls `erx_yield`; one that lowers
-it keeps the higher urgency until the next decision, at most one slice or
-one accounting quantum. Neither direction needs a kernel call.
+it keeps the higher urgency until the next transition, at most one slice.
+Neither direction needs a kernel call.
 
 The shared areas are read only through the accessors `erx_shared_load_u8`,
 `erx_shared_load_u32` and `erx_shared_load_u64`, one per field width: one
@@ -790,10 +853,11 @@ when the CPU's finishing share runs out or its period begins:
    the bitmap, or the finishing level when nothing else is ready. If
    there is none, the CPU idles, waiting for an interrupt, until an
    interrupt or a cross-CPU request.
-2. Take the head thread `t` of that level. If `t` was not resolved in this
-   pick, resolve it. If its urgency differs from the level, move it to the
-   tail of the level of its urgency and go back to step 1. A thread is
-   resolved at most once per pick, so each moves at most once.
+2. Take the head thread `t` of that level. If `t` may no longer run on this
+   CPU, take it off the queues as a move ([Placement and
+   affinity](#placement-and-affinity)) and go back to step 1. A pick never
+   moves a thread for its urgency: the level it waits on is its urgency
+   ([Urgency resolution](#urgency-resolution)).
 3. Check `t`'s group path ([Charging and quota](#charging-and-quota)). If
    a group on it cannot supply quota on this CPU, move `t` to that group's
    throttled list on this CPU, and go back to step 1. A killed thread
@@ -808,12 +872,12 @@ when the CPU's finishing share runs out or its period begins:
    group enables `ERX_GROUP_STATUS`.
 
 **A bounded pick.** A pick moves at most `ERX_PICK_MOVES` (8) threads, to
-another level, to a throttled list or off a CPU it may no longer use. One
+a throttled list or off a CPU it may no longer use. One
 that reaches the bound before it finds a thread to dispatch dispatches the CPU's idle thread instead, which
 takes pending interrupts at once and picks again, so the pick's work
 between preemption points never grows with the number of ready threads,
-whatever a runtime publishes and however many threads a spent quota leaves
-to throttle (K13 of [design-kernel.md](design-kernel.md#invariants)). A
+however many threads a spent quota leaves to throttle or a changed cpuset
+leaves on the wrong CPU (K13 of [design-kernel.md](design-kernel.md#invariants)). A
 thread joins a group's throttled list at most once per period of that
 group ([Charging and quota](#charging-and-quota)), and the moves are
 kernel work, charged as every kernel entry is.
@@ -829,14 +893,14 @@ other thread is ready at its level or above, the pick takes it again and
 every dispatch cuts what a thread has left to its group's slice as it is then.
 
 **Preemption.** When a wake makes a thread ready at a higher urgency than
-the resolved urgency of the thread running on that CPU, the running thread
+the stored urgency of the thread running on that CPU, the running thread
 is preempted at once, in user mode or in the middle of a kernel call,
 except inside the short sections that hold the CPU's lock or a spinlock
 ([design-kernel.md](design-kernel.md#execution-model-and-locking)).
 Urgency preemption is always immediate; only slice ends and quota
 exhaustion may be deferred.
 
-**The finishing level.** A killed thread, one whose space has stopped or
+**The finishing level.** *Frozen.* A killed thread, one whose space has stopped or
 whose group or self is destroyed
 ([design-kernel.md](design-kernel.md#execution-model-and-locking)),
 leaves its urgency level at its kill and joins the finishing level of
@@ -903,6 +967,17 @@ and the thread's death follows its work and those waits.
 time is added to its own path's `finishing_ns` for the accounting
 ([Charging and quota](#charging-and-quota)).
 
+*Help.* A waiter helps a killed holder of a lock it needs as it helps any
+preempted holder ([design-kernel.md](design-kernel.md#execution-model-and-locking)):
+the part runs on the helper's CPU, at the helper's urgency, charged to the
+helper's path as all help is. The share measures what a CPU's pick chose,
+so `SWITCH` sees the helper's context and not a killed thread's: a helped
+part takes nothing from any CPU's share and adds nothing to the holder's
+`finishing_ns`. A pick on the holder's own CPU that takes it while a
+helper runs it finds the switch refused, as Fiasco's `switch_exec_locked`
+refuses one, leaves it on the level and picks again, as one of the pick's
+moves. Help only shortens `W`.
+
 ### Charging and quota
 
 **Accounting points.** The kernel charges a thread whenever it stops
@@ -939,7 +1014,12 @@ the path. `erx_sched_draw` refills a local slice that has reached zero:
    draws a positive slice, and a quota too small to share among all its
    CPUs runs on fewer of them at once.
 3. A local slice left at zero or below means the group is exhausted on
-   this CPU until its next period.
+   this CPU until its next period, and a pool at zero or below supplies
+   nothing.
+
+`erx_grant_normalize` caps a finite quota at `period_ns` times the
+machine's CPUs, more than any period can spend, so a quota always fits the
+pool's `int64_t`, and the arithmetic on it and on a debt is checked.
 
 **Period indexes.** Each local slice records the index of the period it
 was drawn in. A CPU returns its slice, under the pool lock, before it
@@ -980,13 +1060,13 @@ group that cannot. Once the group cannot supply quota there, the rest of
 the cohort goes back to the head of the list, in the same order, and waits
 for the next period untouched. The time the CPU spends releasing is
 charged to the group whose cohort it releases, from its local slice and as
-a debt beyond it, rather than to the thread it interrupted. So a group
-whose quota is zero, or whose debt exceeds its quota, costs each CPU where
-its threads wait one expiry and one failed draw per period, however many
-they are, and releasing a large cohort is paid for from the quota of the
-group it serves.
+a debt beyond it, rather than to the thread it interrupted. So releasing a large cohort is paid for from the quota of the group it
+serves. A group whose quota is zero arms no refill timer:
+`erx_group_configure` is the only event that can make it runnable, and it
+re-arms. A debt larger than the quota arms the first period in which a draw
+can succeed.
 
-**Finishing.** Stopping a space posts a kill to every thread of the
+**Finishing.** *Frozen.* Stopping a space posts a kill to every thread of the
 tree, and destroying a group or a thread kills its members or the thread
 ([design-kernel.md](design-kernel.md#execution-model-and-locking)). A
 killed thread leaves the quota's rules at its kill: it runs at the
@@ -1049,13 +1129,22 @@ period the change started; and the call posts a request, with an
 inter-processor interrupt, to each CPU that the group's `throttled_on`
 mask names, which re-arms that CPU's refill timer for the start of that
 period, the present, so its cohort is released under the changed grant at
-once. Every other field takes effect at each thread's next decision and
-leaves the accounting records alone, so changing a cpuset, a capacity, a
-ceiling or a flag never refills a pool. The fields that decisions read
+once. A CPU that enters throttling publishes its `throttled_on` bit before
+it arms the refill deadline and rechecks `grant_gen` after, each side
+storing and then loading with a full barrier between, so a replacement
+either sees the bit and posts its request or the CPU sees the replacement
+and re-arms itself. A changed base or ceiling is refreshed before the call
+returns ([Urgency resolution](#urgency-resolution)), every other field
+takes effect at each thread's next decision, and none of them touches the
+accounting records, so changing a cpuset, a capacity, a ceiling or a flag
+never refills a pool. The fields that decisions read
 without the pool lock, the cpuset, slice, grace, base, ceiling and flags,
 the kernel keeps as atomic values that the call stores and each decision
 loads once, so a decision sees each field from before a replacement or
-from after it, never a torn value.
+from after it, never a torn value. Two replacements racing one decision may
+resolve a value neither configuration held for an instant, bounded by both;
+that is the contract, since serialising configuration with every decision
+would cost a lock per pick.
 
 **A quota caps; it reserves nothing.** A group with quota left runs only
 when the kernel picks one of its threads, and higher urgencies come
@@ -1115,19 +1204,11 @@ The kernel's side:
   under the park lock, list the object unless it is listed, mirror
   `ready`, advance the group's epoch, mirror it, and take one executor
   from the parked FIFO (the longest parked, or with `ERX_GROUP_PLACE` the
-  first whose CPU is idle), passing over the executors of a stopped space
-  (below). Wake it after releasing the lock. With no parked executor the
+  first whose CPU is idle). Wake it after releasing the lock. With no parked executor the
   trigger ends there, and a running executor finds the work at its next
   safe point. The list's links live in the IRQ objects, so a trigger
   allocates nothing, and the list holds a counted reference to each object
   on it. Unbinding an object takes it off the list, as does its deletion.
-* **No stopped space's executor is chosen.** A trigger and a capacity
-  change never choose an executor whose space has stopped: one met in
-  the parked FIFO leaves it and is woken, to die at its return to user
-  mode, and the choice goes on to the next, at most
-  `ERX_GROUP_EXECUTORS_MAX` of them; `erx_executor_wake` treats such an
-  executor's slot as empty. So no delivery goes to an executor that
-  cannot run user code again.
 * `erx_group_take_ready(max)`, by an executor, on its own group, as
   `erx_park` acts on it, so the members of a released group, which no
   capability names, still take their deliveries; a worker is refused with
@@ -1141,6 +1222,11 @@ The kernel's side:
 * `erx_executor_wake(slot)`, by a thread of the same group: under the park
   lock advance the slot's epoch, mirror it, and if the executor is parked,
   remove it from the FIFO and wake it.
+* **An executor's death**, as its teardown frees its slot under the park lock,
+  advances the group's epoch, mirrors it and wakes one parked executor, as a
+  trigger does. So a delivery, or a capacity change, whose chosen executor
+  died before it reached user mode passes to another, by construction, with no
+  rule about which executors may be chosen. A spurious wake costs one park.
 
 **Why no wakeup is lost.** Whoever publishes work, a lane's producer or
 the policy changing a capacity, stores it before the trigger, and the
@@ -1152,46 +1238,38 @@ work published before the trigger. A trigger of an object that is already
 listed still advances the epoch, so an executor that has not yet taken the
 list never parks past it. The same argument covers slot epochs. This is
 invariant S2, explored exhaustively on the host for two executors, two IRQ
-objects with repeated triggers, a capacity change, deadlines, and an old
-executor of a stopped space that dies while a new one holds its slot.
+objects with repeated triggers, a capacity change, deadlines and an executor's
+death.
 
-**Executor slots.** Slot `s` of a group has at most one holder, the thread
-that `slot[s]` names, which is written only under the park lock. An
-executor takes the lowest free slot at its creation, and a slot is free
-when it names no thread or when its thread's space has stopped. A creation
-that takes a slot whose holder's space has stopped first makes the old
-holder let go of it:
+**Executor slots.** Slot `s` of a group names a thread from that thread's
+creation to its teardown, and nothing else writes it. A creation of an
+executor walks the group's slots once under the park lock: a slot naming a
+thread of another space, dying or not, fails the creation with `ERX_EBUSY`;
+no free slot fails it with `ERX_ELIMIT`; otherwise the lowest free slot is
+taken under the same lock, so two concurrent creations cannot take one slot
+or put two spaces in one group. The check and the installation are one
+critical section on the caller's CPU, and no request goes to anyone. A
+creation always completes once started, as every call finishes the bounded
+work it began; if its caller's space stops meanwhile, the new thread's
+capability goes with the caller's table, the thread, released, dies without
+having run, and its teardown frees its slot.
 
-1. `erx_thread_create` makes every allocation and check of the new
-   thread first, so nothing after the handover can fail, and finds slot
-   `s` held by a thread whose space has stopped.
-2. It posts a request to the old holder's home CPU, which alone changes
-   that thread's scheduling record (K14 in
-   [design-kernel.md](design-kernel.md#invariants)), and spins at a
-   preemption point, applying its own CPU's requests meanwhile, until the
-   request has been applied. The home CPU applies it at its next kernel
-   entry or preemption point, so the spin lasts at most the longest
-   stretch with interrupts masked (K13), as Fiasco's `Thread::kill` waits
-   for its request to a thread on another CPU. The spin keeps no wait
-   record, so the call never waits, and an executor may make it.
-3. The home CPU applies the request's four effects: it clears the old
-   holder's `slot` field; under the park lock, it names the new executor
-   in `slot[s]` and takes the old holder off the parked FIFO; and it wakes
-   the old holder, to die.
-4. The creation installs the new thread and returns its slot.
-
-A creation always completes once started, as every call finishes the
-bounded work it began; if its caller's space stops meanwhile, the new
-thread's capability goes with the caller's table, the thread, released,
-dies without having run, and its teardown frees slot `s`, which names it.
-From step 3 on the old holder's decisions read no control slot and write
-no status line, and its teardown frees no slot, since a thread frees slot
-`s` only while `slot[s]` still names it. So a reused slot's epoch and
-status line belong to its new holder alone, and S2's argument for slot
-epochs holds for it. An old executor that finished `erx_group_take_ready`
-as its space stopped may have taken deliveries that the next runtime
-never sees; that runtime reconciles with its sources when it starts, as a
-program's next image does, rather than waiting for their triggers.
+A group's executors are therefore of one space until the last of them has
+died. `exec` needs no more: it creates the next image's executor after the
+old image's exit record, which arrives only after every old thread has died
+([design-programs.md](design-programs.md)), and a creator that reuses a
+group before that record gets `ERX_EBUSY` and retries after it. A trigger or
+capacity change in between wakes a dying executor or none: the woken one
+returns from `erx_park`, dies at its return check and never reaches user
+mode, so it takes no delivery, the IRQ object stays listed and the epoch
+stays advanced. A dying executor clears its own `slot` field as it frees its
+slot, so no later transition of it writes the status line, and an executor's
+creation clears the slot's control and status lines, so the next holder sees
+nothing of the last. S2's argument for slot epochs holds for it. An old executor
+that finished `erx_group_take_ready` as its space stopped may have taken
+deliveries that the next runtime never sees; that runtime reconciles with
+its sources when it starts, as a program's next image does, rather than
+waiting for their triggers.
 
 **Why the runtime picks which executor to wake.** ERTS keeps one run queue
 per scheduler and wakes the scheduler whose queue gained work. A trigger
@@ -1207,6 +1285,8 @@ list is the open wait's counterpart for a group, and the label is
 Fiasco's ([design-kernel.md](design-kernel.md#l4-lineage)).
 
 ### Deferred preemption
+
+*Frozen, configuration C2.*
 
 An executor preempted while it holds one of its runtime's locks makes the
 runtime's other executors wait for a thread that is not running: the
@@ -1253,7 +1333,7 @@ whether deferral pays at all.
 
 ### Status words and capacity
 
-With `ERX_GROUP_STATUS`, the kernel writes each executor's state and CPU
+*Status words are frozen, configuration C2.* With `ERX_GROUP_STATUS`, the kernel writes each executor's state and CPU
 into its status slot at every transition, and increments `preemptions` at
 every involuntary preemption. A runtime reads these at its safe points to
 avoid spinning on a lock whose holder is not running and to steal at once
@@ -1297,24 +1377,30 @@ within its quota.
 Every thread has an affinity mask; its effective CPUs are the mask
 intersected with its group's effective cpuset, the whole of that cpuset
 when they do not meet, so a thread pinned within a group's run stays
-pinned whatever the cpusets above it did to reach it. Placement happens
-only at a wake:
+pinned whatever the cpusets above it did to reach it. In C0 and C1 a wake
+never moves a thread: it joins the queues of its home CPU, or, when that CPU
+has left its effective set, its home becomes the lowest-numbered allowed CPU,
+as a move ([Concurrency](#concurrency)).
+
+A thread whose CPU leaves its effective set, because an affinity or a
+cpuset changed, moves at its next decision: a running thread when it next
+gives up the CPU, a ready one when a pick reaches it, which takes it off
+the queues as one of the pick's moves and has it woken on its new home.
+There is no periodic balancing. ERTS's adapter pins each online normal
+scheduler to one CPU of its group's run ([Status words and
+capacity](#status-words-and-capacity)), so its own work stealing does the
+balancing between them, as `+sbt` binding does on a host, and leaves dirty
+CPU schedulers unpinned within the run
+([design-runtime.md](design-runtime.md#scheduling)).
+
+*Idle-first placement is frozen, configuration C2.* With `ERX_GROUP_PLACE`,
+a wake chooses the CPU, so a dirty CPU scheduler finds an idle CPU of its
+run:
 
 1. the CPU it last ran on, if allowed and idle;
 2. otherwise the lowest-numbered allowed idle CPU;
 3. otherwise the CPU it last ran on, if allowed, else the lowest-numbered
    allowed CPU.
-
-A thread whose CPU leaves its effective set, because an affinity or a
-cpuset changed, moves at its next decision: a running thread when it next
-gives up the CPU, a ready one when a pick reaches it, which takes it off
-the queues as one of the pick's moves and has it placed by these rules.
-There is no periodic balancing. ERTS's adapter pins each online normal scheduler to one CPU of
-its group's run ([Status words and capacity](#status-words-and-capacity)),
-so its own work stealing does the balancing between them, as `+sbt`
-binding does on a host, and leaves dirty CPU schedulers unpinned within
-the run, so wake placement finds them an idle CPU of it
-([design-runtime.md](design-runtime.md#scheduling)).
 
 ### Service work
 
@@ -1532,13 +1618,62 @@ deadlines are measured in the same virtual time.
   masks interrupts, so nothing else runs on that CPU meanwhile. The rest
   of the scheduler runs preemptibly, as Fiasco's kernel does
   ([design-kernel.md](design-kernel.md#execution-model-and-locking)).
-* **Cross-CPU operations** (waking a thread whose CPU is another, moving a
-  thread, preempting a remote CPU) are requests posted to the target CPU's
-  request queue followed by an inter-processor interrupt when the target
-  must act at once, as Fiasco's cross-CPU requests are. The target applies
-  them in order when it takes the interrupt or at its next kernel entry. A
-  wake from CPU A therefore never touches CPU B's queues, and the order of
-  two requests from one sender is preserved.
+* **The cross-CPU protocol** is Fiasco's (K14 in
+  [design-kernel.md](design-kernel.md#invariants)), written out here so that
+  no implementer has to invent one. It has six rules:
+  1. **One writer.** A thread's scheduling state (its `where`, queue links,
+     slice, deadline, stored urgency and the scheduling effect of its kill
+     mark) is written only on its home CPU with interrupts masked. Every
+     other CPU posts a request **on the thread** and lists the thread on
+     the home CPU's pending list, with an inter-processor interrupt when
+     the home must act at once (`Context::drq`). The home CPU drains its
+     pending list at every kernel entry, preemption point and before idling:
+     for each thread it applies the state changes, runs the requests and,
+     if the thread is ready, enqueues it, as Fiasco's
+     `Context::Pending_rqq::handle_requests` does (`context.cpp`). A
+     requester may wait for the answer by a bounded spin with no wait
+     record, as `Thread::kill` does, or not wait.
+  2. **A wake means "check again".** The waker settles the wait's outcome first,
+     by completing its record, and the wake request then only tells the home CPU
+     to look. Applied to a sleeper, off every queue and off every stack, whose
+     record is complete, it makes the thread ready. Applied to a thread still on
+     its way to sleep, it needs to do nothing, since the final check of rule 3
+     sees the record. A wake of a killed thread, a never-started thread or a
+     thread already ready does nothing. A kill is irreversible: no wake clears it.
+  3. **Blocking.** Under the CPU lock, a blocking thread, its wait published,
+     clears its ready state and makes a final check of its record: complete, it
+     sets the state again and does not sleep; still open, it switches. The CPU
+     drains no request between the clear and the switch. So a wake is applied
+     before the clear, whose final check sees its record, or after the switch,
+     where it finds a sleeper, never between.
+  4. **Moving.** In C0 and C1 a wake never moves a thread: it is enqueued on
+     its home CPU, or, if that CPU has left its effective set, the home CPU
+     re-homes it as a move. A move happens only on the thread's home CPU. A
+     sleeper or a ready thread is dequeued, re-homed and listed on the new
+     home's pending list in one masked stretch; a running thread is moved
+     from the idle context after the switch away from it, never on its own
+     stack, as Fiasco's `kernel_context_drq` and `Thread::migrate_away` do
+     (`thread.cpp`). A request hangs on the thread, so one posted during a
+     move follows it: a CPU that drains a listing and finds the thread's home
+     is another lists the thread on that CPU's pending list.
+  5. **Record lifetime.** A thread's record is freed after its kill has
+     closed and drained its request queue, a request posted after the close
+     being refused to its poster, after its last switch on its home CPU, and
+     after a grace period. A request holds a counted reference on its thread
+     from posting to answer. An inter-processor interrupt carries no thread
+     pointer: it says only "drain your list".
+  6. **Helping** is the one exception to one writer, as K14 says: a helper
+     runs a preempted holder's context on the helper's CPU for a bounded
+     part, and the holder's state is the helper's CPU's until the switch
+     back.
+
+  The protocol is model-checked, with the stack switch as separate steps,
+  before any code calls `erx_sched_pick` across CPUs ([Verification and
+  testing](#verification-and-testing)). The core's contract, that its caller
+  serialises every call naming a thread, is this protocol's: the caller is
+  the thread's home CPU. The stopgap runs Fiasco's machinery itself
+  ([design-stopgap-scheduling.md](design-stopgap-scheduling.md)) and never
+  calls the pick.
 * **Shared group state**: the pool, under `pool_lock`, touched at most once
   per draw quantum per CPU; the park state, under `park_lock`, touched by
   park, trigger, take ready and executor wake. Both are leaf locks taken
@@ -1559,22 +1694,23 @@ deadlines are measured in the same virtual time.
   triggerer published before it, are visible to any executor that
   observes the epoch advance it made (S2). A runtime observes capacity
   changes in the order the policy made them, because each is one store of
-  a larger sequence number. Requests between two CPUs are applied in the
-  order they were posted.
+  a larger sequence number. Requests on one thread are applied in the order
+  they were posted.
 
 ### Complexity
 
 | Operation | Time | Memory |
 | --- | --- | --- |
-| pick | O(1) for the bitmap, plus O(d) path checks for each thread examined; each thread is examined at most twice per pick (once to reposition, once to throttle), and at most `ERX_PICK_MOVES` threads move between preemption points | none |
+| pick | O(1) for the bitmap, plus O(d) path checks for each thread examined; each thread is examined once per pick, and at most `ERX_PICK_MOVES` threads move between preemption points | none |
 | charge | O(d), d the thread's group path's depth, at most 8 | none |
-| resolve | one load of the control slot and a walk of the thread's group path, at most 8 | none |
+| resolve, at a transition or a refresh | one load of the control slot and a walk of the thread's group path, at most 8 | none |
 | draw | O(1) under a leaf lock, once per draw quantum per CPU per group | none |
 | park, trigger, executor wake | O(1) under a leaf lock, plus a cross-CPU request for a wake | none |
 | take ready | O(k) under a leaf lock for the k objects taken, at most 63 | none |
+| refresh | one resolve and, for a ready thread that changed, one unlink and one append, on its home CPU | none |
 | replenish | per expiry, one splice and one draw, and for each of at most `ERX_REFILL_BATCH` threads released O(d) to resolve it and check its path; charged to the group released | none |
 | a call through an IPC gate | the rendezvous and two context switches; no scheduling work beyond the pick on each side | none |
-| configure a grant | O(k) cross-CPU requests, k the CPUs that hold the group's throttled threads; a changed quota or period starts another period, and every other limit takes effect at the next decision of each thread | none |
+| configure a grant | O(k) cross-CPU requests, k the CPUs that hold the group's throttled threads; a changed quota or period starts another period; a changed base or ceiling makes O(m) answered refresh requests in bounded parts, m the threads of the group and the groups below it; every other limit takes effect at the next decision of each thread | none |
 
 No operation looks a capability up. The scheduler walks the path of the
 thread a decision is about, the running thread's or a ready one's, and
@@ -1640,12 +1776,12 @@ Every call below is bounded; only `erx_park` blocks.
 | Call | Authority | Contract | Errors |
 | --- | --- | --- | --- |
 | `erx_group_create(budget, parent)` -> group, control, status | `budget`: `ALLOC`; `parent`: `CONFIGURE` | creates a group under `parent` with the grant in the caller's UTCB, its per-CPU records and its two shared areas, all charged to `budget`; returns a group capability with every right and two memory capabilities whose ceilings are read-write (control area) and read-only (status area) | `ERX_ENOMEM` (budget), `ERX_ELIMIT` (depth 8), `ERX_EINVAL` (grant), capability errors |
-| `erx_group_configure(group)` | `CONFIGURE` | replaces the grant with the one in the caller's UTCB: a changed quota or period starts another period at once, and every other limit applies at each thread's next decision ([Charging and quota](#charging-and-quota)); publishes capacity and run, advances the group's epoch and wakes one parked executor | `ERX_EINVAL`, capability errors |
+| `erx_group_configure(group)` | `CONFIGURE` | replaces the grant with the one in the caller's UTCB: a changed quota or period starts another period at once, a changed base or ceiling refreshes every thread of the group and of the groups below it before the call returns ([Urgency resolution](#urgency-resolution)), and every other limit applies at each thread's next decision ([Charging and quota](#charging-and-quota)); publishes capacity and run, advances the group's epoch and wakes one parked executor | `ERX_EINVAL`, capability errors |
 | `erx_group_info(group)` | `INSPECT` | writes into the caller's UTCB the grant, the usage, the finishing time charged to the group, the throttling and the parked and ready counts; the per-slot counters are in the status area | capability errors |
 | `erx_group_take_ready(max)` -> count | the caller's own group; the caller an executor | removes up to `max` IRQ objects, at most `ERX_MSG_WORDS` (63), from the caller's group's ready list and writes the labels they were bound with into the caller's UTCB; never blocks, and serves the members of a released group as well ([Park and wake](#park-and-wake)) | `ERX_ETYPE` (a worker) |
-| `erx_thread_create(budget, space, group, class)` -> thread, slot | `budget`: `ALLOC`; `space`: `THREADS`; `group`: `ATTACH` | creates a stopped thread of `class` in `space`, a domain's space or a sub-space ([design-kernel.md](design-kernel.md#creating-spaces)), with its starting registers in the caller's UTCB, and in `group`, which is the group it is charged to for life; the thread holds a counted reference to each group on `group`'s path until it dies ([Ownership and lifetime](#ownership-and-lifetime)); an executor takes the lowest free slot of the group ([Park and wake](#park-and-wake)) and returns it as `slot` (a worker gets `ERX_SLOT_NONE`), and must be of the space of the group's executors whose space has not stopped, if it has any; a slot whose holder's space has stopped is first handed over, by a bounded spin until the holder's home CPU has applied the request, which keeps no wait record, so the call never waits and an executor may make it | `ERX_ELIMIT` (no free slot), `ERX_EBUSY` (an executor for a group whose executors belong to another space that has not stopped), `ERX_ENOMEM`, capability errors |
+| `erx_thread_create(budget, space, group, class)` -> thread, slot | `budget`: `ALLOC`; `space`: `THREADS`; `group`: `ATTACH` | creates a stopped thread of `class` in `space`, a domain's space or a sub-space ([design-kernel.md](design-kernel.md#creating-spaces)), with its starting registers in the caller's UTCB, and in `group`, which is the group it is charged to for life; the thread holds a counted reference to each group on `group`'s path until it dies ([Ownership and lifetime](#ownership-and-lifetime)); an executor takes the lowest free slot of the group under the park lock ([Park and wake](#park-and-wake)) and returns it as `slot` (a worker gets `ERX_SLOT_NONE`); a slot names its thread until the thread's teardown | `ERX_ELIMIT` (no free slot), `ERX_EBUSY` (a slot names a thread of another space, dying or not), `ERX_ENOMEM`, capability errors |
 | `erx_thread_set_affinity(thread, mask)` | `CONFIGURE` | sets the affinity; takes effect at the thread's next decision | capability errors |
-| `erx_thread_set_urgency(thread, urgency)` | `CONFIGURE` | sets the thread's base, worker or executor, clamped at each decision; until the first call the thread takes its group's base, and no call returns it to that | `ERX_EINVAL` above `ERX_URGENCY_MAX`, capability errors |
+| `erx_thread_set_urgency(thread, urgency)` | `CONFIGURE` | sets the thread's base, worker or executor, and refreshes it before returning ([Urgency resolution](#urgency-resolution)); until the first call the thread takes its group's base, and no call returns it to that | `ERX_EINVAL` above `ERX_URGENCY_MAX`, capability errors |
 | `erx_park(group_epoch, slot_epoch, deadline)` | the caller's own group | the [park protocol](#park-and-wake); `deadline` is absolute in the kernel clock, `ERX_TIME_NEVER` for none | `ERX_ETYPE` (worker), `ERX_ETIMEDOUT` |
 | `erx_executor_wake(slot)` | caller in the same group | advances the slot's epoch and wakes it if parked | `ERX_EINVAL` (empty slot), `ERX_ETYPE` (caller not in the group) |
 | `erx_yield()` | none | requeues the caller at the tail of its level unless it is the only ready thread there; clears a yield request | none |
@@ -1788,7 +1924,7 @@ each difference
 | A group's budget cannot pay for creation | the charging funnel | nothing created | the caller | `ERX_ENOMEM` |
 | A group is deleted while it has member threads or child groups | `erx_object_destroy`, or the destruction of the budget that pays for it | its child groups destroyed and its member threads killed, each finishing its call at the finishing level of its own CPU, within that CPU's share, its time in its own path's `finishing_ns`, and dying before it returns to user mode; its record kept until the last of them is dead ([Ownership and lifetime](#ownership-and-lifetime)) | the kernel | the group gone from the inspector, with its members' deaths |
 | A park deadline passes | the timer wheel | the executor is removed from the parked FIFO | the kernel | `ERX_ETIMEDOUT` |
-| An executor dies parked or queued | its space's stop, its deletion or its group's destruction | its references dropped; its slot freed by its own teardown if it still holds it, or already taken over by a new executor ([Park and wake](#park-and-wake)) | the thread's own teardown, then the reaper for its record | the slot reads `ERX_EXEC_NONE`, or the state of the executor that took it over |
+| An executor dies parked or queued | its space's stop, its deletion or its group's destruction | its references dropped; its slot freed by its own teardown ([Park and wake](#park-and-wake)) | the thread's own teardown, then the reaper for its record | the slot reads `ERX_EXEC_NONE` |
 | An internal inconsistency in the scheduler's records | assertions in debug builds; the core's model tests | a debug build stops with the record dumped | developers | a panic report in debug builds only |
 
 **Inspection.** `erx_group_info` and the status area expose everything the
@@ -1826,6 +1962,19 @@ urgency load and a walk of at most eight groups along the thread's own
 path, which the charge walks the same way before the thread's kill and
 after it. A decision touches no group off that path, whose records the
 thread's counted references keep until its last switch.
+
+**What a refresh exposes.** A refresh is a cross-CPU request a runtime can
+cause by `erx_thread_set_urgency` or a configure of a group it holds, on the
+home CPUs of its threads, which a narrowed cpuset leaves until their next
+wake. Its caller's call pays for the posting and waits for the answer, and the
+home CPU's bounded work lands on whoever runs there, as all request work does.
+A configure of a group whose threads a hostile child created takes as long as
+those threads, which the child's budget paid for, on the parent's time. Both
+are residuals `TODO.md` records. No request
+writes a queue from another CPU, and a stale one follows its thread or is
+refused at the close of its queue ([Concurrency](#concurrency)). A pick never
+loads a shared area, so a runtime that rewrites its published urgencies from
+another CPU moves nothing.
 
 **What a hostile runtime can do.** Waste its own quota; delay its own
 processes; make its executors fail blocking calls. It cannot exceed its
@@ -1886,9 +2035,10 @@ reading that lane and tell the system domain, which takes the connection down
 | Layer | Test | Oracle |
 | --- | --- | --- |
 | Pure core, host | unit and property tests of `erx_sched_resolve`, `_charge`, `_draw` and `_pick`: random trees, grants, charges and decisions | a reference model in Ruby over the same inputs; a seeded charge that skips a level, and one that charges a second thread's group, each fail |
-| Protocols, host | exhaustive exploration of the park protocol (two executors, two IRQ objects triggered repeatedly, a capacity change, deadlines, epochs to depth 12) and of `erx_defer_step` (every event in every state) | no lost wakeup; every request resolved; a seeded park that compares outside the lock loses one |
+| Protocols, host | exhaustive exploration of the park protocol (two executors, two IRQ objects triggered repeatedly, a capacity change, deadlines, an executor's death, epochs to depth 12) and of `erx_defer_step` (every event in every state) | no lost wakeup; every request resolved; a seeded park that compares outside the lock loses one |
 | Concurrency, host | the park lock and pool under ThreadSanitizer with many threads | TSan |
-| Build | the chokepoint checks: the charge function is the one writer of a group's usage; the shared-area accessors are the one reader of the control area and the one writer of the status area | a seeded second writer of usage, a seeded direct load from the control area and a seeded direct store into the status area each fail the build |
+| Protocols, host | the cross-CPU protocol of [Concurrency](#concurrency), model-checked before any code calls `erx_sched_pick` across CPUs: two CPUs exhaustively and three for routing, the stack switch as separate steps (select, save the outgoing context, change stack, publish the disposition, unmask); a request completed before registration, after the final check, during the save and after the stack change; a kill at every switch and move boundary; a wake of a killed thread; a stale request drained after a move; last reference, grace period and address reuse | one CPU per stack; one queue per thread; death is terminal; no wake revives a killed thread; no reference into freed storage; every wake either readies its thread or is provably unnecessary |
+| Build | the chokepoint checks: the charge function is the one writer of a group's usage; a thread's stored urgency is written only as its own resolve in the core; the shared-area accessors are the one reader of the control area and the one writer of the status area | a seeded second writer of usage, a seeded direct load from the control area and a seeded direct store into the status area each fail the build |
 | Kernel, QEMU | hostile runtimes: random control-area writes, executors calling every blocking call, gates and IRQ objects bound to executors, executors armed for upcalls, executors that never yield, groups that spin | invariants S1 to S7; no group but the runtime's own charged |
 | Kernel, QEMU | quota accuracy: one group spinning at 10% and 30% on one and four CPUs, measured per period | S4's bound |
 | Pure core, host | draws with quotas from 1 ns to the whole machine over cpusets of one to 64 CPUs, and slices returned across period boundaries in every order against refills by other CPUs | every positive quota draws a positive slice; no remainder is counted twice; every overrun is charged once |
@@ -1900,12 +2050,12 @@ reading that lane and tell the system domain, which takes the connection down
 | Kernel, QEMU | finishing: a stopper whose group's quota is zero stops a space whose threads are in long range calls, in `erx_park`, throttled under their own spent quota and paused, on every CPU; a stopper whose cpuset excludes the CPU of a thread inside a long call; a spinner of a third group above every user urgency on that CPU; and the stopper's thread deleted after its walk, after which a second stopper stops the same space | every stopped thread finishes and the exit record comes within `ceil(W * k / T) + 1` periods of the last kill, for the longest call's `W` ticks and the most finishers `k` at its CPU's level meanwhile, itself included, whatever the stopper's quota or cpuset; a thread killed while it runs inside a long call after its CPU's share is spent, then each user thread that runs next on that CPU killed in turn while it runs, one of them by its own `erx_thread_exit`, leaves the level's time in every period within `T`; the spinner is delayed at most `T` ticks in any period and `2T` at a stretch; `finishing_ns` grows on every group of the stopped threads' own path by the finishing time and nowhere else, no `used_ns`, `total_ns` or pool moves for it, and neither stopper's path gains anything; the stopped threads never return to user mode; both stoppers return after the record, the deleted one dying at its return check; with a seeded kill that throttles the finishing thread on its killer's zero grant, the record never comes and the case's deadline fails; with a seeded finishing level placed below the spinner's urgency, the same; with a seeded kill of the running thread that moves it to the finishing level without a pick, each killed thread runs on past the spent share and the per-period counter fails the case; with a seeded charge of the finishing time to the thread's own pool or to the first stopper's path, the counters fail the case |
 | Kernel, QEMU | deletion: `DESTROY` on a group whose executors run, park, sit throttled under a spent quota and serve calls, with a child group whose members do the same; the destruction of the budget that pays for such a group; a group whose last capability closes while its executors run and park and IRQ objects bound to it wait on its ready list; an IRQ object bound to a group fired while the group's teardown runs | every member of the group and of its child killed, none returning to user mode, each finishing its call at the finishing level of its own CPU, its time in the `finishing_ns` of its own path and none in the destroying call's, with a seeded teardown that frees the record while a killed member still runs, and a seeded drop of a member's references at its teardown rather than after its last switch, each failing the test; a group destroyed while its quota is zero and a member is inside a long range call, by a destroyer whose own quota is zero as well, whose member finishes within the share's bound after the destroy returns, the group's record outliving the destroy until then, with a seeded destroy that throttles the member on either zero grant failing the test; the released group's executors park and wake until the last one ends, then its waiting deliveries are owed to their objects' next bindings, or dropped for a level-sensitive line; a group destroyed while a member finishes a long range call, its status area's pages taken by another budget's charge once their grace period has passed and filled with a marker, while the member goes on finishing and after it has left the member list: the marker stays whole, the member's time lands in the per-CPU records' `finishing_ns`, and `erx_group_info` on the group above it reports it, with a seeded publish that keeps the area's pointer after the destroy, which overwrites the marker and, on the hosted kernel with released pages poisoned, is reported by ASan; the record freed after the grace period and the last member's death, and the creator's budget, or its parent once the budget is destroyed, back at its baseline |
 | Kernel, QEMU | pause: a group's executors running, parked and serving calls while their space is paused and resumed, with triggers during the pause; an executor of another space created in the group; a worker that takes the ready list | none returns to user mode while paused, and slots read `ERX_EXEC_PAUSED`; every trigger is handled after the resume (S2); `ERX_EBUSY`; `ERX_ETYPE` |
-| Kernel, QEMU | a stopped space's executors parked in a group when a new space creates executors in it before the old ones have died, with triggers in between | the new executors created with free slots, every trigger delivered to one of them, each old executor dead once woken, and a slot taken over from an old executor that dies afterwards still held by its new executor, whose wakes by slot all arrive (S2) |
+| Kernel, QEMU | a new space creating executors in a group whose old executors are still dying, with triggers in between | refused with `ERX_EBUSY`; after the exit record the creations succeed with the lowest free slots, and every trigger in between is found on the ready list by the new runtime (S2) |
 | Kernel, QEMU | determinism: a fixed workload in `erx.det=1` twice | byte-identical traces |
 | Runtimes | ERTS's adapter and the test runtime against the contract: wakeups under storms, capacity changes, yield requests | the runtimes' own tests and OTP's suites |
 | Runtimes | runs: four ERTS domains on eight CPUs with the same cpuset and a capacity of two each, normal and dirty CPU schedulers busy, runs placed by the policy | each domain's executors only on its own run; no CPU shared by two domains' executors in steady state |
 | Runtimes | attribution: a service serving three clients with known work per request, its per-client report against a cycle-counter ground truth | the report within the budget E-S5 sets; shown as runtime-reported in the inspector, with a seeded misreport changing nothing outside the service: its group's usage stays within its quota |
-| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick and its stored priorities among them, and its documented scheduling differences: finishing with no share, and Fiasco's placement of a woken thread at the head of its level |
+| Parity | the stopgap and erXos's kernel run the same scheduler tests over C0 and C1 | identical decisions on the core's traces; documented accuracy differences, the stopgap's tick among them, and its documented scheduling differences: finishing with no share, and Fiasco's placement of a woken thread at the head of its level |
 
 Every test runs under TCG and HVF; a test that passes under only one is a
 bug until explained. The host builds run under ASan and UBSan, and the
@@ -2202,6 +2352,35 @@ client's.**
   needs no such case: a killed member never returns to user mode, so no
   executor is left in a group it cannot park in either way.
 
+**One machine-wide scheduling lock.**
+
+* *How it works.* One lock guards every thread's state and every ready
+  queue, is held across the stack switch and is released on the incoming
+  stack, with six thread states and one transition function.
+* *What it buys.* One owner and a small model to check.
+* *Why it lost.* Every context switch and wake on the machine goes through
+  one cache line, which puts M7's gate, to meet or beat the stopgap, at risk
+  on IPC-heavy work ([todo-performance.md](todo-performance.md)). It would
+  also depart from Fiasco with no reason that Fiasco's protocol lacks, and
+  contradict K14. It stays the fallback: it is taken
+  if the protocol of [Concurrency](#concurrency) fails its model or its
+  implementation.
+
+**Deriving urgency at every decision.**
+
+* *How it works.* Nothing derived is stored: a pick resolves the head of a
+  level, moves it to its own level if the two differ, and tries again, and a
+  configure is O(1).
+* *What it buys.* No stored copy to go stale, and a published value that needs
+  no kernel call to be seen.
+* *Why it lost.* A pick examines only the head of the highest non-empty level,
+  so a ready thread whose urgency rose stays unseen behind a more urgent
+  thread, and that needs an eager requeue anyway. The repositioning needs moves
+  and a retry in the pick, and hands a runtime that rewrites its published
+  values from another CPU a way to keep a CPU repositioning. Stored urgency
+  costs a configure O(m) requests in bounded parts, which the stopgap pays too,
+  and two listed writers replace those mechanisms.
+
 ## Risks and open questions
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -2212,7 +2391,7 @@ client's.**
 | cross-CPU wakes under HVF are slow | unknown | wake latency above budget, felt as messaging latency | E-S4; executors stay pinned and a busy runtime finds work without wakes |
 | quotas at 10 ms periods make a throttled domain's latency jumpy | medium | p99 latency for capped domains | E-S7 tunes periods and draw quanta; policy prefers capacity over tight caps |
 | refill once per period lets a burst that straddles a boundary use up to twice the quota in one period's span, and local slices strand quota on CPUs a group left | medium | short-term isolation between groups | E-S7 measures both and decides whether a CPU that goes idle returns its local quota to the pool; sporadic replenishment, as in seL4's scheduling contexts, is the fallback |
-| accounting at the stopgap's 1 ms tick misattributes short runs | high on the stopgap | coarse statistics there | documented accuracy differences; erXos's kernel uses one-shot timers ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)) |
+| slices and quota enforcement at the stopgap's 1 ms tick are accurate only to the tick | high on the stopgap | coarse slices there; charges are exact to the clock | documented accuracy differences; erXos's kernel uses one-shot timers ([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)) |
 | two runtimes in one space share a group | low | contention and taken wake-ups inside one space | the kernel keeps a group's executors in one space and its ready list to executors; a space that runs two runtimes gives each a group of its own |
 
 Open questions:

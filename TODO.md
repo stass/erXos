@@ -363,31 +363,29 @@ it; git history is the record of completed work.
 * [Medium] scheduler, the pick core is configuration C0's
   (`kernel/sched/sched.c`, `erx_sched_pick`): it has no finishing level,
   no throttled lists and no published urgency yet, which the design's
-  Pick and dispatch names and erXos's own kernel and C1 need. The stopgap
-  keeps Fiasco's ready queue until C1, so nothing on the target calls
-  `erx_sched_wake`, `erx_sched_remove` or `erx_sched_pick` before then.
-* [High] scheduler, no design for how a thread passes between CPUs
-  ([Concurrency](docs/design-scheduler.md#concurrency), `include/erx/sched.h`):
-  the core decides on one CPU and leaves this to its caller, and the design
-  says only that a cross-CPU wake is a request. It has to settle, before C1 or
-  erXos's own kernel calls `erx_sched_pick`: which CPU a wake and a kill go
-  to; how a wake meets a blocking thread's last check without being lost, and
-  that a wake means only "check again"; that a thread a pick gave up stays
-  untouchable until the switch off its stack is done, even by a kill of a
-  thread on its way to another CPU; that a stale wake or arrival cannot revive
-  a thread a kill took or join a later move of it; and when a record that
-  requests can still name may be freed. Two attempts inside the core, an atomic
-  claim and a home CPU with a moving state, each failed review on these cases.
-* [Medium] scheduler, a raised urgency waits behind its old level
-  (`erx_sched_pick`,
-  [Pick and dispatch](docs/design-scheduler.md#pick-and-dispatch)): a pick
-  examines only the head of the highest non-empty level, so a ready thread
-  whose base or ceiling rose stays on its old level, unseen, for as long as
-  a more urgent thread stays ready. The stopgap refreshes priorities when
-  they change and is not affected; erXos's own kernel is. Fix: have a
-  raising `erx_thread_set_urgency` and `erx_group_configure` post a request
-  that requeues each ready thread they raise on its CPU, or state the wait
-  as a limit in the design.
+  Pick and dispatch names and erXos's own kernel needs. The stopgap keeps
+  Fiasco's ready queue until it leaves, so nothing on the target calls
+  `erx_sched_wake`, `erx_sched_remove` or `erx_sched_pick` before Track K's
+  kernel does. The pick also has no way to give back a thread whose switch is
+  refused because a helper runs it, which the design's finishing level asks for.
+* [Medium] scheduler, who refreshes (`include/erx/sched.h`,
+  `erx_sched_group_configure`): S5 rests on every caller that changes a base
+  or a ceiling walking the threads below it. Have the configure report what
+  changed, or the core own the walk's plan, when the first caller lands.
+* [High] scheduler, Track K, the cross-CPU protocol has no model and no code
+  ([Concurrency](docs/design-scheduler.md#concurrency), `include/erx/sched.h`).
+  It does not block M1: the stopgap keeps Fiasco's dispatch, and nothing on
+  the target calls the core's pick. The first deliverable is the model the
+  design's Verification names, with the stack switch as separate steps; no
+  code calls `erx_sched_pick` across CPUs before it passes. Then transcribe
+  Fiasco's `Pending_rqq::handle_requests`, `Context::drq`, `migrate_away`,
+  `migrate_to`, `kernel_context_drq` and the kill's request wait into C17
+  against it.
+* [Medium] stopgap scheduling, the charge at switches
+  ([design-stopgap-scheduling.md](docs/design-stopgap-scheduling.md#server-urgency-and-charging)):
+  the work that writes `erx_sched_charge` calls it from
+  `Sched_context::Ready_queue::activate` as well as from the tick hook. It needs no change to `config/fiasco/kernel.defconfig`, and
+  `FINE_GRAINED_CPUTIME` stays unset.
 * [Medium] scheduler, `erx_sched_thread_init` and `erx_sched_root_init` on a
   live record (`kernel/sched/sched.c`): a second call re-parents a thread,
   changing the group it is charged to (S6), or clears a group's parent,
@@ -777,6 +775,14 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
+* [Medium] scheduler, Track K and M11: request batches bound an interrupt's
+  length, not how much of a remote CPU a sender consumes
+  ([Concurrency](docs/design-scheduler.md#concurrency)). A runtime that
+  posts wakes and refreshes in a loop spends another party's time on the
+  home CPUs of its threads, charged to whoever runs there, and a configure of
+  a group whose threads a hostile child created takes as long as those threads,
+  on the parent's time. The stopgap accepts this. Charge the receiver's work to the requester's path, as the finishing
+  share's approach to kills does.
 * [Medium] Entropy generator's burn on the kernel's objects
   (`kernel/core/rng.c`, `test/host/rng_test.rb`): the residue test runs
   the host build, whose frames differ from the kernel's, and the stack

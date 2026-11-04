@@ -504,8 +504,12 @@ across CPUs, deadline-to-resume latency (`tools/erx bench timer`, the
 return from a deadline wait against its deadline, since M1 has no device
 line to program), boot time to the root task's start, and
 `tools/erx bench stop`, the stop of a space with threads in calls and
-waits on every CPU. Decides: the timer slack and default time slice;
-whether the stopgap's 1 ms tick accounting suffices until M7.
+waits on every CPU, and what charging at every switch adds to a switch.
+Decides: the timer slack and default time slice; whether the charge at
+switches stays. Tick sampling alone misses a thread that blocks before
+each tick, so its error is not bounded per thread, which is why the
+stopgap charges at switches as well as ticks
+([design-stopgap-scheduling.md](design-stopgap-scheduling.md#server-urgency-and-charging)).
 
 ## M2: The execution contract holds
 
@@ -1676,7 +1680,7 @@ replacement of lwIP.
 | Gate | Milestone | Measures or asks | Decides |
 | --- | --- | --- | --- |
 | G0 | M0 | the Fiasco set's licence scan and link closure; `lld` installed | what enters the tree, and the GPL-headed files the stopgap keeps |
-| G1 | M1 | null call, IPC round trips through a gate, park and wake, deadline-to-resume latency, boot time to the root task, `tools/erx bench stop`, under HVF and TCG | timer slack, default time slice; whether the stopgap's tick accounting suffices until M7 |
+| G1 | M1 | null call, IPC round trips through a gate, park and wake, deadline-to-resume latency, boot time to the root task, `tools/erx bench stop`, under HVF and TCG | timer slack, default time slice; whether the stopgap's charge at switches stays |
 | G2 | M2 | early E-S2 (kernel thread switch, IPC round trip through a gate, park and wake); E-S4 FIFO wake latency | whether the two-level model proceeds onto ERTS |
 | GK1 | after M2 | the pilot's time and defect rate | the pace of the rest of track K and of the plan |
 | G3 | M3 | W1 against stock OTP; footprint; boot time to the shell and to the first pet; E-S10 | default table sizes; the baseline; NIFs that move to dirty schedulers |
@@ -1708,7 +1712,7 @@ interpreter, within a frame's cost across a connection).
 | Stopgap | Seam | Replaced at |
 | --- | --- | --- |
 | The modified Fiasco, with `bootstrap` and `sigma0` | the kernel interface: `abi/erx_abi.txt` and `liberx`'s backends | M7 |
-| Accounting at Fiasco's 1 ms tick | the scheduler core | M7 |
+| Slices, deadlines and quota enforcement at Fiasco's 1 ms tick | the scheduler core | M7 |
 | Virtio-mmio devices with ordinary interrupts and unconfined DMA, driven by the same Erlang drivers | DMA profiles; IRQ objects; the device NIF | M9 (virtio-pci with MSIs and the IOMMU), M11 (refused unless configured) |
 | A host link holding every facet | session facet tables | M10, M11 |
 | littlefs, the read-write file system of the data partition and the vault's partition, a sub-space port of their storage domains | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, through an installation that creates both partitions afresh |

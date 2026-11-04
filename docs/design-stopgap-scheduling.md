@@ -175,10 +175,10 @@ under `fiasco/kernel/src/kern/` have them:
    of an executor follow [Park and wake](design-scheduler.md#park-and-wake)
    exactly (S2); an executor is refused every other wait of its own
    asking (S3), and a stop or a fault holds it at its boundary like any
-   thread; an executor of a stopped space is passed over and dies.
+   thread.
 6. **Ceilings hold while serving.** A server runs at its resolved
    urgency, never above its path's ceiling, from its next scheduling
-   decision (S5); every tick is charged to the group of the thread whose
+   decision (S5); every interval is charged to the group of the thread whose
    scheduling context the CPU runs (S6).
 7. **Decisions are pure.** The stop state, the wait outcome, the return
    check, the park protocol and the charge step are C17 functions with
@@ -314,7 +314,7 @@ worth adding later.
 | **ST2.** A thread of a stopped space never sleeps in a caller wait again and never returns to user mode | `erx_wait_step` reads the run word under the CPU lock on the thread's home CPU and refuses a caller wait while the word is not `LIVE`; the kill request runs on that CPU under the same lock, so a wait begun before it is ended by it and none begins after it; every return to user mode passes `erx_return_check`, whose first two rows are death and the boundary wait ([design-stopgap.md](design-stopgap.md#ipc-gates-and-where-transfer-fits)) | a sleep outside the funnel; a return path that skips the check | the wait funnel's exhaustive host model; the stopgap's return-path check; a seeded return check that resumes a stopped thread, which the K18 case detects by a progress counter |
 | **ST3.** Every wait a kill must end has a wait record, and the kill finds it | a thread sleeps with its ready bits clear only in `Erx::wait_sleep`, which writes the record, and in the three waits of Fiasco's own that kernel execution alone ends within a bound, with no user thread's turn needed: the answer wait of `Context::drq`, ended at the target CPU's next request interrupt; the dying thread's wait for its transfer in `do_kill`, ended by the sender's one bounded request; and the grace-period wait, ended once every active CPU has reported its quiescent states at its ticks and its CPU's record steps reach the item ([Death and the death edge](#stop-and-exit)); `Thread::halt`, the priority-inheritance wait and `Ipc_gate::block`'s own sleep are not built | a Fiasco-internal sleep added outside that list | the source check that a clearing of the ready bits followed by `schedule()` occurs only at the listed sites, with a seeded sleep elsewhere failing it; a debug assertion in the request handler that a sleeping target outside those sites has a wait record |
 | **ST4.** No wakeup of an executor is lost (S2 on the fork) | the park core compares and lists under the group's park lock, a Fiasco spin lock taken under the CPU lock; the parker clears its ready bit under the CPU lock before the lock is dropped, and every wake completes the record under the park lock and sets the ready bit through the home CPU's serialized state writers, so a wake after the parker's listing always finds a sleeper to wake ([Park and wake](#park-and-wake)) | a compare outside the lock; a wake that writes thread state from another CPU directly | the park protocol's exhaustive host model (S2); the park lock under ThreadSanitizer; a seeded compare outside the lock, which the model finds as a lost wakeup |
-| **ST5.** A thread runs at its resolved urgency and never above its path's ceiling, a finishing thread at the finishing priority, and every tick is charged to the group of the thread owning the CPU's current scheduling context | a thread's Fiasco priority is `erx_sched_resolve`'s result plus one, refreshed by every call that changes a base or a grant before that call returns, or the finishing priority once it is dying; the only switch that does not set the CPU's scheduling context is a lock holder's help; the tick's charge is one function reading the current scheduling context ([Server urgency and charging](#server-urgency-and-charging)) | a switch of execution context alone outside helping; a second charge site; a priority written outside the refresh | the S5 conformance case with a third thread at 25; the source check that `Not_Helping` switches happen only in `schedule_switch_to_locked`; the charge function's chokepoint check; a seeded donating switch in `activate_ipc_partner`, which lets the server run ahead of the thread at 25 and fails |
+| **ST5.** A thread runs at its resolved urgency and never above its path's ceiling, a finishing thread at the finishing priority, and every interval is charged to the group of the thread owning the CPU's current scheduling context | a thread's Fiasco priority is `erx_sched_resolve`'s result plus one, refreshed by every call that changes a base or a grant before that call returns, or the finishing priority once it is dying; the only switch that does not set the CPU's scheduling context is a lock holder's help; the charge is one function reading the current scheduling context, called at every change of it and at the tick ([Server urgency and charging](#server-urgency-and-charging)) | a switch of execution context alone outside helping; a charge outside the charge function; a priority written outside the refresh | the S5 conformance case with a third thread at 25; the source check that `Not_Helping` switches happen only in `schedule_switch_to_locked`; the charge function's chokepoint check; a seeded donating switch in `activate_ipc_partner`, which lets the server run ahead of the thread at 25 and fails |
 | **ST6.** No request of this binding, and no kernel-internal wait of a finishing thread, waits for another thread's turn on a CPU | every cross-CPU request this binding sends is eager, taken at the target CPU's next interrupt; the IPC glue's cross-CPU handshake, reply and abort are eager too; every entry that drains request queues runs a bounded number of steps and continues itself, so a request is run within a bounded number of interrupts of its CPU; the answer makes the requester runnable at its own CPU's next interrupt, at its own priority | a request sent with `eager = false`; a `Drq::Wait` whose handler needs the target to be scheduled; a lock held across a `Drq::Wait` | a source check that every `drq` call in the glue and in the IPC path passes `eager = true`; the flood case and the starved-receiver case of the conformance suite |
 | **ST7.** Every wait of the funnel ends at the waiter's kill, so no death waits on a death | the kill request kicks whatever funnel wait it finds its target in, a stopper's wait included, and the funnel refuses every wait to a thread with a kill posted; the three sleeps outside the funnel end within a bound by kernel execution alone and need no thread's turn; a stopped space's record is posted by its own last death edge, which needs nothing of any stopper; so in a cycle of stops each stopper's wait ends at its own kill, each death takes its own space's count down, and every space of the cycle exits; erXos's kernel has the same rule, a stopper's call ending at its own kill once its walk is done ([Threads and faults](design-kernel.md#threads-and-faults)) | a wait the kill does not end; a post that waits for a stopper; a stopper's wait that outlives its walk's kill | the mutual-stop host model, two spaces each stopping the other, over every interleaving; the QEMU case of two domains stopping each other on four CPUs; a seeded stopper's wait the kill leaves alone, which the model finds as a trace where both words stay `STOPPED` forever and the QEMU case as a missed deadline |
 | **ST8.** Nothing a stop or a wait leaves linked outlives what it is linked to or into | a delivery, an exit record's or an IRQ object's, holds `erx_object_ref` on its object from its post until the one step that takes or withdraws it, through every queue it sits in; a waiter's record names its list, the list's owner clears that name when it detaches the waiter at its own teardown, and the waiter reads it under the CPU lock before it touches the list, so it reaches the owner only while the owner's teardown has not run, which is before the owner's grace period and its free; a thread holds the counted references on every group of its own path from its creation until its last switch, after which `handle_kill_helper` drops them with its dying reference, so the path its finishing is charged to outlives every charge; the counts are kept in the groups' per-CPU records, and a group's teardown detaches its shared areas before it releases them, so a charge after the destroy publishes nothing (**A group's end**) | a delivery's reference dropped when its handler returns rather than when it is taken; a resume that unlinks without the membership check; a member's group references dropped at its teardown, before the grace-period wait and the last switch that are still charged; a charge or a status mirror stored into a group's shared area after the group's teardown has released it | the hosted suite under ASan: a space's record kept under a queued exit record until the record is taken, and a sender killed as its gate is destroyed, each with the seeded failure of the middle column, which ASan reports as a use after free; the group references and the released status area by the deletion case of [Verification and testing](design-scheduler.md#verification-and-testing), whose seeded early drop and seeded publish after the destroy fail it |
@@ -468,9 +468,8 @@ is refused.
 **The request.** `Erx::thread_request(t, req)` is the one way anything
 acts on a thread's scheduling state from outside that thread. `req`
 carries flags, `ERX_THREAD_KILL`, `CONTROL_STOP`, `CONTROL_START`,
-`START`, `HANDOVER`, `READ` or `WRITE`, and their arguments: for a
-handover, the new executor; for a register access, the buffer; a kill
-carries none. Its handler runs on `t`'s
+`START`, `READ` or `WRITE`, and their arguments: for a register access,
+the buffer; a kill carries none. Its handler runs on `t`'s
 home CPU under the CPU lock, in the eager cross-CPU request's handler
 when the caller is on another CPU (`Context::drq` with `Drq::Wait` and
 `eager = true`, the request's structure the caller's own `_drq`) and at
@@ -484,7 +483,7 @@ The handler:
    the ready queue's dequeue, `set_prio` and enqueue, as
    `Thread::set_sched_params` does on the home CPU, a thread waiting on
    a throttled list in C1 taken off it and enqueued the same way; its
-   slice is left as it was. From then on the tick charges `t`'s time to
+   slice is left as it was. From then on each charge takes `t`'s time to
    the `finishing_ns` of its own path, which it holds as a member, for
    the accounting alone (**Finishing priority and charging**). If `t` is
    dying already, by any earlier kill, all of that stays as the first
@@ -510,7 +509,7 @@ The handler:
    interrupt that carried the request has already brought it into the
    kernel; if it is running inside a call elsewhere in this CPU's queue,
    nothing: it reaches the return check by itself.
-4. **Handover, read, write.** As the park binding and K14 state below.
+4. **Read, write.** As K14 states below.
 5. Answers the request. The requester sleeps meanwhile with
    `Thread_drq_wait` set, holding nothing but its reference on `t`; the
    answer makes it runnable at its own CPU's next interrupt and is
@@ -565,8 +564,8 @@ wakes are posted to it, since `pending_rqq_enqueue` queues a context
 that is already queued no second time (`context.cpp:2299`). The budget
 keeps every entry finite however fast other CPUs send; how many entries
 a CPU takes per tick follows the senders' rate, which the fork does not
-bound (**Risks and open questions**). The tick charges an entry's work
-to whoever runs on that CPU, a stopgap inaccuracy.
+bound (**Risks and open questions**). An entry's work is charged to
+whoever runs on that CPU, a stopgap inaccuracy.
 
 **`erx_space_stop(space, status)`**, with `STOP`:
 
@@ -837,7 +836,7 @@ back, and nothing of the stopper, neither its grant, its spent period
 nor its cpuset, is read. In C0 and C1 alike the priority is the whole
 of the service rule: no path admits a dying thread, so the throttle
 that C1 adds never applies to one. The thread's time is charged to its
-own group path for the accounting alone: the tick adds it to the
+own group path for the accounting alone: each charge adds it to the
 `finishing_ns` of the per-CPU record of each group on that path and to
 no pool, `used_ns` or `total_ns` (**Charging** under [Server urgency and
 charging](#server-urgency-and-charging)). A finisher whose own group is
@@ -874,13 +873,12 @@ stopped threads' own paths (**Verification and testing**).
 **Helping a dying holder.** A dying thread that holds a helping lock
 may be helped by a waiter as Fiasco helps any preempted holder (**What
 Fiasco does**): the help runs it on the waiter's CPU and scheduling
-context, and the tick charges that time to the helper's path, as it
-charges all help (**Charging** under [Server urgency and
+context, and that time is charged to the helper's path, as all help is
+(**Charging** under [Server urgency and
 charging](#server-urgency-and-charging)). That is correct: helping
 moves only who runs and pays for the holder's bounded parts until it
 releases the lock, and the holder still dies on its home CPU at its
-return check. It differs from erXos's kernel, which never helps a dying
-holder ([Differences from erXos's kernel](#differences-from-erxoss-kernel)).
+return check. erXos's kernel does the same.
 
 **Transfer ownership.** A receiver held in a transfer is counted, since
 it is alive, and its kill does nothing until the transfer ends; the
@@ -975,7 +973,7 @@ waiter on its home CPU, without its list, unlinks nothing:
 
 | Ender | Cause | Where | Unlinks |
 | --- | --- | --- | --- |
-| a waker walking a list: a wake by slot, a trigger or a handover taking a parked executor; a umtx wake; a receiver taking a queued sender, a binding taking a sender blocked at the gate, who then starts the send over (**After the resume** below); the exit's drain | `WOKEN` | under the list's lock: a leaf, on any CPU; the receiver's home CPU for its sender list | yes, in the same step |
+| a waker walking a list: a wake by slot or a trigger taking a parked executor; a umtx wake; a receiver taking a queued sender, a binding taking a sender blocked at the gate, who then starts the send over (**After the resume** below); the exit's drain | `WOKEN` | under the list's lock: a leaf, on any CPU; the receiver's home CPU for its sender list | yes, in the same step |
 | a dying receiver's sender drain, detaching every sender queued at it | `ABORTED` | under the list's lock, on the receiver's home CPU | yes |
 | the owner of a list detaching every waiter at its own destroy: a destroyed gate's blocked list, a destroyed memory object's umtx buckets | `STALE` | under the list's lock, as above | yes |
 | a sender's handshake or transfer ending a receiver's wait; a reply; a dying server's abort of its caller's reply wait | `WOKEN`; `ABORTED` | on the receiver's home CPU, in the eager request's handler when the ender is elsewhere, which checks that the receiver still waits for it | nothing listed |
@@ -1044,8 +1042,8 @@ The protocol is [design-scheduler.md](design-scheduler.md#park-and-wake)'s
 and its decisions are the C17 `erx_park_step`, a pure function over the
 group's park record and one event: a park with the caller's epochs and
 deadline, a trigger of a bound IRQ object, a capacity change, a wake by
-slot, a take of the ready list, a deadline, an executor's death, and an
-executor's creation with a slot to take over. It returns the record's
+slot, a take of the ready list, a deadline and an executor's death. It
+returns the record's
 next state and the actions to perform; the glue performs them on Fiasco
 and reads no policy. Fiasco carries each action so:
 
@@ -1055,9 +1053,9 @@ and reads no policy. Fiasco carries each action so:
 | sleep the executor | `Erx::wait_sleep(ERX_WAIT_PARK, deadline)`, a caller wait: under the CPU lock, after the park lock is dropped, the funnel clears `Thread_ready` and calls `schedule()`; the executor is on the parked FIFO from the listing on | the CPU lock | the executor's home CPU |
 | wake an executor | under the park lock, the waker completes its record `WOKEN` by the swap and unlists it, clearing its `queue`; an executor whose record a deadline or a kick completed first is unlisted, not counted, and the next is taken; then `Erx::wait_wake(t)`: `xcpu_state_change(~0, Thread_ready)`, which sets the bit at once on the home CPU with the ready queue's `deblock`, or posts it to the home CPU's request queue with an inter-processor interrupt when the waker is elsewhere | the park lock, then none | the executor's home CPU |
 | arm and disarm the deadline | `Erx_wait_timeout` set in the home CPU's timeout queue before the sleep and reset on resume; its `expired()` completes `TIMED_OUT` by the swap, with no lock, and sets `Thread_ready` with `deblock` when the swap won; the executor unlists itself on resume | none | the executor's home CPU, at the tick |
-| take over a slot | the creation sends the old holder `thread_request(HANDOVER)` with the new executor named: the handler, on the old holder's home CPU, clears its slot field, names the new executor in `slot[s]`, completes the old holder `WOKEN` and unlists it from the FIFO under the park lock, and makes it ready; the creation waits for the answer in Fiasco's answer wait, which an executor may do | the park lock, inside the request | the old holder's home CPU |
+| take a slot | the creation walks the group's slots under the park lock: a slot of another space's thread, dying or not, is `ERX_EBUSY`, no free slot is `ERX_ELIMIT`, otherwise it names the new executor in the lowest free slot; no request goes to anyone | the park lock | the caller's |
 | an IRQ object bound to a group fires | `Irq`'s hit path takes the park core's trigger step instead of Fiasco's delivery to a thread, in the interrupt handler, with bounded work and no indirect call; a software trigger takes it in `erx_irq_trigger` | the IRQ object's lock, then the park lock inside it, the one nesting the lock order allows | the firing CPU |
-| pass over a stopped space's executor | the trigger's and the wake's steps read each candidate's run state from its space's run word; one of a stopped space leaves the FIFO and is woken to die, at most `ERX_GROUP_EXECUTORS_MAX` per trigger | the park lock | the caller's |
+| an executor dies | its teardown, under the park lock, clears `slot[s]`, advances the epoch, mirrors it and takes one parked executor, whom it wakes after the lock as a trigger does | the park lock, then none | the dying executor's |
 | `erx_group_take_ready` | the core's take step under the park lock, then the labels written into the caller's UTCB through the accessors with the lock dropped | the park lock | the caller's |
 
 **The park's outcome.** An executor resumes in `Erx::wait_sleep`:
@@ -1136,12 +1134,11 @@ least ceiling on its group path; a dying thread's is
 `ERX_PRIO_FINISHING`. The priority is written at the thread's creation,
 by `erx_thread_set_urgency`, by the kill, and by `erx_group_configure`,
 which refreshes every member of the group and of the groups below it in
-bounded parts before it returns, each refresh a request to the member's
+bounded parts before it returns, under each group's existence lock so the
+lists hold still, each refresh a request to the member's
 home CPU that dequeues, sets and enqueues its scheduling context. The
-kernel design derives the value at every decision instead; on the fork
-the value is stored and refreshed, so a ceiling change takes effect for
-every thread by the time the configuring call returns rather than at
-each thread's next decision, a difference the scope table records.
+kernel design stores and refreshes urgency the same way
+([design-scheduler.md](design-scheduler.md#urgency-resolution)).
 
 **Round robin.** A thread's time slice, `Sched_context::_quantum`, is
 its group's `slice_us`, set with the priority; Fiasco's slice timeout
@@ -1169,10 +1166,22 @@ execution context that leaves the scheduling context alone is a lock
 holder's help, which the kernel design charges to the helper as the fork
 does.
 
-**Charging.** At every tick, the fork's tick hook, in
-`Thread::handle_timer_interrupt`, calls `erx_sched_charge(path,
-1 ms)` once, for the charge path of the thread that owns the CPU's
-current scheduling context: the running thread's own path, a helped lock
+**Charging.** Each CPU keeps the clock value it has charged up to.
+`erx_sched_charge` is called with the time since then at every change of the
+CPU's current scheduling context and at every tick: in
+`Sched_context::Ready_queue::activate` (`sched_context-fixed_prio.cpp`), the
+one function that changes the current context, through which
+`set_current_sched` and a slice expiry's `invalidate_sched` both go, for the
+context being replaced; and in the fork's tick hook, in
+`Thread::handle_timer_interrupt`, for the context current then. While no
+context is current, between a slice's expiry and the next
+`set_current_sched`, no charge is made and the clock value only advances:
+those few scheduler instructions are no group's. A help changes no scheduling
+context, so it needs no charge of its own. Sampling at the tick alone would
+miss a thread that blocks before each tick, whose error no bound per thread
+limits, so charges at switches make the per-path totals exact to the clock;
+G1 measures what they add to a switch. The tick keeps enforcement. Each charge
+is for the charge path of the thread that owns the context: the running thread's own path, a helped lock
 holder's helper's, and a dying thread's own path with the finishing
 kind, where the charge goes to `finishing_ns` and to nothing else. The
 charge function is the one writer of a group's usage and of its
@@ -1477,7 +1486,8 @@ bounds stated.
 | core, host | the IPC core's send at a gate bound to no thread, over every outcome of the wait, with the gate bound, unbound again, or deleted between the wake and the resume, and with and without a deadline | `WOKEN` restarts from the lookup, which sends, blocks again with the same absolute deadline, or returns `ERX_ESTALE`; `STALE` returns `ERX_ESTALE`; `CANCELLED` and `TIMED_OUT` return their statuses; the model's freed flag on the gate is never read after the wake | a resume that reads the binding its frames hold reaches the freed gate, which the model's freed flag catches |
 | core, host | the mutual stop: two spaces of two threads each, a thread of each stopping the other, over every interleaving of walk parts, kill arrivals, the stoppers' waits and kicks, detachments, death edges, claims and drains; then a ring of three | every space reaches `EXITED` with exactly one record, each after its own last death edge; every stopper's wait ends at its kill; no trace waits forever | a stopper's wait the kill leaves alone, which leaves every word `STOPPED` in the trace where both stoppers wait |
 | core, host | `erx_return_check` over every combination of run state, flags, holds and upcall state | the row table; holds never fire with zero counts | rows 1 and 2 swapped hold a killed thread instead of killing it; a stopped space's thread resumed instead of held |
-| core, host | `erx_park_step` exhaustive model (S2), as the scheduler design states it: two executors, two IRQ objects triggered repeatedly, a capacity change, deadlines, epochs to depth 12, and an old executor of a stopped space dying while a new one holds its slot | no lost wakeup; every request resolved | a compare outside the lock loses one |
+| kernel, QEMU | charges: a thread ending its slice, one blocking before each tick and a helped holder, usage per path against a cycle-counter ground truth | each path's total exact to the clock | a charge that drops a slice's last stretch at its expiry fails |
+| core, host | `erx_park_step` exhaustive model (S2), as the scheduler design states it: two executors, two IRQ objects triggered repeatedly, a capacity change, deadlines, an executor's death and epochs to depth 12 | no lost wakeup; every request resolved | a compare outside the lock loses one |
 | concurrency, host | the park core under ThreadSanitizer with sixteen threads parking, triggering, waking by slot and taking the ready list for a million operations, under a host lock | no race report | the park lock removed from the trigger step reports a race on the epoch |
 | hosted and debug builds | K33 on the fork: each thread's held locks and counted references are counted and asserted zero at the funnel's sleep, the answer wait of `Context::drq` excepted as the one holder | the stop, park, umtx and IPC cases pass | a park that keeps a reference across its sleep fails the hosted suite |
 | hosted, ASan | the exit record's lifetime: a space whose last thread exits while its fault gate's thread is busy on another CPU, then every capability to the space closed before that thread receives; the same with the gate destroyed while the record is queued; and the receiver killed with the record on its list | the record is received intact, or dropped and counted, and the space's record is freed only after that; no report | the delivery's reference dropped at the handler's return frees the space under the queued record, which ASan reports |
@@ -1548,7 +1558,7 @@ Gate G1 times, under TCG and HVF, by the time page's counter:
 Each number states host, accelerator, QEMU version, compiler, flags and
 workload, and TCG numbers are never compared with HVF numbers. G1
 decides the timer slack and the default slice from them, and whether the
-1 ms tick suffices until M7.
+charge at switches stays.
 
 ## Differences from erXos's kernel
 
@@ -1559,10 +1569,9 @@ Each documented, tested, and gone with the stopgap:
 | the count that gates the exit record | the live count: every thread from its creation to its death edge, with no pauses or copies to serve | the active count: every thread running or preempted inside a call, which pauses and copies also wait on; both are zero exactly when no thread of the space can act |
 | what finishing may take from a CPU | no share: a killed thread runs at the fixed finishing priority above every user urgency on its own CPU, outside every quota, until its call is done, so a stream of kills holds that CPU's user threads back for as long as it lasts, bounded only by the stopped spaces' remaining work, which their budgets paid for; a stopgap residual (**Security**) | the finishing share, 4 of every 8 ticks, measured by `erx_sched_finishing_step` and armed as a one-shot deadline, a kill of the running thread being a decision that asks it ([design-scheduler.md](design-scheduler.md#pick-and-dispatch)); the finishing level and the charge to the thread's own path's `finishing_ns` are the same |
 | order among finishers and of a woken thread | Fiasco's `ready_enqueue` puts a woken thread, and one whose priority the kill raises, at the head of its level; a finisher keeps the slice it had | FIFO levels: a woken thread joins the tail (S7), and finishers rotate one tick each |
-| a dying lock holder | helped as Fiasco helps any holder, on the helper's CPU and charged to the helper | never helped: a waiter waits for it as for a holder running elsewhere |
 | a thread of a stopped space at its return boundary before its kill | holds in a boundary wait until the stop's kill reaches it | dies there at once |
-| urgency resolution | stored and refreshed by every change before that call returns | derived at every decision |
-| slices, deadlines and charges | at the 1 ms tick; a request pass on a CPU is charged to whoever runs there | one-shot timers |
+| slices and deadlines | at the 1 ms tick | one-shot timers |
+| charges | at every change of a CPU's scheduling context and at the tick; a request pass on a CPU is charged to whoever runs there | at every stop of a thread and every timer interrupt |
 | the direct switch | none: the server is picked by the scheduler at the sender's next decision | the same pick, in the dispatch |
 | K33, a wait holds nothing | the funnel's waits hold nothing, and every ender calls `erx_wait_complete`; but the requester of a waited request holds `erx_object_ref` on its target across its answer wait, and a woken thread's frames carry Fiasco's call state, so a wake returns through them and never resumes the thread straight to user mode | nothing held across any sleep; the completion writes the result registers and may resume the thread from an interrupt handler |
 | pauses and copies of spaces | `ERX_ENOTSUP`; the hold row never fires | in full |
@@ -1675,6 +1684,20 @@ Each documented, tested, and gone with the stopgap:
   closing it.** Rejected: other CPUs replenish the queue for as long as
   they like, and the drain runs with interrupts masked; closing first
   makes the cohort finite and lets the drain run in parts.
+* **Charging through Fiasco's fine-grained CPU time.** Rejected:
+`Context::update_consumed_time` (`context.cpp`), which
+`Config::Fine_grained_cputime` makes read the clock at every switch, runs
+after `set_current_sched` has made the incoming context current, on the
+outgoing execution context, which under help is the holder while the helper
+pays, so it cannot name the path the time belongs to without a record of its
+own. The option also needs a change the charge does not:
+`FINE_GRAINED_CPUTIME` depends on `!PERFORMANCE || ONE_SHOT || ONE_SHOT_PARAM`,
+and the fork requires `CONFIG_PERFORMANCE` and runs the periodic tick, so
+taking it would mean editing that dependency, setting the option in
+`config/fiasco/kernel.defconfig` and adding it to
+`tools/lib/erx/fiasco_config.rb`'s required list. `activate` sees every
+change of the context, a slice's expiry included, and still knows the outgoing
+one.
 
 ## Risks and open questions
 
