@@ -12,7 +12,11 @@
  * cpuset capacity_mcpu capacity_first slice_us grace_us base ceiling flags
  * padding.
  *
- *   machine CAP          a new machine whose flags are capped to CAP
+ *   machine CAP          a new machine whose flags are capped to CAP, whose
+ *                        root is told of MACHINE_CPUS
+ *   cpus MASK            the CPUs the next root is told of instead, to test
+ *                        what a grant reads back; the model has no such
+ *                        command, and the CPU records stay CPUS
  *   root GRANT           creates group 0
  *   group P GRANT        creates the next group under P
  *   configure G GRANT    replaces G's grant
@@ -51,6 +55,7 @@
 static erx_sched_group_t	groups[GROUPS_MAX];
 static erx_sched_thread_t	threads[THREADS_MAX];
 static erx_sched_cpu_t		cpus[CPUS];
+static uint64_t			root_cpus = MACHINE_CPUS;
 static int			ngroups;
 static int			nthreads;
 static erx_group_flags_t	cap;
@@ -338,6 +343,7 @@ new_machine(uint64_t new_cap)
 {
 	uint32_t i;
 
+	root_cpus = MACHINE_CPUS;
 	ngroups = 0;
 	nthreads = 0;
 	cap = (erx_group_flags_t)new_cap;
@@ -356,7 +362,7 @@ new_group(const uint64_t *parent, const uint64_t *word)
 	if (ngroups == GROUPS_MAX)
 		die("too many groups");
 	if (parent == NULL)
-		status = erx_sched_root_init(&groups[ngroups], MACHINE_CPUS, &grant,
+		status = erx_sched_root_init(&groups[ngroups], root_cpus, &grant,
 		    cap);
 	else
 		status = erx_sched_group_init(&groups[ngroups],
@@ -374,7 +380,7 @@ operands_of(const char *name)
 		const char	*name;
 		int		 operands;
 	} commands[] = {
-		{ "machine", 1 }, { "root", GRANT_WORDS },
+		{ "machine", 1 }, { "cpus", 1 }, { "root", GRANT_WORDS },
 		{ "group", GRANT_WORDS + 1 }, { "configure", GRANT_WORDS + 1 },
 		{ "normalize", GRANT_WORDS }, { "thread", 1 }, { "urgency", 2 },
 		{ "affinity", 2 }, { "wake", 2 }, { "refresh", 2 }, { "remove", 2 },
@@ -404,6 +410,9 @@ run_command(const char *name, const uint64_t *word, int nwords)
 	if (strcmp(name, "machine") == 0) {
 		new_machine(word[0]);
 		printf("= 0\n");
+	} else if (strcmp(name, "cpus") == 0) {
+		root_cpus = word[0];
+		printf("= 0\n");
 	} else if (strcmp(name, "root") == 0) {
 		new_group(NULL, word);
 	} else if (strcmp(name, "group") == 0) {
@@ -416,7 +425,7 @@ run_command(const char *name, const uint64_t *word, int nwords)
 		erx_grant_t result;
 
 		grant = grant_of(word);
-		status = erx_grant_normalize(&grant, MACHINE_CPUS, cap, &result);
+		status = erx_grant_normalize(&grant, cap, &result);
 		printf("= %d", status);
 		if (status == ERX_OK) {
 			printf(" ");

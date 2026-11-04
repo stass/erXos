@@ -18,6 +18,7 @@ limit utcb_brs u32 58
 limit utcb_bytes_max u32 504
 limit period_min u64 1000000
 limit period_max u64 1000000000
+limit cpuset_bits u32 64
 limit slice_min_us u32 500
 limit slice_max_us u32 50000
 limit grace_min_us u32 5

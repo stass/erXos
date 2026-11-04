@@ -1017,9 +1017,12 @@ the path. `erx_sched_draw` refills a local slice that has reached zero:
    this CPU until its next period, and a pool at zero or below supplies
    nothing.
 
-`erx_grant_normalize` caps a finite quota at `period_ns` times the
-machine's CPUs, more than any period can spend, so a quota always fits the
-pool's `int64_t`, and the arithmetic on it and on a debt is checked.
+`erx_grant_normalize` caps a finite quota at `period_ns` times
+`ERX_CPUSET_BITS`, the 64 CPUs a cpuset can name, at least what any period
+can spend. `ERX_PERIOD_MAX` keeps that product within the pool's `int64_t`,
+and the arithmetic on a quota and on a debt is checked. The cap is the same
+on every machine, so a grant read back with `erx_group_info` does not depend
+on how many CPUs the machine has.
 
 **Period indexes.** Each local slice records the index of the period it
 was drawn in. A CPU returns its slice, under the pool lock, before it
@@ -2041,7 +2044,7 @@ reading that lane and tell the system domain, which takes the connection down
 | Build | the chokepoint checks: the charge function is the one writer of a group's usage; a thread's stored urgency is written only as its own resolve in the core; the shared-area accessors are the one reader of the control area and the one writer of the status area | a seeded second writer of usage, a seeded direct load from the control area and a seeded direct store into the status area each fail the build |
 | Kernel, QEMU | hostile runtimes: random control-area writes, executors calling every blocking call, gates and IRQ objects bound to executors, executors armed for upcalls, executors that never yield, groups that spin | invariants S1 to S7; no group but the runtime's own charged |
 | Kernel, QEMU | quota accuracy: one group spinning at 10% and 30% on one and four CPUs, measured per period | S4's bound |
-| Pure core, host | draws with quotas from 1 ns to the whole machine over cpusets of one to 64 CPUs, and slices returned across period boundaries in every order against refills by other CPUs | every positive quota draws a positive slice; no remainder is counted twice; every overrun is charged once |
+| Pure core, host | draws with quotas from 1 ns to the cap, `period_ns` times `ERX_CPUSET_BITS` over cpusets of one to 64 CPUs, and slices returned across period boundaries in every order against refills by other CPUs | every positive quota draws a positive slice; no remainder is counted twice; every overrun is charged once |
 | Pure core, host | refill: cohorts of one to 1,000 threads on a CPU under quotas of zero, of one draw quantum and uncapped, below exhausted ancestors, with threads that throttle again during a release, and grants replaced at every step of a release | no thread joins one group's list twice in one of its periods; no batch released while the group cannot supply quota; a zero quota costs one expiry and one failed draw per period and CPU; the release's time charged to the group released; after a replacement, every slice returned once, every debt carried and every cohort released under the changed grant at once |
 | Kernel, QEMU | populations: a domain's whole own budget spent on ready threads on one CPU, whose group is then exhausted and refilled, while its executors churn their published urgencies | every stretch with interrupts masked on that CPU within K13's 20 microseconds; another domain's wake latency there unchanged beyond one pick's moves |
 | Kernel, QEMU | ceilings: a server whose group's ceiling is 15 serving a caller at 40, with a second caller queued; a runtime publishing 63 in every slot under a ceiling of 31 | the server never above 15; no raise for the queued caller; every executor clamped to 31 |

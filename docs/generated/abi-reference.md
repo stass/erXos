@@ -48,6 +48,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CAP_SLOT_STATE_RETIRED` | 3 |
 | `ERX_CAPS_MAX` | 1048576 |
 | `ERX_COPY_MAX` | 1048576 |
+| `ERX_CPUSET_BITS` | 64 |
 | `ERX_CRASH_CAUSE_FAULT` | 1 |
 | `ERX_CRASH_CAUSE_HALT` | 2 |
 | `ERX_CRASH_CAUSE_PANIC` | 4 |

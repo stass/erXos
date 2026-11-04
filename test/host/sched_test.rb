@@ -84,9 +84,9 @@ class SchedTest < Minitest::Test
     'a raised ready thread does not preempt' => ["}\n\treturn (must_pick(cpu, thread->urgency));\n}\n\nbool\nerx_sched_remove", "}\n\treturn (false);\n}\n\nbool\nerx_sched_remove"],
     'a refresh acts on another cpu' => ["if (where != sched_where(SCHED_THREAD_READY, cpu->index))\n\t\treturn (false);", "if (sched_where_state(where) != SCHED_THREAD_READY)\n\t\treturn (false);"],
     'a refresh of a sleeper stores' => ["if (where != sched_where(SCHED_THREAD_READY, cpu->index))\n\t\treturn (false);", "if (where != sched_where(SCHED_THREAD_READY, cpu->index)) {\n\t\tthread->urgency = erx_sched_resolve(thread).raw;\n\t\treturn (false);\n\t}"],
-    'a finite quota stays uncapped' => ["grant.quota_ns = min_u64(grant.quota_ns,\n\t\t    grant.period_ns * cpuset_size(machine));", ';'],
+    'a finite quota stays uncapped' => ["grant.quota_ns = min_u64(grant.quota_ns,\n\t\t    grant.period_ns * ERX_CPUSET_BITS);", ';'],
     'no quota caps too' => ['if (grant.quota_ns != ERX_QUOTA_NONE)', 'if (1)'],
-    'a group caps its quota by no machine' => ['for (level = group; level->parent != NULL; level = level->parent)', 'for (level = group; 0; level = level->parent)'],
+    'the cap is a single period' => ['grant.period_ns * ERX_CPUSET_BITS);', 'grant.period_ns);'],
     'a preempted thread joins the tail' => ['fifo_prepend(cpu, thread);', 'fifo_append(cpu, thread);'],
     'a slice end rejoins the head' => ['if (why == ERX_PICK_PREEMPTED && thread->slice_left_ns != 0)',
                                        'if (thread->slice_left_ns != 0)'],
@@ -263,18 +263,37 @@ class SchedTest < Minitest::Test
     assert_includes lines[-1], ';16=1+2+3+4+5+6+7+8+9+10+11'
   end
 
-  # A finite quota is capped at what the machine's CPUs can spend in a period,
-  # so it fits a pool's int64_t; no quota stays none, and a smaller one as it is.
-  def test_a_finite_quota_is_capped_at_the_machine_per_period
+  # A finite quota is capped at its period times the width of a cpuset, so it fits
+  # a pool's int64_t; no quota stays none, and a smaller one as it is.
+  def test_a_finite_quota_is_capped_at_what_a_cpuset_can_name_per_period
     quota = ->(**grant) { Integer(result(["normalize #{M.grant(**grant)}"])[/\A= 0 (\d+),/, 1]) }
-    assert_equal 4_000_000, quota.call(quota: 1 << 62, period: 1_000_000)
-    assert_equal 4_000_000_000, quota.call(quota: M::QUOTA_NONE - 1, period: 1 << 40), 'of the clamped period'
-    assert_equal 4_000_000, quota.call(quota: 4_000_000, period: 1_000_000)
-    assert_equal 3_999_999, quota.call(quota: 3_999_999, period: 1_000_000)
+    cap = M::CPUSET_BITS * 1_000_000
+    assert_equal cap, quota.call(quota: 1 << 62, period: 1_000_000)
+    assert_equal M::CPUSET_BITS * 1_000_000_000, quota.call(quota: M::QUOTA_NONE - 1, period: 1 << 40), 'of the clamped period'
+    assert_equal cap, quota.call(quota: cap, period: 1_000_000)
+    assert_equal cap - 1, quota.call(quota: cap - 1, period: 1_000_000)
     assert_equal M::QUOTA_NONE, quota.call(quota: M::QUOTA_NONE, period: 1_000_000)
     assert_equal 0, quota.call(quota: 0)
     child = base_machine + ["configure 1 #{M.grant(quota: 1 << 62, period: 1_000_000)}", 'state']
-    assert_includes drive(child).last, "/4000000,1000000,", 'on a group below the root too'
+    assert_includes drive(child).last, "/#{cap},1000000,", 'on a group below the root too'
+  end
+
+  # The stored grant, which erx_group_info returns, is the same at a root and below
+  # it however many CPUs the root is told of. The state line also prints each group's
+  # effective cpuset and capacity, which do vary with the machine; the match takes
+  # only the stored grant, which follows the slash.
+  def test_a_grant_read_back_does_not_depend_on_the_machines_cpus
+    grant = M.grant(quota: 1 << 62, period: 1_000_000)
+    stored = lambda do |mask|
+      state = drive(['machine 0', "cpus #{mask}", "root #{grant}", "group 0 #{grant}",
+                     "group 1 #{grant}", "configure 2 #{grant}", 'state']).last
+      state.scan(%r{/(\d+,1000000,[^/ ]*)})
+    end
+    one_cpu = stored.call(0b1)
+    assert_equal 3, one_cpu.length, 'a root, a child and a grandchild'
+    [0b11, 0b1111, 0xff, (1 << 64) - 1].each do |mask|
+      assert_equal one_cpu, stored.call(mask), "a machine of mask #{mask}"
+    end
   end
 
   # S7: each level is a FIFO, a slice end goes to the tail with a fresh slice,

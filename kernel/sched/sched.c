@@ -26,12 +26,13 @@
 	((erx_group_flags_t)(ERX_GROUP_HINTS | ERX_GROUP_DEFER |	\
 	    ERX_GROUP_STATUS | ERX_GROUP_PLACE))
 
-#define CPUSET_BITS		UINT32_C(64)
 #define MCPU_PER_CPU		UINT32_C(1000)
 #define NS_PER_US		UINT64_C(1000)
 
 _Static_assert(SCHED_LEVELS == 64, "a 64-bit bitmap covers every level");
-_Static_assert(ERX_PERIOD_MAX <= INT64_MAX / CPUSET_BITS,
+_Static_assert(sizeof(((erx_grant_t *)0)->cpuset) * 8 == ERX_CPUSET_BITS,
+    "the ABI's cpuset width is its field's");
+_Static_assert(ERX_PERIOD_MAX <= INT64_MAX / ERX_CPUSET_BITS,
     "a capped quota fits a pool's int64_t, and the cap does not overflow");
 
 size_t
@@ -99,7 +100,7 @@ min_u8(uint8_t a, uint8_t b)
 static bool
 cpuset_has(uint64_t cpuset, uint32_t cpu)
 {
-	return (cpu < CPUSET_BITS && (cpuset >> cpu & 1) != 0);
+	return (cpu < ERX_CPUSET_BITS && (cpuset >> cpu & 1) != 0);
 }
 
 static uint32_t
@@ -120,8 +121,8 @@ cpuset_size(uint64_t cpuset)
 }
 
 erx_status_t
-erx_grant_normalize(const erx_grant_t *raw, uint64_t machine,
-    erx_group_flags_t cap, erx_grant_t *result)
+erx_grant_normalize(const erx_grant_t *raw, erx_group_flags_t cap,
+    erx_grant_t *result)
 {
 	erx_grant_t grant = *raw;
 	size_t i;
@@ -138,7 +139,7 @@ erx_grant_normalize(const erx_grant_t *raw, uint64_t machine,
 	    ERX_PERIOD_MAX);
 	if (grant.quota_ns != ERX_QUOTA_NONE)
 		grant.quota_ns = min_u64(grant.quota_ns,
-		    grant.period_ns * cpuset_size(machine));
+		    grant.period_ns * ERX_CPUSET_BITS);
 	grant.slice_us = clamp_u32(grant.slice_us, ERX_SLICE_MIN_US,
 	    ERX_SLICE_MAX_US);
 	grant.grace_us = clamp_u32(grant.grace_us, ERX_GRACE_MIN_US,
@@ -175,17 +176,6 @@ group_store(erx_sched_group_t *group, const erx_grant_t *grant)
 	    memory_order_relaxed);
 }
 
-/* The machine's CPUs, which only the root's record holds. */
-static uint64_t
-path_machine(const erx_sched_group_t *group)
-{
-	const erx_sched_group_t *level;
-
-	for (level = group; level->parent != NULL; level = level->parent)
-		continue;
-	return (level->machine);
-}
-
 erx_status_t
 erx_sched_root_init(erx_sched_group_t *root, uint64_t machine,
     const erx_grant_t *raw, erx_group_flags_t cap)
@@ -193,7 +183,7 @@ erx_sched_root_init(erx_sched_group_t *root, uint64_t machine,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, machine, cap, &grant);
+	error = erx_grant_normalize(raw, cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if ((grant.cpuset & machine) == 0)
@@ -212,7 +202,7 @@ erx_sched_group_init(erx_sched_group_t *group, const erx_sched_group_t *parent,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, path_machine(parent), cap, &grant);
+	error = erx_grant_normalize(raw, cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if (parent->depth + 1 >= ERX_GROUP_DEPTH_MAX)
@@ -231,7 +221,7 @@ erx_sched_group_configure(erx_sched_group_t *group, const erx_grant_t *raw,
 	erx_grant_t grant;
 	erx_status_t error;
 
-	error = erx_grant_normalize(raw, path_machine(group), cap, &grant);
+	error = erx_grant_normalize(raw, cap, &grant);
 	if (error != ERX_OK)
 		return (error);
 	if (group->parent == NULL && (grant.cpuset & group->machine) == 0)
@@ -334,7 +324,8 @@ erx_sched_group_slice_ns(const erx_sched_group_t *group)
 /*
  * Thousandths of a CPU a quota per period pays for. Divided first, so that a
  * quota read from before a replacement and a period read from after one cannot
- * overflow: the remainder is below ERX_PERIOD_MAX.
+ * overflow: the remainder is below ERX_PERIOD_MAX, and the quotient is at most
+ * ERX_PERIOD_MAX * ERX_CPUSET_BITS / ERX_PERIOD_MIN.
  */
 static uint64_t
 quota_mcpu(uint64_t quota_ns, uint64_t period_ns)
@@ -458,7 +449,7 @@ erx_sched_place(const erx_sched_thread_t *thread, uint64_t idle)
 erx_status_t
 erx_sched_cpu_init(erx_sched_cpu_t *cpu, uint32_t index)
 {
-	if (index >= CPUSET_BITS)
+	if (index >= ERX_CPUSET_BITS)
 		return (ERX_EINVAL);
 	__builtin_memset(cpu, 0, sizeof(*cpu));
 	cpu->index = index;
@@ -533,7 +524,7 @@ thread_set_here(erx_sched_thread_t *thread, const erx_sched_cpu_t *cpu,
 static uint8_t
 highest_level(const erx_sched_cpu_t *cpu)
 {
-	return ((uint8_t)(CPUSET_BITS - 1 -
+	return ((uint8_t)(SCHED_LEVELS - 1 -
 	    (uint32_t)__builtin_clzll(cpu->ready)));
 }
 

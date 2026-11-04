@@ -12,6 +12,7 @@ class SchedModel
   CODEC = Erx::ABI::Generated::CODEC
   URGENCY_MAX = CODEC.constant('urgency_max')
   PERIOD = CODEC.constant('period_min')..CODEC.constant('period_max')
+  CPUSET_BITS = CODEC.constant('cpuset_bits')
   SLICE = CODEC.constant('slice_min_us')..CODEC.constant('slice_max_us')
   GRACE = CODEC.constant('grace_min_us')..CODEC.constant('grace_max_us')
   DEPTH_MAX = CODEC.constant('group_depth_max')
@@ -283,7 +284,7 @@ class SchedModel
     return nil if (grant.flags & ~FLAGS_DEFINED) != 0 || grant.padding != 0
 
     period = grant.period.clamp(PERIOD)
-    quota = grant.quota == QUOTA_NONE ? QUOTA_NONE : [grant.quota, period * CPUS].min
+    quota = grant.quota == QUOTA_NONE ? QUOTA_NONE : [grant.quota, period * CPUSET_BITS].min
     grant.with(quota: quota, period: period, slice: grant.slice.clamp(SLICE), grace: grant.grace.clamp(GRACE),
                base: [grant.base, grant.ceiling].min, flags: grant.flags & @cap)
   end

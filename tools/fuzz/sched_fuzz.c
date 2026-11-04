@@ -13,7 +13,7 @@
  *   a normalized grant is within every limit, and normalizing it again
  *   changes nothing;
  *   a refused grant or depth changes no record;
- *   a normalized finite quota is at most its period times the machine's CPUs;
+ *   a normalized finite quota is at most its period times ERX_CPUSET_BITS;
  *   S5: a thread's urgency is at most every ceiling on its path, a ready or
  *   running thread's stored urgency is what it resolves to once it has been
  *   refreshed, and a ready thread's level is that urgency, and its
@@ -102,9 +102,9 @@ check_grant(const erx_grant_t *grant)
 	    grant->base.raw > grant->ceiling.raw ||
 	    (grant->flags & (erx_group_flags_t)~cap) != 0 ||
 	    (grant->quota_ns != ERX_QUOTA_NONE && grant->quota_ns > grant->period_ns *
-	    (uint64_t)__builtin_popcountll(FUZZ_MACHINE)))
+	    ERX_CPUSET_BITS))
 		abort();
-	if (erx_grant_normalize(grant, FUZZ_MACHINE, cap, &again) != ERX_OK ||
+	if (erx_grant_normalize(grant, cap, &again) != ERX_OK ||
 	    memcmp(grant, &again, sizeof(again)) != 0)
 		abort();
 }
@@ -243,6 +243,29 @@ refresh_all(void)
 	}
 }
 
+/*
+ * A group holds exactly its raw grant normalized, and that grant's quota is
+ * the raw one up to the cap, which names no machine.
+ */
+static void
+check_stored(const erx_sched_group_t *group, const erx_grant_t *raw)
+{
+	erx_grant_t normalized, stored;
+	uint64_t expected;
+
+	if (erx_grant_normalize(raw, cap, &normalized) != ERX_OK)
+		abort();
+	erx_sched_group_grant(group, &stored);
+	if (memcmp(&normalized, &stored, sizeof(stored)) != 0)
+		abort();
+	expected = raw->quota_ns;
+	if (expected != ERX_QUOTA_NONE &&
+	    expected > stored.period_ns * ERX_CPUSET_BITS)
+		expected = stored.period_ns * ERX_CPUSET_BITS;
+	if (stored.quota_ns != expected)
+		abort();
+}
+
 static void
 op_group(fuzz_input_t *in)
 {
@@ -252,11 +275,13 @@ op_group(fuzz_input_t *in)
 
 	if (ngroups == FUZZ_GROUPS)
 		return;
-	if (erx_grant_normalize(&raw, FUZZ_MACHINE, cap, &normalized) == ERX_OK)
+	if (erx_grant_normalize(&raw, cap, &normalized) == ERX_OK)
 		check_grant(&normalized);
 	if (erx_sched_group_init(&groups[ngroups], &groups[parent % ngroups],
-	    &raw, cap) == ERX_OK)
+	    &raw, cap) == ERX_OK) {
+		check_stored(&groups[ngroups], &raw);
 		ngroups++;
+	}
 }
 
 static void
@@ -267,7 +292,9 @@ op_configure(fuzz_input_t *in)
 	erx_grant_t before, after;
 
 	erx_sched_group_grant(group, &before);
-	if (erx_sched_group_configure(group, &raw, cap) != ERX_OK) {
+	if (erx_sched_group_configure(group, &raw, cap) == ERX_OK) {
+		check_stored(group, &raw);
+	} else {
 		erx_sched_group_grant(group, &after);
 		if (memcmp(&before, &after, sizeof(after)) != 0)
 			abort();

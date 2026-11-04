@@ -844,6 +844,13 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
+* [Low] scheduler and budgets, a group's charge
+  ([per-CPU records](docs/design-scheduler.md#ownership-and-lifetime)): a group
+  charges one `erx_group_cpu` record per CPU to its creator's budget, so a domain
+  that creates groups and reads its spending through `erx_budget_watch` or a
+  carved budget may learn roughly how many CPUs the machine has, which a grant
+  read back does not tell it. When the records are written, charge every group
+  for `ERX_CPUSET_BITS` records, or state that the count is not a secret.
 * [Medium] scheduler, Track K and M11: request batches bound an interrupt's
   length, not how much of a remote CPU a sender consumes
   ([Concurrency](docs/design-scheduler.md#concurrency)). A runtime that

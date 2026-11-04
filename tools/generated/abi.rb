@@ -7859,6 +7859,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "cpuset_bits".b => Constant.new(
+            name: "cpuset_bits".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "crash_cause_fault".b => Constant.new(
             name: "crash_cause_fault".b,
             value: 1,

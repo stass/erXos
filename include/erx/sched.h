@@ -111,14 +111,16 @@ size_t	erx_sched_cpu_record_align(void);
  * limits that depend on nothing but the grant applied. raw is a private
  * copy the caller made once from the caller's UTCB, never the UTCB itself,
  * since this reads each field more than once. Period, slice and grace clamped
- * into their ranges, a finite quota capped at the period times the CPUs of
- * machine, more than any period can spend, so it fits a pool's int64_t, base
- * clamped to the ceiling, flags masked by the machine-wide cap. ERX_EINVAL for
+ * into their ranges, a finite quota capped at the period times
+ * ERX_CPUSET_BITS, the most CPUs a cpuset can name and at least what any period
+ * can spend, on every machine alike, base clamped to the ceiling, flags masked
+ * by the machine-wide cap. ERX_PERIOD_MAX keeps the cap within a pool's
+ * int64_t. ERX_EINVAL for
  * an urgency above ERX_URGENCY_MAX, a flag erXos does not define, or non-zero
  * padding; nothing else in a grant is refused. result is written only on
  * success, and normalizing a normalized grant changes nothing.
  */
-erx_status_t	erx_grant_normalize(const erx_grant_t *raw, uint64_t machine,
+erx_status_t	erx_grant_normalize(const erx_grant_t *raw,
 		    erx_group_flags_t cap, erx_grant_t *result);
 
 /*
