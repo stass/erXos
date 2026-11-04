@@ -40,7 +40,7 @@ class NativeBootTest < Minitest::Test
   end
 
   def test_the_root_line_comes_after_the_banner
-    assert_equal %w[bootstrap-memory erxos-banner development-warning root-task],
+    assert_equal %w[bootstrap-memory erxos-art erxos-banner development-warning root-task],
                  M.checkpoints(BUILT).map { |point| point.fetch(:name) }
   end
 

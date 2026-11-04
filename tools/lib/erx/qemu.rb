@@ -138,6 +138,7 @@ module Erx
 
   class Qemu
     BANNER = [
+      { name: 'erxos-art', pattern: %r{/_/\\_\\ \\___/ \|___/\r?\n}n, seconds: 30 }.freeze,
       { name: 'erxos-banner', pattern: /erXos\r?\n/n, seconds: 30 }.freeze,
       { name: 'development-warning', pattern: /development build: trusted code only\r?\n/n,
         seconds: 30 }.freeze

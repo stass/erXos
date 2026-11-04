@@ -20,6 +20,12 @@ Banner::init()
 {
   // Kip::k() has not necessarily been initialized yet!
   extern char _initkip_start[];
+  printf("\n"
+         "             __  __\n"
+         "   ___  _ __ \\ \\/ /  ___   ___\n"
+         "  / _ \\| '__| \\  /  / _ \\ / __|\n"
+         " |  __/| |    /  \\ | (_) |\\__ \\\n"
+         "  \\___||_|   /_/\\_\\ \\___/ |___/\n");
   printf("\n%s\n", _initkip_start);
   Erx_handoff::banner();
 

@@ -157,10 +157,17 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
-  def boot_transcript(available:, warning: "development build: trusted code only\r\n")
+  def boot_transcript(available:, warning: "development build: trusted code only\r\n",
+                      art: "  \\___||_|   /_/\\_\\ \\___/ |___/\r\n")
     "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000005fffffff: 512.0 MiB\r\n" \
       "  Total RAM: 512.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
-      "\e[1;32merXos\r\n#{warning}"
+      "#{art}\e[1;32merXos\r\n#{warning}"
+  end
+
+  def test_boot_without_the_banner_art_fails
+    qemu = Erx::Qemu.new(root: @directory,
+                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', art: '')))
+    assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
   end
 
   def test_boot_without_the_development_warning_fails
@@ -195,7 +202,7 @@ class QemuTest < Minitest::Test
   def test_boot_with_consistent_bootstrap_memory_passes
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
     report = qemu.run(accel: 'tcg', image: image)
-    assert_equal %w[bootstrap-memory erxos-banner development-warning],
+    assert_equal %w[bootstrap-memory erxos-art erxos-banner development-warning],
                  report.fetch('checkpoints').map { |entry| entry.fetch('name') }
     assert_equal 'passed', report.fetch('state')
   end
