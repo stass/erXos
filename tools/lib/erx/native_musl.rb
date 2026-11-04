@@ -19,7 +19,7 @@ module Erx
     BACKEND = NativeRoot::BACKEND
     # musl supplies memcpy, bcopy and the rest of what root_mem.c gives a freestanding root.
     SOURCES = [*(NativeRoot::RUNTIME - ["#{BACKEND}/root_mem.c"]), *NativeRoot::VM, *NativeRoot::SERVICE,
-               "#{BACKEND}/libc_start.c"].freeze
+               "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root.c"].freeze
     GUEST = 'test/guest/native_musl/guest.c'
     GUEST_FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -O2 -nostdinc -fno-stack-protector
                      -mno-outline-atomics].freeze

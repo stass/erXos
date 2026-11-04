@@ -616,20 +616,39 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `brk` | reports no room | mallocng uses `mmap` alone |
 | `__clone` | `erx_thread_create`, `erx_fiasco_thread_set_clear_word`, `erx_thread_start` | only `CLONE_THREAD`; a worker, or an executor with `ERX_CLONE_EXECUTOR`, which only `erx_pthread_create_executor` causes |
 | `exit`, `__unmapself` | `erx_thread_exit`, `erx_thread_exit_release` | |
-| `exit_group` | `erx_machine_end` | the root's form |
+| `exit_group` | `erx_space_stop(ERX_CAP_SELF, status)` | whoever started the program reads the status's low byte; in the root the stop is `erx_machine_end` |
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
 | `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_console_write` | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
-| `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: the machine runs one program, with no users |
-| `sched_yield`, `set_robust_list`, `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
+| `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
+| `sched_yield` | `erx_yield` | |
+| `set_robust_list`, `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
 
 Everything else is `ENOSYS`. No signal is delivered, so `pthread_cancel` returns 0 and acts at the target's next
 cancellation point rather than interrupting a call it is blocked in.
 
-`liberx/backend/fiasco/libc_start.c` brings the service up and calls `__libc_start_main` with one argument, no
-environment and the ELF headers, which `root.ld` loads first so that musl finds the TLS image. The program links with
-`libl4sys.p.a`, which defines four symbols and needs none, and with Fiasco's `libgcc.a` for binary128 arithmetic.
+`liberx/backend/fiasco/libc_start.c` calls `__libc_start_main` with one argument, no environment and the ELF headers,
+which `root.ld` and `task.ld` load first so that musl finds the TLS image. `libc_root.c` brings the service up first and
+ends the machine if the start comes back; `libc_task.c` is a task's `erx_task_main`, whose thread `task_start.c` has
+readied. A program's own thread handle is its index in the root and in a task alike, so the seam is one file for both.
+The program links with `libl4sys.p.a`, which defines four symbols and needs none, and with Fiasco's `libgcc.a` for
+binary128 arithmetic.
+
+#### musl's own tests
+
+`tools/lib/erx/libc_test.rb` builds `libc-test`, fetched at its pinned commit, against this musl: each test of
+`functional`, `regression`, `math` and `musl` becomes a program for the boot image, and `test/guest/native_libc_test`'s root
+runs every one as a task, one after another, many to a boot, since a task's fault leaves the machine running. It
+joins each with `erx_fiasco_task_join_until` and stops one still running at its deadline. A task holds no log
+capability, so a test's own output goes nowhere and its exit status is its result.
+
+A test whose own object calls what Phase 1 does not offer (files, processes, signals, sockets, shared objects) is not
+run, and its result names the calls. Every test ends with one result in `build/libc-test`, never in the tree: passed, failed with its
+exit status, its fault or its build error, timed out, not run with its cause, or unknown. A test the root did not reach is
+not run, and how the one under way when a boot stopped went is unknown, with what stopped it named. Only the root's end
+line of that boot says how a test ended: `tools/erx check-libc-test ACCEL CPUS` relinks every program and deletes each
+boot's old log first.
 
 ## Interrupts and readiness
 

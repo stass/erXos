@@ -201,6 +201,24 @@ it; git history is the record of completed work.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.
+* [Low] stopgap, `liberx/backend/fiasco/root.c`: the root has no path to the kernel command
+  line, so the system root's watchdog runs on `erx_watchdog_config_default` in normal mode,
+  `erx.watchdog` is parsed only by the suite's guest and `erx.det=1` does not reach it.
+  Nothing pets it either until M3's root does, so a system root that outlives its
+  60-second boot deadline ends the machine.
+* [Medium] musl, `tools/lib/erx/libc_test.rb`: a task holds no log capability, so a failing test's own lines are lost
+  and only its exit status reaches the report. Triage needs them: `erx_debug_log` from a task, or the root mapping
+  its log capability into a test task. Either must keep a task's bytes from starting a line, since
+  `read_boot` trusts every end line on the serial log, and no task can write one only because none can print.
+* [Low] musl, `liberx/backend/fiasco/arch/aarch64/task_start.S`: a task's 256 KiB first stack lies in `.bss` with no
+  guard page, so a deep test overruns its own globals, possibly `t_status`, instead of faulting.
+* [Low] musl, `tools/lib/erx/libc_test.rb`: `NEEDS` also holds back tests using `sigprocmask` and `pthread_sigmask`,
+  which the seam answers with no effect; and `Dependencies`'s git fetch reads the user's git configuration, which
+  the pinned hash catches only as a failed fetch.
+* [Medium] musl, `tools/lib/erx/libc_test.rb`: `libc-test` has no suite in the QEMU gate's roster, because most
+  tests cannot pass yet: settle what the gate holds it to, a recorded baseline or a canary set.
+* [Low] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's private headers. Move
+  it behind a neutral `liberx` header when the erx backend needs musl.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: a program's standard output reaches the console through
   `erx_fiasco_console_write` with no escaping, by an allowlist entry of the console chokepoint, against the escaping
   rule. The root's one program is trusted, so this waits until a program prints text from another source. The strict escape has no C form: `include/erx/terminal_ascii.h` holds only the kernel's ASCII class, so this
@@ -223,6 +241,7 @@ it; git history is the record of completed work.
 * [Low] musl, `musl/src/internal/erxos/syscall.c`: `sched_getaffinity` is refused, so
   `sysconf(_SC_NPROCESSORS_ONLN)` does not count CPUs; `native_musl` counts them by the refused pin. `AT_RANDOM`
   is absent, so mallocng's secret comes from an address alone; `erx_entropy_read` can supply its 16 bytes at program start. `sched_yield` does nothing.
+  is absent, so mallocng's secret comes from an address alone.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

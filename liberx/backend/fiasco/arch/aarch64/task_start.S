@@ -26,7 +26,8 @@ _start:
 	b	erx_fiasco_thread_trampoline
 	.size	_start, . - _start
 
+	/* A musl program's main runs here, and its frames are not small. No guard page: see TODO.md. */
 	.bss
 	.balign	16
-	.space	16384
+	.space	262144
 task_stack_top:

@@ -38,6 +38,9 @@ module Erx
       when 'tar'
         fields = COMMON_FIELDS + %w[url directory]
         member = 'directory'
+      when 'git'
+        fields = COMMON_FIELDS + %w[url directory commit]
+        member = 'directory'
       when 'file'
         fields = COMMON_FIELDS + %w[url filename]
         member = 'filename'
@@ -58,6 +61,7 @@ module Erx
         end
       end
       raise Error, 'invalid source SHA-256' unless /\A[0-9a-f]{64}\z/.match?(source.fetch('sha256'))
+      raise Error, 'invalid source commit' if source.fetch('kind') == 'git' && !/\A[0-9a-f]{40}\z/.match?(source.fetch('commit'))
       raise Error, 'invalid dependency status' unless %w[permanent stopgap].include?(source.fetch('status'))
 
       if source.fetch('kind') == 'oci'
@@ -193,7 +197,7 @@ module Erx
     end
 
     def archive_path(source)
-      suffix = source.fetch('kind') == 'tar' ? '.tar.gz' : File.extname(source.fetch('filename'))
+      suffix = %w[tar git].include?(source.fetch('kind')) ? '.tar.gz' : File.extname(source.fetch('filename'))
       parent = OutputDirectory.check(root: @root, path: File.join(@root, 'build/downloads'))
       path = File.join(parent, "#{source.fetch('id')}-#{source.fetch('sha256')}#{suffix}")
       raise Error, 'downloaded source archive must not be a symbolic link' if File.symlink?(path)
@@ -210,6 +214,8 @@ module Erx
           cached = File.join(cache, File.basename(URI.parse(source.fetch('url')).path))
           raise Error, "source not found in explicit cache: #{cached}" unless File.file?(cached)
           copy_bounded(cached, destination: temporary)
+        elsif source.fetch('kind') == 'git'
+          export_commit(source, directory: directory, archive: temporary)
         else
           @runner.run(['curl', '--disable', '--fail', '--location', '--silent', '--show-error',
                        '--proto', '=https', '--proto-redir', '=https',
@@ -221,6 +227,16 @@ module Erx
         verify(source, archive: temporary)
         File.rename(temporary, archive)
       end
+    end
+
+    # A source whose host serves no stable archive: the pinned commit, as git's own
+    # uncompressed tar of it, which the pinned hash then holds like any download's.
+    def export_commit(source, directory:, archive:)
+      clone = File.join(directory, 'clone')
+      @runner.run(['git', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'clone', '--quiet', '--bare',
+                   source.fetch('url'), clone], name: "fetch-#{source.fetch('id')}", deadline: 200)
+      @runner.run(['git', '-C', clone, 'archive', '--format=tar', "--prefix=#{source.fetch('directory')}/",
+                   '--output', archive, source.fetch('commit')], name: "export-#{source.fetch('id')}", deadline: 60)
     end
 
     def copy_bounded(source, destination:)
@@ -259,7 +275,7 @@ module Erx
 
       Dir.mktmpdir('.source-', parent) do |temporary|
         extracted = File.join(temporary, 'tree')
-        if source.fetch('kind') == 'tar'
+        if %w[tar git].include?(source.fetch('kind'))
           selected = extracted
           if source.fetch('directory') != '.'
             Dir.mkdir(extracted)

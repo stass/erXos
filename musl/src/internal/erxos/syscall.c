@@ -250,7 +250,7 @@ clock_nanosleep_call(clockid_t clock, int flags, const struct timespec *wait)
 	return (sleep_call(wait));
 }
 
-/* A thread's identifier is its index plus one; in the root the handle is the index. */
+/* A thread's identifier is its index plus one, and a program's own handle is the index. */
 static long
 tid_set_address(uint64_t word)
 {
@@ -294,6 +294,7 @@ sigprocmask_call(sigset_t *old, size_t size)
 #define ROOT_PID	1
 #define ROOT_PARENT	0
 #define ROOT_USER	0
+#define EXIT_STATUS_MASK	0xff
 
 long
 __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
@@ -341,13 +342,12 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_exit:
 		erx_thread_exit();	/* does not return */
 	case SYS_exit_group:
-		/* In the root, ending the program ends the machine; its status has no reader yet. */
-		(void)erx_machine_end(0, ERX_END_OFF);
-		return (-ENOSYS);
+		/* Whoever started the program reads the status's low byte, as POSIX's parent does. */
+		return (errno_of(erx_space_stop(ERX_CAP_SELF, a & EXIT_STATUS_MASK)));
 	case SYS_sched_setaffinity:
 		return (set_affinity(a, (size_t)b, (const unsigned long *)c));
 	case SYS_sched_yield:
-		/* The kernel's time slices still run the others. */
+		erx_yield();
 		return (0);
 	case SYS_tkill:
 		return (tkill_call((int)b));

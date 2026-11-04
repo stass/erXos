@@ -81,11 +81,18 @@ erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_t *t
 int
 erx_fiasco_task_join(uint64_t task, int64_t *status)
 {
+	return (erx_fiasco_task_join_until(task, ERX_FIASCO_UMTX_FOREVER, status));
+}
+
+int
+erx_fiasco_task_join_until(uint64_t task, uint64_t deadline, int64_t *status)
+{
 	const erx_fiasco_task_join_request_t request = { .caller = erx_fiasco_thread_self()->index, .task = task };
 	erx_fiasco_reply_t reply;
 	int result;
 
-	(void)erx_fiasco_semaphore_down(erx_fiasco_task_ended_cap(task), ERX_FIASCO_UMTX_FOREVER);
+	if (!erx_fiasco_semaphore_down(erx_fiasco_task_ended_cap(task), deadline))
+		return (ERX_ETIMEDOUT);
 	result = erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_JOIN, &request, sizeof(request), &reply);
 	if (result == ERX_OK)
 		*status = (int64_t)reply.first;

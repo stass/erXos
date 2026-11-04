@@ -77,6 +77,8 @@ module Erx
         oracle(command_arguments, **collaborators)
       when 'bench'
         bench(command_arguments, **collaborators)
+      when 'check-libc-test'
+        check_libc_test(command_arguments)
       when 'check-oracle'
         check_oracle(command_arguments, **collaborators)
       when '--help', '-h', nil
@@ -362,6 +364,18 @@ module Erx
       0
     end
 
+    # Runs musl's libc-test in tasks on one accelerator and CPU count: tools/erx check-libc-test ACCEL CPUS.
+    # Its results are data, not a verdict, so the command fails only if it could not say them.
+    def self.check_libc_test(arguments)
+      accel, cpus = arguments
+      raise OptionParser::InvalidArgument, 'check-libc-test ACCEL CPUS' unless arguments.size == 2 && cpus.match?(/\A[1-9][0-9]*\z/)
+
+      require_relative 'lib/erx/libc_test'
+      outcome = LibcTest::Run.new(root: ROOT).call(accel: accel, cpus: cpus.to_i)
+      Terminal.puts("#{outcome.fetch(:report)}: #{outcome.fetch(:totals)}; pool leaks in boots #{outcome.fetch(:pool_leaks_in_boots)}")
+      0
+    end
+
     def self.check_oracle(arguments)
       no_arguments(arguments)
       Terminal.puts('unsupported: target ERTS and libc-test domains are required for erXos oracle parity')
@@ -369,7 +383,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
       0
     end
 

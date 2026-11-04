@@ -22,6 +22,17 @@
       "status": "permanent"
     },
     {
+      "id": "libc-test",
+      "kind": "git",
+      "version": "63e36e934e8f2bedf645303a90b64098e2af6c8f",
+      "url": "https://repo.or.cz/libc-test.git",
+      "commit": "63e36e934e8f2bedf645303a90b64098e2af6c8f",
+      "sha256": "698c911c90d49d2c4654f31ab78405fd07b3344bcf2ea3465e4915e4a8fb0672",
+      "directory": "libc-test-63e36e9",
+      "license": "MIT",
+      "status": "permanent"
+    },
+    {
       "id": "tla-tools",
       "kind": "file",
       "version": "1.8.0-asset-692577622",

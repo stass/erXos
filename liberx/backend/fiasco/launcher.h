@@ -26,4 +26,10 @@ int	erx_fiasco_launch(uint32_t entry, uint32_t flags, uint64_t argument, uint64_
  */
 int	erx_fiasco_task_join(uint64_t task, int64_t *status) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * The same, up to deadline on erx_fiasco_clock_ns's clock. At the deadline it is
+ * ERX_ETIMEDOUT with the task as it was, and it can be stopped and joined again.
+ */
+int	erx_fiasco_task_join_until(uint64_t task, uint64_t deadline, int64_t *status) ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_FIASCO_LAUNCHER_H */

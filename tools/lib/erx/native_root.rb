@@ -97,14 +97,19 @@ module Erx
     # Fiasco are system headers here: they are inherited, so -pedantic judges only
     # erXos's own code.
     def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT)
-      FileUtils.mkdir_p(directory)
-      objects = sources.map { |source| compile(source, directory: directory, flags: flags) }
+      objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
       @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-Map', map_path(program), '-o', program, *objects, *archives,
                    @fiasco.boot_core_archive, *libraries],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program
+    end
+
+    # The objects of sources, for a caller that links many programs from them.
+    def compile_all(sources:, directory:, flags: [])
+      FileUtils.mkdir_p(directory)
+      sources.map { |source| compile(source, directory: directory, flags: flags) }
     end
 
     private
