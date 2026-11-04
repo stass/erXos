@@ -645,8 +645,9 @@ erx_crash_brief_decode(const uint8_t *bytes, size_t length,
 		value.build_id[index] = bytes[48 + index * 1];
 	}
 	value.boot_value = erx_abi_load_u32(bytes + 56);
-	value.nframes = erx_abi_load_u32(bytes + 60);
-	if (!erx_fault_decode(bytes + 64,
+	value.boot_slot = erx_abi_load_u32(bytes + 60);
+	value.nframes = erx_abi_load_u32(bytes + 64);
+	if (!erx_fault_decode(bytes + 72,
 	    ERX_FAULT_SIZE, &value.fault))
 		return (false);
 
@@ -666,11 +667,11 @@ erx_crash_record_decode(const uint8_t *bytes, size_t length,
 	if (!erx_crash_brief_decode(bytes + 0,
 	    ERX_CRASH_BRIEF_SIZE, &value.header))
 		return (false);
-	if (!erx_regs_decode(bytes + 112,
+	if (!erx_regs_decode(bytes + 120,
 	    ERX_REGS_SIZE, &value.regs))
 		return (false);
 	for (size_t index = 0; index < 64; index++) {
-		value.frames[index] = erx_abi_load_u64(bytes + 384 + index * 8);
+		value.frames[index] = erx_abi_load_u64(bytes + 392 + index * 8);
 	}
 
 	*result = value;

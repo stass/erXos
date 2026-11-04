@@ -25,7 +25,6 @@ struct erx_rights {
 #define ERX_ARCH_ASID_BITS UINT32_C(16)
 #define ERX_ARCH_ELF_MACHINE UINT16_C(183)
 #define ERX_ARCH_USER_LIMIT UINT64_C(281474976710656)
-#define ERX_BOOT_ARGS_MAX UINT32_C(2048)
 #define ERX_BOOT_DET UINT32_C(1)
 #define ERX_BOOT_INSTALLED_ONLY UINT32_C(2)
 #define ERX_BOOT_ROOT UINT32_C(4)
@@ -61,7 +60,7 @@ struct erx_rights {
 #define ERX_CRASH_FORM_FULL UINT32_C(2)
 #define ERX_CRASH_MAGIC UINT64_C(5211581015370781253)
 #define ERX_CRASH_SIZE UINT32_C(16384)
-#define ERX_CRASH_VERSION UINT32_C(1)
+#define ERX_CRASH_VERSION UINT32_C(2)
 #define ERX_CTL_MAX UINT32_C(4096)
 #define ERX_DEVICE_SECRET_STATUS_NEVER_PROVISIONED UINT32_C(3)
 #define ERX_DEVICE_SECRET_STATUS_NO_KEY UINT32_C(2)
@@ -763,24 +762,20 @@ _Static_assert(offsetof(erx_lane_rpage_t, wake) ==
 
 #define ERX_MACHINE_PAGE_SIZE 4096
 #define ERX_MACHINE_PAGE_ALIGN 4096
-#define ERX_MACHINE_PAGE_OFF_LEASE_SEQ 0
-#define ERX_MACHINE_PAGE_OFF_LEASE_DEADLINE_NS 8
-#define ERX_MACHINE_PAGE_OFF_BOOT_VALUE 16
-#define ERX_MACHINE_PAGE_OFF_BOOT_SLOT 20
-#define ERX_MACHINE_PAGE_OFF_FLAGS 24
-#define ERX_MACHINE_PAGE_OFF_ENTROPY_QUALITY 28
-#define ERX_MACHINE_PAGE_OFF_MEMORY_BYTES 32
-#define ERX_MACHINE_PAGE_OFF_CPU_COUNT 40
-#define ERX_MACHINE_PAGE_OFF_WATCHDOG_PERIOD_S 44
-#define ERX_MACHINE_PAGE_OFF_WATCHDOG_DEADLINE_S 48
-#define ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S 52
-#define ERX_MACHINE_PAGE_OFF_BUILD_ID 56
-#define ERX_MACHINE_PAGE_OFF_BOOT_ARGS_LEN 64
-#define ERX_MACHINE_PAGE_OFF_BOOT_ARGS 72
+#define ERX_MACHINE_PAGE_OFF_LEASE_DEADLINE_NS 0
+#define ERX_MACHINE_PAGE_OFF_BOOT_VALUE 8
+#define ERX_MACHINE_PAGE_OFF_BOOT_SLOT 12
+#define ERX_MACHINE_PAGE_OFF_FLAGS 16
+#define ERX_MACHINE_PAGE_OFF_ENTROPY_QUALITY 20
+#define ERX_MACHINE_PAGE_OFF_MEMORY_BYTES 24
+#define ERX_MACHINE_PAGE_OFF_CPU_COUNT 32
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_PERIOD_S 36
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_DEADLINE_S 40
+#define ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S 44
+#define ERX_MACHINE_PAGE_OFF_BUILD_ID 48
 typedef struct erx_machine_page erx_machine_page_t;
 struct erx_machine_page {
-	_Alignas(4096) _Atomic uint64_t	lease_seq;
-	_Atomic uint64_t	lease_deadline_ns;
+	_Alignas(4096) _Atomic uint64_t	lease_deadline_ns;
 	_Atomic uint32_t	boot_value;
 	_Atomic uint32_t	boot_slot;
 	_Atomic uint32_t	flags;
@@ -791,15 +786,10 @@ struct erx_machine_page {
 	_Atomic uint32_t	watchdog_deadline_s;
 	_Atomic uint32_t	watchdog_boot_s;
 	_Atomic uint8_t	build_id[8];
-	_Atomic uint32_t	boot_args_len;
-	uint8_t	padding_0[4];
-	_Atomic uint8_t	boot_args[2048];
-	uint8_t	padding_1[1976];
+	uint8_t	padding_0[4040];
 };
 _Static_assert(sizeof(erx_machine_page_t) == ERX_MACHINE_PAGE_SIZE, "erx_machine_page size");
 _Static_assert(_Alignof(erx_machine_page_t) == ERX_MACHINE_PAGE_ALIGN, "erx_machine_page alignment");
-_Static_assert(offsetof(erx_machine_page_t, lease_seq) ==
-    ERX_MACHINE_PAGE_OFF_LEASE_SEQ, "erx_machine_page.lease_seq offset");
 _Static_assert(offsetof(erx_machine_page_t, lease_deadline_ns) ==
     ERX_MACHINE_PAGE_OFF_LEASE_DEADLINE_NS, "erx_machine_page.lease_deadline_ns offset");
 _Static_assert(offsetof(erx_machine_page_t, boot_value) ==
@@ -822,10 +812,6 @@ _Static_assert(offsetof(erx_machine_page_t, watchdog_boot_s) ==
     ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S, "erx_machine_page.watchdog_boot_s offset");
 _Static_assert(offsetof(erx_machine_page_t, build_id) ==
     ERX_MACHINE_PAGE_OFF_BUILD_ID, "erx_machine_page.build_id offset");
-_Static_assert(offsetof(erx_machine_page_t, boot_args_len) ==
-    ERX_MACHINE_PAGE_OFF_BOOT_ARGS_LEN, "erx_machine_page.boot_args_len offset");
-_Static_assert(offsetof(erx_machine_page_t, boot_args) ==
-    ERX_MACHINE_PAGE_OFF_BOOT_ARGS, "erx_machine_page.boot_args offset");
 
 #define ERX_MF_BOOT_ORDER_SIZE 4
 #define ERX_MF_BOOT_ORDER_ALIGN 4
@@ -1464,7 +1450,7 @@ _Static_assert(offsetof(erx_fault_t, space) ==
 _Static_assert(offsetof(erx_fault_t, status) ==
     ERX_FAULT_OFF_STATUS, "erx_fault.status offset");
 
-#define ERX_CRASH_BRIEF_SIZE 112
+#define ERX_CRASH_BRIEF_SIZE 120
 #define ERX_CRASH_BRIEF_ALIGN 8
 #define ERX_CRASH_BRIEF_OFF_MAGIC 0
 #define ERX_CRASH_BRIEF_OFF_VERSION 8
@@ -1477,8 +1463,9 @@ _Static_assert(offsetof(erx_fault_t, status) ==
 #define ERX_CRASH_BRIEF_OFF_SINCE_PET_NS 40
 #define ERX_CRASH_BRIEF_OFF_BUILD_ID 48
 #define ERX_CRASH_BRIEF_OFF_BOOT_VALUE 56
-#define ERX_CRASH_BRIEF_OFF_NFRAMES 60
-#define ERX_CRASH_BRIEF_OFF_FAULT 64
+#define ERX_CRASH_BRIEF_OFF_BOOT_SLOT 60
+#define ERX_CRASH_BRIEF_OFF_NFRAMES 64
+#define ERX_CRASH_BRIEF_OFF_FAULT 72
 typedef struct erx_crash_brief erx_crash_brief_t;
 struct erx_crash_brief {
 	_Alignas(8) uint64_t	magic;
@@ -1491,8 +1478,10 @@ struct erx_crash_brief {
 	uint64_t	uptime_ns;
 	uint64_t	since_pet_ns;
 	uint8_t	build_id[8];
-	uint32_t	boot_value;
+	erx_boot_value_t	boot_value;
+	erx_boot_slot_t	boot_slot;
 	uint32_t	nframes;
+	uint8_t	padding_0[4];
 	erx_fault_t	fault;
 };
 _Static_assert(sizeof(erx_crash_brief_t) == ERX_CRASH_BRIEF_SIZE, "erx_crash_brief size");
@@ -1519,16 +1508,18 @@ _Static_assert(offsetof(erx_crash_brief_t, build_id) ==
     ERX_CRASH_BRIEF_OFF_BUILD_ID, "erx_crash_brief.build_id offset");
 _Static_assert(offsetof(erx_crash_brief_t, boot_value) ==
     ERX_CRASH_BRIEF_OFF_BOOT_VALUE, "erx_crash_brief.boot_value offset");
+_Static_assert(offsetof(erx_crash_brief_t, boot_slot) ==
+    ERX_CRASH_BRIEF_OFF_BOOT_SLOT, "erx_crash_brief.boot_slot offset");
 _Static_assert(offsetof(erx_crash_brief_t, nframes) ==
     ERX_CRASH_BRIEF_OFF_NFRAMES, "erx_crash_brief.nframes offset");
 _Static_assert(offsetof(erx_crash_brief_t, fault) ==
     ERX_CRASH_BRIEF_OFF_FAULT, "erx_crash_brief.fault offset");
 
-#define ERX_CRASH_RECORD_SIZE 896
+#define ERX_CRASH_RECORD_SIZE 904
 #define ERX_CRASH_RECORD_ALIGN 8
 #define ERX_CRASH_RECORD_OFF_HEADER 0
-#define ERX_CRASH_RECORD_OFF_REGS 112
-#define ERX_CRASH_RECORD_OFF_FRAMES 384
+#define ERX_CRASH_RECORD_OFF_REGS 120
+#define ERX_CRASH_RECORD_OFF_FRAMES 392
 typedef struct erx_crash_record erx_crash_record_t;
 struct erx_crash_record {
 	_Alignas(8) erx_crash_brief_t	header;
@@ -2582,43 +2573,12 @@ erx_lane_rpage_wake_store(erx_lane_rpage_t *record, uint64_t value)
 
 /* Each successful accessor performs one atomic element access. */
 static inline bool
-erx_machine_page_lease_seq_load(const erx_machine_page_t *record, uint64_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->lease_seq,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_machine_page_lease_seq_store(erx_machine_page_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->lease_seq, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
 erx_machine_page_lease_deadline_ns_load(const erx_machine_page_t *record, uint64_t *value)
 {
 	if (record == NULL || value == NULL)
 		return (false);
 	*value = atomic_load_explicit(&record->lease_deadline_ns,
 	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_machine_page_lease_deadline_ns_store(erx_machine_page_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->lease_deadline_ns, value,
-	    memory_order_release);
 	return (true);
 }
 
@@ -2730,38 +2690,6 @@ erx_machine_page_build_id_load(const erx_machine_page_t *record, size_t index, u
 	*value = atomic_load_explicit(&record->build_id[index],
 	    memory_order_acquire);
 	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_machine_page_boot_args_len_load(const erx_machine_page_t *record, uint32_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->boot_args_len,
-	    memory_order_acquire);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_machine_page_boot_args_load(const erx_machine_page_t *record, size_t index, uint8_t *value)
-{
-	if (record == NULL || value == NULL || index >= 2048)
-		return (false);
-	*value = atomic_load_explicit(&record->boot_args[index],
-	    memory_order_acquire);
-	return (true);
-}
-
-#define ERX_MACHINE_PAGE_LEASE_SEQ_TERMINAL UINT64_C(18446744073709551615)
-#define ERX_MACHINE_PAGE_LEASE_SEQ_EXHAUSTION ERX_ELIMIT
-
-/* Tests a captured sequence value; it does not validate a snapshot. */
-static inline erx_status_t
-erx_machine_page_lease_seq_status(uint64_t captured)
-{
-	return (captured == ERX_MACHINE_PAGE_LEASE_SEQ_TERMINAL ? ERX_MACHINE_PAGE_LEASE_SEQ_EXHAUSTION : ERX_OK);
 }
 
 static inline uint64_t

@@ -509,7 +509,7 @@ machine's action list names them, and one function applies them.
 | **K16.** The boot image never changes after validation, and no user mapping reaches its index; only a `SYSTEM` holder slices a system file; no file is read or mapped before its check | its pages are excluded from the direct map and mapped read-only in the kernel; no call writes them, and its capability carries no `WRITE`; the whole image's object has an empty ceiling, so no mapping of it can be made whatever its capability carries (K4), and it is not one of the immutable objects that parent copy-on-write children; `erx_image_slice` covers only whole pages of a run of entries, and refuses a run with a system file unless the capability carries `SYSTEM`, and a slice covers only files whose check passed, every mapping of a file being made from a slice | a direct map that covers the boot image's range; a slice made before its files are checked; a writable mapping; a slice that covers the index; any access in the whole image's ceiling | the kernel-table walk also checks the boot image's range; the flipped-byte cases of [Tests of the boot image](#tests-of-the-boot-image); host tests of the slice arithmetic; a domain test that tries to map the whole image, to make a child of it, to slice a system file without the right, and to map the index |
 | **K17.** Every capability is in a table, and enters a table only by that space's own call or its creator's | a message's capabilities move only at the rendezvous, into slots its receiver reserved in its own call, and every other install needs the caller's own table or `CAPS` on the target, which only the space itself and its creator hold, since a space's capability leaves its creator's table with `INSPECT` alone ([Passing capabilities](#passing-capabilities)) | a message or ring format that carries a capability; a pass that fills a slot its receiver did not reserve; a pass that holds capabilities outside every table from one call to the next; an installer that ignores the emptied flag; a pass of a space's capability with more than `INSPECT` | a source check that the table's fill is referenced only from the creation calls, `erx_cap_dup`, `erx_pass_install` and `erx_space_copy`; the pass core's exhaustive host model with timeouts, deaths, closes and emptying; domain tests that a receive with no room receives nothing, that a pass to a space that has just ended drops what it carried, and that a space's capability passed into a sub-space carries `INSPECT` alone |
 | **K18.** A stopped space's threads never return to user mode, and its exit record arrives only when none of them can act | every path to user mode passes `erx_return_check`, where a thread of a stopped space dies once its call is finished, no thread is created or started in a stopped space, and the exit record waits until the space's active count, which holds every thread that runs or is preempted inside a call, reaches zero, which each finishing thread reaches on its own CPU, finishing its call at the finishing level above every urgency, within that CPU's finishing share and outside every quota ([Execution model and locking](#execution-model-and-locking), [Threads and faults](#threads-and-faults)) | a path to user mode that skips the check; a thread that runs without entering the count; a call abandoned at a preemption point; a finishing thread throttled by any grant, its own group's or its killer's; a finishing thread below a user urgency, or held past its share; a group of the thread's own path dropped before its last switch, which the accounting still charges | a test that stops a domain whose threads run on every CPU, some inside long calls and deletions, and creates and starts threads while it is stopped, and checks that the exit record comes only after the last of them is dead or asleep and that every deletion it started completed; a test that sets a group's quota to zero while its thread is preempted inside a long range call, then stops the thread's space from a group whose quota is zero as well, and sees the call complete within the share's bound and the exit record come; a test that stops such a space from a thread whose cpuset excludes the dying thread's CPU, then deletes the stopper's thread while the target is preempted inside its call behind a spinner above every user urgency on its CPU, and sees the call complete and the record come; the exhaustive model of the count against concurrent switches; a seeded kill that throttles the thread on its killer's grant, which the finishing model catches as a thread never dying while that grant is zero, and a seeded finishing level placed below a user urgency, which the spinner case catches as a record that never comes |
-| **K19.** While a machine lease is held, the machine ends only in a reset | one funnel, `erx_machine_end_effect`, performs every end, the panic path's included, and maps every end to a reset while the lease word is set; the deadline is checked from the kernel's own timer, and the board's watchdog covers a kernel that stops taking interrupts | an end path that bypasses the funnel; a watchdog stopped while a lease is held | the funnel's host tests over every end and lease state; a QEMU test of each end with and without a lease; on each board, a trial that panics, hangs in the kernel with interrupts masked, or calls `halt/0`, each booting the committed slot |
+| **K19.** While a machine lease is held, the machine ends only in a reset | one funnel, `erx_machine_end_effect`, performs every end, the panic path's included, and maps every end to a reset while the kernel's own record of the lease, set at boot step 2, says one is held; the deadline is checked from the kernel's own timer, and the board's watchdog covers a kernel that stops taking interrupts | an end path that bypasses the funnel; a watchdog stopped while a lease is held | the funnel's host tests over every end and lease state; a QEMU test of each end with and without a lease; on each board, a trial that panics, hangs in the kernel with interrupts masked, or calls `halt/0`, each booting the committed slot |
 | **K20.** Preemption never runs runtime code: no executor receives an upcall | `erx_vcpu_control` refuses an executor, a thread's class is fixed when it is created, and only an armed thread receives upcalls ([vCPU upcalls](#vcpu-upcalls)) | an arming path without the class check, or a call that changes a thread's class | host tests of the arming rules over every class; a domain test that arming an executor fails with `ERX_ETYPE` |
 | **K21.** An object's release happens once, and only once, after the last capability to it has gone | every slot is cleared by `erx_cap_slot_clear` under the object's capability lock, a move hands its count from slot to slot without passing through zero, and the decrement to zero closes the slot list to inserts, so nothing makes a capability after the release ([Objects and capabilities](#objects-and-capabilities)) | a slot cleared without the decrement or outside the object's capability lock; a move split across two operations; a copy inserted after the release; a call that names an object by anything but a capability | the release core's exhaustive host model over closes, moves, deletions and table emptying, with copies and moves whose lookups raced the last close, which checks that every slot is freed once, that no copy follows a release, and that the last close of a deleted object leaves it deleted; a domain test in which a domain passes a gate to its sub-space at a rendezvous, closes its own capability, and sees the gate released only when the sub-space closes it; a test that stops the sub-space and empties its table and sees the release then |
 | **K22.** A copy-on-write child never writes a page it does not own, and no device writes a shared page | every user translation comes from `erx_pte_make`, which grants write only for a page its mapping's object owns exclusively, and a child's mapping is populated only with pages the child owns, so no translation anywhere names a page shared by copy-on-write; every fault in a child's mapping, whether the CPU reports a missing translation or a permission fault, goes through the fault decision to `erx_cow_decide`, and only `erx_cow_install` makes a page the child's own, under the child's lock, touching no translation table; the kernel writes a memory object's pages only through `erx_window_write`, which makes a child's page its own through `erx_cow_install` before it writes it; `erx_dma_map` takes only pages its object owns exclusively | a translation built elsewhere; a translation in a child's mapping that names a parent's page; a kernel write into a child's page that skips `erx_cow_install`; a DMA mapping of a parent's page | the funnel's exhaustive host model over every fault, window write, page state and concurrent `erx_mem_own`, and over deletions of the child and unmaps of its mapping racing faults on it, with a seeded fault that releases its space's lock between the copy and the write of the translation, which the model catches as a translation naming a page it has released; the fault decision's model over every mapping kind, page state and access; a hostile test that writes a child's page from two threads while a third reads the parent, and one that maps a child at a thousand addresses in two spaces and writes one page through each, each write taking one bounded part and every alias reading the written page afterwards, with a seeded populate that maps the parent's page for a read, which the host model's check that no translation names a parent's page catches; a test that a child range with an unowned page cannot be DMA-mapped; the build checks on `erx_pte_make` and `erx_cow_install` |
@@ -2241,7 +2241,11 @@ implements the same protocol, so no step is specific to one loader
    and the platform binding names,
    [design-platforms.md](design-platforms.md#data-model)). It walks the
    tree with `libfdt`, whose traversal is iterative and checks bounds at
-   every step, behind this one file. When the boot value it derives is a
+   every step, behind this one file. The kernel keeps the boot value, its
+   slot and any lease's deadline in its own data from here on; the crash
+   record and the end funnel read them there, and the machine page is a
+   copy of them. Until this step they hold `unknown`, slot `none` and no
+   lease. When the boot value it derives is a
    trial, the kernel takes the machine lease here, before anything else
    can hang: it finds the watchdog's node, restarts the watchdog, which
    the firmware may already be running, and sets the lease's deadline from
@@ -2450,27 +2454,26 @@ gives the root task no end of the machine it did not already have, and no way
 to survive one.
 
 The machine page is a read-only page in a layout of its own in the ABI file,
-`erx_machine_page_t`, 4,096 bytes and page-aligned:
+`erx_machine_page_t`, 4,096 bytes and page-aligned, zero after its last field:
 
 | Offset | Field | Holds |
 | --- | --- | --- |
-| 0 | `lease_seq`, u64 | the sequence count of the machine lease's deadline |
-| 8 | `lease_deadline_ns`, u64 | the lease's deadline on the monotonic clock in nanoseconds; 0 while no lease is held |
-| 16 | `boot_value`, u32 | the boot value: `ERX_BOOT_VALUE_UNKNOWN` (1), `_NORMAL` (2) or `_TRIAL` (3) |
-| 20 | `boot_slot`, u32 | its slot: `ERX_BOOT_SLOT_NONE` (0), `_A` (1) or `_B` (2) |
-| 24 | `flags`, u32 | `ERX_MACHINE_DET`, deterministic mode, in which the watchdog is off; `ERX_MACHINE_CRASH_FOUND`, a previous crash record was found |
-| 28 | `entropy_quality`, u32 | `ERX_ENTROPY_QUALITY_GOOD` (1), `_WEAK` (2) or `_FIXED` (3) |
-| 32 | `memory_bytes`, u64 | the memory found |
-| 40 | `cpu_count`, u32 | the CPUs found |
-| 44, 48, 52 | `watchdog_period_s`, `watchdog_deadline_s`, `watchdog_boot_s`, u32 | the three values of `erx.watchdog` |
-| 56 | `build_id`, 8 bytes | the build identifier |
-| 64 | `boot_args_len`, u32 | the bytes of `boot_args` in use, at most `ERX_BOOT_ARGS_MAX` |
-| 72 | `boot_args`, 2,048 bytes | the words of the command line the kernel did not take, as it spaces them, and zero after them; firmware text, so untrusted, and it reaches a console only through that sink's escaper |
+| 0 | `lease_deadline_ns`, u64 | the machine lease's deadline on the monotonic clock in nanoseconds; 0 when no lease is held |
+| 8 | `boot_value`, u32 | the boot value: `ERX_BOOT_VALUE_UNKNOWN` (1), `_NORMAL` (2) or `_TRIAL` (3) |
+| 12 | `boot_slot`, u32 | its slot: `ERX_BOOT_SLOT_NONE` (0), `_A` (1) or `_B` (2) |
+| 16 | `flags`, u32 | `ERX_MACHINE_DET`, deterministic mode, in which the watchdog is off; `ERX_MACHINE_CRASH_FOUND`, a previous crash record was found |
+| 20 | `entropy_quality`, u32 | `ERX_ENTROPY_QUALITY_GOOD` (1), `_WEAK` (2) or `_FIXED` (3) |
+| 24 | `memory_bytes`, u64 | the memory found |
+| 32 | `cpu_count`, u32 | the CPUs found |
+| 36, 40, 44 | `watchdog_period_s`, `watchdog_deadline_s`, `watchdog_boot_s`, u32 | the three values of `erx.watchdog` |
+| 48 | `build_id`, 8 bytes | the build identifier |
 
-The kernel writes every field before the root task starts and changes none but
-the lease's, which a reader takes as it takes the time page's: it loads
-`lease_seq`, retries while it is odd, stops at its terminal value, loads the
-deadline and loads the count again. The boot value and its slot are `unknown` with slot `none`,
+The kernel writes every field before the root task starts and changes none
+after: a lease is taken at boot and held until the machine ends ([The machine
+lease](#console-log-and-panic)), and its deadline is one 64-bit word, so a
+reader loads it once. The page holds no boot argument: the kernel alone reads
+the command line ([Configuration](#configuration)). The boot value and its
+slot are `unknown` with slot `none`,
 `normal(slot)` or `trial(slot)` with slot `A` or `B`; a reader refuses any other pair,
 so a page never written reads as no boot value at all.
 The kernel derives them from the two `/chosen` properties that name the boot
@@ -2521,14 +2524,15 @@ take ([Alternatives considered](#alternatives-considered)).
 
 **The crash record.** Before any of these ends, and before a kernel
 panic's report, the kernel writes one **crash record**, a layout of the
-ABI file of at most `ERX_CRASH_SIZE` (16 KiB, an estimate: a few hundred
-bytes of fixed fields and the rest for the log's tail). It has two
+ABI file of at most `ERX_CRASH_SIZE` (16 KiB, an estimate: under 1 KiB of
+fixed fields and the rest for the log's tail). It has two
 **forms**, and the boot image's `ERX_PACK_DEVELOPMENT` flag
 ([Configuration](#configuration)) chooses which one a build writes:
 
 * the **brief** form, a release build's, ends at `fault`: the cause, the
   program counter and fault address in the fault record, the build
-  identifier, the uptime and the time since the last pet, and no register
+  identifier, the boot value and its slot, so a crashed trial names the slot
+  that failed, the uptime and the time since the last pet, and no register
   but the program counter, no stack and no text, so nothing the root task
   held, a passphrase it was checking included, survives a reset in it;
 * the **full** form, a development build's, adds the registers, the
@@ -2543,7 +2547,7 @@ bytes of fixed fields and the rest for the log's tail). It has two
 ```c
 typedef struct erx_crash_record {
 	uint64_t	magic;		/* ERX_CRASH_MAGIC */
-	uint32_t	version;	/* 1 */
+	uint32_t	version;	/* ERX_CRASH_VERSION, 2 */
 	uint32_t	length;		/* bytes used, header included: the
 					 * offset of regs for BRIEF, at most
 					 * ERX_CRASH_SIZE for FULL */
@@ -2556,9 +2560,11 @@ typedef struct erx_crash_record {
 	uint64_t	since_pet_ns;	/* time since the root task's last pet, or
 					 * since its start before the first */
 	uint8_t		build_id[8];
-	uint32_t	boot_value;	/* the machine page's, without its slot */
+	uint32_t	boot_value;	/* the boot value the kernel holds */
+	uint32_t	boot_slot;	/* its slot, as on the machine page */
 	uint32_t	nframes;	/* backtrace frames that follow; FULL and
 					 * PANIC only, else zero */
+	uint8_t		padding[4];	/* zero */
 	erx_fault_t	fault;		/* FAULT: the fault record; HALT: the exit
 					 * record; PANIC: the exception's cause,
 					 * address and program counter, as the
@@ -2574,11 +2580,18 @@ typedef struct erx_crash_record {
 } erx_crash_record_t;
 ```
 
-The kernel writes it into the **crash buffer**, the pages it carved at
+`boot_value` is at offset 56, `boot_slot` at 60, `nframes` at 64 and `fault`
+at 72, so the brief form is 120 bytes; `regs` is at 120 and `frames` at 392,
+so the full form's fixed prefix is 904 bytes. `boot_value` and `boot_slot` are
+one of the pairs the machine page allows, from the kernel's own data, so a
+record written before the page holds the same pair.
+
+The kernel zeroes the **crash buffer**, the pages it carved at
 boot step 4, which the platform layer places in a region that survives a
 warm reset where the platform has one and in ordinary RAM elsewhere
-([design-platforms.md](design-platforms.md#the-crash-record)); it cleans
-those lines to the point of coherency, and then prints the same fields and
+([design-platforms.md](design-platforms.md#the-crash-record)), and writes the
+record into it, so no padding byte holds what the buffer held before; it
+cleans those lines to the point of coherency, and then prints the same fields and
 text on the console as the panic report's first part, followed by the
 record itself in the **crash frame**, so that a reader validates the
 record rather than parses the report's prose:
@@ -2610,6 +2623,8 @@ record rather than parses the report's prose:
   reads exactly the lines the length names, and accepts the record only
   if `magic`, `version`, `form` and `length` equal the frame's, the CRC
   matches, `cause` is one of the four, `cpu` is below the CPU limit,
+  `boot_value` and `boot_slot` are one of the machine page's pairs, the
+  padding is zero,
   `nframes` is at most 64 and zero unless the form is full and the cause
   `PANIC`, the fault record's `kind` is a declared kind for `FAULT` and is
   `exit` for `HALT`, the fault record is zero for `WATCHDOG`, and in the
@@ -2631,7 +2646,8 @@ in the record passed `erx_log_escape` when it entered the log, and the
 report escapes everything else it did not write.
 
 At boot step 4 the kernel reads the region before it carves the buffer. A
-record whose magic, version, form, length and CRC check, and whose form is
+record whose magic, version, form, length, boot value with its slot, padding
+and CRC check, and whose form is
 the one the running build writes, is the **previous crash record**: the
 kernel copies it into fresh pages wrapped in a read-only physical memory
 object, hands that object to the root task among the root capabilities,
@@ -7731,11 +7747,21 @@ The kernel command line (`/chosen/bootargs`) is parsed once at boot, up to
 2,048 bytes; a longer one, as firmware that prepends its own text can
 make, is cut at the last whole word within that length, and the boot
 reports the cut. The kernel takes the keys below; a malformed value of
-one of them is reported on the early console and the default used. Every other
-word, `erx.` keys included, reaches the root task in the machine page, so
-the system domain's keys ([design-system.md](design-system.md#interfaces))
-need nothing from the kernel; the system domain reports an `erx.` key
-that neither knows. Sizes are
+one of them is reported on the early console, by its key alone, and the
+default used. Words are separated by spaces, tabs and newlines. An `erx.`
+word that names none of these keys the kernel reports itself in the kernel
+log ([Console, log and panic](#console-log-and-panic)), once the log's ring
+exists, and the boot goes on. Each such word gets one warning record: a
+fixed prefix the kernel wrote, then the key up to any `=`, at most 64 bytes
+of it, since a value may hold anything. The key is firmware text, so
+untrusted, and enters the log only through `erx_log_escape`. The kernel
+reports at most 8 words and then one record counting the rest (both
+estimates), so a long command line crowds neither the log nor the early
+console, on whose time a trial's watchdog margin depends. Every other word
+the kernel ignores, unreported. Nothing outside the kernel reads the command
+line: the machine page holds none of it, and the system domain reads no boot
+argument
+([design-system.md](design-system.md#interfaces)). Sizes are
 decimal with an optional `K`, `M` or `G` suffix, parsed with checked
 arithmetic.
 
@@ -8068,7 +8094,7 @@ the host exploration and conformance requirements below.
 | Layer | What | Where |
 | --- | --- | --- |
 | Pure core | the capability table, the slot's sequence lock under TSan with slots churned by closes, moves and deletions on other threads, the trace ring under TSan with records overwritten while other threads read them, the deletion core, the grace-period tracker with its retire, over an item retired while no period is in progress and one retired after a CPU's report for the period in progress, the release core with a backing whose owner, or an enclosing lock its thread holds, is closed at every part boundary, and a construction whose budget is destroyed at every step and between every insert of its publication, which must leave the object wholly attached and then wholly detached, or never attached, with a seeded publication that inserts without the object's existence lock, which the model catches as a child attached to its parent after the parent's budget tore it down, and a seeded backing that reads only its owner's lock, which the model catches as a child backed to its full size after its copy's target was destroyed, the ticket lock under TSan with every thread contending without pause, budget arithmetic with pins passing through live and dead budgets, with the inspector's figure for a destroy compared against what each destroy gives back, after pins at every depth, and a seeded pin that marks a tombstone's cache page at the close instead, which the comparison catches at the first destroy after a pin, mapping plans and the edge rule, the thread and IPC state machines with the pass plan, the IRQ object machine, the vCPU step, the stop and emptying walks, the kills over a stopper deleted, descheduled behind a spinner and killed in turn, a killed thread whose own path is at zero grant and a second stop of the stopped space, with a seeded kill that throttles the thread on its own zero-grant path, which the model catches as a finishing thread that never dies, and a seeded charge of the finishing time to the stopper's path, which the model's `finishing_ns` counters catch, the stopper's wait, the wait for children's records and the holds, with two holds on one space and a resume of either while a quiesce and a copy run under the other, fault classification and the fault decision over every mapping kind, page state and access, store tracking over stores, faults, removals of translations and reports interleaved on several CPUs, among them the trace of a report, a store to a reported page and the next report, which must report it again, and the trace of a store, the removal of its translation by an unmap, an `exec`'s replacement of the space or the space's destroy, and a report, which must report the page, under both the hardware's dirty bit and protection faults, the window functions over deletions, seals and copy-on-write between every two parts, `erx_uword_load`'s walk over every descriptor kind and unmapped level and over outputs in every range the direct map leaves out (the boot image, device registers, a board's crash region, the kernel's text), each refused with `ERX_EFAULT`, budget destruction over trees of budgets and objects charged across them, the boot-image and manifest validators, the device-tree and command-line parsers, the carve of requester ids, which gives a stream only on a fixed bus, the watchdog machine over pets, ticks, arming and the mode, the crash record's check, the scheduler's core: unit and property tests, with protocol machines explored exhaustively | host, under ASan, UBSan and, for concurrent code, TSan |
-| Fuzzing | the device tree, the boot image's index, locator and file check, and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
+| Fuzzing | the device tree, the kernel command line, the boot image's index, locator and file check, and manifests, system-call argument decoding, message tags, typed items and buffer descriptors, resumed vCPU frames, the previous crash record in both forms, checked by a build of each form | host, `make check-fuzz` |
 | Conformance | every kernel call's contract, from test domains: arguments at and beyond their limits, every error, every right missing, every outcome; run identically on erXos's kernel and the stopgap, among them a stop of a space whose thread waits on an IRQ object while the IRQ fires, and of one whose thread is inside a vCPU resume, each posting its exit record only after the thread has died and running none of its user code after it, and a memory-object map and the range calls racing the destroy of their space, which add no record to it (K26's container test); a store to a shared object's page followed by an unmap of the mapping, or by a stop and destroy of the storing space, and then `erx_mem_dirty`, which reports the page stored; umtx waits on a word of a boot-image slice and of a device's register window, each refused with `ERX_EFAULT` before any load; `erx_mem_copy` from a child of a sealed paged object, which returns the parent's bytes for every page the child does not own and the child's for the pages it owns, against the same copy with the child's pages seeded with a marker; a thread parked inside `erx_mem_copy` between two parts while the source's budget is destroyed, whose next part fails with `ERX_ESTALE`, after which the reaper frees the budget's tombstone last and the parent's free capacity is whole again, under ASan on the hosted kernel; a stop of a three-level tree from a thread whose group's grant is set to zero right after the word is stopped, then between two parts of kills, then between two levels of the walk, each followed by a stop of the same tree, and of its parent, from a thread with quota, whose own walk posts the missing kills and after which the record comes, with a seeded second stop that only waits never receiving it and failing the case's deadline; a killed thread holding a space's lock across a long range call while a waiter on another CPU and one on its own CPU take that lock, and the same holder killed while a waiter runs it by helping, in which the holder's time after the help's current part lands in its own path's `finishing_ns`, the waiters' paths gain only their own waiting, and the holder's finishing stays within its CPU's share, with a seeded help of a dying holder moving its time to the waiter's group, which the counters catch; a fork given up by resuming the copy's hold while the job's hold remains, which leaves the parent held and the copier reporting `ERX_EBUSY`, and the same fork given up while the copier is between two parts of a child's backing, which leaves nothing charged to the child's budget once the child is destroyed | QEMU, TCG and HVF |
 | Hostile domains | random calls, closed and foreign capabilities, rights probing, passes of stale, duplicated, unpassable and surplus capabilities, of two copies of one object, and receivers that end mid-pass, writes racing a seal, stores racing a store report, windows whose objects are deleted mid-copy, umtx waits on words unmapped, remapped and freed by other threads during the wait, budgets destroyed while other spaces map their objects, deletions racing lookups, copies, moves and mappings, accesses to deleted memory, mapping probes, threads that fault in every exception class, executors calling every blocking call, groups that spin, servers that never reply or drop their callers, doorbells and gates deleted under their waiters, UTCBs, vCPU frames and windows rewritten while the kernel reads them, calls that pass kernel addresses wherever an argument is an integer, sub-spaces created to the depth limit and churned, devices that flood interrupts and devices that fault through the IOMMU without pause | QEMU |
 | Isolation | freed pages handed between domains on four CPUs; TLB maintenance under concurrency; one domain reading another's memory through every path; a sub-space reaching beyond what its creator gave it | QEMU |

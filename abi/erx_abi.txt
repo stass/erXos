@@ -45,7 +45,7 @@ limit lane_side_data u32 8192
 limit label_split u32 2147483648
 limit boot_version u32 1
 limit boot_strings_max u32 2048
-limit crash_version u32 1
+limit crash_version u32 2
 limit crash_size u32 16384
 limit crash_magic u64 0x4853415243585245
 limit budget_depth_max u32 16

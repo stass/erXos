@@ -19,7 +19,6 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_ASID_BITS` | 16 |
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
-| `ERX_BOOT_ARGS_MAX` | 2048 |
 | `ERX_BOOT_DET` | 1 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
 | `ERX_BOOT_ROOT` | 4 |
@@ -55,7 +54,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_CRASH_FORM_FULL` | 2 |
 | `ERX_CRASH_MAGIC` | 5211581015370781253 |
 | `ERX_CRASH_SIZE` | 16384 |
-| `ERX_CRASH_VERSION` | 1 |
+| `ERX_CRASH_VERSION` | 2 |
 | `ERX_CTL_MAX` | 4096 |
 | `ERX_DEVICE_SECRET_STATUS_NEVER_PROVISIONED` | 3 |
 | `ERX_DEVICE_SECRET_STATUS_NO_KEY` | 2 |
@@ -501,20 +500,17 @@ Storage: `shared`. Prefix size: 4096. Alignment: 4096.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
-| `lease_seq` | `u64` | 0 | 1 |
-| `lease_deadline_ns` | `u64` | 8 | 1 |
-| `boot_value` | `u32` | 16 | 1 |
-| `boot_slot` | `u32` | 20 | 1 |
-| `flags` | `u32` | 24 | 1 |
-| `entropy_quality` | `u32` | 28 | 1 |
-| `memory_bytes` | `u64` | 32 | 1 |
-| `cpu_count` | `u32` | 40 | 1 |
-| `watchdog_period_s` | `u32` | 44 | 1 |
-| `watchdog_deadline_s` | `u32` | 48 | 1 |
-| `watchdog_boot_s` | `u32` | 52 | 1 |
-| `build_id` | `u8` | 56 | 8 |
-| `boot_args_len` | `u32` | 64 | 1 |
-| `boot_args` | `u8` | 72 | 2048 |
+| `lease_deadline_ns` | `u64` | 0 | 1 |
+| `boot_value` | `u32` | 8 | 1 |
+| `boot_slot` | `u32` | 12 | 1 |
+| `flags` | `u32` | 16 | 1 |
+| `entropy_quality` | `u32` | 20 | 1 |
+| `memory_bytes` | `u64` | 24 | 1 |
+| `cpu_count` | `u32` | 32 | 1 |
+| `watchdog_period_s` | `u32` | 36 | 1 |
+| `watchdog_deadline_s` | `u32` | 40 | 1 |
+| `watchdog_boot_s` | `u32` | 44 | 1 |
+| `build_id` | `u8` | 48 | 8 |
 
 ### `erx_mf_boot_order_t`
 
@@ -796,7 +792,7 @@ Storage: `wire_le`. Prefix size: 48. Alignment: 8.
 
 ### `erx_crash_brief_t`
 
-Storage: `wire_le`. Prefix size: 112. Alignment: 8.
+Storage: `wire_le`. Prefix size: 120. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -810,19 +806,20 @@ Storage: `wire_le`. Prefix size: 112. Alignment: 8.
 | `uptime_ns` | `u64` | 32 | 1 |
 | `since_pet_ns` | `u64` | 40 | 1 |
 | `build_id` | `u8` | 48 | 8 |
-| `boot_value` | `u32` | 56 | 1 |
-| `nframes` | `u32` | 60 | 1 |
-| `fault` | `erx_fault` | 64 | 1 |
+| `boot_value` | `boot_value` | 56 | 1 |
+| `boot_slot` | `boot_slot` | 60 | 1 |
+| `nframes` | `u32` | 64 | 1 |
+| `fault` | `erx_fault` | 72 | 1 |
 
 ### `erx_crash_record_t`
 
-Storage: `wire_le`. Prefix size: 896. Alignment: 8.
+Storage: `wire_le`. Prefix size: 904. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
 | `header` | `erx_crash_brief` | 0 | 1 |
-| `regs` | `erx_regs` | 112 | 1 |
-| `frames` | `u64` | 384 | 64 |
+| `regs` | `erx_regs` | 120 | 1 |
+| `frames` | `u64` | 392 | 64 |
 
 ### `erx_share_t`
 

@@ -1527,35 +1527,16 @@ module Erx
         size: 4096,
         fields: [
           Field.new(
-            name: "lease_seq".b,
+            name: "lease_deadline_ns".b,
             type: types.fetch("u64"),
             offset: 0,
             count: nil,
             bits: [].freeze,
             atomic: {
               :load => "acquire".b,
-              :store => "release".b
+              :store => "none".b
             }.freeze,
-            writer: "kernel_lease".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "internal".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "lease_deadline_ns".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "kernel_lease".b,
+            writer: "kernel_boot".b,
             owners: {
               "kernel".b => 18446744073709551615
             }.freeze,
@@ -1567,7 +1548,7 @@ module Erx
           Field.new(
             name: "boot_value".b,
             type: types.fetch("u32"),
-            offset: 16,
+            offset: 8,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1586,7 +1567,7 @@ module Erx
           Field.new(
             name: "boot_slot".b,
             type: types.fetch("u32"),
-            offset: 20,
+            offset: 12,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1605,7 +1586,7 @@ module Erx
           Field.new(
             name: "flags".b,
             type: types.fetch("u32"),
-            offset: 24,
+            offset: 16,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1624,7 +1605,7 @@ module Erx
           Field.new(
             name: "entropy_quality".b,
             type: types.fetch("u32"),
-            offset: 28,
+            offset: 20,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1643,7 +1624,7 @@ module Erx
           Field.new(
             name: "memory_bytes".b,
             type: types.fetch("u64"),
-            offset: 32,
+            offset: 24,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1662,7 +1643,7 @@ module Erx
           Field.new(
             name: "cpu_count".b,
             type: types.fetch("u32"),
-            offset: 40,
+            offset: 32,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1681,7 +1662,7 @@ module Erx
           Field.new(
             name: "watchdog_period_s".b,
             type: types.fetch("u32"),
-            offset: 44,
+            offset: 36,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1700,7 +1681,7 @@ module Erx
           Field.new(
             name: "watchdog_deadline_s".b,
             type: types.fetch("u32"),
-            offset: 48,
+            offset: 40,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1719,7 +1700,7 @@ module Erx
           Field.new(
             name: "watchdog_boot_s".b,
             type: types.fetch("u32"),
-            offset: 52,
+            offset: 44,
             count: nil,
             bits: [].freeze,
             atomic: {
@@ -1738,7 +1719,7 @@ module Erx
           Field.new(
             name: "build_id".b,
             type: types.fetch("u8"),
-            offset: 56,
+            offset: 48,
             count: 8,
             bits: [].freeze,
             atomic: {
@@ -1753,55 +1734,11 @@ module Erx
             input_masks: {}.freeze,
             visibility: "release".b,
             line: source_line
-          ).freeze,
-          Field.new(
-            name: "boot_args_len".b,
-            type: types.fetch("u32"),
-            offset: 64,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "none".b
-            }.freeze,
-            writer: "kernel_boot".b,
-            owners: {
-              "kernel".b => 4294967295
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "boot_args".b,
-            type: types.fetch("u8"),
-            offset: 72,
-            count: 2048,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "none".b
-            }.freeze,
-            writer: "kernel_boot".b,
-            owners: {
-              "kernel".b => 255
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "internal".b,
-            line: source_line
           ).freeze
         ].freeze,
-        padding: [[68, 4].freeze, [2120, 1976].freeze].freeze,
+        padding: [[56, 4040].freeze].freeze,
         tail: nil,
-        sequence: {
-          :field => "lease_seq".b,
-          :terminal => 18446744073709551615,
-          :exhaustion => "@limit".b,
-          :recovery => "none".b,
-          :line => source_line
-        }.freeze,
+        sequence: nil,
         private_owner: nil,
         line: source_line
       ).freeze
@@ -3856,7 +3793,7 @@ module Erx
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 112,
+        size: 120,
         fields: [
           Field.new(
             name: "magic".b,
@@ -4000,8 +3937,22 @@ module Erx
           ).freeze,
           Field.new(
             name: "boot_value".b,
-            type: types.fetch("u32"),
+            type: types.fetch("boot_value"),
             offset: 56,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "boot_slot".b,
+            type: types.fetch("boot_slot"),
+            offset: 60,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -4015,7 +3966,7 @@ module Erx
           Field.new(
             name: "nframes".b,
             type: types.fetch("u32"),
-            offset: 60,
+            offset: 64,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -4029,7 +3980,7 @@ module Erx
           Field.new(
             name: "fault".b,
             type: types.fetch("erx_fault"),
-            offset: 64,
+            offset: 72,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -4041,7 +3992,7 @@ module Erx
             line: source_line
           ).freeze
         ].freeze,
-        padding: [].freeze,
+        padding: [[68, 4].freeze].freeze,
         tail: nil,
         sequence: nil,
         private_owner: nil,
@@ -4052,7 +4003,7 @@ module Erx
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 896,
+        size: 904,
         fields: [
           Field.new(
             name: "header".b,
@@ -4071,7 +4022,7 @@ module Erx
           Field.new(
             name: "regs".b,
             type: types.fetch("erx_regs"),
-            offset: 112,
+            offset: 120,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -4085,7 +4036,7 @@ module Erx
           Field.new(
             name: "frames".b,
             type: types.fetch("u64"),
-            offset: 384,
+            offset: 392,
             count: 64,
             bits: [].freeze,
             atomic: nil,
@@ -7285,12 +7236,6 @@ module Erx
             type: types.fetch("u64"),
             description: nil
           ).freeze,
-          "boot_args_max".b => Constant.new(
-            name: "boot_args_max".b,
-            value: 2048,
-            type: types.fetch("u32"),
-            description: nil
-          ).freeze,
           "boot_det".b => Constant.new(
             name: "boot_det".b,
             value: 1,
@@ -7503,7 +7448,7 @@ module Erx
           ).freeze,
           "crash_version".b => Constant.new(
             name: "crash_version".b,
-            value: 1,
+            value: 2,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

@@ -741,17 +741,27 @@ document's "residual risks accepted" paragraph.
   UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
   `carries_capability?` refuses as a plain aggregate
   ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
-* [Medium] machine page, `boot_args` has no agreed reader:
-  [design-kernel.md](docs/design-kernel.md#configuration) says the words the
-  kernel did not take reach the root task and the system domain reports an
-  unknown `erx.` key, while [design-system.md](docs/design-system.md#interfaces)
-  says the system domain reads no boot argument. The page is also given to the
-  slot writer and the block driver, which need only the boot value. Recommended:
-  delete the field, and have the kernel report an unknown `erx.` key itself.
+* [Medium] kernel log, a tab passes `erx_log_escape` raw:
+  `kernel_ascii` in `abi/terminal.txt` admits 0x09, though
+  [design-kernel.md](docs/design-kernel.md#console-log-and-panic) says escaped
+  text cannot move the cursor, and the crash frame's reader accepts only
+  printable ASCII and newlines, so an `erx_debug_log` tab in a full record's
+  tail reads as `corrupt`. A backslash also passes raw, so a literal `\x1b`
+  reads the same as an escaped ESC. Escape both.
+* [Low] crash record, the crash frame's constants: the design says the ABI
+  file declares `crash_frame_begin`, `crash_frame_end`, `crash_frame_line` and
+  `crash_frame_lines_max`, and it does not yet. They land with the frame's
+  writer and reader.
+* [Low] crash record, the brief form's promise: `fault` keeps `addr`, `pc` and
+  `status`, so a wild dereference or an exit status can carry 8 bytes of what
+  the root task held, against [design-kernel.md](docs/design-kernel.md#the-root-task)'s
+  "nothing the root task held". Narrow the promise or the fields.
 * [Medium] boot records, their writers and readers: the ABI file declares
   `erx_machine_page`, `erx_device_secret_page` and `erx_boot_root_extension`,
   and no code writes or reads them yet. The kernel's writers land with the root
-  task's construction. `liberx`'s root-task entry reads them, refuses a boot
+  task's construction, and with them the kernel's command-line parser, its
+  report of an unknown `erx.` key and their fuzz target. `liberx`'s root-task
+  entry reads them, refuses a boot
   value and slot outside the pairs the design lists, treats a status outside
   its enum as no secret, and derives only from a status of present. With it
   land its fuzz targets, known-answer vectors for both HMACs, and the link

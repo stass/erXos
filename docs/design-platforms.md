@@ -727,7 +727,8 @@ writes one **crash record**, in the layout
 [design-kernel.md](design-kernel.md#the-root-task) defines, in one of two
 forms, which the record names: a release build's **brief** form, which
 holds the cause, the program counter and the fault address, the build
-identifier, the uptime and the time since the last pet, and no other
+identifier, the boot value and its slot, the uptime and the time since
+the last pet, and no other
 register, no stack and no text; and a development build's **full** form,
 which adds the faulting thread's registers, the backtrace and the
 kernel's final log lines. It then ends the machine through the firmware

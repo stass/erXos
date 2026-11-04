@@ -1383,7 +1383,8 @@ The kernel reads the record at its start, checks the version, checks
 that a bootloader descriptor covers the archive, checks the device
 tree's memory against the manifest's `memory_min`, parses the `erx.`
 keys of `bootargs` as [Configuration](design-kernel.md#configuration)
-says, and keeps the rest for the machine page. Fiasco's own options stay
+says, and passes the kernel those values and any unknown `erx.` key for its
+log, and nothing of the rest. Fiasco's own options stay
 on the kernel's module line in the recipe. The banner prints the build
 identifier, the index hash and `development build: trusted code only`
 when the flags say so, after Fiasco's start-up lines and before the root
@@ -1409,7 +1410,9 @@ same rounding and the same top-down selection, and its `heap`, as
 map holds, so the allocator's panic on an unfillable request is
 unreachable from a plan that passed.
 
-At its start the kernel runs the same plan over the descriptors it was
+At its start the kernel derives the boot value and its slot
+([design-kernel.md](design-kernel.md#boot)), so every crash record holds
+them, and runs the same plan over the descriptors it was
 given and the reservations it knows, and refuses to go on, with a crash
 record of cause `PANIC` naming both figures, if its `heap` or `regions`
 differ from the handoff's: the plan is recomputed, never trusted. It
@@ -2071,7 +2074,7 @@ ran.
 | executors and reply | `erx_ipc_reply` from an executor returns `ERX_ENOCALLER`; every waiting IPC call returns `ERX_EWOULDBLOCK` | a call declared without its attribute fails the generator |
 | the IRQ shortcut off | a thread woken from `erx_ipc_wait` by an IRQ object returns with the status the binding translates, and a stop pending at that wake takes effect at the return | `Irq_shortcut` set makes the wake skip the translation; the returned status is Fiasco's and the test fails |
 | the performance counters | the boot audit reports user-mode counter access as enabled, and a domain's read of a counter register succeeds, as the stopgap's difference states | a build that leaves the audit line out fails |
-| the crash frame (B7) | the four causes in both forms decode and validate from the serial log | a frame cut one line short reports `truncated`; a flipped payload byte, a brief frame carrying a full record's length and a full frame whose record says brief each report `corrupt`; all fuzzed |
+| the crash frame (B7) | the four causes in both forms decode and validate from the serial log | a frame cut one line short reports `truncated`; a flipped payload byte, a brief frame carrying a full record's length and a full frame whose record says brief and a record whose boot value and slot are no allowed pair or whose padding is not zero each report `corrupt`; a crash before the machine page is written holds the boot's pair; all fuzzed |
 | the guest's end | each K31 case reports `guest_end: self` | a kernel whose end line is removed reports `failed` |
 | the pet-stop hook | the hook build ends at the deadline with cause `WATCHDOG` | an ordinary build with the key runs on |
 | console ownership | the host test of `erx_console_owner_step` moves the owner only on the console entry's carve; a partial boot's `erx_debug_log` lines appear after root start for the whole run | a step that ignores the entry's identity moves the owner on any carve and fails the host test |

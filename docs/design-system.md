@@ -605,7 +605,8 @@ file, `erx_crash_record_t`, whose `form` says which of two forms it is
 
 * the **brief** form, a release build's: the cause (`fault`, `halt` or
   `watchdog`), the program counter and the fault address, the build
-  identifier, the machine's uptime and the time since the last pet, and
+  identifier, the boot value and its slot, the machine's uptime and the
+  time since the last pet, and
   no other register, no stack and no dump, so nothing the system domain
   held, a passphrase it was checking included, survives the reset in it;
 * the **full** form, a development build's: the brief form's fields, the
@@ -617,7 +618,7 @@ file, `erx_crash_record_t`, whose `form` says which of two forms it is
 
 Where the platform has a region that survives a warm reset, the kernel
 writes the record there, and the next boot validates it by its magic,
-form and checksum and gives the root task a read-only page holding it;
+form, boot value and checksum and gives the root task a read-only page holding it;
 elsewhere the record goes to the console and the kernel log alone
 ([design-platforms.md](design-platforms.md#the-crash-record)). The
 inspector shows the previous boot's record at `[kernel, crash]` only to a
@@ -2743,7 +2744,10 @@ read at boot and changed by a new build, never at run time. Its limits:
 | `peer_held` | what the system domain holds for one domain's processes: links, monitors and queued signals | 64 KiB |
 | `system_reserve` | normalized configuration headroom left unassigned to service children, in thousandths of `system`'s rate; not CPU supply within a deadline ([The manifest](#the-manifest), property 13) | 250 |
 
-The system domain reads no boot argument. Two keys the kernel owns shape
+The system domain reads no boot argument: the kernel alone reads the
+command line, and reports an unknown `erx.` key itself, in the kernel log
+through that log's escaper
+([design-kernel.md](design-kernel.md#configuration)). Two keys the kernel owns shape
 this document: `erx.panic=halt|reset|off`, how the machine ends when the
 system domain faults, halts outside an ordered end or misses the watchdog
 (`halt` in development builds, so the console keeps the report, which a
