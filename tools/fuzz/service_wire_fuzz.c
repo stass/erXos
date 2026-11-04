@@ -59,12 +59,12 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			abort();
 		break;
 	case ERX_FIASCO_WIRE_FAULT_PAGE:
-		if (decoded.task >= input.live_tasks || tag_label != ERX_FIASCO_WIRE_PAGE_FAULT ||
+		if (decoded.task >= 64 || ((input.live_mask >> decoded.task) & 1) == 0 || tag_label != ERX_FIASCO_WIRE_PAGE_FAULT ||
 		    input.words != ERX_FIASCO_WIRE_PAGE_FAULT_WORDS)
 			abort();
 		break;
 	case ERX_FIASCO_WIRE_FAULT_EXCEPTION:
-		if (decoded.task >= input.live_tasks || tag_label != ERX_FIASCO_WIRE_EXCEPTION ||
+		if (decoded.task >= 64 || ((input.live_mask >> decoded.task) & 1) == 0 || tag_label != ERX_FIASCO_WIRE_EXCEPTION ||
 		    input.words != ERX_FIASCO_WIRE_EXCEPTION_WORDS)
 			abort();
 		break;
