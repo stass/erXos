@@ -41,7 +41,7 @@ label_at(uint32_t index)
 	return (atomic_load(&erx_utcb_self()->mr[index]));
 }
 
-/* Only software's objects here, and every handle checked. */
+/* What neither backend offers, a kind that does not exist, and every handle checked. */
 static bool
 case_irq_refusals(void)
 {

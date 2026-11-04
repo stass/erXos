@@ -38,7 +38,8 @@ class HostedFunctionApiTest < Minitest::Test
     'the thread stays on the host stack' => ['liberx/backend/hosted/thread.c', "\terx_hosted_switch_stack(self->start.regs.sp, thread_run, self, &self->host_sp);\n", "\tthread_run(self);\n", 'tls_and_arg'],
     'a wake reports nobody' => ['liberx/backend/hosted/wait.c', "\t\twoken++;\n", "\t\tbreak;\n", 'umtx_wake_counts'],
     'a worker may park' => ['liberx/backend/hosted/group.c', "\tif (slot == ERX_NO_EXECUTOR_SLOT)\n\t\treturn (ERX_ETYPE);\n\treturn (erx_backend_park_wait", "\treturn (erx_backend_park_wait", 'park_refusals'],
-    'a line is created' => ['liberx/backend/hosted/group.c', "\tif (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)\n\t\treturn (ERX_ENOTSUP);\n", '', 'irq_refusals']
+    'a line is created' => ['liberx/backend/hosted/group.c', 'if (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)', 'if (kind == ERX_IRQ_MSI)', 'irq_line_refused'],
+    'an MSI is created' => ['liberx/backend/hosted/group.c', 'if (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)', 'if (kind == ERX_IRQ_LINE)', 'irq_refusals']
   }.freeze
 
   def setup

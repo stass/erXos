@@ -52,7 +52,7 @@ typedef struct erx_backend_vm_range {
  * the low bits, which a page's address leaves clear. A key of 0 is empty: no area may
  * hold address 0.
  */
-typedef struct erx_fiasco_vm_page {
+typedef struct erx_backend_vm_page {
 	uint64_t	key;
 	uint64_t	window_and_state;	/* a window page's address, low bits the state */
 } erx_backend_vm_page_t;

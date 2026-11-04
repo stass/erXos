@@ -5,7 +5,7 @@
 
 /*
  * The caller's half of interrupts and readiness: the group's dispatcher, which turns
- * each IRQ delivery into a trigger of the park core, the labels of the objects bound
+ * each IRQ delivery into a signal of the park core, the labels of the objects bound
  * to the group, and the stubs of the calls whose bodies the service runs.
  */
 

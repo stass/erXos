@@ -13,7 +13,7 @@
 
 #define VM_PAGE_MASK		((uint64_t)ERX_PAGE_SIZE - 1)
 #define VM_STATE_MASK		UINT64_C(7)
-/* A key's page number stays below this bit: the backend's addresses stop at 2^39. */
+/* Native's page numbers stay below this bit, as its addresses stop at 2^39. Only the hash's quality rests on it: a lookup compares the whole key. */
 #define VM_LABEL_SHIFT		27u
 /* Rights by themselves, as ERX_PROT_* spells them only in combinations. */
 #define VM_RIGHT_W		(ERX_PROT_RW & ~ERX_PROT_R)

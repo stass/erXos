@@ -24,7 +24,7 @@
 /* How many IRQ objects a group holds: one listed bit each, and an index fits ready's bytes. */
 #define ERX_BACKEND_PARK_OBJECTS_MAX	64u
 
-typedef struct erx_fiasco_park {
+typedef struct erx_backend_park {
 	uint64_t	group_epoch;
 	uint64_t	slot_epoch[ERX_GROUP_EXECUTORS_MAX];
 	uint64_t	used;		/* one bit per slot */

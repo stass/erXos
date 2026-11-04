@@ -9,6 +9,8 @@
 
 #include "liberx/backend/core/park_table.h"
 
+_Static_assert(ERX_BACKEND_PARK_OBJECTS_MAX <= 64, "a listed bit per object, and an object fits ready's bytes");
+
 _Static_assert(ERX_GROUP_EXECUTORS_MAX <= 64, "a used bit per slot, and a slot fits parked's bytes");
 
 static bool	park_slot_valid(const erx_backend_park_t *, uint32_t);
@@ -63,7 +65,7 @@ park_take_oldest(erx_backend_park_t *park)
 	return ((erx_backend_park_result_t){ .action = ERX_BACKEND_PARK_UP, .slot = slot });
 }
 
-/* The flag goes with the entry, so the object's next trigger lists it again. */
+/* The flag goes with the entry, so the object's next signal lists it again. */
 static erx_backend_park_result_t
 park_take_ready(erx_backend_park_t *park)
 {
