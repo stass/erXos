@@ -39,6 +39,10 @@ bool erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_reply_t *result);
 bool erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_create_request_t *result);
+bool erx_fiasco_thread_reap_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_reap_request_t *result);
+bool erx_fiasco_thread_set_affinity_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_set_affinity_request_t *result);
 bool erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_start_request_t *result);
 bool erx_fiasco_vm_flagged_request_decode(const uint8_t *bytes, size_t length,

@@ -31,6 +31,7 @@
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/watchdog_thread.h"
 
 /* Where the root sees the kernel information page: no RAM on QEMU virt is here. */
 #define ERX_ROOT_KIP_WINDOW	UINT64_C(0x10000000)
@@ -108,6 +109,13 @@ root_boot(void)
 	    (size_t)handoff.image.size);
 	if (reason != NULL)
 		return (reason);
+	{
+		const erx_watchdog_config_t config = erx_watchdog_config_default();
+
+		reason = erx_fiasco_watchdog_start(&config, ERX_WATCHDOG_MODE_NORMAL);
+		if (reason != NULL)
+			return (reason);
+	}
 	root_report(&handoff, pack.header.nentries);
 	return (NULL);
 }

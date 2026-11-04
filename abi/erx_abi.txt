@@ -13,6 +13,7 @@ limit copy_max u32 1048576
 limit group_executors u32 64
 limit tlb_by_address_max u32 64
 limit msg_words u32 63
+limit group_executors_max u32 64
 limit msg_caps u32 4
 limit utcb_brs u32 58
 limit utcb_bytes_max u32 504
@@ -310,6 +311,8 @@ enum fiasco_call u32
   value vm_release 7
   value space_protect 8
   value machine_end 9
+  value thread_set_affinity 10
+  value thread_reap 11
 
 layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field caller u64 0
@@ -320,6 +323,15 @@ layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field index u64 40
 
 layout erx_fiasco_thread_start_request 1 wire_le 8 16
+  field caller u64 0
+  field thread u64 8
+
+layout erx_fiasco_thread_set_affinity_request 1 wire_le 8 24
+  field caller u64 0
+  field thread u64 8
+  field mask u64 16
+
+layout erx_fiasco_thread_reap_request 1 wire_le 8 16
   field caller u64 0
   field thread u64 8
 

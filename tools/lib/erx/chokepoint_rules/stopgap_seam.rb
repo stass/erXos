@@ -33,6 +33,10 @@ module Erx
         liberx/backend/fiasco/log.h
         liberx/backend/fiasco/page_pool.c
         liberx/backend/fiasco/page_pool.h
+        liberx/backend/fiasco/park.c
+        liberx/backend/fiasco/park.h
+        liberx/backend/fiasco/park_table.c
+        liberx/backend/fiasco/park_table.h
         liberx/backend/fiasco/root.c
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_mem.c
@@ -44,11 +48,15 @@ module Erx
         liberx/backend/fiasco/service_wire.h
         liberx/backend/fiasco/thread.c
         liberx/backend/fiasco/thread.h
+        liberx/backend/fiasco/thread_claim.c
+        liberx/backend/fiasco/thread_claim.h
         liberx/backend/fiasco/thread_offsets.h
         liberx/backend/fiasco/umtx.c
         liberx/backend/fiasco/umtx.h
         liberx/backend/fiasco/umtx_table.c
         liberx/backend/fiasco/umtx_table.h
+        liberx/backend/fiasco/watchdog_thread.c
+        liberx/backend/fiasco/watchdog_thread.h
         liberx/backend/fiasco/vm.c
         liberx/backend/fiasco/vm.h
         liberx/backend/fiasco/vm_table.c
@@ -91,8 +99,11 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_park_driver.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/fiasco_claim_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/service_wire_fuzz.c')],
           seed: { 'kernel/core/seeded.c' => "#include \"liberx/backend/fiasco/generated/calls.h\"\n" }
         ),
@@ -110,8 +121,8 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
-                "the root's memory effects' fixed refusals, the end path's crash frame, the service's fixed refusal, " \
-                "the memory, thread and crash transcripts and the debug log call it",
+                "the root's memory effects' fixed refusals, the end path's crash frame, the service's and the reaper's fixed refusals, " \
+                "the memory, thread, crash and watchdog transcripts and the debug log call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
           pattern: /\b(?:l4_vcon_write(?:_u)?|erx_fiasco_console_write)\b/,
@@ -121,9 +132,11 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
+                  Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/native_watchdog/guest.c', permits: /\Aerx_fiasco_console_write\z/)],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n",
                   'liberx/backend/fiasco/root.c' => "void f(void) { l4_vcon_write(0, \"x\", 1); }\n" }
         ),

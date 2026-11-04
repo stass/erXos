@@ -70,6 +70,14 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_fiasco_thread_create_request_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_thread_reap_request_t value;
+		(void)erx_fiasco_thread_reap_request_decode(bytes, length, &value);
+	}
+	{
+		erx_fiasco_thread_set_affinity_request_t value;
+		(void)erx_fiasco_thread_set_affinity_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_thread_start_request_t value;
 		(void)erx_fiasco_thread_start_request_decode(bytes, length, &value);
 	}

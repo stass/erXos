@@ -19,11 +19,15 @@ module Erx
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_threads/guest.c'].freeze
     CASES = %w[
       tls_and_arg double_start_refused bad_handle_refused wire_refusals umtx_word_differs umtx_past_deadline
-      umtx_timeout_not_early umtx_wake_in_order umtx_ping_pong umtx_timeout_races_wake memory_from_threads
-      failed_start many_threads indices_run_out
+      umtx_timeout_not_early umtx_wake_in_order umtx_ping_pong umtx_timeout_races_wake umtx_no_stale_wake memory_from_threads
+      failed_start affinity_each_cpu affinity_refused join_loop detached_loop park_refusals park_alone
+      park_trigger_in_window park_ping park_timeout_races_wake umtx_no_stale_wake_after many_threads indices_run_out
+      first_thread_exit
     ].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.
     CASE_SECONDS = 90
+    # The join loop's 10,000 deletions each wait for a grace period, which across CPUs under TCG takes far longer.
+    LONG_CASES = { 'join_loop' => 1500 }.freeze
 
     module_function
 
@@ -35,7 +39,7 @@ module Erx
     end
 
     def case_point(name)
-      { name: "threads-#{name}", pattern: /\Aerx: threads: #{name} /n, seconds: CASE_SECONDS,
+      { name: "threads-#{name}", pattern: /\Aerx: threads: #{name} /n, seconds: LONG_CASES.fetch(name, CASE_SECONDS),
         verify: ->(text) { raise Error, "the threads case reports #{text.inspect}" unless text.match?(/ ok\r?\n\z/n) } }.freeze
     end
 

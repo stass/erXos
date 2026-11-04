@@ -24,13 +24,36 @@ static _Atomic uint32_t end_taken;
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_record[ERX_CRASH_SIZE];
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_scratch[ERX_CRASH_SCRATCH_BYTES];
 
+/* The first caller goes on; every other sleeps. */
+static void
+end_take(void)
+{
+	if (atomic_exchange_explicit(&end_taken, 1, memory_order_acq_rel) != 0)
+		erx_fiasco_sleep_forever();
+}
+
+_Noreturn void
+erx_fiasco_end_watchdog(const erx_watchdog_end_t *end)
+{
+	static const char message[] = "the watchdog's pet was missed";
+
+	end_take();
+	const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = end->cause,
+	    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,
+	    .uptime_ns = end->uptime_ns, .since_pet_ns = end->since_pet_ns, .message = message,
+	    .message_length = sizeof(message) - 1 };
+
+	(void)erx_crash_record_write(&input, end_record, end_scratch);
+	erx_crash_frame_write(end_record);
+	erx_fiasco_machine_end(false);
+}
+
 _Noreturn void
 erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how)
 {
 	static const char message[] = "root task fault";
 
-	if (atomic_exchange_explicit(&end_taken, 1, memory_order_acq_rel) != 0)
-		erx_fiasco_sleep_forever();
+	end_take();
 	if (fault != NULL) {
 		const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = ERX_CRASH_CAUSE_FAULT,
 		    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,

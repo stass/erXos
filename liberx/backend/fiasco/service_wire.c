@@ -28,6 +28,10 @@ erx_fiasco_wire_words(int64_t number)
 		return (sizeof(erx_fiasco_thread_create_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_THREAD_START:
 		return (sizeof(erx_fiasco_thread_start_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_THREAD_SET_AFFINITY:
+		return (sizeof(erx_fiasco_thread_set_affinity_request_t) / sizeof(uint64_t));
+	case ERX_FIASCO_CALL_THREAD_REAP:
+		return (sizeof(erx_fiasco_thread_reap_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_VM_RESERVE:
 	case ERX_FIASCO_CALL_SPACE_PROTECT:
 		return (sizeof(erx_fiasco_vm_flagged_request_t) / sizeof(uint64_t));

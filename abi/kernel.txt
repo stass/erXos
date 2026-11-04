@@ -111,6 +111,110 @@ layout erx_msg_item 1 wire_le 8 16
   field desc u64 0
   field cap cap 8
 
+# An executor's class and state, and what a group's status page mirrors for its
+# runtime (docs/design-scheduler.md, "The status area").
+
+enum thread_class u32
+  value worker 0
+  value executor 1
+
+enum exec_state u32
+  value none 0
+  value running 1
+  value ready 2
+  value parked 3
+  value blocked 4
+  value throttled 5
+  value paused 6
+
+layout erx_exec_stat 1 shared 8 128
+  field state u32 0
+  field cpu u32 4
+  field epoch u64 8
+  field yield_req u32 16
+  field preemptions u64 24
+  field overruns u64 32
+  field run_ns u64 40
+  padding 20 4
+  padding 48 80
+  atomic state load relaxed store relaxed
+  writer state kernel_boot
+  owner state kernel all
+  visibility state internal
+  atomic cpu load relaxed store relaxed
+  writer cpu kernel_boot
+  owner cpu kernel all
+  visibility cpu internal
+  atomic epoch load acquire store release
+  writer epoch kernel_boot
+  owner epoch kernel all
+  visibility epoch internal
+  atomic yield_req load relaxed store relaxed
+  writer yield_req kernel_boot
+  owner yield_req kernel all
+  visibility yield_req internal
+  atomic preemptions load relaxed store relaxed
+  writer preemptions kernel_boot
+  owner preemptions kernel all
+  visibility preemptions internal
+  atomic overruns load relaxed store relaxed
+  writer overruns kernel_boot
+  owner overruns kernel all
+  visibility overruns internal
+  atomic run_ns load relaxed store relaxed
+  writer run_ns kernel_boot
+  owner run_ns kernel all
+  visibility run_ns internal
+
+layout erx_group_stat 1 shared 8 8320
+  field epoch u64 0
+  field capacity u64 8
+  field period_start_ns u64 16
+  field used_ns u64 24
+  field total_ns u64 32
+  field finishing_ns u64 40
+  field parked u32 48
+  field throttled u32 52
+  field ready u32 56
+  field exec erx_exec_stat 128 count @group_executors_max
+  padding 60 68
+  atomic epoch load acquire store release
+  writer epoch kernel_boot
+  owner epoch kernel all
+  visibility epoch internal
+  atomic capacity load acquire store release
+  writer capacity kernel_boot
+  owner capacity kernel all
+  visibility capacity internal
+  atomic period_start_ns load relaxed store relaxed
+  writer period_start_ns kernel_boot
+  owner period_start_ns kernel all
+  visibility period_start_ns internal
+  atomic used_ns load relaxed store relaxed
+  writer used_ns kernel_boot
+  owner used_ns kernel all
+  visibility used_ns internal
+  atomic total_ns load relaxed store relaxed
+  writer total_ns kernel_boot
+  owner total_ns kernel all
+  visibility total_ns internal
+  atomic finishing_ns load relaxed store relaxed
+  writer finishing_ns kernel_boot
+  owner finishing_ns kernel all
+  visibility finishing_ns internal
+  atomic parked load relaxed store relaxed
+  writer parked kernel_boot
+  owner parked kernel all
+  visibility parked internal
+  atomic throttled load relaxed store relaxed
+  writer throttled kernel_boot
+  owner throttled kernel all
+  visibility throttled internal
+  atomic ready load acquire store release
+  writer ready kernel_boot
+  owner ready kernel all
+  visibility ready internal
+
 layout erx_utcb 1 shared 8 1024
   field mr u64 0 count @msg_words
   field self u64 504

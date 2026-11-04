@@ -125,6 +125,13 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ETIMEDOUT` | -9 |
 | `ERX_ETYPE` | -3 |
 | `ERX_EWOULDBLOCK` | -14 |
+| `ERX_EXEC_STATE_BLOCKED` | 4 |
+| `ERX_EXEC_STATE_NONE` | 0 |
+| `ERX_EXEC_STATE_PARKED` | 3 |
+| `ERX_EXEC_STATE_PAUSED` | 6 |
+| `ERX_EXEC_STATE_READY` | 2 |
+| `ERX_EXEC_STATE_RUNNING` | 1 |
+| `ERX_EXEC_STATE_THROTTLED` | 5 |
 | `ERX_EXIT_NOTHREAD` | -9223372036854775805 |
 | `ERX_EXIT_PARENT` | -9223372036854775807 |
 | `ERX_EXIT_RELEASED` | -9223372036854775806 |
@@ -140,6 +147,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_MACHINE_END` | 9 |
 | `ERX_FIASCO_CALL_SPACE_PROTECT` | 8 |
 | `ERX_FIASCO_CALL_THREAD_CREATE` | 2 |
+| `ERX_FIASCO_CALL_THREAD_REAP` | 11 |
+| `ERX_FIASCO_CALL_THREAD_SET_AFFINITY` | 10 |
 | `ERX_FIASCO_CALL_THREAD_START` | 3 |
 | `ERX_FIASCO_CALL_VM_COMMIT` | 5 |
 | `ERX_FIASCO_CALL_VM_DECOMMIT` | 6 |
@@ -151,6 +160,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_GROUP_DEFER` | 2 |
 | `ERX_GROUP_DEPTH_MAX` | 8 |
 | `ERX_GROUP_EXECUTORS` | 64 |
+| `ERX_GROUP_EXECUTORS_MAX` | 64 |
 | `ERX_GROUP_HINTS` | 1 |
 | `ERX_GROUP_PLACE` | 8 |
 | `ERX_GROUP_STATUS` | 4 |
@@ -333,6 +343,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SLICE_MIN_US` | 500 |
 | `ERX_SPACE_DEPTH_MAX` | 64 |
 | `ERX_SPACE_JIT` | 1 |
+| `ERX_THREAD_CLASS_EXECUTOR` | 1 |
+| `ERX_THREAD_CLASS_WORKER` | 0 |
 | `ERX_TLB_BY_ADDRESS_MAX` | 64 |
 | `ERX_URGENCY_MAX` | 63 |
 | `ERX_USER_BASE_MIN` | 65536 |
@@ -528,6 +540,37 @@ Storage: `wire_le`. Prefix size: 56. Alignment: 8.
 | `p_memsz` | `u64` | 40 | 1 |
 | `p_align` | `u64` | 48 | 1 |
 
+### `erx_exec_stat_t`
+
+Storage: `shared`. Prefix size: 128. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `state` | `u32` | 0 | 1 |
+| `cpu` | `u32` | 4 | 1 |
+| `epoch` | `u64` | 8 | 1 |
+| `yield_req` | `u32` | 16 | 1 |
+| `preemptions` | `u64` | 24 | 1 |
+| `overruns` | `u64` | 32 | 1 |
+| `run_ns` | `u64` | 40 | 1 |
+
+### `erx_group_stat_t`
+
+Storage: `shared`. Prefix size: 8320. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `epoch` | `u64` | 0 | 1 |
+| `capacity` | `u64` | 8 | 1 |
+| `period_start_ns` | `u64` | 16 | 1 |
+| `used_ns` | `u64` | 24 | 1 |
+| `total_ns` | `u64` | 32 | 1 |
+| `finishing_ns` | `u64` | 40 | 1 |
+| `parked` | `u32` | 48 | 1 |
+| `throttled` | `u32` | 52 | 1 |
+| `ready` | `u32` | 56 | 1 |
+| `exec` | `erx_exec_stat` | 128 | 64 |
+
 ### `erx_fiasco_machine_end_request_t`
 
 Storage: `wire_le`. Prefix size: 24. Alignment: 8.
@@ -560,6 +603,25 @@ Storage: `wire_le`. Prefix size: 48. Alignment: 8.
 | `group` | `u64` | 24 | 1 |
 | `thread_class` | `u64` | 32 | 1 |
 | `index` | `u64` | 40 | 1 |
+
+### `erx_fiasco_thread_reap_request_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `thread` | `u64` | 8 | 1 |
+
+### `erx_fiasco_thread_set_affinity_request_t`
+
+Storage: `wire_le`. Prefix size: 24. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `thread` | `u64` | 8 | 1 |
+| `mask` | `u64` | 16 | 1 |
 
 ### `erx_fiasco_thread_start_request_t`
 

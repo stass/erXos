@@ -17,4 +17,12 @@ int	erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline);
 /* How many it woke. */
 int	erx_umtx_wake(uint64_t addr, uint32_t count);
 
+#ifdef ERX_FIASCO_TEST_HOOKS
+#include <stdatomic.h>
+
+/* See umtx.c: how the threads suite's waits came out. */
+extern _Atomic uint64_t erx_fiasco_test_umtx_woken, erx_fiasco_test_umtx_timed_out, erx_fiasco_test_umtx_absorbed;
+extern _Atomic uint64_t erx_fiasco_test_umtx_stale;
+#endif
+
 #endif /* ERX_FIASCO_UMTX_H */

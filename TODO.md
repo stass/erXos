@@ -96,16 +96,8 @@ it; git history is the record of completed work.
   failed as [the verification table](docs/design-stopgap.md#verification) says;
   nothing in the tree repeats them, as `check-qemu-mutant` does for the debug
   log, and nothing shows that a write to the archive faults. The same holds
-  for the root service's seeds: the crash frame's write removed, the
-  trampoline omitting the thread pointer and a failed start's deletion skipped.
-* [Medium] stopgap, `test/guest/native_threads`: every root thread stays on the
-  first CPU, so the suite's 4-CPU cells do not exercise a wake or a service call
-  across CPUs. A hand-run seed giving each thread a CPU of its own passed under
-  TCG and HVF. The suite should keep that form once the backend sets affinity.
-* [Medium] stopgap, `liberx/backend/fiasco/thread.c`, `thread_claim`: the check of
-  a UTCB's marker has no test that can fail, since no thread exits yet and
-  `case_indices_run_out` passes with it removed. Its decision belongs in a pure
-  core tested with a late-marker fake, the verification table's Claim row.
+  for the crash frame's write removed. `make check-native-seeds` keeps the threads
+  and watchdog suites' seeds.
 * [Low] stopgap, the crash suite's end-path row: `erx_machine_end` runs only with
   `ERX_END_OFF`; under `-no-reboot` both ends exit QEMU, so the suite cannot tell
   them apart, and the refusal of a bad `how` has no case.
@@ -117,6 +109,52 @@ it; git history is the record of completed work.
   thread. The handle table of
   [design-stopgap.md](docs/design-stopgap.md#capabilities-in-fiascos-object-space)
   replaces it.
+* [Medium] stopgap, Fiasco's `Semaphore`, `fiasco/kernel/src/kern/semaphore.cpp`: an up
+  across CPUs dequeues its waiter and only later reaches the waiter's CPU, through
+  `Context::activate`'s remote state change (`context.cpp:1059,1612`). If the waiter's
+  timeout fires in between, `sys_down` reports success, as it must, but the activation is
+  still on its way. If the thread has entered another down by the time it lands, that down
+  returns success with no up and with the thread still on the semaphore's queue, and a
+  third down inserts it twice. A vCPU the host preempts holds that window open. The
+  threads suite counts it (`umtx_no_stale_wake`, the umtx node still queued after a wait)
+  and has not seen it. Timed waits only; erXos's own kernel has no such object. The fix, if
+  it is ever seen, is in `sys_down`: a thread made ready while still queued and with no
+  timeout or cancel goes back to sleep. Beyond the early return, such an up can dequeue a running
+  thread and never count, which is a true lost wake, and the umtx node can be queued twice. ERTS's
+  timed parks reach this path from M3, so settle it then. The suite's count covers umtx waits only, not a
+  park returning with its slot still listed.
+* [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than
+  the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode; nothing on
+  QEMU asserts `parked` while a slot is parked. It has one waker in flight, and judges a lost wake only with
+  no event or timeout left, so a stuck absorb with no work passes. A two-waker variant and a check of every
+  quiet state passed the core by hand (623,596 and 287,527 states) and should replace them.
+* [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
+  free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
+  a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.
+* [Low] stopgap, `liberx/backend/fiasco/service.c`, `service_thread_reap`: only the reaper should send this
+  request, and nothing checks the caller; `watchdog_thread.c` and `service.c` also share the convention of fixed
+  helper slots in the kernel-given UTCB page, which one small enum could own.
+* [Low] abi, `abi/erx_abi.txt`: `group_executors` and `group_executors_max` hold the same value. Keep one, and
+  update whichever of `design-kernel.md` and `design-scheduler.md` then disagrees.
+* [Medium] stopgap, `liberx/backend/fiasco/thread.c`, `erx_fiasco_semaphore_down`: the
+  wait, which the umtx and park effects share, retries every IPC error, including permanent
+  ones such as a deleted semaphore, so such a thread spins in the kernel forever rather
+  than reporting it.
+* [Low] stopgap, `liberx/backend/fiasco/root.ld`: nothing checks whether an orphan section
+  lands past `erx_fiasco_image_end`, which `sigma0`'s map of the root's image would then
+  miss.
+* [Medium] tooling, `tools/lib/erx/oracle_guest.rb`: nothing automatic runs
+  `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
+  break under its older `json`. The oracle's `probe` operation should exercise a
+  duplicate-key refusal there.
+* [Low] stopgap, `liberx/backend/fiasco/root.c`: the root has no path to the kernel command
+  line, so the system root's watchdog runs on `erx_watchdog_config_default` in normal mode,
+  `erx.watchdog` is parsed only by the suite's guest and `erx.det=1` does not reach it.
+  Nothing pets it either until M3's root does, so a system root that outlives its
+  60-second boot deadline ends the machine.
+* [Low] stopgap, the threads package's verification rows that need musl's port:
+  `pthread_cond_broadcast` with 64 waiters, and the join and detached loops through
+  `pthread_join` and `__unmapself` rather than the suite's own form of them.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

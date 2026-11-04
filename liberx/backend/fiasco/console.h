@@ -12,7 +12,7 @@
 /*
  * The root task's way to the kernel's polled UART output and to the machine's
  * end (docs/design-stopgap.md, "The console" and "The end path"). Neither takes
- * a lock: the root task's one thread alone calls them.
+ * a lock: the threads that call them take none around them.
  */
 void erx_fiasco_console_write(const char *, size_t);
 _Noreturn void erx_fiasco_machine_off(void);

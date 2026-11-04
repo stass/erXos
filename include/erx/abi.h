@@ -131,6 +131,13 @@ struct erx_rights {
 #define ERX_ETIMEDOUT (-INT32_C(9))
 #define ERX_ETYPE (-INT32_C(3))
 #define ERX_EWOULDBLOCK (-INT32_C(14))
+#define ERX_EXEC_STATE_BLOCKED UINT32_C(4)
+#define ERX_EXEC_STATE_NONE UINT32_C(0)
+#define ERX_EXEC_STATE_PARKED UINT32_C(3)
+#define ERX_EXEC_STATE_PAUSED UINT32_C(6)
+#define ERX_EXEC_STATE_READY UINT32_C(2)
+#define ERX_EXEC_STATE_RUNNING UINT32_C(1)
+#define ERX_EXEC_STATE_THROTTLED UINT32_C(5)
 #define ERX_EXIT_NOTHREAD (-INT64_C(9223372036854775805))
 #define ERX_EXIT_PARENT (-INT64_C(9223372036854775807))
 #define ERX_EXIT_RELEASED (-INT64_C(9223372036854775806))
@@ -146,6 +153,8 @@ struct erx_rights {
 #define ERX_FIASCO_CALL_MACHINE_END UINT32_C(9)
 #define ERX_FIASCO_CALL_SPACE_PROTECT UINT32_C(8)
 #define ERX_FIASCO_CALL_THREAD_CREATE UINT32_C(2)
+#define ERX_FIASCO_CALL_THREAD_REAP UINT32_C(11)
+#define ERX_FIASCO_CALL_THREAD_SET_AFFINITY UINT32_C(10)
 #define ERX_FIASCO_CALL_THREAD_START UINT32_C(3)
 #define ERX_FIASCO_CALL_VM_COMMIT UINT32_C(5)
 #define ERX_FIASCO_CALL_VM_DECOMMIT UINT32_C(6)
@@ -157,6 +166,7 @@ struct erx_rights {
 #define ERX_GROUP_DEFER UINT16_C(2)
 #define ERX_GROUP_DEPTH_MAX UINT32_C(8)
 #define ERX_GROUP_EXECUTORS UINT32_C(64)
+#define ERX_GROUP_EXECUTORS_MAX UINT32_C(64)
 #define ERX_GROUP_HINTS UINT16_C(1)
 #define ERX_GROUP_PLACE UINT16_C(8)
 #define ERX_GROUP_STATUS UINT16_C(4)
@@ -339,6 +349,8 @@ struct erx_rights {
 #define ERX_SLICE_MIN_US UINT32_C(500)
 #define ERX_SPACE_DEPTH_MAX UINT32_C(64)
 #define ERX_SPACE_JIT UINT32_C(1)
+#define ERX_THREAD_CLASS_EXECUTOR UINT32_C(1)
+#define ERX_THREAD_CLASS_WORKER UINT32_C(0)
 #define ERX_TLB_BY_ADDRESS_MAX UINT32_C(64)
 #define ERX_URGENCY_MAX UINT8_C(63)
 #define ERX_USER_BASE_MIN UINT64_C(65536)
@@ -850,6 +862,93 @@ _Static_assert(offsetof(erx_elf64_phdr_t, p_memsz) ==
 _Static_assert(offsetof(erx_elf64_phdr_t, p_align) ==
     ERX_ELF64_PHDR_OFF_P_ALIGN, "erx_elf64_phdr.p_align offset");
 
+#define ERX_EXEC_STAT_SIZE 128
+#define ERX_EXEC_STAT_ALIGN 8
+#define ERX_EXEC_STAT_OFF_STATE 0
+#define ERX_EXEC_STAT_OFF_CPU 4
+#define ERX_EXEC_STAT_OFF_EPOCH 8
+#define ERX_EXEC_STAT_OFF_YIELD_REQ 16
+#define ERX_EXEC_STAT_OFF_PREEMPTIONS 24
+#define ERX_EXEC_STAT_OFF_OVERRUNS 32
+#define ERX_EXEC_STAT_OFF_RUN_NS 40
+typedef struct erx_exec_stat erx_exec_stat_t;
+struct erx_exec_stat {
+	_Alignas(8) _Atomic uint32_t	state;
+	_Atomic uint32_t	cpu;
+	_Atomic uint64_t	epoch;
+	_Atomic uint32_t	yield_req;
+	uint8_t	padding_0[4];
+	_Atomic uint64_t	preemptions;
+	_Atomic uint64_t	overruns;
+	_Atomic uint64_t	run_ns;
+	uint8_t	padding_1[80];
+};
+_Static_assert(sizeof(erx_exec_stat_t) == ERX_EXEC_STAT_SIZE, "erx_exec_stat size");
+_Static_assert(_Alignof(erx_exec_stat_t) == ERX_EXEC_STAT_ALIGN, "erx_exec_stat alignment");
+_Static_assert(offsetof(erx_exec_stat_t, state) ==
+    ERX_EXEC_STAT_OFF_STATE, "erx_exec_stat.state offset");
+_Static_assert(offsetof(erx_exec_stat_t, cpu) ==
+    ERX_EXEC_STAT_OFF_CPU, "erx_exec_stat.cpu offset");
+_Static_assert(offsetof(erx_exec_stat_t, epoch) ==
+    ERX_EXEC_STAT_OFF_EPOCH, "erx_exec_stat.epoch offset");
+_Static_assert(offsetof(erx_exec_stat_t, yield_req) ==
+    ERX_EXEC_STAT_OFF_YIELD_REQ, "erx_exec_stat.yield_req offset");
+_Static_assert(offsetof(erx_exec_stat_t, preemptions) ==
+    ERX_EXEC_STAT_OFF_PREEMPTIONS, "erx_exec_stat.preemptions offset");
+_Static_assert(offsetof(erx_exec_stat_t, overruns) ==
+    ERX_EXEC_STAT_OFF_OVERRUNS, "erx_exec_stat.overruns offset");
+_Static_assert(offsetof(erx_exec_stat_t, run_ns) ==
+    ERX_EXEC_STAT_OFF_RUN_NS, "erx_exec_stat.run_ns offset");
+
+#define ERX_GROUP_STAT_SIZE 8320
+#define ERX_GROUP_STAT_ALIGN 8
+#define ERX_GROUP_STAT_OFF_EPOCH 0
+#define ERX_GROUP_STAT_OFF_CAPACITY 8
+#define ERX_GROUP_STAT_OFF_PERIOD_START_NS 16
+#define ERX_GROUP_STAT_OFF_USED_NS 24
+#define ERX_GROUP_STAT_OFF_TOTAL_NS 32
+#define ERX_GROUP_STAT_OFF_FINISHING_NS 40
+#define ERX_GROUP_STAT_OFF_PARKED 48
+#define ERX_GROUP_STAT_OFF_THROTTLED 52
+#define ERX_GROUP_STAT_OFF_READY 56
+#define ERX_GROUP_STAT_OFF_EXEC 128
+typedef struct erx_group_stat erx_group_stat_t;
+struct erx_group_stat {
+	_Alignas(8) _Atomic uint64_t	epoch;
+	_Atomic uint64_t	capacity;
+	_Atomic uint64_t	period_start_ns;
+	_Atomic uint64_t	used_ns;
+	_Atomic uint64_t	total_ns;
+	_Atomic uint64_t	finishing_ns;
+	_Atomic uint32_t	parked;
+	_Atomic uint32_t	throttled;
+	_Atomic uint32_t	ready;
+	uint8_t	padding_0[68];
+	erx_exec_stat_t	exec[64];
+};
+_Static_assert(sizeof(erx_group_stat_t) == ERX_GROUP_STAT_SIZE, "erx_group_stat size");
+_Static_assert(_Alignof(erx_group_stat_t) == ERX_GROUP_STAT_ALIGN, "erx_group_stat alignment");
+_Static_assert(offsetof(erx_group_stat_t, epoch) ==
+    ERX_GROUP_STAT_OFF_EPOCH, "erx_group_stat.epoch offset");
+_Static_assert(offsetof(erx_group_stat_t, capacity) ==
+    ERX_GROUP_STAT_OFF_CAPACITY, "erx_group_stat.capacity offset");
+_Static_assert(offsetof(erx_group_stat_t, period_start_ns) ==
+    ERX_GROUP_STAT_OFF_PERIOD_START_NS, "erx_group_stat.period_start_ns offset");
+_Static_assert(offsetof(erx_group_stat_t, used_ns) ==
+    ERX_GROUP_STAT_OFF_USED_NS, "erx_group_stat.used_ns offset");
+_Static_assert(offsetof(erx_group_stat_t, total_ns) ==
+    ERX_GROUP_STAT_OFF_TOTAL_NS, "erx_group_stat.total_ns offset");
+_Static_assert(offsetof(erx_group_stat_t, finishing_ns) ==
+    ERX_GROUP_STAT_OFF_FINISHING_NS, "erx_group_stat.finishing_ns offset");
+_Static_assert(offsetof(erx_group_stat_t, parked) ==
+    ERX_GROUP_STAT_OFF_PARKED, "erx_group_stat.parked offset");
+_Static_assert(offsetof(erx_group_stat_t, throttled) ==
+    ERX_GROUP_STAT_OFF_THROTTLED, "erx_group_stat.throttled offset");
+_Static_assert(offsetof(erx_group_stat_t, ready) ==
+    ERX_GROUP_STAT_OFF_READY, "erx_group_stat.ready offset");
+_Static_assert(offsetof(erx_group_stat_t, exec) ==
+    ERX_GROUP_STAT_OFF_EXEC, "erx_group_stat.exec offset");
+
 #define ERX_FIASCO_MACHINE_END_REQUEST_SIZE 24
 #define ERX_FIASCO_MACHINE_END_REQUEST_ALIGN 8
 #define ERX_FIASCO_MACHINE_END_REQUEST_OFF_CALLER 0
@@ -921,6 +1020,42 @@ _Static_assert(offsetof(erx_fiasco_thread_create_request_t, thread_class) ==
     ERX_FIASCO_THREAD_CREATE_REQUEST_OFF_THREAD_CLASS, "erx_fiasco_thread_create_request.thread_class offset");
 _Static_assert(offsetof(erx_fiasco_thread_create_request_t, index) ==
     ERX_FIASCO_THREAD_CREATE_REQUEST_OFF_INDEX, "erx_fiasco_thread_create_request.index offset");
+
+#define ERX_FIASCO_THREAD_REAP_REQUEST_SIZE 16
+#define ERX_FIASCO_THREAD_REAP_REQUEST_ALIGN 8
+#define ERX_FIASCO_THREAD_REAP_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_THREAD_REAP_REQUEST_OFF_THREAD 8
+typedef struct erx_fiasco_thread_reap_request erx_fiasco_thread_reap_request_t;
+struct erx_fiasco_thread_reap_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	thread;
+};
+_Static_assert(sizeof(erx_fiasco_thread_reap_request_t) == ERX_FIASCO_THREAD_REAP_REQUEST_SIZE, "erx_fiasco_thread_reap_request size");
+_Static_assert(_Alignof(erx_fiasco_thread_reap_request_t) == ERX_FIASCO_THREAD_REAP_REQUEST_ALIGN, "erx_fiasco_thread_reap_request alignment");
+_Static_assert(offsetof(erx_fiasco_thread_reap_request_t, caller) ==
+    ERX_FIASCO_THREAD_REAP_REQUEST_OFF_CALLER, "erx_fiasco_thread_reap_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_thread_reap_request_t, thread) ==
+    ERX_FIASCO_THREAD_REAP_REQUEST_OFF_THREAD, "erx_fiasco_thread_reap_request.thread offset");
+
+#define ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_SIZE 24
+#define ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_ALIGN 8
+#define ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_THREAD 8
+#define ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_MASK 16
+typedef struct erx_fiasco_thread_set_affinity_request erx_fiasco_thread_set_affinity_request_t;
+struct erx_fiasco_thread_set_affinity_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	thread;
+	uint64_t	mask;
+};
+_Static_assert(sizeof(erx_fiasco_thread_set_affinity_request_t) == ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_SIZE, "erx_fiasco_thread_set_affinity_request size");
+_Static_assert(_Alignof(erx_fiasco_thread_set_affinity_request_t) == ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_ALIGN, "erx_fiasco_thread_set_affinity_request alignment");
+_Static_assert(offsetof(erx_fiasco_thread_set_affinity_request_t, caller) ==
+    ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_CALLER, "erx_fiasco_thread_set_affinity_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_thread_set_affinity_request_t, thread) ==
+    ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_THREAD, "erx_fiasco_thread_set_affinity_request.thread offset");
+_Static_assert(offsetof(erx_fiasco_thread_set_affinity_request_t, mask) ==
+    ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_OFF_MASK, "erx_fiasco_thread_set_affinity_request.mask offset");
 
 #define ERX_FIASCO_THREAD_START_REQUEST_SIZE 16
 #define ERX_FIASCO_THREAD_START_REQUEST_ALIGN 8
@@ -1701,6 +1836,8 @@ _Static_assert(offsetof(erx_kupage_t, utcb) ==
     ERX_KUPAGE_OFF_UTCB, "erx_kupage.utcb offset");
 _Static_assert(offsetof(erx_kupage_t, vcpu) ==
     ERX_KUPAGE_OFF_VCPU, "erx_kupage.vcpu offset");
+
+typedef uint32_t erx_exec_state_t;
 
 typedef int64_t erx_exit_kind_t;
 
@@ -2498,6 +2635,8 @@ typedef uint8_t erx_system_manifest_path_t[15];
 #define ERX_SYSTEM_MANIFEST_PATH_BYTES { 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x2f, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74 }
 #define ERX_SYSTEM_MANIFEST_PATH_STRING "system/manifest"
 
+typedef uint32_t erx_thread_class_t;
+
 typedef struct erx_uaddr erx_uaddr_t;
 struct erx_uaddr {
 	uint64_t	raw;
@@ -2883,6 +3022,342 @@ erx_device_secret_page_secret_load(const erx_device_secret_page_t *record, size_
 		return (false);
 	*value = atomic_load_explicit(&record->secret[index],
 	    memory_order_acquire);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_state_load(const erx_exec_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->state,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_state_store(erx_exec_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->state, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_cpu_load(const erx_exec_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->cpu,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_cpu_store(erx_exec_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->cpu, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_epoch_load(const erx_exec_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->epoch,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_epoch_store(erx_exec_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->epoch, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_yield_req_load(const erx_exec_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->yield_req,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_yield_req_store(erx_exec_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->yield_req, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_preemptions_load(const erx_exec_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->preemptions,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_preemptions_store(erx_exec_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->preemptions, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_overruns_load(const erx_exec_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->overruns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_overruns_store(erx_exec_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->overruns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_exec_stat_run_ns_load(const erx_exec_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->run_ns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_exec_stat_run_ns_store(erx_exec_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->run_ns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_epoch_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->epoch,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_epoch_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->epoch, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_capacity_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->capacity,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_capacity_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->capacity, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_period_start_ns_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->period_start_ns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_period_start_ns_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->period_start_ns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_used_ns_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->used_ns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_used_ns_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->used_ns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_total_ns_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->total_ns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_total_ns_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->total_ns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_finishing_ns_load(const erx_group_stat_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->finishing_ns,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_finishing_ns_store(erx_group_stat_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->finishing_ns, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_parked_load(const erx_group_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->parked,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_parked_store(erx_group_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->parked, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_throttled_load(const erx_group_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->throttled,
+	    memory_order_relaxed);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_throttled_store(erx_group_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->throttled, value,
+	    memory_order_relaxed);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_group_stat_ready_load(const erx_group_stat_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->ready,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_group_stat_ready_store(erx_group_stat_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->ready, value,
+	    memory_order_release);
 	return (true);
 }
 

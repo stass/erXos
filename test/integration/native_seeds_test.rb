@@ -1,0 +1,72 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'fileutils'
+require 'minitest/autorun'
+require 'tmpdir'
+require_relative '../../tools/lib/erx/native_threads'
+require_relative '../../tools/lib/erx/native_watchdog'
+
+# The threads and watchdog suites' seeded failures (docs/design-stopgap.md,
+# "Verification"): each seed breaks one thing in a copy of the sources, and the suite's
+# run under TCG must say so, naming the case. A seed that makes no difference means its
+# case does not run the code it claims to. Each boots QEMU and those that lose a wake
+# wait out the guest's patience, so `make check` excuses this file
+# (STANDALONE_INTEGRATION_TESTS in tools/erx) and `make check-native-seeds` runs it.
+# Needs ERX_CLANG, ERX_LLD and a built kernel; a missing tool is a failure, not a skip.
+class NativeSeedsTest < Minitest::Test
+  ROOT = File.expand_path('../..', __dir__)
+  COPIED = %w[include kernel liberx test].freeze
+  THREAD = 'liberx/backend/fiasco/thread.c'
+  SERVICE = 'liberx/backend/fiasco/service.c'
+  WATCHDOG = 'liberx/backend/fiasco/watchdog_thread.c'
+  PARK = 'liberx/backend/fiasco/park_table.c'
+  REAP_CALL = "\tif (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)\n" \
+              "\t\treaper_refused(\"erx: reaper: the service refused a deletion\\n\");\n"
+  CLEAR = "\tif (record->clear_word != 0) {\n" \
+          "\t\tatomic_store_explicit((_Atomic uint32_t *)(uintptr_t)record->clear_word, 0, memory_order_release);\n" \
+          "\t\t(void)erx_umtx_wake(record->clear_word, 1);\n" \
+          "\t}\n"
+  Seed = Data.define(:file, :from, :to, :suite, :cpus, :expected)
+  SEEDS = {
+    'the clear before the deletion' => Seed.new(file: THREAD, from: REAP_CALL + "\tif (record->release_size", to: "#{CLEAR}#{REAP_CALL}\tif (record->release_size",
+                                                suite: :threads, cpus: 4, expected: /join_loop FAILED/),
+    'the clear removed' => Seed.new(file: THREAD, from: CLEAR, to: '', suite: :threads, cpus: 1, expected: /join_loop FAILED/),
+    'the range not released' => Seed.new(file: THREAD, from: "record->release_size = size;\n", to: "record->release_size = 0;\n\t(void)size;\n",
+                                         suite: :threads, cpus: 1, expected: /detached_loop FAILED/),
+    'the mask ignored' => Seed.new(file: SERVICE, from: "param.affinity = l4_sched_cpu_set(0, 0, mask);\n\treturn (param);", to: "(void)mask;\n\treturn (param);",
+                                   suite: :threads, cpus: 4, expected: /affinity_each_cpu FAILED/),
+    'the epoch comparison removed' => Seed.new(file: PARK, from: "if (park->group_epoch != event->group_seen || park->slot_epoch[slot] != event->slot_seen)\n\t\t\treturn ((erx_fiasco_park_result_t){ .action = ERX_FIASCO_PARK_RETURN });\n", to: '',
+                                               suite: :threads, cpus: 1, expected: /park_alone FAILED/),
+    'the trampoline omits the thread pointer' => Seed.new(file: 'liberx/backend/fiasco/arch/aarch64/thread_start.S', from: "\tmsr\ttpidr_el0, x11\n", to: '',
+                                                          suite: :threads, cpus: 1, expected: /tls_and_arg FAILED/),
+    'the failed start deletes nothing' => Seed.new(file: SERVICE, from: "\tif (!service_thread_steps(index, cap)) {\n\t\tservice_thread_delete(index);\n", to: "\tif (!service_thread_steps(index, cap)) {\n",
+                                                   suite: :threads, cpus: 1, expected: /failed_start FAILED/),
+    'the watchdog never ends the machine' => Seed.new(file: WATCHDOG, from: "\t\tif (step.action == ERX_WATCHDOG_END)\n\t\t\terx_fiasco_end_watchdog(&step.end);\n", to: '',
+                                                      suite: :watchdog, cpus: 1, expected: /UNCAUGHT/),
+    'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
+                                   suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/)
+  }.freeze
+
+  def run_suite(source, seed)
+    case seed.suite
+    when :threads then Erx::NativeThreads::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
+    when :watchdog then Erx::NativeWatchdog::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
+    end
+  end
+
+  SEEDS.each do |name, seed|
+    define_method("test_#{name.tr(' ', '_')}") do
+      Dir.mktmpdir('erx-native-seed-') do |directory|
+        COPIED.each { |entry| FileUtils.cp_r(File.join(ROOT, entry), directory) }
+        path = File.join(directory, seed.file)
+        text = File.read(path)
+        assert_includes text, seed.from, 'the seed no longer applies'
+        File.write(path, text.sub(seed.from) { seed.to })
+        error = assert_raises(Erx::Error) { run_suite(directory, seed) }
+        assert_match seed.expected, error.message
+      end
+    end
+  end
+end

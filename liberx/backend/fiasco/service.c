@@ -73,6 +73,11 @@ static int	service_thread_create(const erx_fiasco_thread_create_request_t *, erx
 static int	service_thread_start(uint64_t);
 static bool	service_thread_steps(uint32_t, l4_cap_idx_t);
 static void	service_thread_delete(uint32_t);
+static int	service_thread_reap(uint64_t);
+static int	service_thread_set_affinity(uint64_t, uint64_t);
+static l4_sched_param_t service_sched_param(uint64_t);
+static uint64_t service_cpus_online(void);
+static l4_cap_idx_t service_thread_cap(uint32_t);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static _Noreturn void service_page_fault(const l4_msg_regs_t *, uint32_t);
@@ -81,6 +86,8 @@ static _Noreturn void service_exception(const l4_exc_regs_t *, uint32_t);
 static _Alignas(16) uint8_t service_stack[SERVICE_STACK_BYTES];
 /* Which indices hold a live thread; only the service writes it once running. */
 static service_thread_state_t service_threads[ERX_FIASCO_THREADS_MAX];
+/* Each thread's CPUs as last set, 0 for wherever it was created. */
+static uint64_t service_affinity[ERX_FIASCO_THREADS_MAX];
 /* Counted, never printed: a label naming no live task. */
 static _Atomic uint64_t service_dropped;
 
@@ -121,7 +128,10 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 	if (reason != NULL)
 		return (reason);
 	service_threads[0] = SERVICE_THREAD_STARTED;
-	return (service_start());
+	reason = service_start();
+	if (reason != NULL)
+		return (reason);
+	return (erx_fiasco_reaper_start());
 }
 
 static bool
@@ -225,6 +235,11 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (service_thread_create(words, reply));
 	case ERX_FIASCO_CALL_THREAD_START:
 		return (service_thread_start(((const erx_fiasco_thread_start_request_t *)words)->thread));
+	case ERX_FIASCO_CALL_THREAD_SET_AFFINITY:
+		return (service_thread_set_affinity(((const erx_fiasco_thread_set_affinity_request_t *)words)->thread,
+		    ((const erx_fiasco_thread_set_affinity_request_t *)words)->mask));
+	case ERX_FIASCO_CALL_THREAD_REAP:
+		return (service_thread_reap(((const erx_fiasco_thread_reap_request_t *)words)->thread));
 	case ERX_FIASCO_CALL_VM_RESERVE:
 		if (flagged->flags > UINT32_MAX)
 			return (ERX_EINVAL);
@@ -316,7 +331,7 @@ service_thread_start(uint64_t thread)
 static bool
 service_thread_steps(uint32_t index, l4_cap_idx_t cap)
 {
-	const l4_sched_param_t param = l4_sched_param(SERVICE_THREAD_PRIORITY, 0);
+	const l4_sched_param_t param = service_sched_param(service_affinity[index]);
 
 	l4_thread_control_start();
 	l4_thread_control_pager(erx_fiasco_service_gate());
@@ -332,6 +347,67 @@ service_thread_steps(uint32_t index, l4_cap_idx_t cap)
 	return (true);
 }
 
+/* The first thread's capability is the one the kernel gave it. */
+static l4_cap_idx_t
+service_thread_cap(uint32_t index)
+{
+	return (index == 0 ? L4_BASE_THREAD_CAP : (l4_cap_idx_t)erx_fiasco_thread_cap(index));
+}
+
+/* A mask of 0 leaves the kernel's own: a thread stays on the CPU it was created on. */
+static l4_sched_param_t
+service_sched_param(uint64_t mask)
+{
+	l4_sched_param_t param = l4_sched_param(SERVICE_THREAD_PRIORITY, 0);
+
+	if (mask != 0)
+		param.affinity = l4_sched_cpu_set(0, 0, mask);
+	return (param);
+}
+
+static uint64_t
+service_cpus_online(void)
+{
+	l4_umword_t cpu_max;
+	l4_sched_cpu_set_t cpus = l4_sched_cpu_set(0, 0, 0);
+
+	if (service_failed(l4_scheduler_info(L4_BASE_SCHEDULER_CAP, &cpu_max, &cpus)))
+		return (0);
+	return (cpus.map);
+}
+
+/*
+ * A thread not started yet takes the mask at its start, and a running one moves
+ * now. Fiasco runs it on one CPU of the mask, its own if the mask holds it: a recorded
+ * difference.
+ */
+static int
+service_thread_set_affinity(uint64_t thread, uint64_t mask)
+{
+	l4_sched_param_t param;
+
+	if (thread >= ERX_FIASCO_THREADS_MAX || service_threads[thread] == SERVICE_THREAD_ABSENT ||
+	    (mask & service_cpus_online()) == 0)
+		return (ERX_EINVAL);
+	service_affinity[thread] = mask;
+	if (service_threads[thread] != SERVICE_THREAD_STARTED)
+		return (ERX_OK);
+	param = service_sched_param(mask);
+	if (service_failed(l4_scheduler_run_thread(L4_BASE_SCHEDULER_CAP, service_thread_cap((uint32_t)thread), &param)))
+		return (ERX_EINVAL);
+	return (ERX_OK);
+}
+
+/* The reaper's request: the thread has exited, and asked for this by its record. */
+static int
+service_thread_reap(uint64_t thread)
+{
+	if (thread >= ERX_FIASCO_THREADS_MAX || service_threads[thread] != SERVICE_THREAD_STARTED)
+		return (ERX_EINVAL);
+	service_thread_delete((uint32_t)thread);
+	return (ERX_OK);
+}
+
 /* A deletion the root cannot perform leaves a thread it cannot account for: the machine ends. */
 static void
 service_thread_delete(uint32_t index)
@@ -339,7 +415,8 @@ service_thread_delete(uint32_t index)
 	static const char line[] = "erx: service: the kernel refused a deletion\n";
 
 	service_threads[index] = SERVICE_THREAD_ABSENT;
-	if (service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_thread_cap(index))) ||
+	service_affinity[index] = 0;
+	if (service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, service_thread_cap(index))) ||
 	    service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_thread_semaphore_cap(index)))) {
 		erx_fiasco_console_write(line, sizeof(line) - 1);
 		erx_fiasco_machine_off();
@@ -350,8 +427,25 @@ service_thread_delete(uint32_t index)
 bool
 erx_fiasco_test_thread_caps_gone(uint32_t index)
 {
-	return (l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, erx_fiasco_thread_cap(index))) == 0 &&
+	return (l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, service_thread_cap(index))) == 0 &&
 	    l4_msgtag_label(l4_task_cap_valid(L4_BASE_TASK_CAP, erx_fiasco_thread_semaphore_cap(index))) == 0);
+}
+
+uint32_t
+erx_fiasco_test_cpu_count(void)
+{
+	return ((uint32_t)__builtin_popcountll(service_cpus_online()));
+}
+
+/* Raises a thread above its CPU's others, which is how the suite sees where it runs. */
+int
+erx_fiasco_test_thread_priority(uint32_t index, uint32_t priority, uint64_t mask)
+{
+	l4_sched_param_t param = l4_sched_param(priority, 0);
+
+	param.affinity = l4_sched_cpu_set(0, 0, mask);
+	return (service_failed(l4_scheduler_run_thread(L4_BASE_SCHEDULER_CAP, erx_fiasco_thread_cap(index), &param)) ?
+	    ERX_EINVAL : ERX_OK);
 }
 #endif
 

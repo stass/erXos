@@ -12,6 +12,7 @@
 #include "erx/abi.h"
 #include "erx/cdefs.h"
 #include "erx/core/crash.h"
+#include "erx/watchdog.h"
 
 /*
  * The root service (docs/design-stopgap.md, "The root service"): one thread that
@@ -43,6 +44,8 @@ int	erx_machine_end(uint64_t res, uint32_t how);
  * and the rest sleep. With a fault it first prints the crash frame. Takes no lock.
  */
 _Noreturn void	erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how);
+/* The same for a missed pet, on the watchdog's own thread. */
+_Noreturn void	erx_fiasco_end_watchdog(const erx_watchdog_end_t *end);
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 #include <stdatomic.h>
@@ -51,6 +54,8 @@ _Noreturn void	erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how);
 /* See service.c: the start step to fail, and whether a thread's capabilities are gone. */
 extern _Atomic uint32_t erx_fiasco_test_start_fails;
 bool erx_fiasco_test_thread_caps_gone(uint32_t);
+uint32_t erx_fiasco_test_cpu_count(void);
+int erx_fiasco_test_thread_priority(uint32_t, uint32_t, uint64_t);
 #endif
 
 #endif /* ERX_FIASCO_SERVICE_H */

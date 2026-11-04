@@ -89,7 +89,8 @@ Each is backend C with no thread-local storage, and calls no musl function.
 | dispatcher | the group's task, one per group | turns IRQ deliveries into triggers | console and block drivers, ERTS's wakes |
 
 A task's own threads create its reaper, at backend initialisation, and its dispatchers, at group
-creation, through the ordinary calls. `moe`, L4Re's root task, is likewise one server thread for
+creation, through the ordinary calls. The watchdog, like the root service, holds no thread index and
+takes a free slot of the kernel-given UTCB page, with `sigma0` as its pager. `moe`, L4Re's root task, is likewise one server thread for
 memory and faults (upstream; `moe` is not in this tree), and `libpthread` serializes thread and UTCB
 work through one manager thread (`manager.cc:494`). The cost is that the machine's memory, thread
 and log calls queue on one thread, which Phase 1 accepts and an ERTS boot measures.
@@ -252,7 +253,7 @@ seeds Track K's conformance roster.
 | `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3) | local: [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set, which `info` reports as capacity | correct readiness; everything else `unsupported`; no guarantee, quota or throttling | grants enforced, usage reported |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
 | `erx_umtx_wait`, `erx_umtx_wake` | musl's futexes | local: [The umtx table](#the-umtx-table) | correct within a task | across spaces; `ERX_EFAULT`, `ERX_ESTALE`, `ERX_EINTR` |
-| `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; those calls work |
+| `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; an empty mask, or one naming no CPU, `ERX_EINVAL`; affinity runs the thread on one CPU of the mask, its own if the mask holds it; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; those calls work; the thread may run on any CPU of its mask |
 | `erx_space_create`, `erx_space_stop`, `erx_image_map` | the test-task launcher in the root (`libc-test` M3, BeamAsm M4) | service: `l4_factory_create_task`; segments through `elf_plan.c`, copied through the window, cleaned and invalidated, mapped code read-execute and data read-write; [task exit](#task-exit). `parent`, `fault`, `label` ignored | a "domain" is a task with no budget, grant, lanes, facets or exit record; `erx_space_pause`, `_resume`, `_clear_caps`, `_quiesce`, `_copy` `ERX_ENOTSUP` | parents, fault gates, exit records, quiesce |
 | `erx_cap_dup`, `erx_cap_close`, `erx_object_destroy`, `erx_object_info` | Erlang NIF handles, the launcher | service: the handle table; destroy deletes the Fiasco objects, and for memory revokes every mapping first | destroying a started thread, `erx_cap_pass` `ERX_ENOTSUP` | generations, rights, transfer at rendezvous; a thread ends at once |
 | `erx_budget_create`, `_resize`, `_watch` | the domain library's root entry (M3), the inspector | service: [Reporting a budget](#reporting-a-budget) | `used` partial, the rest `unsupported`; resize, watch `ERX_ENOTSUP` | exact, all fields |
@@ -356,7 +357,9 @@ Fiasco's fixed-priority scheduler schedules every thread; ERTS schedules its pro
 but the watchdog runs at Fiasco's default priority of 1, as the root's first thread and `sigma0` do, so a spinner
 never outranks a preempted lock holder on its CPU. The watchdog, which takes no lock, runs at 255.
 `l4_scheduler_run_thread(L4_BASE_SCHEDULER_CAP, thread, &param)` starts each thread, with `param` from
-`l4_sched_param(priority, 0)` and the CPU mask in `param.affinity`.
+`l4_sched_param(priority, 0)` and the CPU mask in `param.affinity`. A thread with no mask set stays on the CPU it
+was created on (`scheduler.cpp:98-103`). `erx_thread_set_affinity` before the start takes effect at the start, and after it
+moves the thread at once, through the same call.
 
 ### Thread creation
 
@@ -382,12 +385,14 @@ Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears 
 at the index's slot, copies the starting registers from the caller's public UTCB into the record, and replies
 with the handle and the slot, which in the root is the root's own capability. The starting registers are
 `erx_fiasco_start_t`: the ABI's `erx_regs` and, beside them, the thread pointer, which `erx_regs` does not hold.
-In the root, a thread's handle is its index, so it carries no generation and a stale one names the index's
-next thread. On failure the stub frees the
+In the root, a thread's handle is its index, so it carries no generation. Once the thread is reaped the handle names no
+thread and is refused, until the index's next create, from which on it names that thread; nothing keeps a handle past a
+join, since `pthread_t` is musl's own. On failure the stub frees the
 record and returns the service's status. A task names only itself as the space; the root may also name a task with no
 thread yet, which takes index 0.
 
-**`erx_thread_start`.** The stub writes the marker 1. The service, in order:
+**`erx_thread_start`.** The stub moves the record from created to started, and only then writes the marker 1: a start of any other handle
+is refused untouched, since a 1 written over the kernel's 0 would lose the index for good. The service, in order:
 
 1. `l4_thread_control_start`, `_pager` and `_exc_handler` naming the task's gate, `_bind(slot, task)`, `_commit`.
 2. `l4_thread_ex_regs(thread, trampoline, record, 0)`.
@@ -456,7 +461,10 @@ an exiting thread runs on the stack to be freed and musl's lock word must outlas
    returns the thread never reaches user mode again, so its stack is free. A refusal ends the machine.
 2. **Release.** If the record names a range (a detached thread), `erx_vm_release` it.
 3. **Clear.** Store 0 in the record's word to clear and call `erx_umtx_wake(word, 1)`.
-4. **Recycle.** Mark the record free.
+4. **Recycle.** Give back the executor's slot, if it has one, and mark the record free. The index is claimed again once
+   Fiasco has written its marker.
+
+The first thread exits the same way: its capability is the one the kernel gave it, and its index is never claimed again.
 
 **Join: musl's code stays.** The word to clear is `&__thread_list_lock`, the contract of Linux's exit futex address
 (`pthread_create.c:142-146`). `__pthread_exit` holds `__tl_lock`, sets `self->tid` to 0 and unlinks itself, leaving the
@@ -510,7 +518,7 @@ dispatcher thread.
 ### The park protocol
 
 The protocol of [design-scheduler.md](design-scheduler.md) is kept, with a semaphore per thread, as L4Re's pthread has
-(`restart.h:26-37`), in place of the kernel's switch. The four operations are one pure state machine, `park_step`, over the
+(`restart.h:26-37`), in place of the kernel's switch. The operations are one pure state machine, `park_step`, over the
 group's epoch, each slot's epoch, the parked list in order, the ready ring and the listed flags. It reads no clock, makes no
 Fiasco call, and returns what the caller does after unlocking.
 
@@ -520,9 +528,14 @@ Fiasco call, and returns what the caller does after unlocking.
 | **Park**(slot, g, s) | if the group's epoch differs from `g` or the slot's from `s`, return `ERX_OK`; otherwise join the parked list | `l4_semaphore_down` with the deadline |
 | **Timeout**(slot) | if still on the list, leave it and return `ERX_ETIMEDOUT`; if taken off, return "owed" | if owed, an unbounded `l4_semaphore_down`, then `ERX_OK` |
 | **Wake**(slot) | advance the slot's epoch and mirror it; if on the list, take it off | if it was taken off, up its semaphore |
+| **Release**(slot), an executor's death | free the slot; advance the group's epoch and mirror it; take the longest-parked slot, if any | up that slot's semaphore |
 
 The executor reads the epochs before its empty check. A trigger or wake before the park changes an epoch, so the park returns at
 once; one after it finds the slot on the list. With no slot parked, a running executor finds the work at its next safe point.
+
+The epochs and `parked` are mirrored in the group's status page, the layout `erx_group_stat` of `abi/kernel.txt`, under the park lock,
+with each slot's `epoch` and `state`; its other fields stay 0, which `erx_group_info` reports as `unsupported`. A slot taken off the list
+is owed exactly one up, and the semaphore is the one the thread's umtx waits use, which holds 0 whenever the thread enters either wait.
 
 ### The trace ring
 
@@ -579,8 +592,8 @@ Phase 1 acts on no finer kind.
 
 ### The watchdog
 
-A root thread runs `watchdog.c`'s step machine: sleep one period, step over the pet word. In deterministic mode the step is off and the
-machine page says so. A missed pet takes the end path.
+A root thread at priority 255 runs `watchdog.c`'s step machine: sleep one period, step over the pet word, which holds the time of the last pet.
+In deterministic mode the step is off and the machine page says so. A missed pet takes the end path, with `ERX_END_OFF`, as a root fault does.
 
 ### The end path
 
@@ -725,7 +738,7 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 ## Verification
 
 Each increment is a QEMU transcript test under TCG and HVF, one and four CPUs, kept in the suite. Each case has a seeded failure, a test-only patch that makes it fail, which shows the case
-ran the code it claims to. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
+ran the code it claims to; `make check-native-seeds` keeps the threads and watchdog suites' seeds. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
 the tests.
 
 | Case | Seeded failure, and what it shows |
@@ -739,20 +752,20 @@ the tests.
 | **Range table.** `test/host/fiasco_vm_test.rb`, host, exhaustive over page states, ranges and calls against a fake memory unit that adds rights as Fiasco does, plus random sequences; each seed is a mutant there | a target with write and execute admitted. Each of the other seeds of this table's memory rows, and a page given back still mapped |
 | **Thread start**, the QEMU gate's `native_threads` suite: TLS in the new thread equals the value given | trampoline omits the thread pointer: the case's line reports a failure |
 | **Failed start**, a hook built only into the suite's image (`ERX_FIASCO_TEST_HOOKS`) failing each of the three steps: the status returns, `l4_task_cap_valid` is 0 for the thread, its stack canary is untouched, the next create works | the deletion skipped: the capability stays valid |
-| **Claim**, host, a fake kernel writing the marker late, over every order of exit and create | the claim ignores the marker: the fake's write lands on a live thread |
+| **Claim**, `test/host/fiasco_park_test.rb`, a fake kernel writing the marker late, over every order of exit and create | the claim ignores the marker: the fake's write lands on a live thread |
 | **Umtx**: a timed wait is never early; host model and TSan, a wake between compare and sleep, a timeout racing a wake | deadline rounded down. Compare outside the lock: a lost wake. Absorb removed: a stale count |
-| **Join loop, 10,000 times**: stack and index reused; the joined handle is stale after each join | reaper's steps 1 and 3 swapped: a live handle. Step 3 removed: the deadline fires |
-| **Detached loop**: range and index return; the pool's count is steady | range omitted: the count falls |
+| **Join loop, 10,000 times**, the `native_threads` suite in musl's form, a word the reaper clears: stack and index reused; after each join the handle names no thread, its capabilities gone and a start refused | reaper's steps 1 and 3 swapped: a live capability. Step 3 removed: the case's patience runs out |
+| **Detached loop**, the `native_threads` suite: range and index return; the pool's count is steady | range omitted: the count falls |
 | `pthread_cond_broadcast` with 64 waiters, one mutex held at a time | the next waiter's barrier left locked: the deadline fires |
-| **Park**, host, exhaustive over two executors, two objects and three events; on QEMU, a trigger hooked between the empty check and the park | the epoch comparison removed: a lost wake. An up to a listed slot: a stale count. Hook removed: no immediate returns counted |
-| Affinity to each CPU, read back | mask ignored: the wrong CPU |
+| **Park**, `test/host/fiasco_park_test.rb`, exhaustive over two executors, two objects, three events and two timeouts, with each up landing on its own, and TSan over real threads; on QEMU, the `native_threads` suite, a trigger between the empty check and the park, a turn with two executors on two CPUs, and a timeout racing a wake | the epoch comparison removed: a lost wake. An up to a slot not listed: a stale count. The epoch comparison removed on QEMU: the case's park never returns |
+| Affinity to each CPU, read back: the `native_threads` suite pins a thread of raised priority to each CPU in turn while a probe counts on every CPU, and only that CPU's probe stops | mask ignored: every CPU but the first shows the wrong probe stopping |
 | **A second task** creates memory and a thread through the service and runs code through a JIT object's read-execute alias. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show | RW alias mapped RX: the write faults |
 | **Task exit**: a spinning thread's count on a shared page freezes; `l4_task_cap_valid` is 0 for every recorded thread; the pool's count returns | thread deletion skipped: the capability stays valid (the count alone can still freeze). Memory step skipped: the pool is short |
 | **Request against exit**: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the dead-label counter stays 0 | thread and gate deletion skipped: requests arrive for a freed label and the counter moves |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
 | **Interrupt**: a UART receive and a software object wake a parked executor; `erx_group_take_ready` returns each label once; ack lets the next through | ack removed: the second character never arrives. Listed flag ignored: a label twice |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
-| **Watchdog**: a stopped pet ends the machine, its cause in the record | watchdog skipped: the deadline fires |
+| **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
 | **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
@@ -783,8 +796,9 @@ call, and no stub takes a snapshot of it.
 The gate's `boot_image`, `native_boot`, `native_memory`, `debug_log`, `native_threads` and `native_crash` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
 handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
-`l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. Every thread in those
-suites runs on the first CPU, since `l4_sched_param(priority, 0)` leaves the mask whole and a thread stays on the CPU it was created on (`scheduler.cpp:98-103`), so a run at 4 CPUs does not by itself exercise a wake across CPUs.
+`l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. `native_threads` and `native_watchdog` have run, with each thread on a CPU in turn, service calls and semaphore wakes across
+CPUs, timed waits racing wakes, `l4_scheduler_run_thread`'s mask on a thread before its start and while it runs, priority 255 over a spinning thread, the deletion of a running thread's capability from another CPU with the marker cleared afterwards, the same for the first thread, an index and its
+native UTCB reused, and deleted semaphores recreated at the same slot.
 Everything below was read at the cited lines and has not been executed.
 
 **Run by hand, not kept in a suite**, a root with a helper thread whose pager it was, under TCG and HVF: a write in R, a run in R or RW, a touch of an
@@ -794,9 +808,8 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 **The thread package:**
 
 * A 128 KiB area works in `utcb_area`: `task.cpp:253,356,645-649,887`.
-* A return from `l4_task_delete_obj` means the thread never reaches user mode again, whether or not it ever ran, and the marker goes to 0 only when the kernel has finished with the UTCB: `thread.cpp:603-604,657-690`, `thread_object.cpp:157-166,650`, `kobject.cpp:224-233`, `utcb.h:176-185`.
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
-* Grace periods proceed while the service's clients wait: `kobject.cpp:224-233`, `thread.cpp:479-489`.
+* A semaphore's count stays exact when an up across CPUs races a down's timeout: `sys_down` looks under the semaphore's lock, and a thread no longer queued was given the up and reports success (`semaphore.cpp:203-243`). Its late activation is the gap [`TODO.md`](../TODO.md) records (`context.cpp:1059,1612`), which the suite counts and has not seen.
 * Musl's `tid` is used only by `__tl_lock` and mutex ownership, given no signals: `pthread_mutex_trylock.c:8-12`, `pthread_create.c:30-40`.
 
 **Later packages:**

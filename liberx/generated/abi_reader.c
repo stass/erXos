@@ -348,6 +348,39 @@ erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_thread_reap_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_reap_request_t *result)
+{
+	erx_fiasco_thread_reap_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_THREAD_REAP_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.thread = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_fiasco_thread_set_affinity_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_thread_set_affinity_request_t *result)
+{
+	erx_fiasco_thread_set_affinity_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_THREAD_SET_AFFINITY_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.thread = erx_abi_load_u64(bytes + 8);
+	value.mask = erx_abi_load_u64(bytes + 16);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_thread_start_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_start_request_t *result)
 {

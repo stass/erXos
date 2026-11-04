@@ -13,7 +13,7 @@ DOCKER_CONTEXT ?=
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
-.PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-boot-image
+.PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
 
 all: build
 
@@ -56,6 +56,10 @@ check-qemu:
 # Seeds a failure into a copy of the sources and checks the gate reports it.
 check-qemu-mutant:
 	$(RUBY) test/integration/qemu_gate_mutant_test.rb
+
+# Each seeded failure of the threads and watchdog suites, seen to fail.
+check-native-seeds:
+	$(RUBY) test/integration/native_seeds_test.rb
 
 check-conformance:
 	$(RUBY) tools/erx conformance

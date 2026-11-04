@@ -116,7 +116,7 @@ module Erx
     # An integration test runs in `make check` unless it is excused here: these
     # rebuild the stopgap kernel, boot it under QEMU or need the stock OTP
     # suites' runtime.
-    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible oracle_reporter qemu_gate_mutant].freeze
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_reporter qemu_gate_mutant].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }

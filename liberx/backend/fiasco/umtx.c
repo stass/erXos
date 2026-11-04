@@ -5,9 +5,7 @@
 
 /*
  * The effects under umtx_table.c: the table's lock and a thread's semaphore. A
- * wait is never early: the remainder rounds up to microseconds, the kernel's
- * timeout rounds up again, and a timer that fires early, or a remainder past the
- * longest timeout, only waits again.
+ * wait is never early: see erx_fiasco_semaphore_down.
  */
 
 #include <stdatomic.h>
@@ -23,8 +21,6 @@
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/umtx.h"
 
-#define UMTX_NS_PER_US	UINT64_C(1000)
-
 static void umtx_lock(void *);
 static void umtx_unlock(void *);
 static bool umtx_down(void *, erx_fiasco_umtx_node_t *, uint64_t);
@@ -37,11 +33,32 @@ static const erx_fiasco_umtx_effects_t umtx_effects = { .lock = umtx_lock, .unlo
 static erx_fiasco_umtx_table_t umtx_table;
 static erx_fiasco_lock_t umtx_table_lock;
 
+#ifdef ERX_FIASCO_TEST_HOOKS
+/* The threads suite's counts of how its races came out. */
+_Atomic uint64_t erx_fiasco_test_umtx_woken, erx_fiasco_test_umtx_timed_out, erx_fiasco_test_umtx_absorbed;
+_Atomic uint64_t erx_fiasco_test_umtx_stale;
+#endif
+
 int
 erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline)
 {
-	return (erx_fiasco_umtx_wait(&umtx_table, &umtx_effects, NULL, &erx_fiasco_thread_self()->node,
-	    (const _Atomic uint32_t *)(uintptr_t)addr, expected, deadline));
+	erx_fiasco_umtx_node_t *const node = &erx_fiasco_thread_self()->node;
+	const int status = erx_fiasco_umtx_wait(&umtx_table, &umtx_effects, NULL, node,
+	    (const _Atomic uint32_t *)(uintptr_t)addr, expected, deadline);
+
+#ifdef ERX_FIASCO_TEST_HOOKS
+	/*
+	 * A wait that returns with its node still queued was woken by no taker: the
+	 * kernel's late activation of an earlier up (TODO.md, the semaphore's late wake).
+	 */
+	umtx_lock(NULL);
+	if (node->queued)
+		atomic_fetch_add_explicit(&erx_fiasco_test_umtx_stale, 1, memory_order_relaxed);
+	umtx_unlock(NULL);
+	atomic_fetch_add_explicit(status == ERX_OK ? &erx_fiasco_test_umtx_woken : &erx_fiasco_test_umtx_timed_out, 1,
+	    memory_order_relaxed);
+#endif
+	return (status);
 }
 
 int
@@ -75,33 +92,18 @@ umtx_semaphore(const erx_fiasco_umtx_node_t *node)
 static bool
 umtx_down(void *context, erx_fiasco_umtx_node_t *node, uint64_t deadline)
 {
-	const l4_cap_idx_t semaphore = umtx_semaphore(node);
-	l4_timeout_t timeout = L4_IPC_NEVER;
-	uint64_t now, remainder;
-	l4_msgtag_t tag;
-
 	(void)context;
-	for (;;) {
-		if (deadline != ERX_FIASCO_UMTX_FOREVER) {
-			now = erx_fiasco_clock_ns();
-			if (now >= deadline)
-				return (false);
-			remainder = (deadline - now - 1) / UMTX_NS_PER_US + 1;
-			timeout = l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(
-			    remainder < L4_TIMEOUT_US_MAX ? remainder : L4_TIMEOUT_US_MAX));
-		}
-		tag = l4_semaphore_down(semaphore, timeout);
-		if (l4_ipc_error(tag, l4_utcb()) == 0)
-			return (true);
-	}
+	return (erx_fiasco_semaphore_down(umtx_semaphore(node), deadline));
 }
 
 static void
 umtx_absorb(void *context, erx_fiasco_umtx_node_t *node)
 {
 	(void)context;
-	while (l4_ipc_error(l4_semaphore_down(umtx_semaphore(node), L4_IPC_NEVER), l4_utcb()) != 0)
-		continue;
+#ifdef ERX_FIASCO_TEST_HOOKS
+	atomic_fetch_add_explicit(&erx_fiasco_test_umtx_absorbed, 1, memory_order_relaxed);
+#endif
+	(void)erx_fiasco_semaphore_down(umtx_semaphore(node), ERX_FIASCO_UMTX_FOREVER);
 }
 
 static void

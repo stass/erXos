@@ -1614,6 +1614,352 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_exec_stat"] = Layout.new(
+        name: "erx_exec_stat".b,
+        version: 1,
+        storage: "shared".b,
+        alignment: 8,
+        size: 128,
+        fields: [
+          Field.new(
+            name: "state".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cpu".b,
+            type: types.fetch("u32"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "epoch".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "yield_req".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "preemptions".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "overruns".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "run_ns".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [[20, 4].freeze, [48, 80].freeze].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_group_stat"] = Layout.new(
+        name: "erx_group_stat".b,
+        version: 1,
+        storage: "shared".b,
+        alignment: 8,
+        size: 8320,
+        fields: [
+          Field.new(
+            name: "epoch".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "capacity".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "period_start_ns".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "used_ns".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "total_ns".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "finishing_ns".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "parked".b,
+            type: types.fetch("u32"),
+            offset: 48,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "throttled".b,
+            type: types.fetch("u32"),
+            offset: 52,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "relaxed".b,
+              :store => "relaxed".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ready".b,
+            type: types.fetch("u32"),
+            offset: 56,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "kernel_boot".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "exec".b,
+            type: types.fetch("erx_exec_stat"),
+            offset: 128,
+            count: 64,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [[60, 68].freeze].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_machine_end_request"] = Layout.new(
         name: "erx_fiasco_machine_end_request".b,
         version: 1,
@@ -1807,6 +2153,104 @@ module Erx
             name: "index".b,
             type: types.fetch("u64"),
             offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_fiasco_thread_reap_request"] = Layout.new(
+        name: "erx_fiasco_thread_reap_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_fiasco_thread_set_affinity_request"] = Layout.new(
+        name: "erx_fiasco_thread_set_affinity_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 24,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "mask".b,
+            type: types.fetch("u64"),
+            offset: 16,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -4334,6 +4778,21 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["exec_state"] = EnumType.new(
+        name: "exec_state".b,
+        base: types.fetch("u32"),
+        members: {
+          "blocked".b => 4,
+          "none".b => 0,
+          "parked".b => 3,
+          "paused".b => 6,
+          "ready".b => 2,
+          "running".b => 1,
+          "throttled".b => 5
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       types["exit_kind"] = EnumType.new(
         name: "exit_kind".b,
         base: types.fetch("i64"),
@@ -4747,6 +5206,8 @@ module Erx
           "machine_end".b => 9,
           "space_protect".b => 8,
           "thread_create".b => 2,
+          "thread_reap".b => 11,
+          "thread_set_affinity".b => 10,
           "thread_start".b => 3,
           "vm_commit".b => 5,
           "vm_decommit".b => 6,
@@ -6967,6 +7428,16 @@ module Erx
         size: 15,
         fixed: "system/manifest".b
       ).freeze
+      types["thread_class"] = EnumType.new(
+        name: "thread_class".b,
+        base: types.fetch("u32"),
+        members: {
+          "executor".b => 1,
+          "worker".b => 0
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       types["uaddr"] = ScalarType.new(
         name: "uaddr".b,
         base: types.fetch("u64"),
@@ -8176,9 +8647,13 @@ module Erx
           "erx_elf64_nhdr".b,
           "erx_abi_note".b,
           "erx_elf64_phdr".b,
+          "erx_exec_stat".b,
+          "erx_group_stat".b,
           "erx_fiasco_machine_end_request".b,
           "erx_fiasco_reply".b,
           "erx_fiasco_thread_create_request".b,
+          "erx_fiasco_thread_reap_request".b,
+          "erx_fiasco_thread_set_affinity_request".b,
           "erx_fiasco_thread_start_request".b,
           "erx_fiasco_vm_flagged_request".b,
           "erx_fiasco_vm_range_request".b,
@@ -8210,6 +8685,7 @@ module Erx
           "erx_vcpu".b,
           "erx_utcb".b,
           "erx_kupage".b,
+          "exec_state".b,
           "exit_kind".b,
           "fault_kind".b,
           "erx_fault".b,
@@ -8255,6 +8731,7 @@ module Erx
           "erx_image_manifest".b,
           "space_flags".b,
           "system_manifest_path".b,
+          "thread_class".b,
           "uaddr".b,
           "upage".b,
           "urgency".b,
@@ -8932,6 +9409,48 @@ module Erx
             type: types.fetch("i32"),
             description: "executor made a call that would wait".b
           ).freeze,
+          "exec_state_blocked".b => Constant.new(
+            name: "exec_state_blocked".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_none".b => Constant.new(
+            name: "exec_state_none".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_parked".b => Constant.new(
+            name: "exec_state_parked".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_paused".b => Constant.new(
+            name: "exec_state_paused".b,
+            value: 6,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_ready".b => Constant.new(
+            name: "exec_state_ready".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_running".b => Constant.new(
+            name: "exec_state_running".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "exec_state_throttled".b => Constant.new(
+            name: "exec_state_throttled".b,
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "exit_nothread".b => Constant.new(
             name: "exit_nothread".b,
             value: -9223372036854775805,
@@ -9022,6 +9541,18 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "fiasco_call_thread_reap".b => Constant.new(
+            name: "fiasco_call_thread_reap".b,
+            value: 11,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_thread_set_affinity".b => Constant.new(
+            name: "fiasco_call_thread_set_affinity".b,
+            value: 10,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "fiasco_call_thread_start".b => Constant.new(
             name: "fiasco_call_thread_start".b,
             value: 3,
@@ -9084,6 +9615,12 @@ module Erx
           ).freeze,
           "group_executors".b => Constant.new(
             name: "group_executors".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "group_executors_max".b => Constant.new(
+            name: "group_executors_max".b,
             value: 64,
             type: types.fetch("u32"),
             description: nil
@@ -10177,6 +10714,18 @@ module Erx
           "space_jit".b => Constant.new(
             name: "space_jit".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_class_executor".b => Constant.new(
+            name: "thread_class_executor".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_class_worker".b => Constant.new(
+            name: "thread_class_worker".b,
+            value: 0,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
