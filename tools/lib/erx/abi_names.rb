@@ -55,7 +55,7 @@ module Erx
            erx_sys_arguments erx_sys_arguments_t erx_sys_shape erx_sys_shape_t
            erx_sys_context erx_sys_context_t erx_sys_decode_shape
            erx_sys_action erx_sys_action_t erx_utcb_self erx_sys_word_get
-           erx_sys_word_put ERX_SYS_ACTION_DONE ERX_SYS_ACTION_RETRY].each do |symbol|
+           erx_sys_word_put erx_sys_run ERX_SYS_ACTION_DONE ERX_SYS_ACTION_RETRY].each do |symbol|
           reserve.call(symbol, 'generated interface')
         end
         constants.each_key { |name| reserve.call(macro(name), "constant #{name}") }

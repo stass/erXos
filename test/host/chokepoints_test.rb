@@ -34,7 +34,7 @@ class ChokepointsTest < Minitest::Test
   end
 
   def test_fiasco_backend_may_speak_fiasco
-    text = "#include <l4/sys/ipc.h>\nint f(void) { l4_ipc_call(); __asm__(\"svc #0\"); }\n"
+    text = "#include <l4/sys/ipc.h>\nint f(void) { l4_ipc_call(); __asm__(\"svc #0x4552\"); }\n"
     assert_empty evaluate(Rules::ACTIVE, { 'liberx/backend/fiasco/trap.c' => text })
     assert_equal %w[fiasco-headers-in-backend fiasco-symbols-in-backend one-erx-trap],
                  evaluate(Rules::ACTIVE, { 'kernel/core/trap.c' => text }).map(&:rule).uniq.sort
@@ -86,7 +86,9 @@ class ChokepointsTest < Minitest::Test
   end
 
   def test_a_pending_scope_fails_on_a_new_file_and_on_a_stale_exemption
-    glue = rule('glue-imports')
+    glue = Erx::Chokepoints::Pending.new(name: 'seeded', rule: 'seeded', design: 'seeded', reason: 'seeded',
+                                         awaits: ['fiasco/kernel/src/erx/**/*'],
+                                         existing: ['fiasco/kernel/src/erx/erx_probe.cpp'])
     assert_empty evaluate([glue], { 'fiasco/kernel/src/erx/erx_probe.cpp' => '' })
     refute_empty evaluate([glue], { 'fiasco/kernel/src/erx/erx_probe.cpp' => '', 'fiasco/kernel/src/erx/ipc.cpp' => '' })
     assert_match(/no longer listed/, evaluate([glue], { 'kernel/core/a.c' => '' }).first.detail)

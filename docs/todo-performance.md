@@ -101,3 +101,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   dispatch loop lands, against the same call with the admission inlined.
   Fixes: let the dispatch loop and the core share a translation unit at
   -O2, or emit the per-call steps from the plan as straight-line code.
+
+* [Low] stopgap, the system-call case of `Thread::arm_esr_entry`: every
+  Fiasco system call also pays one out-of-line `Erx_syscall::is_call`, and
+  an erXos call a frame copy and the admission's calls, with interrupts masked
+  for the whole call, its console write included. No `tools/erx bench`
+  workload covers kernel entry on the stopgap: the `null` workload named
+  above is the one to measure them with. Fixes: compare the immediate in
+  place, and drain the console after unmasking interrupts.

@@ -4,12 +4,11 @@
  */
 
 /*
- * The hosted backend's kernel log: erx_debug_log inside one macOS process,
- * which is one space. The process holds the kernel's ring and rate state,
- * runs the kernel's core over them under one lock, and plays the early
- * console: standard error is its console, and every record goes there as it
- * is written, as during a real kernel's boot. erx_hosted_log_sink is the one
- * writer of log bytes in this backend (the hosted-log-sink check), and it
+ * The hosted backend of the kernel interface's log: one macOS process, which
+ * is one space, runs the kernel's own dispatch and log cores and provides
+ * their effects. Standard error is its console, and every record goes there
+ * as it is written, as during a real kernel's boot. erx_hosted_log_sink is the
+ * one writer of log bytes in this backend (the hosted-log-sink check), and it
  * only ever receives lines erx_log_render made.
  */
 
@@ -21,23 +20,18 @@
 #include <unistd.h>
 
 #include "erx/abi.h"
+#include "erx/core/dispatch.h"
+#include "erx/core/effects.h"
 #include "erx/log.h"
 #include "liberx/backend/hosted/generated/calls.h"
 #include "liberx/backend/hosted/log.h"
 
-static void erx_hosted_log_drain(void);
-static uint64_t erx_hosted_log_now(void);
 static void erx_hosted_log_sink(const char *, size_t);
 
 static pthread_mutex_t erx_hosted_log_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Guarded by erx_hosted_log_lock. */
-static erx_log_t erx_hosted_log;
+/* The process's one space's log rate; the cores guard it with the log lock. */
 static erx_log_rate_t erx_hosted_log_rate;
-static uint64_t erx_hosted_log_cursor;
-static uint8_t erx_hosted_log_window[ERX_LOG_RECORD_MAX];
-static char erx_hosted_log_text[ERX_LOG_TEXT_MAX];
-static char erx_hosted_log_line[ERX_LOG_LINE_MAX];
 
 /* Each thread's UTCB; nothing but the thread itself reaches it here. */
 static _Thread_local erx_utcb_t erx_hosted_utcb;
@@ -46,6 +40,18 @@ erx_utcb_t *
 erx_utcb_self(void)
 {
 	return (&erx_hosted_utcb);
+}
+
+void
+erx_effect_log_lock(void)
+{
+	(void)pthread_mutex_lock(&erx_hosted_log_lock);
+}
+
+void
+erx_effect_log_unlock(void)
+{
+	(void)pthread_mutex_unlock(&erx_hosted_log_lock);
 }
 
 /*
@@ -71,34 +77,15 @@ erx_hosted_log_sink(const char *line, size_t length)
 	}
 }
 
-/* Writes every record the console has not yet had, one window at a time. */
-static void
-erx_hosted_log_drain(void)
+void
+erx_effect_console_write(const char *line, size_t length)
 {
-	erx_log_copy_result_t copied;
-	erx_log_view_t view;
-	size_t length, offset;
-
-	for (;;) {
-		copied = erx_log_copy(&erx_hosted_log, erx_hosted_log_cursor,
-		    erx_hosted_log_window, sizeof(erx_hosted_log_window));
-		if (copied.status != ERX_OK || copied.records == 0)
-			return;
-		erx_hosted_log_cursor = copied.next_cursor;
-
-		offset = 0;
-		while (erx_log_next_record(erx_hosted_log_window, copied.written,
-		    &offset, erx_hosted_log_text, &view) == ERX_LOG_NEXT_RECORD) {
-			length = erx_log_render(&view, erx_hosted_log_line,
-			    sizeof(erx_hosted_log_line));
-			erx_hosted_log_sink(erx_hosted_log_line, length);
-		}
-	}
+	erx_hosted_log_sink(line, length);
 }
 
 /* The kernel clock's stand-in; a clock that fails reads as time zero. */
-static uint64_t
-erx_hosted_log_now(void)
+uint64_t
+erx_effect_clock_ns(void)
 {
 	struct timespec now;
 
@@ -108,16 +95,29 @@ erx_hosted_log_now(void)
 	    (uint64_t)now.tv_nsec);
 }
 
+void
+erx_hosted_call(uint64_t number, const uint64_t args[ERX_TRAP_ARG_COUNT],
+    uint64_t results[ERX_TRAP_RESULT_COUNT])
+{
+	erx_sys_caller_t caller = {
+		.utcb = &erx_hosted_utcb,
+		.log_rate = &erx_hosted_log_rate,
+		.space = (uint64_t)getpid(),
+		.executor = false,
+	};
+
+	erx_dispatch(&caller, number, args, results);
+}
+
 erx_status_t
 erx_hosted_debug_log(erx_utcb_length_t len)
 {
-	erx_status_t status;
+	uint64_t args[ERX_TRAP_ARG_COUNT] = { (uint64_t)len.raw };
+	uint64_t results[ERX_TRAP_RESULT_COUNT];
+	uint32_t raw_status;
 
-	(void)pthread_mutex_lock(&erx_hosted_log_lock);
-	status = erx_log_debug(&erx_hosted_log, &erx_hosted_log_rate,
-	    (uint64_t)getpid(), erx_hosted_log_now(), &erx_hosted_utcb, len);
-	if (status == ERX_OK)
-		erx_hosted_log_drain();
-	(void)pthread_mutex_unlock(&erx_hosted_log_lock);
-	return (status);
+	erx_hosted_call(ERX_CALL_DEBUG_LOG, args, results);
+	raw_status = (uint32_t)results[0];
+	return (raw_status <= UINT32_C(2147483647) ? (int32_t)raw_status :
+	    -INT32_C(1) - (int32_t)(UINT32_C(4294967295) - raw_status));
 }

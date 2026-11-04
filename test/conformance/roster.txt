@@ -15,3 +15,7 @@
 # report with `erx-test: end COUNT`. `tools/erx conformance` runs the
 # roster under TCG and HVF with one and four CPUs. A case the roster runs
 # and the guest does not report is omitted, and fails its configuration.
+
+# erx_debug_log: every declared status. tools/erx check-debug-log runs them
+# through its own transcript, since no conformance guest reports this protocol.
+pending debug_log.statuses 30

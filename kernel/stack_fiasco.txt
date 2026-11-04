@@ -39,3 +39,13 @@ leaf memset 64
 # meet, and the watermark run catches a cost declared too low.
 leaf erx_effect_budget_lock 128
 leaf erx_effect_budget_unlock 128
+
+# The debug log's effects (include/erx/core/effects.h), which the glue
+# provides over a Spin_lock, Timer::system_clock and Fiasco's console. The
+# costs declared are unmeasured budgets those functions must meet, the
+# console's being the largest, through its mux and UART driver; the watermark
+# run catches a cost declared too low.
+leaf erx_effect_log_lock 128
+leaf erx_effect_log_unlock 128
+leaf erx_effect_clock_ns 128
+leaf erx_effect_console_write 512

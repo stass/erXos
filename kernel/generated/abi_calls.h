@@ -63,4 +63,8 @@ typedef struct erx_sys_context erx_sys_context_t;
 erx_status_t erx_sys_debug_log(erx_sys_context_t *context,
     const erx_sys_debug_log_args_t *arguments);
 
+/* Runs the handler of a decoded and admitted shape. */
+erx_status_t erx_sys_run(erx_sys_context_t *context,
+    const erx_sys_shape_t *shape);
+
 #endif /* ERX_KERNEL_ABI_CALLS_H */

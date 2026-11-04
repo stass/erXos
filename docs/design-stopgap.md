@@ -1851,7 +1851,8 @@ measured with `tools/erx bench irq` when resources land.
 * **`fiasco/erx_glue_imports.txt`**: every Fiasco internal the glue may
   reference, one per line with the effect that calls it and the glue
   file that may hold the call. It is an allowlist: a glue object whose
-  undefined symbols are not all listed for that file fails the build,
+  undefined symbols are not all listed for that file fails the build
+  (`tools/lib/erx/glue_imports.rb`, on every kernel build),
   so the raw allocator, the slab caches, `Ram_quota`'s byte charge,
   `L4_timeout`, `Utcb`-reading internals and every deleted path are
   forbidden by not being listed, and `entry.cpp`'s one line is the
@@ -2094,6 +2095,7 @@ ran.
 | the crash frame (B7) | the four causes in both forms decode and validate from the serial log | a frame cut one line short reports `truncated`; a flipped payload byte, a brief frame carrying a full record's length and a full frame whose record says brief and a record whose boot value and slot are no allowed pair or whose padding is not zero each report `corrupt`; a crash before the machine page is written holds the boot's pair; all fuzzed |
 | the guest's end | each K31 case reports `guest_end: self` | a kernel whose end line is removed reports `failed` |
 | the pet-stop hook | the hook build ends at the deadline with cause `WATCHDOG` | an ordinary build with the key runs on |
+| the first kernel call | `tools/erx check-debug-log`: the probe of `test/guest/debug_log_probe` as the root task under TCG and HVF and on the hosted backend gives one transcript: each status, escaped text, dropped lines, zeroed result registers, every other register kept | a backend that answers differently fails the comparison; the cores' seeded mutants fail `test/host/dispatch_test.rb` |
 | console ownership | the host test of `erx_console_owner_step` moves the owner only on the console entry's carve; a partial boot's `erx_debug_log` lines appear after root start for the whole run | a step that ignores the entry's identity moves the owner on any carve and fails the host test |
 | the stack watermark | every thread's measured depth stays within the block less the cores' allowance | an effect declared cheaper than it is, with a workload that drives it, exceeds the bound and fails |
 | the stack proof's scope | the report names the C17 scope | a report line naming the kernel stack fails |

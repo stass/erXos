@@ -61,9 +61,12 @@ module Erx
         {
           'kernel/generated/abi_calls.h' => kernel_header(schema),
           'kernel/generated/abi_decode.c' => decoder(schema),
+          'kernel/generated/abi_run.c' => run_source(schema),
+          'include/erx/core/abi_trap.h' => trap_seam(schema),
           'liberx/backend/erx/arch/aarch64/generated/calls.c' => trap_source(schema),
           'liberx/backend/fiasco/generated/calls.h' => backend_header(schema, 'fiasco'),
           'liberx/backend/fiasco/generated/calls.c' => backend_source(schema, 'fiasco'),
+          'liberx/backend/fiasco/arch/aarch64/generated/trap.c' => fiasco_trap_source(schema),
           'liberx/backend/hosted/generated/calls.h' => backend_header(schema, 'hosted'),
           'liberx/backend/hosted/generated/calls.c' => backend_source(schema, 'hosted')
         }
@@ -164,6 +167,9 @@ module Erx
           out << "erx_status_t erx_sys_#{name}(erx_sys_context_t *context,"
           out << "    #{parameters.join(', ')});"
         end
+        out.concat(['', '/* Runs the handler of a decoded and admitted shape. */',
+                    'erx_status_t erx_sys_run(erx_sys_context_t *context,',
+                    '    const erx_sys_shape_t *shape);'])
         out.concat(['', '#endif /* ERX_KERNEL_ABI_CALLS_H */', ''])
         out.join("\n")
       end
@@ -543,26 +549,69 @@ module Erx
         out.join("\n")
       end
 
-      def trap_source(schema)
+      # The handler of each call the dispatch can run. A call with results
+      # or a retry has no case here and answers ERX_ENOTSUP.
+      def run_source(schema)
+        cases = schema.calls.select { |_name, call| call.fetch(:results).empty? && !call.fetch(:retry) }.flat_map do |name, _call|
+          ["\tcase ERX_CALL_#{name.upcase}:",
+           "\t\treturn (erx_sys_#{name}(context, &shape->arguments.#{name}));"]
+        end
+        [CEmitter::NOTICE, '#include "abi_calls.h"', '', 'erx_status_t',
+         'erx_sys_run(erx_sys_context_t *context, const erx_sys_shape_t *shape)', '{',
+         "\tswitch (shape->number) {", *cases, "\tdefault:", "\t\treturn (ERX_ENOTSUP);", "\t}", '}', ''].join("\n")
+      end
+
+      # The architecture's trap as the kernel's glue reads it from a saved
+      # frame: which general register holds what. Macros only, so the seam
+      # header stays valid C, C++ and assembler.
+      def trap_seam(schema)
         architecture = schema.architecture || raise(SchemaError, 'trap output needs an architecture')
-        out = [CEmitter::NOTICE, '#include "liberx/generated/calls.h"', '']
+        registers = architecture.fetch(:registers)
+        indices = ->(role) { registers.fetch(role).map { |register| frame_index(register) } }
+        utcb = schema.types.fetch(Contracts::UTCB_LAYOUT)
+        [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_TRAP_H', '#define ERX_CORE_ABI_TRAP_H', '',
+         "#define ERX_TRAP_IMMEDIATE #{format('0x%x', architecture.fetch(:trap)[1])}",
+         "#define ERX_TRAP_REG_NUMBER #{indices.call('number').first}",
+         "#define ERX_TRAP_ARG_COUNT #{registers.fetch('args').size}",
+         "#define ERX_TRAP_REG_ARGS { #{indices.call('args').join(', ')} }",
+         "#define ERX_TRAP_RESULT_COUNT #{registers.fetch('results').size}",
+         "#define ERX_TRAP_REG_RESULTS { #{indices.call('results').join(', ')} }",
+         "#define ERX_TRAP_UTCB_BYTES #{utcb.size}",
+         '', '#endif /* ERX_CORE_ABI_TRAP_H */', ''].join("\n")
+      end
+
+      def frame_index(register)
+        raise SchemaError, "trap register #{register} has no frame index" unless (match = /\Ax([0-9]{1,2})\z/.match(register))
+
+        match[1].to_i
+      end
+
+      # The stopgap's transport: the same trap as the erx backend's, under
+      # the names the fiasco backend's generated calls forward to.
+      def fiasco_trap_source(schema)
+        trap_source(schema, prefix: 'erx_fiasco', header: 'liberx/backend/fiasco/generated/calls.h')
+      end
+
+      def trap_source(schema, prefix: 'erx', header: 'liberx/generated/calls.h')
+        architecture = schema.architecture || raise(SchemaError, 'trap output needs an architecture')
+        out = [CEmitter::NOTICE, %(#include "#{header}"), '']
         if schema.calls.values.any? { |call| (utcb_parameters(call.fetch(:arguments)) + utcb_parameters(call.fetch(:results))).any? }
           out.concat(['/* The calling thread\'s UTCB, which the erx backend provides. */',
                       'erx_utcb_t *erx_utcb_self(void);', ''])
           out.concat(WORD_HELPERS)
         end
-        schema.calls.each { |name, call| out.concat(trap_wrapper(name, call, architecture)) }
+        schema.calls.each { |name, call| out.concat(trap_wrapper(name, call, architecture, prefix: prefix)) }
         out.join("\n")
       end
 
-      def trap_wrapper(name, call, architecture)
+      def trap_wrapper(name, call, architecture, prefix: 'erx')
         registers = architecture.fetch(:registers)
         number_register = registers.fetch('number').first
         result_registers = registers.fetch('results')
         utcb_arguments = utcb_parameters(call.fetch(:arguments))
         utcb_results = utcb_parameters(call.fetch(:results))
         uses_utcb = !(utcb_arguments.empty? && utcb_results.empty?)
-        out = ['erx_status_t', signature(name, call), '{']
+        out = ['erx_status_t', signature(name, call, prefix: prefix), '{']
         if uses_utcb
           span = [word_span(call.fetch(:arguments)).last, word_span(call.fetch(:results)).last].max
           out.concat(["\terx_utcb_t *utcb;", "\tuint64_t words[#{span}] = {0};"])

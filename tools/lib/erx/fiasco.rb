@@ -14,6 +14,7 @@ require_relative 'fiasco_inputs'
 require_relative 'fiasco_config'
 require_relative 'core_archive'
 require_relative 'stack_proof_run'
+require_relative 'glue_imports'
 require_relative 'output_directory'
 
 module Erx
@@ -124,6 +125,25 @@ module Erx
 
     def image_path
       File.join(@build, 'images/bootstrap_banner.elf')
+    end
+
+    # An image of a test guest's own modules list, whose debug_log entry names
+    # a program beside guest, from the kernel and users already built.
+    def debug_log_image(guest:, modules:, directory:)
+      users = File.join(@build, 'users')
+      kernel = File.join(@build, 'kernel')
+      raise Error, 'build the Fiasco fork first: tools/erx build fiasco' unless File.directory?(users) && File.directory?(kernel)
+
+      OutputDirectory.prepare(root: @root, path: directory)
+      @runner.run(['gmake', '-C', users, 'CROSS_COMPILE=aarch64-elf-', 'elfimage',
+                   'E=debug_log', 'PT=arm_virt',
+                   "MODULES_LIST=#{modules}",
+                   "MODULE_SEARCH_PATH=#{kernel}:#{File.dirname(guest)}", "BOOTSTRAP_OUTPUT_DIR=#{directory}"],
+                  name: 'fiasco-debug-log-image', deadline: 180, env: build_environment)
+      image = File.join(directory, 'bootstrap_debug_log.elf')
+      raise Error, 'the debug-log image was not produced' unless File.file?(image)
+
+      image
     end
 
     def input_catalog
@@ -257,6 +277,8 @@ module Erx
       @runner.run(['gmake', '-C', directory, "-j#{jobs}", 'CROSS_COMPILE=aarch64-elf-',
                    "ERX_CORE_ARCHIVE=#{cores.archive}", "ERX_CORE_INCLUDE=#{cores.seam}"],
                   name: 'fiasco-kernel-build', deadline: 600, env: build_environment)
+      GlueImports.check(source: @inputs.part('kernel'), allowlist: File.join(@source, GlueImports::ALLOWLIST),
+                        objects: directory, runner: @runner, env: build_environment)
       directory
     end
 

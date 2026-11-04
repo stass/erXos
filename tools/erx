@@ -12,6 +12,7 @@ require_relative 'lib/erx/tla'
 require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/qemu'
 require_relative 'lib/erx/conformance'
+require_relative 'lib/erx/debug_log_probe'
 require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
@@ -64,6 +65,8 @@ module Erx
         qemu(command_arguments, **collaborators)
       when 'conformance'
         conformance(command_arguments, **collaborators)
+      when 'check-debug-log'
+        check_debug_log(command_arguments, **collaborators)
       when 'oracle'
         oracle(command_arguments, **collaborators)
       when 'bench'
@@ -343,7 +346,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-debug-log | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
       0
     end
 
@@ -457,6 +460,27 @@ module Erx
                end
       Terminal.puts("Linux host oracle: #{result.fetch('state')}; #{result.fetch('report')}")
       result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
+    end
+
+    # The debug-log probe on the stopgap kernel under each accelerator, each
+    # transcript compared with the hosted backend's and the expected one.
+    def self.check_debug_log(input_arguments)
+      arguments = input_arguments.dup
+      accels = %w[tcg hvf]
+      jobs = 8
+      OptionParser.new do |flags|
+        flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| accels = value }
+        flags.on('--jobs N', Integer, 'Build jobs') { |value| jobs = value }
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      unless (accels - %w[tcg hvf]).empty? && !accels.empty?
+        raise OptionParser::InvalidArgument, 'accelerators must be tcg or hvf'
+      end
+
+      DebugLogProbe::Run.new(root: ROOT).call(accels: accels, jobs: jobs).each do |label, run|
+        Terminal.puts("debug-log probe #{label}: agrees with hosted; image #{run.fetch(:image_sha256)}; #{run.fetch(:serial)}")
+      end
+      0
     end
 
     # The conformance roster over the matrix of accelerators and CPU counts.

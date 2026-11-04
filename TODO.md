@@ -60,6 +60,43 @@ it; git history is the record of completed work.
   go with the stopgap at M7, or earlier once the profiling feature under
   Planned features gives a confined way to count.
 
+* [High] stopgap, the one route from user mode: only erXos's trap immediate
+  reaches `erx_dispatch` (`Erx_syscall::enter`, called from the system-call
+  case of `Thread::arm_esr_entry`); Fiasco's own calls, its exception path
+  and its vector table stand as imported, so requirement 1 of
+  [design-stopgap.md](docs/design-stopgap.md#transport) does not hold yet
+  and a program can still reach Fiasco's protocol. Sigma0 is the only user
+  of it in the images built today. Remaining: `erx_user_sync_entry` with
+  `erx_fault_classify` and `erx_entry_step`, the stubs, the deletions the
+  section lists, `tools/check_vectors.rb` (the pending `vector-route` rule),
+  and folding `fiasco/kernel/src/erx/erx_syscall.cpp` into `entry.cpp`.
+* [Medium] stopgap, `make check` does not run `tools/erx check-debug-log`:
+  like `tools/erx conformance`, it needs a kernel build and QEMU, so the
+  kernel half of the first call (`erx_syscall.cpp`, the branch in
+  `thread-arm.cpp`, the fiasco backend) is covered only when that command
+  runs. Give the QEMU suites one gate.
+* [Medium] stopgap, untested glue paths: `erx_log_lock` has never run under
+  contention, since the probe has one thread and no call makes another, and
+  nothing exercises the alien and vCPU-user guard in `Thread::arm_esr_entry`.
+* [Medium] kernel, `kernel/core/debug_log.c` keeps the ring and its console
+  buffers in file statics, and `tools/fuzz/dispatch_fuzz.c` a static UTCB and
+  rate, so a fuzz crash can depend on earlier inputs. Make the log an object
+  `erx_sys_caller_t` points to.
+* [Low] stopgap, `tools/lib/erx/glue_imports.rb` reads what the compiler left
+  out of line: a change of inlining can move a symbol such as
+  `_ZN13Irq_chip_soft7sw_chipE` on or off the list and fail the build.
+* [Medium] stopgap, console ownership: `erx_effect_console_write` writes every
+  log record for the whole run, which is the kernel half of
+  `erx_console_owner_step`; the core and its host test
+  ([design-stopgap.md](docs/design-stopgap.md#observation-ends-the-pet-stop-hook-and-the-benchmarks)
+  and the row in its verification table) are still to land.
+* [Medium] stopgap, the debug-log probe's report: `tools/erx check-debug-log`
+  compares its own transcript, because the conformance guest's protocol
+  needs lines that start with `erx-test:` and a guest that ends the machine,
+  and a program's only output here is a log record with the kernel's prefix
+  and no call ends the machine. `debug_log.statuses` stays `pending` in the
+  roster until the conformance guest can report.
+
 ## Bugs by subsystem
 
 * [Low] Lane reader, `liberx/erx_lane.c`: the record state machine

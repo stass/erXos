@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# What the stopgap's glue may reference in Fiasco (docs/design-stopgap.md,
+# "Interfaces", and tools/lib/erx/glue_imports.rb): one symbol per line, with
+# the effect that needs it and the glue file that may hold the reference. A
+# glue object with an undefined symbol its file does not list fails the build.
+# The cores' own erx_ functions need no entry.
+printf probe-report erx_probe.cpp
+__cxa_pure_virtual console-class-vtable erx_syscall.cpp
+_ZN13Irq_chip_soft7sw_chipE thread-header-inline erx_syscall.cpp
+_ZN5Timer22_scaler_shift_ts_to_usE clock erx_syscall.cpp
+_ZN8Kconsole2_cE console erx_syscall.cpp

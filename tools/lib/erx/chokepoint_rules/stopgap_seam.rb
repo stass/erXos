@@ -19,6 +19,8 @@ module Erx
       # and reader, and the ELF planner.
       unchecked_objects: %w[
         liberx/backend/erx/arch/aarch64/generated/calls.c
+        liberx/backend/fiasco/arch/aarch64/generated/trap.c
+        liberx/backend/fiasco/arch/aarch64/utcb.c
         liberx/backend/fiasco/generated/calls.c
         liberx/backend/fiasco/generated/calls.h
         liberx/backend/hosted/generated/calls.c
@@ -65,14 +67,17 @@ module Erx
         ),
         Chokepoints::Forbidden.new(
           name: 'one-erx-trap',
-          rule: "kernel calls only through liberx: the ABI's trap only in liberx's erx backend, Fiasco's svc only " \
-                'in its fiasco backend, and no other trap or raw instruction word in erXos C',
+          rule: "kernel calls only through liberx: the ABI's trap only in liberx's erx and fiasco backends and " \
+                'the debug-log probe, and no other trap or raw instruction word in erXos C',
           design: "#{STOPGAP}#verification-and-testing",
           scope: ERXOS_C,
           pattern: TRAP,
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/erx/arch/aarch64/**/*', permits: ERX_TRAP),
-                  # Fiasco's own trap is svc #0.
-                  Chokepoints::Site.new(glob: FIASCO_BACKEND, permits: /\Asvc[ \t]+#0\z/i),
+                  # The fiasco backend's transport is the ABI's trap, which the
+                  # fork hands to erXos's call path. The debug-log probe makes
+                  # the calls no typed wrapper can express, in a test guest.
+                  Chokepoints::Site.new(glob: FIASCO_BACKEND, permits: ERX_TRAP),
+                  Chokepoints::Site.new(glob: 'test/guest/debug_log_probe/start.S', permits: ERX_TRAP),
                   # The stack proof's host fixtures plant raw instruction
                   # words its extractor must refuse; no build links them.
                   Chokepoints::Site.new(glob: 'test/fixtures/stack_graph/*.c', permits: /\A\.inst\z/)],
@@ -97,13 +102,11 @@ module Erx
           awaits: ['fiasco/kernel/src/erx/entry.cpp', 'tools/check_vectors.rb'],
           reason: 'reads the vector table and the stubs in the kernel disassembly'
         ),
-        Chokepoints::Pending.new(
+        Chokepoints::Elsewhere.new(
           name: 'glue-imports', rule: "a glue object's undefined symbols are all listed for its file in " \
                                       'fiasco/erx_glue_imports.txt',
-          design: "#{STOPGAP}#interfaces",
-          awaits: ['fiasco/erx_glue_imports.txt', GLUE],
-          existing: ['fiasco/kernel/src/erx/erx_probe.cpp'],
-          reason: "reads the glue's GCC objects from the kernel build"
+          design: "#{STOPGAP}#interfaces", check: 'GlueImports, on every kernel build',
+          test: 'test/host/glue_imports_test.rb'
         ),
         Chokepoints::Pending.new(
           name: 'raw-allocator-sites', rule: "the linked kernel's call sites of the raw page allocator are the " \

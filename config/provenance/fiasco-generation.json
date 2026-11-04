@@ -400,7 +400,7 @@
     },
     "build/fiasco/kernel/.Modules.deps": {
       "mode": "text",
-      "sha256": "87f95517504a3667aeffd88add91978a6db4a9e57fa126f03a1ae913706a52f4"
+      "sha256": "7fe6ecfc09870b8abaf4e75bc6222eeca85e2c3afe3fac4ed902ab338c469bfd"
     },
     "build/fiasco/kernel/.dump_tcboffsets.cc.d": {
       "mode": "text",

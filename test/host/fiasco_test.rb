@@ -91,6 +91,7 @@ class FiascoTest < Minitest::Test
     File.write(kernel_config, KERNEL_CONFIG)
     File.write(user_config, "CONFIG_BUILD_ARCH_arm64=y\n")
     File.write(File.join(@directory, 'config/fiasco/modules.list'), 'fixture')
+    File.write(File.join(@directory, 'fiasco/erx_glue_imports.txt'), "# no glue in this fixture\n")
   end
 
   def teardown

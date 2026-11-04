@@ -20,6 +20,8 @@ class LogTest < Minitest::Test
   SEED = Integer(ENV.fetch('ERX_LOG_SEED', '20261103'), 10)
   CORE = 'kernel/core/log.c'
   HOSTED = 'liberx/backend/hosted/log.c'
+  HOSTED_CORES = %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
+                    kernel/generated/abi_decode.c kernel/generated/abi_run.c].freeze
   FORGERIES = {
     'newline and a forged kernel line' => "ok\nerx: panic: forged\r\n",
     'csi that clears the screen' => "\e[2J\e[H",
@@ -449,6 +451,8 @@ class LogTest < Minitest::Test
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-D_DARWIN_C_SOURCE', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror', '-pedantic',
                  '-O1', '-g', *sanitizers, '-pthread', '-I', File.join(@root, 'include'), '-I', @root,
+                 '-I', File.join(@root, 'kernel/generated'), '-I', File.join(@root, 'kernel/core'),
+                 *HOSTED_CORES.map { |source| File.join(@root, source) },
                  File.join(@root, CORE), File.join(@root, HOSTED),
                  File.join(@root, 'liberx/backend/hosted/generated/calls.c'),
                  File.join(@root, 'test/fixtures/log_hosted_probe.c'), '-o', output],
