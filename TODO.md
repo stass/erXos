@@ -70,11 +70,6 @@ it; git history is the record of completed work.
   `erx_fault_classify` and `erx_entry_step`, the stubs, the deletions the
   section lists, `tools/check_vectors.rb` (the pending `vector-route` rule),
   and folding `fiasco/kernel/src/erx/erx_syscall.cpp` into `entry.cpp`.
-* [Medium] stopgap, `make check` does not run `tools/erx check-debug-log`:
-  like `tools/erx conformance`, it needs a kernel build and QEMU, so the
-  kernel half of the first call (`erx_syscall.cpp`, the branch in
-  `thread-arm.cpp`, the fiasco backend) is covered only when that command
-  runs. Give the QEMU suites one gate.
 * [Medium] stopgap, untested glue paths: `erx_log_lock` has never run under
   contention, since the probe has one thread and no call makes another, and
   nothing exercises the alien and vCPU-user guard in `Thread::arm_esr_entry`.

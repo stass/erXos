@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require_relative '../../tools/fuzz/run_pack'
 require_relative '../../tools/lib/erx/checks'
 require_relative '../../tools/lib/erx/core_archive'
+require_relative '../../tools/lib/erx/qemu_gate'
 require_relative '../../tools/lib/erx/sanitizer_tests'
 
 # The gates discover what they run, so a deleted or misnamed file could make
@@ -80,6 +81,14 @@ class GateBaselineTest < Minitest::Test
                        kernel/crypto/blake3/blake3_portable.c kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                        kernel/generated/abi_decode.c kernel/generated/abi_run.c
                        kernel/sched/sched.c].freeze
+
+  # The suites the QEMU gate runs. The conformance roster's pending cases are
+  # not a floor: they come and go as the calls they wait for land.
+  QEMU_SUITES = %w[conformance debug_log].freeze
+
+  def test_the_qemu_gate_still_runs_every_suite
+    assert_empty QEMU_SUITES - Erx::QemuGate.suites.map(&:name)
+  end
 
   def test_the_sanitizer_gate_still_runs_every_test
     assert_empty SANITIZER_TESTS - Erx::SanitizerTests.discover(root: ROOT)

@@ -13,6 +13,7 @@ require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/qemu'
 require_relative 'lib/erx/conformance'
 require_relative 'lib/erx/debug_log_probe'
+require_relative 'lib/erx/qemu_gate'
 require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
@@ -65,6 +66,8 @@ module Erx
         qemu(command_arguments, **collaborators)
       when 'conformance'
         conformance(command_arguments, **collaborators)
+      when 'check-qemu'
+        check_qemu(command_arguments, **collaborators)
       when 'check-debug-log'
         check_debug_log(command_arguments, **collaborators)
       when 'oracle'
@@ -108,8 +111,9 @@ module Erx
     end
 
     # An integration test runs in `make check` unless it is excused here: these
-    # two rebuild the stopgap kernel or need the stock OTP suites' runtime.
-    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible oracle_reporter].freeze
+    # rebuild the stopgap kernel, boot it under QEMU or need the stock OTP
+    # suites' runtime.
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible oracle_reporter qemu_gate_mutant].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }
@@ -228,6 +232,7 @@ module Erx
       Terminal.puts("test pool: #{TestPool.jobs} parallel processes (#{TestPool::JOBS_VARIABLE} overrides); " \
                     "each file under its own #{TEST_FILE_DEADLINE}s deadline; " \
                     "serial files: #{serial.empty? ? 'none' : serial.join(' ')}")
+      QemuGate.suites.each { |suite| Terminal.puts("QEMU suite: #{suite.name}") }
       PackFuzz.targets.each do |target|
         Terminal.puts("native fuzz target: #{target.kind}: #{target.seeds.size} seeds; " \
                       "sources #{target.sources.join(' ')}; includes #{target.includes.join(' ')}")
@@ -346,7 +351,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-debug-log | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-tla | gates | status')
       0
     end
 
@@ -481,6 +486,31 @@ module Erx
         Terminal.puts("debug-log probe #{label}: agrees with hosted; image #{run.fetch(:image_sha256)}; #{run.fetch(:serial)}")
       end
       0
+    end
+
+    # Every QEMU suite, discovered from tools/lib/erx/qemu_suites/, over the
+    # accelerators asked for. Exits 0 only when no suite failed or went
+    # incomplete: an accelerator this host lacks is reported as not run and
+    # fails the gate unless the caller narrowed --accel on purpose.
+    def self.check_qemu(input_arguments, runner_class: Runner, fiasco_class: Fiasco)
+      arguments = input_arguments.dup
+      options = { accels: %w[tcg hvf], jobs: 8 }
+      OptionParser.new do |flags|
+        flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| options[:accels] = value }
+        flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
+      end.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      unless (options.fetch(:accels) - %w[tcg hvf]).empty? && !options.fetch(:accels).empty?
+        raise OptionParser::InvalidArgument, 'accelerators must be tcg or hvf'
+      end
+
+      runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      fiasco_class.new(root: ROOT, runner: runner).build(jobs: options.fetch(:jobs))
+      context = QemuGate::Context.new(root: ROOT, accels: options.fetch(:accels).uniq, jobs: options.fetch(:jobs),
+                                      available: QemuGate.available_accelerators(runner: runner))
+      results = QemuGate.run(suites: QemuGate.suites, context: context)
+      QemuGate.table(results, context: context).each { |line| Terminal.puts(line) }
+      QemuGate.overall(results.values.map { |entry| QemuGate.status(entry) }) == 'passed' ? 0 : 1
     end
 
     # The conformance roster over the matrix of accelerators and CPU counts.

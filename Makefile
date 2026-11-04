@@ -13,7 +13,7 @@ DOCKER_CONTEXT ?=
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
-.PHONY: check-stack-proof check-conformance check-debug-log
+.PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant
 
 all: build
 
@@ -45,6 +45,17 @@ check-ubsan:
 
 check-sources:
 	$(RUBY) tools/erx check-sources
+
+# Every kernel-touching change runs this: all QEMU suites, discovered from
+# tools/lib/erx/qemu_suites/, over tcg and hvf. A missing accelerator is
+# reported as not run and fails the gate; pass ACCEL_LIST=tcg to narrow it.
+ACCEL_LIST ?= tcg,hvf
+check-qemu:
+	$(RUBY) tools/erx check-qemu --accel $(ACCEL_LIST) --jobs $(JOBS)
+
+# Seeds a failure into a copy of the sources and checks the gate reports it.
+check-qemu-mutant:
+	$(RUBY) test/integration/qemu_gate_mutant_test.rb
 
 check-conformance:
 	$(RUBY) tools/erx conformance
