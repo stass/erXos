@@ -64,6 +64,7 @@ class JsonInputTest < Minitest::Test
     secret = 'private-token-that-must-not-appear'
     error = assert_raises(Erx::Error) { Erx::JsonInput.parse("{\"#{secret}\":1,\"#{secret}\":2}") }
     refute_includes error.message, secret
+    assert_nil error.cause
   end
 
   def test_json_that_cannot_refuse_duplicate_keys_refuses_every_input
@@ -106,5 +107,6 @@ class JsonInputTest < Minitest::Test
     error = assert_raises(Erx::Error) { Erx::JsonInput.parse("{#{secret}", label: 'build record') }
     assert_equal 'invalid build record: malformed JSON', error.message
     refute_includes error.message, secret
+    assert_nil error.cause
   end
 end

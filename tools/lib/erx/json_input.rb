@@ -33,13 +33,13 @@ module Erx
         super
       end
     end
-    private_constant :DistinctKeys
+    private_constant :DuplicateKey, :DistinctKeys
 
-    # Two independent mechanisms refuse a duplicate, and both are always
-    # requested: json 2.13 and later refuse it themselves
-    # (allow_duplicate_key) and no longer call []= per member, while older
-    # json ignores that option and relies on DistinctKeys. Neither
-    # is selected by version.
+    # Both mechanisms are always requested, and a given json honors at most
+    # one of them: json 2.13 and later refuse a duplicate themselves
+    # (allow_duplicate_key) and ignore what object_class would see, while
+    # json 2.9 ignores that option and refuses through DistinctKeys. No
+    # mechanism is selected by version.
     PARSE_OPTIONS = { max_nesting: 64, allow_duplicate_key: false, object_class: DistinctKeys }.freeze
 
     # json reports its own refused duplicate as a ParserError whose message
@@ -80,26 +80,28 @@ module Erx
       end
       text = bytes.dup.force_encoding(Encoding::UTF_8)
       raise Error, "#{label} is not valid UTF-8" unless text.valid_encoding?
-      validated(JSON.parse(text, **PARSE_OPTIONS), label: label)
+      plain_checked(JSON.parse(text, **PARSE_OPTIONS), label: label)
     rescue JSON::ParserError => error
       # Only the kind of failure is kept, so input never reaches a diagnostic.
       kind = duplicate_key_error?(error) ? 'duplicate JSON object key' : 'malformed JSON'
-      raise Error, "invalid #{label}: #{kind}"
+      # cause: nil drops the parser's error, which quotes the input.
+      raise Error, "invalid #{label}: #{kind}", cause: nil
     end
 
     # Checks every string and number and returns the same value with each
-    # object turned into a plain Hash. The parser's max_nesting bounds the
-    # recursion.
-    def self.validated(value, label:)
+    # object turned into a plain Hash, so callers never see DistinctKeys
+    # and a later assignment to a key cannot raise. The parser's max_nesting
+    # bounds the recursion.
+    def self.plain_checked(value, label:)
       case value
       when Hash
         value.to_h do |key, member|
           raise Error, "#{label} has an invalid UTF-8 key" unless key.valid_encoding?
 
-          [key, validated(member, label: label)]
+          [key, plain_checked(member, label: label)]
         end
       when Array
-        value.map { |member| validated(member, label: label) }
+        value.map { |member| plain_checked(member, label: label) }
       when String
         raise Error, "#{label} has an invalid UTF-8 value" unless value.valid_encoding?
 
@@ -112,6 +114,6 @@ module Erx
         value
       end
     end
-    private_class_method :validated
+    private_class_method :plain_checked
   end
 end
