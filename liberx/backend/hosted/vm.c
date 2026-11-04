@@ -9,6 +9,9 @@
  * own address, so the pool is only a count. Host pages hold several of the ABI's
  * pages on Apple Silicon: each host page's protection is the union of its pages',
  * and contents are cleaned lazily, so a commit of whole host pages touches nothing.
+ * A call's effects only record each page's rights, and the host pages it touched
+ * change once it is whole, so a range moving between write and execute never meets
+ * itself halfway. A reserve's search starts on a host page, so unrelated ranges share none.
  *
  * An uncommitted page that may hold its last holder's bytes is marked dirty when
  * given back. A take cleans a dirty page; a host page none of whose pages is
@@ -59,6 +62,8 @@ static uint64_t vm_area;
 static uint64_t vm_host_page;
 static uint8_t *vm_page_bytes;	/* one per ABI page of the area */
 static uint8_t *vm_host_rights;	/* one per host page of the area: what the host holds now */
+static uint64_t vm_touched_low;	/* the pages this call's effects changed, as a range */
+static uint64_t vm_touched_high;
 
 static void *
 vm_map_host(uint64_t bytes, int prot)
@@ -83,6 +88,7 @@ vm_init(void)
 	erx_backend_vm_index_init(index, (size_t)layout.index_slots);
 	erx_backend_vm_table_init(&vm_table, 0, vm_ranges, VM_RANGES_MAX, index, (size_t)layout.index_slots, vm_area,
 	    vm_area + VM_AREA_BYTES);
+	vm_table.placement = vm_host_page;
 	vm_free = VM_POOL_PAGES;
 }
 
@@ -130,12 +136,21 @@ host_refresh(uint64_t addr)
 }
 
 static void
+page_touched(uint64_t addr)
+{
+	if (vm_touched_high == 0 || addr < vm_touched_low)
+		vm_touched_low = addr;
+	if (addr + PAGE > vm_touched_high)
+		vm_touched_high = addr + PAGE;
+}
+
+static void
 vm_map(uint32_t label, uintptr_t window, uint64_t addr, uint32_t prot)
 {
 	(void)label;
 	(void)window;
 	*page_byte(addr) |= (uint8_t)prot & PAGE_RIGHTS;
-	host_refresh(addr);
+	page_touched(addr);
 }
 
 /* As on a real table a read right's unmap takes the mapping whole. */
@@ -149,7 +164,7 @@ vm_unmap(uint32_t label, uint64_t addr, uint32_t rights)
 		*byte &= (uint8_t)~PAGE_RIGHTS;
 	else
 		*byte &= (uint8_t)~rights;
-	host_refresh(addr);
+	page_touched(addr);
 }
 
 /* A dirty page's sibling keeps the host page mapped, so the bytes are cleaned under a brief write right. */
@@ -209,6 +224,11 @@ vm_call(erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, ui
 	(void)pthread_once(&vm_once, vm_init);
 	(void)pthread_mutex_lock(&vm_lock);
 	status = erx_backend_vm_call(&vm_table, &vm_effects, &request, reserved);
+	if (vm_touched_high != 0)
+		for (uint64_t host = vm_touched_low & ~(vm_host_page - 1); host < vm_touched_high; host += vm_host_page)
+			host_refresh(host);
+	vm_touched_low = 0;
+	vm_touched_high = 0;
 	(void)pthread_mutex_unlock(&vm_lock);
 	return (status);
 }

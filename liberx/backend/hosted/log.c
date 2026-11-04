@@ -42,7 +42,7 @@ static _Thread_local erx_utcb_t erx_hosted_utcb;
 erx_utcb_t *
 erx_utcb_self(void)
 {
-	/* The block holds its own address, as natively; each thread sets its own, once. */
+	/* The block holds its own address, as natively; storing it each time is simplest. */
 	atomic_store_explicit(&erx_hosted_utcb.self, (uint64_t)(uintptr_t)&erx_hosted_utcb, memory_order_relaxed);
 	return (&erx_hosted_utcb);
 }

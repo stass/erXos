@@ -66,6 +66,7 @@ typedef struct erx_backend_vm_table {
 	uint32_t		 label;		/* below ERX_PAGE_SIZE, and no other table's */
 	uint64_t		 area_start;	/* where reservations may lie */
 	uint64_t		 area_end;
+	uint64_t		 placement;	/* a reserve's search starts on this power of two */
 } erx_backend_vm_table_t;
 
 /* What the window's first pages must hold for an index covering the whole window. */

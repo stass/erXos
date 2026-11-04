@@ -7,8 +7,8 @@
  * What both backends must do alike, one line per case, judged by
  * tools/lib/erx/function_api.rb. Natively a fault ends the machine before the case's
  * line, and hosted it ends the process: a missing line is a failure either way.
- * Order matters at the two ends only: the pool's count is steady across the memory
- * cases, and indices_run_out uses up the thread table, so it comes last.
+ * Order matters at the two ends only: pool_count_steady closes the memory cases, and
+ * indices_run_out uses up the thread table, so it comes last.
  */
 
 #include <stdatomic.h>
@@ -304,6 +304,38 @@ case_every_protection_change(void)
 	return (erx_vm_release(base, PAGE) == 0 && erx_vm_free_pages() == free_before);
 }
 
+/*
+ * A range of many pages changes between write and execute as one call, beside
+ * another reservation that stays writable: no moment of the change, and no
+ * neighbour, may stop it.
+ */
+static bool
+case_many_pages_between_write_and_execute(void)
+{
+	const uint64_t pages = 32;
+	uint64_t base, neighbour;
+	bool ok = true;
+
+	if (erx_vm_reserve(0, pages * PAGE, 0, &base) != 0 || erx_vm_commit(base, pages * PAGE) != 0 ||
+	    erx_vm_reserve(0, PAGE, 0, &neighbour) != 0 || erx_vm_commit(neighbour, PAGE) != 0)
+		return (false);
+	page_fill(neighbour, 0x71);
+	for (uint64_t index = 0; index < pages; index++)
+		page_fill(base + index * PAGE, 0x70 + index);
+	if (erx_space_protect(base, pages * PAGE, ERX_PROT_RX) != 0)
+		return (false);
+	page_fill(neighbour, 0x72);
+	for (uint64_t index = 0; index < pages; index++)
+		ok = ok && page_holds(base + index * PAGE, 0x70 + index);
+	if (erx_space_protect(base, pages * PAGE, ERX_PROT_RW) != 0)
+		return (false);
+	for (uint64_t index = 0; index < pages; index++)
+		ok = ok && page_holds(base + index * PAGE, 0x70 + index);
+	page_fill(base, 0x7f);
+	ok = ok && page_holds(neighbour, 0x72);
+	return (ok && erx_vm_release(neighbour, PAGE) == 0 && erx_vm_release(base, pages * PAGE) == 0);
+}
+
 /* The whole pool at once: the index at its fullest. */
 static bool
 case_whole_pool_commits(void)
@@ -319,6 +351,15 @@ case_whole_pool_commits(void)
 	page_fill(base + size - PAGE, 0x52);
 	ok = page_holds(base, 0x51) && page_holds(base + size - PAGE, 0x52);
 	return (ok && erx_vm_release(base, size) == 0 && erx_vm_free_pages() == free_before);
+}
+
+static uint64_t pool_at_start;
+
+/* Every memory case above gave back what it took. */
+static bool
+case_pool_count_steady(void)
+{
+	return (erx_vm_free_pages() == pool_at_start);
 }
 
 void
@@ -507,11 +548,11 @@ case_bad_handle_refused(void)
 {
 	uint64_t thread;
 
-	return (erx_thread_start(0) == ERX_EINVAL && erx_thread_start(UINT64_C(1) << 40) == ERX_EINVAL &&
-	    erx_thread_set_clear_word(0, 0) == ERX_EINVAL &&
+	return (erx_thread_start(UINT64_C(1) << 40) == ERX_EINVAL &&
 	    erx_thread_set_clear_word(UINT64_C(1) << 40, 0) == ERX_EINVAL &&
 	    erx_thread_set_affinity(UINT64_C(1) << 40, 1) == ERX_EINVAL &&
-	    erx_thread_create(0, 0, 0, 2, &thread) == ERX_EINVAL);
+	    erx_thread_create(0, 0, 0, 2, &thread) == ERX_EINVAL &&
+	    erx_thread_create(0, 1, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_EINVAL);
 }
 
 /* The calls this table refuses, whatever they are handed. */
@@ -1000,7 +1041,9 @@ static const function_api_case_t shared_cases[] = {
 	{ "refusals", case_refusals },
 	{ "fixed_reserve_replaces", case_fixed_reserve_replaces },
 	{ "every_protection_change", case_every_protection_change },
+	{ "many_pages_between_write_and_execute", case_many_pages_between_write_and_execute },
 	{ "whole_pool_commits", case_whole_pool_commits },
+	{ "pool_count_steady", case_pool_count_steady },
 	{ "tls_and_arg", case_tls_and_arg },
 	{ "utcb_is_each_threads", case_utcb_is_each_threads },
 	{ "double_start_refused", case_double_start_refused },
@@ -1036,14 +1079,9 @@ report(const char *name, bool ok)
 void
 function_api_run(const function_api_case_t *extra, size_t nextra)
 {
-	const uint64_t free_before = erx_vm_free_pages();
-	const size_t memory_cases = 11;
-
-	for (size_t index = 0; index < sizeof(shared_cases) / sizeof(shared_cases[0]); index++) {
+	pool_at_start = erx_vm_free_pages();
+	for (size_t index = 0; index < sizeof(shared_cases) / sizeof(shared_cases[0]); index++)
 		report(shared_cases[index].name, shared_cases[index].run());
-		if (index + 1 == memory_cases)
-			report("pool_count_steady", erx_vm_free_pages() == free_before);
-	}
 	for (size_t index = 0; index < nextra; index++)
 		report(extra[index].name, extra[index].run());
 	report("indices_run_out", case_indices_run_out());

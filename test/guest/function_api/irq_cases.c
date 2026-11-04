@@ -71,7 +71,7 @@ ready_once_helper(uint64_t arg)
 	ok = ok && erx_group_take_ready(UINT32_MAX) == 1 && label_at(0) == LABEL_B;
 	ok = ok && erx_group_take_ready(ERX_MSG_WORDS) == 0 && atomic_load(&status->ready) == 0;
 	ok = ok && erx_irq_ack(irq_a) == ERX_OK;
-	/* Free to fire again; bound elsewhere, under the new label; unbound, it delivers nothing. */
+	/* Free to fire again; bound again, under the new label; unbound, it delivers nothing. */
 	ok = ok && erx_irq_bind(irq_b, GROUP, LABEL_A + 1) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK;
 	ok = ok && erx_group_take_ready(1) == 1 && label_at(0) == LABEL_A + 1;
 	ok = ok && erx_irq_bind(irq_b, ERX_CAP_NULL, 0) == ERX_OK && erx_irq_trigger(irq_b) == ERX_OK;

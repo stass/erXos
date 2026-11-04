@@ -112,7 +112,8 @@ erx_backend_vm_table_init(erx_backend_vm_table_t *table, uint32_t label, erx_bac
     uint64_t area_end)
 {
 	*table = (erx_backend_vm_table_t){ .label = label, .ranges = ranges, .ranges_max = ranges_max,
-	    .pages = pages, .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end };
+	    .pages = pages, .pages_mask = slots - 1, .area_start = area_start, .area_end = area_end,
+	    .placement = ERX_PAGE_SIZE };
 }
 
 erx_backend_vm_steps_t
@@ -421,16 +422,17 @@ erx_backend_vm_table_clear(erx_backend_vm_table_t *table, const erx_backend_vm_e
 static int
 find_free_range(const erx_backend_vm_table_t *table, uint64_t size, uint64_t *start)
 {
+	const uint64_t mask = table->placement - 1;
 	uint64_t gap = table->area_start;
 
 	for (size_t run = 0; run < table->nranges; run++) {
-		if (table->ranges[run].start - gap >= size) {
+		if (gap <= table->ranges[run].start && table->ranges[run].start - gap >= size) {
 			*start = gap;
 			return (0);
 		}
-		gap = table->ranges[run].end;
+		gap = (table->ranges[run].end + mask) & ~mask;
 	}
-	if (table->area_end - gap < size)
+	if (gap > table->area_end || table->area_end - gap < size)
 		return (ERX_ENOMEM);
 	*start = gap;
 	return (0);

@@ -111,15 +111,15 @@ layout erx_msg_item 1 wire_le 8 16
   field desc u64 0
   field cap cap 8
 
-# An executor's class and state, and what a group's status page mirrors for its
-# runtime (docs/design-scheduler.md, "The status area").
-
 # What an IRQ object fires from (docs/design-kernel.md, "IRQ objects").
 
 enum irq_kind u32
   value soft 0
   value line 1
   value msi 2
+
+# An executor's class and state, and what a group's status page mirrors for its
+# runtime (docs/design-scheduler.md, "The status area").
 
 enum thread_class u32
   value worker 0

@@ -44,7 +44,7 @@ class FiascoVmTest < Minitest::Test
     'an alias over a committed page admitted' => ['vm_table.c', "\tif (count_takes(table, addr, end, ERX_BACKEND_PAGE_RW) != size / ERX_PAGE_SIZE)\n\t\treturn (ERX_EEXIST);\n", '', 'an alias over a committed page passed'],
     'an alias of addresses not reserved admitted' => ['vm_table.c', "\tif (!range_reserved(table, addr, end) || __builtin_add_overflow(object->area_start, offset, &first))\n", "\tif (__builtin_add_overflow(object->area_start, offset, &first))\n", 'a bad alias passed'],
     'clearing leaves the pages' => ['vm_table.c', "\t\tapply_plan(table, effects, &plan);\n\t}\n}\n\n/* The area's lowest", "\t\t(void)plan;\n\t\t(void)effects;\n\t\ttable->nranges--;\n\t}\n}\n\n/* The area's lowest", 'clearing one table reached'],
-    'a free range too small accepted' => ['vm_table.c', 'if (table->ranges[run].start - gap >= size) {', 'if (table->ranges[run].start - gap > 0) {', 'a non-fixed reserve landed wrong']
+    'a free range too small accepted' => ['vm_table.c', 'if (gap <= table->ranges[run].start && table->ranges[run].start - gap >= size) {', 'if (gap <= table->ranges[run].start && table->ranges[run].start - gap > 0) {', 'a non-fixed reserve landed wrong']
   }.freeze
 
   def setup

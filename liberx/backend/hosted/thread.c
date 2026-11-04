@@ -45,6 +45,7 @@ typedef enum thread_state {
 	THREAD_STARTED
 } thread_state_t;
 
+/* The creator writes these under thread_lock; once started, the thread reads its own start record freely. */
 typedef struct hosted_thread {
 	thread_state_t	state;		/* under thread_lock */
 	erx_thread_start_t start;
@@ -53,6 +54,7 @@ typedef struct hosted_thread {
 	uint64_t	release_base;
 	uint64_t	release_size;
 	uint64_t	host_sp;	/* the way back to the pthread's stack */
+	void		*asan_fake_stack;	/* the pthread stack's, while on the caller's */
 } hosted_thread_t;
 
 static pthread_mutex_t thread_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -70,47 +72,56 @@ thread_find(uint64_t thread)
 	return (threads[thread - HANDLE_BASE].state != THREAD_FREE ? &threads[thread - HANDLE_BASE] : NULL);
 }
 
+/* save keeps the stack being left's fake frames for its return; NULL ends them, for a stack never returned to. */
 static void
-sanitizer_before_switch(uint64_t top)
+sanitizer_before_switch(void **save, uint64_t top)
 {
 #ifdef HOSTED_ASAN
-	void *fake_stack;
-
-	__sanitizer_start_switch_fiber(&fake_stack, (const void *)(uintptr_t)(top - ASAN_STACK_SPAN), ASAN_STACK_SPAN);
+	__sanitizer_start_switch_fiber(save, (const void *)(uintptr_t)(top - ASAN_STACK_SPAN), ASAN_STACK_SPAN);
 #else
+	(void)save;
 	(void)top;
 #endif
 }
 
 static void
-sanitizer_after_switch(void)
+sanitizer_after_switch(void *saved)
 {
 #ifdef HOSTED_ASAN
-	__sanitizer_finish_switch_fiber(NULL, NULL, NULL);
+	__sanitizer_finish_switch_fiber(saved, NULL, NULL);
+#else
+	(void)saved;
 #endif
 }
 
-/* On the pthread's own stack again: nothing of the caller's stack is used from here on. */
+/*
+ * On the pthread's own stack again: nothing of the caller's stack is used from here on.
+ * The order is native's contract: the word clears while the handle and the slot are
+ * still this thread's, so no new thread can be mistaken for it by the word's holder.
+ */
 static _Noreturn void
 thread_finish(void *arg)
 {
 	hosted_thread_t *const self = arg;
 	const uint32_t slot = self->slot;
-	const uint64_t word = self->clear_word;
+	uint64_t word;
 
-	sanitizer_after_switch();
+	sanitizer_after_switch(self->asan_fake_stack);
 	if (self->release_size != 0 && erx_vm_release(self->release_base, self->release_size) != ERX_OK)
 		erx_hosted_fatal("erx: hosted: a thread's stack would not release\n");
+	(void)pthread_mutex_lock(&thread_lock);
+	word = self->clear_word;
+	(void)pthread_mutex_unlock(&thread_lock);
+	if (word != 0) {
+		atomic_store_explicit((_Atomic uint32_t *)(uintptr_t)word, 0, memory_order_release);
+		(void)erx_umtx_wake(word, 1);
+	}
 	if (slot != ERX_NO_EXECUTOR_SLOT)
 		erx_hosted_executor_release(slot);
 	(void)pthread_mutex_lock(&thread_lock);
 	*self = (hosted_thread_t){ .state = THREAD_FREE };
 	(void)pthread_mutex_unlock(&thread_lock);
 	thread_self = NULL;
-	if (word != 0) {
-		atomic_store_explicit((_Atomic uint32_t *)(uintptr_t)word, 0, memory_order_release);
-		(void)erx_umtx_wake(word, UINT32_MAX);
-	}
 	pthread_exit(NULL);
 }
 
@@ -118,14 +129,13 @@ static _Noreturn void
 thread_leave(uint64_t base, uint64_t size)
 {
 	hosted_thread_t *const self = thread_self;
-	uint64_t discarded;
 
 	if (self == NULL)
 		pthread_exit(NULL);
 	self->release_base = base;
 	self->release_size = size;
-	sanitizer_before_switch(self->host_sp);
-	erx_hosted_switch_stack(self->host_sp, thread_finish, self, &discarded);
+	sanitizer_before_switch(NULL, self->host_sp);
+	erx_hosted_switch_stack(self->host_sp, thread_finish, self, &self->host_sp);
 }
 
 /* On the caller's stack, where the start record said. An entry that returned has no place to go. */
@@ -135,7 +145,7 @@ thread_run(void *arg)
 	hosted_thread_t *const self = arg;
 	void (*const entry)(uint64_t) = (void (*)(uint64_t))(uintptr_t)self->start.regs.pc;
 
-	sanitizer_after_switch();
+	sanitizer_after_switch(NULL);
 	entry(self->start.regs.gpr[0]);
 	erx_hosted_fatal("erx: hosted: a thread's entry returned\n");
 }
@@ -146,7 +156,7 @@ thread_main(void *arg)
 	hosted_thread_t *const self = arg;
 
 	thread_self = self;
-	sanitizer_before_switch(self->start.regs.sp);
+	sanitizer_before_switch(&self->asan_fake_stack, self->start.regs.sp);
 	erx_hosted_switch_stack(self->start.regs.sp, thread_run, self, &self->host_sp);
 }
 
@@ -156,36 +166,30 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 	erx_utcb_t *const utcb = erx_utcb_self();
 	erx_thread_start_t start;
 	uint64_t *const words = (uint64_t *)(void *)&start;
-	uint32_t slot = ERX_NO_EXECUTOR_SLOT;
 	int status = ERX_ENOMEM;
 
 	(void)budget;
-	(void)space;
 	(void)group;
-	if (thread_class != ERX_THREAD_CLASS_WORKER && thread_class != ERX_THREAD_CLASS_EXECUTOR)
+	if (space != 0 || (thread_class != ERX_THREAD_CLASS_WORKER && thread_class != ERX_THREAD_CLASS_EXECUTOR))
 		return (ERX_EINVAL);
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
 	(void)pthread_mutex_lock(&thread_lock);
-	for (uint32_t index = 0; index < THREADS_MAX && status != ERX_OK; index++) {
+	for (uint32_t index = 0; index < THREADS_MAX; index++) {
 		if (threads[index].state == THREAD_FREE) {
-			threads[index] = (hosted_thread_t){ .state = THREAD_CREATED, .start = start,
-			    .slot = ERX_NO_EXECUTOR_SLOT };
-			*thread = HANDLE_BASE + index;
-			status = ERX_OK;
+			const uint32_t slot = thread_class == ERX_THREAD_CLASS_EXECUTOR ? erx_hosted_executor_claim() :
+			    ERX_NO_EXECUTOR_SLOT;
+
+			if (thread_class != ERX_THREAD_CLASS_EXECUTOR || slot != ERX_NO_EXECUTOR_SLOT) {
+				threads[index] = (hosted_thread_t){ .state = THREAD_CREATED, .start = start, .slot = slot };
+				*thread = HANDLE_BASE + index;
+				status = ERX_OK;
+			}
+			break;
 		}
 	}
 	(void)pthread_mutex_unlock(&thread_lock);
-	if (status != ERX_OK || thread_class != ERX_THREAD_CLASS_EXECUTOR)
-		return (status);
-	slot = erx_hosted_executor_claim();
-	(void)pthread_mutex_lock(&thread_lock);
-	if (slot == ERX_NO_EXECUTOR_SLOT)
-		*thread_find(*thread) = (hosted_thread_t){ .state = THREAD_FREE };
-	else
-		thread_find(*thread)->slot = slot;
-	(void)pthread_mutex_unlock(&thread_lock);
-	return (slot == ERX_NO_EXECUTOR_SLOT ? ERX_ENOMEM : ERX_OK);
+	return (status);
 }
 
 int

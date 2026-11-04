@@ -94,7 +94,8 @@ void	erx_group_trigger(void);
 /*
  * IRQ objects. ERX_IRQ_SOFT alone is software's; a bind moves the object's label to
  * the group, and a bind to ERX_CAP_NULL unbinds it. A trigger of an object not bound
- * delivers nothing and never waits.
+ * delivers nothing and never waits. A delivery carries the label bound when it is
+ * taken, so an object that fired and was then unbound delivers label 0.
  */
 int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;

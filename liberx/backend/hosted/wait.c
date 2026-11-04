@@ -5,9 +5,8 @@
 
 /*
  * The umtx calls and the park protocol's semaphores, over the host's wait on an
- * address. The host's own table holds the waiters, so its wake order is its own,
- * which is the one difference from the native table: a caller cannot count on the
- * oldest waiter first (docs/design-stopgap.md, "The hosted backend").
+ * address. The host's own table holds the waiters, so the wake order is its own and
+ * a wake's count is of the host's wakes (docs/design-stopgap.md, "The hosted backend").
  */
 
 #include <errno.h>
@@ -23,7 +22,10 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/hosted/internal.h"
 
-/* The host's wait until a wake or the deadline, whichever it reports first; false at the deadline. */
+/*
+ * The host's wait until a wake or the deadline; false at the deadline, never before it,
+ * since a timeout or an interruption only goes round to read the clock again.
+ */
 static bool
 word_wait(_Atomic uint32_t *word, uint32_t expected, uint64_t deadline)
 {
@@ -42,6 +44,7 @@ word_wait(_Atomic uint32_t *word, uint32_t expected, uint64_t deadline)
 		}
 		if (result >= 0)
 			return (true);
+		/* EFAULT or EINVAL: a bad address, which natively is a fault. */
 		if (errno != EINTR && errno != ETIMEDOUT)
 			erx_hosted_fatal("erx: hosted: a wait on an address the host refused\n");
 	}
