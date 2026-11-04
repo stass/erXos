@@ -425,6 +425,7 @@ Each declaration lives with what it declares:
 | --- | --- | --- |
 | Chokepoint checks | `tools/lib/erx/chokepoint_rules/NAME.rb`, one group of rules; a core's group is named after its source and states its rules or why it has none | a `kernel/core` or `kernel/sched` source has no group, or a group file declares nothing, twice, or an empty group |
 | `check-sanitizers` | the line `# erx-gate: sanitizers` in a test under `test/host` or `test/integration` | a comment resembles it but is not it, a test reads the sanitizer switch directly or through a helper without declaring, a core or `liberx` source is named by no declaring test, or nothing declares |
+| Test pool (`check`, `check-sanitizers`) | every `*_test.rb` under `test/host` (and the declaring or non-excused integration tests); `# erx-gate: serial` on a file that cannot share the machine | a file's log has no Minitest summary or zero runs, a file fails or times out, a file is listed twice, or the verdicts differ from the file list |
 | `check-fuzz`, native targets | `tools/fuzz/KIND_target.rb` beside `tools/fuzz/KIND_fuzz.c`, naming sources, include paths and seeds | either file lacks the other, or a declaration is empty or malformed |
 
 Discovery could otherwise make a security gate quietly run less, so
@@ -434,6 +435,13 @@ gate does not touch that file; taking something away does, which makes the
 removal a visible edit. `tools/erx gates` lists what each gate runs, one
 line each, for a reader or a diff. An integration test runs in `make check`
 unless `tools/erx` excuses it by name.
+
+The test pool runs each test file as its own process, with its own log and
+deadline, about half the CPUs at a time (`ERX_TEST_JOBS=N` overrides). A
+file keeps its temporary directories and global state to itself, so a
+failure names the file and its log, and a hang costs one file's deadline.
+The pool refuses to pass a file that printed no Minitest summary, so a test
+that forgets `require 'minitest/autorun'` cannot silently run nothing.
 
 `TODO.md` and `docs/todo-performance.md` merge by line union
 (`.gitattributes`), so concurrent additions to these lists never

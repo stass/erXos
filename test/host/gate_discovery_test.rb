@@ -181,6 +181,16 @@ class GateDiscoveryTest < Minitest::Test
     assert_equal %w[a_test.rb], select({ 'a_test.rb' => DECLARED, 'b_test.rb' => "x = \"#{DECLARED.chomp}\"\n" })
   end
 
+  # The test pool's serial declaration shares the `erx-gate` comment style and
+  # is the one other line discovery accepts; a misspelling of it is refused.
+  def test_the_serial_declaration_is_accepted_beside_the_sanitizer_one_and_misspelt_ones_are_refused
+    both = "#{DECLARED}# erx-gate: serial\n"
+    assert_equal %w[a_test.rb b_test.rb], select({ 'a_test.rb' => both, 'b_test.rb' => "# erx-gate: serial\n#{DECLARED}" })
+    ['# erx-gate: serail', '# erx-gate:serial', '# erx-gate: serial, sanitizers'].each do |line|
+      refusal(/malformed declaration/) { select({ 'a_test.rb' => DECLARED, 'b_test.rb' => "#{line}\n" }) }
+    end
+  end
+
   def test_a_gate_nothing_declares_is_refused
     refusal(/no test declares it/) { select({ 'a_test.rb' => "# nothing\n" }) }
     refusal(/no test declares it/) { select({}) }

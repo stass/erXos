@@ -34,16 +34,38 @@ class TopLevelCliTest < Minitest::Test
     [status, output]
   end
 
+  def setup
+    @directory = Dir.mktmpdir('erx-cli-')
+  end
+
+  def teardown
+    FileUtils.remove_entry(@directory)
+  end
+
+  # A log that ends the way a Minitest run does, for the pool's check that
+  # a file ran tests.
+  def passing_log
+    @passing_log ||= File.join(@directory, 'passing.log').tap do |path|
+      File.write(path, "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips\n")
+    end
+  end
+
   def recording_runner(commands, fail_name: nil)
+    log = passing_log
     Object.new.tap do |runner|
       runner.define_singleton_method(:run) do |argv, **options|
         commands << [argv, options]
-        if options.fetch(:name) == fail_name
+        if fail_name && options.fetch(:name).start_with?(fail_name)
           raise Erx::CommandError, { 'state' => 'failed', 'log' => '/evidence/failure.log' }
         end
-        { 'state' => 'succeeded' }
+        { 'state' => 'succeeded', 'log' => log }
       end
     end
+  end
+
+  # The commands a step ran: one per test file, named after the step.
+  def step_commands(commands, step)
+    commands.select { |_argv, options| options.fetch(:name).start_with?("#{step}-") }
   end
 
   def with_checks(commands, fail_name: nil)
@@ -68,16 +90,15 @@ class TopLevelCliTest < Minitest::Test
     assert proof, 'check runs the stack proof'
     assert proof.first[1].end_with?('/tools/stack_proof.rb')
     assert_equal '/verified/erl', proof.last.fetch(:env).fetch('ERX_ERL')
-    host = commands.find { |_argv, options| options.fetch(:name) == 'host-tests' }
-    assert host
-    assert_operator host.last.fetch(:deadline), :>, 180
-    integration = commands.find { |_argv, options| options.fetch(:name) == 'native-integration' }
-    assert integration.first.any? { |argument| argument.end_with?('/terminal_tables_test.rb') }
-    assert integration.first.any? { |argument| argument.end_with?('/structural_pack_test.rb') }
-    assert integration.first.any? { |argument| argument.end_with?('/fiasco_config_test.rb') }
-    assert integration.first.any? { |argument| argument.end_with?('/pack_fixture_test.rb') }
-    assert integration.first.any? { |argument| argument.end_with?('/sanitizer_gate_test.rb') }
-    assert_equal '/verified/erl', integration.last.fetch(:env).fetch('ERX_ERL')
+    host = step_commands(commands, 'host-tests')
+    discovered = Dir.glob(File.join(Erx::ROOT, 'test/host/*_test.rb'))
+    assert_equal discovered.sort, host.map { |argv, _options| argv.last }.sort
+    assert host.all? { |_argv, options| options.fetch(:deadline) > 180 }
+    integration = step_commands(commands, 'native-integration')
+    %w[terminal_tables structural_pack fiasco_config pack_fixture sanitizer_gate].each do |name|
+      assert integration.any? { |argv, _options| argv.last.end_with?("/#{name}_test.rb") }, name
+    end
+    assert integration.all? { |_argv, options| options.fetch(:env).fetch('ERX_ERL') == '/verified/erl' }
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
   end
 
@@ -142,7 +163,7 @@ class TopLevelCliTest < Minitest::Test
       assert_equal 1, status
       assert_includes output, 'not built'
     end
-    refute commands.any? { |_argv, options| options.fetch(:name) == 'host-tests' }
+    assert_empty step_commands(commands, 'host-tests')
   end
 
   def test_production_pack_reports_unsupported_startup
@@ -163,11 +184,11 @@ class TopLevelCliTest < Minitest::Test
       status, output = run_cli('check-sanitizers', **collaborators.slice(:runner_class, :runtime))
       assert_equal 0, status, output
     end
-    tests = commands.find { |_argv, options| options.fetch(:name) == 'sanitizer-tests' }
+    tests = step_commands(commands, 'sanitizer-tests')
     expected = Erx::SanitizerTests.discover(root: Erx::ROOT).map { |path| File.join(Erx::ROOT, path) }
     refute_empty expected
-    assert_equal expected, tests.first.last(expected.size)
-    assert_equal 'address,undefined', tests.last.fetch(:env).fetch('ERX_SANITIZERS')
+    assert_equal expected.sort, tests.map { |argv, _options| argv.last }.sort
+    assert tests.all? { |_argv, options| options.fetch(:env).fetch('ERX_SANITIZERS') == 'address,undefined' }
   end
 
   def test_fuzz_limits_are_checked_before_starting_commands

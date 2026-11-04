@@ -17,6 +17,7 @@ require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
 require_relative 'lib/erx/oracle_container'
 require_relative 'lib/erx/sanitizer_tests'
+require_relative 'lib/erx/test_pool'
 require_relative 'lib/erx/bench'
 require_relative 'lib/erx/toolchain_provenance'
 
@@ -171,10 +172,14 @@ module Erx
       end
     end
 
-    def self.run_tests(paths, runner:, name:, environment:)
-      runner.run([RbConfig.ruby, '-I', File.join(ROOT, 'test/host'), '-e',
-                  'ARGV.each { |path| require path }', *paths],
-                 name: name, deadline: 900, chdir: ROOT, env: environment)
+    # Seconds one test file may run before it is killed. The slowest file takes
+    # about 230 s under sanitizers on a loaded 16-CPU host, so this is about four
+    # times that, and a hang costs one file's deadline, not the step's.
+    TEST_FILE_DEADLINE = 900
+
+    # Each file is its own process, under its own deadline (see TestPool).
+    def self.run_tests(paths, runner:, name:, environment:, deadline: TEST_FILE_DEADLINE)
+      TestPool.run(paths, runner: runner, name: name, environment: environment, deadline: deadline, root: ROOT)
     end
 
     def self.check_reproducible(arguments)
@@ -215,6 +220,11 @@ module Erx
       no_arguments(arguments)
       require_relative 'fuzz/run_pack'
       SanitizerTests.discover(root: ROOT).each { |test| Terminal.puts("sanitizer test: #{test}") }
+      serial = Dir.glob('test/{host,integration}/*_test.rb', base: ROOT).sort
+                  .select { |test| TestPool.serial?(File.join(ROOT, test)) }
+      Terminal.puts("test pool: #{TestPool.jobs} parallel processes (#{TestPool::JOBS_VARIABLE} overrides); " \
+                    "each file under its own #{TEST_FILE_DEADLINE}s deadline; " \
+                    "serial files: #{serial.empty? ? 'none' : serial.join(' ')}")
       PackFuzz.targets.each do |target|
         Terminal.puts("native fuzz target: #{target.kind}: #{target.seeds.size} seeds; " \
                       "sources #{target.sources.join(' ')}; includes #{target.includes.join(' ')}")

@@ -619,14 +619,6 @@ it; git history is the record of completed work.
   `Thread::transfer_fpu` (`thread.cpp`) still saves and restores the
   current thread's registers without turning the unit on; the design
   does not build it.
-* [Low] host tooling, runner: `Runner#terminate_group`
-  (`tools/lib/erx/runner.rb`) treats only `ESRCH` from signalling the
-  child's process group as "already gone"; on macOS the group's signal can
-  fail with `EPERM` instead after the child aborted, and the run then
-  fails with "command cleanup failed: Operation not permitted". Seen once
-  in `make check` (2026-11-03, `SanitizerGateTest`, whose child aborts
-  under UBSan); the test passes alone. Find what holds the group and
-  decide whether `EPERM` there means "gone".
 * [Low] build, configuration check: `tools/lib/erx/fiasco.rb` checks the
   resolved `globalconfig.out` before the kernel make, whose own rules can
   rerun `oldconfig` or `syncconfig` (`fiasco/kernel/src/Makefile`). Today
@@ -684,9 +676,6 @@ it; git history is the record of completed work.
   outside the project is likewise judged by name; checking it against the
   compiler's own roots (SDK path, resource directory) would also refuse
   credential files whose directory is not on the list.
-* [Low] Test runner, `tools/erx`, `run_tests`: on Apple Silicon `make check`'s
-  `host-tests` step runs for over 720 of its 900 seconds, so a few more slow
-  tests will time it out. It fails loudly; split the step or raise the deadline.
 
 ## Security residuals
 

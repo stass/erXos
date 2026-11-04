@@ -196,9 +196,13 @@ module Erx
       end
     end
 
+    # A group with no live member is gone. macOS reports a group whose members
+    # have all exited but are not yet reaped as EPERM, not ESRCH. The group is
+    # our own child's; a member that changed user could not be signalled by
+    # this runner in any case.
     def signal_group(signal, pid)
       Process.kill(signal, -pid)
-    rescue Errno::ESRCH
+    rescue Errno::ESRCH, Errno::EPERM
       nil
     end
   end

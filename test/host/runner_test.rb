@@ -122,6 +122,17 @@ class RunnerTest < Minitest::Test
     refute File.exist?(marker), 'child survived completion of its command'
   end
 
+  # On macOS, signalling a process group whose only members have exited but
+  # are not yet reaped fails with EPERM instead of ESRCH (a child that aborted
+  # under a sanitizer leaves such a group for a moment). The group is gone.
+  def test_signalling_a_group_of_exited_processes_is_not_an_error
+    pid = Process.spawn(RbConfig.ruby, '-e', 'exit!', pgroup: true)
+    sleep 0.3 # exited, not reaped: a zombie
+    @runner.send(:signal_group, 'TERM', pid)
+  ensure
+    Process.wait(pid) if pid
+  end
+
   def test_callback_failure_cleans_up
     assert_raises(RuntimeError) do
       ruby('sleep 20', success: ->(_path) { raise 'fixture failure' })

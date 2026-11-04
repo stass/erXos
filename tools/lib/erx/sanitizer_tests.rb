@@ -5,6 +5,7 @@
 require_relative 'bounded_file'
 require_relative 'core_archive'
 require_relative 'error'
+require_relative 'test_pool'
 
 module Erx
   # Which test files `make check-sanitizers` runs. A test joins the gate with
@@ -18,6 +19,8 @@ module Erx
     module_function
 
     DECLARATION = '# erx-gate: sanitizers'
+    # The test pool's `# erx-gate: serial` is the only other declaration.
+    KNOWN_DECLARATIONS = [DECLARATION, TestPool::SERIAL_DECLARATION].freeze
     # Any comment trying to be a declaration, spelled however.
     DECLARATION_LIKE = /^\s*#[\W_]*erx[\W_]*gates?\b.*$/i
     DIRECTORIES = %w[test/host test/integration].freeze
@@ -40,7 +43,7 @@ module Erx
     # sources must be named by a test that declares the gate.
     def select(tests, switch_helpers:, sources:)
       tests.each do |path, text|
-        stray = text.scan(DECLARATION_LIKE).map(&:strip).reject { |line| line == DECLARATION }
+        stray = text.scan(DECLARATION_LIKE).map(&:strip).reject { |line| KNOWN_DECLARATIONS.include?(line) }
         raise Error, "sanitizer gate: #{path}: malformed declaration #{stray.first}" unless stray.empty?
       end
       declared = tests.select { |_path, text| text.match?(/^\s*#{Regexp.escape(DECLARATION)}\s*$/) }
