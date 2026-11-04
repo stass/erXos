@@ -86,7 +86,7 @@ erx_fiasco_park_step(erx_fiasco_park_t *park, const erx_fiasco_park_event_t *eve
 		park->group_epoch++;
 		return (park_take_oldest(park));
 	case ERX_FIASCO_PARK_OP_PARK:
-		/* A listed slot: Fiasco's late wake ended its last park early (TODO.md). */
+		/* A listed slot has a park in progress, so a second one is refused. */
 		if (!park_slot_valid(park, slot) || park_on_list(park, slot))
 			break;
 		if (park->group_epoch != event->group_seen || park->slot_epoch[slot] != event->slot_seen)

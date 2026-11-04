@@ -48,8 +48,8 @@ erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline)
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 	/*
-	 * A wait that returns with its node still queued was woken by no taker: the
-	 * kernel's late activation of an earlier up (TODO.md, the semaphore's late wake).
+	 * A wait that returns with its node still queued was woken by no taker, which
+	 * the kernel's keeping each activation inside its own down rules out.
 	 */
 	umtx_lock(NULL);
 	if (node->queued)

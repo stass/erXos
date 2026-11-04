@@ -1,5 +1,5 @@
 // Modified by erXos: a thread this semaphore dequeued does not leave sys_down
-// before its activation has landed (docs/design-stopgap.md, "Thread start").
+// before its activation has landed (docs/design-stopgap.md, "Thread creation").
 INTERFACE:
 
 #include <limits.h>
@@ -218,7 +218,10 @@ Semaphore::sys_down(L4_fpage::Rights rights, L4_timeout t, Utcb const *utcb)
 
   IPC_timeout timeout;
 
-  if (!(c_thread->state() & Thread_ready))
+  // Only a thread that queued can be dequeued, and so has an activation coming.
+  bool const queued = !(c_thread->state() & Thread_ready);
+
+  if (queued)
     c_thread->setup_timer(t, utcb, &timeout);
 
   while (!(c_thread->state() & Thread_ready))
@@ -279,11 +282,11 @@ Semaphore::sys_down(L4_fpage::Rights rights, L4_timeout t, Utcb const *utcb)
       //
       // Whoever dequeued this thread has yet to activate it, or the activation
       // is on its way here. Wait for it, so that it lands in this wait and in no
-      // later one. It cannot be missed: a remote state change lands here only
-      // through the request interrupt, which the CPU lock keeps out until
-      // schedule() lets the CPU go, so nothing lands between the check and
-      // clearing Thread_ready. A cancel in this wait finds the down complete.
-      while (!(c_thread->state() & Thread_sem_woken))
+      // later one. It cannot be missed: with the CPU lock held nothing applies a
+      // remote state change between the check and clearing Thread_ready, and that
+      // clear leaves the other bit alone. A cancel in this wait finds the down
+      // complete.
+      while (queued && !(c_thread->state() & Thread_sem_woken))
         {
           c_thread->state_del_dirty(Thread_ready);
           c_thread->schedule();

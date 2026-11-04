@@ -380,7 +380,7 @@ free and its marker reads 0**, checked under the thread lock, lowest first, as L
 Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears one. No claimable index is
 `ERX_ENOMEM`.
 
-**A semaphore's wake across CPUs.** The fork changes one thing in `Semaphore`. An up on another CPU dequeues its waiter and activates it afterwards, and the waiter's timeout can fire in between. Its down then reports success, as it must, since the count went to it, but the activation is still on its way, and it would end whatever the thread blocks in next: an IPC wait with a false timeout, or another down with success and no up, leaving the thread queued. So the activation carries `Thread_sem_woken`, and a down that finds its thread dequeued waits for that bit before it returns. No activation outlives its down, so no other wait has to expect one.
+**A semaphore's wake across CPUs.** The fork changes one thing in `Semaphore`. An up on another CPU dequeues its waiter and activates it afterwards, and the waiter's timeout can fire in between. Its down then reports success, as it must, since the count went to it, but the activation is still on its way, and it would end whatever the thread blocks in next: an IPC wait with a false timeout, or another down with success and no up, leaving the thread queued. So the activation carries `Thread_sem_woken`, and a down that finds its thread dequeued waits for that bit before it returns. No semaphore's activation outlives its down, so no other wait has to expect one.
 
 **`erx_thread_create`.** The stub claims an index. The service runs `l4_factory_create_thread` and
 `l4_factory_create(factory, L4_PROTO_SEMAPHORE, cap)` (`factory.h:470`, `semaphore.cpp:329`), maps the semaphore

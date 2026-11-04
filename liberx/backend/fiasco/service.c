@@ -45,10 +45,10 @@
 
 _Static_assert(L4_PROTO_PAGE_FAULT == ERX_FIASCO_WIRE_PAGE_FAULT, "Fiasco's page fault protocol");
 _Static_assert(L4_PROTO_EXCEPTION == ERX_FIASCO_WIRE_EXCEPTION, "Fiasco's exception protocol");
-_Static_assert(sizeof(l4_exc_regs_t) <= ERX_FIASCO_WIRE_EXCEPTION_WORDS * sizeof(uint64_t), "the exception's words hold its registers");
+_Static_assert(L4_UTCB_EXCEPTION_REGS_SIZE == ERX_FIASCO_WIRE_EXCEPTION_WORDS, "Fiasco's exception length");
 
 /*
- * The threads suite's image is built with this hook, and no other is: the step of
+ * Only the threads and semaphore race suites' images are built with this hook: the step of
  * a start to fail, 1 to 3 in the order they run, with 0 failing none.
  */
 #ifdef ERX_FIASCO_TEST_HOOKS

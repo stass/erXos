@@ -138,7 +138,8 @@ module Erx
       prepare_source_cache
       cores = build_cores
       directory = File.join(@build, "test-kernel-#{name}")
-      inputs = File.read(File.join(@build, '.erx-inputs.json'))
+      # Makeconf.local has no rule that rebuilds on a change, so the record holds the defines too.
+      inputs = File.read(File.join(@build, '.erx-inputs.json')) + defines.join(' ')
       marker = File.join(directory, '.erx-test-inputs.json')
       current = File.file?(marker) && File.read(marker) == inputs
       FileUtils.remove_entry(directory) if File.exist?(directory) && !current

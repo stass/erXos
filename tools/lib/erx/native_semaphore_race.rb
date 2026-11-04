@@ -18,7 +18,7 @@ module Erx
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_semaphore_race/guest.c'].freeze
     HOLD_US = 500_000
-    # What the guest's timings assume of the hold are in its own comments.
+    # The guest is built with the same define, and holds its timings to it.
     DEFINES = ["-DERX_TEST_SEMAPHORE_WAKE_HOLD_US=#{HOLD_US}"].freeze
     CASES = %w[ipc_wait_undisturbed second_down_waits].freeze
     CASE_SECONDS = 120
@@ -68,7 +68,7 @@ module Erx
       def image(fiasco, kernel)
         root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                               .build(name: 'semaphore-race-root', sources: SOURCES, directory: File.join(@build, 'root'),
-                                     flags: ['-DERX_FIASCO_TEST_HOOKS'])
+                                     flags: ['-DERX_FIASCO_TEST_HOOKS', *DEFINES])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, kernel: kernel)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
       end

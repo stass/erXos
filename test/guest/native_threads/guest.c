@@ -390,7 +390,7 @@ case_umtx_timeout_races_wake(void)
 /*
  * How the suite's waits came out: an absorbed wait is a timeout that met a wake, so
  * a run at four CPUs that shows some has crossed the race. A wait that returned with
- * its node still queued was woken by the kernel's late activation of an earlier up.
+ * its node still queued was woken by no taker, and none should be.
  */
 static bool
 case_umtx_no_stale_wake(void)

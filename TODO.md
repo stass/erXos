@@ -109,6 +109,10 @@ it; git history is the record of completed work.
   thread. The handle table of
   [design-stopgap.md](docs/design-stopgap.md#capabilities-in-fiascos-object-space)
   replaces it.
+* [Low] stopgap, Fiasco's `Ipc_gate_obj::unblock_all`, `fiasco/kernel/src/kern/ipc_gate.cpp:142-166`: the gate dequeues
+  a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
+  return first and the activation land in what the thread blocks in next. The root's one gate is created bound
+  (`service.c:161`), and a sender blocks only on an unbound gate, so nothing in `liberx` reaches it. Other runtimes unchecked.
 * [Medium] stopgap, the fork's executable pages under SMP: nothing runs a page rewritten on one CPU and run
   again on another, so instruction-cache coherence across CPUs and the reuse of an executable page are unverified:
   the native suites inspect only data after protection changes. The `native_memory` suite needs

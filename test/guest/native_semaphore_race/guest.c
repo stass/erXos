@@ -9,8 +9,9 @@
  * The waiter's first down times out meanwhile and must report the up. The activation
  * must then reach nothing the waiter does next: neither an IPC receive wait, which it
  * would end early, nor another down, which it would complete with no up and with the
- * waiter still queued. A round counts only if the first down really was raced; too few
- * such rounds is a failure of its own, since nothing was then tested.
+ * waiter still queued. A round counts only if its first down outlasted its timer and
+ * still took the up, and the up took the kernel's whole hold; too few such rounds is a
+ * failure of its own, since nothing was then tested.
  */
 
 #include <stdatomic.h>
@@ -29,13 +30,17 @@
 /* The up comes while the down waits, and the down's timer fires inside the kernel's hold. */
 #define UP_AFTER_NS	(UINT64_C(10) * NS_PER_MS)
 #define FIRST_DOWN_NS	(UINT64_C(100) * NS_PER_MS)
-/* Longer than the hold (ERX_TEST_SEMAPHORE_WAKE_HOLD_US in the suite), so a late activation lands inside. */
+/* Longer than the hold, so a late activation lands inside. */
 #define SLEEP_NS	(UINT64_C(1500) * NS_PER_MS)
 #define SECOND_DOWN_NS	(UINT64_C(1500) * NS_PER_MS)
 #define DRAIN_NS	(UINT64_C(30000) * NS_PER_MS)
 #define PATIENCE_NS	(UINT64_C(60000) * NS_PER_MS)
+#define HOLD_NS		((uint64_t)ERX_TEST_SEMAPHORE_WAKE_HOLD_US * NS_PER_US)
 #define RACED_WANTED	3u
 #define TRIES		30u
+
+_Static_assert(FIRST_DOWN_NS < HOLD_NS && SLEEP_NS > HOLD_NS && SECOND_DOWN_NS > HOLD_NS,
+    "the timer fires inside the hold, and what follows outlasts it");
 
 typedef enum {
 	WAITER_SLEEPS = 1,	/* after the raced down, an IPC receive wait */
@@ -86,7 +91,7 @@ waiter_after_raced_down(void)
 	atomic_fetch_add_explicit(&raced, 1, memory_order_relaxed);
 	if (atomic_load_explicit(&next_step, memory_order_relaxed) == WAITER_SLEEPS) {
 		erx_fiasco_test_ipc_sleep_us(SLEEP_NS / NS_PER_US);
-		if ((uint64_t)erx_fiasco_clock_ns() - start < SLEEP_NS)
+		if (erx_fiasco_clock_ns() - start < SLEEP_NS)
 			atomic_fetch_add_explicit(&damaged, 1, memory_order_relaxed);
 	} else if (erx_fiasco_semaphore_down(waiter_semaphore, start + SECOND_DOWN_NS)) {
 		atomic_fetch_add_explicit(&damaged, 1, memory_order_relaxed);
@@ -135,7 +140,8 @@ wait_for_word(_Atomic uint32_t *word, uint32_t want)
 static bool
 run_case(const char *name, waiter_next_t step, uint32_t *round)
 {
-	uint64_t up_at;
+	uint64_t up_at, up_took;
+	uint32_t raced_before;
 	bool responded = true;
 
 	atomic_store(&raced, 0);
@@ -149,8 +155,18 @@ run_case(const char *name, waiter_next_t step, uint32_t *round)
 		up_at = erx_fiasco_clock_ns() + UP_AFTER_NS;
 		while (erx_fiasco_clock_ns() < up_at)
 			;
+		raced_before = atomic_load(&raced);
+		up_took = erx_fiasco_clock_ns();
 		erx_fiasco_test_semaphore_up(waiter_semaphore);
+		up_took = erx_fiasco_clock_ns() - up_took;
 		responded = responded && wait_for_word(&round_done, *round);
+		/*
+		 * An up held for less than the hold found the waiter queued again, which shows
+		 * as damage, or found it not queued at all: its vCPU stalled before the down, which
+		 * then took a count and raced nothing, whatever the waiter's clock said.
+		 */
+		if (atomic_load(&raced) > raced_before && atomic_load(&damaged) == 0 && up_took < HOLD_NS / 2)
+			atomic_fetch_sub(&raced, 1);
 	}
 	say("erx: semaphore-race: ");
 	say(name);
