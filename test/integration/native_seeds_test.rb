@@ -82,11 +82,12 @@ class NativeSeedsTest < Minitest::Test
     end
   end
 
-  # A seed of its own kind: a second kernel, about 12 minutes to build, holds its up open
+  # A seed of its own kind: a second kernel build holds its up open
   # while a down's timeout races it. Only this suite boots that kernel, which is why the
-  # QEMU gate's roster leaves it to this target.
+  # QEMU gate's roster leaves it to this target. It builds first: building the test kernel
+  # on inputs newer than the last build deletes what the other seeds link against.
   def test_an_up_held_across_a_timed_down
-    ran = Erx::NativeSemaphoreRace::Run.new(root: ROOT).call(accels: %w[tcg], cpus: [4], build: false)
+    ran = Erx::NativeSemaphoreRace::Run.new(root: ROOT).call(accels: %w[tcg], cpus: [4], build: true)
     assert_equal %w[tcg-4cpu], ran.keys
   end
 

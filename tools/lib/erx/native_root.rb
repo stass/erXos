@@ -33,7 +33,7 @@ module Erx
     # threads it reaches the service through.
     TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c
               #{BACKEND}/service_stubs.c #{BACKEND}/thread.c #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c
-              #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c #{BACKEND}/park_table.c
+              #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/time_table.c
               #{BACKEND}/arch/aarch64/clock.c #{BACKEND}/arch/aarch64/cache.c].freeze
     # The system's root task. The archive's core comes from Fiasco's boot archive,
     # which does not hold the handoff record's core, since bootstrap only writes it.
@@ -66,15 +66,16 @@ module Erx
     end
 
     # Compiles sources in source's tree and links them into directory/name, with Fiasco's
-    # boot archive, which holds the cores the service reads a program with. Headers of
+    # boot archive, which holds the cores the service reads a program with, and any
+    # further archives. Headers of
     # Fiasco are system headers here: they are inherited, so -pedantic judges only
     # erXos's own code.
-    def build(name:, sources:, directory:, flags: [], script: LINK_SCRIPT)
+    def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT)
       FileUtils.mkdir_p(directory)
       objects = sources.map { |source| compile(source, directory: directory, flags: flags) }
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, *objects, @fiasco.boot_core_archive, *libraries],
+      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, *objects, *archives, @fiasco.boot_core_archive, *libraries],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program
     end

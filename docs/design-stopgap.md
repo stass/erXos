@@ -785,7 +785,7 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 ## Verification
 
 Each increment is a QEMU transcript test under TCG and HVF, one and four CPUs, kept in the suite. Each case has a seeded failure, a test-only patch that makes it fail, which shows the case
-ran the code it claims to; `make check-native-seeds` keeps the threads and watchdog suites' seeds. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
+ran the code it claims to; `make check-native-seeds` keeps the suites' seeds and the semaphore race's test kernel. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
 the tests.
 
 | Case | Seeded failure, and what it shows |
