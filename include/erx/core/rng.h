@@ -26,23 +26,22 @@
  *   they mix in, and mixing in bytes an observer cannot guess recovers
  *   from a key the observer knew.
  *
- * Mixing takes a digest, not the bytes: erx_rng_digest hashes bytes of any
- * length and touches no generator, so the caller hashes outside whatever
- * serializes the generator, which then holds for one ChaCha20 block, not
- * for a hash whose length a domain chose. A digest is spent by the call
- * that takes it, which erases it. The hash's working state, ERX_RNG_HASH_BYTES
- * bytes aligned to ERX_RNG_HASH_ALIGN, is too large for a kernel stack, so the
- * caller supplies it, in memory charged to its own caller and out of user
- * mode's reach (a page, as the boot image's hash does), overlapping neither
- * the digest nor the bytes; its contents are of no interest before the call
- * and all zeroes after it. The bytes are the caller's, and so is erasing them.
+ * Mixing takes a digest, not the bytes: erx_rng_digest hashes at most
+ * ERX_RNG_DIGEST_INPUT_MAX bytes and touches no generator, so the caller
+ * hashes outside whatever serializes the generator, which then holds for one
+ * ChaCha20 block, not for a hash whose length a domain chose. A digest is spent
+ * by the call that takes it, which erases it. The bound is one BLAKE3 chunk,
+ * which has no chaining values to keep, so the hash's state sits on the call's
+ * own stack and the caller supplies no memory; a source longer than the bound
+ * mixes in parts, each with its own digest. The bytes are the caller's, and so
+ * is erasing them.
  *
  * A generator is ready only from erx_rng_init, which keys it with its
  * first seed's digest, until erx_rng_clear retires it. A retired or never
  * initialized generator (all zero bytes) refuses reads and mixes, so no
  * output ever comes from a key nobody seeded.
  *
- * The functions read and write only the state, the digest, the hash and
+ * The functions read and write only the state, the digest and the
  * buffers passed to them and their own stack. They erase the key streams and
  * digests they work with and overwrite the stack their callees used
  * before they return; they do not erase the registers a callee may change,
@@ -64,30 +63,41 @@ extern "C" {
 #define ERX_RNG_DIGEST_LENGTH	32
 /* The longest read one request may make; a longer one is refused. */
 #define ERX_RNG_READ_MAX	256
-/* The memory erx_rng_digest's hash needs; rng.c holds these to the hasher's. */
-#define ERX_RNG_HASH_BYTES	1912
-#define ERX_RNG_HASH_ALIGN	8
+/* The most bytes one digest takes, one BLAKE3 chunk; more are refused. */
+#define ERX_RNG_DIGEST_INPUT_MAX	1024
 
 typedef struct erx_rng erx_rng_t;
 typedef struct erx_rng_digest erx_rng_digest_t;
-/* Private to the generator: only its size and alignment are stated. */
-typedef struct erx_rng_hash erx_rng_hash_t;
 
 struct erx_rng {
 	uint8_t		key[ERX_RNG_KEY_LENGTH];
 	bool		ready;
 };
 
-/* The BLAKE3 digest of bytes to mix, which the generator's calls take. */
+/*
+ * The BLAKE3 digest of bytes to mix, which the generator's calls take. Only a
+ * hash that was not refused sets hashed, and spending the digest clears it, so
+ * a refused or spent digest keys nothing.
+ */
 struct erx_rng_digest {
 	uint8_t		bytes[ERX_RNG_DIGEST_LENGTH];
+	bool		hashed;
 };
 
 void	erx_rng_clear(erx_rng_t *);
-/* Length bytes, none and possibly NULL when length is 0, into the digest. */
-void	erx_rng_digest(erx_rng_digest_t *, erx_rng_hash_t *, const void *, size_t);
+/*
+ * Length bytes, none and possibly NULL when length is 0, into the digest.
+ * Returns false, with the digest all zeroes and not hashed, when length is
+ * over ERX_RNG_DIGEST_INPUT_MAX.
+ */
+bool	erx_rng_digest(erx_rng_digest_t *, const void *, size_t)
+	    __attribute__((__warn_unused_result__));
+/* A digest that was not hashed leaves the generator all zeroes, not ready. */
 void	erx_rng_init(erx_rng_t *, erx_rng_digest_t *);
-/* Returns false, spending the digest all the same, unless rng is ready. */
+/*
+ * Returns false, spending the digest all the same, unless rng is ready and the
+ * digest was hashed; the state is then untouched.
+ */
 bool	erx_rng_mix(erx_rng_t *, erx_rng_digest_t *)
 	    __attribute__((__warn_unused_result__));
 /*

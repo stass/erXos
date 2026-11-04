@@ -685,7 +685,9 @@ it; git history is the record of completed work.
   proof holds only the depth, so a flag or compiler change that moves a
   frame's padding onto a message word in the kernel's objects goes
   unseen. Run the residue check on objects built with the core archive's
-  flags, under QEMU or reassembled for the host.
+  flags, under QEMU or reassembled for the host. An assembly leaf that zeroes
+  downward from the stack pointer would leave no padding to check and no
+  frame cap to meet.
 * [Low] Entropy generator's registers (`kernel/core/rng.c`): secrets stay
   in the registers a callee may change until they are overwritten, and an
   interrupt taken in kernel mode in that window saves them to the stack,

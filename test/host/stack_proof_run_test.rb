@@ -16,7 +16,6 @@ class StackProofRunTest < Minitest::Test
 
   ROOT = File.expand_path('../..', __dir__)
   FIXTURES = File.expand_path('../fixtures', __dir__)
-  RNG_BURN_SHIFT_BYTES = Integer(File.read(File.join(ROOT, 'kernel/core/rng.c'))[/ERX_RNG_BURN_SHIFT_BYTES\s+(\d+)/, 1])
   FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
              -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections].freeze
   BUDGET = Erx::StackProofInput::Budget.new(block_bytes: 8192, allowances: { 'call' => 2048, 'tick' => 1024 }.freeze,
@@ -117,27 +116,24 @@ class StackProofRunTest < Minitest::Test
     refute_empty Erx::StackProofRun.call(root: root, compiler: @compiler, runner: @runner, output: 'proof')
   end
 
+  RNG_BURN_BYTES = Integer(File.read(File.join(ROOT, 'kernel/core/rng.c'))[/ERX_RNG_BURN_BYTES\s+(\d+)/, 1])
+
   # erx_rng_digest overwrites what BLAKE3 leaves on the stack, a secret when
-  # the bytes are one. The burn's nearer pass, which the report does not
-  # show since the deeper one is the deepest chain, must reach as deep as the
-  # hash at each level the proof reads, measured from the frame both are
-  # called from, and past that frame's own bytes too, should the compiler
-  # make the burn a tail call. The passes' frames must also lie far enough
-  # apart that the padding of one cannot fall on the padding of the other.
+  # the bytes are one. Its one burn frame, which the report shows as the deepest
+  # chain, must reach as deep as the hash at each level the proof reads, measured
+  # from the frame both are called from. The digest returns a value after the
+  # burn, so the burn is never a tail call laid over that frame. The array alone
+  # is compared: what else the frame holds, its index and alignment, nothing
+  # writes over.
   def assert_the_generators_burn_covers_its_hash(lines)
-    assert_operator RNG_BURN_SHIFT_BYTES, :>=, 64, 'the passes must not lie on each other'
     %w[-O0 -O2].each do |level|
       section = lines.drop_while { |line| line != "stack proof of the C17 cores at #{level}:" }.drop(1)
                      .take_while { |line| line.start_with?('  ') }
-      hash_depth = %w[erx_blake3_update erx_blake3_final].map do |entry|
-        Integer(section.find { |line| line.start_with?("  #{entry} (call): ") }[/: (\d+) bytes:/, 1])
-      end.max
+      hash_depth = Integer(section.find { |line| line.start_with?('  erx_blake3_hash_chunk (call): ') }[/: (\d+) bytes:/, 1])
       chain = section.find { |line| line.start_with?('  erx_rng_digest (call): ') }.split(': ').last.split(/ [-=]> /)
       names = chain.map { |frame| frame[/\A\w+/] }
-      assert_equal %w[erx_rng_digest erx_rng_burn_deep erx_rng_burn_stack], names, "the deepest chain at #{level}"
-      digest_frame, *burn_frames = chain.map { |frame| Integer(frame[/(\d+) bytes\)\z/, 1]) }
-      assert_operator burn_frames.sum - RNG_BURN_SHIFT_BYTES, :>=, hash_depth + digest_frame,
-                      "the burn against the hash at #{level}"
+      assert_equal %w[erx_rng_digest erx_rng_burn_stack], names, "the deepest chain at #{level}"
+      assert_operator RNG_BURN_BYTES, :>=, hash_depth, "the burn against the hash at #{level}"
     end
   end
 

@@ -21,27 +21,18 @@
 #define ERX_RNG_OUTPUT_BLOCK	1
 
 /*
- * How much one burn frame overwrites. ChaCha20's frames, as the stack
- * proof's report lists them, are shallower than this at every level it
- * reads, so one frame covers a read or a mix. BLAKE3's go deeper than one
- * frame may hold under the proof's frame cap: see erx_rng_burn_deep. The
- * stack proof's run test holds the nearer of that function's two passes,
- * shallower by ERX_RNG_BURN_SHIFT_BYTES, against BLAKE3's measured chains.
+ * How much one burn frame overwrites. A one-chunk hash, as the stack proof's
+ * report lists it, reaches no deeper than this at any level it reads, which
+ * the stack proof's run test holds; ChaCha20 reaches less far, and the residue
+ * test shows one frame covers a read and a mix. It is sized to the hash at
+ * -O0, the deepest, and stays under the proof's 1024-byte frame cap.
  */
-#define ERX_RNG_BURN_BYTES		768
-#define ERX_RNG_BURN_SHIFT_BYTES	256
+#define ERX_RNG_BURN_BYTES	976
 
-/* A hash in progress; the header keeps BLAKE3 out of the glue's sight. */
-struct erx_rng_hash {
-	erx_blake3_ctx_t	blake3;
-};
-
-_Static_assert(sizeof(erx_rng_hash_t) == ERX_RNG_HASH_BYTES,
-    "the header states the hash's size");
-_Static_assert(_Alignof(erx_rng_hash_t) == ERX_RNG_HASH_ALIGN,
-    "the header states the hash's alignment");
 _Static_assert(ERX_RNG_KEY_LENGTH == ERX_CHACHA20_KEY_LENGTH,
     "the generator's key is a ChaCha20 key");
+_Static_assert(ERX_RNG_DIGEST_INPUT_MAX == ERX_BLAKE3_CHUNK_LEN,
+    "a digest's bytes are one BLAKE3 chunk");
 _Static_assert(ERX_RNG_DIGEST_LENGTH == ERX_BLAKE3_OUT_LEN,
     "a mix's digest is a BLAKE3 digest");
 _Static_assert(ERX_RNG_KEY_LENGTH == ERX_RNG_DIGEST_LENGTH,
@@ -54,8 +45,6 @@ _Static_assert(ERX_RNG_READ_MAX / ERX_CHACHA20_BLOCK_LENGTH + 1 <
 
 static const uint8_t erx_rng_nonce[ERX_CHACHA20_NONCE_LENGTH];
 
-static void erx_rng_burn_deep(void);
-static void erx_rng_burn_deep_shifted(void);
 static void erx_rng_burn_stack(void);
 static bool erx_rng_next_key(const erx_rng_t *, uint8_t *);
 static bool erx_rng_stream(const erx_rng_t *, uint32_t, uint8_t *, size_t);
@@ -72,41 +61,6 @@ erx_rng_burn_stack(void)
 {
 	volatile uint8_t burn[ERX_RNG_BURN_BYTES];
 
-	for (size_t index = 0; index < sizeof(burn); index++)
-		burn[index] = 0;
-}
-
-/*
- * The same for a hash, which goes deeper: a second frame, with the first
- * below it. Its own bytes are written after the call, so the call cannot
- * become a tail call, which would lay both frames in one place.
- *
- * A frame also has slots nothing writes: the padding beside its saved
- * registers. Where they fall depends on the flags, and one can fall on a
- * message word: the host build, whose stack protector moves the padding,
- * keeps one when this pass runs alone as a tail call. The shifted pass
- * therefore lays its frames off these, so a slot one pass skips lies in the
- * other's array.
- * The exception is the slot just below the caller's frame, which only the
- * caller's direct callees write, with the registers they saved.
- */
-static __attribute__((__noinline__)) void
-erx_rng_burn_deep(void)
-{
-	volatile uint8_t burn[ERX_RNG_BURN_BYTES];
-
-	erx_rng_burn_stack();
-	for (size_t index = 0; index < sizeof(burn); index++)
-		burn[index] = 0;
-}
-
-/* erx_rng_burn_deep's second pass: its smaller array is its whole purpose. */
-static __attribute__((__noinline__)) void
-erx_rng_burn_deep_shifted(void)
-{
-	volatile uint8_t burn[ERX_RNG_BURN_BYTES - ERX_RNG_BURN_SHIFT_BYTES];
-
-	erx_rng_burn_stack();
 	for (size_t index = 0; index < sizeof(burn); index++)
 		burn[index] = 0;
 }
@@ -139,16 +93,22 @@ erx_rng_clear(erx_rng_t *rng)
 	erx_explicit_bzero(rng, sizeof(*rng));
 }
 
-/* Final erases the hash; the burn erases what the frames below this left. */
-void
-erx_rng_digest(erx_rng_digest_t *digest, erx_rng_hash_t *hash,
-    const void *bytes, size_t length)
+/*
+ * The hash erases its state; the burn erases what the frames below this left.
+ * A refusal leaves the digest erased and not hashed, so it keys nothing.
+ */
+bool
+erx_rng_digest(erx_rng_digest_t *digest, const void *bytes, size_t length)
 {
-	erx_blake3_init(&hash->blake3);
-	erx_blake3_update(&hash->blake3, bytes, length);
-	erx_blake3_final(&hash->blake3, digest->bytes);
-	erx_rng_burn_deep();
-	erx_rng_burn_deep_shifted();
+	bool hashed;
+
+	hashed = erx_blake3_hash_chunk(bytes, length, digest->bytes);
+	if (hashed)
+		digest->hashed = true;
+	else
+		erx_explicit_bzero(digest, sizeof(*digest));
+	erx_rng_burn_stack();
+	return (hashed);
 }
 
 /*
@@ -169,7 +129,7 @@ erx_rng_init(erx_rng_t *rng, erx_rng_digest_t *seed)
 /*
  * The block-0 bound is a constant, so the stream is never refused; were it
  * to be, the generator would be retired rather than keyed with the bare
- * digest.
+ * digest. A digest that was not hashed changes nothing.
  */
 bool
 erx_rng_mix(erx_rng_t *rng, erx_rng_digest_t *digest)
@@ -177,11 +137,11 @@ erx_rng_mix(erx_rng_t *rng, erx_rng_digest_t *digest)
 	uint8_t next[ERX_RNG_KEY_LENGTH];
 	bool keyed;
 
-	keyed = rng->ready && erx_rng_next_key(rng, next);
+	keyed = rng->ready && digest->hashed && erx_rng_next_key(rng, next);
 	if (keyed) {
 		for (size_t index = 0; index < sizeof(rng->key); index++)
 			rng->key[index] = next[index] ^ digest->bytes[index];
-	} else if (rng->ready) {
+	} else if (rng->ready && digest->hashed) {
 		erx_rng_clear(rng);
 	}
 

@@ -7,6 +7,7 @@
  * instruction and no CPU-feature detection; the one compression function
  * renamed erx_blake3_compress_in_place and called directly, with no
  * dispatch; the constants the interface no longer exposes defined here;
+ * BLAKE3_CHUNK_LEN taken from the interface's ERX_BLAKE3_CHUNK_LEN;
  * freestanding C17 (no <assert.h> or <string.h>); the keyed and
  * key-derivation flags, which nothing sets (so the context's key is
  * always IV and its chunk flags 0), and the helpers nothing
@@ -29,7 +30,7 @@
 #include "blake3.h"
 
 #define BLAKE3_KEY_LEN 32
-#define BLAKE3_CHUNK_LEN 1024
+#define BLAKE3_CHUNK_LEN ERX_BLAKE3_CHUNK_LEN
 
 // internal flags
 enum blake3_flags {

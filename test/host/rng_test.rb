@@ -42,7 +42,7 @@ class RngTest < Minitest::Test
       Array.new(random.rand(1..12)) do
         case random.rand(12)
         when 0..4 then [:read, [0, 1, 31, 32, 33, 63, 64, 65, 255, 256, 257, random.rand(0..300)].sample(random: random)]
-        when 5..7 then [:mix, random.bytes(random.rand(0..(random.rand(4).zero? ? 6000 : 300)))]
+        when 5..7 then [:mix, random.bytes(random.rand(0..(random.rand(4).zero? ? F::DIGEST_INPUT_MAX : 300)))]
         when 8..10 then [:init, random.bytes(random.rand(0..64))]
         else [:clear]
         end
@@ -113,6 +113,35 @@ class RngTest < Minitest::Test
     refute_equal F.hex(digest), answers[0][1][1]
   end
 
+  # Up to one chunk, a digest is BLAKE3's as b3sum computes it; past that it
+  # is refused, and the driver stops unless the refusal left it all zeroes.
+  def test_a_digest_is_blake3s_up_to_one_chunk_and_refused_past_it
+    random = Random.new(SEED)
+    messages = [0, 1, 63, 64, 65, 504, 1023, F::DIGEST_INPUT_MAX].map { |length| random.bytes(length) }
+    digests = @driver.blake3_table(messages)
+    answers = parse(@driver.ask([digest_request(messages)]).first)
+    assert_equal messages.map { |message| F.hex(digests.fetch(message)) }, answers.map { |answer| answer[1] }
+    assert_equal [:digest], answers.map(&:first).uniq
+    too_long = [F::DIGEST_INPUT_MAX + 1, 4096].map { |length| random.bytes(length) }
+    assert_equal [:digest_refused], parse(@driver.ask([digest_request(too_long)]).first).map(&:first).uniq
+  end
+
+  def test_a_digest_bound_past_one_chunk_is_caught
+    request = digest_request(["\0".b * (F::DIGEST_INPUT_MAX + 1)])
+    _path, program = @driver.mutant('kernel/crypto/blake3/blake3.c', 'if (length > BLAKE3_CHUNK_LEN) {',
+                                    'if (length > BLAKE3_CHUNK_LEN + 1) {', index: 100)
+    refute_equal @driver.ask([request]), @driver.ask_with(program, [request])
+  end
+
+  # A caller that falls through a refusal must not key a generator from the
+  # zero key's public block.
+  def test_a_refused_digest_keys_nothing
+    too_long = F.hex("\0".b * (F::DIGEST_INPUT_MAX + 1))
+    assert_equal [[:init, F.hex(F::ZERO_KEY), '0']], parse(@driver.ask(["rng i:#{too_long}"]).first)
+    answers = parse(@driver.ask(["rng i:00 m:#{too_long}"]).first)
+    assert_equal [:mix_refused, *answers[0][1, 2]], answers[1]
+  end
+
   def test_clear_erases_the_key
     answers = parse(@driver.ask(['rng i:0102 r:8 c']).first)
     assert_equal [:clear, F.hex(F::ZERO_KEY), '0'], answers[2]
@@ -128,10 +157,12 @@ class RngTest < Minitest::Test
                                   'rng->key[index] ^= digest->bytes[index] ^ (next[index] & 0);'],
       'bound off by one' => ['length > ERX_RNG_READ_MAX)', 'length > ERX_RNG_READ_MAX + 1)'],
       'unseeded reads' => ['if (!rng->ready || length > ERX_RNG_READ_MAX)', 'if (length > ERX_RNG_READ_MAX)'],
+      'a refused digest is mixed' => ['keyed = rng->ready && digest->hashed &&', 'keyed = rng->ready &&'],
       'clear keeps the generator ready' => ["erx_rng_clear(erx_rng_t *rng)\n{\n\terx_explicit_bzero(rng, sizeof(*rng));",
                                             "erx_rng_clear(erx_rng_t *rng)\n{\n\terx_explicit_bzero(rng->key, sizeof(rng->key));"]
     }
-    requests = ['rng r:8 i:00 r:32 r:257 m:6162 r:16 c r:4', 'rng i: m: r:0']
+    requests = ['rng r:8 i:00 r:32 r:257 m:6162 r:16 c r:4', 'rng i: m: r:0',
+                "rng i:#{F.hex("\0".b * (F::DIGEST_INPUT_MAX + 1))}"]
     expected = @driver.ask(requests)
     mutants.each_with_index do |(name, (original, replacement)), index|
       _path, program = @driver.mutant('kernel/core/rng.c', original, replacement, index: index)
@@ -139,10 +170,10 @@ class RngTest < Minitest::Test
     end
   end
 
-  # Message lengths reaching every frame of the hash: a block alone, a
-  # chunk's several blocks, a chunk boundary (hasher_finish_chunk), and
-  # merges of the chaining-value stack.
-  RESIDUE_LENGTHS = [1, 64, 65, 1025, 2049, 4097, 5121].freeze
+  # Message lengths reaching every path of the hash: a part of a block, a
+  # block alone, one more byte, the longest bytes a domain can mix and a
+  # whole chunk.
+  RESIDUE_LENGTHS = [1, 64, 65, 504, F::DIGEST_INPUT_MAX].freeze
 
   def test_the_generators_calls_leave_nothing_secret_on_the_stack
     skip 'a sanitizer changes the frames the burn is sized for' if sanitized?
@@ -156,24 +187,24 @@ class RngTest < Minitest::Test
     end
   end
 
-  BurnMutant = Data.define(:name, :original, :replacement, :levels)
-  HASH_BURN = "\terx_rng_burn_deep();\n\terx_rng_burn_deep_shifted();\n"
-  NO_HASH_BURN = "\tif (length == SIZE_MAX) {\n#{HASH_BURN.gsub(/^/, "\t")}\t}\n".freeze
-  # One burn frame reaches past the whole hash at -O2 on this measure, so
-  # 'one frame' is judged at -O0, where the hash goes deeper than it. 'one
-  # pass', tail-called, leaves only what a frame's padding skips, which at -O2
-  # on the host is a message word; the kernel's objects lay out their padding
-  # elsewhere.
+  # Each is judged on the calls of its own kind alone, so a burn too shallow for
+  # the hash cannot die on a read's residue instead.
+  BurnMutant = Data.define(:name, :kind, :original, :replacement, :levels)
   BURN_MUTANTS = [
-    BurnMutant.new(name: 'hash without a burn', original: HASH_BURN, replacement: NO_HASH_BURN, levels: %w[-O0 -O2]),
-    BurnMutant.new(name: 'hash with one frame', original: HASH_BURN,
-                   replacement: "#{NO_HASH_BURN}\terx_rng_burn_stack();\n", levels: %w[-O0]),
-    BurnMutant.new(name: 'hash with one pass', original: HASH_BURN,
-                   replacement: "\tif (length == SIZE_MAX)\n\t\terx_rng_burn_deep_shifted();\n\terx_rng_burn_deep();\n",
-                   levels: %w[-O2]),
-    BurnMutant.new(name: 'read without a burn', original: "\terx_rng_burn_stack();\n\treturn (served);",
+    BurnMutant.new(name: 'hash without a burn', kind: 'hash',
+                   original: "\terx_rng_burn_stack();\n\treturn (hashed);",
+                   replacement: "\tif (length == SIZE_MAX)\n\t\terx_rng_burn_stack();\n\treturn (hashed);", levels: %w[-O0 -O2]),
+    BurnMutant.new(name: 'a burn too shallow', kind: 'hash',
+                   original: "#define ERX_RNG_BURN_BYTES\t976",
+                   replacement: "#define ERX_RNG_BURN_BYTES\t128", levels: %w[-O0 -O2]),
+    BurnMutant.new(name: 'a burn shallower than the hash at -O0', kind: 'hash',
+                   original: "#define ERX_RNG_BURN_BYTES\t976",
+                   replacement: "#define ERX_RNG_BURN_BYTES\t768", levels: %w[-O0]),
+    BurnMutant.new(name: 'read without a burn', kind: 'read',
+                   original: "\terx_rng_burn_stack();\n\treturn (served);",
                    replacement: "\tif (rng == NULL)\n\t\terx_rng_burn_stack();\n\treturn (served);", levels: %w[-O0 -O2]),
-    BurnMutant.new(name: 'mix without a burn', original: "\terx_rng_burn_stack();\n\treturn (keyed);",
+    BurnMutant.new(name: 'mix without a burn', kind: 'mix',
+                   original: "\terx_rng_burn_stack();\n\treturn (keyed);",
                    replacement: "\tif (rng == NULL)\n\t\terx_rng_burn_stack();\n\treturn (keyed);", levels: %w[-O0 -O2])
   ].freeze
 
@@ -185,7 +216,8 @@ class RngTest < Minitest::Test
       mutant.levels.each do |level|
         driver = driver_at(level)
         _path, program = driver.mutant('kernel/core/rng.c', mutant.original, mutant.replacement, index: index)
-        found = residue(driver.ask_with(program, requests)).map(&:differing)
+        judged = requests.select { |request| request.split[1] == mutant.kind }
+        found = residue(driver.ask_with(program, judged)).map(&:differing)
         assert_operator found.max, :>, 0, "mutant survived at #{level}: #{mutant.name}"
       end
     end
@@ -198,6 +230,8 @@ class RngTest < Minitest::Test
   private
 
   def sanitized? = !ENV.fetch('ERX_SANITIZERS', '').empty?
+
+  def digest_request(messages) = "rng #{messages.map { |bytes| "d:#{bytes.empty? ? '' : F.hex(bytes)}" }.join(' ')}"
 
   def driver_at(level)
     @level_drivers[level] ||= F::Driver.new(name: "rng#{level.delete('-').downcase}", level: level)
@@ -257,7 +291,8 @@ class RngTest < Minitest::Test
   end
 
   # The answer's operations as [KIND, (OUT,) KEY, READY], KIND one of :read
-  # (with OUT), :refused, :mix, :mix_refused, :init and :clear.
+  # (with OUT), :refused, :mix, :mix_refused, :init, :digest (with the digest as
+  # OUT), :digest_refused and :clear.
   def parse(line)
     words = line.split(' ')
     raise Erx::Error, "not an rng answer: #{line}" unless words.shift == 'rng'
@@ -269,6 +304,8 @@ class RngTest < Minitest::Test
       in ['m', 'ok', key, ready] then [:mix, key, ready]
       in ['m', 'refused', key, ready] then [:mix_refused, key, ready]
       in ['i', key, ready] then [:init, key, ready]
+      in ['d', 'ok', digest, key, ready] then [:digest, digest, key, ready]
+      in ['d', 'refused', key, ready] then [:digest_refused, key, ready]
       in ['c', key, ready] then [:clear, key, ready]
       end
     end

@@ -16,6 +16,8 @@
 
 /* A read's length spans the bound and beyond it. */
 #define FUZZ_READ_SPAN	(ERX_RNG_READ_MAX + 64)
+/* So does a digest's. */
+#define FUZZ_DIGEST_SPAN	(ERX_RNG_DIGEST_INPUT_MAX + 64)
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
@@ -94,7 +96,9 @@ fuzz_read(erx_rng_t *rng, size_t length)
  * A mix, or an init when init is set, makes the key block 0's first 32
  * bytes, from the old key or from the zero key, XORed with the bytes'
  * digest, and erases the digest. A mix into a generator that is not ready
- * is refused and changes nothing.
+ * is refused and changes nothing. Bytes over the digest's bound are refused
+ * before any of that: the refused digest is all zeroes and keys nothing, so a
+ * mix changes nothing and an init leaves the generator all zeroes.
  */
 static void
 fuzz_mix(erx_rng_t *rng, const uint8_t *bytes, size_t length, bool init)
@@ -104,21 +108,31 @@ fuzz_mix(erx_rng_t *rng, const uint8_t *bytes, size_t length, bool init)
 	erx_rng_digest_t digest;
 	uint8_t expected[ERX_BLAKE3_OUT_LEN], next[ERX_RNG_KEY_LENGTH];
 	uint8_t old[ERX_RNG_KEY_LENGTH];
-	uint8_t *hash;
 	bool ready;
 
+	memset(&digest, 0xa5, sizeof(digest));
+	if (!erx_rng_digest(&digest, bytes, length)) {
+		if (length <= ERX_RNG_DIGEST_INPUT_MAX)
+			abort();
+		fuzz_erased(&digest, sizeof(digest));
+		memcpy(old, rng->key, sizeof(old));
+		ready = rng->ready;
+		if (init) {
+			erx_rng_init(rng, &digest);
+			fuzz_erased(rng, sizeof(*rng));
+		} else if (erx_rng_mix(rng, &digest) || rng->ready != ready ||
+		    memcmp(old, rng->key, sizeof(old)) != 0) {
+			abort();
+		}
+		return;
+	}
+	if (length > ERX_RNG_DIGEST_INPUT_MAX)
+		abort();
 	erx_blake3_init(&ctx);
 	erx_blake3_update(&ctx, bytes, length);
 	erx_blake3_final(&ctx, expected);
-	/* At its exact size, so a sanitizer sees any access past it. */
-	if ((hash = malloc(ERX_RNG_HASH_BYTES)) == NULL)
-		abort();
-	memset(hash, 0xa5, ERX_RNG_HASH_BYTES);
-	erx_rng_digest(&digest, (erx_rng_hash_t *)hash, bytes, length);
 	if (memcmp(digest.bytes, expected, sizeof(expected)) != 0)
 		abort();
-	fuzz_erased(hash, ERX_RNG_HASH_BYTES);
-	free(hash);
 
 	memcpy(old, rng->key, sizeof(old));
 	ready = rng->ready;
@@ -145,8 +159,9 @@ fuzz_mix(erx_rng_t *rng, const uint8_t *bytes, size_t length, bool init)
  * The input is a program for one generator, which starts all zeroes and
  * not ready: each operation byte's low two bits choose a read (its length
  * the next two bytes, little-endian, modulo FUZZ_READ_SPAN), a mix or an
- * init (of as many of the following bytes as the next byte says), or a
- * clear. Every outcome is checked against the generator's rules,
+ * init (of as many of the following bytes as the next two bytes say,
+ * little-endian, modulo FUZZ_DIGEST_SPAN), or a clear. Every outcome is
+ * checked against the generator's rules,
  * recomputed from ChaCha20 and BLAKE3.
  */
 int
@@ -169,7 +184,12 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			break;
 		case 1:
 		case 3:
-			length = cursor < size ? data[cursor++] : 0;
+			length = 0;
+			if (cursor < size)
+				length = data[cursor++];
+			if (cursor < size)
+				length |= (size_t)data[cursor++] << 8;
+			length %= FUZZ_DIGEST_SPAN;
 			length = length > size - cursor ? size - cursor : length;
 			fuzz_mix(&rng, length == 0 ? NULL : data + cursor, length,
 			    op == 3);

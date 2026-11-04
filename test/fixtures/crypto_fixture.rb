@@ -17,6 +17,8 @@ require_relative '../../tools/lib/erx/runner'
 # them.
 module CryptoFixture
   ROOT = File.expand_path('../..', __dir__)
+  # The most bytes one of the generator's digests takes (ERX_RNG_DIGEST_INPUT_MAX).
+  DIGEST_INPUT_MAX = Integer(File.read(File.join(ROOT, 'include/erx/core/rng.h'))[/ERX_RNG_DIGEST_INPUT_MAX\s+(\d+)/, 1])
   SOURCES = %w[kernel/crypto/sha2/sha256c.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                kernel/crypto/blake3/blake3_portable.c kernel/core/rng.c].freeze
   KEY_BYTES = 32
@@ -106,8 +108,8 @@ module CryptoFixture
       # "blake3/blake3.h", "sha2/sha256.h" and "chacha20/chacha.h", found
       # through -I kernel/crypto. A mutant's copy lives outside the tree, so the
       # imported sources' own includes of the header beside them
-      # ("sha256.h", "chacha.h") need those directories on the path too.
-      includes = %w[include kernel/crypto kernel/crypto/sha2 kernel/crypto/chacha20].flat_map do |directory|
+      # ("sha256.h", "chacha.h", "blake3.h") need those directories on the path too.
+      includes = %w[include kernel/crypto kernel/crypto/sha2 kernel/crypto/chacha20 kernel/crypto/blake3].flat_map do |directory|
         ['-I', File.join(ROOT, directory)]
       end
       @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', @level, '-g',

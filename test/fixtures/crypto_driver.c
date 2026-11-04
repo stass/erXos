@@ -19,12 +19,15 @@
  *   chacha20-bound COUNTER LENGTH   (no buffers: LENGTH must be refused)
  *     -> chacha20 refused | chacha20 ok
  *   rng OP...   OP: "r:N" read N bytes, "m:HEX" mix the bytes' digest,
- *               "i:HEX" init with the bytes' digest, "c" clear; the
+ *               "i:HEX" init with the bytes' digest, "d:HEX" the bytes'
+ *               digest alone, "c" clear; the
  *               generator starts all zeroes, never initialized
  *     -> rng, then per OP " r:ok:OUT:STATE", " r:refused:STATE",
- *        " m:ok:STATE", " m:refused:STATE", " i:STATE" or " c:STATE",
- *        where STATE is KEY:READY, READY 1 or 0. A spent digest, or a
- *        hash after its digest, that is not all zeroes stops the driver.
+ *        " m:ok:STATE", " m:refused:STATE", " i:STATE", " d:ok:DIGEST:STATE",
+ *        " d:refused:STATE" or " c:STATE", where STATE is KEY:READY, READY 1
+ *        or 0. A spent or refused digest that is not all zeroes, or that
+ *        still counts as hashed, stops the driver; "m" and "i" pass a refused
+ *        digest on.
  *   rng-residue KIND HEX HEX   KIND "hash", of two messages of one length,
  *               or "read" or "mix", under two 32-byte keys
  *     -> rng-residue DIFFERING TOUCHED
@@ -76,9 +79,9 @@ static void driver_answer_rng(char *);
 static void driver_answer_rng_residue(char *);
 static void driver_answer_sha256(char *);
 static void driver_answer_sha256_repeat(char *);
-static void driver_residue_run(driver_residue_t, erx_rng_hash_t *, erx_rng_t *,
+static void driver_residue_run(driver_residue_t, erx_rng_t *,
     const driver_bytes_t *, uint8_t *);
-static void driver_rng_digest(erx_rng_digest_t *, const char *);
+static bool driver_rng_digest(erx_rng_digest_t *, const char *);
 static void driver_rng_spent(const erx_rng_digest_t *);
 static uintptr_t driver_stack_edge(void);
 static driver_bytes_t driver_hex(const char *);
@@ -282,26 +285,21 @@ driver_answer_chacha20_bound(char *cursor)
 }
 
 /* Hashes the op's bytes, "-" or nothing for none. */
-static void
+static bool
 driver_rng_digest(erx_rng_digest_t *digest, const char *text)
 {
 	driver_bytes_t bytes = driver_hex(*text == '\0' ? "-" : text);
-	uint8_t *hash = malloc(ERX_RNG_HASH_BYTES);
+	bool hashed = erx_rng_digest(digest, bytes.bytes, bytes.length);
 
-	if (hash == NULL)
-		driver_usage("out of memory");
-	memset(hash, DRIVER_PAINT, ERX_RNG_HASH_BYTES);
-	erx_rng_digest(digest, (erx_rng_hash_t *)hash, bytes.bytes, bytes.length);
-	for (size_t index = 0; index < ERX_RNG_HASH_BYTES; index++)
-		if (hash[index] != 0)
-			driver_usage("a spent hash was not erased");
-	free(hash);
 	free(bytes.bytes);
+	return (hashed);
 }
 
 static void
 driver_rng_spent(const erx_rng_digest_t *digest)
 {
+	if (digest->hashed)
+		driver_usage("a spent digest still counts as hashed");
 	for (size_t index = 0; index < sizeof(digest->bytes); index++)
 		if (digest->bytes[index] != 0)
 			driver_usage("a spent digest was not erased");
@@ -347,6 +345,15 @@ driver_answer_rng(char *cursor)
 			erx_rng_init(&rng, &digest);
 			fputs(" i", stdout);
 			driver_rng_spent(&digest);
+		} else if (strncmp(op, "d:", 2) == 0) {
+			memset(&digest, DRIVER_PAINT, sizeof(digest));
+			if (driver_rng_digest(&digest, op + 2)) {
+				fputs(" d:ok:", stdout);
+				driver_print_hex(digest.bytes, sizeof(digest.bytes));
+			} else {
+				fputs(" d:refused", stdout);
+				driver_rng_spent(&digest);
+			}
 		} else if (strcmp(op, "c") == 0) {
 			erx_rng_clear(&rng);
 			fputs(" c", stdout);
@@ -378,7 +385,7 @@ driver_stack_edge(void)
  * copying, so every change is the call's.
  */
 static __attribute__((__noinline__)) void
-driver_residue_run(driver_residue_t kind, erx_rng_hash_t *hash, erx_rng_t *rng,
+driver_residue_run(driver_residue_t kind, erx_rng_t *rng,
     const driver_bytes_t *secret, uint8_t *left)
 {
 	uint8_t out[ERX_RNG_READ_MAX];
@@ -390,13 +397,14 @@ driver_residue_run(driver_residue_t kind, erx_rng_hash_t *hash, erx_rng_t *rng,
 	if (kind != DRIVER_RESIDUE_HASH) {
 		memcpy(rng->key, secret->bytes, sizeof(rng->key));
 		rng->ready = true;
+		digest.hashed = true;
 	}
 	stretch = (volatile uint8_t *)(driver_stack_edge() - DRIVER_RESIDUE_BYTES);
 	for (size_t index = 0; index < DRIVER_RESIDUE_BYTES; index++)
 		stretch[index] = DRIVER_PAINT;
 	switch (kind) {
 	case DRIVER_RESIDUE_HASH:
-		erx_rng_digest(&digest, hash, secret->bytes, secret->length);
+		served = erx_rng_digest(&digest, secret->bytes, secret->length);
 		break;
 	case DRIVER_RESIDUE_READ:
 		served = erx_rng_read(rng, out, sizeof(out));
@@ -420,7 +428,6 @@ driver_answer_rng_residue(char *cursor)
 	driver_bytes_t first = driver_hex(driver_token(&cursor));
 	driver_bytes_t second = driver_hex(driver_token(&cursor));
 	driver_bytes_t secret;
-	erx_rng_hash_t *hash = malloc(ERX_RNG_HASH_BYTES);
 	erx_rng_t *rng = malloc(sizeof(*rng));
 	uint8_t *first_left, *left;
 	size_t differing = 0, touched = 0;
@@ -429,7 +436,7 @@ driver_answer_rng_residue(char *cursor)
 	left = malloc(DRIVER_RESIDUE_BYTES);
 	secret.length = first.length;
 	secret.bytes = malloc(first.length == 0 ? 1 : first.length);
-	if (hash == NULL || rng == NULL || first_left == NULL || left == NULL ||
+	if (rng == NULL || first_left == NULL || left == NULL ||
 	    secret.bytes == NULL)
 		driver_usage("out of memory");
 	if (first.length != second.length ||
@@ -443,11 +450,11 @@ driver_answer_rng_residue(char *cursor)
 	 * runs the dynamic linker on the painted stack.
 	 */
 	memcpy(secret.bytes, first.bytes, first.length);
-	driver_residue_run(kind, hash, rng, &secret, left);
-	driver_residue_run(kind, hash, rng, &secret, left);
+	driver_residue_run(kind, rng, &secret, left);
+	driver_residue_run(kind, rng, &secret, left);
 	memcpy(first_left, left, DRIVER_RESIDUE_BYTES);
 	memcpy(secret.bytes, second.bytes, second.length);
-	driver_residue_run(kind, hash, rng, &secret, left);
+	driver_residue_run(kind, rng, &secret, left);
 	for (size_t index = 0; index < DRIVER_RESIDUE_BYTES; index++) {
 		differing += first_left[index] != left[index];
 		touched += first_left[index] != DRIVER_PAINT;
@@ -457,7 +464,6 @@ driver_answer_rng_residue(char *cursor)
 	free(left);
 	free(first_left);
 	free(rng);
-	free(hash);
 	free(second.bytes);
 	free(first.bytes);
 }

@@ -15,7 +15,9 @@
  * erx_explicit_bzero. The keyed and key-derivation modes, reset, the
  * version string and the TBB entry point removed; erXos names for the
  * interface; freestanding C17 (compiler builtins for memcpy and memset,
- * no <assert.h> or <string.h>); the context's size bounded at build time.
+ * no <assert.h> or <string.h>); the context's size bounded at build time;
+ * erx_blake3_hash_chunk added, the chunk state's path alone, with its
+ * state on its own stack.
  *
  * BLAKE3 1.8.7, https://github.com/BLAKE3-team/BLAKE3, taken under
  * Apache-2.0 WITH LLVM-exception (LICENSE_A2LLVM beside this file);
@@ -269,6 +271,25 @@ void erx_blake3_update(erx_blake3_ctx_t *ctx, const void *input,
   // erx_blake3_final below.
   chunk_state_update(&ctx->chunk, input_bytes, input_len);
   hasher_merge_cv_stack(ctx, ctx->chunk.chunk_counter);
+}
+
+// One chunk is its own root, so the chunk state's own path gives the digest.
+bool erx_blake3_hash_chunk(const void *input, size_t length,
+                           uint8_t digest[ERX_BLAKE3_OUT_LEN]) {
+  if (length > BLAKE3_CHUNK_LEN) {
+    return false;
+  }
+
+  erx_blake3_chunk_t chunk;
+  chunk_state_init(&chunk, IV, 0);
+  if (length > 0) {
+    chunk_state_update(&chunk, (const uint8_t *)input, length);
+  }
+  output_t output = chunk_state_output(&chunk);
+  output_root_hash(&output, digest);
+  erx_explicit_bzero(&output, sizeof(output));
+  erx_explicit_bzero(&chunk, sizeof(chunk));
+  return true;
 }
 
 void erx_blake3_final(erx_blake3_ctx_t *ctx,

@@ -6354,32 +6354,31 @@ counter conversion. The page's sequence is never reset during a boot.
   seeded; the other seed sources below are mixed in after it. A mix
   takes the BLAKE3 digest of its bytes, computed before the lock is
   taken, so the lock is held for one ChaCha20 block whatever length a
-  domain mixes. The hasher's state, 1912 bytes, and the kernel's copy of
-  the bytes from the UTCB, at most 504, live in one page that the call
-  charges to the caller's budget, as [the boot image's
-  hash](#the-boot-image) does, so no kernel stack holds either; the
-  digest leaves the state all zeroes and the call erases the copy before
-  it releases the page. The boot's seeds, hashed before any budget
-  exists, use a page of boot memory the same way. The working words
-  ChaCha20 and BLAKE3 leave
-  on the kernel stack are overwritten before each call returns. A read
-  or a mix, whose ChaCha20 frames the stack proof measures under 600
-  bytes, burns one frame of 768 bytes. A hash goes deeper, 1088 bytes at
-  `-O0` and 784 at `-O2`, past what one frame may hold under the proof's
-  1024-byte cap, so it burns two frames below the one that called it,
-  and does so twice, about 256 bytes apart, because a frame's padding is
-  never written and what one pass skips among the hash's frames lies in
-  the other's array. The registers the calls may change are not erased;
-  a return to user mode restores or clears them. The
-  deepest chain is 1664 bytes, within the 2048 bytes the proof allows
-  the cores on the 8 KiB kernel stack. ChaCha20 is FreeBSD's and BLAKE3
+  domain mixes. A digest takes at most one BLAKE3 chunk, 1024 bytes, and
+  refuses more, and a refused digest keys nothing. One chunk has no
+  chaining values to keep, so the hash's
+  state, 112 bytes, and the kernel's copy of the bytes from the UTCB, at
+  most 504, live on the kernel stack and the call allocates nothing; the
+  hash erases its state and the call erases the copy before it returns.
+  The working words ChaCha20 and BLAKE3 leave on the kernel stack are
+  overwritten before each call returns: a read, a mix and a digest each
+  burn one frame of 976 bytes, within the proof's 1024-byte frame cap,
+  which the stack proof's run test holds deeper than a hash at each
+  level it reads. The registers the calls may change are not
+  erased; a return to user mode restores or clears them. Each chain stays
+  within the 2048 bytes the proof allows the cores on the 8 KiB kernel
+  stack. ChaCha20 is FreeBSD's and BLAKE3
   its authors', imported as erXos's code into `kernel/crypto/`
   ([design.md](design.md#dependencies)); the generator around them is
   the C17 core `kernel/core/rng.c`.
 * **Seed.** At boot, `/chosen/rng-seed`, `/chosen/kaslr-seed`, 32 bytes
   from the board's random generator where the platform layer drives one
   ([design-platforms.md](design-platforms.md#entropy-sources)), for which
-  it waits at most 100 ms, and counter jitter. Neither accelerator offers
+  it waits at most 100 ms, and counter jitter. Each source is mixed on
+  its own and hashes within one chunk: `rng-seed` is 32 bytes under QEMU,
+  `kaslr-seed` a 64-bit value, the board generator's read 32 bytes and
+  the jitter at most a chunk of samples; a firmware's longer `rng-seed`
+  is mixed one chunk at a time. Neither accelerator offers
   the architecture's random-number instruction
   ([measured](research-baselines.md#accelerator-capabilities)).
 * **Forward secrecy.** After each request the generator replaces its key
