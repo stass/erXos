@@ -155,9 +155,6 @@ it; git history is the record of completed work.
   The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
-* [Medium] `otp/lib/kernel/src/inet_gethost_native.erl`: `{error, notfound}` answers a lookup that never ran, `localhost`
-  included, where the stopgap rule would say unsupported. `{error, notsup}` leaves `inet`'s answers unchanged and costs
-  `inet_SUITE:t_gethostnative`, which accepts neither; the owner decides.
 * [Low] `otp/erts/preloaded/src/prim_inet.erl`: `gen_tcp:listen` answers `{error, eprotonosupport}`, stock's answer for a
   missing inet driver, where `docs/design-runtime.md` says `{error, eacces}` without a grant. The design is the target and
   stays; the answer changes with the network service's grant check or a preloaded rebuild.

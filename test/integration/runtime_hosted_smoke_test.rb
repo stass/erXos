@@ -213,13 +213,18 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_answers(expected)
   end
 
-  # Stock OTP gives each of these answers on a name its resolver does not know, except that
-  # it knows localhost. The node must live through all of them: a stopped runtime is the machine.
-  def test_a_native_lookup_answers_as_stock_does_for_an_unknown_name
+  # No lookup runs, so a well-formed one is unsupported, where stock answers notfound for a
+  # name its resolver does not know. inet reads any error as not found, as with stock's. The
+  # node must live through all of them: a stopped runtime is the machine.
+  def test_a_native_lookup_answers_unsupported_and_inet_answers_as_stock_does
     assert_answers(
-      'inet_gethost_native:gethostbyname("nosuch.invalid").' => /^\{error,notfound\}$/,
-      'inet_gethost_native:gethostbyname("nosuch.invalid", inet6).' => /^\{error,notfound\}$/,
-      'inet_gethost_native:gethostbyaddr("192.0.2.1").' => /^\{error,notfound\}$/,
+      'inet_gethost_native:gethostbyname("nosuch.invalid").' => /^\{error,notsup\}$/,
+      'inet_gethost_native:gethostbyname("nosuch.invalid", inet6).' => /^\{error,notsup\}$/,
+      'inet_gethost_native:gethostbyaddr("192.0.2.1").' => /^\{error,notsup\}$/,
+      'inet_db:set_lookup([native]).' => /^ok$/,
+      'inet:gethostbyname("nosuch.invalid").' => /^\{error,nxdomain\}$/,
+      'inet:gethostbyaddr("192.0.2.1").' => /^\{error,nxdomain\}$/,
+      'inet_db:set_lookup([file]).' => /^ok$/,
       'inet_gethost_native:gethostbyaddr("x").' => /^\{error,formerr\}$/,
       'inet_gethost_native:gethostbyname(1, inet).' => /^\{error,formerr\}$/,
       'inet_gethost_native:control(soft_restart).' => /^ok$/,

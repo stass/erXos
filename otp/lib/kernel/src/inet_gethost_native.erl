@@ -35,9 +35,9 @@ gethostbyname(Name) ->
     gethostbyname(Name, inet).
 
 gethostbyname(Name, inet) when is_list(Name) ->
-    {error, notfound};
+    {error, notsup};
 gethostbyname(Name, inet6) when is_list(Name) ->
-    {error, notfound};
+    {error, notsup};
 gethostbyname(Name, Type) when is_atom(Name) ->
     gethostbyname(atom_to_list(Name), Type);
 gethostbyname(_, _)  ->
@@ -45,11 +45,11 @@ gethostbyname(_, _)  ->
 
 gethostbyaddr({A,B,C,D})
   when ?VALID_V4(A), ?VALID_V4(B), ?VALID_V4(C), ?VALID_V4(D) ->
-    {error, notfound};
+    {error, notsup};
 gethostbyaddr({A,B,C,D,E,F,G,H})
   when ?VALID_V6(A), ?VALID_V6(B), ?VALID_V6(C), ?VALID_V6(D),
        ?VALID_V6(E), ?VALID_V6(F), ?VALID_V6(G), ?VALID_V6(H) ->
-    {error, notfound};
+    {error, notsup};
 gethostbyaddr(Addr) when is_list(Addr) ->
     case inet_parse:address(Addr) of
         {ok, IP} -> gethostbyaddr(IP);
