@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported.
+ *
  * %CopyrightEnd%
  */
 
@@ -4269,7 +4271,8 @@ BIF_RETTYPE statistics_1(BIF_ALIST_1)
 	ErtsMonotonicTime u1, u2;
 	Eterm b1, b2;
         Uint hsz;
-	erts_runtime_elapsed_both(&u1, NULL, &u2, NULL);
+	if (!erts_runtime_elapsed_both(&u1, NULL, &u2, NULL))
+	    BIF_ERROR(BIF_P, EXC_NOTSUP);
         hsz = 3; /* 2-tuple */
         (void) erts_bld_monotonic_time(NULL, &hsz, u1);
         (void) erts_bld_monotonic_time(NULL, &hsz, u2);

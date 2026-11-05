@@ -4,6 +4,7 @@
 
 require 'fileutils'
 require 'minitest/autorun'
+require 'open3'
 require 'pty'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runtime'
@@ -76,6 +77,45 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_empty report.violations.map { |violation| "#{violation.object}: #{violation.name}" }
   end
 
+  # What the runtime answers about its clocks and its start, each from a shell's prompt:
+  # both clocks name liberx's calls, CPU time is refused as natively, nothing of the host's
+  # environment or zone arrives, and the boot page's node name reached init's arguments.
+  def test_time_and_the_boot_page_as_a_shell_sees_them
+    expected = {
+      'proplists:get_value(function, erlang:system_info(os_monotonic_time_source)).' => /^erx_clock_ns$/,
+      'proplists:get_value(function, erlang:system_info(os_system_time_source)).' => /^erx_time_wall_ns$/,
+      'catch erlang:statistics(runtime).' => /^\{'EXIT',\{notsup,/,
+      'erlang:localtime_to_universaltime({{2026,7,1},{12,0,0}}).' => /^\{\{2026,7,1\},\{12,0,0\}\}$/,
+      'os:getenv("ERX_SMOKE_LEAK").' => /^false$/,
+      'init:get_argument(sname).' => /^\{ok,\[\["system@hosted"\]\]\}$/,
+      "abs(os:system_time(second) - #{Time.now.to_i}) < 300." => /^true$/,
+      'file:native_name_encoding().' => /^utf8$/,
+      'T0 = erlang:monotonic_time(millisecond), timer:sleep(20), erlang:monotonic_time(millisecond) - T0 >= 20.' => /^true$/
+    }
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home) do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        answers = expected.each_with_index.map do |(expression, _), index|
+          writer.write("#{expression}\n")
+          read_until(reader, transcript, /^#{index + 2}> /, deadline)
+          plain(transcript)[/^#{index + 1}> .*\z/m]
+        end
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        @reaped = true if wait_for(pid, deadline, transcript)
+        expected.values.zip(answers).each { |pattern, answer| assert_match pattern, answer }
+      end
+    end
+  end
+
+  def test_a_word_the_page_refuses_stops_the_start_with_its_reason
+    output, status = Open3.capture2e('gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam, 'word', '', stdin_data: '')
+    assert_equal 1, status.exitstatus, output
+    assert_match(/empty word/, output)
+  end
+
   private
 
   # The newest of the lines hosted liberx prints as the table changes.
@@ -91,10 +131,11 @@ class RuntimeHostedSmokeTest < Minitest::Test
     bin = File.dirname(OUTPUT.beam)
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
       'BINDIR' => bin, 'ROOTDIR' => OUTPUT.root, 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
+      'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes',
       **extra_environment
     )
     arguments = ['--', '-root', OUTPUT.root, '-bindir', bin, '-progname', 'erl', '--', '-home', home, '--',
-                 '-boot', File.join(OUTPUT.root, 'bootstrap/bin/start')]
+                 '-boot', File.join(OUTPUT.root, 'bootstrap/bin/start'), '-kernel', 'start_distribution', 'false']
     PTY.spawn(environment, OUTPUT.beam, *arguments, chdir: home) do |reader, writer, pid|
       yield reader, writer, pid
     ensure

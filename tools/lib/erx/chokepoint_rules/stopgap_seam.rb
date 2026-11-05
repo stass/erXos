@@ -97,6 +97,12 @@ module Erx
         liberx/backend/fiasco/vm.h
         liberx/backend/core/vm_table.c
         liberx/backend/core/vm_table.h
+        liberx/backend/core/boot_info.c
+        liberx/backend/core/boot_info.h
+        liberx/backend/hosted/start.c
+        liberx/backend/runtime_entry.h
+        liberx/backend/fiasco/boot_args.c
+        liberx/backend/fiasco/boot_args.h
         liberx/backend/hosted/generated/calls.c
         liberx/backend/hosted/generated/calls.h
         liberx/elf_plan.c
@@ -147,6 +153,8 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_task/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/boot_info_driver.c'),
+                  Chokepoints::Site.new(glob: 'tools/fuzz/boot_args_fuzz.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_umtx_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_park_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_claim_driver.c'),

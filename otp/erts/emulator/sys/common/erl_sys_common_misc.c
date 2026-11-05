@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: paths are UTF-8 unless a flag says otherwise, whatever the locale.
+ *
  * %CopyrightEnd%
  */
 
@@ -88,41 +90,11 @@ int erts_get_printable_characters(void) {
 
 void erts_init_sys_common_misc(void)
 {
-#if defined(__WIN32__)
-    /* win_efile will totally fail if this is not set. */
-    filename_encoding = ERL_FILENAME_WIN_WCHAR;
-#else
-    if (user_filename_encoding != ERL_FILENAME_UNKNOWN) {
-	filename_encoding = user_filename_encoding;
-    } else {
-	char *l;
-	filename_encoding = ERL_FILENAME_LATIN1;
-#  ifdef PRIMITIVE_UTF8_CHECK
-	setlocale(LC_CTYPE, "");  /* Set international environment, 
-				     ignore result */
-	if (((l = getenv("LC_ALL"))   && *l) ||
-	    ((l = getenv("LC_CTYPE")) && *l) ||
-	    ((l = getenv("LANG"))     && *l)) {
-	    if (strstr(l, "UTF-8")) {
-		filename_encoding = ERL_FILENAME_UTF8;
-	    } 
-	}
-	
-#  else
-	l = setlocale(LC_CTYPE, "");  /* Set international environment */
-	if (l != NULL) {
-	    if (strcmp(nl_langinfo(CODESET), "UTF-8") == 0) {
-		filename_encoding = ERL_FILENAME_UTF8;
-	    }
-	}
-#  endif
-    }
-#  if defined(__DARWIN__)
-    if (filename_encoding == ERL_FILENAME_UTF8) {
-	filename_encoding = ERL_FILENAME_UTF8_MAC;
-    }
-#  endif
-#endif
+    /* docs/design-runtime.md, "Files": paths are UTF-8, and no environment says otherwise. */
+    if (user_filename_encoding != ERL_FILENAME_UNKNOWN)
+        filename_encoding = user_filename_encoding;
+    else
+        filename_encoding = ERL_FILENAME_UTF8;
 }
 
 int erts_get_native_filename_encoding(void)

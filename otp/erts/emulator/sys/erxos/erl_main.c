@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: ERTS starts on the boot information page, whose entry owns main.
+ *
  * %CopyrightEnd%
  */
 #ifdef HAVE_CONFIG_H
@@ -26,12 +28,46 @@
 #include "erl_vm.h"
 #include "global.h"
 
-int
-main(int argc, char **argv)
+#include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/runtime_entry.h"
+
+static erx_boot_view_t boot_view;
+
+void
+erx_runtime_env(const char **words, size_t *length)
 {
+    *words = boot_view.env;
+    *length = boot_view.info.env_len;
+}
+
+/*
+ * erl_start reads its arguments as emulator flags, --, then init's arguments, and edits
+ * the vector, which is why the page's words are copied. See docs/design-runtime.md,
+ * "Configuration".
+ */
+void
+erx_runtime_main(void)
+{
+    erx_boot_info_status_t status;
+    erx_boot_argv_plan_t plan;
+    char **argv;
+    char *strings;
+
     /* Must be done before we have a chance to spawn any scheduler threads. */
     sys_init_signal_stack();
 
-    erl_start(argc, argv);
-    return 0;
+    status = erx_boot_info_read(erx_boot_info(), ERX_PAGE_SIZE, &boot_view);
+    if (status != ERX_BOOT_INFO_OK) {
+        fprintf(stderr, "erx: the boot information page: %s\n", erx_boot_info_reason(status));
+        exit(1);
+    }
+    plan = erx_boot_argv_plan(&boot_view);
+    argv = malloc((plan.argc + 1) * sizeof(*argv));
+    strings = malloc(plan.strings);
+    if (argv == NULL || strings == NULL) {
+        fprintf(stderr, "erx: no memory for the arguments\n");
+        exit(1);
+    }
+    erx_boot_argv_fill(&boot_view, argv, strings);
+    erl_start((int) plan.argc, argv);
 }

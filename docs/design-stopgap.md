@@ -215,6 +215,13 @@ the command line's words, are `init`'s arguments. Strings past `ERX_BOOT_STRINGS
 refuses the boot with the reason, as in step 6's failure; ERTS never starts on a
 partial page.
 
+A reader, `erx_boot_info_read(page, size, view)`, checks the version, the ABI version, the flags, the
+reserved words and every string against the page and `ERX_BOOT_STRINGS_MAX`, and `sys/erxos`'s
+`erx_runtime_main` starts ERTS on nothing else. `erx_boot_argv_plan` and `erx_boot_argv_fill` make
+[the vector for `erl_start`](design-runtime.md#configuration) from what it accepted. A word list on
+the page has no empty word, and an environment word is `KEY=VALUE`. Both the build and the read refuse
+anything else with its reason, and a refused build writes nothing.
+
 The page is a page of the root's image, written before any other thread reads it and not read-only:
 Phase 1 keeps no isolation inside a task. The launcher writes a test task's page with the same
 function and maps it read-only.
@@ -229,7 +236,7 @@ whatever a file holds. erXos's kernel checks each file at its first slice.
 `erx_boot_args_parse(bytes, length, out)` in `liberx/backend/fiasco/boot_args.c`, a pure function with a
 fuzz target, splits it on spaces and reads three kinds of word: `erx.watchdog=P,D,B`, through the
 existing `erx_watchdog_parse`; `erx.det=1`; and `erx.arg=WORD`, at most as many as fit the page's
-strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word refuses the
+strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word, and an `erx.` word of no known kind, refuses the
 boot with the word's name. Bootstrap cuts the record at the last whole word, so a parser never sees half
 a word.
 
@@ -997,6 +1004,7 @@ These differ from the native backend, and a caller must not depend on either sid
 * **A reset is exit status 75**, an end `exit(0)`.
 * **A fault is the host's**: the process ends with the host's signal, under `lldb` or a sanitizer, and writes no crash record.
 * **A runtime links libSystem.** ERTS's threads are libSystem's pthreads with libSystem's TLS, and `erx_utcb_self` is a thread-local block (`hosted/log.c:40`), so it works on any host thread. Only a thread that `erx_thread_create` or `erx_pthread_create_executor` made has a slot; for one that plain `pthread_create` made, `erx_executor_slot` says none and `erx_park` is `ERX_ETYPE`, as for a worker natively.
+* **Time.** `erx_clock_ns` is the host's `CLOCK_MONOTONIC`: nanoseconds, at the microsecond the host's clock ticks by on macOS, counting through a sleep of the machine. `erx_time_wall_ns` adds one offset that the entry reads from `CLOCK_REALTIME` at its start, as the time page's wall offset does natively, so a later step of the host's clock does not reach ERTS. `erlang:system_info(os_monotonic_time_source)` and `os_system_time_source` name these two calls as their functions, and report their unit as the resolution, since neither backend says how fine its clock ticks. The zone is UTC whatever the host's `TZ` says. `statistics(runtime)` fails with `notsup`, as on Fiasco, though the host could answer, so nothing comes to depend on it; no start path calls it.
 * **The entry maps an archive.** `liberx/backend/hosted/start.c` holds `main(ARCHIVE, ARGS...)`: it `mmap`s the file read-only, closes it, runs `erx_pack_open` and the manifest reader, builds [the boot information page](#boot-information) and calls `erx_runtime_main`. A missing file or a refusal prints its reason and exits with status 1. A file truncated during the run faults, as the host's. `erx.*` words do not exist here: arguments after the archive's path go to ERTS.
 * **The archive has a root that never runs.** `erx_pack_open` requires a root image and a manifest (`pack.c:405`, `:505`), and the packer sizes the root as an executable for the target. A hosted release is packed by the same `Pack#build`, with the same manifest and the same entries under `system/`, and a minimal static executable as `system/root`, so hosted iteration needs neither Fiasco's build nor the cross-compiled ERTS. A test compares the two archives' release files, path and hash; the root, the manifest and the notices, which name what each build links, are excepted.
 * **No watchdog.** A pet is accepted and does nothing, so a process stopped under `lldb` lives, and `erx_watchdog` runs as natively.

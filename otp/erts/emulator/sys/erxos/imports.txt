@@ -52,10 +52,6 @@ __swbuf __udivti3 __vsprintf_chk bzero memset_pattern16
 [stock_limits]
 sysconf
 
-# Emptied by time over erx_clock_ns and the boot information form.
-[stock_time]
-clock_getres clock_gettime daylight environ getenv gettimeofday posix2time time2posix
-
 # Emptied by erx_prim_file.c and the archive reader.
 [stock_files]
 access chdir chmod chown close closedir dirfd fclose fdopen fileno fopen
@@ -67,7 +63,7 @@ read readdir readlink readv rename rmdir stat symlink unlink utime write writev
 [stock_ports]
 __darwin_check_fd_set_overflow
 _exit alarm dlclose dlerror dlopen dlsym dup dup2 execle execv execve fcntl fork
-getegid geteuid getpid getrusage ioctl kevent kqueue nice pipe poll
+getegid geteuid getpid ioctl kevent kqueue nice pipe poll
 pthread_kill pthread_sigmask select select$DARWIN_EXTSN setsid sigaction sigprocmask
 sigwait uname waitpid
 

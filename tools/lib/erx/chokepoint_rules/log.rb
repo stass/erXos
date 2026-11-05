@@ -37,12 +37,13 @@ module Erx
         ),
         Chokepoints::Forbidden.new(
           name: 'hosted-log-sink',
-          rule: "only the hosted backend's log sink writes bytes to its console, standard error",
+          rule: "only the hosted backend's log sink, and its entry's refusal to start, write bytes to its console, standard error",
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: false, extra: ['liberx/backend/hosted/**/*']),
           pattern: /\b(?:write|writev|pwrite|pwritev|fwrite|fputs|fputc|fprintf|vfprintf|printf|vprintf|dprintf|vdprintf|
                          puts|putc|putchar|perror|err|errx|warn|warnx|syscall|stderr|stdout|STDERR_FILENO|STDOUT_FILENO)\b/x,
-          sites: [Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c', permits: /\A(?:write|STDERR_FILENO)\z/)],
+          sites: [Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c', permits: /\A(?:write|STDERR_FILENO)\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/hosted/start.c', permits: /\A(?:fprintf|stderr)\z/)],
           seed: { 'liberx/backend/hosted/seeded.c' => "void f(void) { write(2, \"x\", 1); }\n",
                   'liberx/backend/hosted/log.c' => "void f(void) { fprintf(stderr, \"x\"); }\n" }
         )

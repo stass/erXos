@@ -19,6 +19,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  * 
+ * Modified by erXos: ERTS's clocks are liberx's, and the zone is UTC.
+ *
  * %CopyrightEnd%
  *
  * This file handles differences between different Unix systems.
@@ -132,19 +134,10 @@ typedef time_t erts_time_t;
 
 typedef struct timeval SysTimeval;
 
-#define sys_gettimeofday(Arg) ((void) gettimeofday((Arg), NULL))
+void sys_gettimeofday(SysTimeval *tv);
 
-typedef struct tms SysTimes;
-
-#define SYS_CLK_TCK (erts_sys_time_data__.r.o.ticks_per_sec)
-
-#define sys_times(Arg) times(Arg)
-
-#if !HAVE_DECL_DAYLIGHT
-extern int sys_daylight;
-#else
-#define sys_daylight daylight
-#endif
+/* The zone is UTC, which has no daylight saving: an entry's environment names no other. */
+#define sys_daylight 0
 
 #if SIZEOF_LONG == 8
 typedef long ErtsMonotonicTime;
@@ -163,61 +156,28 @@ typedef ErtsSysHrTime ErtsSysPerfCounter;
 #define ERTS_MONOTONIC_TIME_MAX (~ERTS_MONOTONIC_TIME_MIN)
 
 /*
- * OS monotonic time and OS system time
+ * OS monotonic time and OS system time, both in nanoseconds: erx_clock_ns and
+ * erx_time_wall_ns, in sys_time.c.
  */
-#undef ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__
-
-#if defined(OS_SYSTEM_TIME_USING_CLOCK_GETTIME) \
-    && defined(OS_MONOTONIC_TIME_USING_CLOCK_GETTIME)
-#  if defined(__linux__)
-#    define ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__ 1
-#  endif
-#endif
-
-ErtsSystemTime erts_os_system_time(void);
-
 #undef ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT
 #undef ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT
-#undef ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__
+#define ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT 1
+#define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT (1000*1000*1000)
 
-#if defined(OS_MONOTONIC_TIME_USING_CLOCK_GETTIME)
-#  define ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT 1
-#  define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT (1000*1000*1000)
-#  if defined(__linux__)
-#    define ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__ 1
-#  endif
-#elif defined(OS_MONOTONIC_TIME_USING_MACH_CLOCK_GET_TIME)
-#  define ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT 1
-#  define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT (1000*1000*1000)
-#elif defined(OS_MONOTONIC_TIME_USING_GETHRTIME)
-#  define ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT 1
-#  define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT (1000*1000*1000)
-#elif defined(OS_MONOTONIC_TIME_USING_TIMES)
-#  define ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT 1
-/* Time unit determined at runtime... */
-#  define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT 0
-#else /* No OS monotonic available... */
-#  define ERTS_COMPILE_TIME_MONOTONIC_TIME_UNIT (1000*1000)
-#endif
+ErtsSystemTime erts_os_system_time(void);
+ErtsMonotonicTime erts_os_monotonic_time(void);
+void erts_os_times(ErtsMonotonicTime *, ErtsSystemTime *);
 
 /*
  * erts_sys_hrtime() is the highest resolution
  * time function found. Time unit is nano-seconds.
- * It may or may not be monotonic.
  */
 ErtsSysHrTime erts_sys_hrtime(void);
 #define ERTS_HRTIME_UNIT (1000*1000*1000)
 
 struct erts_sys_time_read_only_data__ {
-#ifdef ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__
-    ErtsMonotonicTime (*os_monotonic_time)(void);
-#endif
-#ifdef ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__
-    void (*os_times)(ErtsMonotonicTime *, ErtsSystemTime *);
-#endif
     ErtsSysPerfCounter (*perf_counter)(void);
     ErtsSysPerfCounter perf_counter_unit;
-    int ticks_per_sec;
 };
 
 typedef struct {
@@ -231,43 +191,11 @@ typedef struct {
 
 extern ErtsSysTimeData__ erts_sys_time_data__;
 
-#ifdef ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT
+/* A group's CPU usage in milliseconds; 0 where it is unsupported. */
+int erts_sys_cpu_time_ms(ErtsMonotonicTime *user, ErtsMonotonicTime *sys);
 
-#ifdef ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__
-ERTS_GLB_INLINE
-#endif
-ErtsMonotonicTime erts_os_monotonic_time(void);
-
-#ifdef ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__
-ERTS_GLB_INLINE
-#endif
-void erts_os_times(ErtsMonotonicTime *, ErtsSystemTime *);
-
-#if ERTS_GLB_INLINE_INCL_FUNC_DEF
-
-#ifdef ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__
-
-ERTS_GLB_INLINE ErtsMonotonicTime
-erts_os_monotonic_time(void)
-{
-    return (*erts_sys_time_data__.r.o.os_monotonic_time)();
-}
-
-#endif /* ERTS_OS_MONOTONIC_INLINE_FUNC_PTR_CALL__ */
-
-#ifdef ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__
-
-ERTS_GLB_INLINE void
-erts_os_times(ErtsMonotonicTime *mtimep, ErtsSystemTime *stimep)
-{
-    (*erts_sys_time_data__.r.o.os_times)(mtimep, stimep);
-}
-
-#endif /* ERTS_OS_TIMES_INLINE_FUNC_PTR_CALL__ */
-
-#endif /* ERTS_GLB_INLINE_INCL_FUNC_DEF */
-
-#endif /* ERTS_HAVE_OS_MONOTONIC_TIME_SUPPORT */
+/* The boot information page's environment: NUL-ended KEY=VALUE words. */
+void erx_runtime_env(const char **words, size_t *length);
 
 /*
  * Functions for getting the performance counter

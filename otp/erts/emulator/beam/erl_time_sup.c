@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: CPU time comes from sys_time.c, which refuses it where unsupported, and no conversion of leap seconds.
+ *
  * %CopyrightEnd%
  */
 
@@ -1421,45 +1423,15 @@ erts_finalize_time_offset(void)
 
 /* info functions */
 
-void 
-erts_runtime_elapsed_both(ErtsMonotonicTime *ms_user, ErtsMonotonicTime *ms_sys, 
+/* 0 where the group's CPU usage is unsupported, with nothing written. */
+int
+erts_runtime_elapsed_both(ErtsMonotonicTime *ms_user, ErtsMonotonicTime *ms_sys,
                           ErtsMonotonicTime *ms_user_diff, ErtsMonotonicTime *ms_sys_diff)
 {
     ErtsMonotonicTime prev_user, prev_sys, user, sys;
 
-#ifdef HAVE_GETRUSAGE
-
-    struct rusage now;
-
-    if (getrusage(RUSAGE_SELF, &now) != 0) {
-        erts_exit(ERTS_ABORT_EXIT, "getrusage(RUSAGE_SELF, _) failed: %d\n", errno);
-	return;
-    }
-
-    user = (ErtsMonotonicTime) now.ru_utime.tv_sec;
-    user *= (ErtsMonotonicTime) 1000000;
-    user += (ErtsMonotonicTime) now.ru_utime.tv_usec;
-    user /= (ErtsMonotonicTime) 1000;
-
-    sys = (ErtsMonotonicTime) now.ru_stime.tv_sec;
-    sys *= (ErtsMonotonicTime) 1000000;
-    sys += (ErtsMonotonicTime) now.ru_stime.tv_usec;
-    sys /= (ErtsMonotonicTime) 1000;
-
-#else
-
-    SysTimes now;
-
-    sys_times(&now);
-    user = (ErtsMonotonicTime) now.tms_utime;
-    user *= (ErtsMonotonicTime) 1000;
-    user /= (ErtsMonotonicTime) SYS_CLK_TCK;
-
-    sys = (ErtsMonotonicTime) now.tms_stime;
-    sys *= (ErtsMonotonicTime) 1000;
-    sys /= (ErtsMonotonicTime) SYS_CLK_TCK;
-
-#endif
+    if (!erts_sys_cpu_time_ms(&user, &sys))
+        return 0;
 
     if (ms_user)
 	*ms_user = user;
@@ -1482,6 +1454,7 @@ erts_runtime_elapsed_both(ErtsMonotonicTime *ms_user, ErtsMonotonicTime *ms_sys,
         if (ms_sys_diff)
             *ms_sys_diff = sys - prev_sys;
     }
+    return 1;
 }
 
 
@@ -1726,10 +1699,6 @@ int univ_to_seconds(Sint year, Sint month, Sint day, Sint hour, Sint minute, Sin
     return 1;
 }
 
-#if defined(HAVE_TIME2POSIX) && defined(HAVE_DECL_TIME2POSIX) && \
-    !HAVE_DECL_TIME2POSIX
-extern time_t time2posix(time_t);
-#endif
 
 int 
 local_to_univ(Sint *year, Sint *month, Sint *day, 
@@ -1773,9 +1742,6 @@ local_to_univ(Sint *year, Sint *month, Sint *day,
         return 0;
     }
 
-#ifdef HAVE_TIME2POSIX
-    the_clock = time2posix(the_clock);
-#endif
 
 #ifdef HAVE_GMTIME_R
     tm = gmtime_r(&the_clock, &tmbuf);
@@ -1793,10 +1759,6 @@ local_to_univ(Sint *year, Sint *month, Sint *day,
     *second = tm->tm_sec;
     return 1;
 }
-#if defined(HAVE_POSIX2TIME) && defined(HAVE_DECL_POSIX2TIME) && \
-    !HAVE_DECL_POSIX2TIME
-extern time_t posix2time(time_t);
-#endif
 
 int 
 univ_to_local(Sint *year, Sint *month, Sint *day, 
@@ -1819,20 +1781,6 @@ univ_to_local(Sint *year, Sint *month, Sint *day,
 
     the_clock = *second + 60 * (*minute + 60 * (*hour + 24 *
                                             gregday(*year, *month, *day)));
-#ifdef HAVE_POSIX2TIME
-    /*
-     * Addition from OpenSource - affects FreeBSD.
-     * No valid test case /PaN
-     *
-     * leap-second correction performed
-     * if system is configured so;
-     * do nothing if not
-     * See FreeBSD 6.x and 7.x
-     * /usr/src/lib/libc/stdtime/localtime.c
-     * for the details
-     */
-    the_clock = posix2time(the_clock);
-#endif
 
     tm = sys_localtime_r(&the_clock, &tmbuf);
 

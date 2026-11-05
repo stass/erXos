@@ -23,7 +23,9 @@ module Erx
     # The host OTP on PATH. Host tests hold an exclusive lock on the `jit` oracle
     # while they run, and this build only reads, so it stays off that one.
     HOST_OTP_FLAVOUR = 'emu'
-    LIBERX_SOURCES = FunctionApi::HOSTED_SOURCES.reject { |source| source.start_with?(FunctionApi::GUEST) }.freeze
+    # The function API's test has a main of its own, so the entry and what only it calls join here.
+    LIBERX_SOURCES = [*FunctionApi::HOSTED_SOURCES.reject { |source| source.start_with?(FunctionApi::GUEST) },
+                      'liberx/backend/core/boot_info.c', 'liberx/backend/hosted/start.c'].freeze
     # What the hosted archive is compiled from, for the build record.
     LIBERX_TREES = %w[include kernel/core kernel/generated liberx].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
@@ -167,9 +169,9 @@ module Erx
       Oracle::CLEAN_ERLANG_ENV.merge(
         'ERL_TOP' => @output.root,
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
-        'ERX_ROOT' => @root,
         'ERX_HOSTED_LIBERX' => @output.liberx,
-        'ERX_SDKROOT' => sdk_root
+        'ERX_SDKROOT' => sdk_root,
+        'ERX_TREE' => @root
       ).freeze
     end
 

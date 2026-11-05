@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: erts_runtime_elapsed_both says when CPU time is unsupported.
+ *
  * %CopyrightEnd%
  */
 
@@ -137,7 +139,7 @@ Eterm erts_get_monotonic_end_time(struct process *c_p);
 Eterm erts_monotonic_time_source(struct process*c_p);
 Eterm erts_system_time_source(struct process*c_p);
 
-void erts_runtime_elapsed_both(ErtsMonotonicTime *ms_user,
+int erts_runtime_elapsed_both(ErtsMonotonicTime *ms_user,
                                ErtsMonotonicTime *ms_sys, 
                                ErtsMonotonicTime *ms_user_diff,
                                ErtsMonotonicTime *ms_sys_diff);

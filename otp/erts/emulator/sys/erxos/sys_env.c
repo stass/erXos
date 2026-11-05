@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the initial environment is the boot information page's, not the host's.
+ *
  * %CopyrightEnd%
  */
 
@@ -32,8 +34,6 @@
 
 static erts_osenv_t sysenv_global_env;
 static erts_rwmtx_t sysenv_rwmtx;
-
-extern char **environ;
 
 static void import_initial_env(void);
 
@@ -109,46 +109,48 @@ int erts_sys_explicit_8bit_getenv(char *key, char *value, size_t *size) {
 }
 
 int erts_sys_explicit_host_getenv(const char *key, char *value, size_t *size) {
-    char *orig_value;
-    size_t length;
-    
-    orig_value = getenv(key);
+    const size_t key_length = sys_strlen(key);
+    const char *words;
+    size_t length, used = 0;
 
-    if(orig_value == NULL) {
-        return 0;
+    erx_runtime_env(&words, &length);
+    while (used < length) {
+        const char *word = words + used;
+        const size_t word_length = sys_strlen(word);
+
+        used += word_length + 1;
+        if (word_length > key_length && word[key_length] == '='
+            && memcmp(word, key, key_length) == 0) {
+            const size_t value_length = word_length - key_length - 1;
+
+            if (value_length >= *size) {
+                *size = value_length + 1;
+                return -1;
+            }
+            sys_memcpy((void*)value, (void*)(word + key_length + 1), value_length + 1);
+            *size = value_length;
+            return 1;
+        }
     }
-
-    length = sys_strlen(orig_value);
-
-    if (length >= *size) {
-        *size = length + 1;
-        return -1;
-    }
-
-    sys_memcpy((void*)value, (void*)orig_value, length + 1);
-    *size = length;
-
-    return 1;
+    return 0;
 }
 
 static void import_initial_env(void) {
-    char **environ_iterator, *environ_variable;
+    const char *words;
+    size_t length, used = 0;
 
-    environ_iterator = environ;
+    erx_runtime_env(&words, &length);
+    while (used < length) {
+        const char *word = words + used;
+        const size_t word_length = sys_strlen(word);
+        const char *separator = strchr(word, '=');
+        erts_osenv_data_t env_key, env_value;
 
-    while ((environ_variable = *(environ_iterator++)) != NULL) {
-        char *separator_index = strchr(environ_variable, '=');
-
-        if (separator_index != NULL) {
-            erts_osenv_data_t env_key, env_value;
-
-            env_key.length = separator_index - environ_variable;
-            env_key.data = environ_variable;
-    
-            env_value.length = sys_strlen(separator_index) - 1;
-            env_value.data = separator_index + 1;
-
-            erts_osenv_put_native(&sysenv_global_env, &env_key, &env_value);
-        }
+        env_key.length = separator - word;
+        env_key.data = (void*)word;
+        env_value.length = word_length - env_key.length - 1;
+        env_value.data = (void*)(separator + 1);
+        erts_osenv_put_native(&sysenv_global_env, &env_key, &env_value);
+        used += word_length + 1;
     }
 }
