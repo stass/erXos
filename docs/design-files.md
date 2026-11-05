@@ -1389,6 +1389,32 @@ path runs it, the code server included when a server's directory is on
 the code path, and a module the code server would have to load then halts
 the node.
 
+**The working directory** is one namespace path per runtime, held in the
+NIF beside the namespace's table and starting at `/`. `erx_ns_resolve`
+joins every relative path to it, so a relative path resolves, at each
+use, as the absolute path it stands for. `set_cwd` of a path on the
+release file system is checked in the NIF. On a grant,
+`erx_file_remote` follows the path's links as `chdir` follows them and
+asks `getattr` of what it reaches: anything but a directory answers
+`enotdir`, a directory without the owner's search bit answers `eacces`,
+as the server checks the owner's bits for a walk, and a walk that stops
+answers as the walk does (`enoent` for a missing name). It then stores the namespace path of that directory,
+the entry's point and the names below the entry's root, through
+`prim_file:erx_set_cwd/1`, which normalises it with `erx_ns_resolve`
+and stores it under the namespace's write lock; `get_cwd` answers the
+stored path. The working directory holds no fid and no grant, only the
+path, and only the namespace turns it into a server, as for any path
+the caller writes. A mount change between the check and the store
+leaves the state the same change leaves just after the store. Once a
+grant's process ends, the paths of its entries, the working directory's
+among them, answer `eio`; once the entry is unmounted, they reach what
+the namespace maps at that path then, the release file system, a later
+mount with that mount's rights, or nothing (`enoent`), as the same
+absolute path would.
+So a working directory never reaches a server the namespace does not
+map at its path, and never keeps a server reachable past its unmount.
+Error step 5 below finds the working directory through this path.
+
 * path operations (`read_file_info`, `list_dir`, `make_dir`, `delete`,
   `rename`, `make_link`, `make_symlink`, `read_link`, `read_file`,
   `write_file`) attach a fid of their own on the grant, walk from it
@@ -1766,7 +1792,10 @@ table:
   at most 40 times for one path;
 * a working directory is a path, so a domain or program whose working
   directory is renamed stays at the old path, where Unix follows the
-  directory;
+  directory, and `get_cwd` answers the path of a working directory that
+  was removed, where Linux's `getcwd` answers `enoent`, and an entry the
+  working directory lies under is unmounted like any other, where Linux's
+  `umount` answers `ebusy`;
 * a rename between two grants, two trees or two sets of rights fails
   with `exdev`, where Linux also fails between two mounts of one tree;
 * every operation on a file whose server died fails with `eio`;

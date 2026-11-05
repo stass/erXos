@@ -416,11 +416,8 @@ it; git history is the record of completed work.
   until then.
 * [Low] runtime, `erx_prim_file.c`: EROFS has no provider yet, so a path on it cannot arise; its row's
   `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
-* [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `set_cwd` on a grant still answers
-  `{error, enotsup}`; with a working directory on a grant
-  ([design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote)) comes error step 5,
-  `del_dir` of the working directory answering `einval`, which cannot arise while none lies on a grant.
-  `file:ipread_s32bu_p32bu/3` on an open file of a grant has no implementation, so it raises `undef`.
+* [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
+  file of a grant has no implementation, so it raises `undef`.
 * [Medium] runtime, `erx_file_remote`: `read_file` keeps up to the size a server's `getattr` answers and
   `read_line` reads until a server sends a `"\n"`, so a hostile server can make the caller, perhaps the code
   server, hold as much as it sends until the node dies; stock fails such a size up front with `enomem`. A
@@ -473,8 +470,7 @@ it; git history is the record of completed work.
   into the namespace's table after the lock is released; nothing reads it, but holding only copied values
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
 * [Low] runtime, `erx_ns`: `which/1` and `list/0` of
-  [design-files.md](docs/design-files.md#interfaces) are not written; `set_cwd` into a grant answers through
-  `erx_file_remote`, which cannot yet set the working directory (see the open-files item above).
+  [design-files.md](docs/design-files.md#interfaces) are not written.
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
   ([design-tmp.md](docs/design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
   on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which
@@ -489,7 +485,9 @@ it; git history is the record of completed work.
 * [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:
-  the resolve and the store want one hold of the write lock.
+  the resolve and the store want one hold of the write lock. On a grant a `getattr` exchange lies between
+  them, so there the store wants to check that the working directory is still the one the path was
+  resolved against.
 * [Low] runtime, `liberx/release.c`: `erx_release_entry`'s `ERX_ERANGE` also stands for a failed decode, which
   the kernel's backend must tell apart.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the

@@ -43234,12 +43234,12 @@ Third-party notices remain in their original files.
     "erts/preloaded/ebin/erx_file_remote.beam": {
       "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_file_remote.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
       "license": "BSD-2-Clause",
-      "sha256": "0723fb2d6400b030268bf3f78c7d82b8a21de974a4ca72d26fea57322ecf94a2"
+      "sha256": "1d16d64a9105d3ed2ff1d113551bdaa2edc6213349085623ab23739f52133d6a"
     },
     "erts/preloaded/ebin/prim_file.beam": {
       "evidence": "compiled from the modified erts/preloaded/src/prim_file.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
       "license": "Apache-2.0",
-      "sha256": "ed3ad39fd6703eee9678ad3e1755aa82ce74e82cc0928a6884a65eab050cf1de"
+      "sha256": "ce6f82dbf3635b83b837445ca16b956da5be6fe1907ade97de3a1f299f429d98"
     }
   }
 }

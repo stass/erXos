@@ -904,8 +904,64 @@ tmp(Prefix, Mode) ->
                {"victim kept", fun() -> file:read_link(At(<<"victim">>)) end},
                {"file kept", fun() -> file:read_file(At(<<"file">>)) end}],
     [Show(Step, Call()) || {Step, Call} <- Special],
+    tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
+
+%% A working directory in the tree (design-files.md, Erlang clients, error step 5):
+%% relative calls run in it; set_cwd refuses a file and a missing path and keeps the
+%% directory; del_dir of the working directory, by its own path or as sub/.., answers
+%% einval while it holds names and removes it once it is empty, after which a relative
+%% write finds no directory. set_cwd follows links, one to the corpus included, and
+%% refuses a directory the user may not search. Then the working directory returns to
+%% the corpus.
+tmp_cwd(At, Mode, Show) ->
+    {ok, Saved} = file:get_cwd(),
+    ok = file:make_dir(At(<<"w">>)),
+    Show("cwd set", file:set_cwd(At(<<"w">>))),
+    Show("cwd get", cwd_name(file:get_cwd())),
+    case Mode of
+        "release" -> io:format("tmpx cwd path\t~0tp~n", [file:get_cwd()]);
+        "stock" -> ok
+    end,
+    Show("cwd write", file:write_file(<<"f">>, <<"rel">>)),
+    Show("cwd read", file:read_file(<<"f">>)),
+    Show("cwd read absolute", file:read_file(At(<<"w/f">>))),
+    Show("cwd make dir", file:make_dir(<<"sub">>)),
+    Show("cwd list", sorted(file:list_dir(<<".">>))),
+    Show("cwd set file", file:set_cwd(<<"f">>)),
+    Show("cwd set missing", file:set_cwd(<<"missing">>)),
+    Show("cwd set file/", file:set_cwd(<<"f/">>)),
+    Show("cwd set sub", file:set_cwd(<<"sub">>)),
+    Show("cwd sub", cwd_name(file:get_cwd())),
+    Show("cwd set ..", file:set_cwd(<<"..">>)),
+    ok = file:make_dir(<<"nx">>),
+    ok = file:change_mode(<<"nx">>, 8#600),
+    Show("cwd set unsearchable", file:set_cwd(<<"nx">>)),
+    ok = file:change_mode(<<"nx">>, 8#755),
+    ok = file:del_dir(<<"nx">>),
+    ok = file:make_symlink(<<"w">>, At(<<"wl">>)),
+    Show("cwd set link", file:set_cwd(At(<<"wl">>))),
+    Show("cwd link", cwd_name(file:get_cwd())),
+    ok = file:make_symlink(Saved, At(<<"corpus">>)),
+    Show("cwd set link out", file:set_cwd(At(<<"corpus">>))),
+    Show("cwd out", cwd_name(file:get_cwd())),
+    ok = file:set_cwd(At(<<"w">>)),
+    ok = file:delete(At(<<"wl">>)),
+    ok = file:delete(At(<<"corpus">>)),
+    Show("cwd kept", cwd_name(file:get_cwd())),
+    Show("del_dir cwd full", file:del_dir(At(<<"w">>))),
+    Show("del_dir cwd sub/..", file:del_dir(<<"sub/..">>)),
+    Show("del_dir other full", file:del_dir(At(<<"child/..">>))),
+    ok = file:delete(<<"f">>),
+    ok = file:del_dir(<<"sub">>),
+    Show("del_dir cwd empty", file:del_dir(At(<<"w">>))),
+    Show("cwd gone write", file:write_file(<<"g">>, <<"g">>)),
+    Show("cwd back", file:set_cwd(Saved)),
+    Show("cwd back where", file:get_cwd() =:= {ok, Saved}).
+
+cwd_name({ok, Cwd}) -> {ok, filename:basename(Cwd)};
+cwd_name(Other) -> Other.
 
 %% What the design compares of a #file_info{}: type, access and permission bits,
 %% and a regular file's size and links; a directory's size and links are Linux's
@@ -952,8 +1008,21 @@ tmp_erxos("release") ->
     Show("small write", file:pwrite(Big, 0, binary:copy(<<3>>, 60000))),
     Show("small kept", file:pread(Big, 0, 1)),
     ok = file:close(Big),
+    %% A working directory on the grant is a path: once the grant ends its paths answer
+    %% eio, and once /small is unmounted they reach the release file system, which holds
+    %% no /small.
+    {ok, Saved} = file:get_cwd(),
+    Show("small cwd", file:set_cwd(<<"/small">>)),
+    Show("small cwd info", tmp_info(file:read_file_info(<<"a">>))),
+    Down = monitor(process, Small),
     unlink(Small),
     exit(Small, shutdown),
+    receive {'DOWN', Down, process, Small, _} -> ok end,
+    Show("small cwd ended", file:read_file_info(<<"a">>)),
+    ok = erx_ns:unmount(<<"/small">>),
+    Show("small cwd unmounted", file:read_file_info(<<"a">>)),
+    Show("small cwd kept", file:get_cwd()),
+    ok = file:set_cwd(Saved),
     {ok, Zero} = erx_ramfs_sup:start_link(0, <<"/zero">>, erx_ramfs_zero),
     Show("zero list", file:list_dir(<<"/zero">>)),
     Show("zero write", file:write_file(<<"/zero/a">>, <<>>)),

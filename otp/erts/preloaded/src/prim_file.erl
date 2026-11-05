@@ -40,9 +40,10 @@
 
 -export([read_file/1, write_file/2]).
 
-%% erXos: the namespace's changes, for erx_ns, and the runtime's fid counter.
+%% erXos: the namespace's changes, for erx_ns, the runtime's fid counter, and the
+%% working directory on a grant, for erx_file_remote.
 -export([erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1,
-         erx_tmp_limit/0]).
+         erx_tmp_limit/0, erx_set_cwd/1]).
 
 -export([read_link/1, read_link_all/1,
          read_link_info/1, read_link_info/2,
@@ -84,7 +85,7 @@
        get_handle_nif/1, delayed_close_nif/1, altname_nif/1,
        file_desc_to_ref_nif/1,
        erx_ns_mount_nif/4, erx_ns_bind_nif/3, erx_ns_unmount_nif/1, erx_fid_nif/0,
-       erx_tmp_limit_nif/0,
+       erx_tmp_limit_nif/0, erx_set_cwd_nif/1,
        erx_resolve_nif/1, erx_resolve_nif/2]).
 
 -type prim_file_name() :: string() | unicode:unicode_binary().
@@ -613,6 +614,16 @@ erx_fid() ->
 erx_tmp_limit() ->
     erx_tmp_limit_nif().
 
+%% erXos: makes an absolute namespace path, a name as set_cwd/1 takes, the working
+%% directory, checking nothing about what lies there; erx_file_remote:set_cwd/3 calls it
+%% once it found a directory on the path's grant (design-files.md, Erlang clients).
+erx_set_cwd(Path) ->
+    try
+        erx_set_cwd_nif(encode_path(Path))
+    catch
+        error:badarg -> {error, badarg}
+    end.
+
 %% erXos: where one path lies, or the two of a rename or a link, as their operations
 %% would find them, acting on nothing: their remote term, local for the NIF's own
 %% providers, or the refusal. erx_file_remote asks it for the path a symbolic link
@@ -628,6 +639,8 @@ erx_resolve(Paths) ->
         error:badarg -> {error, einval}
     end.
 
+erx_set_cwd_nif(_Path) ->
+    erlang:nif_error(undef).
 erx_ns_mount_nif(_Point, _Pid, _Tree, _Rights) ->
     erlang:nif_error(undef).
 erx_ns_bind_nif(_From, _To, _ReadOnly) ->
@@ -887,8 +900,9 @@ set_cwd(Path) ->
     try
         case is_path_translatable(Path) of
             true ->
-                remote(set_cwd_nif(encode_path(Path)),
-                       fun(Grant, Place) -> erx_file_remote:set_cwd(Grant, Place) end);
+                Encoded = encode_path(Path),
+                remote(set_cwd_nif(Encoded),
+                       fun(Grant, Place) -> erx_file_remote:set_cwd(Grant, Place, Encoded) end);
             false -> {error, no_translation}
         end
     catch

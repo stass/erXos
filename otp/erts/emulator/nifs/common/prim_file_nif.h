@@ -158,13 +158,15 @@ int efile_load(ErlNifEnv *env);
  * namespace and is not resolved. */
 posix_errno_t efile_marshal_text(ErlNifEnv *env, ERL_NIF_TERM text, efile_path_t *result);
 
-/** @brief erXos: the namespace's changes and the runtime's fid counter
+/** @brief erXos: the namespace's changes, the runtime's fid counter and the
+ * working directory on a grant
  * (erx_ns, design-files.md, Building, binding and mounting). */
 ERL_NIF_TERM efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_ns_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_ns_unmount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 
 /** @brief Translates the given "raw name" into the format expected by the APIs
  * used by the underlying implementation. The result is transient and does not

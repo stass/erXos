@@ -588,6 +588,31 @@ efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_uint(env, fid));
 }
 
+/*
+ * prim_file:erx_set_cwd_nif(Path): makes Path, an absolute namespace path, the
+ * working directory, as erx_ns_resolve normalises it. It checks nothing about what
+ * lies there: erx_file_remote:set_cwd/3 found a directory on the path's grant first.
+ * The working directory is a path, resolved again at each use, so a mount change
+ * between that check and this store leaves the state the same change would leave
+ * just after it.
+ */
+ERL_NIF_TERM
+efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_ns_result_t result;
+	erx_ns_status_t status;
+	ErlNifBinary path;
+
+	if (argc != 1 || !erx_inspect_path(env, argv[0], &path) || path.data[0] != '/')
+		return (enif_make_badarg(env));
+	enif_rwlock_rwlock(ns_lock);
+	status = erx_ns_resolve(&name_space, path.data, path.size - 1, &result);
+	if (status == ERX_NS_OK)
+		memcpy(name_space.cwd, result.res_path, result.res_path_length + 1);
+	enif_rwlock_rwunlock(ns_lock);
+	return (erx_ns_answer(env, status));
+}
+
 /* prim_file:erx_tmp_limit_nif(): the cap of the domain's /tmp, from its startup limits. */
 ERL_NIF_TERM
 efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])

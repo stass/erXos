@@ -220,12 +220,14 @@ static ErlNifFunc nif_funcs[] = {
     {"altname_nif", 1, altname_nif, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"file_desc_to_ref_nif", 1, file_desc_to_ref_nif, ERL_NIF_DIRTY_JOB_IO_BOUND},
 
-    /* erXos: the namespace's changes, the fid counter and /tmp's cap (erx_prim_file.c). */
+    /* erXos: the namespace's changes, the fid counter, /tmp's cap and the working
+     * directory on a grant (erx_prim_file.c). */
     {"erx_ns_mount_nif", 4, efile_ns_mount_nif},
     {"erx_ns_bind_nif", 3, efile_ns_bind_nif},
     {"erx_ns_unmount_nif", 1, efile_ns_unmount_nif},
     {"erx_fid_nif", 0, efile_fid_nif},
     {"erx_tmp_limit_nif", 0, efile_tmp_limit_nif},
+    {"erx_set_cwd_nif", 1, efile_ns_set_cwd_nif},
     {"erx_resolve_nif", 1, erx_resolve_nif},
     {"erx_resolve_nif", 2, erx_resolve_nif},
 };

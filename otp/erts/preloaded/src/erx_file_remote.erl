@@ -47,14 +47,13 @@
 %% (T6 of design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
 %%
 %% Not yet done here (TODO.md): a listing's entries for the mount points below a
-%% directory; set_cwd, and with it the working-directory step of del_dir;
-%% file:ipread_s32bu_p32bu/3 on an open file.
+%% directory; file:ipread_s32bu_p32bu/3 on an open file.
 
 -module(erx_file_remote).
 
 -export([read_file_info/4, read_link/3, list_dir/3, write_file_info/4, make_dir/3,
          del_dir/3, delete/3, rename/5, make_link/5, make_symlink/4]).
--export([open/4, read_file/3, set_cwd/2]).
+-export([open/4, read_file/3, set_cwd/3]).
 %% An open file's operations, which file dispatches to by its descriptor's module.
 -export([close/1, read/2, read_line/1, pread/2, pread/3, write/2, pwrite/2, pwrite/3,
          position/2, truncate/1, sync/1, datasync/1, advise/4, allocate/3,
@@ -368,8 +367,21 @@ del_dir(Grant, Place, Path) ->
                  end,
                  fun(Text) -> prim_file:del_dir(Text) end),
     case Answer of
-        {error, enotempty} -> {error, eexist};
+        {error, Full} when Full =:= enotempty; Full =:= eexist -> working_directory_step(Path);
         _ -> Answer
+    end.
+
+%% Step 5: a directory del_dir found full answers einval when it is the working directory,
+%% as stock answers after it compares the stats of the path and of ".", else eexist.
+working_directory_step(Path) ->
+    {ok, Cwd} = prim_file:get_cwd(),
+    case identity(text(Path)) of
+        none -> {error, eexist};
+        Identity ->
+            case identity(raw(Cwd)) of
+                Identity -> {error, einval};
+                _ -> {error, eexist}
+            end
     end.
 
 %% A last name written with a trailing "/" is not followed and removes nothing: eisdir
@@ -1022,9 +1034,56 @@ copied(Source, Destination, Left, Done) ->
             Error
     end.
 
-%% A working directory on a grant is not served yet (TODO.md).
--spec set_cwd(grant(), place()) -> {error, enotsup}.
-set_cwd(_Grant, _Place) -> {error, enotsup}.
+%% The working directory is a namespace path (design-files.md, Erlang clients): set_cwd
+%% follows the path's links, as chdir does, and makes the namespace path of the directory
+%% it reaches the working directory, which prim_file's NIF resolves every relative path
+%% against. A path that a link led to the NIF's own providers is set there.
+-spec set_cwd(grant(), place(), path()) -> ok | {error, posix()}.
+set_cwd(Grant, Place, Path) ->
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [Reached], [Text]) -> cwd_at(OnGrant, Reached, Text) end,
+               fun([Text]) -> prim_file:set_cwd(Text) end).
+
+%% chdir's checks on what the path reaches: a directory, which the domain's user may
+%% search, as the owner whose permission bits a server checks (design-tmp.md,
+%% Permissions); else enotdir or eacces, or the walk's answer.
+cwd_at(Grant, {_, _, Names} = Reached, Text) ->
+    case act(Grant, [{names(Names), followed(Text)}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
+        {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =/= ?ERX_P9_S_IFDIR -> {error, enotdir};
+        {ok, #{mode := Mode}} when Mode band 8#100 =:= 0 -> {error, eacces};
+        {ok, _} -> prim_file:erx_set_cwd(namespace_path(Reached));
+        Other -> Other
+    end.
+
+%% The namespace path a place names: the entry's point, then the names below its root.
+namespace_path({Point, Root, Names}) ->
+    {_, Below} = split_at(length(names(Root)), names(Names)),
+    joined([Point | Below], false).
+
+%% Step 5's identity of the directory a path names, its links followed and "." and ".."
+%% resolved on its text by the NIF: its grant's pid and tree and the qid path a getattr
+%% answers, or none when the path lies on no grant or reaching it fails, so two failures
+%% never compare as one directory.
+-spec identity(text()) -> {pid(), binary(), non_neg_integer()} | none.
+identity(Text) ->
+    Found = case prim_file:erx_resolve([Text]) of
+                {remote, Grant, Place} ->
+                    with_links(Grant, [Place], [Text],
+                               fun({Pid, Tree, _} = OnGrant, [{_, _, Names}], _) ->
+                                       case act(OnGrant, [{names(Names), follow}],
+                                                fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
+                                           {ok, #{qid := {_, _, QidPath}}} -> {found, {Pid, Tree, QidPath}};
+                                           Other -> Other
+                                       end
+                               end,
+                               fun(_) -> none end);
+                _ ->
+                    none
+            end,
+    case Found of
+        {found, Identity} -> Identity;
+        _ -> none
+    end.
 
 %% The error steps -----------------------------------------------------------
 
