@@ -14,6 +14,31 @@ supervision and inspection span them all.
 [docs/design.md](docs/design.md) is the architecture and
 [docs/plan.md](docs/plan.md) the staged roadmap.
 
+## Principles
+
+These shape every design and change; the rules below apply them.
+
+1. **Erlang wherever practical.** Write as much of the system as is
+   practical in Erlang, drivers included. Practical is the key word: do
+   not complicate a design just to keep it in Erlang, and do not give up
+   performance where it matters. Where Erlang does the job elegantly, use
+   it, even if that means patching OTP.
+2. **We own OTP.** Modify OTP freely when it makes the system simpler, more
+   elegant or faster. Avoid gratuitous changes.
+3. **Beauty and simplicity.** The system and its architecture must be
+   simple and elegant. A small performance loss is acceptable when it buys
+   a lot of simplicity.
+4. **Declarative where it simplifies.** Describe the system declaratively
+   wherever that is simpler: Datalog, awklog (`~/projects/awklog`), relic
+   (`~/projects/relic`) or another fitting language, never where it adds
+   complexity. Barrelfish's "Tackling OS Complexity with Declarative
+   Techniques" and the BOOM project are the references
+   ([research-os-ideas.md](docs/research-os-ideas.md)).
+5. **Unix look and feel.** To its users the system feels like Unix, as QNX
+   does. A POSIX-like layer that runs FreeBSD programs is a goal, but not
+   at the expense of the other principles; full POSIX compliance is not
+   the bar.
+
 ## Collaboration
 
 * Ask, don't assume. If something is unclear, ask before writing a single line.
