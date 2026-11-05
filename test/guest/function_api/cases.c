@@ -36,7 +36,7 @@
 #define TLS_VALUE	UINT64_C(0x5a5a00001234beef)
 #define ARG_VALUE	UINT64_C(0x1122334455667788)
 /* More than either backend's pool holds, and well inside either's area. */
-#define BEYOND_POOL	(UINT64_C(8) * 1024 * 1024 * 1024)
+#define BEYOND_POOL	(UINT64_C(16) * 1024 * 1024 * 1024)
 
 _Atomic uint32_t function_api_done;
 

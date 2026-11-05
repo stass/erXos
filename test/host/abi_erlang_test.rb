@@ -99,9 +99,9 @@ class AbiErlangTest < Minitest::Test
   def write_partition_and_parameter_fixtures
     valid = AbiErlangFixture.devices(owners: 2, devices: 2)
     overlapping = valid.dup
-    AbiManifestFixture.integer(overlapping, 700, 712)
+    AbiManifestFixture.integer(overlapping, 708, 720)
     gap = AbiErlangFixture.devices(owners: 1, devices: 2)
-    AbiManifestFixture.integer(gap, 676, 752)
+    AbiManifestFixture.integer(gap, 684, 760)
     fixtures = {
       'partition_valid' => valid,
       'partition_overlap' => overlapping,

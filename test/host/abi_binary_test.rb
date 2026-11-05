@@ -124,13 +124,13 @@ class AbiBinaryTest < Minitest::Test
 
   def test_device_selector_refuses_inactive_fields_and_missing_path
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 712 + 32, 1, width: 2)
+    AbiManifestFixture.integer(bytes, 720 + 32, 1, width: 2)
     assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.span(bytes, 712 + 8, 0, 0)
+    AbiManifestFixture.span(bytes, 720 + 8, 0, 0)
     assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 712 + 48, 4096, width: 8)
+    AbiManifestFixture.integer(bytes, 720 + 48, 4096, width: 8)
     assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
   end
 
