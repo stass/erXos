@@ -284,6 +284,13 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] `test/fixtures/runtime_event_harness.c`: the `scheduler_wait` exit test (`erx_event_leave_wait_ready`) is single-threaded and pins the
+  call by source text, so the real crossing of a scheduler and its waker is not run.
+* [Low] `tools/fuzz/boot_build_target.rb`: the boot fuzz targets do not require that any input is accepted, so a target that
+  refuses everything passes, and the script copies the limits layout by hand rather than from `abi/erx_abi.txt`.
+* [Low] `otp/erts/emulator/Makefile.in`: `erlang:system_info(compile_info)` answers `N/A` on erXos (edit 49 of
+  `docs/design-runtime.md`), which no test pins until the oracle comparison runs.
+
 * [Medium] `libc-test` on native Fiasco, `tools/lib/erx/libc_test.rb`: the
   first run through `tools/erx check-libc-test` under TCG at 4 CPUs passed 286,
   failed 12, timed out 4 and did not run 42 (`~/erxos-history` `5ab1582`,
