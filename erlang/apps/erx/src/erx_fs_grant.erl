@@ -16,7 +16,7 @@ performs them:
 * `{monitor, Owner}`: monitor `Owner` and hand the reference back with
   `monitored/3` before the next step;
 * `{demonitor, Ref}`: `erlang:demonitor(Ref, [flush])`;
-* `{start_file, Node, Module, Tree}`: start the file process process,
+* `{start_file, Node, Module, Fs}`: start the file process,
   linked to the grant, and hand its pid and tag back with `file_started/4`
   before the next step;
 * `{run, Process, Tag, Job}`: send `{Tag, Job}` to a file process,
@@ -26,7 +26,11 @@ The core calls the tree's callback module directly for everything but an open
 file's reads, writes, listings, size changes, syncs and clunks, which its file process
 runs in turn and answers with `{erx_fs_file, Tag, Alias, Reply}`; a walk asks
 the tree one name at a time and each answer decides the next question. The core
-reads no other state and sends nothing.
+reads no other state and sends nothing. Every callback receives the tree's
+handle `Fs`, which `init/1` answered and which never changes, and answers only
+its result, never a next state, so the grant and its file processes call one
+tree; an answer that is none of its callback's shapes reaches the client as
+`eio`, through `failed/1` or the grammar's reply check in `finish/4`.
 
 Every frame passes one funnel, `decode/2`, which takes the grant's rights:
 dispatch receives only requests the funnel admitted, so a writing request on a
@@ -98,7 +102,7 @@ ends with its file's last clunk.
                   by = none :: reference() | none}).
 
 -record(grant, {module :: module(),
-                tree :: term(),
+                fs :: term(),
                 rights :: rights(),
                 client :: node(),
                 pool :: pos_integer(),
@@ -114,7 +118,7 @@ ends with its file's last clunk.
 -type effect() :: {reply, reference(), term()}
                 | {monitor, pid()}
                 | {demonitor, reference()}
-                | {start_file, Node :: term(), module(), Tree :: term()}
+                | {start_file, Node :: term(), module(), Fs :: term()}
                 | {run, pid(), reference(), job()}.
 %% What a file process performs: a request it answers to Alias, or the
 %% clunk of one of its handles, the last of which ends it.
@@ -132,15 +136,15 @@ A grant with no fids. `rights` is the grant's (`ro`, `rw` or `rx`); a tree
 whose module has no `write/4` callback is read-only whatever they say (F5).
 `client` is the node of the domain the grant serves, `pool` its fid bound.
 """.
--spec new(#{module := module(), tree := term(), rights := rights(),
+-spec new(#{module := module(), fs := term(), rights := rights(),
             client := node(), pool => pos_integer()}) -> grant().
-new(#{module := Module, tree := Tree, rights := Rights, client := Client} = Options)
+new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
   when (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx),
        is_atom(Client) ->
     Pool = maps:get(pool, Options, ?DEFAULT_POOL),
     true = is_integer(Pool) andalso Pool > 0,
     Writes = erlang:function_exported(Module, write, 4),
-    #grant{module = Module, tree = Tree, client = Client, pool = Pool,
+    #grant{module = Module, fs = Fs, client = Client, pool = Pool,
            rights = effective_rights(Rights, Writes)}.
 
 effective_rights(rw, false) -> ro;
@@ -199,52 +203,56 @@ file_answer(Tag, Alias, Reply, #grant{pending = Pending} = Grant) ->
     end.
 
 -doc """
-What a file process does with one job, calling `Module` with the tree
-`State` it holds: `{answer, Alias, Reply, State1}` for a request, whose reply
-goes to the grant; `{continue, State1}` after a clunk; `{stop, State1}` after
-the file's last clunk, when the file process ends.
+What a file process does with one job, calling `Module` with the tree's
+handle `Fs`: `{answer, Alias, Reply}` for a request, whose reply goes to the
+grant; `continue` after a clunk; `stop` after the file's last clunk, when the
+file process ends. A clunk's answer is not used: the grant answered the
+client's clunk when it sent the job.
 """.
--spec run_job(job(), module(), term()) ->
-          {answer, reference(), term(), term()} | {continue, term()} | {stop, term()}.
-run_job({answer, Alias, Call}, Module, State) ->
-    {Reply, State1} = call(Call, Module, State),
-    {answer, Alias, Reply, State1};
-run_job({clunk, Handle}, Module, State) ->
-    {ok, State1} = Module:clunk(Handle, State),
-    {continue, State1};
-run_job({last_clunk, Handle}, Module, State) ->
-    {ok, State1} = Module:clunk(Handle, State),
-    {stop, State1}.
+-spec run_job(job(), module(), term()) -> {answer, reference(), term()} | continue | stop.
+run_job({answer, Alias, Call}, Module, Fs) ->
+    {answer, Alias, call(Call, Module, Fs)};
+run_job({clunk, Handle}, Module, Fs) ->
+    _ = Module:clunk(Handle, Fs),
+    continue;
+run_job({last_clunk, Handle}, Module, Fs) ->
+    _ = Module:clunk(Handle, Fs),
+    stop.
 
-call({read, Handle, Offset, Count}, Module, State) ->
-    case Module:read(Handle, Offset, Count, State) of
-        {ok, Data, State1} -> {{ok, Data}, State1};
-        {error, Posix} when is_atom(Posix) -> {{error, Posix}, State}
+call({read, Handle, Offset, Count}, Module, Fs) ->
+    case Module:read(Handle, Offset, Count, Fs) of
+        {ok, Data} -> {ok, Data};
+        Other -> failed(Other)
     end;
-call({write, Handle, Offset, Data}, Module, State) ->
-    case Module:write(Handle, Offset, Data, State) of
-        {ok, Count, At, State1} -> {{ok, Count, At}, State1};
-        {error, Posix} when is_atom(Posix) -> {{error, Posix}, State}
+call({write, Handle, Offset, Data}, Module, Fs) ->
+    case Module:write(Handle, Offset, Data, Fs) of
+        {ok, Count, At} -> {ok, Count, At};
+        Other -> failed(Other)
     end;
-call({readdir, Handle, Offset, Count}, Module, State) ->
+call({readdir, Handle, Offset, Count}, Module, Fs) ->
     case Count div packed_entry(<<>>) of
         0 ->
-            {{error, einval}, State};
+            {error, einval};
         Fit ->
-            case Module:readdir(Handle, Offset, min(Fit, ?DIRENTS_PER_CALL), State) of
-                {ok, Entries, State1} -> {fit_listing(Entries, Count), State1};
-                {error, Posix} when is_atom(Posix) -> {{error, Posix}, State}
+            case Module:readdir(Handle, Offset, min(Fit, ?DIRENTS_PER_CALL), Fs) of
+                {ok, Entries} -> fit_listing(Entries, Count);
+                Other -> failed(Other)
             end
     end;
-call({fsync, Handle}, Module, State) ->
-    ok_or_error(optional(Module, fsync, [Handle, State], {ok, State}), State);
-call({setattr, Handle, Attr}, Module, State) ->
-    ok_or_error(optional(Module, setattr, [{open, Handle}, Attr, State], {error, eperm}), State).
+call({fsync, Handle}, Module, Fs) ->
+    done(optional(Module, fsync, [Handle, Fs], ok));
+call({setattr, Handle, Attr}, Module, Fs) ->
+    done(optional(Module, setattr, [{open, Handle}, Attr, Fs], {error, eperm})).
 
-%% A callback answering {ok, State1} or {error, Posix}, as {Reply, State1}: the
-%% reply ok with its next state, or the error with the state unchanged.
-ok_or_error({ok, State1}, _) -> {ok, State1};
-ok_or_error({error, Posix}, State) when is_atom(Posix) -> {{error, Posix}, State}.
+%% The answer of a callback that answers ok or an error.
+done(ok) -> ok;
+done(Other) -> failed(Other).
+
+%% A callback's error, or eio for an answer that is none of its callback's
+%% shapes, so a malformed answer reaches the client and leaves the grant as
+%% it was.
+failed({error, Posix}) when is_atom(Posix) -> {error, Posix};
+failed(_) -> {error, eio}.
 
 %% A listing keeps the entries that fit the request's count, as the wire packs
 %% them; a first entry that does not fit is einval, as getdents answers a
@@ -255,7 +263,7 @@ ok_or_error({error, Posix}, State) when is_atom(Posix) -> {{error, Posix}, State
 fit_listing([], _) ->
     {ok, []};
 fit_listing(Entries, Count) ->
-    case is_list(Entries) andalso lists:all(fun is_entry/1, Entries) of
+    case entries(Entries) of
         true ->
             case take_fitting(Entries, Count, []) of
                 [] -> {error, einval};
@@ -265,8 +273,10 @@ fit_listing(Entries, Count) ->
             {ok, Entries}
     end.
 
-is_entry({_, _, _, Name}) -> is_binary(Name);
-is_entry(_) -> false.
+%% A proper list of entries; an improper one is malformed too.
+entries([]) -> true;
+entries([{_, _, _, Name} | Entries]) when is_binary(Name) -> entries(Entries);
+entries(_) -> false.
 
 take_fitting([{_, _, _, Name} = Entry | Entries], Room, Kept) ->
     case Room - packed_entry(Name) of
@@ -406,13 +416,13 @@ dispatch(Owner, {attach, Fid, Afid, _, Aname, _}, Grant) ->
 dispatch(Owner, {walk, Fid, NewFid, Names}, Grant) ->
     walk(Owner, Fid, NewFid, Names, Grant);
 dispatch(_, {getattr, Fid, _}, Grant) ->
-    on_node(Fid, Grant, fun(Node, Module, Tree) -> Module:getattr(Node, Tree) end);
+    on_node(Fid, Grant, fun(Node, Module, Fs) -> Module:getattr(Node, Fs) end);
 dispatch(_, {readlink, Fid}, Grant) ->
-    on_node(Fid, Grant, fun(Node, Module, Tree) ->
-                                optional(Module, readlink, [Node, Tree], {error, einval})
+    on_node(Fid, Grant, fun(Node, Module, Fs) ->
+                                optional(Module, readlink, [Node, Fs], {error, einval})
                         end);
 dispatch(_, {statfs, Fid}, Grant) ->
-    on_node(Fid, Grant, fun(_, Module, Tree) -> Module:statfs(Tree) end);
+    on_node(Fid, Grant, fun(_, Module, Fs) -> Module:statfs(Fs) end);
 dispatch(_, {clunk, Fid}, Grant) ->
     case held(Fid, Grant) of
         true -> {ok, end_fid(Fid, Grant)};
@@ -475,14 +485,16 @@ version(Msize, _) -> {ok, min(Msize, ?MSIZE_MAX), <<"unknown">>}.
 attach(_, _, Afid, _, Grant) when Afid =/= ?NOFID ->
     %% auth is not served, so the grant holds no fid an Afid could name.
     {{error, ebadf}, Grant};
-attach(Owner, Fid, _, Aname, #grant{module = Module, tree = Tree} = Grant) ->
+attach(Owner, Fid, _, Aname, #grant{module = Module, fs = Fs} = Grant) ->
     case new_fid_admissible(Fid, Grant) of
         ok ->
-            case Module:root(Tree) of
+            case Module:root(Fs) of
                 {ok, Aname, Root, Qid} ->
                     {{ok, Qid}, add_fid(Fid, Owner, [{Root, Qid, root}], Grant)};
                 {ok, _, _, _} ->
-                    {{error, enoent}, Grant}
+                    {{error, enoent}, Grant};
+                Other ->
+                    {failed(Other), Grant}
             end;
         {error, _} = Error ->
             {Error, Grant}
@@ -535,26 +547,24 @@ walk_step(<<"..">>, [_] = Root, _) ->
     {ok, Root};
 walk_step(<<"..">>, [_ | Parent], _) ->
     {ok, Parent};
-walk_step(Name, [{Dir, _, _} | _] = Path, #grant{module = Module, tree = Tree}) ->
-    case Module:walk(Dir, Name, Tree) of
+walk_step(Name, [{Dir, _, _} | _] = Path, #grant{module = Module, fs = Fs}) ->
+    case Module:walk(Dir, Name, Fs) of
         {ok, Node, Qid} -> {ok, [{Node, Qid, Name} | Path]};
-        {error, _} = Error -> Error
+        Other -> failed(Other)
     end.
 
 %% lopen opens an unopened fid in place; a fid at a symbolic link is never
 %% opened (eloop), so no open acts on a link the client has not seen.
-lopen(Fid, Flags, #grant{fids = Fids, module = Module, tree = Tree} = Grant) ->
+lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
         #{Fid := #fid{path = [{_, {Type, _, _}, _} | _]}} when Type band ?QTSYMLINK =/= 0 ->
             {{error, eloop}, Grant};
         #{Fid := #fid{path = [{Node, Qid, _} | _]}} ->
-            case Module:open(Node, Flags, Tree) of
-                {ok, Handle, Tree1} ->
-                    {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant#grant{tree = Tree1})};
-                {error, Posix} when is_atom(Posix) ->
-                    {{error, Posix}, Grant}
+            case Module:open(Node, Flags, Fs) of
+                {ok, Handle} -> {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant)};
+                Other -> {failed(Other), Grant}
             end;
         #{} ->
             {{error, ebadf}, Grant}
@@ -563,18 +573,18 @@ lopen(Fid, Flags, #grant{fids = Fids, module = Module, tree = Tree} = Grant) ->
 %% lcreate turns a directory's unopened fid into the opened fid of the file
 %% Name names: one make of {file, Mode, Flags} creates it, or without O_EXCL
 %% opens the regular file already there, and either way counts the open.
-lcreate(Fid, Name, Flags, Mode, #grant{fids = Fids, module = Module, tree = Tree} = Grant) ->
+lcreate(Fid, Name, Flags, Mode, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
         #{Fid := #fid{path = [{Dir, _, _} | _] = Path}} ->
             What = {file, Mode band 8#7777, Flags},
-            case optional(Module, make, [Dir, Name, What, Tree], {error, eperm}) of
-                {ok, Node, Qid, Handle, Tree1} ->
-                    Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Grant#grant{tree = Tree1}),
+            case optional(Module, make, [Dir, Name, What, Fs], {error, eperm}) of
+                {ok, Node, Qid, Handle} ->
+                    Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Grant),
                     {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant1)};
-                {error, Posix} when is_atom(Posix) ->
-                    {{error, Posix}, Grant}
+                Other ->
+                    {failed(Other), Grant}
             end;
         #{} ->
             {{error, ebadf}, Grant}
@@ -588,8 +598,8 @@ remove(Fid, #grant{fids = Fids} = Grant) ->
         #{Fid := #fid{path = [{_, _, root}]}} ->
             {{error, einval}, end_fid(Fid, Grant)};
         #{Fid := #fid{path = [{Node, _, Name}, {Dir, _, _} | _]}} ->
-            {Reply, Grant1} = change(unlink, [Dir, Name, {node, Node}], Grant),
-            {Reply, end_fid(Fid, Grant1)};
+            Reply = change(unlink, [Dir, Name, {node, Node}], Grant),
+            {Reply, end_fid(Fid, Grant)};
         #{} ->
             {{error, ebadf}, Grant}
     end.
@@ -598,8 +608,8 @@ make(Dfid, Name, What, Grant) ->
     case node_of(Dfid, Grant) of
         {ok, Dir} ->
             case change(make, [Dir, Name, What], Grant) of
-                {{ok, _Node, Qid}, Grant1} -> {made_reply(What, Qid), Grant1};
-                {{error, _}, _} = Error -> Error
+                {ok, _Node, Qid} -> {made_reply(What, Qid), Grant};
+                {error, _} = Error -> {Error, Grant}
             end;
         error ->
             {{error, ebadf}, Grant}
@@ -608,24 +618,25 @@ make(Dfid, Name, What, Grant) ->
 made_reply({link, _}, _) -> ok;
 made_reply(_, Qid) -> {ok, Qid}.
 
-%% A callback that changes the tree returns its next state with its answer;
-%% a tree without the callback keeps nothing of that kind (eperm).
+%% A callback that changes the tree answers ok, or for make the node it made;
+%% a tree without the callback keeps nothing of that kind (eperm). The change
+%% is the tree's, behind its handle, so the grant holds the same state after.
 change_on_node(Fid, Grant, Callback, Arguments) ->
     case node_of(Fid, Grant) of
-        {ok, Node} -> change(Callback, Arguments(Node), Grant);
+        {ok, Node} -> {change(Callback, Arguments(Node), Grant), Grant};
         error -> {{error, ebadf}, Grant}
     end.
 
-change(Callback, Arguments, #grant{module = Module, tree = Tree} = Grant) ->
-    case optional(Module, Callback, Arguments ++ [Tree], {error, eperm}) of
-        {ok, Tree1} -> {ok, Grant#grant{tree = Tree1}};
-        {ok, Node, Qid, Tree1} -> {{ok, Node, Qid}, Grant#grant{tree = Tree1}};
-        {error, Posix} when is_atom(Posix) -> {{error, Posix}, Grant}
-    end.
+change(Callback, Arguments, #grant{module = Module, fs = Fs}) ->
+    changed(Callback, optional(Module, Callback, Arguments ++ [Fs], {error, eperm})).
 
-on_node(Fid, #grant{module = Module, tree = Tree} = Grant, Read) ->
+changed(make, {ok, Node, Qid}) -> {ok, Node, Qid};
+changed(make, Other) -> failed(Other);
+changed(_, Answer) -> done(Answer).
+
+on_node(Fid, #grant{module = Module, fs = Fs} = Grant, Read) ->
     case node_of(Fid, Grant) of
-        {ok, Node} -> {Read(Node, Module, Tree), Grant};
+        {ok, Node} -> {Read(Node, Module, Fs), Grant};
         error -> {{error, ebadf}, Grant}
     end.
 
@@ -701,7 +712,7 @@ end_fid_if_held(Fid, Grant) ->
 %% file process at the file's first open, and its end sends that process the
 %% handle's clunk, the last of which ends the process. The clunk runs after
 %% every request already sent to the process, so no request meets a clunked handle.
-opened(Fid, Node, Handle, #grant{fids = Fids, files = Files, module = Module, tree = Tree,
+opened(Fid, Node, Handle, #grant{fids = Fids, files = Files, module = Module, fs = Fs,
                                  effects = Effects} = Grant) ->
     #{Fid := Record} = Fids,
     Grant1 = Grant#grant{fids = Fids#{Fid := Record#fid{open = {open, Node, Handle}}}},
@@ -710,7 +721,7 @@ opened(Fid, Node, Handle, #grant{fids = Fids, files = Files, module = Module, tr
             Grant1#grant{files = Files#{Node := File#file{opens = Opens + 1}}};
         #{} ->
             Grant1#grant{files = Files#{Node => #file{process = pending, tag = pending, opens = 1}},
-                         effects = [{start_file, Node, Module, Tree} | Effects]}
+                         effects = [{start_file, Node, Module, Fs} | Effects]}
     end.
 
 released(none, Grant) ->

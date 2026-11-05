@@ -19,8 +19,8 @@ and keeps directories, files and links, made, removed and renamed through
 directories. As an `erx_fs` tree with open files must, it keeps its nodes
 where the grant and every file owner reach them: in a process of its own,
 linked to the one that ran `init/1`, which applies each callback whole, so
-every callback is atomic. The callbacks' `State` is that process and the
-observer, and never changes.
+every callback is atomic. Its handle, `Fs`, holds that process and the
+observer.
 
 A node lives while a name or an open holds it; an open of a node with no
 name left is `enoent`. A handle is `{Ino, Access, Append}`: a read through
@@ -91,16 +91,16 @@ apply_step(#{tree := Tree}, Step) ->
     end.
 
 -doc "The tree is named `test`.".
-root(State) ->
-    seen(root, State),
-    apply_step(State, fun(T) -> {{ok, <<"test">>, ?ROOT, qid(?ROOT, T)}, T} end).
+root(Fs) ->
+    seen(root, Fs),
+    apply_step(Fs, fun(T) -> {{ok, <<"test">>, ?ROOT, qid(?ROOT, T)}, T} end).
 
 -doc "One plain name in a directory.".
 walk(_, <<"..">>, _) ->
     erlang:error(dotdot_reached_the_tree);
-walk(Dir, Name, State) ->
-    seen(walk, State),
-    read_only(State, fun(T) ->
+walk(Dir, Name, Fs) ->
+    seen(walk, Fs),
+    read_only(Fs, fun(T) ->
                              case node(Dir, T) of
                                  #{kind := directory, entries := #{Name := Ino}} -> {ok, Ino, qid(Ino, T)};
                                  #{kind := directory} -> {error, enoent};
@@ -110,9 +110,9 @@ walk(Dir, Name, State) ->
                      end).
 
 -doc "The 9P2000.L attributes of a node.".
-getattr(Ino, State) ->
-    seen(getattr, State),
-    read_only(State, fun(T) ->
+getattr(Ino, Fs) ->
+    seen(getattr, Fs),
+    read_only(Fs, fun(T) ->
                              case node(Ino, T) of
                                  gone -> {error, enoent};
                                  #{kind := Kind, mode := Mode, links := Links} = Node ->
@@ -128,9 +128,9 @@ getattr(Ino, State) ->
                      end).
 
 -doc "Opens a node that still has a name: a file, or a directory for reading.".
-open(Ino, Flags, State) ->
-    seen(open, State),
-    change(State, fun(T) ->
+open(Ino, Flags, Fs) ->
+    seen(open, Fs),
+    change(Fs, fun(T) ->
                           case node(Ino, T) of
                               gone -> {error, enoent};
                               #{links := 0} -> {error, enoent};
@@ -160,12 +160,12 @@ handle(Ino, Flags) ->
     {Ino, Access, Flags band ?O_APPEND =/= 0}.
 
 -doc "Bytes of a file, through a handle opened for reading.".
-read({_, write, _}, _, _, State) ->
-    seen(read, State),
+read({_, write, _}, _, _, Fs) ->
+    seen(read, Fs),
     {error, ebadf};
-read({Ino, _, _}, Offset, Count, State) ->
-    seen(read, State),
-    with_state(State, read_only(State, fun(T) ->
+read({Ino, _, _}, Offset, Count, Fs) ->
+    seen(read, Fs),
+    read_only(Fs, fun(T) ->
                              case node(Ino, T) of
                                  #{kind := file, data := Data} when Offset >= byte_size(Data) ->
                                      {ok, <<>>};
@@ -174,18 +174,18 @@ read({Ino, _, _}, Offset, Count, State) ->
                                  #{} ->
                                      {error, eisdir}
                              end
-                     end)).
+                     end).
 
 -doc """
 Writes through a handle opened for writing: at `Offset`, filling a gap with
 zeros, or at the end through an append handle; answers where it wrote.
 """.
-write({_, read, _}, _, _, State) ->
-    seen(write, State),
+write({_, read, _}, _, _, Fs) ->
+    seen(write, Fs),
     {error, ebadf};
-write({Ino, _, Append}, Offset, Bytes, State) ->
-    seen(write, State),
-    change_with(State, fun(T) ->
+write({Ino, _, Append}, Offset, Bytes, Fs) ->
+    seen(write, Fs),
+    apply_step(Fs, fun(T) ->
                                #{data := Data} = Node = node(Ino, T),
                                At = case Append of
                                         true -> byte_size(Data);
@@ -209,9 +209,9 @@ spliced(Data, At, Bytes) ->
 The entries of an open directory in name order, entry I at offset I, from
 just past `Offset`.
 """.
-readdir({Ino, _, _}, Offset, Max, State) ->
-    seen(readdir, State),
-    with_state(State, read_only(State, fun(T) ->
+readdir({Ino, _, _}, Offset, Max, Fs) ->
+    seen(readdir, Fs),
+    read_only(Fs, fun(T) ->
                              case node(Ino, T) of
                                  #{kind := directory, entries := Entries} ->
                                      Sorted = lists:sort(maps:to_list(Entries)),
@@ -222,21 +222,20 @@ readdir({Ino, _, _}, Offset, Max, State) ->
                                  #{} ->
                                      {error, enotdir}
                              end
-                     end)).
+                     end).
 
 -doc "Drops an open; a node with no name and no open is gone.".
-clunk({Ino, _, _}, State) ->
-    seen(clunk, State),
-    apply_step(State, fun(T) ->
+clunk({Ino, _, _}, Fs) ->
+    seen(clunk, Fs),
+    apply_step(Fs, fun(T) ->
                               #{opens := Opens} = Node = node(Ino, T),
                               {ok, kept(Ino, Node#{opens := Opens - 1}, T)}
-                      end),
-    {ok, State}.
+                      end).
 
 -doc "A link's text.".
-readlink(Ino, State) ->
-    seen(readlink, State),
-    read_only(State, fun(T) ->
+readlink(Ino, Fs) ->
+    seen(readlink, Fs),
+    read_only(Fs, fun(T) ->
                              case node(Ino, T) of
                                  #{kind := symlink, target := Target} -> {ok, Target};
                                  _ -> {error, einval}
@@ -244,8 +243,8 @@ readlink(Ino, State) ->
                      end).
 
 -doc "Fixed numbers.".
-statfs(State) ->
-    seen(statfs, State),
+statfs(Fs) ->
+    seen(statfs, Fs),
     {ok, #{type => 16#01021994, bsize => 4096, blocks => 16, bfree => 8, bavail => 8,
            files => 64, ffree => 58, fsid => 0, namelen => 255}}.
 
@@ -253,9 +252,9 @@ statfs(State) ->
 A directory, a link, another name for a node, or a file: created and opened,
 or without `O_EXCL` the regular file the name already names, opened.
 """.
-make(Dir, Name, What, State) ->
-    seen(make, State),
-    Made = apply_step(State, fun(T) ->
+make(Dir, Name, What, Fs) ->
+    seen(make, Fs),
+    apply_step(Fs, fun(T) ->
                               case node(Dir, T) of
                                   #{kind := directory, entries := #{Name := Ino}} -> answer(existing(Ino, What, T), T);
                                   #{kind := directory, links := 0} -> {{error, enoent}, T};
@@ -263,12 +262,7 @@ make(Dir, Name, What, State) ->
                                   #{} -> {{error, enotdir}, T};
                                   gone -> {{error, enoent}, T}
                               end
-                      end),
-    case Made of
-        {ok, Ino, Qid, Handle} -> {ok, Ino, Qid, Handle, State};
-        {ok, Ino, Qid} -> {ok, Ino, Qid, State};
-        {error, _} = Error -> Error
-    end.
+                      end).
 
 existing(Ino, {file, _, Flags}, T) when Flags band ?O_EXCL =:= 0 ->
     case node(Ino, T) of
@@ -309,14 +303,14 @@ new_node(_) -> {error, eperm}.
 Changes a node's mode and a file's size when `valid` asks for them. A size
 change through a handle needs one opened for writing (`einval`).
 """.
-setattr({open, {_, read, _}}, #{valid := Valid}, State) when Valid band ?ATTR_SIZE =/= 0 ->
-    seen(setattr, State),
+setattr({open, {_, read, _}}, #{valid := Valid}, Fs) when Valid band ?ATTR_SIZE =/= 0 ->
+    seen(setattr, Fs),
     {error, einval};
-setattr({open, {Ino, _, _}}, Attr, State) ->
-    setattr({node, Ino}, Attr, State);
-setattr({node, Ino}, #{valid := Valid, mode := Mode, size := Size}, State) ->
-    seen(setattr, State),
-    change(State, fun(T) ->
+setattr({open, {Ino, _, _}}, Attr, Fs) ->
+    setattr({node, Ino}, Attr, Fs);
+setattr({node, Ino}, #{valid := Valid, mode := Mode, size := Size}, Fs) ->
+    seen(setattr, Fs),
+    change(Fs, fun(T) ->
                           case node(Ino, T) of
                               gone -> {error, enoent};
                               Node ->
@@ -339,9 +333,9 @@ Removes a name, refusing a kind that does not match: `file` and `directory`
 from `unlinkat`, and `{node, Ino}` from `remove`, which removes the name only
 while it still names that node.
 """.
-unlink(Dir, Name, Kind, State) ->
-    seen(unlink, State),
-    change(State, fun(T) ->
+unlink(Dir, Name, Kind, Fs) ->
+    seen(unlink, Fs),
+    change(Fs, fun(T) ->
                           case node(Dir, T) of
                               #{kind := directory, entries := #{Name := Ino}} -> unlinked(Dir, Name, Ino, Kind, T);
                               #{kind := directory} -> {error, enoent};
@@ -361,9 +355,9 @@ unlinked(Dir, Name, Ino, Kind, T) ->
     end.
 
 -doc "Moves a name, replacing what the new name named.".
-rename(Dir, Name, NewDir, NewName, State) ->
-    seen(rename, State),
-    change(State, fun(T) ->
+rename(Dir, Name, NewDir, NewName, Fs) ->
+    seen(rename, Fs),
+    change(Fs, fun(T) ->
                           case node(Dir, T) of
                               #{kind := directory, entries := #{Name := Ino}} ->
                                   T1 = leave(Dir, Name, T),
@@ -381,27 +375,13 @@ rename(Dir, Name, NewDir, NewName, State) ->
                   end).
 
 %% A step whose reply is the callback's answer and which changes nothing.
-read_only(State, Read) ->
-    apply_step(State, fun(T) -> {Read(T), T} end).
+read_only(Fs, Read) ->
+    apply_step(Fs, fun(T) -> {Read(T), T} end).
 
-%% A step answering {ok, T1} or {error, Posix}; the callback answers
-%% {ok, State} for the first, since the tree lives in its process.
-change(State, Step) ->
-    case apply_step(State, fun(T) -> answer(Step(T), T) end) of
-        ok -> {ok, State};
-        {ok, Handle} -> {ok, Handle, State};
-        {error, _} = Error -> Error
-    end.
-
-%% A read's answer, with the unchanged State the callback returns.
-with_state(State, {ok, Value}) -> {ok, Value, State};
-with_state(_, {error, _} = Error) -> Error.
-
-%% A step answering {Reply, T1}, the callback answering Reply with State added.
-change_with(State, Step) ->
-    case apply_step(State, Step) of
-        {ok, Count, At} -> {ok, Count, At, State}
-    end.
+%% A step answering {ok, T1}, {ok, Handle, T1} or {error, Posix}; the callback
+%% answers ok, {ok, Handle} or the error, and the tree keeps T1.
+change(Fs, Step) ->
+    apply_step(Fs, fun(T) -> answer(Step(T), T) end).
 
 %% A tree step's answer, split into the reply and the next tree; {ok, T1} is
 %% the reply ok with the tree T1.

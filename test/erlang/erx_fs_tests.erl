@@ -336,8 +336,8 @@ in_flight_bound_test() ->
 %% effect back at once.
 core(Rights) ->
     {module, _} = code:ensure_loaded(erx_fs_test_tree),
-    {ok, Tree} = erx_fs_test_tree:init([]),
-    erx_fs_grant:new(#{module => erx_fs_test_tree, tree => Tree, rights => Rights,
+    {ok, Fs} = erx_fs_test_tree:init([]),
+    erx_fs_grant:new(#{module => erx_fs_test_tree, fs => Fs, rights => Rights,
                        client => node()}).
 
 core_frame(Core, Request) ->
@@ -414,8 +414,8 @@ refused_remove_still_clunks_its_fid_test() ->
     stop(Grant).
 
 tree_without_write_is_read_only_test() ->
-    {ok, Tree} = erx_fs_test_tree:init([]),
-    Core = erx_fs_grant:new(#{module => ?MODULE, tree => Tree, rights => rw, client => node()}),
+    {ok, Fs} = erx_fs_test_tree:init([]),
+    Core = erx_fs_grant:new(#{module => ?MODULE, fs => Fs, rights => rw, client => node()}),
     ?assertMatch(#{rights := ro}, erx_fs_grant:info(Core)).
 
 %% Changes on a read-write grant -------------------------------------------
@@ -876,3 +876,55 @@ file_owner_answers_through_its_tag_test() ->
     {Clunked, Core8} = core_frame(Core7, {clunk, 1}),
     ?assertMatch([{run, Owner, Tag, {last_clunk, _}} | _], Clunked),
     ?assertMatch(#{files := 0, fids := 0}, erx_fs_grant:info(Core8)).
+
+%% Callbacks' answers -----------------------------------------------------
+
+%% A grant on erx_fs_stale_tree, whose callbacks named in Stale answer with a
+%% next state appended, as a tree kept as a value would.
+stale_grant(Stale) ->
+    {ok, Grant} = erx_fs:start_link(erx_fs_stale_tree, [{stale, Stale}], rw),
+    unlink(Grant),
+    Grant.
+
+%% A callback the grant runs that answers with a next state is answered eio,
+%% the grant keeps nothing of it, and it goes on serving. A make of a
+%% directory answering {ok, Node, Qid, State1} is not taken for a file's
+%% {ok, Node, Qid, Handle}.
+answers_with_a_state_are_eio_in_the_grant_test() ->
+    Grant = stale_grant([open, make, setattr, unlink, rename]),
+    {ok, _} = attach(Grant, 1),
+    {ok, _} = walk(Grant, 1, 2, [<<"f">>]),
+    ?assertEqual({error, eio}, call(Grant, {lopen, 2, ?O_WRONLY})),
+    {ok, _} = walk(Grant, 1, 3, []),
+    ?assertEqual({error, eio}, call(Grant, {lcreate, 3, <<"n">>, ?O_RDWR, 8#644, 0})),
+    ?assertEqual({error, eio}, call(Grant, {mkdir, 1, <<"d">>, 8#755, 0})),
+    ?assertEqual({error, eio}, call(Grant, {symlink, 1, <<"s">>, <<"t">>, 0})),
+    Set = maps:from_keys([uid, gid, size, atime_sec, atime_nsec, mtime_sec, mtime_nsec], 0),
+    ?assertEqual({error, eio}, call(Grant, {setattr, 2, Set#{valid => 1, mode => 8#600}})),
+    ?assertEqual({error, eio}, call(Grant, {renameat, 1, <<"f">>, 1, <<"g">>})),
+    ?assertEqual({error, eio}, call(Grant, {unlinkat, 1, <<"l">>, 0})),
+    %% Neither fid was opened: each still walks.
+    ?assertMatch({ok, [_]}, walk(Grant, 3, 4, [<<"a">>])),
+    ?assertMatch({error, enotdir}, walk(Grant, 2, 5, [<<"x">>])),
+    ?assert(is_process_alive(Grant)),
+    stop(Grant).
+
+%% The same in a file process: each request is answered eio to the client, a
+%% clunk's answer is not used, and the grant goes on serving.
+answers_with_a_state_are_eio_in_a_file_process_test() ->
+    Grant = stale_grant([read, write, readdir, setattr, clunk]),
+    {ok, _} = attach(Grant, 1),
+    {ok, _} = walk(Grant, 1, 2, [<<"f">>]),
+    {ok, _, _} = call(Grant, {lopen, 2, ?O_RDWR}),
+    ?assertEqual({error, eio}, call(Grant, {write, 2, 0, <<"x">>})),
+    ?assertEqual({error, eio}, call(Grant, {read, 2, 0, 1})),
+    Set = maps:from_keys([uid, gid, mode, atime_sec, atime_nsec, mtime_sec, mtime_nsec], 0),
+    ?assertEqual({error, eio}, call(Grant, {setattr, 2, Set#{valid => 8, size => 0}})),
+    {ok, _} = walk(Grant, 1, 3, []),
+    {ok, _, _} = call(Grant, {lopen, 3, 0}),
+    ?assertEqual({error, eio}, call(Grant, {readdir, 3, 0, 4096})),
+    ok = call(Grant, {clunk, 2}),
+    ok = call(Grant, {clunk, 3}),
+    ?assertMatch({ok, [_]}, walk(Grant, 1, 4, [<<"a">>])),
+    ?assert(is_process_alive(Grant)),
+    stop(Grant).

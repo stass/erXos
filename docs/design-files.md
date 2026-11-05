@@ -945,50 +945,50 @@ the protocol, the fids, the locks and the checks, and calls back for the
 tree:
 
 ```erlang
--callback init(Args :: term()) -> {ok, State :: term()}.
+-callback init(Args :: term()) -> {ok, Fs :: term()}.
 %% The tree the grant roots in: its name, which attach's Aname must match, and its root.
--callback root(State :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
--callback walk(Node :: term(), Name :: binary(), State :: term()) ->
+-callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
+-callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
--callback getattr(Node :: term(), State :: term()) ->
+-callback getattr(Node :: term(), Fs :: term()) ->
               {ok, attr()} | {error, file:posix()}.
--callback open(Node :: term(), Flags :: non_neg_integer(), State :: term()) ->
-              {ok, Handle :: term(), State1 :: term()} | {error, file:posix()}.
+-callback open(Node :: term(), Flags :: non_neg_integer(), Fs :: term()) ->
+              {ok, Handle :: term()} | {error, file:posix()}.
 -callback read(Handle :: term(), Offset :: non_neg_integer(),
-               Count :: 1..65536, State :: term()) ->
-              {ok, binary(), State1 :: term()} | {error, file:posix()}.
--callback readdir(Handle :: term(), Offset :: non_neg_integer(),
-                  Max :: 1..256, State :: term()) ->
-              {ok, [dirent()], State1 :: term()} | {error, file:posix()}.
--callback readlink(Node :: term(), State :: term()) ->
+               Count :: 1..65536, Fs :: term()) ->
               {ok, binary()} | {error, file:posix()}.
--callback statfs(State :: term()) -> {ok, statfs()}.
--callback clunk(Handle :: term(), State :: term()) -> {ok, State1 :: term()}.
+-callback readdir(Handle :: term(), Offset :: non_neg_integer(),
+                  Max :: 1..256, Fs :: term()) ->
+              {ok, [dirent()]} | {error, file:posix()}.
+-callback readlink(Node :: term(), Fs :: term()) ->
+              {ok, binary()} | {error, file:posix()}.
+-callback statfs(Fs :: term()) -> {ok, statfs()}.
+-callback clunk(Handle :: term(), Fs :: term()) -> ok.
 %% A tree whose reads never wait for a medium answers immediate; absent: helper.
 -callback read_mode() -> helper | immediate.
 %% A tree that writes adds these; one without them is read-only (F5).
 -callback write(Handle :: term(), Offset :: non_neg_integer(), binary(),
-                State :: term()) ->
-              {ok, Count :: non_neg_integer(), At :: non_neg_integer(),
-               State1 :: term()} | {error, file:posix()}.
+                Fs :: term()) ->
+              {ok, Count :: non_neg_integer(), At :: non_neg_integer()}
+            | {error, file:posix()}.
 %% A {file, ...} make answers with the open Handle; every other kind without.
--callback make(Dir :: term(), Name :: binary(), What :: what(), State :: term()) ->
-              {ok, Node :: term(), qid(), Handle :: term(), State1 :: term()}
-            | {ok, Node :: term(), qid(), State1 :: term()} | {error, file:posix()}.
+-callback make(Dir :: term(), Name :: binary(), What :: what(), Fs :: term()) ->
+              {ok, Node :: term(), qid(), Handle :: term()}
+            | {ok, Node :: term(), qid()} | {error, file:posix()}.
 -callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
-                  Changes :: map(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
+                  Changes :: map(), Fs :: term()) ->
+              ok | {error, file:posix()}.
 -callback unlink(Dir :: term(), Name :: binary(),
                  Kind :: file | directory | {node, Node :: term()},
-                 State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
+                 Fs :: term()) ->
+              ok | {error, file:posix()}.
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
-                 NewName :: binary(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
--callback fsync(Handle :: term(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
--callback xattr(Node :: term(), Op :: xattr_op(), State :: term()) ->
-              {ok, term(), State1 :: term()} | {error, file:posix()}.
+                 NewName :: binary(), Fs :: term()) ->
+              ok | {error, file:posix()}.
+-callback fsync(Handle :: term(), Fs :: term()) ->
+              ok | {error, file:posix()}.
+-callback xattr(Node :: term(), Op :: xattr_op(), Fs :: term()) ->
+              {ok, term()} | {error, file:posix()}.
 -optional_callbacks([read_mode/0, readlink/2, write/4, make/4, setattr/3,
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
@@ -1051,13 +1051,21 @@ other client's request can come between its parts:
   itself, in turn with the file's other operations, and starts no helper,
   since a helper would only add a process to every read. `erx_fs` reads
   the answer once, when the grant starts; a module without the callback
-  gets helpers. The owner calls the callbacks with the `State` its grant
-  held when it started it, so a module whose files have owners keeps its
-  tree behind that `State`, in a process of its own as `/tmp` does
+  gets helpers.
+* **One handle per tree.** `init/1` answers the tree's handle, `Fs`,
+  which never changes: every callback receives it and answers only its
+  result, never a next state. The grant and each owner call the
+  callbacks in their own processes, so a tree that changes keeps its
+  nodes behind the handle, in a process of its own as `/tmp` does
   ([design-tmp.md](design-tmp.md#concurrency)) or on its medium, where
-  the grant and every owner reach the same tree; the `State1` a
-  callback returns replaces only its caller's copy. An owner is linked
-  to its grant, so a callback that crashes in it ends the grant, and the
+  the grant and every owner reach the same tree; with no next state in
+  any answer, no callback can leave its caller a copy of the tree that
+  the others do not see. An answer that is none of its callback's
+  shapes, a next state appended included, reaches the client as `eio`.
+  A callback keeps no state in the process that calls it, and an answer
+  turned into `eio` does not undo what the tree did.
+* **Owners and their grant.** An owner is linked to its grant, so a
+  callback that crashes in it ends the grant, and the
   grant's end ends its owners. The grant sends an owner its file's
   requests and the clunks of its opened fids in order and takes back
   only the answers that carry the owner's tag; a clunk therefore runs
@@ -1843,7 +1851,12 @@ report, so a passing run shows the code under test ran.
   catches; a grant that, after an owner's `DOWN`, records a later fid
   made for that owner without monitoring it again, which the ended-owner
   case catches as a fid that stays; a grant that keeps an owner's monitor
-  after its last fid, which the short-lived owners case catches. The
+  after its last fid, which the short-lived owners case catches. A tree
+  whose callbacks answer with a next state appended, in the grant and in
+  an owner, is answered `eio` at the client and the grant goes on
+  serving; seeded: a grant that takes a directory's `make` answering
+  `{ok, Node, Qid, State1}` for a file's, and one that crashes on an
+  answer that is not an error, which that case catches. The
   fid counter's property test, over a space a test hook shrinks to 256
   numbers, draws from many processes at once, keeps some fids alive past
   a wrap and ends others with their owners, and finds no number drawn

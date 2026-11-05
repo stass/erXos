@@ -20,6 +20,7 @@ class ErxFsTest < Minitest::Test
   ].freeze
   TESTS = %w[
     test/erlang/erx_fs_test_tree.erl
+    test/erlang/erx_fs_stale_tree.erl
     test/erlang/erx_fs_tests.erl
     test/erlang/erx_fs_version_tests.erl
   ].freeze
@@ -33,7 +34,7 @@ class ErxFsTest < Minitest::Test
   FAULTS = [
     Fault.new(name: 'a walk of .. at the root asks the tree', file: GRANT,
               from: "walk_step(<<\"..\">>, [_] = Root, _) ->\n    {ok, Root};",
-              to: "walk_step(<<\"..\">>, [{Dir, _, _}] = Root, #grant{module = M, tree = T}) ->\n" \
+              to: "walk_step(<<\"..\">>, [{Dir, _, _}] = Root, #grant{module = M, fs = T}) ->\n" \
                   "    {ok, _, Qid} = M:walk(Dir, <<\"..\">>, T),\n    {ok, [{Dir, Qid, root} | Root]};",
               caught_by: 'dotdot_stays_at_the_root_test'),
     Fault.new(name: 'a walk continues past a link', file: GRANT,
@@ -93,12 +94,12 @@ class ErxFsTest < Minitest::Test
               to: 'What = {file, Mode band 8#7777, Flags band bnot 8#200},',
               caught_by: 'lcreate_with_exclusive_answers_eexist_test'),
     Fault.new(name: 'a write answers the offset it was sent at', file: GRANT,
-              from: '        {ok, Count, At, State1} -> {{ok, Count, At}, State1};',
-              to: '        {ok, Count, _, State1} -> {{ok, Count, Offset}, State1};',
+              from: '        {ok, Count, At} -> {ok, Count, At};',
+              to: '        {ok, Count, _} -> {ok, Count, Offset};',
               caught_by: 'append_answers_order_two_appenders_test'),
     Fault.new(name: 'a write answers its count and offset swapped', file: GRANT,
-              from: '        {ok, Count, At, State1} -> {{ok, Count, At}, State1};',
-              to: '        {ok, Count, At, State1} -> {{ok, At, Count}, State1};',
+              from: '        {ok, Count, At} -> {ok, Count, At};',
+              to: '        {ok, Count, At} -> {ok, At, Count};',
               caught_by: 'write_answers_where_it_wrote_test'),
     Fault.new(name: "a size change through an open goes by the node's permission", file: GRANT,
               from: '        #{Fid := #fid{open = {open, Node, Handle}}} -> {{to_file, Node, {setattr,',
@@ -109,8 +110,8 @@ class ErxFsTest < Minitest::Test
               to: '#grant{effects = Effects} = Grant1 = element(3, {fun released/2, Open, Grant#grant{fids = Fids1}}),',
               caught_by: 'owner_end_clunks_its_open_fids_test'),
     Fault.new(name: 'a listing is not fitted to its count', file: GRANT,
-              from: '{ok, Entries, State1} -> {fit_listing(Entries, Count), State1};',
-              to: '{ok, Entries, State1} -> element(2, {fun fit_listing/2, {{ok, Entries}, State1}});',
+              from: '{ok, Entries} -> fit_listing(Entries, Count);',
+              to: '{ok, Entries} -> element(2, {fun fit_listing/2, {ok, Entries}});',
               caught_by: 'readdir_over_an_open_directory_test'),
     Fault.new(name: 'a walk starts from an opened fid', file: GRANT,
               from: "        \#{Fid := #fid{open = {open, _, _}}} ->\n            {{error, einval}, Grant};\n" \
@@ -129,7 +130,15 @@ class ErxFsTest < Minitest::Test
     Fault.new(name: 'a file answer is taken whatever its tag', file: GRANT,
               from: '#{Alias := #pending{by = Tag}} when is_reference(Tag) -> complete(Alias, Reply, Grant);',
               to: '#{Alias := #pending{}} when is_reference(Tag) -> complete(Alias, Reply, Grant);',
-              caught_by: 'file_owner_answers_through_its_tag_test')
+              caught_by: 'file_owner_answers_through_its_tag_test'),
+    Fault.new(name: "a directory's make answering a next state is taken for a file's", file: GRANT,
+              from: 'changed(make, Other) -> failed(Other);',
+              to: "changed(make, {ok, Node, Qid, _}) -> {ok, Node, Qid};\nchanged(make, Other) -> failed(Other);",
+              caught_by: 'answers_with_a_state_are_eio_in_the_grant_test'),
+    Fault.new(name: 'a malformed answer crashes the grant', file: GRANT,
+              from: 'failed(_) -> {error, eio}.',
+              to: 'failed(Other) when element(1, Other) =:= error -> {error, eio}.',
+              caught_by: 'answers_with_a_state_are_eio_in_the_grant_test')
   ].freeze
 
   def test_the_cases_pass

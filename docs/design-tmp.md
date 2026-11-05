@@ -146,7 +146,7 @@ answer it gives is one POSIX allows ([Fids and nodes](#fids-and-nodes)).
   |   G: erx_fs grant process   ---> file owner (one per open file)    |
   |         | erx_ramfs callbacks       |                              |
   |         v                           v                              |
-  |   tree process (erx_ramfs): State = the whole tree                 |
+  |   tree process (erx_ramfs): holds the whole tree                   |
   |     each call: erx_ramfs_core:step(Request, Stamp, Now, Tree)      |
   |                -> {Reply, Tree1}                                   |
   +--------------------------------------------------------------------+

@@ -28,11 +28,14 @@ opened fids (reads, writes, listings, size changes through an open, syncs
 and clunks) one at a time, in the order the grant sent them, and answers
 each to the grant. Requests on the node itself (opens, truncation through an
 unopened fid, `getattr`, `remove`) run in the grant; that every request is
-atomic against every other is the tree's to keep. A file process calls the callbacks with
-the `State` the grant held when it started, so a tree that has owners keeps
-its nodes and data behind that `State`, in a process or on a medium, where
-the grant and every owner reach the same tree; what a callback returns as
-`State1` replaces only its caller's copy.
+atomic against every other is the tree's to keep.
+
+`init/1` answers the tree's handle, `Fs`, which never changes: every callback
+receives it and none returns a new one, so the grant and every file process
+call the tree through the same handle, and a tree that changes keeps its
+nodes behind it, in a process or on a medium, where all of them reach the
+same tree. A callback's answer that is not one of its shapes reaches the
+client as `eio`.
 """.
 
 -export([start_link/3, start_link/4]).
@@ -51,50 +54,50 @@ the grant and every owner reach the same tree; what a callback returns as
               | {node, Mode :: non_neg_integer(), Major :: non_neg_integer(),
                  Minor :: non_neg_integer()}.
 
--callback init(Args :: term()) -> {ok, State :: term()}.
+-callback init(Args :: term()) -> {ok, Fs :: term()}.
 %% The tree the grant roots in: its name, which attach's Aname must match, and its root.
--callback root(State :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
--callback walk(Node :: term(), Name :: binary(), State :: term()) ->
+-callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
+-callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
--callback getattr(Node :: term(), State :: term()) ->
+-callback getattr(Node :: term(), Fs :: term()) ->
               {ok, attr()} | {error, file:posix()}.
--callback open(Node :: term(), Flags :: non_neg_integer(), State :: term()) ->
-              {ok, Handle :: term(), State1 :: term()} | {error, file:posix()}.
+-callback open(Node :: term(), Flags :: non_neg_integer(), Fs :: term()) ->
+              {ok, Handle :: term()} | {error, file:posix()}.
 -callback read(Handle :: term(), Offset :: non_neg_integer(),
-               Count :: 1..65536, State :: term()) ->
-              {ok, binary(), State1 :: term()} | {error, file:posix()}.
--callback readdir(Handle :: term(), Offset :: non_neg_integer(),
-                  Max :: 1..256, State :: term()) ->
-              {ok, [dirent()], State1 :: term()} | {error, file:posix()}.
--callback readlink(Node :: term(), State :: term()) ->
+               Count :: 1..65536, Fs :: term()) ->
               {ok, binary()} | {error, file:posix()}.
--callback statfs(State :: term()) -> {ok, statfs()}.
--callback clunk(Handle :: term(), State :: term()) -> {ok, State1 :: term()}.
+-callback readdir(Handle :: term(), Offset :: non_neg_integer(),
+                  Max :: 1..256, Fs :: term()) ->
+              {ok, [dirent()]} | {error, file:posix()}.
+-callback readlink(Node :: term(), Fs :: term()) ->
+              {ok, binary()} | {error, file:posix()}.
+-callback statfs(Fs :: term()) -> {ok, statfs()}.
+-callback clunk(Handle :: term(), Fs :: term()) -> ok.
 %% A tree whose reads never wait for a medium answers immediate; absent: helper.
 -callback read_mode() -> helper | immediate.
 %% A tree that writes adds these; one without them is read-only (F5).
 -callback write(Handle :: term(), Offset :: non_neg_integer(), binary(),
-                State :: term()) ->
-              {ok, Count :: non_neg_integer(), At :: non_neg_integer(),
-               State1 :: term()} | {error, file:posix()}.
+                Fs :: term()) ->
+              {ok, Count :: non_neg_integer(), At :: non_neg_integer()}
+            | {error, file:posix()}.
 %% A {file, ...} make answers with the open Handle; every other kind without.
--callback make(Dir :: term(), Name :: binary(), What :: what(), State :: term()) ->
-              {ok, Node :: term(), qid(), Handle :: term(), State1 :: term()}
-            | {ok, Node :: term(), qid(), State1 :: term()} | {error, file:posix()}.
+-callback make(Dir :: term(), Name :: binary(), What :: what(), Fs :: term()) ->
+              {ok, Node :: term(), qid(), Handle :: term()}
+            | {ok, Node :: term(), qid()} | {error, file:posix()}.
 -callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
-                  Changes :: map(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
+                  Changes :: map(), Fs :: term()) ->
+              ok | {error, file:posix()}.
 -callback unlink(Dir :: term(), Name :: binary(),
                  Kind :: file | directory | {node, Node :: term()},
-                 State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
+                 Fs :: term()) ->
+              ok | {error, file:posix()}.
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
-                 NewName :: binary(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
--callback fsync(Handle :: term(), State :: term()) ->
-              {ok, State1 :: term()} | {error, file:posix()}.
--callback xattr(Node :: term(), Op :: term(), State :: term()) ->
-              {ok, term(), State1 :: term()} | {error, file:posix()}.
+                 NewName :: binary(), Fs :: term()) ->
+              ok | {error, file:posix()}.
+-callback fsync(Handle :: term(), Fs :: term()) ->
+              ok | {error, file:posix()}.
+-callback xattr(Node :: term(), Op :: term(), Fs :: term()) ->
+              {ok, term()} | {error, file:posix()}.
 -optional_callbacks([read_mode/0, readlink/2, write/4, make/4, setattr/3,
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
@@ -126,9 +129,9 @@ start_link(Module, Args, Rights, Options) ->
 -spec init(pid(), {module(), term(), erx_fs_grant:rights(), map()}) -> no_return().
 init(Parent, {Module, Args, Rights, Options}) ->
     {module, Module} = code:ensure_loaded(Module),
-    {ok, Tree} = Module:init(Args),
+    {ok, Fs} = Module:init(Args),
     Grant = erx_fs_grant:new((maps:with([pool], Options))#{
-                               module => Module, tree => Tree, rights => Rights,
+                               module => Module, fs => Fs, rights => Rights,
                                client => maps:get(client, Options, node())}),
     proc_lib:init_ack(Parent, {ok, self()}),
     loop(Grant).
@@ -160,10 +163,10 @@ perform_effect({monitor, Owner}, Grant) ->
 perform_effect({demonitor, Ref}, Grant) ->
     erlang:demonitor(Ref, [flush]),
     Grant;
-perform_effect({start_file, Node, Module, Tree}, Grant) ->
+perform_effect({start_file, Node, Module, Fs}, Grant) ->
     Tag = make_ref(),
     Heap = #{size => ?MAX_HEAP_WORDS, kill => true, include_shared_binaries => true},
-    Process = proc_lib:spawn_opt(?MODULE, file_loop, [self(), Tag, Module, Tree],
+    Process = proc_lib:spawn_opt(?MODULE, file_loop, [self(), Tag, Module, Fs],
                                  [link, {max_heap_size, Heap}]),
     erx_fs_grant:file_started(Node, Process, Tag, Grant);
 perform_effect({run, Process, Tag, Job}, Grant) ->
@@ -177,18 +180,18 @@ perform_effect({run, Process, Tag, Job}, Grant) ->
 %% nothing but the grant's jobs reaches the tree through it.
 -doc false.
 -spec file_loop(pid(), reference(), module(), term()) -> ok.
-file_loop(Grant, Tag, Module, Tree) ->
+file_loop(Grant, Tag, Module, Fs) ->
     receive
         {Tag, Job} ->
-            case erx_fs_grant:run_job(Job, Module, Tree) of
-                {answer, Alias, Reply, Tree1} ->
+            case erx_fs_grant:run_job(Job, Module, Fs) of
+                {answer, Alias, Reply} ->
                     erlang:send(Grant, {erx_fs_file, Tag, Alias, Reply}),
-                    ?MODULE:file_loop(Grant, Tag, Module, Tree1);
-                {continue, Tree1} ->
-                    ?MODULE:file_loop(Grant, Tag, Module, Tree1);
-                {stop, _} ->
+                    ?MODULE:file_loop(Grant, Tag, Module, Fs);
+                continue ->
+                    ?MODULE:file_loop(Grant, Tag, Module, Fs);
+                stop ->
                     ok
             end;
         _ ->
-            ?MODULE:file_loop(Grant, Tag, Module, Tree)
+            ?MODULE:file_loop(Grant, Tag, Module, Fs)
     end.
