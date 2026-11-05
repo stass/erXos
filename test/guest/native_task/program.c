@@ -280,7 +280,7 @@ mode_irq_refused(void)
 /*
  * The forgery goes out with its newlines and an escape sequence, and the judge reads
  * the serial log for it. A length past the UTCB, one past its register's width and a
- * thread with no record are refused, and the longest line is not.
+ * thread index past the table are refused, and the longest line is not.
  */
 static int64_t
 mode_log(void)
@@ -289,7 +289,7 @@ mode_log(void)
 	erx_utcb_t *const utcb = erx_utcb_self();
 	const uint64_t self = erx_fiasco_thread_self()->index;
 	const erx_fiasco_debug_log_request_t wide = { .caller = self, .len = UINT64_C(1) << 32 };
-	const erx_fiasco_debug_log_request_t stranger = { .caller = ERX_FIASCO_THREADS_MAX, .len = 1 };
+	const erx_fiasco_debug_log_request_t past_table = { .caller = ERX_FIASCO_THREADS_MAX, .len = 1 };
 	erx_fiasco_reply_t reply;
 
 	for (size_t done = 0; done < sizeof(forged) - 1; done += sizeof(uint64_t)) {
@@ -305,7 +305,7 @@ mode_log(void)
 		return (81);
 	if (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &wide, sizeof(wide), &reply) != ERX_EINVAL)
 		return (82);
-	if (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &stranger, sizeof(stranger), &reply) != ERX_EINVAL)
+	if (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &past_table, sizeof(past_table), &reply) != ERX_EINVAL)
 		return (83);
 	return (erx_debug_log((erx_utcb_length_t){ .raw = ERX_UTCB_BYTES_MAX }) == ERX_OK ? 0 : 84);
 }

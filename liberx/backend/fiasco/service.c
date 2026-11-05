@@ -365,10 +365,10 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 }
 
 /*
- * The text stays in the caller's public UTCB, which the kernel's dispatch and log
- * cores read through the window, as they read a UTCB under any kernel: every byte
- * passes their escape, and each line opens with their sequence number and the
- * task's, so a task's text never starts a line.
+ * The text stays in the caller's public UTCB, and the kernel's dispatch and log cores
+ * read it through the window, loading each word once. Every byte passes their escape,
+ * and each line opens with their sequence number and the task's. A long line takes
+ * several console writes, so another writer's bytes can fall between them.
  */
 static int
 service_debug_log(uint32_t task, const erx_fiasco_debug_log_request_t *request)

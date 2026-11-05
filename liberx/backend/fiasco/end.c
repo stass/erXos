@@ -5,8 +5,9 @@
 
 /*
  * The end path (docs/design-stopgap.md, "The end path"), and the effects the crash
- * codec asks of it. Best effort, with no lock. No thread is stopped first, and this
- * root holds no log ring, so there is nothing to drain.
+ * codec asks of it. Best effort, with no lock. No thread is stopped first, and the
+ * crash writer is handed no log ring: the debug log's lines went out as they were written,
+ * so there is nothing to drain.
  */
 
 #include <stdatomic.h>
@@ -82,7 +83,7 @@ erx_fiasco_task_crash_write(const erx_crash_fault_t *fault)
 	erx_crash_frame_write(record);
 }
 
-/* No log ring is passed to the writer, so these guard nothing. */
+/* The service is one thread and the only caller of erx_dispatch in this program, so the debug log's lock is empty. */
 void
 erx_effect_log_lock(void)
 {
