@@ -22,8 +22,8 @@
 
 /*
  * Modified by erXos: no library is ever opened. A NIF comes linked into the runtime image
- * (erts_static_nif_tab), so what is left of this layer calls the init function of a linked
- * NIF or driver, and refuses every load with an error, the host's dynamic linker out of reach.
+ * (erts_static_nif_tab), so this layer calls a linked NIF's init function and refuses every
+ * load with an error, the host's dynamic linker out of reach.
  */
 
 #ifdef HAVE_CONFIG_H

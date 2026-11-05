@@ -374,7 +374,6 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_operator high.to_i, :<, limit.to_i
   end
 
-  # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
   # Types each expression at a prompt of one node and matches its answer, then halts.
   def assert_answers(expected)
     Dir.mktmpdir('erx-hosted-home-') do |home|
@@ -405,6 +404,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
+  # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
   def spawn_shell(home, extra_environment = {})
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
       'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment

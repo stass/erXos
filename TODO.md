@@ -146,15 +146,27 @@ it; git history is the record of completed work.
   `test/guest/function_api` holds no shared object's case and its device cases stay native alone.
 * [Low] `otp/erts/emulator/beam/erl_process.c`: the safe point of `docs/design-runtime.md`, "Scheduling", handles the ready list only: its
   capacity and urgency steps land with the adapter that publishes them.
-* [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `erl_erxos_sys_ddll.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
+* [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
   `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
-  Darwin's main thread, `nice`, `alarm`, `uname`, `dlopen` and the crash dump's descriptors (edit 34). The first native boot answers each,
+  Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
   as `ENOSYS` tracing shows it;
 * [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
   group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
   The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
+* [Medium] `otp/lib/kernel/src/inet_gethost_native.erl`: `{error, notfound}` answers a lookup that never ran, `localhost`
+  included, where the stopgap rule would say unsupported. `{error, notsup}` leaves `inet`'s answers unchanged and costs
+  `inet_SUITE:t_gethostnative`, which accepts neither; the owner decides.
+* [Low] `otp/erts/preloaded/src/prim_inet.erl`: `gen_tcp:listen` answers `{error, eprotonosupport}`, stock's answer for a
+  missing inet driver, where `docs/design-runtime.md` says `{error, eacces}` without a grant. The design is the target and
+  stays; the answer changes with the network service's grant check or a preloaded rebuild.
+* [Low] `otp/erts/emulator/test/binary_SUITE.erl`: `make_port/0` is `hd(erlang:ports())`, and `ports()` is empty by design,
+  so its term-ordering cases fail with `hd([])`. Opening `{spawn_driver, "ram_file_drv"}` there gives a real port (checked on
+  hosted), and is the route when the suite is next run for its results.
+* [Low] `otp/erts/emulator/test/process_SUITE.erl`: `max_heap_size_test/5` fails with `{badmatch, noproc}` under a runner
+  with no common_test, because `ct:log` delays its monitor past the process's death. It needs a run under `ct_run` to tell
+  whether this is the runner alone.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet

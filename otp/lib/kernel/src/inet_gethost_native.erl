@@ -19,10 +19,9 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: there is no inet_gethost program to run, and the network service will
-%% replace this module with inet_config's choice of lookup, so its server and port are gone
-%% and every well-formed request has the answer stock gives for a name its resolver does not
-%% know. A request that stock refuses as malformed is refused as stock does.
+%% Modified by erXos: no inet_gethost program exists to run, so this module has no server or
+%% port, and every well-formed request has the answer stock gives for a name its resolver does
+%% not know. A request that stock refuses as malformed is refused as stock does.
 -module(inet_gethost_native).
 -moduledoc false.
 
