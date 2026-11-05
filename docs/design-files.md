@@ -426,19 +426,22 @@ which the client's namespace entry records with the grant's pid. A client
 takes a fid on the grant's root with `attach`, as often as it likes, each
 attach a fid of its own.
 
-Fids are the client's to choose, as in 9P. A runtime draws them for each
-grant from one allocator its processes share, and a session's handlers
-from the session's. The allocator draws the numbers of the 32-bit fid
-space in turn, wrapping past `NOFID`, and skips a number it still has
-out: one whose `clunk` or `remove` has not been answered and whose
-owner, which it monitors as the grant does, has not ended; it clunks
-nothing, since the grant alone ends a fid. So two
-processes of one domain never hold the same fid on one grant, and a
-number comes back, to any owner, only after every other number has been
-drawn, over four billion fids later; a request that names a fid after
-its end, sent late on an ended owner's behalf, meets no fid and fails
-with `ebadf`. The allocator's state is the numbers it has out and one
-monitor per owner, each removed with the owner's last fid.
+Fids are the client's to choose, as in 9P. A runtime draws them for all
+its processes from one counter, a 64-bit atomic it keeps beside its
+namespace, and a session's handlers from the session's: `prim_file`'s
+NIF adds one and takes the low 32 bits, drawing again for `NOFID`, so a
+draw is one atomic add in the calling process and no process allocates
+fids. A number therefore comes back, on any grant and to any owner,
+only after every other number has been drawn, over four billion fids
+later, and two processes of one domain never share a fid on one grant:
+if a fid is still alive when its number comes round again, the `attach`
+or `walk` that names it as new fails with `einval`, as QEMU's server
+answers a fid in use, and the client's operation fails with it rather
+than act on another's fid. A request that names a fid after its end,
+sent late on an ended owner's behalf, meets no fid and fails with
+`ebadf`. The counter keeps no record of the fids it drew: the grant's
+fid table and its monitors on owners are the one record of which are
+alive ([Fid owners](#fid-owners)).
 
 #### Fid owners
 
@@ -460,7 +463,7 @@ it again, and OTP delivers the `DOWN` of a monitor on a process that has
 already ended at once, so the grant clunks the new fid when it handles
 that `DOWN`, behind whatever already waits in its queue. A request in
 flight from a process that ends therefore never leaves a fid behind, and
-by the allocator's rule above never meets a fid made again for someone
+by the counter's rule above never meets a fid made again for someone
 else.
 
 `Owner` governs a fid's lifetime, not authority: any process of the
@@ -957,6 +960,8 @@ tree:
               {ok, binary()} | {error, file:posix()}.
 -callback statfs(State :: term()) -> {ok, statfs()}.
 -callback clunk(Handle :: term(), State :: term()) -> {ok, State1 :: term()}.
+%% A tree whose reads never wait for a medium answers immediate; absent: helper.
+-callback read_mode() -> helper | immediate.
 %% A tree that writes adds these; one without them is read-only (F5).
 -callback write(Handle :: term(), Offset :: non_neg_integer(), binary(),
                 State :: term()) ->
@@ -979,8 +984,8 @@ tree:
               {ok, State1 :: term()} | {error, file:posix()}.
 -callback xattr(Node :: term(), Op :: xattr_op(), State :: term()) ->
               {ok, term(), State1 :: term()} | {error, file:posix()}.
--optional_callbacks([readlink/2, write/4, make/4, setattr/3, unlink/4,
-                     rename/5, fsync/2, xattr/3]).
+-optional_callbacks([read_mode/0, readlink/2, write/4, make/4, setattr/3,
+                     unlink/4, rename/5, fsync/2, xattr/3]).
 
 -type what() :: {file, Mode :: 0..8#7777, Flags :: non_neg_integer()}
               | {directory, Mode :: 0..8#7777}
@@ -1024,12 +1029,18 @@ other client's request can come between its parts:
 * **One owner per open file.** Each open file has an owner process, which
   `erx_fs` starts at its first open on any grant and which runs that
   file's reads, writes, size changes and locks in turn
-  ([Open files and offsets](#open-files-and-offsets)). A read through the
-  module, the slow part, runs in a helper the owner starts, whose result
-  names the file state it was prepared against, and the owner's pure core
-  accepts it only if that state still holds and otherwise retries it, so
-  other operations of the file that do not conflict run while a read
-  waits for the medium.
+  ([Open files and offsets](#open-files-and-offsets)). A read through a
+  module that reads from a medium, the slow part, runs in a helper the
+  owner starts, whose result names the file state it was prepared
+  against, and the owner's pure core accepts it only if that state still
+  holds and otherwise retries it, so other operations of the file that do
+  not conflict run while a read waits for the medium. A module whose
+  reads never wait, such as a tree held in memory, says so once:
+  `read_mode/0` answers `immediate`, and the owner then calls `read`
+  itself, in turn with the file's other operations, and starts no helper,
+  since a helper would only add a process to every read. `erx_fs` reads
+  the answer once, when the grant starts; a module without the callback
+  gets helpers.
 * **Checks before callbacks.** `erx_fs` decodes each request with the
   protocol's grammar, checks the bounds, maps fids to nodes, refuses
   writing operations when the tree has no `write` callback or the grant is
@@ -1321,7 +1332,10 @@ the node.
   its count from erXos's servers;
   `file:allocate/3`, which 9P2000.L has no operation for, answers
   `{error, enotsup}`, and `{error, einval}` on a closed file, as stock
-  answers on a platform without preallocation; `file:sendfile/5` takes
+  answers on a platform without preallocation; `file:advise/4`, which
+  9P2000.L has no operation for either, answers `ok`, as stock's
+  `efile_advise` answers on a platform without `posix_fadvise`, advice
+  being only a recommendation; `file:sendfile/5` takes
   `file`'s fallback of reads and sends, since a remote file has no
   descriptor to hand to the host's call;
 * a request waits for its reply or for the end of the grant's process,
@@ -1334,8 +1348,20 @@ the node.
   terminal is. A server that dies while files are open turns their next
   operations into `{error, eio}`.
 
-A rename between two mounts returns `{error, exdev}`, as between two Unix
-file systems, without asking either server.
+A rename or a `make_link` between two mounts returns `{error, exdev}`, as
+between two Unix file systems, without asking either server.
+
+**Modes.** A file that `open` creates is sent with stock's mode `8#666`
+and a directory that `make_dir` makes with `8#777`, the modes stock's
+`efile_open` and `efile_make_dir` pass to the host, each less the
+domain's `umask`, 022 by default, which the host's kernel would take off,
+so `lcreate` and `mkdir` always carry the mode the file gets, and a
+server stores the mode it is given. `write_file_info` sends a record's
+`mode` masked as stock's `efile_set_permissions` masks it, to the
+set-user-ID, set-group-ID and permission bits (`8#6777`): a record read
+back carries its type bits, such as `8#100644`, which are dropped rather
+than sent as a mode outside the `0..8#7777` a server's modes are typed
+with ([Serving](#serving-the-erx_fs-behaviour)).
 
 **Errors.** `erx_file_remote` answers as stock `prim_file` answers on a
 Unix host, whose platform layer adjusts some of the system's errors after
@@ -1744,11 +1770,13 @@ report, so a passing run shows the code under test ran.
   made for that owner without monitoring it again, which the ended-owner
   case catches as a fid that stays; a grant that keeps an owner's monitor
   after its last fid, which the short-lived owners case catches. The
-  fid allocator's property test, over a space a test hook shrinks to 256
-  numbers, draws, returns and abandons numbers under owners' ends and
-  finds no number drawn again while out or before every other number has
-  been drawn; seeded: an allocator that hands
-  out the lowest free number, which the test catches.
+  fid counter's property test, over a space a test hook shrinks to 256
+  numbers, draws from many processes at once, keeps some fids alive past
+  a wrap and ends others with their owners, and finds no number drawn
+  again before every other number has been drawn, `NOFID` never drawn,
+  and every new fid that meets a live one refused with `einval` and
+  nothing shared; seeded: a counter that hands out the lowest number not
+  in the grant's table, which the test catches.
 * F4: a tiny request whose callback is slow, sent in a flood by one
   client, which delays that client's grant and no other, and spends no
   more than the server's grant; seeded: a grant that runs callbacks in its

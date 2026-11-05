@@ -398,6 +398,12 @@ it; git history is the record of completed work.
 * [Low] runtime, `erx_prim_file.c`: EROFS, `/tmp` and file servers have no provider yet, so a path on them
   cannot arise: the namespace holds the one row `/`. Their rows' fields of `erx_ns_mount_t`
   ([design-files.md](docs/design-files.md#namespaces)) arrive with them.
+* [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
+  ([design-tmp.md](docs/design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
+  on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which
+  ends `kernel` and halts the node. A Phase 1 residual: `/tmp` is the domain's own, so the domain ends
+  with it. The restart test of [/tmp's verification](docs/design-tmp.md#verification) covers one crash,
+  not a recurring one; a recurring crash would want `erx_ramfs_sup` to give up on `/tmp` alone.
 * [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:

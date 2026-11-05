@@ -174,16 +174,15 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   sink, on top of the message. Settled by the same bench at an interrupt rate a driver sees, with and without one environment
   kept per entry.
 * **`/tmp`'s hops per operation** (`erx_ramfs`, [design-tmp.md](design-tmp.md#where-tmp-runs)): a `/tmp`
-  operation is about two to four local message round trips (the grant, the file's owner and a read helper, then the tree
-  process), plus the NIF's resolve for a path operation, where a C provider in the NIF would cost one move to a dirty
+  operation is two or three local message round trips (the grant, the file's owner for an open file's reads and writes,
+  then the tree process; `erx_ramfs`'s reads run in the owner, with no helper), plus the NIF's resolve for a path operation, where a C provider in the NIF would cost one move to a dirty
   scheduler; a Common Test run writes its logs a line at a time. Measure, each number against another from the same
   runtime under the same accelerator: 10,000 line-sized `file:write/2` calls and 1,000 `file:read_file_info/1` and
   `file:read_file/1` calls of 4 KiB files on `/tmp`, against the same reads on the release file system, which the NIF
   serves, and against `erx_ramfs_core:step/4` run alone on the same tree, so the difference is the dispatch; and the
   same workload in the hosted runtime against stock OTP 29.1.2 on the same host, both native, for the end-to-end cost.
   Also record the tree process's memory against `held` after the workload, which [Charges](design-tmp.md#data-model)
-  leaves unpromised. Fixes on the table, cheapest first: reads without a helper for a module that declares them
-  immediate; the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
+  leaves unpromised. Fixes on the table, cheapest first: the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
   reached by one round trip.
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 

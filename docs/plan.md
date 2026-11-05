@@ -557,7 +557,15 @@ both for the operations `/tmp` needs: `version`, `attach`, `walk`,
 `lopen`, `lcreate`, `read`, `write`, `readdir`, `getattr`, `setattr`,
 `mkdir`, `symlink`, `link`, `readlink`, `unlinkat`, `renameat`,
 `statfs`, `fsync` (a no-op for `/tmp` that succeeds, as OTP's `sync` and
-`datasync` cases need), `flush` and `clunk`; and `/tmp` as the domain's
+`datasync` cases need), `flush` and `clunk`, with the grammar generated
+whole from its one table, so every other operation decodes and is
+answered too: `auth` with `enotsup`, as every server answers it,
+`remove` through `unlink` as `unlinkat` is, `mknod` with `eperm` and
+`xattrwalk` and `xattrcreate` with `enotsup` from `/tmp`'s callbacks,
+and `lock` and `getlock` with `enolck` until `erx_fs`'s locks arrive in
+M4; the owner of an open file calling `read` itself for a module whose
+`read_mode/0` answers `immediate`, as `/tmp`'s does, so M3 needs no read
+helpers; and `/tmp` as the domain's
 own `erx_fs` server ([design-tmp.md](design-tmp.md#where-tmp-runs));
 the watchdog process, `erx_watchdog`, petting
 from the system release; musl behind `liberx`; the console service and
@@ -639,9 +647,10 @@ code store in memory, with loads by hash, checked by the SHA-256
 primitive ([design-runtime.md](design-runtime.md#per-byte-primitives)),
 manifests, history and the missing-blob exchange
 ([design-live.md](design-live.md#the-code-store)); the system domain's
-namespace, `erx_ns_resolve` in `prim_file` with its fuzz target, the
+namespace, the
 9P2000.L byte codec `erx_9p` built from the frame profile, with its fuzz
-target, `erx_fs`'s locks, read helpers and flush of helper work, and
+target, `erx_fs`'s locks, and the read helpers of servers that read from a
+medium, with flush of helper work, and
 `/proc`, with the previous boot's crash record under `[kernel, crash]`
 where the platform keeps one ([design-files.md](design-files.md)); the
 host link's files stream, stream 4, which `tools/erx files` relays to a
