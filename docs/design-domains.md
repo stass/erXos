@@ -1701,9 +1701,9 @@ script: a small release with `kernel` and `stdlib`, `kernel`'s
 `erx_connections` application being the connection agent; the
 code server, which loads the release's modules from the domain's slice and
 the modules that arrive through the domain's code facet
-([design-live.md](design-live.md#the-code-store)); a `user` that writes to
-descriptor 1, which reaches the domain's tty or, where it has none, its log
-([design-runtime.md](design-runtime.md#the-console-and-standard-io)); a
+([design-live.md](design-live.md#the-code-store)); a `user` that writes with
+`erlang:display_string/2`, which reaches the domain's tty or, where it has none,
+its log ([design-runtime.md](design-runtime.md#the-console-and-standard-io)); a
 logger proxy, which sends the domain's log records to
 the console facet ([design-live.md](design-live.md#the-console)); and the
 domain agent that answers inspection ([design-live.md](design-live.md)).

@@ -7465,8 +7465,8 @@ out refuses further lines with `ERX_ELIMIT` and never reuses a number.
 During boot every record is also written to the early console;
 afterwards the system domain's log service reads records with
 `erx_log_read(resource (TRACE), cursor, window)` into a memory window and
-renders them on the console through the console's driver, so log lines
-never break into the shell's output
+renders them on the console through the console's driver, each record one
+write, whole, which can land between a program's writes or in an edited line
 ([design-live.md](design-live.md#the-console)). The cursor is a sequence
 number. A reader that falls more
 than the ring behind is told how many records it lost, never shown a

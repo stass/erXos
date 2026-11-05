@@ -467,9 +467,10 @@ input for programs, it takes requests only through the programs' handlers,
 which never wait on a program, and it never waits on one itself, so a busy
 or hostile program delays none of its work:
 
-* **Input.** Bytes from the master go through the line discipline to the
-  tty's one reader: the group while the shell prompts, on a raw tty with
-  `edlin`'s editing and history, and otherwise the foreground job. In
+* **Input.** Bytes from the master go through the line discipline to what
+  reads the tty: the group while the shell prompts, on a raw tty with
+  `edlin`'s editing and history, and otherwise the foreground job, whose opens
+  may compete, as on Unix, with the relay serving their reads one at a time. In
   cooked mode the line discipline collects a line and the relay answers the
   foreground job's pending read with it, newline included, when the line
   ends. `Ctrl-D` at the start of a line answers that read with no bytes,
@@ -478,15 +479,16 @@ or hostile program delays none of its work:
   is discarded. The relay handles input before output, so `Ctrl-C` and
   `Ctrl-Z` act however much output waits.
 * **Output.** What any program writes to the terminal goes through the line
-  discipline's output and to the master as `{tty_output, Bytes}`, in the
+  discipline's output and to the master as `{tty_output, N, Bytes}`, in the
   order the writes arrive, so one program's output and error streams
   interleave as it wrote them and two programs' as they arrive. The relay
-  keeps at most 4 KiB unanswered by the master and answers a write only when
-  it has room for it, so a program that writes faster than the terminal, or
-  to a session that is not connected, waits in its write, as on a Unix
-  terminal, and nothing piles up in the session. A background job's write
-  goes through as well, unless `TOSTOP` is set, when it waits until the job
-  is brought to the foreground.
+  holds at most 4 KiB for the master, and a write takes only what room there
+  is. A program that writes faster than the terminal, or to a session that is
+  not connected, waits for room with no request outstanding, so a signal
+  interrupts it as on a Unix terminal
+  ([design-programs.md](design-programs.md#the-terminal)), and nothing piles up
+  in the session. A background job's write goes through as well; `TOSTOP`
+  comes with process groups, in the second tier, and follows POSIX there.
 * **Interrupts.** With `ISIG`, `Ctrl-C` and `Ctrl-Z` reach the relay's
   line discipline as input. `Ctrl-C` asks the handler of every program of
   the foreground job to send it `SIGINT`, ends the job's Erlang commands

@@ -1650,21 +1650,43 @@ terminal beyond the streams it was started with.
 **Reading a terminal.** A terminal read waits for input before it asks for
 it, as a socket's read does, so the wait has no request in flight and a
 signal interrupts it by POSIX's rules ([Signals in
-liberx](#signals-in-liberx)). `liberx` first sends its handler
-`{watch, Open, [in]}`, which the handler answers at once and
-follows, once, with the report `{ready, Open, [in]}` when the terminal has
+liberx](#signals-in-liberx)). `liberx` first sends its handler a watch, which the handler answers at once
+and follows, once, with the report `{ready, Open, Events}` when the terminal has
 input for that reader: a complete line in canonical mode, and otherwise
 what `VMIN` and `VTIME` ask for, which the line discipline decides. Only
 then does `liberx` send the read, which is answered at once, with bytes or
 with `eagain` when another reader took them first, and `liberx` then
-watches again. A read under `O_NONBLOCK` is sent at once and fails with
-`EAGAIN` on `eagain`; `poll` reports `POLLIN` from the same reports, and
-`POLLOUT` once the relay can take a write. `Ctrl-D` at the start of a
+watches again. Several opens of a foreground job may read, as on Unix, and
+the relay serves their reads one at a time. A read under `O_NONBLOCK` is sent
+at once and fails with `EAGAIN` on `eagain`. A blocking read watches
+`{watch, Open, [read]}`, which is the line discipline's `read_wait` and starts
+the timer that `VTIME` asks for. `poll` watches `{watch, Open, [in]}`, which
+starts no timer and reports only when bytes wait, one byte with `VTIME` set and
+otherwise `VMIN` of them, and reports `POLLIN` from that, so a `poll` never
+consumes input or starts a read's time.
+`Ctrl-D` at the start of a
 line answers that read with no bytes, the end of file, and later reads go
 on, as on a Unix terminal. A job in the background gets no report in the
 first tier, so its read waits until the job is in the foreground; in the
 second tier the line discipline sends a background group that reads its
 controlling terminal `SIGTTIN` instead.
+
+**Writing a terminal.** A terminal write waits for room the same way, since a
+stopped tty, a session not connected to the console among them, can leave it
+waiting for as long as the session lives, and a request outstanding would hold up
+a caught signal and another thread's `exec` ([Open and closed
+waits](#signals-in-liberx)). `liberx` sends `{watch, Open, [out]}`, answered at
+once and followed, once, by `{ready, Open, [out]}` when the relay has room. That
+wait is open, so a handler runs in it. Only then does it send the write, which is
+answered at once with the count taken, or with `eagain` when another writer took
+the room first, and `liberx` then watches again. A blocking `write` goes on until
+every byte is taken and returns that count, as on Unix: if a signal interrupts it,
+it returns the count so far, or fails with `EINTR` if nothing was taken. A write
+under `O_NONBLOCK` is sent at once and returns the count, or fails with `EAGAIN`
+on `eagain`. `poll` reports `POLLOUT` from the same reports. musl's stdio is
+ordinary code above this: `__stdio_write` repeats on a short count, and a failed
+`write` sets `F_ERR` and discards its buffer (`musl/src/stdio/__stdio_write.c`),
+as it does on any Unix.
 
 **Pseudo-terminals, in the second tier.** A session's own tty is a
 **pseudo-terminal** whose master is the console. In the second tier a program
@@ -1684,7 +1706,14 @@ and a session leader that opens a pseudo-terminal's slave first makes it
 its controlling terminal. The command server keeps each program's group
 and session in its process table; `tcsetpgrp` sets the terminal's
 foreground group; a background group that reads its controlling terminal
-gets `SIGTTIN`, and one that writes it with `TOSTOP` set gets `SIGTTOU`.
+gets `SIGTTIN`. A write by a background group with `TOSTOP` set follows POSIX:
+the relay answers it `{background, Orphaned}`, and `liberx`, which alone knows the
+program's signal state, decides. If `SIGTTOU` is ignored or blocked, it sends the
+write again marked so, and the write goes through; otherwise, if the group is
+orphaned, the write fails with `EIO`; otherwise the group gets `SIGTTOU`, and the
+write goes on once it is continued. In the first tier, a job is one group that
+counts as orphaned and takes no such signal, so `tcsetattr` with `TOSTOP` fails
+with `EINVAL`, and a background job's write goes through.
 Within one such session, programs stop and continue each other as POSIX
 processes do, so a ported shell runs job control in a pseudo-terminal:
 
@@ -2623,6 +2652,7 @@ test:
 | a handler for `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGTRAP` or `SIGSYS` runs for a signal raised with `raise` or `kill`, never for a fault, which ends the program | a fault ends only the faulting space, from the kernel's record ([A program's end](#a-programs-end)) |
 | in the first tier, a program cannot stop or continue itself or another: `kill` and `raise` of `SIGSTOP` fail with `EPERM`, and `SIGTSTP`, `SIGTTIN` and `SIGTTOU` under their default action are discarded | stopping is the session's job control, and a job's process group is orphaned, for whose members POSIX discards those three; the second tier stops and continues programs within a POSIX session ([The terminal](#the-terminal)) |
 | in the first tier, a job is one process group and session that no program can leave | process groups and sessions that programs create come with pseudo-terminals, in the second tier |
+| in the first tier, `tcsetattr` with `TOSTOP` fails with `EINVAL`, and a background job's write goes through | `TOSTOP`'s rules are about process groups and `SIGTTOU`, which come in the second tier, where POSIX's rules apply |
 | `kill` of a process that is neither the caller's child nor in a `signal` right's scope it holds fails with `ESRCH`, even when it exists | a process id grants nothing, and the error does not say whether it exists |
 | `kill` with a `pid` of 0, of minus the caller's group or of -1 reaches the caller's children, the processes of its `signal` right's scope and the caller itself, and no other member of its job, its parent and its siblings included | the same rule: a program reaches only its children and what its `signal` right names, so a job's other members are out of its reach unless that right names them ([The POSIX-lite personality](#the-posix-lite-personality)) |
 | process ids are unique within a session only | a session is the namespace of its process ids |
@@ -3111,7 +3141,9 @@ terminal cases.
   pseudo-terminal in canonical and
   raw modes; `kill(0, SIGTSTP)` and `raise(SIGTSTP)` in a program on a
   pseudo-terminal, each of which returns only after the program is
-  continued; a `SIGSTOP` of a child, which the parent's `waitpid` with
+  continued; a background group's write with `TOSTOP` set, which stops with
+  `SIGTTOU`, goes through with it ignored and with it blocked, and fails with
+  `EIO` in an orphaned group; a `SIGSTOP` of a child, which the parent's `waitpid` with
   `WUNTRACED` reports; `^C` that sends `SIGINT` to the foreground group
   only; a background group's read that gets `SIGTTIN`; a resize that sends
   `SIGWINCH`; a master's close that sends `SIGHUP`; and a recompiled `vi`

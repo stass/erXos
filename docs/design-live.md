@@ -232,7 +232,7 @@ with it.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **V1.** A tty changes a program's bytes only as its `termios` says | every write to a tty goes through `erx_tty:output/2`, a pure function of the bytes and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/2` | a test that writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio, `io:put_chars/1` and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was written; with an escaping step added on the path, the comparison fails |
+| **V1.** A tty changes a program's bytes only as its `termios` says | every write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
 | **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service` or `runtime`); renderers print the status and reporter of every value | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
@@ -240,7 +240,7 @@ with it.
 | **V6.** Only a holder of the system-shell facet types expressions into the system domain | the console starts an Erlang shell in the system domain only for a session that holds the facet; every other session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; release builds give the facet to the principals the system configuration names, by default none | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login | a test that a release build's console shows a login and that a session without the facet gets no system shell; a test that `erl` in the console's command shell evaluates in the session's domain |
 | **V7.** A console reaches only the sessions of the principal logged in at it | `erx_console` records the principal that the principal service confirmed at the console's login, and its menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; locking or logging out detaches the console and clears the record, and only a login, which the vault checks, sets it again | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached | a test that logs two principals in turn at one console and finds that each menu shows and reaches only its own sessions; a test that locks the console and finds every menu action refused, and the sessions running, until the same principal logs in again |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
-| **V9.** Text labelled with its source is displayed only through the line escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `erx_render`, which prints inspection records and the shell's records, and the host tool's printer; the kernel's log escapes on entry with its own ASCII class | a renderer that prints a name or a value raw; a class of characters missing from the table; a print path in the host tool that skips its printer | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
+| **V9.** Text labelled with its source is displayed only through the line escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records and the shell's records, and the host tool's printer; the kernel's log escapes on entry with its own ASCII class | a renderer that prints a name or a value raw; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
 
 ## Data model
 
@@ -379,23 +379,45 @@ write. Its decisions are one pure state machine, the **line discipline**,
 the Erlang module `erx_tty`, the same for every tty and tested exhaustively
 on the host:
 
-* `output(Bytes, Tty)` returns the bytes for the master. With `OPOST` and
-  `ONLCR` a newline becomes CR-LF, and no other byte changes unless a program
-  sets another of POSIX's output flags. With `OPOST` clear it returns its
-  input. This is the only thing that ever happens to a program's output.
-* `input(Bytes, Tty)` returns the next state and what to do: bytes for the
-  reader, bytes to echo, a signal for the foreground group.
+* `output(Bytes, Room, Tty)` returns how many of `Bytes` it took and the bytes
+  for the master, at most `Room` of them. With `OPOST` and `ONLCR` a newline
+  becomes CR-LF, and no other byte changes unless a program sets another of
+  POSIX's output flags. With `OPOST` clear the bytes are its input. A CR-LF is
+  never split, so 4 KiB of newlines with 4 KiB of room takes 2 KiB. This is the
+  only thing that ever happens to a program's output.
+* `input(Bytes, Tty)` returns the next state and what to do: bytes to echo, a
+  signal for the foreground group, a report that a waiting read can go on. A
+  line in cooked mode holds at most 4,095 bytes and its end, and in raw mode at
+  most 4 KiB wait unread; further bytes are dropped and counted, as Linux's
+  line discipline does.
+* `read_wait(Open, Tty)`, for a blocking read that starts to wait,
+  `timer(Open, Tty)`, for its timer's end, and `read(Open, Max, Tty)`, for the
+  read itself, return the next state and what to do: bytes for the reader, or
+  none; a report that the read can go on; a timer to start or cancel.
 * `set(Termios, Tty)` takes a new `termios`, checking it whole; a flag
   outside `erx_tty`'s table fails with `EINVAL`.
+* `size(Rows, Columns, Tty)` takes a new window size, each from 1 to 65,535,
+  and refuses any other.
+
+The owner carries out what they return and owns the timers, so time reaches the
+machine only as `timer`, and the exploration on the host drives it event by
+event.
 
 **Cooked and raw** mean what they mean on Unix, as flags of `termios`:
 
 * **Cooked**, `ICANON` set: the line discipline collects a line, applying
   `VERASE`, `VKILL`, `VWERASE` and `VEOF`, and a read gets one line. History
   and arrow keys are no part of it.
-* **Raw**, `ICANON` clear: a read gets bytes as `VMIN` and `VTIME` ask for.
-  `ECHO`, `ISIG` and `OPOST` are flags of their own, which `cfmakeraw` clears
-  with the rest.
+* **Raw**, `ICANON` clear: a read gets bytes as `VMIN` and `VTIME` ask for,
+  by POSIX's four cases:
+  * `VMIN` above 0, `VTIME` 0: the read can go on at `VMIN` bytes;
+  * `VMIN` and `VTIME` above 0: at `VMIN` bytes, or when a timer that each byte
+    restarts, and the first byte starts, ends;
+  * `VMIN` 0, `VTIME` above 0: at the first byte, or when a timer that
+    `read_wait` starts ends, and the read then returns no bytes;
+  * both 0: at once, with whatever waits.
+* `ECHO`, `ISIG` and `OPOST` are flags of their own, which `cfmakeraw` clears
+  with the rest, so a tty made raw with it delivers `Ctrl-Z` as data.
 * With `ISIG`, `VINTR`, `VQUIT` and `VSUSP` signal the foreground group.
 
 A new tty starts cooked, with `ECHO`, `ISIG`, `ICRNL`, `OPOST` and `ONLCR`
@@ -410,8 +432,8 @@ group take `Ctrl-C` as data. The process that drives the group, the terminal
 relay or for the system shell `erx_console`, takes each request through
 `prim_tty:handle_request/2`, whose state comes from `prim_tty:init_ssh/3`
 (`lib/kernel/src/prim_tty.erl:308`), which needs neither a terminal
-descriptor nor terminfo, and writes the bytes to the tty as any writer does.
-Input goes to the group as `{self(), {data, Chars}}`, the protocol `ssh_cli`
+descriptor nor terminfo, and writes the bytes to the tty as any writer does, or
+for the system shell to the driver. Input goes to the group as `{self(), {data, Chars}}`, the protocol `ssh_cli`
 uses (`lib/ssh/src/ssh_cli.erl:420`), and `Ctrl-C` interrupts the shell's
 evaluator as `ssh_cli` turns it into `exit(Group, interrupt)`
 (`lib/ssh/src/ssh_cli.erl:409-411`). Before the shell starts a foreground
@@ -421,29 +443,83 @@ as a Unix shell does. So a program that ends in raw mode leaves nothing in
 the `termios`. What it left on the terminal itself, an alternate screen, a
 hidden cursor or a colour, stays until the operator runs `reset`, as on Unix.
 
+**The editor's rendering is not the tty's.** A process's `io:put_chars` is
+Erlang's text I/O, not a write of bytes: the group turns it into
+`{putc, Binary}`, which `prim_tty`, in stock OTP's cooked output mode
+(`prim_tty.erl:329`), renders for the screen as stock OTP's shell does, with
+CR-LF for a newline and caret notation for a control character
+(`prim_tty.erl:696`, `:1227`, `:1280`). That is the shell's line editor at work,
+as readline's redraw is `bash`'s. What `prim_tty` returns then reaches the tty
+as a write. So there are two exact comparisons, each at its own boundary: what a
+writer hands the tty against what the master gets, which V1 tests; and what
+`prim_tty` renders from a request against what stock OTP's renders from the same
+request. A program that needs exact bytes uses `write` or stdio, and Erlang code
+uses `erlang:display_string/2`.
+
 **Where a tty lives.** A session's tty lives in the session's domain, in its
 terminal relay ([Job control](design-shell.md#job-control)), which answers
-every `{tty, Open, Request}` of its programs. The system shell's lives in
-`erx_console`. A tty's master is `erx_console` while the session is connected
-to the console, the host link's `console` facet, or in the second tier a
-program that holds a pseudo-terminal's master; so a session's `/dev/tty` and
-a `/dev/pts/N` are one thing with different masters
-([design-programs.md](design-programs.md#the-terminal)). Between domains the
-protocol is closed and small, carried as frames on the domain's connection
-to the system domain: `{tty_output, Bytes}` from the tty, answered when the
-bytes are taken; `{tty_input, Bytes}`, `{tty_size, Rows, Columns}` and
-`tty_hangup` to it. Nothing crosses that the console has to interpret.
+every `{tty, Open, Request}` of its programs. A tty's master is `erx_console`
+while the session is connected to the console, the host link's `console`
+facet, or in the second tier a program that holds a pseudo-terminal's master;
+so a session's `/dev/tty` and a `/dev/pts/N` are one thing with different
+masters ([design-programs.md](design-programs.md#the-terminal)).
 
-**Many writers.** Every open may write, in any job and at any time. Writes go
-through the owner in arrival order, whole up to 4 KiB, so two writers' output
-can interleave, as on a Unix terminal. A background job's write goes through
-unless `TOSTOP` is set.
+The system shell's tty lives in `erx_console` and is simpler. Programs run only
+under a session's domain (V8), so no program opens it and nothing can call
+`tcsetattr` on it: it is raw with every flag clear for as long as it lives, and
+`erx_tty` would return its input unchanged in both directions. So `erx_console`
+runs no line discipline for it, and copies bytes between the driver and the
+group's `prim_tty`. `erx:console_size/2` checks the size as `erx_tty:size/3`
+does, so a zero column count never reaches `prim_tty`.
+
+**Between domains.** A tty and a master in the system domain exchange five
+closed messages, as frames on the domain's connection to the system domain.
+Nothing crosses that the console has to interpret. Each receiver checks what it
+gets, whatever the sender's own limits:
+
+| Message | Direction | The receiver's check | If it fails |
+| --- | --- | --- | --- |
+| `{tty_output, N, Bytes}` | tty to master | a binary of at most 4 KiB, charged after `output/3`; `N` is the tty's next output number, or the last one again with `Bytes` empty | the console detaches the tty and logs a line under the domain's id |
+| `{tty_taken, N}` | master to tty | `N` is the output outstanding | ignored, since it is a late repeat |
+| `{tty_input, Bytes}` | master to tty | a binary of at most 4 KiB; `input/2` bounds what waits unread | dropped and counted |
+| `{tty_size, Rows, Columns}` | master to tty | `size/3`, each from 1 to 65,535, so a zero column count never reaches `prim_tty` | the old size stays, counted |
+| `tty_hangup` | master to tty | that atom; it holds from then on | not applicable |
+
+**A lost answer does not stop a tty.** The system domain's peer may drop a
+message to a domain whose lane stays full
+([design-domains.md](design-domains.md#the-peer)), and a `{tty_taken, N}` is
+such a message. So the tty has one output outstanding and numbers it, and with
+no answer in 1 s it sends `{tty_output, N, <<>>}`, and again each second. A
+master that has taken output `N` answers `{tty_taken, N}` again, with the
+current `{tty_size, Rows, Columns}`, and `tty_hangup` if it has hung up: these
+are states, so a repeat of them is harmless and a lost one is sent again. A
+master that has not taken it, because the session is not connected, sends
+nothing, and that one output is all the console holds for a session. A lost
+`{tty_input, Bytes}` is typed input lost, as in a line's overrun, and the peer's
+count reports it. A master in the tty's own domain, a pseudo-terminal's, sends
+the same messages as plain Erlang messages, which are not dropped.
+
+**Many writers.** Every open may write, in any job and at any time. The owner
+serves writes in arrival order, and each writer's bytes stay in order. A write
+can be split, since it takes only what room there is, and another writer's bytes
+can land between its parts, as POSIX allows: it promises atomic writes for pipes
+and FIFOs up to `PIPE_BUF`, and nothing for a terminal. A background job's write
+goes through; `TOSTOP` follows Unix in the second tier and is refused in the
+first ([design-programs.md](design-programs.md#the-terminal)).
+
+An Erlang writer sends `{tty_write, From, Ref, Bytes}` and waits in `receive`
+for the answer, which comes when all its bytes are in the tty. A program cannot
+wait that way, since a program's outstanding request holds up its signals
+([Signals in liberx](design-programs.md#signals-in-liberx)): it waits for room
+with no request outstanding, and then sends a write that is answered at once,
+with the count taken ([Writing a
+terminal](design-programs.md#the-terminal)).
 
 **A stopped tty.** A tty whose master takes no more output is stopped, as a
-line held by XOFF is: the owner keeps at most 4 KiB unanswered and answers no
-further write, so writers wait in `write`. A session not connected to the
-console is in that state until it is connected, and its `{tty_output, Bytes}`
-stays unanswered until then. Nothing is lost and nothing piles up.
+line held by XOFF is: the owner holds at most 4 KiB, counted after `output/3`,
+the outstanding output among them, and once that is full no write takes
+anything, so writers wait. A session not connected to the console is in that
+state until it is connected. Nothing is lost and nothing piles up.
 
 **Why this shape.** It is the structure of a Unix tty and of QNX's `devc`
 drivers. Unix keeps one `termios`, one line discipline and two queues per
@@ -473,8 +549,13 @@ interleave, as on a Unix terminal:
 * the tty of the connected session, whose bytes `erx_console` copies to the
   driver without reading them;
 * `erx_console` itself: its menu, its login prompt and its log lines;
-* the system domain's runtime, whose descriptors 1 and 2 reach the driver
-  ([design-runtime.md](design-runtime.md#the-console-and-standard-io));
+* the system domain's runtime, whose `erlang:display_string/2`, `erlang:display/1`
+  and `standard_error` reach `erx_console`, which writes their bytes to the driver
+  unchanged and answers when the driver has written them
+  ([design-runtime.md](design-runtime.md#the-console-and-standard-io)). They are
+  a writer on the line, as `/dev/console` is on Unix, and not on any tty, so no
+  tty's `termios` applies to them and none waits on them: the only output settings
+  of a terminal are those of its one tty, and the line has none of its own;
 * the kernel's early console, the same UART, at the address its platform
   build fixes and checks against `stdout-path` at boot, which it writes by
   polling at boot, before the driver starts, and at a panic, after the
@@ -551,10 +632,26 @@ reads them with `erx_log_read` and writes each as a log line
   the domains travel only the tty's bytes, its size and a hang-up, as frames
   on the domain's connection to the system domain ([The tty](#the-tty)), and
   the console reads none of them. A user's login shell is such a session.
-* **Logs.** Each domain's logger proxy formats its log events inside the
-  domain, so the system domain never formats another domain's format
-  string, and sends each to the domain's console facet as a log record,
-  `{log, Level, Text}` with `Text` a binary of at most 4 KiB.
+* **Logs.** Every log event of a runtime ends at one sink. The `default`
+  handler of `kernel`'s logger in every domain is `erx_log_h`, whose process in
+  a domain other than the system domain is the domain's logger proxy. It formats
+  each event inside the domain, on one line, so the system domain never formats
+  another domain's format string, and sends it as a log record,
+  `{log, Level, Text}` with `Text` a binary of at most 4 KiB: to the domain's
+  console facet, and in the system domain to `erx_console` directly. Two stock
+  handlers remain:
+  * `logger_simple_h`, which holds and prints a runtime's log events until
+    `erx_log_h` is added, displays them with `erlang:display_string/2`
+    (`logger_simple_h.erl:179`, `:230`). Edit 43 makes it build each event's
+    text on one line and print `erx_text:escape_line/1` of it and a CR-LF in one
+    call, so a boot's early log is attributed text at its display like any other.
+  * `logger_std_h`, which writes to `user` and falls back to `standard_error`
+    (`logger_std_h.erl:680`), is in no domain's default configuration. Given a
+    file, it writes data; given a standard device by a principal in that
+    principal's own domain, it writes that domain's own output to that domain's
+    own tty, under no other name. The system release's configuration names it on
+    no standard device, which the release check confirms.
+
   The console accepts only that shape and at most 16 KiB of text per
   second per domain, the rate `erx_debug_log` allows a space, beyond which
   it drops and counts records. It renders each like a kernel log record,
@@ -578,6 +675,8 @@ chose or a line a domain wrote must not pass for something else.
 
 * `erx_console` escapes domain records and the names in its menu and its
   login prompt.
+* `logger_simple_h` escapes each record it prints before the sink exists
+  ([The console](#the-console)).
 * `erx_render` escapes inspection records and the shell's records at a
   terminal. Toward a file or a pipe it writes its reversible framing
   instead ([Pipelines](design-shell.md#pipelines)).
@@ -1311,29 +1410,57 @@ development-only field never reaches a release projection. The generated
 reference tables and field projections are covered by the drift check.
 
 * **Exact output:** the test of V1, on the console and on the host tool's
-  `console` command. A seeded escaping step in `output/2` or in the console's
-  copy fails it.
+  `console` command. A seeded escaping step in `output/3` or in the console's
+  copy fails it. `prim_tty` from `init_ssh/3` here and in stock OTP 29.1.2 turns
+  the same requests, every printable and control character in `{putc, Binary}`
+  among them, into the same bytes; a seeded change to its caret rendering fails
+  it.
 * **The line discipline:** `erx_tty` explored exhaustively over its flags and
   a small alphabet of bytes, and differentially against a host pseudo-terminal
   with the same `termios`, comparing what a reader gets, what is echoed and
   what the master gets. `ONLCR` applied with `OPOST` clear fails both. Its
-  `set/2` and `input/2` have a fuzz target.
+  `set/2`, `size/3` and `input/2` have a fuzz target. The exploration also drives
+  `read_wait/2`, `timer/2` and `read/3` as events, over each of POSIX's four
+  `VMIN` and `VTIME` cases.
 * **Cooked and raw:** a program that reads a line in cooked mode, with
   `VERASE` and `VKILL` typed; one that turns off `ECHO` and reads a password
   that is not echoed; one that goes raw, reads single keys and draws; `Ctrl-Z`
-  from a raw program, after which the shell's prompt works, and `fg`, after
-  which the program is raw again. With the shell's restore removed, the prompt
-  test fails.
-* **Many writers:** two programs and the system domain's
-  `erlang:display_string/2` writing numbered lines at once: every write of at
-  most 4 KiB arrives whole and each writer's arrive in order. A background
-  job's write arrives; with `TOSTOP` set it does not until `fg`. A log record
-  written during a flood of program output arrives as one whole line. With the
-  copy split below a write's size, the test fails.
+  from a program that clears `ICANON` and `ECHO` and keeps `ISIG`, after which
+  the shell's prompt works, and `fg`, after which the program's settings are back.
+  With the shell's restore removed, the prompt test fails. A program made raw
+  with `cfmakeraw` reads `Ctrl-Z` as a byte; with `ISIG` ignored by `input/2`
+  in the first case the program is never stopped, and that case fails.
+* **Timed reads:** a blocking read with `VMIN` 0 and `VTIME` 1 returns no bytes
+  after its timeout with no input, and a `poll` with the same settings reports
+  nothing and starts no timer. In the exploration, `read_wait` that starts no
+  timer leaves the first test waiting past its deadline, and `poll` that starts
+  one fails the second. A cooked line past 4,095 bytes keeps its end and
+  drops the rest with a count; with the bound removed the model's state grows
+  past its limit.
+* **Many writers:** two programs and an Erlang process in their session
+  writing numbered records at once: each writer's bytes arrive complete and in
+  order, whatever lands between them. With the owner taking the end of a
+  write before its start, the test fails. 4 KiB of newlines under `ONLCR` reaches
+  the master as 8 KiB in frames of at most 4 KiB; with the room counted before
+  `output/3` the console refuses the frame and the test fails. A background job's
+  write arrives, and `tcsetattr` with `TOSTOP` fails with `EINVAL` in the first
+  tier. A log record written during a flood of program output arrives as one
+  whole line, since the driver writes each write whole.
+* **The tty's messages:** a seeded master that drops a `{tty_taken, N}` leaves
+  the tty going on within 2 s; with the repeat removed, its writers wait past
+  the deadline. A resize lost the same way arrives with the repeat. A
+  `{tty_size, 24, 0}` leaves the old size and a count, with `size/3`'s check
+  removed `prim_tty` fails with `badarith`. Output over 4 KiB, an `N` out of
+  order, input over 4 KiB and each message's wrong shape are refused as the
+  table says, each with a seeded receiver that skips its check. The messages
+  have a fuzz target.
 * **A stopped tty:** a session detached by the menu whose program goes on
   writing waits in `write` past 4 KiB, loses nothing and goes on when it is
-  connected. With the answer sent before the bytes are taken, the program's
-  write returns while detached and the test fails. During the menu and a login
+  connected. With the room reported while the tty holds 4 KiB, the program's
+  write returns while detached and the test fails. While it waits, a caught
+  `SIGALRM` runs its handler and `write` returns the count taken, or `EINTR`
+  with none, and another thread's `exec` goes through; with the wait made a
+  request outstanding, both fail by their deadlines. During the menu and a login
   prompt a program's write reaches no byte of the line, and a program's read
   gets no byte typed there.
 * **Attributed text:** the test of V9; a domain whose name and log records
@@ -1345,8 +1472,12 @@ reference tables and field projections are covered by the drift check.
   of other shapes or oversized text, or writes control characters in them
   leaves one escaped line per accepted record under its own id and
   principal, whatever name it chose, and a count of the rest; a program's
-  log lines appear under its session's id. The console's two decoders of
-  log records, for the kernel's records from `erx_log_read` and for the
+  log lines appear under its session's id. A log event with a newline and an
+  escape sequence, raised before `erx_log_h` is added, prints through
+  `logger_simple_h` as one line with both as tokens; with edit 43 removed, the
+  comparison fails. A release check refuses a system configuration that names
+  `logger_std_h` on a standard device, and has a seeded violation. The console's
+  two decoders of log records, for the kernel's records from `erx_log_read` and for the
   domains' records from their facets, have fuzz targets.
 * **Inspection tests:** one per status and per reporter; scope tests for
   facets limited to some domains; a record for every path kind against a

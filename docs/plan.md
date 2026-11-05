@@ -547,7 +547,15 @@ from the system release; musl behind `liberx`; the console service and
 the console's driver, an Erlang process in the system domain over the
 device NIF, with no console NIF
 ([design-runtime.md](design-runtime.md#the-console-and-standard-io)), the
-console's only input; the console has several writers, whose writes can
+console's only input; `erx_console` copies raw bytes between that driver and
+the group's terminal-less `prim_tty`, with `isprint/1` and `wcwidth/1` made
+pure (edit 38), which is the system shell's permanent path: its tty stays raw
+with every flag clear, so `erx_tty` is no part of it, and M3 needs neither
+`erx_tty`, `erx_output`, a registered tty owner nor edit 35's trap, which come
+with the first session's tty in Track S; logging stays OTP's default handler
+over `user`, since only the system release's code runs here, and the log sink
+and edit 43 come with the first other domain in M5; the console has several
+writers, whose writes can
 interleave: the console service, a runtime's descriptors 1 and 2 through
 the seam's console write, and the kernel's log capability serving the root
 before the driver runs and the crash handler after it, on
@@ -673,6 +681,10 @@ and watch the machine come back from the reset with nothing to reconcile.
 
 **Scope.**
 
+* **The log sink**: `erx_log_h` as the `default` handler in every domain, the
+  logger proxy, the console's escaped log lines, and edit 43 for
+  `logger_simple_h`, before any other domain's text can reach a log
+  ([design-live.md](design-live.md#the-console)).
 * **Connections and lanes**: the lane's ring and reader page in the ABI
   file's layout, IRQ objects as doorbells, the wake handshake by published
   positions, and the system domain making a connection at a domain's
@@ -832,7 +844,10 @@ file objects follow M5, on erXos's kernel:
   and grants; the spawn planner, spawn and wait; the session's terminal
   relay, which owns its tty, with the line discipline `erx_tty`, its
   exhaustive model and its fuzz target
-  ([design-live.md](design-live.md#the-tty)); the session's pipe server, `erx_pipe_srv`, which makes every ring
+  ([design-live.md](design-live.md#the-tty)); `erx_output`, the registered
+  tty owner and the normal halt's drain, with edits 35's trap and 42, in place
+  of the seam's console write for a process's output
+  ([design-runtime.md](design-runtime.md#the-console-and-standard-io)); the session's pipe server, `erx_pipe_srv`, which makes every ring
   and every doorbell and installs every end, with the exploration of its
   pipe core, and the pipe NIF ([design-pipes.md](design-pipes.md)); the
   sub-space port form of littlefs, and executables run from the EROFS
