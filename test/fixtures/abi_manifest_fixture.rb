@@ -74,11 +74,14 @@ module AbiManifestFixture
     bytes
   end
 
+  # erx_mf_device's size in abi/manifest.txt.
+  DEVICE_ROW = 80
+
   def unit_partition(overlap: false, orphan: false)
     original = valid
     units = orphan ? 1 : 2
     device_offset = 672 + units * 24
-    strings_offset = device_offset + 2 * 64
+    strings_offset = device_offset + 2 * DEVICE_ROW
     text = original.byteslice(672..-1) + (orphan ? 'unit0' : 'unit0unit1')
     bytes = original.byteslice(0, 672) + "\0".b * (strings_offset - 672) + text
     integer(bytes, 8, bytes.bytesize)
@@ -90,11 +93,11 @@ module AbiManifestFixture
       base = 672 + index * 24
       span(bytes, base, 34 + index * 5, 5)
       integer(bytes, base + 8, 0xffffffff)
-      first = overlap ? device_offset : device_offset + index * 64
+      first = overlap ? device_offset : device_offset + index * DEVICE_ROW
       span(bytes, base + 12, first, 1)
     end
     2.times do |index|
-      base = device_offset + index * 64
+      base = device_offset + index * DEVICE_ROW
       integer(bytes, base, 1)
       integer(bytes, base + 4, 2)
       span(bytes, base + 8, 4, 7)

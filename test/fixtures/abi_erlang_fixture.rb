@@ -14,7 +14,7 @@ module AbiErlangFixture
     strings = original.byteslice(672..-1).dup
     units_offset = 672
     devices_offset = units_offset + owners * 24
-    strings_offset = devices_offset + devices * 64
+    strings_offset = devices_offset + devices * AbiManifestFixture::DEVICE_ROW
     body = original.byteslice(0, 672) + "\0".b * (strings_offset - 672)
     AbiManifestFixture.span(body, 248, units_offset, owners)
     AbiManifestFixture.span(body, 256, devices_offset, devices)
@@ -25,10 +25,10 @@ module AbiErlangFixture
       AbiManifestFixture.span(body, offset, strings.bytesize, name.bytesize)
       strings << name
       AbiManifestFixture.integer(body, offset + 8, 0xffffffff)
-      AbiManifestFixture.span(body, offset + 12, devices_offset + index * 64, 1)
+      AbiManifestFixture.span(body, offset + 12, devices_offset + index * AbiManifestFixture::DEVICE_ROW, 1)
     end
     devices.times do |index|
-      offset = devices_offset + index * 64
+      offset = devices_offset + index * AbiManifestFixture::DEVICE_ROW
       AbiManifestFixture.integer(body, offset, 1)
       AbiManifestFixture.integer(body, offset + 4, 2)
       path = "/uart@#{index}".b

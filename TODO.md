@@ -300,6 +300,11 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `abi/manifest.txt`: the `devices[].selector` choice does not make `base`, `size` and `line` inactive for
+  selector 2, so a PCIe row with any of them nonzero is admitted, where `docs/design-abi.md` says they are zero; and
+  nothing refuses a device-tree row whose `base + size` wraps. Add the three fields to the choice's `dt` case, decide
+  the overflow rule, and give each refusal a fixture case in `test/host/abi_binary_test.rb` and
+  `test/host/manifest_reader_test.rb`.
 * [Medium] `test/guest/native_irq/guest.c`: the line's unbind and rebind come before the first typed character, so
   nothing checks that a line still fires after it was delivered, acked, detached and attached again. Type a third
   character after the rebind and add its checkpoint to `tools/lib/erx/native_irq.rb`.

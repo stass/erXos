@@ -101,12 +101,8 @@ class AbiBinaryTest < Minitest::Test
     view = @codec.open('manifest', AbiManifestFixture.unit_partition)
     assert_equal 2, view.count('units')
     assert_equal 2, view.count('devices')
-    assert_raises(Erx::ABI::DecodeError) do
-      @codec.open('manifest', AbiManifestFixture.unit_partition(overlap: true))
-    end
-    assert_raises(Erx::ABI::DecodeError) do
-      @codec.open('manifest', AbiManifestFixture.unit_partition(orphan: true))
-    end
+    assert_refused %w[partition units[].devices.offset], AbiManifestFixture.unit_partition(overlap: true)
+    assert_refused %w[partition units[].devices.offset], AbiManifestFixture.unit_partition(orphan: true)
   end
 
   def test_tagged_parameter_checks_its_own_payload_contract
@@ -122,16 +118,24 @@ class AbiBinaryTest < Minitest::Test
     end
   end
 
+  # The first device row is at 720: after the header and two 24-byte unit rows.
   def test_device_selector_refuses_inactive_fields_and_missing_path
     bytes = AbiManifestFixture.unit_partition
     AbiManifestFixture.integer(bytes, 720 + 32, 1, width: 2)
-    assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
+    assert_refused %w[inactive devices[].bus], bytes
     bytes = AbiManifestFixture.unit_partition
     AbiManifestFixture.span(bytes, 720 + 8, 0, 0)
-    assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
+    assert_refused %w[string_range devices[].path.offset], bytes
     bytes = AbiManifestFixture.unit_partition
     AbiManifestFixture.integer(bytes, 720 + 48, 4096, width: 8)
-    assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
+    assert_refused %w[inactive devices[].dma_memory], bytes
+  end
+
+  # A refusal for any other reason, such as a table at the wrong offset, would hide
+  # whether the check under test still bites.
+  def assert_refused((reason, field), bytes)
+    error = assert_raises(Erx::ABI::DecodeError) { @codec.open('manifest', bytes) }
+    assert_equal [reason, field], [error.reason, error.field], error.message
   end
 
   def test_partial_mode_cannot_carry_configured_domain_tables
