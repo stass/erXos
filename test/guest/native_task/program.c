@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/cache.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/service.h"

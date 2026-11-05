@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"

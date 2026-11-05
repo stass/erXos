@@ -14,6 +14,7 @@
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"

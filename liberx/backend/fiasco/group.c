@@ -17,6 +17,7 @@
 #include <l4/sys/ipc.h>
 #include <l4/sys/utcb.h>
 
+#include "liberx/backend/api.h"
 #include "liberx/backend/core/group_report.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/lock.h"

@@ -348,10 +348,15 @@ executor_main(uint64_t unused)
 	case_timed_park();
 	case_rounds();
 	atomic_store_explicit(&cases_done, 1, memory_order_release);
-	case_uart("erx: irq: type a character\n");
-	/* A restarted driver's path on a real line: an unbind masks it, and the bind opens it. */
+	/*
+	 * A restarted driver's path on a real line: an unbind masks it, and the first
+	 * character shows the bind opened it again. The second can arrive only through the
+	 * first's ack, so the rebind comes before both: a bind between them would unmask
+	 * the line in the ack's place.
+	 */
 	if (erx_irq_bind(irq_uart, ERX_CAP_NULL, 0) != ERX_OK || erx_irq_bind(irq_uart, ERX_CAP_SELF, LABEL_UART) != ERX_OK)
 		fail("erx: irq: the line was not bound again FAILED\n");
+	case_uart("erx: irq: type a character\n");
 	case_uart("erx: irq: type another\n");
 	say("erx: irq: done\n");
 	erx_fiasco_machine_off();

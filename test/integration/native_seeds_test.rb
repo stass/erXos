@@ -20,7 +20,9 @@ require_relative '../../tools/lib/erx/native_watchdog'
 # Needs ERX_CLANG, ERX_LLD and a built kernel; a missing tool is a failure, not a skip.
 class NativeSeedsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  COPIED = %w[include kernel liberx test].freeze
+  # What the seeded suites compile, at the same paths as in the tree: the interrupt
+  # root takes erx_device's C from ERTS's NIF directory.
+  COPIED = %w[include kernel liberx test otp/erts/emulator/nifs/erxos].freeze
   THREAD = 'liberx/backend/fiasco/thread.c'
   SERVICE = 'liberx/backend/fiasco/service.c'
   WATCHDOG = 'liberx/backend/fiasco/watchdog_thread.c'
@@ -94,7 +96,11 @@ class NativeSeedsTest < Minitest::Test
   SEEDS.each do |name, seed|
     define_method("test_#{name.tr(' ', '_')}") do
       Dir.mktmpdir('erx-native-seed-') do |directory|
-        COPIED.each { |entry| FileUtils.cp_r(File.join(ROOT, entry), directory) }
+        COPIED.each do |entry|
+          parent = File.join(directory, File.dirname(entry))
+          FileUtils.mkdir_p(parent)
+          FileUtils.cp_r(File.join(ROOT, entry), parent)
+        end
         path = File.join(directory, seed.file)
         text = File.read(path)
         assert_includes text, seed.from, 'the seed no longer applies'
