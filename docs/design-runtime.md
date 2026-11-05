@@ -2760,10 +2760,13 @@ own domain, so a runtime that lies harms only itself.
   Ruby tool compares them case by case (`make check-oracle`). Every difference
   is a bug, a documented difference with a test (the table of
   [Erlang-visible behaviour](#erlang-visible-behaviour)), or an upstream
-  bug recorded as such. A checked-in list maps each OTP case that differs
-  to its explanation, such as the printing of local pids, and the
-  comparison fails on a difference the list does not explain and on an
-  entry whose case does not differ.
+  bug recorded as such. Checked-in rules map each class of case that differs
+  to its explanation, such as the printing of local pids, or to the reason it
+  cannot run yet (a peer, a spawn port, a socket, a C helper, a load at run
+  time, a file system), which the run must show. The comparison fails on a
+  difference no rule explains and on a rule that matches no case. Suites run
+  in the system domain from a test release, which alone is allowed to load
+  code outside the install arena, since the suites compile and load modules.
 * **The C library.** musl's `libc-test` runs in a test domain, also
   under `make check-oracle`.
 * **The per-byte primitives.** Each has a fuzz target and a differential

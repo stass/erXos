@@ -1655,10 +1655,11 @@ Every report names its actual execution environment.
 The same `.beam` files run in the oracle and on erXos; OTP's own test suites
 for the applications erXos keeps run on both, and a Ruby tool compares the
 results case by case. Every difference is a bug in erXos, a documented difference
-with a test, or an upstream bug recorded as such. A checked-in list maps
-each OTP case that differs to its explanation, such as the printing of
-pids as `<D.N.S>`. The comparison fails on a difference that the
-list does not explain, and on an entry whose case no longer differs.
+with a test, or an upstream bug recorded as such. Checked-in rules map each
+class of case that differs to its explanation, such as the printing of
+pids as `<D.N.S>`, or to the reason it cannot run yet, which the run must
+show. The comparison fails on a difference that no rule explains, and on a
+rule that matches no case.
 musl's `libc-test` runs in a test domain under the same rule, and so
 do the Open POSIX Test Suite for the POSIX-lite personality, toybox's own
 tests for its applets, and plan9port's rc for the command shell, whose
@@ -1819,7 +1820,7 @@ trial request, is in
 | Component | Purpose | Licence | Status | How it enters |
 | --- | --- | --- | --- | --- |
 | Erlang/OTP 29.1.2 (ERTS and the shipped applications) | the runtime and the system's Erlang code | Apache-2.0 | permanent | imported into `otp/` as erXos's code, with an origin file |
-| OTP 29.1.2 Common Test controller reporting copy | exact case, group-instance and completed-job records for the host oracle | Apache-2.0 | permanent development dependency, never in a target image | modified `test_server_ctrl.erl` in `test/oracle/common_test/`, with original and modified hashes and an origin file; runtime, library and testcase sources remain stock ([design-build.md](design-build.md#oracle-and-protocol-models)) |
+| OTP 29.1.2 Common Test controller reporting copy | exact case, group-instance and completed-job records for the host oracle | Apache-2.0 | permanent development dependency, never in a production image | modified `test_server_ctrl.erl` in `test/oracle/common_test/`, with original and modified hashes and an origin file; runtime, library and testcase sources remain stock ([design-build.md](design-build.md#oracle-and-protocol-models)) |
 | Third-party code inside OTP's tree: asmjit, PCRE2, zlib, zstd, Ryu | the JIT's assembler, in the BeamAsm image alone, `re`, the `zlib` and `zstd` modules, shortest float printing | asmjit Zlib; PCRE2 BSD-3-Clause WITH PCRE2-exception; zlib Zlib; zstd BSD-3-Clause (or GPL-2.0-only, used under BSD); Ryu Apache-2.0 or BSL-1.0 | permanent; asmjit only in the BeamAsm image, never in the system domain's | part of `otp/` |
 | musl 1.2.6 | the C library of every runtime and native program | MIT, with the BSD and public-domain parts listed in [research](research-c-library.md#musl-126) | permanent | imported into `musl/` as erXos's code, with an origin file |
 | Fiasco `50bbe8a9`, `bootstrap` `a4f4ad18`, `sigma0` and `l4sys` from `l4re-core` `e2e2d5af`, `mk` `22cc26e5` | the stopgap kernel behind erXos's interface | MIT, as each project's `LICENSE.spdx` declares for its main package, but carrying GPL-2.0 code in every build, in files whose own notices override that declaration and which `LICENSE.spdx` does not list: `src/kern/kobject_rpc.h`, which the kernel's task, IPC gate and IRQ code include, and, in development builds, the kernel debugger's `jdb_object.cpp`; the debugger's disassembler, capstone, is BSD-3-Clause-Attribution; Fiasco's GPL-licensed `src/lib/regex`, `simple_malloc` and `gcov`, the LGPL `perfctr` code and the Qualcomm board support, which also carries GPL-2.0 files, are excluded; the link closure of `bootstrap` and `sigma0` recorded at import | **stopgap**, replaced by erXos's kernel ([plan.md](plan.md)); since every build carries GPL code, any distribution outside the project, in source or binary form, waits for the replacement, as CLAUDE.md's rule for stopgaps under a license that is not permissive requires | imported into `fiasco/` as erXos's code, with origin files |

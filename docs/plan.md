@@ -46,7 +46,11 @@ Ground rules:
   the kernel or the stopgap, the scheduler, memory, the funnel and the
   connections' carrier, the adapter, the loader, or the build of OTP or
   musl) and at each milestone's exit. `make check-oracle` also runs musl's
-  `libc-test`.
+  `libc-test`. A case that cannot run yet is never a pass: the run shows it as
+  "cannot run" with its reason, and the milestone that brings what it needs
+  must run it. Files arrive with `/tmp` at M3 and the file services of M4 and
+  M6, peers with the domains and connections of M5, sockets with the network
+  service of M12. The full oracle therefore closes in Phase 2, at M12.
 * **Measure, then decide.** A gate records its measurements in a research
   record and its decision in the design document it shapes; the plan says
   where the gate sits and what it decides.
@@ -566,8 +570,13 @@ a manifest whose console differs
 `tools/erx build runtime`; `prim_file`'s path resolution with its fuzz
 target.
 
-**Exit criteria.** The fast oracle subset passes in the system domain and
-the full suites at the milestone's exit, every difference documented;
+**Exit criteria.** The fast oracle subset passes in the system domain, and
+OTP's `emulator`, `kernel`, `stdlib` and `compiler` suites run under stock
+Common Test there and are compared case by case. Every case is the same as
+stock, a bug fixed or in `TODO.md`, an explained difference, or "cannot run
+in M3" with its reason (peer, spawn port, socket, C helper, load at run time,
+file system) named and shown by the run. The counts are recorded and no
+unexplained difference remains;
 musl's `libc-test` runs in a test task that the root builds with every
 failure a bug, a documented difference with a test, or an upstream bug
 recorded as such; a deterministic-mode boot to the shell gives a
@@ -658,7 +667,8 @@ reporter `liberx pool`, each with a test; a file read through
 `tools/erx files` equals its
 source on the machine; the fuzz targets of the deframer, `erx_ns_resolve`,
 the 9P2000.L codec and each escaper run their budgets clean; the oracle's
-full suites pass on the interpreter image in the system domain, and on the
+suites meet M3's standard on the interpreter image in the system domain, with
+the cases that need what M4 brings moved out of "cannot run", and on the
 BeamAsm image at M5, when the domain service can start a BeamAsm domain.
 
 ## M5: A wall around some processes
@@ -742,9 +752,9 @@ and watch the machine come back from the reset with nothing to reconcile.
   [design-system.md](design-system.md#verification-and-testing).
 
 **Exit criteria.** The two-node differential scenario suite passes, every
-difference in the compatibility table; the oracle's full suites pass on
-the BeamAsm image in an ordinary domain that the domain service starts,
-every difference documented; the invariants of
+difference in the compatibility table; the oracle's suites meet M3's
+standard on the BeamAsm image in an ordinary domain that the domain service
+starts, with the cases that need a peer moved out of "cannot run"; the invariants of
 [design-domains.md](design-domains.md#invariants) have their tests; the
 exhaustive models of one lane, of one connection whose peer ends and of
 cross-domain links among three domains pass, progress included; the soak
