@@ -212,6 +212,9 @@ it; git history is the record of completed work.
   `read_boot` trusts every end line on the serial log, and no task can write one only because none can print.
 * [Low] musl, `liberx/backend/fiasco/arch/aarch64/task_start.S`: a task's 256 KiB first stack lies in `.bss` with no
   guard page, so a deep test overruns its own globals, possibly `t_status`, instead of faulting.
+* [Low] musl, `liberx/backend/fiasco/task.ld`: a section the script does not name takes the segments of the one before it, so a
+  writable one that lands after `.tbss` joins the TLS segment and shrinks every thread's TLS, as `.got` did. Link with
+  `--orphan-handling=error`, naming `.symtab`, `.strtab` and `.shstrtab`, before a large program such as ERTS runs as a task.
 * [Low] musl, `tools/lib/erx/libc_test.rb`: `NEEDS` also holds back tests using `sigprocmask` and `pthread_sigmask`,
   which the seam answers with no effect; and `Dependencies`'s git fetch reads the user's git configuration, which
   the pinned hash catches only as a failed fetch.

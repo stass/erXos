@@ -6,6 +6,9 @@
  * table's pages, with its file header and ABI note in the code segment, as
  * elf_plan.c asks, and each segment on a page of its own. A program linked with
  * musl finds its TLS image through the headers, and its constructors in .init_array.
+ * musl sizes each thread's TLS from the tls segment, so that holds .tdata and .tbss and
+ * nothing else. A section this script does not name takes the segments of the one before
+ * it, so .got has its place ahead of them.
  */
 ENTRY(_start)
 PHDRS {
@@ -24,6 +27,7 @@ SECTIONS {
 	. = ALIGN(4096);
 	.init_array : { KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) .init_array)) } :data
 	.fini_array : { KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*) .fini_array)) } :data
+	.got : { *(.got .got.*) } :data
 	.tdata : { *(.tdata .tdata.*) } :data :tls
 	.tbss : { *(.tbss .tbss.*) } :data :tls
 	.data : { *(.data .data.*) } :data

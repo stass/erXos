@@ -45,6 +45,42 @@ class LibcTestTest < Minitest::Test
     assert_equal(:unknown, results.first.state)
   end
 
+  # A program with TLS data, zeroed TLS and a global offset table entry: musl sizes each
+  # thread's TLS from this segment, so it must hold both TLS sections and nothing else.
+  TLS_PROGRAM = <<~C
+    __thread char data = 1;
+    __thread char zeroed[4096] __attribute__((aligned(4096)));
+    extern char absent __attribute__((weak));
+    void _start(void) { zeroed[0] = data + (&absent != 0); }
+  C
+
+  def tls_segment(script)
+    compiler, linker = ENV.values_at('ERX_CLANG', 'ERX_LLD')
+    skip('set ERX_CLANG and ERX_LLD') if compiler.to_s.empty? || linker.to_s.empty?
+
+    Dir.mktmpdir do |directory|
+      source, object, program = %w[tls.c tls.o tls.elf].map { |name| File.join(directory, name) }
+      File.write(source, TLS_PROGRAM)
+      assert(system(compiler, '--target=aarch64-none-elf', '-O1', '-fPIC', '-ffreestanding', '-c', source, '-o', object))
+      assert(system(linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, object))
+      headers = File.binread(program)
+      offset, = headers.unpack('@32Q<')
+      size, count = headers.unpack('@54S<S<')
+      fields = count.times.map { |index| headers.unpack("@#{offset + index * size}L<L<Q<Q<Q<Q<Q<Q<") }
+      fields.find { |type, *| type == 7 }
+    end
+  end
+
+  def test_each_link_script_keeps_the_tls_segment_whole
+    %w[task.ld root.ld].each do |script|
+      segment = tls_segment(File.expand_path("../../liberx/backend/fiasco/#{script}", __dir__))
+      start, file_bytes, memory_bytes, alignment = segment.values_at(3, 5, 6, 7)
+      assert_equal([1, 4096], [file_bytes, alignment], "#{script}: file bytes and alignment")
+      # The zeroed array fills the page after the data's, wherever the data landed in its own.
+      assert_equal((start | 4095) + 1 + 4096, start + memory_bytes, "#{script}: the end of the zeroed array")
+    end
+  end
+
   def test_the_log_case_refuses_a_forged_line_at_the_start
     record = "#3 0.000100 debug space 1: \\x0Aerx: task: forged ok\\x0A\\x1B[2J\n"
     assert_nil(Erx::NativeTask.judge_log(record))
