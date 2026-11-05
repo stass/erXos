@@ -269,6 +269,7 @@ clients](#native-clients-liberxs-file-client)).
 | **F7.** A file's bytes, as one session's programs see them, live in one place per session | while any program of a session maps a file shared, the session's one object for the file holds them: every mapping of the file in the session maps that object, and the handlers send every read, write and size change of the file by the session's programs to the file's mapper, which serves them from the object; the session's file table holds at most one mapper per file, keyed by the server's domain, the tree and the qid path | a second object for one file in one session; a handler that relays such a read or write to the server past the mapper; a mapping installed past the filled extent; a write's bytes put in the object before the server acknowledged them | an exhaustive model of one mapper, its object and its server under interleaved stores, reads, writes the server takes whole, in part or not at all, extending writes, truncations, failed fills and write-backs up to depth 8, against a flat file; two programs of one session, one storing through a mapping and one reading through a descriptor |
 | **F8.** Every store through a shared mapping reaches the file's server as an ordinary write, at a point POSIX names | the mapper writes back, with the protocol's `write`, every page the kernel reports as stored to since the last write-back (`erx_mem_dirty`), at `msync`, at every close of a mapping's open (a program's last `munmap` of the file, its `exec` and its end) and at the `close` that leaves the session's programs no open of the file, and deletes the object only after its last write-back; a write-back that fails is returned to the call that caused it, or logged at a program's end ([Shared mappings](#shared-mappings)) | an object deleted before its last write-back; a stored page the report leaves out; a program's end that the mapper does not see; a failed write-back reported nowhere | a test per write-back point, reading the file through another domain after it; a store made while a write-back runs, which the next write-back carries; a server that fails a write-back, whose `msync`, `munmap` and `close` return `EIO` and whose program's end leaves a log line |
 | **F9.** A program reaches a file only through its handler | a program's sub-space holds its channel, its data area and the memory its session mapped, and nothing else: no grant pid, no fid, no lane to any server; its handler acts only on the program's own table, the fids it walked for it and the files it opened ([design-programs.md](design-programs.md#invariants)) | a capability to a lane or a grant installed in a sub-space; a handler that acts on a fid outside the program's table | a sub-space test that enumerates a program's capabilities and finds only its channel and mapped memory; a hostile program that names another program's open numbers, every request failing with `EBADF` |
+| **F10.** A fid ends exactly once, and no later than its owner process | the grant's fid table is the one record of a fid and the grant alone ends one, at its `clunk`, its `remove`, its owner's end or the grant's end; the grant monitors every owner, signals between two processes keep their order, so an owner's `DOWN` follows every request it sent, and a monitor of a process already ended fires at once ([Fid owners](#fid-owners)) | a fid made without its owner monitored; a client that keeps its own record of fids to clean up | the exhaustive model of a grant's fid table with owners' ends among its events; the ended-owner and killed-opener tests ([design-tmp.md](design-tmp.md#verification)) |
 
 ## Data model
 
@@ -332,17 +333,23 @@ root in ([Identity and version](#identity-and-version)).
 The file protocol is 9P2000.L. Its messages, fields and semantics are
 those of 9P2000.L, which extends 9P2000's version, attach, walk, read,
 write, clunk, remove and flush with operations that carry Linux's file
-semantics; erXos defines no operation of its own and changes the meaning
-of none but `version`'s inside the machine ([Version and
-attach](#version-and-attach)). Inside the machine each message is an
+semantics; erXos defines no operation of its own. Inside the machine it
+departs from 9P2000.L in two places only: `version` resets nothing
+([Version and attach](#version-and-attach)), and `write`'s reply also
+names the offset its bytes were written at ([Open files and
+offsets](#open-files-and-offsets)). Inside the machine each message is an
 Erlang term whose fields are the message's fields in 9P2000.L's order,
 decoded on both sides by the funnel's grammar and then by the protocol's own, the **frame profile** of
 `abi/erx_abi.txt`, so every field is checked once against the table below.
-A request travels as `{erx_9p, Alias, Request}` to a grant and its reply
-as `{erx_9p, Alias, Reply}` to `Alias`, which plays the part of 9P's tag. A
+A request travels as `{erx_9p, Alias, Owner, Request}` to a grant and its
+reply as `{erx_9p, Alias, Reply}` to `Alias`, which plays the part of 9P's
+tag; `Owner` is the process that will hold any fid the request makes
+([Fid owners](#fid-owners)). A
 reply is `ok` for a 9P2000.L reply that has no fields, `{ok, Field...}`
-otherwise, and `{error, Posix}` for `Rlerror`, its Linux error number
-written as OTP's `file:posix()` atom.
+otherwise, and `{error, Posix}` for `Rlerror`: inside the machine an error
+is always OTP's `file:posix()` atom that names the Linux error (`enoent`
+for `ENOENT`), and only the codec at an edge turns it into Linux's number
+and back ([Errors](#errors)).
 
 | Operation | Request term | Reply term | erXos's servers |
 | --- | --- | --- | --- |
@@ -351,15 +358,15 @@ written as OTP's `file:posix()` atom.
 | attach | `{attach, Fid, Afid, Uname, Aname, NUname}` | `{ok, Qid}` | `Fid` then names the grant's root; `Afid` is `?NOFID`, since `auth` is not served; `Aname` names the tree the grant roots in, and any other name fails with `enoent`; `Uname` and `NUname` are recorded and grant nothing |
 | walk | `{walk, Fid, NewFid, Names}` | `{ok, Qids}` | at most 16 names; `Fid` not open, as walk(5) asks and erXos's servers enforce; `NewFid` not in use unless it equals `Fid`; a failure at the first name is an error reply; a walk that passes at least one name and then fails lists the qids it walked and leaves `NewFid` unused; `NewFid` names the result only when every name was walked; a walk from a symbolic link fails at the next name |
 | lopen | `{lopen, Fid, Flags}` | `{ok, Qid, Iounit}` | `Flags` 9P2000.L's open flags ([Flags](#flags)); a link fails with `eloop`, a device node or FIFO with `enxio`; `Iounit` 65,536 inside the machine |
-| lcreate | `{lcreate, Fid, Name, Flags, Mode, Gid}` | `{ok, Qid, Iounit}` | `Fid` a directory, after which it names the created file, open, so no unopened fid of the file remains |
+| lcreate | `{lcreate, Fid, Name, Flags, Mode, Gid}` | `{ok, Qid, Iounit}` | `Fid` a directory, after which it names the file, open, so no unopened fid of the file remains; one atomic step that creates the file, or, without `EXCL`, opens the regular file `Name` already names with `Flags`, `TRUNC` included, as QEMU's `openat` with `O_CREAT` does; `eexist` with `EXCL` for any existing name, a dangling link included; `eloop` for a link without `EXCL`, which the client then follows; `eisdir` for a directory |
 | symlink | `{symlink, Fid, Name, Target, Gid}` | `{ok, Qid}` | `Target` at most 4,095 bytes, Linux's limit, stored as given; where the format keeps no links, `eperm` |
 | mknod | `{mknod, Dfid, Name, Mode, Major, Minor, Gid}` | `{ok, Qid}` | stored where the format keeps nodes, `eperm` elsewhere |
 | rename | `{rename, Fid, Dfid, Name}` | `ok` | both fids of this grant |
 | renameat | `{renameat, OldDirFid, OldName, NewDirFid, NewName}` | `ok` | both fids of this grant |
 | unlinkat | `{unlinkat, DirFid, Name, Flags}` | `ok` | `Flags` 0 or `AT_REMOVEDIR` |
 | readlink | `{readlink, Fid}` | `{ok, Target}` | `Fid` a symbolic link |
-| getattr | `{getattr, Fid, RequestMask}` | `{ok, Attr}` | `Attr` a map whose keys are 9P2000.L's field names, `valid` to `data_version` ([Identity](#identity-and-version)) |
-| setattr | `{setattr, Fid, Attr}` | `ok` | `Attr` a map of 9P2000.L's fields, `valid` naming those set; `uid` and `gid` fail with `eperm` |
+| getattr | `{getattr, Fid, RequestMask}` | `{ok, Attr}` | `Attr` a map whose keys are 9P2000.L's field names, `valid` to `data_version`; erXos's servers set `valid` to the basic fields and the `data_version` bit ([Identity](#identity-and-version)) |
+| setattr | `{setattr, Fid, Attr}` | `ok` | `Attr` a map of 9P2000.L's fields, `valid` naming those set; a `uid` or `gid` other than the file's own fails with `eperm`, and the file's own changes nothing but `ctime`, as a `chown` to its own owner does; a size set through an opened fid needs that fid opened for writing, whatever the file's mode, and fails with `einval` otherwise, as Linux's `ftruncate` does; a size set through an unopened fid needs the file's write permission, as `truncate` does |
 | xattrwalk | `{xattrwalk, Fid, NewFid, Name}` | `{ok, Size}` | `NewFid` then reads the value, or the list of names for an empty `Name` |
 | xattrcreate | `{xattrcreate, Fid, Name, Size, Flags}` | `ok` | `Fid` then takes writes of `Size` bytes, at most 65,536, committed at its clunk; `enotsup` where the format keeps none |
 | readdir | `{readdir, Fid, Offset, Count}` | `{ok, Entries}` | `Fid` an open directory; each entry `{Qid, Offset, Type, Name}`, `Type` Linux's `d_type`, not the qid's type, the entries fitting in `Count` bytes as 9P2000.L packs them; an empty list at the end of the directory |
@@ -370,7 +377,7 @@ written as OTP's `file:posix()` atom.
 | mkdir | `{mkdir, Dfid, Name, Mode, Gid}` | `{ok, Qid}` | |
 | statfs | `{statfs, Fid}` | `{ok, Statfs}` | `Statfs` a map of 9P2000.L's fields, `type` to `namelen` |
 | read | `{read, Fid, Offset, Count}` | `{ok, Data}` | `Count` at most 65,536 inside the machine ([Bytes](#how-a-request-names-its-bytes)) |
-| write | `{write, Fid, Offset, Data}` | `{ok, Count}` | `Data` at most 65,536 bytes inside the machine; 9P2000.L's count field is `Data`'s size |
+| write | `{write, Fid, Offset, Data}` | `{ok, Count, At}` | `Data` at most 65,536 bytes inside the machine; 9P2000.L's count field is `Data`'s size; `At` the offset the bytes were written at, the file's end for an append fid, which 9P2000.L's `Rwrite` does not carry: the codec drops it at an edge and reads an `Rwrite` from outside as `At` = `unknown` ([Open files and offsets](#open-files-and-offsets)) |
 | clunk | `{clunk, Fid}` | `ok` | releases the fid's locks |
 | remove | `{remove, Fid}` | `ok` | `Fid` is clunked whatever the outcome |
 | flush | `{flush, OldTag}` | `ok` | `OldTag` the alias of a request; answered `ok` for a completed or unknown request too ([Flush](#flush)) |
@@ -423,6 +430,41 @@ Fids are the client's to choose, as in 9P. A runtime draws them for each
 grant from one allocator its processes share, and a session's handlers
 from the session's, so two processes of one domain never choose the same
 fid on one grant.
+
+#### Fid owners
+
+Every fid has an **owner**, a process of the client's domain that the
+request making the fid names in its `Owner` (an `attach`, a `walk` to a
+new fid, an `xattrwalk`), fixed for the fid's life. The grant monitors
+each process that owns a fid it holds, and when one ends, clunks every fid
+that process still owns, as if it had sent the clunks. So a fid ends
+exactly once, at its `clunk`, its `remove`, its owner's end or its
+grant's end, whichever comes first, and the grant's fid table, the one
+record of it, is the one place that ends it. Two facts of Erlang order
+this against requests still on their way. Signals from one process to
+another arrive in the order sent, across domains too
+([design-domains.md](design-domains.md#invariants), D9), so an owner's
+`DOWN` reaches the grant after every request the owner sent itself. A
+request another process sent on the owner's behalf can arrive after the
+owner's `DOWN`; the grant then finds the owner unmonitored, monitors it
+again, and a monitor of a process that has ended fires at once, so the
+new fid is clunked as soon as it is made. A request in flight from a
+process that ends therefore never leaves a fid behind and never acts on
+a fid reused for someone else.
+
+Any process of the client's domain may use any of the grant's fids;
+only a fid's life follows its owner. Each client names owners so that a
+fid lives as long as what holds it: an Erlang process makes its path
+operations' fids and its open files' fids as their owner
+([Erlang clients](#erlang-clients-prim_file-and-erx_file_remote)), so a
+file closes when the process that opened it ends, as a stock raw file
+closes when its controlling process does; a session's handler names an
+open-file description's process as the owner of the description's fids,
+and itself as the owner of the fids it holds for its program's namespace;
+and a 9P bridge owns every fid it holds for its edge. An `Owner` that is
+not a process of the client's domain is refused with `einval`. A grant
+holds at most one monitor per owner and at most its pool of fids, so the
+monitors are bounded by the pool ([Bounds](#bounds)).
 
 #### How a request names its bytes
 
@@ -510,11 +552,31 @@ its offset, and the client keeps the file's position. A server holds, for
 each open fid, the callback's handle, and orders the reads, writes, size
 changes and locks of each open file through one process, the file's
 **owner**, which `erx_fs` starts at the file's first open and ends at its
-last clunk, so reads and writes of a regular file are atomic with respect
-to each other whichever fids they come through, as POSIX asks of regular
-files. A fid opened with 9P2000.L's append flag writes at the file's end
-whatever its offset, a rule of erXos's servers rather than of the
-protocol.
+last clunk, so each `read` and `write` request on a regular file is
+atomic with respect to every other whichever fids they come through, as
+POSIX asks of regular files. The unit is one request of at most 64 KiB: a
+caller's write larger than that is several requests, each atomic, which
+another writer's requests may fall between, as over Linux's own 9P2000.L
+client; a request refused part way through such a write, with `enospc`
+say, leaves the requests before it written, and the caller gets the
+error with its offset advanced past what was written, as stock
+`prim_file` returns an error after a short write. A fid opened with
+9P2000.L's append flag writes at the file's end whatever its offset, a
+rule of erXos's servers rather than of the protocol, and a positioned
+write through it appends too, as Linux's `pwrite` does on a file opened
+with `O_APPEND`.
+
+Where an append landed is known only to the server, at the step that
+placed it, and a later `getattr` cannot recover it, since another
+append may have landed since. So inside the machine `write`'s reply
+carries `At`, the offset its bytes were written at, and a client that
+keeps an offset moves it to `At` plus the count after a write, which
+puts an append fid's offset after its own bytes, as Linux's `write`
+with `O_APPEND` does. A positioned write never moves the offset. At an
+edge `Rwrite` carries no `At`: a client of a server from outside erXos
+reads the file's size after an append as Linux's own 9P2000.L client
+does, which can count another client's later append, a limitation of
+9P2000.L that erXos's servers do not share.
 
 Offsets live with the client. An Erlang process's open file keeps its
 offset in its descriptor record ([Erlang
@@ -525,7 +587,9 @@ an **unopened fid** of the file and an **opened fid**, and after a
 change of `O_APPEND` a second opened fid (below). A description's
 unopened fid, while it has one, names the file its opened fid opened.
 
-The two fids arise when the handler opens the file. `lopen` opens a fid
+The two fids arise when the handler opens the file, which makes every
+fid of a description with the description's process as its owner
+([Fid owners](#fid-owners)). `lopen` opens a fid
 in place, so for an open without `O_CREAT` the handler walks the path to
 the unopened fid, clones it with a walk of no names, and opens the clone
 with `lopen`, which makes the clone the opened fid. `lcreate` turns a
@@ -731,6 +795,24 @@ that points above the mount's root names whatever the reader's namespace
 holds there, often nothing. Local providers resolve their links by the
 same rule, in the NIF and in the EROFS reader.
 
+**The last name.** A link before a path's last name is always followed.
+A link that is the last name is followed or not according to the
+operation, as POSIX says of each call:
+
+| The last name's link is | Operations |
+| --- | --- |
+| followed | `open` without `exclusive`, `read_file`, `write_file`, `read_file_info`, `list_dir`, `set_cwd`, `change_mode`, `change_time`, `write_file_info`; a program's `open` without `O_EXCL` or `O_NOFOLLOW`, `stat`, `chmod`, `truncate`, `chdir` |
+| not followed: acts on the link | `delete` and `unlink`, which remove it; `rename`, on either side, which moves or replaces it; `read_link`, `read_link_info` and `lstat`; `make_link` and `link` for the existing name, which link the link itself, as Linux's `link` does |
+| not followed: the name exists | `make_dir`, `make_symlink`, `mkdir`, `symlink`, and `open` with `exclusive` or `O_EXCL`, which answer `eexist` for any existing name, a dangling link included; `del_dir` and `rmdir`, which answer `enotdir` |
+
+For an operation that does not follow, the client walks to the last
+name's directory, following links on the way, and sends the operation on
+that directory's fid and the name (`unlinkat`, `renameat`, `link`,
+`mkdir`, `symlink`, `lcreate` with `EXCL`), or walks the last name and
+acts on the link's own fid (`readlink`, `getattr`). The 40-link count and
+`erx_ns_resolve`'s bounds hold across one path's whole resolution, each
+of a `rename`'s two paths counted on its own.
+
 **Listings across mounts.** A directory's listing is its provider's
 entries, plus an entry of kind `directory` for every mount point directly
 below the directory that the provider does not list, so `ls /` shows
@@ -877,9 +959,11 @@ serves `remove` and `unlinkat`, and `rename` serves `rename` and
 
 * **One process per grant.** A service serves a tree by starting one
   `erx_fs` process per grant, as a facet stands for one grant, so a slow
-  client delays only its own grant. The client's state, its fids and the
-  requests it has in flight, lives in that process, within the bounds
-  above and the process's `max_heap_size`.
+  client delays only its own grant. The client's state, its fids, their
+  owners' monitors and the requests it has in flight, lives in that
+  process, within the bounds above and the process's `max_heap_size`;
+  the grant alone ends a fid ([Fid owners](#fid-owners)), and the module
+  hears of an open fid's end through `clunk`.
 * **One owner per open file.** Each open file has an owner process, which
   `erx_fs` starts at its first open on any grant and which runs that
   file's reads, writes, size changes and locks in turn
@@ -1140,39 +1224,98 @@ calling process through `erx_file_remote`:
 
 * path operations (`read_file_info`, `list_dir`, `make_dir`, `delete`,
   `rename`, `make_link`, `make_symlink`, `read_link`, `read_file`,
-  `write_file`) attach or reuse the runtime's root fid on the grant, walk,
-  act and clunk. Stock OTP sends these through the `file_server_2`
-  process (`lib/kernel/src/file.erl`, `check_and_call/2`); erXos's `file`
-  resolves the path first and sends only local paths there, so a slow
-  server delays only the processes that wait for it;
-* `open` walks and opens, and returns OTP's file descriptor record with
-  `erx_file_remote` as its module, holding the grant's pid, the fid and an
-  `atomics` cell for the offset, so `file:read/2`, `file:pwrite/3`,
-  `file:position/2` and `file:close/1` dispatch to it as they dispatch to
-  `prim_file` for local files, and a read advances the offset in the
-  calling process, as OTP's raw files belong to the process that opened
-  them;
+  `write_file`) attach a fid of their own on the grant, walk it in place,
+  act and clunk, the four requests sent together, so each operation's
+  fid is the calling process's from first to last
+  ([Fid owners](#fid-owners)). Stock OTP sends these through the
+  `file_server_2` process (`lib/kernel/src/file.erl`,
+  `check_and_call/2`); erXos's `file` resolves the path first and sends
+  only local paths there, so a slow server delays only the processes
+  that wait for it;
+* `open` without a mode that creates walks the names and opens the result
+  with `lopen`; with one (`write`, `append`, `exclusive`), it walks the
+  last name's directory and sends `lcreate`, which creates the file or
+  opens the one already there in one step, so two processes opening one
+  new name both succeed, as on Unix; `lcreate`'s `eloop` sends the client
+  through the link, counted with the path's others
+  ([Resolving a path](#resolving-a-path)). It returns OTP's file
+  descriptor record with `erx_file_remote` as its module, holding the
+  grant's pid, the fid, the opening process and an `atomics` cell for the
+  offset, so `file:read/2`, `file:pwrite/3`, `file:position/2` and
+  `file:close/1` dispatch to it as they dispatch to `prim_file` for local
+  files. The opening process owns the fid, so the file closes when that
+  process ends, and a call from any other process fails with
+  `error(not_on_controlling_process)`, as stock `prim_file`'s
+  `get_fd_data/1` fails it. A write moves the offset to the reply's `At`
+  plus its count ([Open files and offsets](#open-files-and-offsets));
+  `file:allocate/3`, which 9P2000.L has no operation for, answers
+  `{error, enotsup}`, and `{error, einval}` on a closed file, as stock
+  answers on a platform without preallocation; `file:sendfile/5` takes
+  `file`'s fallback of reads and sends, since a remote file has no
+  descriptor to hand to the host's call;
 * a request waits for its reply or for the end of the grant's process,
   which the client monitors, as a call on a local file system waits for
   its medium: a slow medium makes it wait, never fail. A process that
-  gives up, by its own exit or an interrupt, flushes the request; a server
-  that dies while files are open turns their next operations into
-  `{error, eio}`.
+  ends with a request in flight needs no cleanup of its own: the reply
+  goes to an alias that ended with it, and the grant clunks its fids when
+  its end arrives ([Fid owners](#fid-owners)). `flush` is for a request a
+  live client abandons, as a native program's interrupted read of a
+  terminal is. A server that dies while files are open turns their next
+  operations into `{error, eio}`.
 
 A rename between two mounts returns `{error, exdev}`, as between two Unix
 file systems, without asking either server.
 
-`erx_file_remote` answers as stock `prim_file` answers on a Unix host,
-whose platform layer adjusts some of the system's errors
-(`unix_prim_file.c`): `del_dir` and `rename` turn a server's `ENOTEMPTY`
-into `eexist`; `delete` turns `EISDIR` into `eperm`; `del_dir` of the
-working directory answers `einval` without asking, which is also how
-`del_dir(".")` answers, since `.` is resolved on the text; `del_dir`,
-`delete` and `rename` of a mount point answer `ebusy` without asking, as
-Linux answers for one, since no parent fid exists to send them to; and
-opening a directory without `[directory]` answers `eisdir`. A server
-therefore answers with Linux's own errors, as any 9P2000.L server does,
-and the one translation lives here.
+**Errors.** `erx_file_remote` answers as stock `prim_file` answers on a
+Unix host, whose platform layer adjusts some of the system's errors after
+they happen (`efile_rename`, `efile_del_file` and `efile_del_dir` in
+`unix_prim_file.c`). A server answers with the atoms of Linux's own
+errors, as any 9P2000.L server does, and the one translation lives here,
+applied in this order:
+
+1. `rename` whose source path, as the caller wrote it, is `"/"` answers
+   `einval`, stock's own check for a failed rename of `/`.
+2. `del_dir` whose path, as the caller wrote it, ends in `.` answers
+   `einval`, and one that ends in `..` answers `eexist`, without asking:
+   these are Linux's `rmdir` answers, `EINVAL` and `ENOTEMPTY`, which
+   stock passes on or maps, and the client keeps them because resolving
+   `.` and `..` on the text would otherwise turn the path into another
+   directory's.
+3. `del_dir`, `delete` and `rename` of a mount point answer `ebusy`
+   without asking, as Linux answers for one, since no parent fid exists
+   to send them to.
+4. A server's `enotempty` from `del_dir` or `rename` becomes `eexist`, and
+   `eisdir` from `delete` becomes `eperm`.
+5. After step 4, a `del_dir` that failed with `eexist` answers `einval`
+   when its directory is the working directory, compared as stock
+   compares them, by identity: the same grant, tree and qid path, from a
+   `getattr` of each. An empty working directory is removed like any
+   other, as on Linux.
+6. Opening a directory without `[directory]` answers `eisdir`.
+
+**File information.** `read_file_info`, `read_link_info` and
+`file:read_file_info/2` on an open file ask `getattr` for the basic fields
+and the `data_version` bit, and build the record stock's
+`build_file_info` builds from a `stat`, which `prim_file`'s own Erlang
+code then converts as it converts a local file's, its times under
+`{time, local | universal | posix}` included:
+
+| `#file_info{}` field | From |
+| --- | --- |
+| `size`, `links`, `uid`, `gid` | `size`, `nlink`, `uid`, `gid` |
+| `mode` | `mode`, its type bits included, as `st_mode` |
+| `type` | `mode`'s type bits: `regular`, `directory`, `symlink`, `device` for a character or block device, `other` for the rest |
+| `inode` | the qid's path |
+| `major_device` | a number the namespace gives each mounted tree, the same for every path into that tree while it is mounted, standing for `st_dev` |
+| `minor_device` | `rdev`, 0 for anything but a device |
+| `atime`, `mtime`, `ctime` | the `_sec` fields; the nanoseconds are dropped, as stock reads `st_atime` |
+| `access` | `read_write`, `read`, `write` or `none` from the owner's read and write bits, as stock's `check_access` reads them for the file's owner; for a path, from the file the path reaches after its links, as stock's `access(2)` follows them, so `read_link_info` of a link reports its target's access and `none` for a link that resolves to nothing |
+
+`write_file_info` sends what stock's `write_file_info_1` would set, in its
+order and with its defaults: an owner and group if either is given, then
+the mode, then `atime` and `mtime`, an absent `atime` taking the current
+time and an absent `mtime` the `atime`; `ctime` is never sent, since
+stock's `set_time` ignores it, and the server sets it.
 
 A session's handler is an Erlang client like any other: it resolves its
 program's path through the program's namespace with the NIF and acts
@@ -1353,6 +1496,14 @@ table:
   directory;
 * a rename between two mounts fails with `exdev`;
 * every operation on a file whose server died fails with `eio`;
+* a write larger than 64 KiB is several requests, each atomic, which
+  another writer's may fall between, where a local Linux file system
+  holds the file for the whole call ([Open files and
+  offsets](#open-files-and-offsets));
+* a positioned write to a file opened for `append` appends, as on Linux;
+  on macOS, and as POSIX says, it writes at its offset;
+* `file:allocate/3` answers `enotsup`, as on a platform without
+  preallocation;
 * hard links, symbolic links, device nodes and extended attributes exist
   where the server's format keeps them, and an open of a device node or a
   FIFO fails with `enxio`.
@@ -1365,8 +1516,11 @@ writes back ([Shared mappings](#shared-mappings)).
 
 The protocol is 9P2000.L as specified, so a 9P2000.L client or server
 from elsewhere meets it at an edge unchanged; inside the machine a
-`version` resets nothing, the one deliberate difference ([Version and
-attach](#version-and-attach)). The term form is erXos's
+`version` resets nothing ([Version and attach](#version-and-attach)) and
+`write`'s reply carries the offset its bytes landed at ([Open files and
+offsets](#open-files-and-offsets)), the two deliberate differences, and
+each request names the owner of the fids it makes ([Fid
+owners](#fid-owners)). The term form is erXos's
 frame profile; it owes nothing to an earlier form
 ([design.md](design.md#compatibility)): a change to it replaces it on both
 sides, which come from one tree. Nothing persists to carry across:
@@ -1386,6 +1540,7 @@ that hold them.
 | A link loop or a chain over 40 links | the client's count | nothing | none | `eloop` |
 | A slow medium | none: the request waits | the request at the server | none | a wait, as on a local file system; an interrupt flushes it |
 | A server dies, or a grant ends | the client's monitor on the grant, which the connection's end also fires | nothing at the server | the client marks its fids dead | `eio` on every open file of that grant; the mount stays, so a restarted service can be mounted again |
+| A client process ends | the grant's monitor on each fid owner, whose `DOWN` follows every request the owner sent ([Fid owners](#fid-owners)) | nothing | the grant clunks every fid the process owned, which releases their locks and, for an open file, the file's open | nothing |
 | A client domain dies | the connection going down, which ends every export across it and fires the grant's monitor on the client ([design-domains.md](design-domains.md#connections)) | nothing | the grant clunks every fid it holds, which releases their locks | nothing |
 | A program ends | its handler, which owns the port | nothing | the handler unlocks every lock of the program's `ProcId`, clunks every fid it walked for the program, closes its share of every description and tells each mapper of a file it mapped | a log line for a failed write-back |
 | A reply exceeds its request | the generated reply check in `erx_file_remote` or the bridge | nothing | the client discards the reply and counts it | `eio` |
@@ -1477,12 +1632,17 @@ report, so a passing run shows the code under test ran.
   at its root with the parent's qid, which both catch.
 * `erx_fs`: hostile-client tests (bounds, fid floods, lock floods, walks
   with `..` at the root and `/` inside names, writes through read-only
-  grants, slow clients, clients that die, clients that never read their
+  grants, slow clients, clients that die, client processes that end with fids and with
+  fid-making requests in flight, owners named on another's behalf that
+  have already ended, clients that never read their
   replies, replies sent to another domain's alias, a pipelined `lopen`
   after a walk that stopped at a link), and an exhaustive model of a
-  grant's fid table under every request in every state up to depth 6;
+  grant's fid table under every request and every owner's end in
+  every state up to depth 6;
   seeded: a grant that keeps a fid after a failed walk, which the model
-  catches.
+  catches, and a grant that, after an owner's `DOWN`, records a later fid
+  made for that owner without monitoring it again, which the ended-owner
+  case catches as a fid that stays.
 * F4: a tiny request whose callback is slow, sent in a flood by one
   client, which delays that client's grant and no other, and spends no
   more than the server's grant; seeded: a grant that runs callbacks in its

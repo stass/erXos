@@ -24,16 +24,24 @@ Decisions every reader needs:
   process, the **tree process**; every callback `erx_fs` makes is one call
   to it, and it answers each by one step of a pure function,
   `erx_ramfs_core:step/4`. Nothing else reads or writes the tree, so every
-  operation is atomic with respect to every other without a lock.
+  request is atomic with respect to every other without a lock.
+* **A node lives while a name or an open holds it; a fid only names it.**
+  A fid names a node by its inode number, which is never given to a
+  second node while the domain lives, so a fid whose node is gone can
+  name nothing else, and a request through it answers `enoent`. Only an
+  open keeps a nameless node alive, so the tree needs to hear of nothing
+  but opens and their ends, and every fid's end is the grant's business
+  ([design-files.md](design-files.md#fid-owners)).
 * **Data is pages, holes are free.** A file's bytes are 4 KiB chunks in a
   map from chunk index to binary, as tmpfs keeps pages; a missing chunk is
-  a hole and reads as zeros. The cap counts chunks, nodes and names in
-  bytes, and a step that would pass it changes nothing and answers
-  `ENOSPC`.
+  a hole and reads as zeros. The cap bounds the tree's **charges**, its
+  chunks plus a fixed charge per node and name, and a step that would pass
+  it changes nothing and answers `enospc`. The cap is a storage limit,
+  not a bound on the runtime's memory ([Charges](#data-model)).
 * **The tree speaks Linux; the client speaks OTP.** The tree answers with
-  9P2000.L's Linux error numbers, as any 9P2000.L server does;
-  `erx_file_remote` turns them into the answers stock `prim_file` gives
-  on a Unix host, for every server alike
+  the `file:posix()` atoms of Linux's errors, as any 9P2000.L server
+  answers with Linux's numbers; `erx_file_remote` turns them into the
+  answers stock `prim_file` gives on a Unix host, for every server alike
   ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)).
 
 ## Where `/tmp` runs
@@ -60,13 +68,14 @@ removes a namespace kind and a path of the session's export.
 
 | | (a) C in the NIF | (b) Erlang, own dispatch | (c) `erx_fs` server in the domain |
 | --- | --- | --- | --- |
-| Cost of one operation | one move to a dirty I/O scheduler and back, one mutex | the NIF's resolve, then one message round trip to the tree process | the NIF's resolve, then a request to the grant process, which calls the tree process, through the file's owner process for reads and writes: about two to four local message round trips |
+| Cost of one operation | one move to a dirty I/O scheduler and back, one mutex | one message round trip to the tree process; a path operation resolves its path in the NIF first | a request to the grant process, which calls the tree process, through the file's owner process for reads and writes: about two to four local message round trips; a path operation resolves its path in the NIF first, an operation on an open file does not |
 | Copies of data | one, in the caller | one, in the tree process (writes) or the caller (reads); binaries pass between processes by reference | the same as (b); payloads are cut into requests of at most 64 KiB, so a 32 MiB file, the default cap, is 512 reads |
-| Atomicity: rename, open after unlink, the cap under concurrent writers | from the mutex; a node freed when its last NIF resource is destroyed | from the one process; opens counted per node | from the one process, the same core as (b); opens are fids, clunked by `erx_fs` |
+| Atomicity: rename, open after unlink, the cap under concurrent writers | from the mutex, for every call | from the one process, for every call | from the one process, for every request; a write over 64 KiB is several requests ([design-files.md](design-files.md#open-files-and-offsets)) |
+| POSIX's calls | each implemented directly | each implemented directly | through 9P2000.L, which needs rules of erXos's servers and client: create-or-open in `lcreate`, truncation by an open fid's access, an append's offset in `write`'s reply; every server shares them |
 | A bug | can corrupt the runtime's memory; in the system domain that resets the machine | crashes the tree process; `/tmp` restarts empty | the same as (b); open files then answer `eio`, as for any server that dies |
-| Allocation failure | `enif_alloc` returns NULL and the write answers `enospc` | fatal for the domain, as any ERTS allocation; the cap keeps `/tmp` within its share | the same as (b) |
+| Memory beyond the cap | the allocator's overhead per page and node; `enif_alloc` returning NULL answers `enospc` | ERTS's overhead per object and garbage awaiting collection, not bounded by a figure; an allocation failure ends the domain, as any ERTS allocation's does | the same as (b) |
 | New concepts in the system | a third local provider in C, `ERX_NS_RAM`, a tree in the session's export for `/tmp` | `ERX_NS_RAM`, a `{ram, ...}` answer and its dispatch in `prim_file`, a module that mirrors the NIF's interface, a tree in the export | one `erx_fs` module; `ERX_NS_RAM` and the export's `/tmp` tree are deleted |
-| What it needs first | nothing | `prim_file`'s dispatch of non-local answers | `erx_fs` and `erx_file_remote`, which every file server needs |
+| What it needs first | nothing | `prim_file`'s dispatch of non-local answers | `erx_fs` and `erx_file_remote`, with fid owners, which every file server needs |
 
 (c) wins on the model a maintainer must hold. Every file system is a
 server reached through one client, so `/tmp` adds a module, not a path:
@@ -81,6 +90,16 @@ fewer, but keeps a provider kind and a dispatch that exist only for
 that refusal protects little, since the rest of the runtime meets the
 same exhausted budget a moment later, while a bug in it is a memory error
 in every domain's runtime.
+
+Two costs fall on (c). POSIX's calls, which (a) and (b) implement
+directly, reach the tree through 9P2000.L, which carries some of them
+only by rules of erXos's own (the POSIX row) and leaves a write over
+64 KiB not atomic against another writer; and its memory beyond the
+cap, like (b)'s, is ERTS's and has no figure, where (a)'s is the
+allocator's. The first is paid once for every server, `/data`
+included, which must follow the same rules whatever `/tmp` does, and the
+second is shared with (b). They narrow (a)'s distance from (c) without
+changing the choice.
 
 The price of (c) is hops. Nothing has measured them; the work `/tmp`
 serves in Phase 1 is small files and line-sized log writes, where a few
@@ -103,7 +122,15 @@ freed at its last close once it has no name; directories counting `2`
 plus their subdirectories as links; and, from memfs and Linux's offset
 map, directory entries ordered by a per-directory sequence number, so a
 listing resumed at an offset neither repeats nor skips an entry that
-stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
+stayed. tmpfs's two limits, pages and nodes, are one byte cap here. On
+what keeps a node alive the systems split: FreeBSD's tmpfs, whose every
+lookup holds a vnode, and the `lib9p` ramfs of later Plan 9s, whose every
+fid holds a reference, keep a node while anything names it; QEMU's
+9P2000.L server, whose unopened fid is a path and whose opened fid a host
+descriptor, keeps a file only while it is open, and the first Plan 9
+ramfs answers a removed file's fids "file does not exist". `/tmp` takes
+QEMU's rule: it needs no notice of an unopened fid's end, and every
+answer it gives is one POSIX allows ([Fids and nodes](#fids-and-nodes)).
 
 ## Overview
 
@@ -112,7 +139,8 @@ stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
   +--------------------------------------------------------------------+
   | file:write_file("/tmp/a", Bin)                                     |
   |   prim_file NIF: erx_ns_resolve -> mount /tmp, grant G, "a"        |
-  |   erx_file_remote: walk, lcreate, write (64 KiB a request), clunk  |
+  |   erx_file_remote: attach, walk, lcreate, write (64 KiB a          |
+  |     request), clunk; the caller owns the fid                       |
   |         | local messages, to aliases                               |
   |         v                                                          |
   |   G: erx_fs grant process   ---> file owner (one per open file)    |
@@ -130,11 +158,16 @@ stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
    grant, so the NIF answers `{remote, G, Names}`.
 2. `erx_file_remote`, in the calling process, sends the protocol's
    requests to `G` as local messages, as it sends them across a
-   connection to a grant in another domain.
+   connection to a grant in another domain, each naming the caller as the
+   owner of any fid it makes.
 3. `erx_fs` checks each request against the protocol's grammar and
-   bounds, and calls `erx_ramfs`'s callbacks, from the grant process or
-   from the file's owner. Each callback is one `gen_server:call` to the
-   tree process.
+   bounds, which local messages need as much as frames from another
+   domain, since they pass no funnel, and calls `erx_ramfs`'s callbacks,
+   from the grant process or from the file's owner. Each callback is one
+   `gen_server:call` to the tree process with no timeout: the tree never
+   waits, so a call waits only behind other steps, as a call on a local
+   file system waits for its medium, and ends with the tree process if
+   that ends.
 4. The tree process draws a stamp from the domain's file version counter
    and reads the clock, then runs one pure step and replies.
 
@@ -142,12 +175,12 @@ stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **T1.** Every operation is atomic with respect to every other | the tree is one value held by one process, and every callback is one call that runs one step to completion | a callback that reads or writes tree state outside the tree process; a step that waits for another process | a source check that only `erx_ramfs`'s server functions call `erx_ramfs_core:step/4`; concurrent rename and lookup tests (below) |
-| **T2.** `held` equals the sum of the charges of what the tree holds, and never passes `cap` | every step computes its charge change with its new tree and is refused whole, with nothing changed, when `held` plus the change would pass `cap` | a step that adds a chunk, node or name without charging it, or frees one without returning its charge | `erx_ramfs_core:check/1` recomputes `held` from the tree; it runs after every step of the sequence tests |
-| **T3.** A node lives exactly while a directory entry names it or an open holds it | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), and `opens` its open handles; a step that brings both to zero deletes the node and returns its charge | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count | `check/1`: every node is reachable from the root or open, and each `links` equals the entries naming it (a directory: 2 plus its subdirectories) |
-| **T4.** Directories form a tree | a directory's `parent` is set where it is made and moved only by `rename`, which refuses to move a directory below itself (`EINVAL`), and a hard link to a directory is refused (`EPERM`) | a rename that skips the ancestor check | `check/1` walks every parent chain to the root; a test renames a directory into its own subdirectory |
+| **T1.** Every request is atomic with respect to every other | the tree is one value held by one process, and every callback is one call that runs one step to completion | a callback that reads or writes tree state outside the tree process; a step that waits for another process | a source check that only `erx_ramfs`'s server functions call `erx_ramfs_core:step/4`; concurrent rename and lookup tests (below) |
+| **T2.** `held` equals the sum of the charges of what the tree holds, and never passes `cap` | every step computes its charge change from the request and the tree before it builds anything, and is refused whole, with nothing changed, when `held` plus the change would pass `cap` | a step that adds a chunk, node or name without charging it, or frees one without returning its charge | `erx_ramfs_core:check/1` recomputes `held` from the tree; it runs after every step of the sequence tests |
+| **T3.** A node lives exactly while a directory entry names it or an open holds it, and a fid reaches no node but the one it was walked to | `links` counts the entries naming a node, as tmpfs counts them (a directory also counts its own `.` and each subdirectory's `..`, and drops to 0 when its name is removed), and `opens` its opens; a step that brings both to zero deletes the node and returns its charge; fids name nodes by inode number, never reused (T5), and a lookup of a missing number answers `enoent` | a rename that replaces a name without lowering the old node's `links`; a clunk that skips the count; an inode number drawn twice | `check/1`: every node with `links` above 0 is reachable from the root, every other has `opens` above 0, and each `links` equals the entries naming it (a directory: 2 plus its subdirectories); the stale-fid test (below) |
+| **T4.** Directories with a name form a tree under the root | a directory's `parent` is set where it is made and moved only by `rename`, which refuses to move a directory below itself (`einval`); a hard link to a directory is refused (`eperm`); removing a directory's name, which needs it empty, sets its `parent` to `none`, and a directory with no name takes no new one (`enoent`) | a rename that skips the ancestor check; a name added to a removed directory | `check/1` walks every named directory's parent chain to the root and checks that a directory with no name is empty; a test renames a directory into its own subdirectory |
 | **T5.** No inode number or version is drawn twice while the domain lives | both come from the domain's file version counter ([design-files.md](design-files.md#identity-and-version)), which outlives the tree process | an inode number drawn from the tree's own state, which a restart would reset | the restart test (below) compares inode numbers before and after |
-| **T6.** The tree process, the grant and the file owners never load code while serving | `erx_ramfs`'s start loads every module they call before it registers or mounts, and `erx_file_remote`, which runs in `erl_prim_loader`'s process when code is read from a server, is preloaded beside `prim_file` | a lazily loaded module on the serving path: loading code from `/tmp` goes through `erl_prim_loader`, which waits for `/tmp`, while the code server waits for `erl_prim_loader` | a test compares the start's list with the remote calls `xref` finds in those modules; a test loads a module compiled into `/tmp` under a deadline |
+| **T6.** No process on `/tmp`'s path loads code while it serves: the client in whatever process calls, and the grant, the file owners, their read helpers and the tree process | `erx_file_remote` is preloaded and calls only preloaded modules and BIFs, as `prim_file` does; `erx_ramfs`'s start loads every module the serving processes call before it mounts | a module loaded on first use on either side. The code server reads its path through `erl_prim_loader` in its own process (`code_server:mod_to_bin/3`, `with_cache/4`), and `erl_prim_loader:read_file/1` runs `prim_file` in its caller (`client_or_request/2`), so with a `/tmp` directory on the code path the code server is itself `/tmp`'s client: an unloaded client module there halts the node (`error_handler:ensure_loaded/1`: "The code server called the unloaded module"), and an unloaded serving module asks the code server, which is waiting on that very process | a test compares the start's list and the preload list with the calls `xref` finds; the cold-path test (below) |
 
 ## Data model
 
@@ -157,7 +190,8 @@ stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
 
 -record(node, {
     data    :: {file, Chunks :: #{non_neg_integer() => <<_:32768>>}}
-             | {directory, Parent :: ino(), Entries :: #{name() => {ino(), Seq :: pos_integer()}},
+             | {directory, Parent :: ino() | none,
+                Entries :: #{name() => {ino(), Seq :: pos_integer()}},
                 Order :: gb_trees:tree(Seq :: pos_integer(), name()), NextSeq :: pos_integer()}
              | {symlink, Text :: binary()},
     mode    :: 0..8#7777,                    %% permission bits; the type is the data's tag
@@ -178,88 +212,138 @@ stayed. tmpfs's two limits, pages and nodes, are one byte cap here.
 
 A node's kind is the tag of its data, so a directory with chunks or a
 file with entries cannot be written down. A file of size `S` holds at
-most `ceil(S / 4096)` chunks, each a binary of exactly 4,096 bytes that
-the tree process made itself (`binary:copy/1` of a slice, never a
-sub-binary of a caller's binary, so a chunk holds no memory it was not
-charged for); bytes past `S` inside the last chunk are zero. A
-directory's `Entries` finds a name, and `Order` lists them by the
-sequence number each received when it was made.
+most `ceil(S / 4096)` chunks, each a binary of exactly 4,096 bytes; bytes
+past `S` inside the last chunk are zero. A directory's `Entries` finds a
+name, and `Order` lists them by the sequence number each received when it
+was made. Everything the tree keeps that came from a request, chunks,
+names and link texts, is a binary the tree process made with
+`binary:copy/1`, never a part of a caller's binary, so nothing the tree
+keeps holds on to a larger binary it was not charged for.
 
 **Charges.** A chunk costs 4,096 bytes, a node 256, a directory entry 64
-plus its name's length, and a symbolic link its text's length. The fixed
-sizes stand for the maps and records that hold them; they are an
-accounting unit, set so that `held` stays above the tree's real
-footprint, which `check/1`'s tests compare with
-`erlang:process_info(Tree, memory)` plus the chunks' bytes. The root
-costs nothing, so a `tmp` of 0 makes a `/tmp` that is empty and refuses
-every creation with `ENOSPC`.
+plus its name's length, and a symbolic link its text's length; `held` is
+their sum, and `cap` bounds it. The charges measure storage, as a disk's
+blocks and inodes do: the chunks are the data `statfs` and `blocks`
+report, and the fixed charges make empty files and names cost something,
+so the one cap also bounds how many there can be, as tmpfs's node limit
+does. They are not the runtime's memory. Each chunk and node also costs
+ERTS's own headers, map entries and records; what the tree drops stays
+allocated until the tree process's next collection; and a reader that
+keeps a binary a read returned keeps the chunk it shares. So `/tmp`
+promises that filling it stops at the cap with `enospc` and nothing of
+the refused request done, and that its memory is what it stores plus
+ERTS's overhead on it, which the domain's `memory` must leave room for.
+It does not promise a figure for that overhead: an allocation failure
+past the domain's budget is fatal for the domain, as any ERTS
+allocation failure is, and the ratio of the tree process's memory to
+`held` is measured, not promised ([watch list](todo-performance.md)).
+The root costs nothing, so a `tmp` of 0 makes a `/tmp` that is empty and
+refuses every creation with `enospc`.
 
 **Stamps and time.** The tree process passes each step a **stamp**, a
 fresh value of the domain's file version counter, and the time. A node
 made in the step takes the stamp as its inode number and its version; a
-node whose data or size the step changes takes it as its version. One
-stamp suffices, because no step makes more than one node. The counter's
-refusal past 2^64 - 1 reaches the caller as `EIO`, as for every server.
+node whose data, size or entries the step changes takes it as its
+version. One stamp suffices, because no step makes more than one node.
+The counter's refusal past 2^64 - 1 reaches the caller as `eio`, as for
+every server.
 
 ## Operations
 
 Each callback of `erx_fs` is one step. Walking is `erx_fs`'s: it calls
 `walk` for one plain name at a time, handles `..` itself, never asks the
-tree to follow a link, and stops at a `symlink`, which
-`erx_file_remote` reads and resolves through the caller's namespace
-([design-files.md](design-files.md#resolving-a-path)). The tree answers
-Linux's error numbers, which travel in `Rlerror` and become OTP atoms in
-the client.
+tree to follow a link, and stops at a `symlink`, which `erx_file_remote`
+reads and resolves through the caller's namespace, following or not
+following a path's last link as the operation asks
+([design-files.md](design-files.md#resolving-a-path)). So a link in
+`/tmp` may lead into another mount of the reader's namespace, as any
+link may; a program narrowed to `/tmp` reaches nothing it was not given.
+The tree's errors are `file:posix()` atoms naming Linux's errors; the
+tables below write them as Linux does (`ENOENT` for `enoent`).
+
+### Fids and nodes
+
+`erx_fs` holds every fid and ends it ([design-files.md](design-files.md#fid-owners)).
+The tree hears only of opens:
+
+| A fid is | The tree |
+| --- | --- |
+| attached | nothing: it names the root, which lives as long as the tree |
+| walked, cloned or walked in place | nothing: `erx_fs` records the node's inode number; a walk that fails makes no fid |
+| opened by `lopen`, or made and opened by `lcreate` | counts an open of the node, by `open` or by `make` of a file |
+| clunked while open, by its client, its `remove` or its owner's end | `clunk` drops the open and frees a node left with no links and no opens |
+| clunked while unopened | nothing |
+
+A request through a fid whose node is gone answers `ENOENT`, which is
+what POSIX gives the same call made after the unlink: a walk then an
+`lopen` of a file removed in between opens nothing, as an `open` after
+the `unlink` would. A fid that a description keeps unopened beside its
+opened fid names a node its open keeps. The one difference from a
+system whose every reference keeps a node is listed under
+[Differences](#differences-from-stock-otp).
 
 **Permissions.** The domain is one user, who owns every file and is not
 a superuser: the tree checks the owner's permission bits and nothing
-else. Searching a directory (`walk`) needs `x`; reading a file or
-listing a directory needs `r`; writing a file, or truncating one by
-`setattr`, needs `w`; adding or removing a name needs `w` and `x` on the
-directory. Changing mode and times needs nothing, as for a file's owner.
-A refused check is `EACCES`. Files are made with mode `0644` and
-directories with `0755`, as under a `umask` of `022`, unless the request
-names a mode.
+else. Searching a directory (`walk`) needs `x`; opening for reading, or
+listing a directory, needs `r`; opening for writing needs `w`; adding or
+removing a name needs `w` and `x` on the directory. A read, a write or a
+truncation through an opened fid needs only that the fid was opened for
+it, so a mode changed after the open changes nothing for it, as on Unix;
+truncation through an unopened fid needs `w`. Changing mode and times
+needs nothing, as for a file's owner. A refused check is `EACCES`. Files
+are made with mode `0644`, directories with `0755` and links with `0777`,
+as under a `umask` of `022`, unless the request names a mode.
 
 | Callback | Does | Linux errors |
 | --- | --- | --- |
-| `walk(Dir, Name)` | the node `Name` names in `Dir`, with its qid | `ENOTDIR` if `Dir` is not a directory; `EACCES`; `ENOENT` |
-| `getattr(Node)` | mode with type bits, `uid` and `gid` 0, `nlink` = `links`, size, `blocks` = chunks held times 8, times, `ino`, `data_version` | none |
-| `open(Node, Flags)` | counts an open and returns `{Node, Access, Append}`; `O_TRUNC` on a file frees every chunk and sets size 0 | `EISDIR` for a directory opened to write; `EACCES` |
-| `make(Dir, Name, {file, Mode})` (`lcreate`) | a new empty file, opened by the same step | `EEXIST` if `Name` exists (the client walks before creating, so only a race or `O_EXCL` meets it); `EACCES`; `ENOSPC` |
-| `make(Dir, Name, {directory, Mode})` | a new directory; `Dir` gains a link | `EEXIST`, `EACCES`, `ENOSPC` |
-| `make(Dir, Name, {symlink, Text})` | a link whose text is `Text` | `ENOENT` for an empty text; `ENAMETOOLONG` past 4,095 bytes; `EINVAL` for a NUL; `EEXIST`, `EACCES`, `ENOSPC` |
-| `make(Dir, Name, {link, Node})` | another name for a file or a symbolic link; `Node` gains a link | `EPERM` for a directory; `EEXIST`, `EACCES`, `ENOSPC` |
+| `walk(Dir, Name)` | the node `Name` names in `Dir`, with its qid | `ENOENT` for a missing name or a `Dir` that is gone; `ENOTDIR` if `Dir` is not a directory; `EACCES` |
+| `getattr(Node)` | `valid` the basic fields and `data_version`; mode with type bits, `uid` and `gid` 0, `nlink` = `links`, size, `blocks` = chunks held times 8, times, `ino`, `data_version` | `ENOENT` for a node that is gone |
+| `open(Node, Flags)` | counts an open and returns `{Node, Access, Append}`; `O_TRUNC` on a file frees every chunk and sets size 0 | `ENOENT`; `EISDIR` for a directory opened to write; `EACCES` |
+| `make(Dir, Name, {file, Mode, Flags})` (`lcreate`) | in one step: a new empty file, opened with `Flags`; or, without `O_EXCL`, the regular file `Name` already names, opened with `Flags`, `O_TRUNC` included; either way counted as an open | `EEXIST` with `O_EXCL` for any existing name, a dangling link included; `ELOOP` for a link without `O_EXCL`, which the client follows; `EISDIR` for a directory; `ENOENT` for a `Dir` with no name; `EACCES`; `ENOSPC` |
+| `make(Dir, Name, {directory, Mode})` | a new directory; `Dir` gains a link | `EEXIST`, `ENOENT` for a `Dir` with no name, `EACCES`, `ENOSPC` |
+| `make(Dir, Name, {symlink, Text})` | a link whose text is `Text` | `ENOENT` for an empty text; `ENAMETOOLONG` past 4,095 bytes; `EINVAL` for a NUL; `EEXIST`, `ENOENT` for a `Dir` with no name, `EACCES`, `ENOSPC` |
+| `make(Dir, Name, {link, Node})` | another name for a file or a symbolic link; `Node` gains a link | `EPERM` for a directory; `ENOENT` for a `Node` or `Dir` that is gone; `EEXIST`, `EACCES`, `ENOSPC` |
 | `make(Dir, Name, {node, ...})` | refused: a RAM tree keeps no device nodes | `EPERM` |
 | `read(Handle, Offset, Count)` | the bytes from `Offset`, at most `Count` and never past the size; a hole is zeros; at or past the end, an empty binary | `EBADF` for a handle not open for reading |
-| `write(Handle, Offset, Data)` | the bytes at `Offset`, or at the end for an `Append` handle; makes missing chunks, extends the size | `EBADF` for a handle not open for writing; `EFBIG` past 2^63 - 1; `ENOSPC`, with nothing written |
+| `write(Handle, Offset, Data)` | the bytes at `Offset`, or at the end for an `Append` handle, a positioned write included; makes missing chunks, extends the size; returns the count and `At`, the offset written at | `EBADF` for a handle not open for writing; `EFBIG` past 2^63 - 1; `ENOSPC`, with nothing written |
 | `readdir(Handle, Offset, Max)` | up to `Max` entries whose sequence number is above `Offset`, in that order, each carrying its sequence number as the next offset | `EBADF` |
-| `readlink(Node)` | the text | `EINVAL` for a node that is not a link |
-| `setattr(Node, Changes)` | mode; `uid` and `gid`; size, which frees chunks past it and zeroes the tail of the last, or extends with a hole; `atime` and `mtime`, given or now; `ctime` is always now | `EPERM` for an owner or group other than 0; `EACCES` for size without `w`; `EISDIR` for the size of a directory |
-| `unlink(Dir, Name, Flags)` | removes the name; a node with no links and no opens is freed | `ENOENT`; with `AT_REMOVEDIR`: `ENOTDIR` for a non-directory, `ENOTEMPTY`; without it, `EISDIR` for a directory; `EACCES` |
+| `readlink(Node)` | the text | `EINVAL` for a node that is not a link; `ENOENT` |
+| `setattr({open, Handle} \| {node, Node}, Changes)` | mode; `uid` and `gid`; size, which frees chunks past it and zeroes the tail of the last, or extends with a hole; `atime` and `mtime`, given or now; `ctime` is always now | `EPERM` for an owner or group other than 0, while 0 changes only `ctime`; for size: `EINVAL` through a handle not open for writing, `EACCES` through a node without `w`, `EISDIR` for a directory; `ENOENT` |
+| `unlink(Dir, Name, Kind)` | removes the name, `Kind` being `file`, `directory` or `any`; a removed directory loses its parent; a node with no links and no opens is freed | `ENOENT`; for `directory`: `ENOTDIR` for a non-directory, `ENOTEMPTY`; for `file`: `EISDIR` for a directory; `EACCES` |
 | `rename(Dir, Name, NewDir, NewName)` | moves the name, replacing what `NewName` named, in one step; the same node under both names changes nothing | `ENOENT`; `ENOTDIR` for a directory over a non-directory; `EISDIR` for a non-directory over a directory; `ENOTEMPTY` over a non-empty directory; `EINVAL` for a directory moved below itself; `EACCES` |
 | `fsync(Handle)` | nothing to do | none |
 | `clunk(Handle)` | ends the open; frees the node if it has no links and no opens left | none |
 | `statfs()` | block size 4,096, blocks `cap div 4096`, free `(cap - held) div 4096` | none |
 | `xattr(...)` | refused: the tree keeps no extended attributes | `EOPNOTSUPP` |
 
-The table assumes two changes to `erx_fs`'s callbacks: `unlink` receives
-the request's `AT_REMOVEDIR` flag, and `make` of a file returns an open
-handle, so that `lcreate` makes and opens in one step; see [Open
-questions](#open-questions).
+The table assumes four changes to `erx_fs`'s callbacks, each so that a
+decision POSIX makes in one step is made in one step here: `unlink`
+receives the request's kind, `make` of a file carries the flags and
+returns an open handle, `setattr` receives an open fid's handle, and
+`write` returns `At`; see [Open questions](#open-questions).
 
-**Times.** Reads never change `atime`, as under Linux's `noatime`. A
-write or a size change sets the file's `mtime` and `ctime`; adding or
-removing a name sets the directory's `mtime` and `ctime`; a rename,
-link, mode or owner change sets the node's `ctime`; a new node takes the
-time for all three. A write of zero bytes changes nothing.
+**Times and versions.** Reads and listings never change `atime`, as under
+Linux's `noatime`, and a write of zero bytes changes nothing. Otherwise:
+
+| Step | Sets to now | Takes the stamp as version |
+| --- | --- | --- |
+| a write of at least one byte | the file's `mtime` and `ctime` | the file |
+| a `setattr` of size, or an open with `O_TRUNC` of an existing file | the file's `mtime` and `ctime` | the file, if its size changed |
+| a new file, directory or link | all three of the new node's; the directory's `mtime` and `ctime` | the new node; the directory |
+| `unlink` | the directory's `mtime` and `ctime`; the node's `ctime` if it survives, with other names or opens | the directory |
+| `link` | the node's `ctime`; the directory's `mtime` and `ctime` | the directory |
+| `rename` | both directories' `mtime` and `ctime`; the moved node's `ctime`; a replaced node's `ctime` if it survives | both directories |
+| `setattr` of mode, owner or times | the node's `ctime`, and `atime` or `mtime` where asked for now | none |
 
 **Data.** A write at offset `O` of `N` bytes touches chunks `O div 4096`
-to `(O + N - 1) div 4096`. Each touched chunk is rebuilt whole: the old
-chunk or zeros, with the new bytes copied over their range. Only chunks
+to `(O + N - 1) div 4096`. The step first counts the touched chunks
+that do not exist and refuses the write if their charge would pass the
+cap, and only then builds: each touched chunk is rebuilt whole, the old
+chunk or zeros with the new bytes copied over their range. Only chunks
 that did not exist are charged, so overwriting costs nothing and a write
 far past the end costs one chunk. A read gathers the chunks of its range
-and returns them joined, zeros standing in for missing ones.
+and returns them joined, zeros standing in for missing ones; a read of
+exactly one whole chunk returns the chunk itself.
 
 **Listing.** A directory's entries come out in the order they were
 made, by sequence number; a listing resumed at an offset neither repeats
@@ -271,21 +355,24 @@ points below the directory, as for every server.
 **Open after unlink.** An open handle names a node, not a name: removing
 or replacing the name leaves the node, its data and its charge, and
 reads, writes and `getattr` through the handle go on, with `nlink` 0.
-The clunk that leaves it with no opens frees it. A process that dies
-with files open has its fids clunked by its client
-([Open questions](#open-questions)).
+The clunk that leaves it with no opens frees it, whether its client sent
+it or the grant did at the end of the fid's owner, so a process that
+dies with a removed file open frees the file's charge
+([design-files.md](design-files.md#fid-owners)).
 
 ## The client's answers
 
-`erx_file_remote` turns the protocol's answers into what stock
-`prim_file` answers on a Unix host, for every server
+`erx_file_remote` turns the tree's answers into what stock `prim_file`
+answers on a Unix host, by rules it applies to every server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)):
-among the cases `/tmp`'s tests meet, `ENOTEMPTY` from `del_dir` or
-`rename` becomes `eexist` and `EISDIR` from `delete` becomes `eperm`, as
-`unix_prim_file.c` maps them; `del_dir` of the working directory, and so
-`del_dir(".")`, answers `einval`; and `del_dir`, `delete` and `rename`
-of `/tmp` itself, a mount point with no parent fid to send them to,
-answer `ebusy`, as Linux answers for a mount point.
+its error steps (`rename` of `"/"` and `del_dir` of a path ending in `.`
+answer `einval`; `del_dir` of a path ending in `..` answers `eexist`; a
+mount point, `/tmp` itself, answers `ebusy`; `enotempty` becomes `eexist`
+and `eisdir` from `delete` becomes `eperm`; a failed `del_dir` of the
+working directory answers `einval`, while an empty one is removed), its
+mapping of `getattr` to `#file_info{}`, and its offsets: a write moves an
+open file's offset to `At` plus the count, so an append leaves it after
+the appender's own bytes.
 
 ## Starting and mounting
 
@@ -297,9 +384,15 @@ runtime's startup limits ([design-runtime.md](design-runtime.md#starting-a-runti
 then one `erx_fs` grant for the domain itself with rights `rw` and tree
 name `tmp`, and mounts it with `erx_ns:mount(Grant, "/tmp", [{tree,
 <<"tmp">>}, rw])`. Before mounting, it loads every module the tree,
-the grant and the owners call (T6). The supervisor is `one_for_all`:
-if the tree process or the grant ends, both restart, the tree empty, and
-the old entry is unmounted and the new grant mounted at `/tmp`.
+the grant, the owners and their helpers call (T6).
+
+The tree process, the grant, and the file owners and read helpers
+`erx_fs` starts for it are one unit: each is linked to the tree process,
+and the supervisor is `one_for_all`, so when any of them ends, all end,
+and `/tmp` restarts empty, its old entry unmounted and the new grant
+mounted at `/tmp`. No owner of the old tree can reach the new one, and
+the old grant's fids end with it; a client's monitor on the old grant
+turns its open files' next operations into `eio`.
 
 `kernel_safe_sup` starts after `code_server` and `file_server_2`, before
 any application of the release; a path under `/tmp` before the mount
@@ -317,37 +410,49 @@ for another process: a step reads its arguments and the tree and
 returns. Grant processes, file owners and their read helpers wait for
 the tree, never the other way, so no cycle can form. `erx_fs` already
 orders the reads, writes and size changes of one open file through its
-owner; the tree orders everything, so the two together still give
-POSIX's atomicity of regular-file operations
-([design-files.md](design-files.md#open-files-and-offsets)) and make
-`rename` over an existing name atomic for every observer. The cap is a
-field of the one value, so concurrent writers cannot together pass it.
+owner; the tree orders everything, so each request is atomic, as POSIX
+asks of regular-file operations, and `rename` over an existing name is
+atomic for every observer. The unit is one request: a write over 64 KiB
+is several, and another writer's may fall between them
+([design-files.md](design-files.md#open-files-and-offsets)). The cap is
+a field of the one value, so concurrent writers cannot together pass it.
 
-A step's work is bounded by its request: a write by its at most 64 KiB
-payload, a read by its count, a listing page by `Max`. The work that
-grows with the tree, `check/1`, runs only in tests.
+**Work per step.** A write touches at most 17 chunks, a read its
+count's, a listing page `Max` entries, and a lookup or a change of a
+name is logarithmic in the tree's nodes and the directory's entries.
+Three steps grow with what is stored: a truncation frees the chunks past
+the new size, at most `cap div 4096`, 8,192 for the default 32 MiB; a
+rename of a directory walks its new parent's chain to the root, as deep
+as the tree; and freeing a node drops its record, whose chunks ERTS
+frees at the tree process's next collection. None of them waits, but
+each delays the steps behind it. `check/1`, which grows with the tree,
+runs only in tests.
 
 ## Failure handling
 
 | Failure | Detection | What remains | Cleanup | What the user sees |
 | --- | --- | --- | --- | --- |
-| A write, create or link would pass the cap | the step's charge check | the tree as before the step | none | `{error, enospc}`; `ENOSPC` to a program |
-| The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp` to its share |
-| A bug crashes the tree process or the grant | the supervisor | nothing of `/tmp` | `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
-| A caller dies during a request | `erx_fs`'s alias and monitor rules | the request's effect, if the step ran | its fids are clunked | nothing |
+| A write request, create or link would pass the cap | the step's charge check, before it builds anything | the tree as before the step; of a caller's write over 64 KiB, the requests before it | none | `{error, enospc}`, with an open file's offset past what was written; `ENOSPC` to a program |
+| The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
+| A bug crashes the tree process, the grant, an owner or a helper | the links, then the supervisor | nothing of `/tmp` | all of them end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
+| A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
+| A request names a fid whose node is gone | the step's lookup by inode number | the tree | none | `{error, enoent}` |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |
 
 Nothing a caller sends can crash the tree: `erx_fs` checks every
 request's grammar and bounds before a callback, and `step/4` is total
-over every request the callbacks can build, answering an error for each
-case it refuses.
+over every request the callbacks can build, a node that is gone
+included, answering an error for each case it refuses.
 
 ## Differences from stock OTP
 
 These add to the differences every server has
 ([design-files.md](design-files.md#compatibility-and-migration)): `..`
 resolved on the text, a working directory that is a path, `exdev`
-between mounts, and links followed by the client.
+between mounts, links followed by the client, writes atomic per 64 KiB
+request, a positioned write to an `append` file appending as on Linux
+where macOS writes at the offset, and `file:allocate/3` answering
+`enotsup`. Each is pinned by the oracle comparison, which maps it.
 
 * Directory listings come in creation order; stock's order is the host
   file system's.
@@ -355,9 +460,13 @@ between mounts, and links followed by the client.
   as on Linux's tmpfs; macOS reports others.
 * Reads never change `atime`.
 * The owner and group are 0, permissions are checked as for the owner
-  and never bypassed, and changing the owner fails with `eperm`.
-* `file:allocate/3` and `file:sendfile/5` take their stock fallbacks,
-  since a remote file has no descriptor to hand to the host's calls.
+  and never bypassed, and changing the owner to anyone else fails with
+  `eperm`.
+* A directory removed while a narrowed program's namespace roots at it
+  answers `enoent` from then on, where Linux keeps a removed directory
+  that something holds readable and empty.
+* `file:sendfile/5` takes `file`'s fallback of reads and sends, since a
+  remote file has no descriptor to hand to the host's call.
 
 ## Verification
 
@@ -367,29 +476,59 @@ the code under test ran.
 * **Core, on the host.** EUnit cases of `erx_ramfs_core` run against
   plain tree values, one per row of the callback table: for each error,
   the condition that causes it and the unchanged tree after it; for each
-  success, the reply and `check/1`. Seeded: a rename that does not lower
+  success, the reply and `check/1`, which also checks that every stored
+  chunk, name and text references no more bytes than its own
+  (`binary:referenced_byte_size/1`). Seeded: a rename that does not lower
   the replaced node's `links`, which `check/1`'s link count fails; an
   ancestor check that compares only the immediate parent, which the
   rename-into-grandchild case catches; a write that charges every touched
-  chunk, which the overwrite-costs-nothing case catches.
+  chunk, which the overwrite-costs-nothing case catches; a name stored
+  without copying, which the referenced-size check catches.
 * **Sequences.** Random sequences of up to 64 operations over a few names
   and directories, with offsets and sizes drawn to include 0, chunk
-  boundaries, 2^63 - 1 and negative values, run through `step/4` with
-  `check/1` after each step and the cap set low. Seeded: a truncate that
-  does not return the freed chunks' charge, which the recomputed `held`
-  catches.
+  boundaries, 2^63 - 1 and negative values, and fids kept across removals,
+  run through `step/4` with `check/1` after each step and the cap set low.
+  Seeded: a truncate that does not return the freed chunks' charge, which
+  the recomputed `held` catches.
 * **Against stock OTP.** The same sequences, as `file` calls, run in the
   hosted runtime under `/tmp` and in stock OTP 29.1.2
   (`build/oracle/jit/install`) in a fresh host directory, and their
-  results are compared after mapping the listed differences; every other
-  difference fails the test. Seeded: the client without its
-  `ENOTEMPTY`-to-`eexist` rule, which the `del_dir` of a non-empty
-  directory catches.
+  results, `#file_info{}` records included, are compared after mapping
+  the listed differences; every other difference fails the test. Cases
+  added for the client's rules: `rename("/", "x")`, `del_dir(".")`, the
+  removal of an empty working directory and of a non-empty one, a
+  truncate through a read-only descriptor and through a writable one
+  after `chmod 0444`, and `write_file_info` of a record read with
+  `read_file_info`. Seeded: the client without its `ENOTEMPTY`-to-`eexist`
+  rule, which the `del_dir` of a non-empty directory catches; `setattr`
+  checking the node's mode for an open handle, which the `chmod 0444`
+  case catches.
+* **Fids and nodes.** A fid walked to a file, the file removed, then an
+  `lopen` and a `getattr` through the fid, which answer `enoent`, and a
+  new file made between. Seeded: a tree that gives the next node a freed
+  inode number, so the stale fid reaches the new file.
 * **Open after unlink and rename.** A file opened, removed, written and
   read through its handle, then closed, after which `held` is back where
   it started; a file renamed over another that is open, whose handle
-  still reads the old bytes. Seeded: a clunk that does not free a node
-  with no links.
+  still reads the old bytes; a process that opens a file, removes it and
+  is killed, after which `held` is back too. Seeded: a clunk that does
+  not free a node with no links; a grant that does not clunk a dead
+  owner's fids, which the killed process's case catches.
+* **Creating.** Two processes open one new name with `[read, write]` at
+  once, many times: both succeed and reach one file. `exclusive` on a
+  dangling link answers `eexist`, and the link's target is not made.
+  `delete`, `rename` and `read_link_info` of a link act on the link.
+  Seeded: an `lcreate` that answers `EEXIST` without `O_EXCL`, which the
+  two openers catch; a client that follows the last link for `delete`,
+  which removes the target and fails the case.
+* **Appends.** Two processes append one distinct byte each, many times,
+  and after each write read the byte before their position, which must
+  be their own. Seeded: a client that sets the offset from a `getattr`'s
+  size, which reads the other's byte.
+* **A write past the cap.** A 128 KiB `file:write/2` with room for 64
+  KiB: `{error, enospc}`, the first 64 KiB in the file and the position
+  after them. Seeded: a client that leaves the position unchanged on an
+  error.
 * **Concurrency.** Eight processes each repeatedly write a fresh file
   and rename it over `b` while eight others stat `b`: every stat finds
   `b`, as POSIX requires of `rename` over an existing name; writers
@@ -397,60 +536,81 @@ the code under test ran.
   holds after. Seeded: a rename split into two steps, remove then add,
   which a stat that misses `b` catches.
 * **Restart.** The tree process killed with files open: their operations
-  answer `eio`, `/tmp` is mounted again and empty, and new files' inode
-  numbers are above every old one. Seeded: inode numbers drawn from a
-  counter in the tree state.
-* **Code from `/tmp`.** A module compiled into `/tmp` and loaded with
-  `code:load_abs/1`, under a 30-second deadline. Seeded: a module of the
-  serving path left out of the start's load list, which hangs and fails
-  at the deadline; the `xref` comparison names it.
+  answer `eio`, `/tmp` is mounted again and empty, no old owner is alive,
+  and new files' inode numbers are above every old one. Seeded: inode
+  numbers drawn from a counter in the tree state.
+* **Code from `/tmp`, cold.** In a fresh hosted runtime whose first use
+  of `/tmp` is the code server's: `code:add_patha("/tmp")`, then
+  `code:ensure_loaded/1` of a module that exists nowhere, which makes the
+  code server list `/tmp` and read a missing file in its own process,
+  under a 30-second deadline, and must answer `{error, nofile}`; then a
+  module written into `/tmp` as a prepared `.beam` and loaded with
+  `code:load_abs/1`. The test records `erlang:loaded()` before and after
+  and fails if any module of `xref`'s serving or client set was loaded
+  by them. Seeded: a serving module left out of the start's list, which
+  the deadline or the loaded-module check catches; a module
+  `erx_file_remote` calls left out of the preload list, which halts the
+  node with the error handler's message.
+* **Grammar on the local route.** Names with NUL, `/`, `.`, `..`, invalid
+  UTF-8, and of 255 and 256 bytes, and link texts of 4,095 and 4,096
+  bytes, sent to `/tmp`'s grant as local messages, each refused before a
+  callback. Seeded: a grant that skips the checks for a sender in its own
+  domain.
 * **OTP's suites.** `file_SUITE`, `filelib_SUITE` and a Common Test run
   writing its logs and `priv_dir` under `/tmp`, compared case by case
   with stock by `make check-oracle`.
 
 The tree parses no bytes: names and payloads reach it only through
-`erx_fs`'s grammar, whose fuzz target covers them, and paths only
-through `erx_ns_resolve`, which has its own. The sequence test is the
-tree's fuzz target, run by `make check-fuzz` for its budget.
+`erx_fs`'s grammar, whose fuzz target feeds both local messages and
+frames, and paths only through `erx_ns_resolve`, which has its own. The
+sequence test is the tree's fuzz target, run by `make check-fuzz` for
+its budget.
 
 ## Open questions
 
-* **`erx_fs`'s callbacks miss two things a tree needs.** 9P2000.L's
-  `unlinkat` carries `AT_REMOVEDIR`, and `remove` removes either kind,
-  but the `unlink/3` callback carries neither, so a tree cannot answer
+* **`erx_fs`'s callbacks miss four things a tree needs**, each a decision
+  POSIX makes in one step. `unlink/3` carries neither 9P2000.L's
+  `AT_REMOVEDIR` nor `remove`'s "either kind", so a tree cannot answer
   `rmdir` of a file with `ENOTDIR` or `unlink` of a directory with
-  `EISDIR`. And `lcreate` makes and opens a file in one request, but
-  `make/4` returns a node and no handle, so another client can remove the
-  new file between `make` and `open`, and the creator's open then fails
-  where Linux's would not. Recommendation: `unlink(Dir, Name, Kind,
-  State)` with `Kind` one of `file`, `directory` or `any`, `remove`
-  passing `any`; and `make` for `{file, Mode, Flags}` returning `{ok,
-  Node, qid(), Handle, State1}`, counted as an open, which is how this
-  document's table treats it.
+  `EISDIR`. `make/4` returns a node and no handle, so another client can
+  remove a new file between `make` and `open`, and it cannot open a file
+  that already exists, which `lcreate` without `O_EXCL` must. `setattr/3`
+  receives a node, so it cannot tell a truncation through a read-only
+  open from one through a writable open. And `write/4` returns a count
+  alone, which cannot say where an append landed. Recommendation:
+  `unlink(Dir, Name, Kind, State)` with `Kind` one of `file`, `directory`
+  or `any`, `remove` passing `any`; `make` for `{file, Mode, Flags}`
+  returning `{ok, Node, qid(), Handle, State1}`, counted as an open,
+  whether it made the file or opened one; `setattr(Target, Changes,
+  State)` with `Target` `{open, Handle}` for an opened fid and `{node,
+  Node}` otherwise; and `write` returning `{ok, Count, At, State1}`. This
+  document's table treats them so.
 * **Where the domain's file version counter lives.** Every server of a
   domain draws from it and it outlives their restarts, but no document
-  names its home. Recommendation: an `atomics` cell the runtime makes
-  before any file server starts, reached through `persistent_term`.
-* **Who clunks a dead process's files.** Stock closes a raw file when
-  its owner process dies; `erx_file_remote` must do the same for every
-  server, or an unlinked `/tmp` file opened by a crashed process holds
-  its charge until the domain ends. Recommendation: the client monitors
-  each process holding an open file and clunks its fids when it ends.
+  names its home. Recommendation: an unsigned 64-bit `atomics` cell the
+  runtime makes before any file server starts, reached through
+  `persistent_term`, drawn by a `compare_exchange/4` loop that refuses at
+  2^64 - 1, since `atomics:add_get/3` would wrap to 0 and draw old values
+  again.
 * **When `erx_fs` and `erx_file_remote` are built.** `/tmp` as a server
   needs both, which the roadmap places with the file services after
-  `/tmp`. Recommendation: build the subset `/tmp` uses (walk, `lopen`,
-  `lcreate`, `read`, `write`, `readdir`, `getattr`, `setattr`, `mkdir`,
-  `symlink`, `link`, `readlink`, `unlinkat`, `renameat`, `statfs`,
-  `clunk`) first, as the package that unblocks OTP's suites, and add
-  locks, flush, freezing and extended attributes with the storage
-  services.
-* **`erx_file_remote` must be preloaded.** Reading code from any server
-  mount, `/tmp` or `/data`, runs `erx_file_remote` in `erl_prim_loader`'s
-  process; if it is not yet loaded, loading it waits on the code server,
-  which waits on `erl_prim_loader`. [design-files.md](design-files.md)
-  does not say it is preloaded, as it says of the EROFS reader.
-  Recommendation: preload it, and hold every module it calls to BIFs and
-  preloaded modules, as `prim_file` is held.
+  `/tmp`. Recommendation: build first, as the package that unblocks
+  OTP's suites, a complete minimum: `version` and `attach`; `walk`,
+  `lopen`, `lcreate` with create-or-open, `read`, `write` with `At`,
+  `readdir`, `getattr`, `setattr`, `mkdir`, `symlink`, `link`,
+  `readlink`, `unlinkat`, `renameat`, `statfs`, `fsync` (a no-op for
+  `/tmp`, which OTP's `sync` and `datasync` cases need to succeed),
+  `flush` and `clunk`; fid owners and their cleanup; the reply checks;
+  and the client's last-name, error, file-information and offset rules.
+  Locks, extended attributes, freezing, `mknod`, `remove`, `rename`'s fid
+  form and `auth` come with the storage services.
+* **`erx_file_remote` must be preloaded.** Whatever process calls `file`
+  or `erl_prim_loader` on a server's path runs `erx_file_remote`, the
+  code server included whenever a server's directory is on the code path
+  (T6); if it is not loaded then, the code server halts the node.
+  [design-files.md](design-files.md) does not say it is preloaded, as it
+  says of the EROFS reader. Recommendation: preload it, and hold every
+  module it calls to BIFs and preloaded modules, as `prim_file` is held.
 * **A read helper per read.** `erx_fs` runs a read in a helper so a slow
   medium does not block the file's owner; for a tree in memory the
   helper only adds a process. Recommendation: leave it until the
@@ -459,14 +619,20 @@ tree's fuzz target, run by `make check-fuzz` for its budget.
 
 ## References
 
-* `ramfs(4)`, Plan 9 Programmer's Manual, 4th edition.
+* `ramfs(4)`, Plan 9 Programmer's Manual, 4th edition; Plan 9's `lib9p`
+  file trees.
 * FreeBSD `sys/fs/tmpfs/` (`tmpfs.h`: `tmpfs_node`, `tmpfs_dirent`) and
   `tmpfs(5)`.
+* QEMU `hw/9pfs/9p.c` (`v9fs_lcreate`, fids of the local back end).
 * Linux `mm/shmem.c` and `fs/libfs.c` (the offset map for directory
-  listings); `rename(2)`, `unlink(2)`, `rmdir(2)`.
+  listings); `rename(2)`, `unlink(2)`, `rmdir(2)`, `pwrite(2)`,
+  `ftruncate(2)`.
 * Fuchsia `src/storage/memfs`.
 * L4Re `l4re_vfs` and its libc file system back ends.
 * POSIX.1-2017, XSH 2.9.7, Thread Interactions with Regular File
-  Operations; `rename()`.
-* OTP 29.1.2 `erts/emulator/nifs/unix/unix_prim_file.c` and
-  `lib/kernel/test/file_SUITE.erl`.
+  Operations; `rename()`, `pwrite()`.
+* OTP 29.1.2 `erts/emulator/nifs/unix/unix_prim_file.c`,
+  `erts/emulator/nifs/common/prim_file_nif.c`,
+  `erts/preloaded/src/prim_file.erl`, `erts/preloaded/src/erl_prim_loader.erl`,
+  `lib/kernel/src/code_server.erl`, `lib/kernel/src/error_handler.erl`,
+  `lib/kernel/src/file.erl` and `lib/kernel/test/file_SUITE.erl`.

@@ -1567,7 +1567,11 @@ server of its own:
   charged to its budget, with a cap of its own, the spec's `tmp` (an
   eighth of `memory` by default), beyond which a write fails with
   `{error, enospc}`, so filling it, by the session's programs or
-  directly, never drives the runtime into a fatal allocation failure. A
+  directly, stops at the cap with nothing of the refused request done. The
+  cap bounds what `/tmp` stores, not the runtime's memory: ERTS's own
+  overhead for what it stores comes on top, and an allocation failure
+  past the domain's budget is fatal for the domain, as any ERTS
+  allocation failure is ([design-tmp.md](design-tmp.md#data-model)). A
   session's programs reach its `/tmp` through fids on the session's grant
   of it, as they reach any grant, and
   their shared mappings of its files are the session's, as of any file:
@@ -2799,7 +2803,7 @@ across them is the conformance suite.
 | An encoding error in the translator | the repaired error path | the translation discarded | the loader | `{error, badfile}`; a log line naming the module |
 | A write to the release file system or an EROFS image | `erx_prim_file` | nothing | none needed | `{error, erofs}` |
 | An EROFS block fails its hash check | the hash-checking primitive under the EROFS reader | the mount, read-only | none needed | `{error, eio}` for the read, and a log line naming the image and the block |
-| The RAM file system reaches its cap | the cap's check in `erx_ramfs`, which refuses the whole write ([design-tmp.md](design-tmp.md#failure-handling)) | the file as before the refused write | none needed | `{error, enospc}`, and `ENOSPC` in a program writing through the session's export or at the write-back of its shared mapping |
+| The RAM file system reaches its cap | the cap's check in `erx_ramfs`, which refuses the whole request of at most 64 KiB ([design-tmp.md](design-tmp.md#failure-handling)) | the file as before the refused request; a larger write keeps the requests before it, as after a short write ([design-files.md](design-files.md#open-files-and-offsets)) | none needed | `{error, enospc}`, and `ENOSPC` in a program writing through its session's grant or at the write-back of its shared mapping |
 | The crash dump exceeds the crash area | the dump writer's bound | the dump cut at the area's end, with its stored length and `ERX_CRASH_TRUNCATED` in the header | none needed | the inspector marks the dump truncated |
 | The console's driver has no free transmit buffer | `{error, empty}` from its pool | the unwritten bytes in the console service | the console service, once the driver reports room | output delayed, never reordered or dropped |
 
