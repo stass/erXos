@@ -14,29 +14,45 @@ class RuntimeBuildTest < Minitest::Test
   Runtime = Erx::Runtime
 
   # Stands in for every subprocess: rsync copies, the emulator's make leaves an
-  # executable, and each step's name is recorded.
+  # executable, lib_src's make compiles the copy's lib_src source, and each step's
+  # name and argument vector are recorded.
   class RecordingRunner
-    attr_reader :steps, :relinked
+    LIB_SRC_SOURCE = 'erts/lib_src/common/erl_misc_utils.c'
+    LIB_SRC_STAMP = "erts/lib_src/obj/#{Erx::Runtime::TARGET}/opt/MADE".freeze
 
-    def initialize(output) = (@output = output; @steps = [])
+    attr_reader :steps, :argvs, :relinked, :lib_src_compiled
+
+    def initialize(output) = (@output = output; @steps = []; @argvs = {})
     attr_accessor :fail_step, :link_leaves_nothing
 
     def run(argv, name:, **)
       @steps << name
+      @argvs[name] = argv
       raise Erx::Error, "#{name} failed" if name == fail_step
 
       case name
       when 'runtime-copy' then FileUtils.cp_r("#{argv[-2]}.", argv[-1])
+      when 'runtime-lib-src' then make_lib_src
       when 'runtime-emulator' then make_emulator
       end
     end
 
     private
 
+    # lib_src's own makefile compiles what changed and touches its stamp.
+    def make_lib_src
+      @lib_src_compiled = File.read(File.join(@output.root, LIB_SRC_SOURCE))
+      FileUtils.mkdir_p(File.dirname(File.join(@output.root, LIB_SRC_STAMP)))
+      FileUtils.touch(File.join(@output.root, LIB_SRC_STAMP))
+    end
+
     # As the emulator's makefile behaves: beam.smp is copied from beam.emu when beam.emu
     # exists, and an empty .SECONDARY makes a missing beam.emu no reason to link while
-    # beam.smp exists. So only with both gone does a link happen.
+    # beam.smp exists. So only with both gone does a link happen. lib_src's archives it
+    # names by their stamp, a target with no prerequisites, so it descends into lib_src
+    # only while the stamp is missing.
     def make_emulator
+      make_lib_src unless File.exist?(File.join(@output.root, LIB_SRC_STAMP))
       primary = File.join(File.dirname(@output.beam), 'beam.smp')
       @relinked = !File.exist?(@output.beam) && !File.exist?(primary)
       return if link_leaves_nothing
@@ -60,6 +76,7 @@ class RuntimeBuildTest < Minitest::Test
     %w[configure erts/configure make/configure erts/emulator/Makefile.in erts/config.h.in erts/autoconf/config.sub
        otp_only.c].each { |path| write_otp(path, 'stock') }
     write_otp(Runtime::XCOMP_FILE, 'stock')
+    write_otp(RecordingRunner::LIB_SRC_SOURCE, 'stock')
     Runtime::LIBERX_SOURCES.each { |path| write_tree(path, 'stock') }
     @output = Runtime.output(root: @root)
     @runner = RecordingRunner.new(@output)
@@ -118,6 +135,20 @@ class RuntimeBuildTest < Minitest::Test
     build
     refute configured?
     assert_equal 'changed', File.read(File.join(@output.root, 'otp_only.c'))
+  end
+
+  # lib_src's archives (ethread, erts_internal) reach the emulator's link, but the
+  # emulator's make looks at them only through a stamp it never remakes once made.
+  def test_an_edit_under_lib_src_reaches_its_archives
+    build
+    write_otp(RecordingRunner::LIB_SRC_SOURCE, 'changed')
+    build
+    assert_equal 'changed', @runner.lib_src_compiled
+    argv = @runner.argvs.fetch('runtime-lib-src')
+    assert_equal ['-C', 'erts/lib_src', 'opt'], argv.each_cons(3).find { |window| window.first == '-C' }
+    assert_includes argv, "TARGET=#{Runtime::TARGET}"
+    assert_operator @runner.steps.index('runtime-lib-src'), :<, @runner.steps.index('runtime-emulator'),
+                    "lib_src's archives must be current before the emulator links them"
   end
 
   def test_a_file_that_left_otp_leaves_the_copy

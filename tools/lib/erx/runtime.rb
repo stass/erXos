@@ -42,7 +42,7 @@ module Erx
     # The templates configure turns into the makefiles and headers make reads.
     CONFIGURE_INPUTS = %w[**/*.in **/configure **/config.sub **/config.guess].freeze
     # Deadlines in seconds, each many times what a clean build took on an idle host.
-    DEADLINES = { compile: 120, copy: 300, configure: 1_800, emulator: 1_800, libs: 1_800 }.freeze
+    DEADLINES = { compile: 120, copy: 300, configure: 1_800, lib_src: 1_800, emulator: 1_800, libs: 1_800 }.freeze
     # What the build leaves for the hosted smoke test and the seam check.
     Output = Data.define(:root, :beam, :objects, :liberx, :archive)
 
@@ -148,11 +148,19 @@ module Erx
       FileUtils.touch(in_copy('.erx-configured'))
     end
 
-    # erts/emulator alone, not OTP's `emulator` target: that one also builds
+    # erts/lib_src and erts/emulator, not OTP's `emulator` target: that one also builds
     # erts/etc, whose programs (erlexec, erlc, heart, inet_gethost) all include ei.h
     # from lib/erl_interface, which the import excludes. The runtime is started
     # without them.
+    #
+    # erts/lib_src goes first, by its own make. Its archives (ethread, erts_internal)
+    # reach the emulator's makefile only through lib_src's stamp, obj/TARGET/opt/MADE,
+    # a target with no prerequisites: once the stamp exists, the emulator's make never
+    # descends into lib_src again, and an edit there would link the old objects.
     def build_emulator(jobs:)
+      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/lib_src', 'opt', "TARGET=#{self.class::TARGET}"],
+                  name: 'runtime-lib-src', deadline: DEADLINES.fetch(:lib_src), chdir: @output.root,
+                  env: build_environment)
       # The archive comes in through LIBS, which is no make dependency, so each build
       # links again. Both executables go: beam.smp is copied from beam.emu, and the
       # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
