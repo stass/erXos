@@ -1607,15 +1607,19 @@ directory cannot exist, and nothing can disagree with the index.
 | `efile_from_fd`, `efile_dup_handle`, `allocate`, `advise`, `altname` and anything else | `enotsup` |
 | a path over the limits, or not UTF-8 | as [design-files.md](design-files.md#resolving-a-path) says: `enametoolong`, `einval` |
 | a missing name; a file used as a directory | `enoent`; `enotdir` |
+| `read_file` or `open` of a file whose bytes fail their hash | `eio`, with the check's name on standard error; `read_file_info` still answers, from the index, which has its own hash |
 
 Those are the calls of `erl_prim_loader` (`read_file`, `list_dir`,
 `read_file_info`, `read_link_info`, `get_cwd`, `read_link`) and more; its
 archive branches run only for a path inside a `.ez` file, and stay dormant.
 `efile_data_t` here holds an entry and a position, and no file descriptor exists
 anywhere in the layer. The table of names is built once when the `prim_file` NIF
-loads, from `erx_release_entry(index, &entry)`, which alone reads the index,
+loads, from `erx_release_entry(index, &entry)`, which alone reads the names,
 and is immutable afterwards, so readers take no lock. A table that cannot be
-allocated ends the start with a diagnostic.
+allocated ends the start with a diagnostic. The first open of each file passes
+`erx_release_check(index, &reason)`, which runs `erx_pack_file_check` over it; a
+flag per file beside the table, guarding no data, spares later opens the hash,
+and two opens that race hash twice.
 
 Two seams keep the rest of the system out of this. New kinds of file are new
 rows of the namespace, and every path already passes `erx_ns_resolve`: a
@@ -1626,6 +1630,8 @@ read is `erx_release_entry`, a `liberx` call: over `erx_pack_entry_at` and
 ([design-stopgap.md](design-stopgap.md#boot-information)), and over
 `erx_object_info(release, ERX_INFO_IMAGE_ENTRY, ...)` on erXos's kernel, which
 keeps the index unmapped ([design-kernel.md](design-kernel.md#the-boot-image)).
+There the kernel's first use of a file holds the hash's verdict, and
+`erx_release_check` answers from it.
 Whether a read copies or returns a binary over the pages is the provider's own
 affair, and no caller can tell.
 

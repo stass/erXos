@@ -12,7 +12,7 @@
  *
  * The namespace's table and the table of names are built once, when the NIF loads,
  * and are immutable afterwards, so readers take no lock. Only the working directory
- * changes, under cwd_lock.
+ * changes, under cwd_lock, and the flags of file_checked, which guard no data.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -45,6 +45,11 @@ typedef struct erx_efile {
 static erx_ns_t		name_space;
 static ErlNifRWLock	*cwd_lock;
 static erx_release_fs_t	release_fs;
+/*
+ * Per file, whether it has passed erx_release_check. Only ever goes from 0 to 1 and
+ * guards no data, so two opens racing hash twice and nothing worse.
+ */
+static erts_atomic32_t	*file_checked;
 
 static int erx_build_table(void);
 static posix_errno_t erx_resolve(const efile_path_t *, erx_ns_result_t *);
@@ -54,6 +59,7 @@ static posix_errno_t erx_find_existing(const efile_path_t *, erx_ns_result_t *,
     erx_release_fs_kind_t *, uint32_t *);
 static posix_errno_t erx_read_only(const efile_path_t *);
 static Sint64 erx_copy_out(uint32_t, Sint64, SysIOVec *, int);
+static posix_errno_t erx_check_file(uint32_t);
 static void erx_fill_info(erx_release_fs_kind_t, uint64_t, efile_fileinfo_t *);
 
 /*
@@ -66,6 +72,7 @@ erx_build_table(void)
 	/* An entry holds a whole path, large for a stack, and the one call owns it. */
 	static erx_release_entry_t entry;
 	erx_release_fs_file_t *files;
+	erts_atomic32_t *checked;
 	uint8_t *strings;
 	uint64_t count, bytes, used;
 
@@ -77,7 +84,8 @@ erx_build_table(void)
 	}
 	files = enif_alloc((size_t)count * sizeof(*files));
 	strings = enif_alloc((size_t)bytes);
-	if (files == NULL || strings == NULL) {
+	checked = enif_alloc((size_t)count * sizeof(*checked));
+	if (files == NULL || strings == NULL || checked == NULL) {
 		enif_fprintf(stderr, "prim_file: no memory for the release's %lu names\n",
 		    (unsigned long)count);
 		return (-1);
@@ -90,8 +98,10 @@ erx_build_table(void)
 		files[index] = (erx_release_fs_file_t){ .path = strings + used,
 		    .length = entry.path_length, .size = entry.size,
 		    .offset = entry.offset };
+		erts_atomic32_init_nob(&checked[index], 0);
 		used += entry.path_length;
 	}
+	file_checked = checked;
 	release_fs = (erx_release_fs_t){ .files = files, .count = (uint32_t)count };
 	return (0);
 }
@@ -210,6 +220,30 @@ efile_dup_handle(ErlNifEnv *env, efile_data_t *d, ErlNifEvent *handle)
 	return (ENOTSUP);
 }
 
+/*
+ * The archive's index is checked at bind, its files here: the first open of each
+ * hashes it, so a changed byte of the immutable archive never reaches a read. A
+ * refused file is hashed again at its next open. The file's path is the archive's
+ * text, and stays out of the diagnostic.
+ */
+static posix_errno_t
+erx_check_file(uint32_t file)
+{
+	const char *reason;
+
+	if (erts_atomic32_read_nob(&file_checked[file]) != 0)
+		return (0);
+	/* The table's index is in the run, so the call never answers ERX_ERANGE. */
+	reason = "file";
+	if (erx_release_check(file, &reason) != 0) {
+		enif_fprintf(stderr, "prim_file: release file %lu refused by check %s\n",
+		    (unsigned long)file, reason);
+		return (EIO);
+	}
+	erts_atomic32_set_nob(&file_checked[file], 1);
+	return (0);
+}
+
 posix_errno_t
 efile_open(const efile_path_t *path, enum efile_modes_t modes,
     ErlNifResourceType *nif_type, efile_data_t **d)
@@ -230,6 +264,9 @@ efile_open(const efile_path_t *path, enum efile_modes_t modes,
 		return ((modes & EFILE_MODE_DIRECTORY) != 0 ? ENOTSUP : EISDIR);
 	if ((modes & EFILE_MODE_DIRECTORY) != 0)
 		return (ENOTDIR);
+	error = erx_check_file(file);
+	if (error != 0)
+		return (error);
 	handle = (erx_efile_t *)enif_alloc_resource(nif_type, sizeof(*handle));
 	handle->file = file;
 	handle->position = 0;

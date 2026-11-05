@@ -69,6 +69,29 @@ class RuntimePrimFileTest < Minitest::Test
     assert_includes @fixture.stock, "end\tok"
   end
 
+  # A changed byte behind an intact index: each open of that one file answers eio where it
+  # answered with data, and the changed bytes come back nowhere.
+  def test_a_changed_byte_is_refused_at_open
+    intact = "sorts before sub/\n".b
+    changed = "torts before sub/\n".b
+    bytes = File.binread(@fixture.archive)
+    place = bytes.index(intact)
+    bytes[place, intact.bytesize] = changed
+    damaged = File.join(@fixture.directory, 'damaged.pack')
+    File.binwrite(damaged, bytes)
+    lines, status = run_beam(damaged, '/', 'release', boot: '/bin/start')
+    assert_equal 0, status.exitstatus, lines.last(30).join("\n")
+    assert_includes @fixture.release.join("\n"), Digest::MD5.digest(intact).bytes.join(','), 'the corpus reads this file'
+    refute_includes lines.join("\n"), Digest::MD5.digest(changed).bytes.join(',')
+    refute_includes lines.join("\n"), 'torts before'
+    # Two runs' memory figures differ by nature, and test_results_agree_with_stock... exempts them too.
+    other = (lines - @fixture.release).reject { |line| line.start_with?('resources') }
+    diagnostics, refused = other.partition { |line| line.start_with?('prim_file: ') }
+    assert_includes diagnostics.first.to_s, 'file_hash'
+    name = 'sub-x'.unpack1('H*')
+    assert_equal ["read_file #{name}\t{error,eio}", "handle #{name}\t{error,eio}"], refused
+  end
+
   def test_results_agree_with_stock_except_where_named
     release = table(@fixture.release)
     stock = table(@fixture.stock)

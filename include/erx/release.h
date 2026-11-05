@@ -41,6 +41,12 @@ const uint8_t	*erx_release_addr(void);
  * kind it carries. Returns 0, or ERX_EINVAL with the name of the check in *reason.
  */
 int		erx_release_manifest(const uint8_t **, size_t *, const char **);
+/*
+ * The one file check of the index-th file's run and hash, as erx_release_entry
+ * numbers them. Returns 0, ERX_ERANGE past the run, or ERX_ECORRUPT with the name of
+ * the check in *reason. Each call hashes the whole file.
+ */
+int		erx_release_check(uint64_t, const char **);
 /* The archive header's flags. */
 uint32_t	erx_release_pack_flags(void);
 

@@ -158,6 +158,22 @@ erx_release_manifest(const uint8_t **bytes, size_t *length, const char **reason)
 	return (ERX_EINVAL);
 }
 
+int
+erx_release_check(uint64_t index, const char **reason)
+{
+	erx_blake3_ctx_t hasher;
+	erx_pack_error_t error;
+
+	if (index >= release_count)
+		return (ERX_ERANGE);
+	error = (erx_pack_error_t){ .reason = "file", .entry = release_first + (uint32_t)index };
+	if (!erx_pack_file_check(&release_view, release_first + (uint32_t)index, &hasher, &error)) {
+		*reason = error.reason;
+		return (ERX_ECORRUPT);
+	}
+	return (0);
+}
+
 uint32_t
 erx_release_pack_flags(void)
 {

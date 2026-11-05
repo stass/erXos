@@ -53,6 +53,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   time from `bootstrap`'s first line to the kernel's banner with serial
   timestamps, on HVF and the Pi 4, with a boot image of the size the first real
   system has. Fix on the table: turn the caches on before hashing.
+* **[Low] runtime, first-open hash of release files on the target.** `erx_prim_file.c`
+  hashes each release file at its first open with BLAKE3's portable code, so a boot
+  hashes every module it loads. Hosted, the cost is small; on the target it is
+  unmeasured, since no native release boots yet. Settled by boot to `1>` with and
+  without the check under TCG, HVF and on the Pi 4.
 * **[Medium] kernel, first-use hash of large boot image files.** The kernel
   checks each boot image file's BLAKE3 hash the first time it is mapped or
   read, once per file per boot, and runs BLAKE3's portable code because it
