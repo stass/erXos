@@ -49,7 +49,7 @@ archive, offline. To replace an existing native build, use
 `tools/erx oracle build --backend native --flavour jit --clean`.
 `make check` verifies this runtime, checks source provenance and ASCII,
 checks every ABI/hardware/system-register/terminal generated artifact,
-runs host tests, and compares terminal renderer bytes with stock OTP.
+runs host tests, and checks the generated text tables in Erlang against Ruby.
 Native ELF and structural archive integrations also run. It does not launch
 the full stock OTP suites or download missing prerequisites.
 M0 requires focused test-runner checks. Full reference suites are required

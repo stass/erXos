@@ -1,97 +1,18 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
-# Profiles are separate: renderer output never grants permission to raw text.
-# Tab is layout only in strict, whose text already holds newlines; a line of
-# attributed text and the kernel log escape it, since it moves the cursor.
+# The rules of the line escape, which renders text attributed to a source
+# (log records, names, inspector output) on one visible line. A program's own
+# output is not such text and does not pass through it. Tab and newline are
+# controls (Cc), so the line escape renders them like any other.
 terminal 1
 unicode 17.0.0
 input unicode_data otp/lib/stdlib/uc_spec/UnicodeData.txt
 input properties otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
-input prim_tty otp/lib/kernel/src/prim_tty.erl
-input io_ansi otp/lib/stdlib/src/io_ansi.erl
-renderer_operations cursor_up cursor_down cursor_backward cursor_forward erase_display tab clear format
-renderer_styles cyan_background light_white bold
 unsafe_categories Cc Cf Zl Zp Cn
 unsafe_property Default_Ignorable_Code_Point
 exceptions 200C 200D FE0E FE0F
 invalid_scalars D800 DFFF
-pass strict 0009 000A
-pass line
 kernel_ascii 0020 007E
 token codepoint <U+ 4 6 >
 token byte <0x 2 2 >
 token kernel \x 2 2 -
-grammar sequence_bytes=64 parameters=16 digits=5 separator=3B intermediates=20..2F
-
-# Parameter lists count absent/default fields. Zero means the declared default
-# for size-bound rules. Bounds and defaults may name current rows or columns.
-parameter none 0 0 - -
-parameter rows 0 1 rows 1
-parameter columns 0 1 columns 1
-parameter position 0 2 rows,columns 1,1
-parameter erase_display 0 1 0..3 0
-parameter erase_line 0 1 0..2 0
-parameter scroll_region 0 2 rows,rows 1,rows
-parameter rendition 0 16 sgr 0
-parameter mode_25 1 1 25 25
-parameter mode_1049 1 1 1049 1049
-parameter mode_1 1 1 1 1
-sgr forbidden 8
-sgr simple 0..7 9 21..25 27..29 30..37 39 40..47 49 53 55 90..97 100..107
-sgr indexed selectors=38,48,58 mode=5 operands=1 maximum=255
-sgr rgb selectors=38,48,58 mode=2 operands=3 maximum=255
-
-# The pinned no-terminfo io_ansi fallback, less full screen clearing.
-# BEL comes only from the renderer's beep request; text profiles escape it.
-literal prim_tty beep 07
-literal prim_tty backspace 08
-literal prim_tty tab 09
-literal prim_tty newline 0A
-literal prim_tty carriage_return 0D
-sequence prim_tty cursor_up 1B5B - - 41 none
-sequence prim_tty cursor_forward 1B5B - - 43 none
-sequence prim_tty erase_after_cursor 1B5B - - 4A none
-sequence prim_tty tab_forward 1B5B - - 49 none
-literal prim_tty reset_rendition 1B5B306D
-literal prim_tty bold 1B5B316D
-literal prim_tty cyan_background 1B5B34366D
-literal prim_tty light_white 1B5B39376D
-
-# The full-screen profile accepts only these ECMA-48 forms and parameter rules.
-sequence terminal_mode cursor_up 1B5B - - 41 rows
-sequence terminal_mode cursor_down 1B5B - - 42 rows
-sequence terminal_mode cursor_forward 1B5B - - 43 columns
-sequence terminal_mode cursor_backward 1B5B - - 44 columns
-sequence terminal_mode cursor_position 1B5B - - 48 position
-sequence terminal_mode cursor_position_alternate 1B5B - - 66 position
-sequence terminal_mode horizontal_position 1B5B - - 47 columns
-sequence terminal_mode vertical_position 1B5B - - 64 rows
-sequence terminal_mode erase_display 1B5B - - 4A erase_display
-sequence terminal_mode erase_line 1B5B - - 4B erase_line
-sequence terminal_mode erase_character 1B5B - - 58 columns
-sequence terminal_mode insert_character 1B5B - - 40 columns
-sequence terminal_mode delete_character 1B5B - - 50 columns
-sequence terminal_mode insert_line 1B5B - - 4C rows
-sequence terminal_mode delete_line 1B5B - - 4D rows
-sequence terminal_mode scroll_region 1B5B - - 72 scroll_region
-sequence terminal_mode scroll_up 1B5B - - 53 rows
-sequence terminal_mode scroll_down 1B5B - - 54 rows
-sequence terminal_mode rendition 1B5B - - 6D rendition
-sequence terminal_mode save_cursor 1B5B - - 73 none
-sequence terminal_mode restore_cursor 1B5B - - 75 none
-literal terminal_mode save_cursor_legacy 1B37
-literal terminal_mode restore_cursor_legacy 1B38
-sequence terminal_mode cursor_show 1B5B 3F - 68 mode_25
-sequence terminal_mode cursor_hide 1B5B 3F - 6C mode_25
-sequence terminal_mode alternate_screen_on 1B5B 3F - 68 mode_1049
-sequence terminal_mode alternate_screen_off 1B5B 3F - 6C mode_1049
-sequence terminal_mode cursor_keys_application 1B5B 3F - 68 mode_1
-sequence terminal_mode cursor_keys_normal 1B5B 3F - 6C mode_1
-literal terminal_mode keypad_application 1B3D
-literal terminal_mode keypad_normal 1B3E
-reset alternate_screen alternate_screen_off 1049
-reset cursor_visibility cursor_show 25
-reset keypad keypad_normal -
-reset cursor_keys cursor_keys_normal 1
-reset scrolling_region scroll_region -
-reset rendition rendition 0

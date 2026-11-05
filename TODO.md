@@ -212,6 +212,9 @@ it; git history is the record of completed work.
   the pinned hash catches only as a failed fetch.
 * [Low] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's private headers. Move
   it behind a neutral `liberx` header when the erx backend needs musl.
+* [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
+  the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
+  and handles with generations; the next part of the port settles it with `libc-test` in a task.
 * [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.

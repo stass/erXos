@@ -76,7 +76,7 @@ class TopLevelCliTest < Minitest::Test
           checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
   end
 
-  def test_check_runs_every_generation_gate_and_real_renderer_integration
+  def test_check_runs_every_generation_gate_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|
       status, output = run_cli('check', **collaborators)
@@ -142,7 +142,7 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, 'chokepoint rule: object-leg: Pending, 0 seeds'
   end
 
-  def test_failed_renderer_integration_fails_the_aggregate_gate
+  def test_failed_native_integration_fails_the_aggregate_gate
     commands = []
     with_checks(commands, fail_name: 'native-integration') do |collaborators|
       status, output = run_cli('check', **collaborators)

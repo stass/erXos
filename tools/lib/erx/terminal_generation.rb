@@ -24,17 +24,9 @@ module Erx
         end
         [name, bytes]
       end
-      renderer_operations = inputs.fetch('prim_tty').scan(/\bio_ansi:([a-z_]+)\(/).flatten.uniq.sort
-      unless renderer_operations == model.fetch('renderer_operations').sort
-        raise Error, 'prim_tty operations differ from terminal declaration'
-      end
-      styles = inputs.fetch('prim_tty').scan(/io_ansi:format\(\[((?:[a-z_]+,\s*)+)/).flatten
-                     .flat_map { |prefix| prefix.split(',').map(&:strip).reject(&:empty?) }.uniq.sort
-      raise Error, 'prim_tty styles differ from terminal declaration' unless styles == model.fetch('renderer_styles').sort
       intervals = unsafe_intervals(model, records: unicode_data(inputs.fetch('unicode_data')),
                                    ignorables: derived_properties(inputs.fetch('properties'), version: model.fetch('unicode')))
-      catalog = model.select { |name, _| %w[pass token grammar parameter sgr literal sequence].include?(name) }
-      catalog = catalog.merge('resets' => reset_sequences(model), 'unicode' => model.fetch('unicode'))
+      catalog = { 'token' => model.fetch('token'), 'unicode' => model.fetch('unicode') }
       files = { OUTPUTS[0] => ascii_header(model), OUTPUTS[1] => erlang_tables(intervals, catalog),
                 OUTPUTS[2] => ruby_tables(intervals, catalog) }
       notice = inputs.fetch('properties').lines.take_while { |line| line.start_with?('#') || line.strip.empty? }.join
@@ -55,22 +47,6 @@ module Erx
     rescue SystemCallError => error
       raise Error, "cannot read terminal generation input: #{error.message}"
     end
-
-    def reset_sequences(model)
-      separator = model.fetch('grammar').fetch('separator').chr
-      model.fetch('reset').to_h do |name, reset|
-        key = 'terminal_mode/' + reset.fetch('sequence')
-        bytes = if model.fetch('literal').key?(key)
-                  model.fetch('literal').fetch(key).fetch('bytes')
-                else
-                  row = model.fetch('sequence').fetch(key)
-                  row.fetch('introducer') + row.fetch('private') +
-                    reset.fetch('parameters').join(separator).bytes + row.fetch('intermediate') + [row.fetch('final')]
-                end
-        [name, bytes]
-      end
-    end
-    private_class_method :reset_sequences
 
     def ascii_header(model)
       first, last = model.fetch('kernel_ascii').fetch('range')

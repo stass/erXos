@@ -163,9 +163,9 @@ module Erx
           seed: { 'kernel/core/seeded.c' => "void f(void) { l4_ipc_call(0, 0, 0, 0); }\n",
                   'liberx/seeded.c' => "void f(void) { l4re_env(); }\n" }
         ),
-        # Bytes on this console reach the operator's terminal: each caller has
-        # escaped what is not its own, or is a program's standard output, which
-        # goes out unchanged, from programs Phase 1 trusts.
+        # Bytes on this console reach the operator's terminal. Text attributed
+        # to a source (a log record, a name) reaches it through the line
+        # escape; a program's own output goes out unchanged, as on Unix.
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \

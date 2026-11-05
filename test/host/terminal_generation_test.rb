@@ -25,7 +25,7 @@ class TerminalGenerationTest < Minitest::Test
                    .lines.take_while { |line| line.start_with?('#') || line.strip.empty? }.join
     assert_equal original, notice.fetch('original_unicode_notice')
     assert_equal 'Unicode-3.0', notice.fetch('license')
-    assert_equal 4, notice.fetch('inputs').size
+    assert_equal 2, notice.fetch('inputs').size
   end
 
   # The kernel's class is a printable range and nothing else: no line of the
@@ -38,50 +38,27 @@ class TerminalGenerationTest < Minitest::Test
     end
   end
 
-  def test_policy_profiles_and_color_operands_are_separate
+  # Tab and newline are controls like the rest: no profile passes them, and
+  # nothing in the source names a renderer, a sequence or a color.
+  def test_the_line_escape_rules_have_no_allowlist
     model = Erx::TerminalRules.source(source)
-    assert_equal [9, 10], model.fetch('pass').fetch('strict')
-    assert_empty model.fetch('pass').fetch('line')
+    assert_equal %w[byte codepoint kernel], model.fetch('token').keys.sort
     assert_equal [0x200c, 0x200d, 0xfe0e, 0xfe0f], model.fetch('exceptions')
-    assert_equal({ 'sequence_bytes' => 64, 'parameters' => 16, 'digits' => 5,
-                   'separator' => 59, 'intermediates' => [32, 47] }, model.fetch('grammar'))
     assert_equal({ 'prefix' => '<U+', 'minimum' => 4, 'maximum' => 6,
                    'suffix' => '>', 'digits' => 'uppercase_hex' }, model.fetch('token').fetch('codepoint'))
-    refute_includes model.fetch('sgr').fetch('simple'), 8
-    assert_includes model.fetch('sgr').fetch('simple'), 28
-    assert_operator model.fetch('sgr').fetch('indexed').fetch('maximum'), :>=, 8
-    assert_equal({ 'selectors' => [38, 48, 58], 'mode' => 5, 'operands' => 1, 'maximum' => 255 },
-                 model.fetch('sgr').fetch('indexed'))
-    assert_equal({ 'selectors' => [38, 48, 58], 'mode' => 2, 'operands' => 3, 'maximum' => 255 },
-                 model.fetch('sgr').fetch('rgb'))
-    assert_equal [7], model.fetch('literal').fetch('prim_tty/beep').fetch('bytes')
-    refute model.fetch('literal').key?('terminal_mode/beep')
+    assert_equal %w[properties unicode_data], model.fetch('input').keys.sort
+    refute_includes model.keys, 'pass'
     assert model.frozen?
-    assert model.fetch('sequence').values.all?(&:frozen?)
   end
 
   def test_malformed_declarations_are_typed_refusals
     [source + "unknown value\n", source + "terminal 1\n", source.sub('unicode 17.0.0', 'unicode latest'),
-     source.sub('unsafe_categories Cc', 'unsafe_categories Cq'), source.sub('parameters=16', 'parameters=0'),
-     source.sub('200C 200D', '200C 200C'), source.sub('sequence_bytes=64', 'sequence_bytes=99999'),
-     source.sub('41 rows', '41 undefined'), source.sub('1B5B - - 41', '1B5D - - 41'),
-     source.sub('sgr simple 0..7', 'sgr simple 0..8'), source.sub('reset keypad keypad_normal', 'reset keypad undefined'),
-     source + "literal prim_tty bad 1B0\n", "\xff".b, 'x' * 65_537].each do |bytes|
+     source.sub('unsafe_categories Cc', 'unsafe_categories Cq'), source.sub('200C 200D', '200C 200C'),
+     source.sub('token byte <0x 2 2 >', 'token byte <0x 0 2 >'),
+     source.sub(/^token kernel .*\n/, ''), source.sub(/^input properties .*\n/, ''),
+     source + "pass strict 0009 000A\n", source + "sequence prim_tty cursor_up 1B5B - - 41 none\n",
+     source + "input prim_tty otp/lib/kernel/src/prim_tty.erl\n", "\xff".b, 'x' * 65_537].each do |bytes|
       assert_raises(Erx::Error) { Erx::TerminalRules.source(bytes) }
-    end
-  end
-
-  def test_reset_operands_and_compound_selectors_obey_the_allowlist
-    [source.sub('reset rendition rendition 0', 'reset rendition rendition 8'),
-     source.sub('reset cursor_visibility cursor_show 25', 'reset cursor_visibility cursor_show 9999'),
-     source.sub('sgr indexed selectors=38,48,58', 'sgr indexed selectors=8'),
-     source.sub('sgr rgb selectors=38,48,58', 'sgr rgb selectors=1')].each do |bytes|
-      assert_raises(Erx::Error) { Erx::TerminalRules.source(bytes) }
-    end
-    color = source.sub('reset rendition rendition 0', 'reset rendition rendition 38,5,8')
-    assert Erx::TerminalRules.source(color)
-    assert_raises(Erx::Error) do
-      Erx::TerminalRules.source(source.sub('reset rendition rendition 0', 'reset rendition rendition 38,5'))
     end
   end
 

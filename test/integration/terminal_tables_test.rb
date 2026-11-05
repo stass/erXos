@@ -25,7 +25,7 @@ class TerminalTablesTest < Minitest::Test
 
   def runtime_command(program, arguments, home: @directory)
     ['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', "HOME=#{home}",
-     'LANG=C', 'TERM=erx-no-terminfo-profile', program, *arguments]
+     'LANG=C', program, *arguments]
   end
 
   def erlang(expression, home: @directory)
@@ -33,16 +33,6 @@ class TerminalTablesTest < Minitest::Test
                                      '-pa', @directory, '-eval', expression], home: home)
     record = @runner.run(command, name: 'terminal-oracle', deadline: 30, chdir: @directory)
     Erx::JsonInput.parse(File.binread(record.fetch('log')))
-  end
-
-  def test_renderer_oracle_does_not_execute_operator_startup
-    home = File.join(@directory, 'operator-home')
-    Dir.mkdir(home)
-    marker = File.join(@directory, 'startup-executed')
-    File.write(File.join(home, '.erlang'), "file:write_file(#{JSON.generate(marker)}, <<\"startup\">>).\n")
-    assert_equal({ 'ok' => true }, erlang('io:put_chars(json:encode(#{<<"ok">> => true})), halt().',
-                                         home: home))
-    refute File.exist?(marker), 'renderer oracle executed operator startup'
   end
 
   def test_generated_c_byte_class_exhaustively
@@ -63,38 +53,5 @@ class TerminalTablesTest < Minitest::Test
                     'io:put_chars(json:encode(#{<<"ranges">> => Ranges, <<"catalog">> => erx_text_tables:catalog()})), halt().')
     assert_equal Erx::Generated::TerminalTables::UNICODE_UNSAFE_RANGES, value.fetch('ranges')
     assert_equal Erx::Generated::TerminalTables::CATALOG, value.fetch('catalog')
-  end
-
-  def test_renderer_catalog_agrees_with_real_pinned_fallback
-    value = erlang('M = #{<<"cursor_up">> => io_ansi:cursor_up(), <<"newline">> => io_ansi:cursor_down(), ' \
-                    '<<"beep">> => element(1,prim_tty:handle_request(undefined,beep)), ' \
-                    '<<"backspace">> => io_ansi:cursor_backward(), <<"cursor_forward">> => io_ansi:cursor_forward(), ' \
-                    '<<"erase_after_cursor">> => io_ansi:erase_display(), <<"tab_forward">> => io_ansi:tab(), ' \
-                    '<<"styled">> => io_ansi:format([cyan_background,light_white,bold,"x"],[],[{enabled,true},{color,true},{reset,true}])}, ' \
-                    'io:put_chars(json:encode(M)), halt().')
-    catalog = Erx::Generated::TerminalTables::CATALOG
-    assert_renderer_agrees(catalog, value)
-    changed = Marshal.load(Marshal.dump(catalog))
-    changed.fetch('sequence').fetch('prim_tty/cursor_up')['final'] = 66
-    assert_raises(Minitest::Assertion) { assert_renderer_agrees(changed, value) }
-    changed = Marshal.load(Marshal.dump(catalog))
-    changed.fetch('literal').fetch('prim_tty/beep')['bytes'] = [27, 93]
-    assert_raises(Minitest::Assertion) { assert_renderer_agrees(changed, value) }
-  end
-
-  def assert_renderer_agrees(catalog, value)
-    expected = catalog.fetch('literal').values.select { |row| row.fetch('profile') == 'prim_tty' }
-                      .to_h { |row| [row.fetch('name'), row.fetch('bytes').pack('C*')] }
-    catalog.fetch('sequence').values.select { |row| row.fetch('profile') == 'prim_tty' }.each do |row|
-      expected[row.fetch('name')] = (row.fetch('introducer') + row.fetch('private') +
-                                    row.fetch('intermediate') + [row.fetch('final')]).pack('C*')
-    end
-    value.each do |name, bytes|
-      next if name == 'styled'
-      assert_equal expected.fetch(name), bytes, name
-    end
-    styled = %w[cyan_background light_white bold].map { |name| expected.fetch(name) }.join +
-             'x' + expected.fetch('reset_rendition')
-    assert_equal styled, value.fetch('styled')
   end
 end

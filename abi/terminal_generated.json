@@ -1,15 +1,13 @@
 {
   "version": 1,
   "inputs": {
-    "abi/terminal.txt": "e2af69ef3c02ec2e4648d29551245366e699f98942fd253a98bdefa68f79ab31",
+    "abi/terminal.txt": "24097c22f87b8ad2a3b68e8c65864e2be2cc68f8cf9231dbd5387f4017c0dcbd",
     "otp/ORIGIN.md": "72de4c148353d702f7422db981495da80f2b98b20e2be7700de8a219f30f4f74",
-    "otp/lib/kernel/src/prim_tty.erl": "92019451b1fbd4183e6a968bdfe25b3245ff24bd532302c0accc877f31211b52",
-    "otp/lib/stdlib/src/io_ansi.erl": "f981b8ade6ed8db6b31a75cf5d08b80b023882be5b98b4e184d09c68b47cdb93",
     "otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
     "otp/lib/stdlib/uc_spec/UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
     "tools/gen_terminal.rb": "1bbc76a53235a43685d6f1286cfca08ceda3cc5b29ae60eb2f08acd655abfe76",
-    "tools/lib/erx/terminal_generation.rb": "e11e85fc31f1b78db5141b1777c5aa7589d00c27ef5078606a578b676f5f21e3",
-    "tools/lib/erx/terminal_rules.rb": "5de91e031513c13c844cbaf5bbfa01f1e5bc1f4298c08d8929125c562bd1c852"
+    "tools/lib/erx/terminal_generation.rb": "ba731681ef6d59e5e658afaa0cc322f2b2fad655fe518f7b085d0862554cebed",
+    "tools/lib/erx/terminal_rules.rb": "feda25a797c84fb48434309f5874e0b835c71020c0c089e0726923c0414b8c26"
   },
   "outputs": [
     "abi/terminal_generated.json",
