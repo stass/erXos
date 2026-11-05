@@ -123,6 +123,13 @@ mprotect_call(uint64_t addr, uint64_t size, int prot)
 	return (errno_of(erx_space_protect(addr, size, prot_of(prot))));
 }
 
+/*
+ * What a mapping's flags may say. One space has no other party, so shared and private
+ * look the same, and the two hints are taken and do nothing. A flag not listed is
+ * refused, so a caller that asked for what this seam does not do learns so.
+ */
+#define MMAP_FLAGS_OFFERED	(MAP_SHARED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE | MAP_STACK)
+
 /* Only anonymous memory is offered: a file mapping needs the personality's files. */
 static long
 mmap_call(uint64_t addr, uint64_t size, int prot, int flags)
@@ -132,6 +139,10 @@ mmap_call(uint64_t addr, uint64_t size, int prot, int flags)
 
 	if (!(flags & MAP_ANONYMOUS))
 		return (-ENOSYS);
+	if ((flags & MAP_TYPE) == 0)
+		return (-EINVAL);
+	if (flags & ~MMAP_FLAGS_OFFERED)
+		return (-EOPNOTSUPP);
 	if (!prot_allowed(prot))
 		return (-EACCES);
 	if (size == 0 || size > UINT64_MAX - PAGE_MASK)

@@ -59,6 +59,15 @@ case_irq_line_refused(void)
 	return (erx_irq_create(0, 0, ERX_IRQ_LINE, 0, &irq) == ERX_ENOTSUP);
 }
 
+/* A software object has no line to mask, so its ack does nothing, bound or not. */
+static bool
+case_irq_ack_unbound(void)
+{
+	uint64_t irq;
+
+	return (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq) == ERX_OK && erx_irq_ack(irq) == ERX_OK);
+}
+
 /* A label comes once however often its object fired; each fire moves the epoch; rebinding moves the label. */
 static void
 ready_once_helper(uint64_t arg)
@@ -161,6 +170,7 @@ case_irq_objects_run_out(void)
 
 const function_api_case_t function_api_irq_cases[] = {
 	{ "irq_refusals", case_irq_refusals },
+	{ "irq_ack_unbound", case_irq_ack_unbound },
 	{ "irq_wakes_parked", case_irq_wakes_parked },
 	{ "irq_objects_run_out", case_irq_objects_run_out },
 };
@@ -168,6 +178,7 @@ const size_t function_api_irq_case_count = sizeof(function_api_irq_cases) / size
 
 const function_api_case_t function_api_hosted_irq_cases[] = {
 	{ "irq_refusals", case_irq_refusals },
+	{ "irq_ack_unbound", case_irq_ack_unbound },
 	{ "irq_line_refused", case_irq_line_refused },
 	{ "irq_ready_once", case_irq_ready_once },
 	{ "irq_wakes_parked", case_irq_wakes_parked },

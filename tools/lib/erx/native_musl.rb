@@ -24,7 +24,7 @@ module Erx
     GUEST_FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -O2 -nostdinc -fno-stack-protector
                      -mno-outline-atomics].freeze
     CASES = %w[
-      constructor printf_float tls join_churn detached_loop cond_broadcast timed_waits nanosleep_not_early mutex_contended
+      constructor printf_float mmap_flags tls join_churn detached_loop cond_broadcast timed_waits nanosleep_not_early mutex_contended
       malloc_threads realloc_grows mmap_mprotect mprotect_same_runs mprotect_hole cancel refusals
     ].freeze
     CASE_SECONDS = 300

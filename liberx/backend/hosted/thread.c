@@ -215,8 +215,9 @@ erx_thread_start(uint64_t thread)
 }
 
 /*
- * A mask is checked as natively and otherwise kept to the host: macOS has no way to
- * hold a thread to a CPU, and a caller can tell only by its timing.
+ * A mask is checked as natively, so it must hold a CPU that exists, and is otherwise
+ * kept to the host: macOS has no way to hold a thread to a CPU, and a caller can tell
+ * only by its timing.
  */
 int
 erx_thread_set_affinity(uint64_t thread, uint64_t mask)
@@ -228,7 +229,7 @@ erx_thread_set_affinity(uint64_t thread, uint64_t mask)
 	(void)pthread_mutex_lock(&thread_lock);
 	named = thread_find(thread) != NULL;
 	(void)pthread_mutex_unlock(&thread_lock);
-	return (named && (mask & all) != 0 && (mask & ~all) == 0 ? ERX_OK : ERX_EINVAL);
+	return (named && (mask & all) != 0 ? ERX_OK : ERX_EINVAL);
 }
 
 int

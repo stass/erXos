@@ -251,6 +251,35 @@ service_main(void)
 	}
 }
 
+/*
+ * The IRQ calls. Their one table holds the root's objects, bound to the root's threads,
+ * and no task has a consumer for them, so a task's call is refused rather than taking
+ * a root thread of the same index for its own.
+ */
+static int
+service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
+{
+	const void *const words = decoded->request;
+
+	if (decoded->task != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	switch (decoded->call) {
+	case ERX_FIASCO_CALL_IRQ_CREATE:
+		return (erx_fiasco_irq_create_body(((const erx_fiasco_irq_create_request_t *)words)->kind,
+		    ((const erx_fiasco_irq_create_request_t *)words)->selector, &reply->first));
+	case ERX_FIASCO_CALL_IRQ_BIND:
+		return (erx_fiasco_irq_bind_body(((const erx_fiasco_irq_bind_request_t *)words)->irq,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->thread,
+		    ((const erx_fiasco_irq_bind_request_t *)words)->record));
+	case ERX_FIASCO_CALL_IRQ_ACK:
+		return (erx_fiasco_irq_ack_body(((const erx_fiasco_irq_request_t *)words)->irq));
+	case ERX_FIASCO_CALL_IRQ_TRIGGER:
+		return (erx_fiasco_irq_trigger_body(((const erx_fiasco_irq_request_t *)words)->irq));
+	default:
+		return (ERX_ENOTSUP);
+	}
+}
+
 static int
 service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 {
@@ -285,16 +314,10 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_vm_body(decoded->task, ERX_BACKEND_VM_PROTECT, flagged->addr, flagged->size,
 		    (uint32_t)flagged->flags, NULL));
 	case ERX_FIASCO_CALL_IRQ_CREATE:
-		return (erx_fiasco_irq_create_body(((const erx_fiasco_irq_create_request_t *)words)->kind,
-		    ((const erx_fiasco_irq_create_request_t *)words)->selector, &reply->first));
 	case ERX_FIASCO_CALL_IRQ_BIND:
-		return (erx_fiasco_irq_bind_body(((const erx_fiasco_irq_bind_request_t *)words)->irq,
-		    ((const erx_fiasco_irq_bind_request_t *)words)->thread,
-		    ((const erx_fiasco_irq_bind_request_t *)words)->record));
 	case ERX_FIASCO_CALL_IRQ_ACK:
-		return (erx_fiasco_irq_ack_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	case ERX_FIASCO_CALL_IRQ_TRIGGER:
-		return (erx_fiasco_irq_trigger_body(((const erx_fiasco_irq_request_t *)words)->irq));
+		return (service_irq(decoded, reply));
 	case ERX_FIASCO_CALL_TIME_SET_WALL:
 		return (erx_fiasco_time_set_wall_body(((const erx_fiasco_time_set_wall_request_t *)words)->wall_ns));
 	case ERX_FIASCO_CALL_MEM_CREATE:

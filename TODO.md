@@ -201,6 +201,13 @@ it; git history is the record of completed work.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.
+* [Medium] musl, `musl/src/internal/erxos/syscall.c`: a program's standard output reaches the console through
+  `erx_fiasco_console_write` with no escaping, by an allowlist entry of the console chokepoint, against the escaping
+  rule. The root's one program is trusted, so this waits until a program prints text from another source. The strict escape has no C form: `include/erx/terminal_ascii.h` holds only the kernel's ASCII class, so this
+  takes the generator's Unicode intervals as a C table, a UTF-8 decoder that holds across writes, and a fuzz target.
+* [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
+  ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
+  and the task's objects released at its end.
 * [Low] stopgap, `liberx/backend/fiasco/arch/aarch64/root_start.S`: `main` runs on 64 KiB in `.bss` with no guard page,
   so a large frame overruns other `.bss` silently.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the

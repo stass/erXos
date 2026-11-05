@@ -4,9 +4,9 @@
  */
 
 /*
- * The IRQ calls' bodies, on the service, which alone touches this table: the kernel's
- * IRQ objects, each bound to a dispatcher with its record in the group as the kernel's
- * label. A bound line stays masked from each delivery until its ack, which is Fiasco's
+ * The IRQ calls' bodies, on the service, which alone touches this table: the root's
+ * IRQ objects, each bound to the root's dispatcher with its record in the group as the
+ * kernel's label. A bound line stays masked from each delivery until its ack, which is Fiasco's
  * own behaviour for a level interrupt.
  */
 
@@ -82,9 +82,11 @@ erx_fiasco_irq_bind_body(uint64_t irq, uint64_t thread, uint64_t record)
 int
 erx_fiasco_irq_ack_body(uint64_t irq)
 {
-	if (irq >= IRQ_OBJECTS_MAX || !irq_objects[irq].bound)
+	if (irq >= IRQ_OBJECTS_MAX || !irq_objects[irq].present)
 		return (ERX_EINVAL);
-	(void)l4_irq_unmask(irq_cap((uint32_t)irq));
+	/* An object not bound has no receiver: its bind is what opens it. */
+	if (irq_objects[irq].bound)
+		(void)l4_irq_unmask(irq_cap((uint32_t)irq));
 	return (ERX_OK);
 }
 

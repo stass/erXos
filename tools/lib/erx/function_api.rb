@@ -27,8 +27,8 @@ module Erx
       entropy_read entropy_add entropy_refusals mem_device_refusals
     ].freeze
     # The IRQ row: what both backends pass, and what holds only hosted (irq_cases.c).
-    IRQ_CASES = %w[irq_refusals irq_wakes_parked irq_objects_run_out].freeze
-    HOSTED_IRQ_CASES = %w[irq_refusals irq_line_refused irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
+    IRQ_CASES = %w[irq_refusals irq_ack_unbound irq_wakes_parked irq_objects_run_out].freeze
+    HOSTED_IRQ_CASES = %w[irq_refusals irq_ack_unbound irq_line_refused irq_ready_once irq_wakes_parked irq_objects_run_out].freeze
     # The devices' row: what takes a device natively, and hosted, that there is none.
     DEVICE_CASES = %w[physical_reads_registers physical_refusals contiguous_runs contiguous_device_writes].freeze
     HOSTED_DEVICE_CASES = %w[mem_device_refused].freeze

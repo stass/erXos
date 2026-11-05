@@ -251,6 +251,31 @@ mode_race(void)
 	return (51);
 }
 
+/*
+ * Only the root binds IRQ objects: the stubs live in the root, so a task asks the service
+ * directly. Each request names handle 0, which no object holds, so without the refusal
+ * these calls answer ERX_EINVAL, not ERX_ENOTSUP.
+ */
+static int64_t
+mode_irq_refused(void)
+{
+	const uint64_t caller = erx_fiasco_thread_self()->index;
+	const erx_fiasco_irq_create_request_t create = { .caller = caller, .kind = ERX_IRQ_SOFT };
+	const erx_fiasco_irq_bind_request_t bind = { .caller = caller };
+	const erx_fiasco_irq_request_t object = { .caller = caller };
+	erx_fiasco_reply_t reply;
+
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &create, sizeof(create), &reply) != ERX_ENOTSUP)
+		return (80);
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &bind, sizeof(bind), &reply) != ERX_ENOTSUP)
+		return (81);
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_ACK, &object, sizeof(object), &reply) != ERX_ENOTSUP)
+		return (82);
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &object, sizeof(object), &reply) != ERX_ENOTSUP)
+		return (83);
+	return (0);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -282,6 +307,8 @@ erx_task_main(uint64_t argument)
 		return (mode_race());
 	case MODE_WAIT:
 		erx_fiasco_sleep_forever();
+	case MODE_IRQ_REFUSED:
+		return (mode_irq_refused());
 	default:
 		return (90);
 	}

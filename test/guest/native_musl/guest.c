@@ -122,6 +122,38 @@ case_printf_float(void)
 	return (strcmp(text, "6.250 2.5 42 ok") == 0);
 }
 
+/* A flag the seam does not offer is refused and leaves the mapping alone, a mapping with no type is invalid, and the listed hints are taken. */
+static int
+case_mmap_flags(void)
+{
+	const int anonymous = MAP_PRIVATE | MAP_ANONYMOUS;
+	const size_t size = 4096;
+	char *const page = mmap(NULL, size, PROT_READ | PROT_WRITE, anonymous, -1, 0);
+	char *hinted;
+
+	if (page == MAP_FAILED)
+		return (0);
+	*page = 7;
+	errno = 0;
+	if (mmap(page, size, PROT_READ | PROT_WRITE, anonymous | MAP_FIXED | MAP_FIXED_NOREPLACE, -1, 0) != MAP_FAILED ||
+	    errno != EOPNOTSUPP || *page != 7)
+		return (0);
+	errno = 0;
+	if (mmap(page, size, PROT_READ | PROT_WRITE, anonymous | MAP_FIXED_NOREPLACE, -1, 0) != MAP_FAILED ||
+	    errno != EOPNOTSUPP)
+		return (0);
+	errno = 0;
+	if (mmap(NULL, size, PROT_READ | PROT_WRITE, anonymous | MAP_POPULATE, -1, 0) != MAP_FAILED || errno != EOPNOTSUPP)
+		return (0);
+	errno = 0;
+	if (mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0) != MAP_FAILED || errno != EINVAL)
+		return (0);
+	hinted = mmap(NULL, size, PROT_READ | PROT_WRITE, anonymous | MAP_NORESERVE | MAP_STACK, -1, 0);
+	if (hinted == MAP_FAILED || munmap(hinted, size) != 0)
+		return (0);
+	return (munmap(page, size) == 0);
+}
+
 static void *
 tls_thread(void *arg)
 {
@@ -631,6 +663,7 @@ main(int argc, char **argv)
 	atexit(at_exit_ran);
 	report("constructor", constructed);
 	report("printf_float", case_printf_float());
+	report("mmap_flags", case_mmap_flags());
 	report("tls", case_tls());
 	report("join_churn", case_join_churn());
 	report("detached_loop", case_detached_loop());

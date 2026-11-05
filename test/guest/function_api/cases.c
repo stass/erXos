@@ -727,7 +727,10 @@ case_memory_from_threads(void)
 	return (atomic_load(&memory_failed) == 0 && erx_vm_free_pages() == before);
 }
 
-/* An empty mask and a CPU past any there is are refused and leave the thread ready to start. */
+/*
+ * An empty mask and a CPU past any there is are refused and leave the thread ready to
+ * start. A mask holding a CPU that exists is taken, whatever else it names.
+ */
 static bool
 case_affinity_refused(void)
 {
@@ -738,7 +741,8 @@ case_affinity_refused(void)
 	if (create_class(idle_helper, 0, 0, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
 		return (false);
 	ok = erx_thread_set_affinity(thread, 0) == ERX_EINVAL &&
-	    erx_thread_set_affinity(thread, UINT64_C(1) << 63) == ERX_EINVAL;
+	    erx_thread_set_affinity(thread, UINT64_C(1) << 63) == ERX_EINVAL &&
+	    erx_thread_set_affinity(thread, UINT64_MAX) == ERX_OK;
 	return (ok && erx_thread_start(thread) == ERX_OK && function_api_wait_for(&function_api_done, 1));
 }
 

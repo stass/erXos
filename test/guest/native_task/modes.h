@@ -16,6 +16,7 @@
 #define MODE_SPIN_STOP	5	/* a thread spinning on each CPU while the first stops the task */
 #define MODE_RACE	6	/* a thread looping on commit while the first faults */
 #define MODE_WAIT	7	/* sleeps until the root stops the task */
+#define MODE_IRQ_REFUSED	8	/* every IRQ call through the service: each refused */
 
 /* The status a spinning task stops with. */
 #define STATUS_SPIN_STOP	7
