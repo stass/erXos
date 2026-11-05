@@ -38,7 +38,7 @@ class ErxFsTest < Minitest::Test
                   "    {ok, _, Qid} = M:walk(Dir, <<\"..\">>, T),\n    {ok, [{Dir, Qid, root} | Root]};",
               caught_by: 'dotdot_stays_at_the_root_test'),
     Fault.new(name: 'a walk continues past a link', file: GRANT,
-              from: 'when Type band ?QTDIR =:= 0 ->', to: 'when Type band ?QTDIR =:= -1 ->',
+              from: 'when Type band ?ERX_P9_QTDIR =:= 0 ->', to: 'when Type band ?ERX_P9_QTDIR =:= -1 ->',
               caught_by: 'walk_through_a_link_stops_at_it_test'),
     Fault.new(name: "a reply goes to another domain's alias", file: GRANT,
               from: "        {ok, Alias, _, _} when node(Alias) =/= Client ->\n            drop;\n",
@@ -155,7 +155,18 @@ class ErxFsTest < Minitest::Test
     Fault.new(name: 'a listing with an improper tail crashes the file process', file: GRANT,
               from: '    case entries(Entries) of',
               to: '    case is_list(Entries) andalso lists:all(fun(Entry) -> entries([Entry]) end, Entries) of',
-              caught_by: 'improper_listing_is_eio_test')
+              caught_by: 'improper_listing_is_eio_test'),
+    Fault.new(name: "a rename's new directory may be a file", file: GRANT,
+              from: 'directory_fids({renameat, OldDfid, _, NewDfid, _}) -> [OldDfid, NewDfid];',
+              to: 'directory_fids({renameat, OldDfid, _, _, _}) -> [OldDfid];',
+              caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
+    Fault.new(name: "a link's checked fid is its source, not its directory", file: GRANT,
+              from: 'directory_fids({link, Dfid, _, _}) -> [Dfid];',
+              to: 'directory_fids({link, _, Fid, _}) -> [Fid];',
+              caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
+    Fault.new(name: 'a file opened is listed by the tree', file: GRANT,
+              from: "directory_fids({readdir, Fid, _, _}) -> [Fid];\n", to: '',
+              caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test')
   ].freeze
 
   def test_the_cases_pass
@@ -185,7 +196,7 @@ class ErxFsTest < Minitest::Test
 
         File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
       end
-      compile(work, paths)
+      compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')])
       compile(work, TESTS.map { |test| File.join(ROOT, test) })
       # A grant a seeded fault crashes would print a crash report into the middle of
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
@@ -197,8 +208,9 @@ class ErxFsTest < Minitest::Test
     end
   end
 
-  def compile(work, paths)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *paths,
+  def compile(work, paths, includes: [])
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work,
+                                     *includes.flat_map { |directory| ['-I', directory] }, '-o', work, *paths,
                                      stdin_data: '')
     assert status.success?, output
   end

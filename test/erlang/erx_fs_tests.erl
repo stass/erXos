@@ -788,6 +788,42 @@ readdir_over_an_open_directory_test() ->
     ?assertEqual({error, einval}, walk(Grant, 2, 4, [<<"a">>])),
     stop(Grant).
 
+%% A request whose directory fid names a file or a link is enotdir from the
+%% grant, so the tree is never asked to make, unlink, rename or list in a
+%% node that is no directory, whatever its own checks; the directory fid of
+%% each such request is refused alone, the other fid naming a directory.
+directory_operations_on_a_file_or_a_link_reach_no_tree_test() ->
+    Grant = grant(rw),
+    {ok, _} = attach(Grant, 1),
+    {ok, [_]} = walk(Grant, 1, 2, [<<"a">>]),
+    {ok, [_]} = walk(Grant, 1, 3, [<<"f">>]),
+    {ok, [?LINK_QID]} = walk(Grant, 1, 4, [<<"l">>]),
+    flush_tree_calls(),
+    Requests = fun(NotDir) ->
+                       [{mkdir, NotDir, <<"n">>, 8#755, 0},
+                        {symlink, NotDir, <<"n">>, <<"t">>, 0},
+                        {mknod, NotDir, <<"n">>, 8#644, 0, 0, 0},
+                        {link, NotDir, 2, <<"n">>},
+                        {unlinkat, NotDir, <<"n">>, 0},
+                        {unlinkat, NotDir, <<"n">>, 16#200},
+                        {renameat, NotDir, <<"f">>, 2, <<"n">>},
+                        {renameat, 2, <<"b">>, NotDir, <<"n">>},
+                        {lcreate, NotDir, <<"n">>, ?O_RDWR, 8#644, 0},
+                        {walk, NotDir, 5, [<<"n">>]}]
+               end,
+    [?assertEqual({Request, {error, enotdir}}, {Request, call(Grant, Request)})
+     || NotDir <- [3, 4], Request <- Requests(NotDir)],
+    ?assertEqual([], tree_calls()),
+    %% Nothing changed: the fids still stand where they were walked.
+    ?assertEqual(?LINK_QID, qid_of(Grant, 4)),
+    ?assertMatch({ok, [_, _]}, walk(Grant, 1, 5, [<<"a">>, <<"b">>])),
+    %% A file opened is listed by no tree.
+    {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDONLY}),
+    flush_tree_calls(),
+    ?assertEqual({error, enotdir}, call(Grant, {readdir, 3, 0, 8192})),
+    ?assertEqual([], tree_calls()),
+    stop(Grant).
+
 %% remove acts on the fid's node, not on whatever its name names now: after
 %% the name moved and a new file took it, remove leaves the new file alone.
 remove_after_a_rename_leaves_the_new_name_test() ->

@@ -51,10 +51,8 @@ ends with its file's last clunk.
 
 -export_type([grant/0, effect/0, job/0, rights/0]).
 
--define(NOFID, 16#ffffffff).
--define(QTDIR, 16#80).
--define(QTSYMLINK, 16#02).
--define(AT_REMOVEDIR, 16#200).
+-include("generated/erx_abi.hrl").
+
 -define(MSIZE_MIN, 4096).
 -define(MSIZE_MAX, 65560).
 -define(VERSION, <<"9P2000.L">>).
@@ -368,9 +366,38 @@ admit(Alias, _, {flush, OldTag}, #grant{pending = Pending, in_flight = InFlight}
     Waiting = Record#pending{flushes = [Alias | Flushes]},
     {[], Grant#grant{pending = Pending#{OldTag := Waiting}, in_flight = InFlight + 1}};
 admit(Alias, Owner, Request, Grant) ->
-    case dispatch(Owner, Request, Grant) of
-        {{to_file, Node, Call}, Grant1} -> drain(to_file(Alias, Request, Node, Call, Grant1));
-        {Reply, Grant1} -> finish(Alias, Request, Reply, Grant1, Grant)
+    case lists:all(fun(Fid) -> directory_or_unheld(Fid, Grant) end, directory_fids(Request)) of
+        true ->
+            case dispatch(Owner, Request, Grant) of
+                {{to_file, Node, Call}, Grant1} -> drain(to_file(Alias, Request, Node, Call, Grant1));
+                {Reply, Grant1} -> finish(Alias, Request, Reply, Grant1, Grant)
+            end;
+        false ->
+            finish(Alias, Request, {error, enotdir}, Grant)
+    end.
+
+%% The fids of a request that must name a directory: the directory a make,
+%% an unlink or a rename acts in, and the fid a listing reads, opened or not.
+%% A request that names a file or a link there is enotdir before dispatch, so
+%% no callback is handed a node that is no directory as one, since a node's
+%% qid, recorded when its fid was walked, keeps its type while the node lives
+%% (design-files.md, qid identity). A walk checks each name it passes itself
+%% (walk_step/3).
+directory_fids({lcreate, Fid, _, _, _, _}) -> [Fid];
+directory_fids({mkdir, Dfid, _, _, _}) -> [Dfid];
+directory_fids({symlink, Dfid, _, _, _}) -> [Dfid];
+directory_fids({mknod, Dfid, _, _, _, _, _}) -> [Dfid];
+directory_fids({link, Dfid, _, _}) -> [Dfid];
+directory_fids({unlinkat, Dfid, _, _}) -> [Dfid];
+directory_fids({renameat, OldDfid, _, NewDfid, _}) -> [OldDfid, NewDfid];
+directory_fids({readdir, Fid, _, _}) -> [Fid];
+directory_fids(_) -> [].
+
+%% A fid the grant does not hold is left to dispatch/3, which answers ebadf.
+directory_or_unheld(Fid, #grant{fids = Fids}) ->
+    case Fids of
+        #{Fid := #fid{path = [{_, {Type, _, _}, _} | _]}} -> Type band ?ERX_P9_QTDIR =/= 0;
+        #{} -> true
     end.
 
 %% A request on an open file goes to the file process, in flight until its
@@ -467,7 +494,7 @@ dispatch(_, {link, Dfid, Fid, Name}, Grant) ->
 dispatch(_, {mknod, Dfid, Name, Mode, Major, Minor, _Gid}, Grant) ->
     make(Dfid, Name, {node, Mode, Major, Minor}, Grant);
 dispatch(_, {unlinkat, Dfid, Name, Flags}, Grant) ->
-    Kind = case Flags band ?AT_REMOVEDIR of
+    Kind = case Flags band ?ERX_P9_AT_REMOVEDIR of
                0 -> file;
                _ -> directory
            end,
@@ -497,7 +524,7 @@ version(Msize, _) when Msize < ?MSIZE_MIN -> {error, einval};
 version(Msize, ?VERSION) -> {ok, min(Msize, ?MSIZE_MAX), ?VERSION};
 version(Msize, _) -> {ok, min(Msize, ?MSIZE_MAX), <<"unknown">>}.
 
-attach(_, _, Afid, _, Grant) when Afid =/= ?NOFID ->
+attach(_, _, Afid, _, Grant) when Afid =/= ?ERX_P9_NOFID ->
     %% auth is not served, so the grant holds no fid an Afid could name.
     {{error, ebadf}, Grant};
 attach(Owner, Fid, _, Aname, #grant{module = Module, fs = Fs} = Grant) ->
@@ -556,7 +583,7 @@ walk_names([Name | Names], Path, Qids, Grant) ->
 %% stops at its next name and the callback is never asked to follow one (F2).
 %% ".." is the grant's: it stays at the root and otherwise returns to the
 %% directory recorded on the way down, even one removed since.
-walk_step(_, [{_, {Type, _, _}, _} | _], _) when Type band ?QTDIR =:= 0 ->
+walk_step(_, [{_, {Type, _, _}, _} | _], _) when Type band ?ERX_P9_QTDIR =:= 0 ->
     {error, enotdir};
 walk_step(<<"..">>, [_] = Root, _) ->
     {ok, Root};
@@ -574,7 +601,7 @@ lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
-        #{Fid := #fid{path = [{_, {Type, _, _}, _} | _]}} when Type band ?QTSYMLINK =/= 0 ->
+        #{Fid := #fid{path = [{_, {Type, _, _}, _} | _]}} when Type band ?ERX_P9_QTSYMLINK =/= 0 ->
             {{error, eloop}, Grant};
         #{Fid := #fid{path = [{Node, Qid, _} | _]}} ->
             case Module:open(Node, Flags, Fs) of

@@ -1085,8 +1085,13 @@ other client's request can come between its parts:
   only what the funnel admitted, so no path reaches a callback with a
   writing request on a read-only grant. A refused `remove` still clunks
   its fid. `erx_fs` then checks the bounds, maps fids to nodes, and
-  replies only to the request's alias, holding each reply to its
-  request with the grammar's reply check, so a callback's malformed
+  refuses with `enotdir` a request whose directory fid (the one of
+  `lcreate`, `mkdir`, `symlink`, `mknod`, `link` and `unlinkat`, both of
+  `renameat`, and the fid of `readdir`) names a node whose qid is
+  not a directory, so no callback is handed a file or a link as a
+  directory, whatever the tree checks itself. It replies only to the
+  request's alias, holding each reply to its request with the grammar's
+  reply check, so a callback's malformed
   answer reaches the client as `eio`. Each operation builds the grant it
   would leave before anything is kept, and only a reply the check
   accepts keeps it; a rejected reply is answered `eio` and, like a
