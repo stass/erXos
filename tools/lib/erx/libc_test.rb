@@ -31,6 +31,12 @@ module Erx
     # The boot image's 16 MiB budget (test/fixtures/structural_pack.rb), less room for its kernel and root.
     BATCH_BYTES = 12 * 1024 * 1024
     TASK_SECONDS = 60
+    # What the QEMU gate holds to passing: threads, TLS, stdio and malloc. Every other test
+    # is check-libc-test's report, not a verdict.
+    CANARY = %w[functional/pthread_cond functional/pthread_mutex functional/pthread_tsd regression/pthread_once-deadlock
+                functional/tls_init functional/tls_local_exec functional/tls_align
+                functional/snprintf functional/sscanf
+                regression/malloc-0].freeze
     BOOT_SECONDS = 120
     # A hung root costs this, at most. The test under way is then unknown, and the rest are not run.
     BOOT_LIMIT = 3600
@@ -161,6 +167,12 @@ module Erx
     end
 
     def totals(results) = results.map(&:state).tally
+
+    # What keeps a canary run from passing: every test of it must pass, and no boot may leak.
+    def canary_problems(totals:, pool_leaks:)
+      [("the canary's results are #{totals}" unless totals == { passed: CANARY.size }),
+       ("pool leaks in boots #{pool_leaks}" unless pool_leaks.empty?)].compact
+    end
 
     class Run
       FLAGS = %w[--target=aarch64-none-elf -pipe -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wno-unused-function

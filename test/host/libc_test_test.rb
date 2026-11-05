@@ -141,6 +141,15 @@ class LibcTestTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::NativeTask.judge_log('') }
   end
 
+  def test_the_canary_holds_only_a_whole_pass
+    size = Erx::LibcTest::CANARY.size
+    assert_empty(Erx::LibcTest.canary_problems(totals: { passed: size }, pool_leaks: []))
+    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1, failed: 1 }, pool_leaks: []))
+    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1, not_run: 1 }, pool_leaks: []))
+    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1 }, pool_leaks: []))
+    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size }, pool_leaks: [0]))
+  end
+
   def test_a_truncated_end_line_says_nothing
     results = read(['erx: libc-test: run a/cut', 'erx: libc-test: end a/cut status'], %w[a/cut])
     assert_equal(:unknown, results.first.state)
