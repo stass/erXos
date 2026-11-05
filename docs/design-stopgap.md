@@ -167,8 +167,10 @@ service's bodies directly.
    the archive, so the fault path maps it read-only by its sub-type: `l4sigma0_map_mem` is `sigma0`'s
    RAM request, which maps read, write and execute whatever the sub-type says (`memmap.cc:125`). After
    this step no page of the root is mapped on demand.
-4. Reads the manifest through its generated C reader, which allocates nothing. Later steps take
-   device entries, wall offset, seed and watchdog period from it.
+4. Reads the manifest through its generated C reader, which allocates nothing, and the kernel command
+   line from the handoff view's `bootargs` ([The command line](#the-command-line)). Later steps take
+   device entries, wall offset, seed and the system's arguments from the first, and the watchdog's
+   numbers and deterministic mode from the second.
 5. Builds the pool window and contiguous pools ([The pool](#the-pool)).
 6. Makes its own thread table ([Thread creation](#thread-creation)); fills the time page; seeds
    `rng.c`; writes its boot information page, flagged `ERX_BOOT_ROOT`; creates its gate, the service
@@ -176,15 +178,56 @@ service's bodies directly.
    event (`watchdog.c:127`).
 7. Points its own `_pager` and `_exc_handler` at its gate and runs the service and the watchdog.
    **From here the service alone touches the root's tables.**
-8. Creates its reaper and enters musl's start path, which runs ERTS.
+8. Creates its reaper and enters musl's start path, whose `main` calls `sys/erxos`'s `erx_runtime_main`.
+   ERTS reads the boot information page, so the one `argv` word in musl's start block goes unused.
 
 A failure in steps 1 to 6 prints its reason through `l4_vcon_write` and ends the machine, with no
 crash record.
 
-**Boot information.** The ABI's `erx_boot_info` layout is kept. `budget`, `space`, `group`,
-`group_ctl`, `group_stat`, `time_page` and `release` hold handles. `crash_area` and
-`system_connection` hold zero. The launcher writes a test task's page the same way and maps it
-read-only.
+### Boot information
+
+The ABI's `erx_boot_info` layout is kept. One pure function,
+`erx_boot_info_build(inputs, page, size)` in `liberx/backend/core/`, writes the page and returns a
+reason on refusal, with checked arithmetic on every offset. Each entry only gathers its inputs, and
+`erx_boot_info` then returns the same fields on both backends, validated by the same reader:
+
+| Field | The native root | The hosted entry |
+| --- | --- | --- |
+| `version`, `abi_version`, `domain_id`, `seal_addr` | 1, `ERX_ABI_VERSION`, 4, 0 | the same |
+| `flags` | `ERX_BOOT_ROOT`, with `ERX_BOOT_DET` under `erx.det=1` | `ERX_BOOT_ROOT` |
+| `pack_flags`, `release_addr` | the handoff's flags; its archive start, which `sigma0` maps one to one | the archive header's flags; the address of its `mmap` |
+| `group` | what `erx_group_create` returned | `ERX_CAP_SELF`, which a bind accepts |
+| `budget`, `space`, `group_ctl`, `group_stat`, `time_page`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*`, `erx_group_status` and `erx_clock_ns` find theirs with no handle, and no Phase 1 caller takes the rest | the same |
+| `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
+| node name | `system@` and the manifest's `host` | the same |
+| `args` | the manifest's `system_args`, then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
+| `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
+| `hwcap`, `hwcap2` | 0, which claims no optional feature; the interpreter asks for none | the same |
+| `limits` | the projection of the manifest's `system_runtime_limits` | the same |
+
+`system_args` is a new string of the manifest's header, under the same rule as a domain's `args`, so
+the system's start has the one configuration file every other setting has. `-root`, `-boot` and their
+kin are written there. Strings past `ERX_BOOT_STRINGS_MAX` (2,048), or a limits record out of range,
+refuses the boot with the reason, as in step 6's failure; ERTS never starts on a
+partial page.
+
+The page is a page of the root's image, written before any other thread reads it and not read-only:
+Phase 1 keeps no isolation inside a task. The launcher writes a test task's page with the same
+function and maps it read-only.
+
+The release's files are not checked one by one: the root checks the index and the last entry
+(`root_open.c`), and the hosted entry's `erx_pack_open` checks the index, so a read stays in bounds
+whatever a file holds. erXos's kernel checks each file at its first slice.
+
+### The command line
+
+`/chosen/bootargs` reaches the root through `erx_boot_handoff_view_t`'s `bootargs` and `bootargs_len`.
+`erx_boot_args_parse(bytes, length, out)` in `liberx/backend/fiasco/boot_args.c`, a pure function with a
+fuzz target, splits it on spaces and reads three kinds of word: `erx.watchdog=P,D,B`, through the
+existing `erx_watchdog_parse`; `erx.det=1`; and `erx.arg=WORD`, at most as many as fit the page's
+strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word refuses the
+boot with the word's name. Bootstrap cuts the record at the last whole word, so a parser never sees half
+a word.
 
 ## The Phase 1 manifest check
 
@@ -255,13 +298,15 @@ backend gives the same rows and refusals ([The hosted backend](#the-hosted-backe
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
 | `erx_umtx_wait`, `erx_umtx_wake` | musl's futexes | local: [The umtx table](#the-umtx-table) | correct within a task | across spaces; `ERX_EFAULT`, `ERX_ESTALE`, `ERX_EINTR` |
 | `erx_thread_create`, `_start`, `_exit`, `_set_affinity` | `pthread_create`, ERTS's threads, `libc-test` | [Thread creation](#thread-creation), [Deletion](#deletion); affinity is `l4_scheduler_run_thread` | no free index `ERX_ENOMEM`; an empty mask, or one naming no CPU, `ERX_EINVAL`; affinity runs the thread on one CPU of the mask, its own if the mask holds it; `erx_thread_stop`, `_read`, `_write`, `_set_urgency` `ERX_ENOTSUP` | backed and charged at create; those calls work; the thread may run on any CPU of its mask |
+| `erx_pthread_create_executor` | ERTS's normal and dirty CPU schedulers, through `ethr_thr_create` | natively musl's `pthread_create` with the executor class, in the row above; hosted a start wrapper ([Making an executor](design-runtime.md#threads-and-synchronisation)) | `pthread_create`'s; no free index or slot `EAGAIN` | the same call |
+| `erx_release_entry` | `erx_prim_file.c` | local, on both backends: `erx_pack_entry_at` and `erx_pack_path_at` over the archive `erx_pack_open` accepted, counting from the first path under `system/` | path, size and offset from `release_addr`; an index past the run `ERX_ERANGE` | `erx_object_info(release, ERX_INFO_IMAGE_ENTRY, ...)` |
 | `erx_space_create`, `erx_space_stop`, `erx_image_map` | the test-task launcher in the root (`libc-test` M3, BeamAsm M4) | service: `l4_factory_create_task`; segments through `elf_plan.c`, copied through the window, cleaned and invalidated, mapped code read-execute and data read-write; [task exit](#task-exit). `parent`, `fault`, `label` ignored | a "domain" is a task with no budget, grant, lanes, facets or exit record; `erx_space_pause`, `_resume`, `_clear_caps`, `_quiesce`, `_copy` `ERX_ENOTSUP` | parents, fault gates, exit records, quiesce |
 | `erx_cap_dup`, `erx_cap_close`, `erx_object_destroy`, `erx_object_info` | Erlang NIF handles, the launcher | service: the handle table; destroy deletes the Fiasco objects, and for memory revokes every mapping first | destroying a started thread, `erx_cap_pass` `ERX_ENOTSUP` | generations, rights, transfer at rendezvous; a thread ends at once |
 | `erx_budget_create`, `_resize`, `_watch` | the domain library's root entry (M3), the inspector | service: [Reporting a budget](#reporting-a-budget) | `used` partial, the rest `unsupported`; resize, watch `ERX_ENOTSUP` | exact, all fields |
 | the time page, `erx_time_set_wall` | ERTS's time, deadlines | service fills a page mapped read-only into every task: the scale of the architecture's user-readable counter, the wall offset; reading is local | correct layout | none |
 | `erx_entropy_read`, `erx_entropy_add` | ERTS's `crypto` seed, the host link | service: `rng.c`, from the counter and the manifest's seed | `quality: low` in the banner | in the kernel |
 | `erx_debug_log`, `erx_log_read` | `liberx`, ERTS's crash path, test tasks; the Erlang log reader | service: [The console](#the-console) | correct | in the kernel |
-| `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, `ERX_ENOTSUP` in a task. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
+| `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, `ERX_ENOTSUP` in a task, and hosted `ERX_OK` with no effect. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
 | a thread's fault | a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | crash record, thread `unknown`; ends the task, or the machine for the root | to the fault gate, with the thread's identity |
 | IPC gates, messages, lanes, `erx_mem_copy`, `erx_mem_child`, paged objects, `erx_vcpu_*` | none | none | `ERX_ENOTSUP` | supported |
 
@@ -522,7 +567,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `futex` wait and wake | `erx_umtx_wait`, `erx_umtx_wake` | no priority inheritance: its probe reads `ENOSYS` |
 | `mmap`, `mprotect`, `munmap` | `erx_vm_reserve`, `erx_space_protect`, which commits what it makes accessible, `erx_vm_release` | anonymous memory only; write and execute together is `EACCES` |
 | `brk` | reports no room | mallocng uses `mmap` alone |
-| `__clone` | `erx_thread_create`, `erx_fiasco_thread_set_clear_word`, `erx_thread_start` | only `CLONE_THREAD` |
+| `__clone` | `erx_thread_create`, `erx_fiasco_thread_set_clear_word`, `erx_thread_start` | only `CLONE_THREAD`; a worker, or an executor with `ERX_CLONE_EXECUTOR`, which only `erx_pthread_create_executor` causes |
 | `exit`, `__unmapself` | `erx_thread_exit`, `erx_thread_exit_release` | |
 | `exit_group` | `erx_machine_end` | the root's form |
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
@@ -634,6 +679,17 @@ Phase 1 acts on no finer kind.
 
 A root thread at priority 255 runs `watchdog.c`'s step machine: sleep one period, step over the pet word, which holds the time of the last pet.
 In deterministic mode the step is off and the machine page says so. A missed pet takes the end path, with `ERX_END_OFF`, as a root fault does.
+
+Its numbers and mode come from [the command line](#the-command-line), with the design's defaults of 1, 5 and 60 seconds. **The pet is the design's
+own**: `erx_watchdog`, a process at priority `max` of the release's `kernel`, started among `kernel`'s first children, calling the watchdog NIF from a
+normal scheduler each period `P`. Its liveness list is the manifest's `liveness` records, which may be empty, so nothing is special about a release with
+no services: the first pet follows the first period. Until then the boot races `B` alone, from the watchdog thread's start, which covers ERTS's start,
+`init` and `kernel`'s start up to that process. A hang in any of them ends the machine with a crash record at `B`, as it should.
+
+The root itself never pets on ERTS's behalf: a pet must mean that schedulers run and timers fire. The harness gives QEMU `-append` from one table: TCG
+`erx.watchdog=1,30,600`, HVF the defaults, deterministic runs `erx.det=1`. A run's own deadline stays at or above its `B`, so a stuck boot ends in the
+crash record rather than in the harness's kill. The time to the first pet has not been measured, since no ERTS has reached it: the first native boot
+prints it under both accelerators. A first pet past 60 seconds under HVF is a finding to explain, not a number to raise.
 
 ### The end path
 
@@ -791,6 +847,8 @@ the tests.
 | Case | Seeded failure, and what it shows |
 | --- | --- |
 | **Image and banner.** `tools/erx check-boot-image` and the QEMU gate's `boot_image` suite: the banner image, the two-file form, and the damage cases, each refusing with its reason | a damaged entry that boots fails the case |
+| **Boot information.** Host tests of `erx_boot_info_build` and `erx_boot_args_parse` at every limit, with fuzz targets on the page's reader and the command line; the root and the hosted entry fill the page from one manifest and a test compares the two field by field, those the table says differ excepted | a seeded unchecked `args_off` fails the reader's bounds case under AddressSanitizer; a word past the strings limit that does not refuse fails its case; a seeded wrong `pack_flags` in the root fails the comparison |
+| **The watchdog from the command line.** A test release boots under `erx.watchdog=1,5,600` with `erx_watchdog` running: its transcript shows the first pet's time, and it runs past 60 seconds under TCG, then halts cleanly | `erx.watchdog=1,5,2`: the same release ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` before its first pet, which shows the numbers came from the command line; a release whose `erx_watchdog` stops ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` at `D`; a malformed `erx.watchdog=` refuses the boot, naming the word |
 | **Native boot.** The QEMU gate's `native_boot` suite: the root accepts the record through `user_ptr`, checks the archive's last entry, writes one line through `l4_vcon_write`, and shuts down, so QEMU exits by itself | shutdown removed: the deadline fires. `user_ptr` left 0: the root's accept refuses. The archive's sub-type removed: `sigma0` refuses the page fault and the root's line never comes |
 | **Debug log.** `tools/erx check-debug-log` and the gate's `debug_log` suite: the probe's calls, good and malformed, on the hosted backend and as the root over the native path to `l4_vcon_write`, compared record by record | `make check-qemu-mutant`: the native call asks for one byte more than a full message, and only the target's transcript differs |
 | **Memory.** The QEMU gate's `native_memory` suite, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents; every protection change keeps contents and its one page; the whole pool committed at once; the pool's count before and after agree | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros. Pool check removed: a refused protect is not refused |
@@ -843,6 +901,11 @@ These differ from the native backend, and a caller must not depend on either sid
 * **An object fires in the caller's thread.** A trigger has listed its object and advanced the epoch by the time it returns, each fire counted, and a bound object rebinds under a new label or unbinds. Natively a trigger reaches the dispatcher later, the kernel keeps two fires not yet received as one, and a second bind is `ERX_ENOTSUP`; a caller must wait on the epoch, as an executor does. So `irq_ready_once` and `irq_line_refused` run hosted only, and the rest of the IRQ row on both.
 * **A reset is exit status 75**, an end `exit(0)`.
 * **A fault is the host's**: the process ends with the host's signal, under `lldb` or a sanitizer, and writes no crash record.
+* **A runtime links libSystem.** ERTS's threads are libSystem's pthreads with libSystem's TLS, and `erx_utcb_self` is a thread-local block (`hosted/log.c:40`), so it works on any host thread. Only a thread that `erx_thread_create` or `erx_pthread_create_executor` made has a slot; for one that plain `pthread_create` made, `erx_executor_slot` says none and `erx_park` is `ERX_ETYPE`, as for a worker natively.
+* **The entry maps an archive.** `liberx/backend/hosted/start.c` holds `main(ARCHIVE, ARGS...)`: it `mmap`s the file read-only, closes it, runs `erx_pack_open` and the manifest reader, builds [the boot information page](#boot-information) and calls `erx_runtime_main`. A missing file or a refusal prints its reason and exits with status 1. A file truncated during the run faults, as the host's. `erx.*` words do not exist here: arguments after the archive's path go to ERTS.
+* **The archive has a root that never runs.** `erx_pack_open` requires a root image and a manifest (`pack.c:405`, `:505`), and the packer sizes the root as an executable for the target. A hosted release is packed by the same `Pack#build`, with the same manifest and the same entries under `system/`, and a minimal static executable as `system/root`, so hosted iteration needs neither Fiasco's build nor the cross-compiled ERTS. A test compares the two archives' release files, path and hash; the root, the manifest and the notices, which name what each build links, are excepted.
+* **No watchdog.** A pet is accepted and does nothing, so a process stopped under `lldb` lives, and `erx_watchdog` runs as natively.
+* **The console's driver is `erx_stdio`** ([design-runtime.md](design-runtime.md#the-console-and-standard-io)).
 
 ### Transport
 
@@ -877,6 +940,12 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
 
 The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
+
+**The ERTS port:**
+
+* An unmodified interpreter `beam.smp` has been linked against this backend and booted as the root under TCG. It reached `main` and stopped at `sys.c:396-398`'s `open("/dev/null")` loop, so nothing after `erts_sys_pre_init` has run natively.
+* `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`; `l4_scheduler_info` as a CPU count (`scheduler.h:129`); a release's first pet.
+* Configure's `aarch64-hosted-erxos` target, and whether its cross-compile file can pin `ac_cv_func_madvise` and `ac_cv_func_mlockall` as written.
 
 **Later packages:**
 

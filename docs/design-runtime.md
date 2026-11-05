@@ -293,7 +293,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | Deferred reclamation | thread progress (`erl_thr_progress.c`) | none needed in the kernel | **kept** inside the runtime; a parked executor counts as asleep | proven, and the code barrier rides on it |
 | Long-running C work | dirty CPU and I/O schedulers | executors and workers | **kept**: dirty CPU schedulers are executors, dirty I/O schedulers workers | the classes match what each pool may do |
 | Memory | allocators over carriers from `erl_mmap` and `erl_mseg` over `mmap` | reserve, commit, decommit, release in the kernel, charged to the domain's budget | **kept** inside carriers; the primitives are kernel calls ([Memory](#memory)) | the domain budget protects other domains; inside a domain, `max_heap_size` is the bound |
-| Threads, locks, thread data | ethread over pthreads; futexes on Linux | `liberx` threads and umtx | **kept**: ethread over musl's pthreads, which run on `liberx` | the least change; umtx waits on private memory are allowed to executors |
+| Threads, locks, thread data | ethread over pthreads; futexes on Linux | `liberx` threads and umtx | **kept**: ethread over the C library's pthreads, musl's on `liberx` natively and libSystem's hosted, with its events over umtx in every build ([Threads and synchronisation](#threads-and-synchronisation)) | the least change; umtx waits on private memory are allowed to executors |
 | Messages inside a domain | signal queues | none | **kept** | Erlang's semantics are the system's |
 | Messages between domains | distribution: node tables, entries, controllers, control messages, lazy decode (`dist.c`, `erl_node_tables.c`, `external.c`) | lanes, the funnel, the export table | **merged**: every domain is a node `<id>@<host>` with its domain id as creation, and each connection is one stock distribution entry, its controller a port whose driver speaks the lane; the funnel validates each frame before `erts_net_message`; the export table answers authority ([Connections in ERTS](#connections-in-erts)) | ERTS already routes every remote operation through one path, keeps flow control per entry, and decodes lazily in the receiver; a node per domain keeps its node table, `net_kernel` and its tools stock |
 | References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a bounded local registry resolves aliases ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
@@ -369,12 +369,19 @@ of behaviour, however many lines it touches:
 | `beam/beam_load.c` | 21. `prepare_loading` accepts, in the system domain, only bytes in installed storage |
 | `beam/erl_nif.c` | 22. `enif_select` is removed; the device and pipe NIFs register events through the event table |
 | `beam/jit/`, asmjit's `VirtMem` | 23. executable memory is a JIT object mapped twice; 24. the translator's error paths fail a load instead of ignoring an error |
-| `beam/erl_init.c` | 25. arguments, environment and the node name come from the boot information page |
+| `beam/erl_init.c` | 25. the environment and the node name come from the boot information page, and the arguments arrive as the `argv` that `sys/erxos`'s `erx_runtime_main` builds from it for `erl_start` |
 | `beam/io.c`, `beam/erl_port_task.c` | 26. `open_port` accepts only erXos's linked-in drivers; spawn, `fd` and forker paths are deleted |
 | `beam/dist.c` (registered names) | 27. on a connection to another domain, the sender drops every operation on the peer's registered names: a send to `{Name, Node}` (`REG_SEND`) is dropped and counted, and a monitor by name is answered with a `DOWN` of reason `noproc` locally and never sent, so stock code writes no frame the receiving funnel refuses |
 | `lib/kernel/src/net_adm.erl` | 28. `ping/1` toward a node at the machine's host name answers `pong` when the node is `node()` or a member of `nodes()` and `pang` otherwise, and never calls `erlang:disconnect_node/1`, where stock OTP calls `net_kernel` by its registered name and disconnects the node after a failure: a connection between domains exists only by introduction, so a ping of an unconnected domain has nothing to try, and a ping of a connected one needs no call; a ping of another machine's node is stock's |
+| `lib_src/pthread/ethread.c`, `include/internal/ethread.h` | 29. `ethr_thr_opts` takes `executor`, and `ethr_thr_create` then calls `erx_pthread_create_executor`; 30. the monotonic clock is `erx_clock_ns`, without `init_get_monotonic_time`'s `uname` check, which reads its buffer whether or not the call succeeded |
+| `lib_src/pthread/ethr_event.c`, `include/internal/pthread/ethr_event.h` | 31. events are the futex variant in every build, with `ETHR_FUTEX__` over `erx_umtx_wait` and `erx_umtx_wake` |
+| `lib_src/common/erl_misc_utils.c` | 32. `erts_cpu_info_update` counts the boot information page's `cpuset`, in place of `sysconf` and `sched_getaffinity` |
+| `beam/erl_time_sup.c` (CPU time) | 33. `erts_runtime_elapsed_both` reads the group's usage from `erx_group_info`; where that is `unsupported`, `statistics(runtime)` fails with `notsup` |
+| `beam/erl_crash_dump.c` | 34. the dump goes to the sink of [Crash handling](#crash-handling), with no `open`, `fdopen` or thread suspension |
+| `beam/bif.c` | 35. `display_string/2`'s standard-input branch, which feeds a terminal through `TIOCSTI`, is compiled out |
+| `beam/sys.h`, `beam/erl_drv_thread.c`, `beam/erl_driver.h`, `sys/common/erl_sys_common_misc.c`, `nifs/common/zlib_nif.c`, `include/internal/erl_misc_utils.h`, and the two event files above | 36. `__erxos__`, which every erXos build defines, turns off each block keyed on `__APPLE__` or `__DARWIN__`, so a hosted build compiles what a native build compiles |
 
-Twenty-eight edits outside `sys/erxos`, in twenty-three files, the JIT's
+Thirty-six edits outside `sys/erxos`, in thirty-six files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
@@ -1333,23 +1340,72 @@ questions](#risks-and-open-questions)).
 
 ### Threads and synchronisation
 
-ERTS's ethread library keeps its pthread backend, over musl's pthreads,
-which erXos reshapes to run on `liberx`:
+ERTS's ethread library keeps its pthread backend, over the C library's
+pthreads: natively musl's, which erXos reshapes to run on `liberx`, and
+in [hosted mode](#hosted-mode) libSystem's.
 
-* `pthread_create` creates a worker with `erx_thread_create`, whose
-  initial registers it writes into the caller's UTCB, in the
+* `pthread_create` creates a worker. Natively it uses `erx_thread_create`,
+  whose initial registers it writes into the caller's UTCB, in the
   domain's group, a stack from committed private memory with a reserved
   guard page below it, and the thread pointer set to musl's thread
-  descriptor; a non-standard attribute, set only by the adapter,
-  creates an executor and returns the slot the kernel assigned.
+  descriptor.
+* `erx_pthread_create_executor` creates an executor, below.
 * musl's futex calls (`__wait`, `__wake` and its `futex` system calls)
-  are `liberx`'s umtx calls, so ethread's mutexes, condition variables
-  and events (its futex variant, as on Linux) wait on words in private
-  memory, which executors may do. Where an interface beyond waiting and
-  waking is needed, it follows FreeBSD's `_umtx_op` rather than Linux's
-  futex extensions ([design-kernel.md](design-kernel.md#umtx)).
+  are `liberx`'s umtx calls, so ethread's mutexes and condition variables
+  wait on words in private memory, which executors may do. Where an
+  interface beyond waiting and waking is needed, it follows FreeBSD's
+  `_umtx_op` rather than Linux's futex extensions
+  ([design-kernel.md](design-kernel.md#umtx)).
+* **ethread's events are the futex variant in every build** (edit 31),
+  with `ETHR_FUTEX__` over `erx_umtx_wait` and `erx_umtx_wake`, a relative
+  timeout turned into `erx_clock_ns() + timeout`. Left to itself, configure
+  finds no `linux/futex.h` on either C library, and `ethr_event.c` then falls
+  to its other form, which keeps a pipe in each event for timed waits
+  (`setup_nonblocking_pipe`, `select`, `read`, `write`). Over umtx there is
+  one form, which runs under `lldb` and the sanitizers as it runs natively.
 * Thread exit is `erx_thread_exit`; joining is a umtx wait on the thread's
   descriptor.
+
+**Making an executor.** A thread's class is fixed when it is created, on
+every backend, and invariant R3 rests on that. ERTS's threads are pthreads,
+so what it needs is `pthread_create` for an executor:
+
+```c
+int erx_pthread_create_executor(pthread_t *thread, const pthread_attr_t *attr,
+    void *(*start)(void *), void *arg);
+```
+
+The arguments, the result and the thread are `pthread_create`'s, and the new
+thread is an executor from its first instruction, which reads its slot with
+`erx_executor_slot`. The call is declared in `liberx/pthread_executor.h`, apart
+from `liberx/backend/api.h` because the root's freestanding code includes that
+header with no `pthread.h` to include. Its body is the one place the backends
+differ:
+
+* **Natively** it lives in musl's tree (`src/thread/erxos/`): it copies the
+  attribute, sets a field only it writes and calls `__pthread_create`, which
+  passes `ERX_CLONE_EXECUTOR` in `__clone`'s flags, and `__clone` passes
+  `ERX_THREAD_CLASS_EXECUTOR` to `erx_thread_create`. erXos's kernel changes none
+  of it.
+* **Hosted** it lives in `liberx/backend/hosted/thread.c`. libSystem's
+  attribute has no room for a class, so a start wrapper does the work: the
+  caller claims a thread record and a slot, and the new thread sets
+  `thread_self` to the record, pushes a cleanup handler and calls `start`.
+  The handler gives back the slot and the record whether the thread returns
+  or calls `pthread_exit`, and `erx_thread_exit` on such a thread is
+  `pthread_exit`.
+
+`ethr_thr_opts` gains `executor` (edit 29), `ethr_thr_create` alone calls the
+function, and `erts_start_schedulers` alone sets the option, for normal and
+dirty CPU schedulers (edit 5). Both rules are build checks. A slot is claimed by the
+creating thread, so no free slot is that call's `EAGAIN`, never a surprise in
+the new thread. `+S` and `+SDcpu` are at most 32 each and a group has 64 slots,
+so a run of ERTS meets `EAGAIN` only when another caller has spent slots;
+`ethr_thr_create` returns it and ERTS's start ends with its own diagnostic,
+`Failed to create scheduler thread` (`erl_process.c:8947`, `:8962`). A call
+that turns the running thread into an executor would be simpler hosted, but
+it needs a kernel call that exists for no other reason, and it would make class
+a state that changes.
 
 No thread of a runtime serves another domain's page faults: a fault on
 memory a runtime mapped resolves from the memory object or ends the
@@ -1481,6 +1537,50 @@ resolved component by component with `.` and `..` handled lexically.
 storage is a file server, mounted in the namespace through the domain's
 facet ([design-storage.md](design-storage.md)).
 
+**The release file system is a view of a sorted list of paths.** A release is
+the archive's entries whose paths start `system/`; the index is sorted, so they
+form one run, and a file's path in the namespace is its entry's path without
+that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
+of another path, so a directory needs no record of its own: `d` is a directory
+exactly when some path starts `d/`, and `/` always is. The provider's core
+is pure and builds for the host: given the names `erx_ns_resolve` returned, a
+binary search answers file, directory, not found, or a file used as a directory,
+and listing a directory walks its range and yields each next name once. An empty
+directory cannot exist, and nothing can disagree with the index.
+
+| `prim_file` call | Result |
+| --- | --- |
+| `read_file`, `open` for reading, `read`, `pread`, `position` | a file's bytes, from `release_addr` plus the entry's offset; a file's position is its handle's, under `prim_file`'s own per-file state; opening a directory is `eisdir` |
+| `list_dir` | the next names, without `.` and `..` |
+| `read_file_info`, `read_link_info` | the same for both: `regular` mode `0444` or `directory` mode `0555`, `read` access, size, one link, owner, group and times 0, since an archive records none and a build is reproducible |
+| `read_link` | `einval`, as stock for a path that is not a link: the provider has no links |
+| `get_cwd`, `set_cwd` | starts at `/`; set takes a directory that exists, under the NIF's lock |
+| any write mode, `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
+| `efile_from_fd`, `efile_dup_handle`, `allocate`, `advise`, `altname` and anything else | `enotsup` |
+| a path over the limits, or not UTF-8 | as [design-files.md](design-files.md#resolving-a-path) says: `enametoolong`, `einval` |
+| a missing name; a file used as a directory | `enoent`; `enotdir` |
+
+Those are the calls of `erl_prim_loader` (`read_file`, `list_dir`,
+`read_file_info`, `read_link_info`, `get_cwd`, `read_link`) and more; its
+archive branches run only for a path inside a `.ez` file, and stay dormant.
+`efile_data_t` here holds an entry and a position, and no file descriptor exists
+anywhere in the layer. The table of names is built once when the `prim_file` NIF
+loads, from `erx_release_entry(index, &entry)`, which alone reads the index,
+and is immutable afterwards, so readers take no lock. A table that cannot be
+allocated ends the start with a diagnostic.
+
+Two seams keep the rest of the system out of this. New kinds of file are new
+rows of the namespace, and every path already passes `erx_ns_resolve`: a
+domain's namespace may have the single row `/`, and `/tmp`, an EROFS image or a
+file server add rows without moving a caller of `prim_file`. How the index is
+read is `erx_release_entry`, a `liberx` call: over `erx_pack_entry_at` and
+`erx_pack_path_at` on Phase 1's backends, hosted included
+([design-stopgap.md](design-stopgap.md#boot-information)), and over
+`erx_object_info(release, ERX_INFO_IMAGE_ENTRY, ...)` on erXos's kernel, which
+keeps the index unmapped ([design-kernel.md](design-kernel.md#the-boot-image)).
+Whether a read copies or returns a binary over the pages is the provider's own
+affair, and no caller can tell.
+
 ### The console and standard I/O
 
 The machine's console is a device like any other, and its UART belongs
@@ -1498,6 +1598,27 @@ system domain, over the domain's system connection, so no other domain
 can write to a terminal at all. `standard_error` in a domain writes
 through the debug log, `erx_debug_log` with the line in the caller's
 UTCB, which the kernel escapes.
+
+**`erx_stdio`, hosted mode's console driver.** `erx_console` is one program in
+every build, and the driver is the one process that differs, since a hosted
+process has no UART to map (`erx_mem_create_physical` and `ERX_IRQ_LINE` are
+refused there). Both drivers take the same two messages,
+`{erx_console_output, Bytes}` from `erx_console` and
+`{erx_console_input, Bytes}` to it, and `-erx console_driver Module`, an ordinary
+argument of the boot information page, names the driver: the hosted entry adds
+`erx_stdio`, and otherwise the manifest's console UART has its driver.
+`erx_stdio` is an Erlang process in `kernel` over `erx_stdio_nif`. A worker
+thread of the NIF sets a terminal on standard input to raw mode, restores it at
+exit, reads standard input into a ring and triggers a software IRQ object bound
+to the group, whose label the event table registers to `erx_stdio`, so input
+travels the same path as a device's interrupt and every executor can park while
+the terminal is idle. Output is `write` on standard output from a dirty I/O NIF.
+End of file on standard input is `halt(0)`, and a read error prints its reason
+through the debug log and is `halt(1)`. `erx_stdio_nif.c` is the one source in
+the runtime that touches a host file descriptor. Only the hosted image's static
+NIF list names it, and natively the module is present and never started. It
+stays as long as hosted mode does: it is hosted mode's device, not a step toward
+the UART driver, which is a process over [the device NIF](#the-device-nif).
 
 **Pipes in a runtime.** A session's domain is the home of its pipes: its
 pipe server, a process of the command server, creates and keeps every
@@ -1895,6 +2016,75 @@ formatting functions, mallocng and `libm` stay as upstream
 C library's: `sys/erxos` owns exact string-to-double and double-to-string
 conversion, so float text never depends on which C library is linked.
 
+### What ERTS imports
+
+**One list of imports, checked at both links, is what makes the two C libraries
+interchangeable under ERTS.** The objects of ERTS, `sys/erxos` and ethread
+included, may import from outside themselves only `liberx`'s calls and the names
+in `sys/erxos/imports.txt`:
+
+* ISO C's memory, string, character, conversion, `math.h`, `malloc` family, `abort`
+  and `exit`; `gmtime_r`, `localtime_r`, `mktime` and `tzset`;
+* output through `stdout` and `stderr`, and `write` on descriptors 1 and 2;
+* `sysconf`, for `_SC_PAGESIZE` and `_SC_THREAD_STACK_MIN` alone
+  (`ethr_aux.c:208`, `:235`);
+* the pthreads calls for threads, attributes, mutexes, condition variables,
+  read-write locks and keys, and `sched_yield`;
+* a short section for each C library of the names its compile emits, such as
+  `__errno_location` for musl and `__error` for libSystem.
+
+`open`, `read`, `close`, `pipe`, `fcntl`, `socket`, `poll`, `select`, `sigaction`,
+`fork`, `uname` and `getrusage` are not on it, so `sys/erxos` cannot assume a file
+descriptor exists. Stock ERTS assumes it early: `erts_sys_pre_init` spins on
+`open("/dev/null")` until it gets a descriptor above 2
+(`sys/unix/sys.c:396-398`), which is forever where `open` fails with `ENOSYS`,
+and it is where a stock interpreter image stops under the Phase 1 seam. The check
+turns that class of stop into a build failure, on a Mac, before anything boots.
+
+`make check-runtime-seam` reads the undefined symbols of the objects with `nm`
+before each link, and fails on a name not on the list, naming the object. Then
+"what libSystem answers and musl refuses" has no members: neither is asked. The
+same check reads the native image's calls to `__erx_syscall` and fails on a
+number the seam refuses, except a closed list of pairs of number and musl function
+that musl copes with, each with its reason: `mremap` in `realloc`, `__map_file`'s
+calls, `exit`'s `ppoll`, `clock_gettime`'s `gettimeofday`, and `sysconf`'s calls for
+names ERTS does not ask. A number the disassembly cannot read is closed by the name
+check. The object of `erx_stdio_nif.c`, in the hosted image alone, is read against a
+list of its own.
+
+**How each refused call ends.** A probe linked an unmodified interpreter
+`beam.smp` against the Phase 1 seam: 60 refused call names, plus an `unknown`
+row. That row hides musl's cancellation points, whose number travels through
+`__syscall_cp`: `read`, `write`, `close`, `openat`, `pread`, `pwrite`, `connect`,
+`accept`, `recv` and `send` and their kin, `ppoll`, `pselect`, `epoll_pwait` and
+`nanosleep`, some of which the 60 also name by another route. So the 60 are a
+floor. The callers below come from the image's disassembly (direct calls only),
+and each verdict from reading the caller. No group needs a new row of the seam.
+
+| Group | Who calls them | `sys/erxos` | Sure? |
+| --- | --- | --- | --- |
+| **Files**, 24: `chdir`, `close`, `dup`, `dup3`, `faccessat`, `fadvise64`, `fchmodat`, `fchownat`, `fcntl`, `fstat`, `ftruncate`, `getcwd`, `getdents64`, `linkat`, `lseek`, `mkdirat`, `newfstatat`, `openat`, `read`, `readlinkat`, `renameat`, `symlinkat`, `unlinkat`, `utimensat` | `efile_*`; `fd_start`, `spawn_start`, `forker_*`; `erts_poll_*`; `inet_*`, `essio_*`, `esock_*`; `erl_crash_dump_v`, `erts_sys_pre_init`, `sys_tty_reset`; `display_string_2` | **Replaced** for `efile_*`, by `erx_prim_file.c`. **Deleted** with their callers for the rest (edits 26, 34, 35). musl's own: `__map_file` from `tzset` gets `ENOSYS` and musl uses UTC, and the hosted entry sets `TZ=UTC` so both builds agree; the stdio reads and seeks are unreached with no input stream | High |
+| **Sockets**, 10: `bind`, `getpeername`, `getsockname`, `getsockopt`, `listen`, `setns`, `setsockopt`, `shutdown`, `socket`, `socketpair` | `inet_drv.c`, `prim_socket_nif.c`, `unix_socket_syncio.c`, `prim_net_nif.c`, `forker_start`; musl's resolver, reached only from those | **Deleted**: the `socket` and `net` NIFs and every driver but erXos's two (edit 26). `prim_inet:open` catches the refused port as `{error, eprotonosupport}` (`prim_inet.erl:103`, `:120`), and `inet_config` then takes the host name `nohost` (`inet_config.erl:223-241`) | High for the C. Medium that `kernel` boots with no socket driver: that path is read, the rest of its start is not |
+| **Spawn**, 4: `clone`, `execve`, `pipe2`, `setsid` | `forker_start`, `spawn_start`; `pipe2` also from `erl_sys_args`, `erts_poll_create_pollset`, `erts_sys_is_area_readable` and ethread's `setup_nonblocking_pipe` | **Deleted**, ethread's by edit 31. `erts_sys_is_area_readable`, which only the crash dump asks, answers 0, so a dump leaves out the stacks it cannot prove readable | High |
+| **Poll**, 6: `epoll_create1`, `epoll_ctl`, `ppoll`, `timerfd_create`, `timerfd_gettime`, `timerfd_settime` | `erts_poll_*`; musl's `__init_libc`, only for a secure start, which the start block does not ask for; musl's `exit`, whose second caller loops on it until the first ends the machine | **Deleted**, for the event table (edits 3, 22). `select` in `erts_sys_main_thread` and `erts_milli_sleep` is **replaced** by an unbounded and a timed umtx wait on a private word | High. The second `exit` caller spins instead of sleeping, for a moment, on the way to the end |
+| **Signals**, 2: `rt_sigaction`, `setitimer` | `sys_signal`, `erts_set_signal`, `init_break_handler`, `sys_init_suspend_handler`, `erts_sys_unix_later_init`; `alarm` in the crash path | **Deleted**. `os:set_signal/2` is `badarg`; only `prim_tty_sighandler`, on the terminal path erXos does not take, calls it (`prim_tty_sighandler.erl:29-30`) | High |
+| **Memory**, 3: `madvise`, `mlockall`, `mremap` | `erts_mem_discard` from `abandon_carrier` and `mbc_free`; `erts_alloc_init`; `erts_mremap` and mallocng's `realloc` | **Deleted**: the cross-compile file pins `HAVE_MADVISE` and `HAVE_MLOCKALL` off, which leaves `erts_mem_discard` empty and `+Mlp` refused; edit 19 removes `erts_mremap`. mallocng copies when `mremap` fails (`realloc.c:33-35`) | High. Discarded carrier pages stay committed: a memory cost, not a fault |
+| **Information**, 11: `clock_getres`, `getpriority`, `getrlimit`, `getrusage`, `gettimeofday`, `prlimit64`, `sched_getaffinity`, `sched_setscheduler`, `setpriority`, `sysinfo`, `uname` | `sys_init_time`; `nice` in the crash path; `sysconf` for limits from `erts_poll_init` and `inet_drv`; `erts_runtime_elapsed_both`; `clock_gettime`'s own fallback; `erts_cpu_info_update`; `pthread_create` with an explicit policy, which ethread never sets; `init_get_monotonic_time`, `os_flavor`, `os_version` | **Replaced**: time by the time page (edit 20), CPU counts by the page (edit 32), CPU time by the group's usage (edit 33), the clock check gone (edit 30), `os_flavor` and `os_version` by constants. **Unreached**: `gettimeofday`, `sched_setscheduler`, `sysinfo`, and the limits once their callers are gone | High, with two traps closed by name: stock `erts_runtime_elapsed_both` ends the runtime when `getrusage` fails (`erl_time_sup.c:1434`), and `sysconf(_SC_NPROCESSORS_ONLN)` silently answers 1 when `sched_getaffinity` is refused (`musl/src/conf/sysconf.c:204-209`) |
+
+What a read cannot settle, and what settles it:
+
+* **A call through a function pointer** is invisible to the disassembly above. The
+  import check closes it by name at link, and any remaining number shows at the `default:` of `__erx_syscall`, traced during the
+  first native boot. The probe's own native run ended at the spin above, so
+  nothing after `erts_sys_pre_init` has been observed.
+* **Whether `kernel` starts without sockets, ports or `heart`.** The first hosted
+  boot with those NIFs and drivers removed settles it.
+* **Which of OTP's suites need `statistics(runtime)`.** Of `kernel` and `stdlib`,
+  `dist_util` alone calls it, and the suites are unread. A `notsup` that the oracle comparison shows to
+  matter gets a body in the Fiasco backend, from `l4_thread_stats_time`.
+* **The contents of `imports.txt`.** The categories above come from reading ERTS;
+  the names come from the first link.
+
 ### liberx
 
 `liberx` is the library through which every runtime and native program
@@ -2051,6 +2241,34 @@ all domains in one process. They run under ASan, UBSan and TSan and under `lldb`
 OTP's suites and erXos's own, for fast iteration. QEMU remains
 authoritative: a test that passes only hosted is not a pass.
 
+**A hosted runtime links macOS's libSystem, not musl.** A macOS process owns its
+thread pointer register and needs libSystem for `pthread_create` and the
+sanitizers, and musl finds its thread descriptor through that register, so a
+second C library in the process is not on offer. musl's seam is under ERTS only
+natively. `sys/erxos` sits directly on `liberx` on both backends.
+
+**Nothing in `sys/erxos` differs between backends.** It is the same list of
+files with no conditional on the backend, and a source check fails on one naming
+`__APPLE__`, `__DARWIN__`, `__linux__` or a backend. What must differ lies below
+or beside it, in a closed set of places, and anything else that differs is a bug:
+
+| What differs | Where | Why it stays there |
+| --- | --- | --- |
+| Who fills the boot information page and calls `erx_runtime_main` | the entry: `liberx/backend/fiasco/libc_start.c`, `liberx/backend/hosted/start.c` | ERTS's start reads only the page ([design-stopgap.md](design-stopgap.md#boot-information)) |
+| The bodies of `liberx`'s calls | `liberx/backend/fiasco`, `liberx/backend/hosted` | one function API, one test set, the differences listed in [The hosted backend](design-stopgap.md#the-hosted-backend) |
+| The C library under the import list | musl, libSystem | [What ERTS imports](#what-erts-imports) checks both links against one list |
+| The console's driver process and its NIF | `erx_stdio_nif`, in the hosted image's static NIF list | [The console and standard I/O](#the-console-and-standard-io) |
+| Compile and link lines, and configure's answers about the C library | one cross-compile file per target | below |
+
+**The hosted build is a second cross target.** Configure runs in cross mode on both,
+for `aarch64-unknown-erxos` and for `aarch64-hosted-erxos`, whose compiler targets
+macOS, so `host_os` is `erxos` in both and none of `erts/configure.ac`'s `darwin*`
+cases apply; `ERLANG_OSTYPE` is `erxos` from one new case at `configure.ac:911-913`.
+Each target's cross-compile file gives the compiler, flags and libraries and pins
+the same answers. `make check-runtime-seam` compares the two `config.h` and
+`ethread_header_config.h` files, and fails on a difference outside a short list,
+each entry with its reason.
+
 ### The build
 
 The top-level `Makefile` and `tools/erx` are erXos's build. They invoke
@@ -2161,7 +2379,9 @@ runs on erXos. Its interface:
 * **Boot information**: `const erx_boot_info_t *erx_boot_info(void)`,
   validated once at start-up (version, ABI version, offsets and lengths
   inside the page); a page that fails ends the program with a diagnostic
-  on the debug log.
+  on the debug log. ERTS reads this page and never `argv` or `environ`:
+  `erx_runtime_main`, `sys/erxos`'s entry on every backend, takes no
+  arguments.
 * **Shared memory access**: `erx_shared_load_u8`, `erx_shared_load_u32`,
   `erx_shared_load_u64` and their store counterparts for the group's
   shared areas and the UTCB, the same accessors the kernel uses on memory
@@ -2597,6 +2817,22 @@ own domain, so a runtime that lies harms only itself.
 * **Floats.** A differential test of `float_to_list/1,2`,
   `list_to_float/1` and the float term format over millions of random
   doubles against the host.
+
+**The port's seams.** Each passing case is paired with the seeded failure that
+shows it ran. Hosted cases run under ASan once per batch, and the native ones are
+listed in [design-stopgap.md](design-stopgap.md#verification).
+
+| Case | Seeded failure, and what it shows |
+| --- | --- |
+| `make check-runtime-seam` passes on the hosted and the native image | a call to `open` in a `sys/erxos` file fails it, naming the object; a call to `uname` in a native-only object fails the number check; a `HAVE_` answer changed in one target's file fails the comparison; `#ifdef __APPLE__` in `sys/erxos` fails the source check |
+| A pty test drives the hosted image: `1> 1+1.` answers `2`, an arrow key recalls history, `halt().` ends the process with status 0 and the terminal is restored | the NIF's `erx_irq_trigger` removed: input never arrives, the test's deadline fires, and an idle sample shows every executor parked; the mode restore removed: the test sees the terminal still raw |
+| The same image with input at end of file ends with status 0 | the end-of-file branch removed: the deadline fires |
+| An executor made by `erx_pthread_create_executor`, hosted and in the `native_musl` suite: its slot is not `ERX_NO_EXECUTOR_SLOT`, `erx_park` with a deadline gives `ERX_ETIMEDOUT`, and a plain `pthread_create` thread gives `ERX_ETYPE` | the call delegating to plain `pthread_create`: the park gives `ERX_ETYPE` |
+| 64 executors succeed and the next gets `EAGAIN` in its creator; slots return after both a return and a `pthread_exit`, so 64 more succeed | the cleanup handler removed: the second round gets `EAGAIN` |
+| `ethr_event` timed waits and wakes in a storm, hosted and native, each with a deadline | `ETHR_FUTEX__`'s wake dropped: the storm's deadline fires |
+| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree | a binary search off by one, and a listing that yields a name twice, each fail the comparison |
+| The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_resolve` and the core under `make check-fuzz` | the name-length check removed: AddressSanitizer reports it from the fuzz target's seed |
+| A hosted boot reaches `init` through `erl_prim_loader` from the archive alone, with `HOME` and the working directory unset and no other file readable to it | `start.boot` removed from the archive: `init` ends with its own diagnostic, with no spin; a flipped index byte: the hosted entry refuses the archive, naming the check |
 
 ## Performance
 
