@@ -46,9 +46,27 @@ erx_pl011_dr_data_set(uint32_t word, uint32_t value, uint32_t *out)
 }
 
 static inline uint32_t
-erx_pl011_dr_errors_get(uint32_t word)
+erx_pl011_dr_fe_get(uint32_t word)
 {
-	return ((word >> 8) & UINT32_C(0xf));
+	return ((word >> 8) & UINT32_C(0x1));
+}
+
+static inline uint32_t
+erx_pl011_dr_pe_get(uint32_t word)
+{
+	return ((word >> 9) & UINT32_C(0x1));
+}
+
+static inline uint32_t
+erx_pl011_dr_be_get(uint32_t word)
+{
+	return ((word >> 10) & UINT32_C(0x1));
+}
+
+static inline uint32_t
+erx_pl011_dr_oe_get(uint32_t word)
+{
+	return ((word >> 11) & UINT32_C(0x1));
 }
 
 static inline bool
@@ -762,25 +780,25 @@ erx_pl011_ris_read(erx_mmio_t device, uint32_t *out)
 }
 
 static inline uint32_t
-erx_pl011_ris_rimris_get(uint32_t word)
+erx_pl011_ris_rirmis_get(uint32_t word)
 {
 	return ((word >> 0) & UINT32_C(0x1));
 }
 
 static inline uint32_t
-erx_pl011_ris_ctsmris_get(uint32_t word)
+erx_pl011_ris_ctsrmis_get(uint32_t word)
 {
 	return ((word >> 1) & UINT32_C(0x1));
 }
 
 static inline uint32_t
-erx_pl011_ris_dcdmris_get(uint32_t word)
+erx_pl011_ris_dcdrmis_get(uint32_t word)
 {
 	return ((word >> 2) & UINT32_C(0x1));
 }
 
 static inline uint32_t
-erx_pl011_ris_dsrmris_get(uint32_t word)
+erx_pl011_ris_dsrrmis_get(uint32_t word)
 {
 	return ((word >> 3) & UINT32_C(0x1));
 }
@@ -915,11 +933,91 @@ erx_pl011_icr_write(erx_mmio_t device, uint32_t value)
 }
 
 static inline bool
-erx_pl011_icr_irqs_clear(erx_mmio_t device, uint32_t value)
+erx_pl011_icr_rimic_clear(erx_mmio_t device, uint32_t value)
 {
-	if ((value & ~UINT32_C(0x7ff)) != 0)
+	if ((value & ~UINT32_C(0x1)) != 0)
 		return (false);
 	return (erx_pl011_icr_write(device, value << 0));
+}
+
+static inline bool
+erx_pl011_icr_ctsmic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 1));
+}
+
+static inline bool
+erx_pl011_icr_dcdmic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 2));
+}
+
+static inline bool
+erx_pl011_icr_dsrmic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 3));
+}
+
+static inline bool
+erx_pl011_icr_rxic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 4));
+}
+
+static inline bool
+erx_pl011_icr_txic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 5));
+}
+
+static inline bool
+erx_pl011_icr_rtic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 6));
+}
+
+static inline bool
+erx_pl011_icr_feic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 7));
+}
+
+static inline bool
+erx_pl011_icr_peic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 8));
+}
+
+static inline bool
+erx_pl011_icr_beic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 9));
+}
+
+static inline bool
+erx_pl011_icr_oeic_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_icr_write(device, value << 10));
 }
 
 #endif

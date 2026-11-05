@@ -218,6 +218,19 @@ erx_device_read_field(const erx_device_t *device, const erx_device_register_t *r
 }
 
 bool
+erx_device_field_of(const erx_device_register_t *reg, erx_device_element_t element, const erx_device_field_t *field,
+    uint64_t word, uint64_t *value)
+{
+	uint64_t offset;
+
+	if (!erx_device_element_offset(reg, element.indexed, element.index, &offset) ||
+	    !erx_device_field_read_allowed(reg, field))
+		return (false);
+	*value = erx_device_field_get(field, word);
+	return (true);
+}
+
+bool
 erx_device_write_field(const erx_device_t *device, const erx_device_register_t *reg, erx_device_element_t element,
     const erx_device_field_t *field, uint64_t value)
 {

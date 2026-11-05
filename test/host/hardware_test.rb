@@ -25,9 +25,9 @@ class HardwareTest < Minitest::Test
     assert_equal 'modify', device.registers.first.read_action
     assert device.registers.last.fields.first.clear
     output = Erx::Hardware.device_header(device)
-    assert_includes output, 'erx_pl011_icr_irqs_clear'
+    assert_includes output, 'erx_pl011_icr_rtic_clear'
     refute_includes output, 'erx_pl011_icr_read'
-    refute_includes output, 'erx_pl011_icr_irqs_set'
+    refute_includes output, 'erx_pl011_icr_rtic_set'
     refute_includes output, 'erx_pl011_dr_modify'
   end
 
@@ -36,7 +36,7 @@ class HardwareTest < Minitest::Test
                  '<!DOCTYPE device [<!ENTITY x "boom">]><device schemaVersion="1.3">'),
                  @source.sub('<width>32</width>', '<width>16</width>'),
                  @source.sub('<addressOffset>0x18</addressOffset>', '<addressOffset>2</addressOffset>'),
-                 @source.sub('<bitWidth>11</bitWidth>', '<bitWidth>33</bitWidth>'),
+                 @source.sub('<bitWidth>8</bitWidth>', '<bitWidth>33</bitWidth>'),
                  @source.sub('<name>PL011</name>', '<name derivedFrom="other">PL011</name>'),
                  @source.sub('<name>PL011</name>', '<name>PL011<hidden/></name>'),
                  @source.sub('oneToClear', 'zeroToToggle'), "\xff".b]
@@ -70,7 +70,7 @@ class HardwareTest < Minitest::Test
     assert_match(/\.name = "imsc", \.writable = UINT32_C\(0x7ff\), \.offset = 56,.*\.plain_update = true/, table)
     assert_match(/\.name = "dr", \.writable = UINT32_C\(0xff\),.*\.plain_update = false/, table)
     assert_match(/\.name = "icr", .*\.access = ERX_DEVICE_WRITE_ONLY,.*\.plain_update = false/, table)
-    assert_match(/\.name = "irqs", \.mask = UINT32_C\(0x7ff\), \.shift = 0, .*\.clear = true/, table)
+    assert_match(/\.name = "rtic", \.mask = UINT32_C\(0x40\), \.shift = 6, .*\.clear = true/, table)
     assert table.ascii_only?
   end
 
@@ -146,7 +146,7 @@ class HardwareTest < Minitest::Test
       \tassert(erx_pl011_fr_read(device, &value));
       \tassert(erx_pl011_fr_rxfe_get(value) == 1);
       \tassert(erx_pl011_fr_txfe_get(value) == 1);
-      \tassert(erx_pl011_icr_irqs_clear(device, UINT32_C(0x40)));
+      \tassert(erx_pl011_icr_rtic_clear(device, UINT32_C(1)));
       \tassert(registers[17] == UINT32_C(0x40));
       \tdevice.length = 4;
       \tassert(!erx_pl011_fr_read(device, &value));

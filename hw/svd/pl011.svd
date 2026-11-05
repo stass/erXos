@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
      SPDX-License-Identifier: BSD-2-Clause
-     Register facts: Arm DDI 0183G, sections 3.2 and 3.3. -->
+     Written by erXos from Arm DDI 0183G (PrimeCell UART PL011 r1p5 Technical
+     Reference Manual), sections 3.2 and 3.3. It is a subset: the console driver
+     needs only the registers listed here. Omitted, all unused by that driver:
+     UARTRSR/UARTECR at 0x004, UARTILPR at 0x020, UARTDMACR at 0x048, the test
+     registers and the ID registers. -->
 <device schemaVersion="1.3">
   <name>PL011</name><version>1</version>
   <description>PrimeCell UART register interface</description>
@@ -16,7 +20,10 @@
           <readAction>modify</readAction>
           <fields>
             <field><name>DATA</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
-            <field><name>ERRORS</name><bitOffset>8</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
+            <field><name>FE</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>PE</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>BE</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>OE</name><bitOffset>11</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
           </fields>
         </register>
         <register>
@@ -100,10 +107,10 @@
         <register>
           <name>RIS</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x3c</addressOffset><access>read-only</access>
           <fields>
-            <field><name>RIMRIS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>CTSMRIS</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>DCDMRIS</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>DSRMRIS</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RIRMIS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTSRMIS</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DCDRMIS</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DSRRMIS</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RXRIS</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>TXRIS</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RTRIS</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
@@ -132,9 +139,17 @@
         <register>
           <name>ICR</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x44</addressOffset><access>write-only</access>
           <fields>
-            <field><name>IRQS</name><bitOffset>0</bitOffset><bitWidth>11</bitWidth>
-              <modifiedWriteValues>oneToClear</modifiedWriteValues>
-            </field>
+            <field><name>RIMIC</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>CTSMIC</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DCDMIC</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DSRMIC</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>RXIC</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>TXIC</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>RTIC</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>FEIC</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>PEIC</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>BEIC</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>OEIC</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
           </fields>
         </register>
       </registers>

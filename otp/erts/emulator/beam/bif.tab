@@ -871,4 +871,5 @@ bif erx_device:read/2
 bif erx_device:write/3
 bif erx_device:read_field/3
 bif erx_device:write_field/4
+bif erx_device:field/4
 bif erx_device:irq_ack/2

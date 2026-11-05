@@ -139,6 +139,22 @@ erx_device_write_field_4(BIF_ALIST_4)
 	BIF_RET(am_ok);
 }
 
+/* Pure: the field of a word the driver read, so a register that pops on a read, DR, is read once. */
+BIF_RETTYPE
+erx_device_field_4(BIF_ALIST_4)
+{
+	named_register_t named;
+	const erx_device_field_t *field;
+	uint64_t word, value;
+
+	if (!decode_register(BIF_ARG_1, BIF_ARG_2, &named) || !decode_value(BIF_ARG_4, &word))
+		BIF_ERROR(BIF_P, BADARG);
+	field = decode_field(&named, BIF_ARG_3);
+	if (field == NULL || !erx_device_field_of(named.reg, named.element, field, word, &value))
+		BIF_ERROR(BIF_P, BADARG);
+	BIF_RET(make_value(BIF_P, value));
+}
+
 /*
  * A BIF because a driver makes it once per interrupt. It is a service call on Fiasco, as a
  * NIF's would be, on the normal scheduler the design's deadlock argument allows. A bad

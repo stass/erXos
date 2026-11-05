@@ -5,7 +5,7 @@
 %% Registers and fields go by name, as tools/gen_hw.rb's table has them from the
 %% CMSIS-SVD source, lower-cased: no address or offset exists here, and a name the table
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
-%% read_field/3, write_field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
+%% read_field/3, write_field/4, field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
 %% documentation. open/1 and irq_bind/2 are NIFs.
 %%
@@ -23,7 +23,7 @@
 -module(erx_device).
 
 -export([open/1]).
--export([read/2, write/3, read_field/3, write_field/4]).
+-export([read/2, write/3, read_field/3, write_field/4, field/4]).
 -export([irq_bind/2, irq_ack/2]).
 -export([stand_in_fire/2]).
 
@@ -64,6 +64,12 @@ read_field(_Dev, _Register, _Field) ->
 
 -spec write_field(device(), register_name(), atom(), non_neg_integer()) -> ok.
 write_field(_Dev, _Register, _Field, _Value) ->
+    erlang:nif_error(undef).
+
+%% The field of a word already read from the register, without touching the device. A driver
+%% reads DR once, which pops a byte, and decodes the data and error bits of that word.
+-spec field(device(), register_name(), atom(), non_neg_integer()) -> non_neg_integer().
+field(_Dev, _Register, _Field, _Word) ->
     erlang:nif_error(undef).
 
 %% Line is the index in the spec's `lines`. An error from the line's first acknowledgement

@@ -28,12 +28,16 @@ class RuntimeDeviceTest < Minitest::Test
       32 = erx_device:read(D, imsc),
       ok = erx_device:write(D, dr, 65),
       65 = erx_device:read_field(D, dr, data),
-      ok = erx_device:write_field(D, icr, irqs, 16#7ff),
+      ok = erx_device:write(D, icr, erx_device:read(D, ris)),
+      ok = erx_device:write_field(D, icr, txic, 1),
+      1 = erx_device:field(D, dr, oe, 16#800),
+      0 = erx_device:field(D, dr, fe, 16#800),
+      16#ab = erx_device:field(D, dr, data, 16#8ab),
       io:format("~s~n", [ok]), halt().
     ERLANG
   end
 
-  REFUSED = ['write(D, dr, 16#100)', 'write_field(D, dr, data, 65)', 'read(D, icr)', 'read_field(D, icr, irqs)',
+  REFUSED = ['write(D, dr, 16#100)', 'write_field(D, dr, data, 65)', 'read(D, icr)', 'read_field(D, icr, txic)', 'field(D, icr, txic, 1)', 'field(D, dr, data, -1)', 'field(D, dr, no_such, 0)',
              'write(D, fr, 0)', 'write_field(D, fr, rxfe, 1)', 'read(D, no_such_register)',
              'read_field(D, imsc, no_such_field)', 'read_field(D, imsc, data)', 'read(D, 16#38)', 'read(D, {imsc, 0})',
              'read(D, "imsc")', 'read(D + 1000, imsc)', 'read(-1, imsc)', 'read(self(), imsc)', 'write(D, imsc, -1)',

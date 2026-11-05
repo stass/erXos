@@ -315,13 +315,16 @@ check_peripheral(const erx_device_peripheral_t *uart, const erx_device_t *device
 
 	/* DR pops a byte when it is read, so it is written whole, within its writable bits. */
 	CHECK(erx_device_field_plan(dr, field_of(uart, dr, "data"), 65).op == ERX_DEVICE_FIELD_REFUSED);
-	CHECK(erx_device_field_plan(dr, field_of(uart, dr, "errors"), 1).op == ERX_DEVICE_FIELD_REFUSED);
+	CHECK(erx_device_field_plan(dr, field_of(uart, dr, "oe"), 1).op == ERX_DEVICE_FIELD_REFUSED);
 	CHECK(erx_device_write_allowed(dr, 65) && !erx_device_write_allowed(dr, 0x100));
-	CHECK(erx_device_field_read_allowed(dr, field_of(uart, dr, "errors")));
+	CHECK(erx_device_field_read_allowed(dr, field_of(uart, dr, "oe")));
 
 	/* ICR clears what it is written, in one write; FR is only read. */
-	plan = erx_device_field_plan(icr, field_of(uart, icr, "irqs"), 0x7ff);
-	CHECK(plan.op == ERX_DEVICE_FIELD_WRITE && plan.bits == 0x7ff);
+	plan = erx_device_field_plan(icr, field_of(uart, icr, "rtic"), 1);
+	CHECK(plan.op == ERX_DEVICE_FIELD_WRITE && plan.bits == 0x40);
+	CHECK(!erx_device_field_of(icr, plain, field_of(uart, icr, "rtic"), 0x40, &word));
+	CHECK(erx_device_field_of(dr, plain, field_of(uart, dr, "oe"), 0x800, &word) && word == 1);
+	CHECK(erx_device_field_of(dr, plain, field_of(uart, dr, "data"), 0x8ab, &word) && word == 0xab);
 	CHECK(!erx_device_read_allowed(icr) && erx_device_write_allowed(icr, 0x7ff) && !erx_device_write_allowed(icr, 0x800));
 	CHECK(erx_device_read_allowed(fr) && !erx_device_write_allowed(fr, 0));
 	CHECK(erx_device_field_get(field_of(uart, fr, "rxfe"), 1u << 4) == 1);

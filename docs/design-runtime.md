@@ -1887,6 +1887,11 @@ that hangs a bus is the platform's residual, not the runtime's.
 where the read has no side effect and every writable field means replacement; on a
 one-to-clear field it is the write alone, and elsewhere `badarg`, so the
 register is written whole with `write/3`.
+`erx_device:field(Dev, Reg, Field, Word)`, also a BIF, is pure: it cuts a field out of a
+word the driver already read, without touching the device, and is `badarg` for a field the
+register does not let it read. A driver reads `dr` once, which pops a byte, and decodes
+the data and the error bits of that one word with it. A driver clears the interrupts it
+handled with `write(Dev, icr, read(Dev, mis))`, which needs no mask.
 
 **The buffer pool.** `erx_device:pool_create(Dev, BufferSize, Count)`
 adds a pool to the device's record: for a confined device a memory object
