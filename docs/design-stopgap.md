@@ -206,8 +206,10 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
 
 `system_args` is a new string of the manifest's header, under the same rule as a domain's `args`, so
-the system's start has the one configuration file every other setting has. `-root`, `-boot` and their
-kin are written there. Strings past `ERX_BOOT_STRINGS_MAX` (2,048), or a limits record out of range,
+the system's start has the one configuration file every other setting has. It holds what `erl_start`
+reads, emulator flags, `--`, then `init`'s arguments, with nothing converted on the way
+([Configuration](design-runtime.md#configuration)), so what follows it on the page, the driver's name and
+the command line's words, are `init`'s arguments. Strings past `ERX_BOOT_STRINGS_MAX` (2,048), or a limits record out of range,
 refuses the boot with the reason, as in step 6's failure; ERTS never starts on a
 partial page.
 
@@ -572,7 +574,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `exit_group` | `erx_machine_end` | the root's form |
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
-| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_console_write` | other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_console_write` | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: the machine runs one program, with no users |
 | `sched_yield`, `set_robust_list`, `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
@@ -687,8 +689,9 @@ no services: the first pet follows the first period. Until then the boot races `
 `init` and `kernel`'s start up to that process. A hang in any of them ends the machine with a crash record at `B`, as it should.
 
 The root itself never pets on ERTS's behalf: a pet must mean that schedulers run and timers fire. The harness gives QEMU `-append` from one table: TCG
-`erx.watchdog=1,30,600`, HVF the defaults, deterministic runs `erx.det=1`. A run's own deadline stays at or above its `B`, so a stuck boot ends in the
-crash record rather than in the harness's kill. The time to the first pet has not been measured, since no ERTS has reached it: the first native boot
+`erx.watchdog=1,30,600`, HVF the defaults, deterministic runs `erx.det=1`. A run's own deadline is at least `B + P + 60` seconds, so a stuck boot ends in the
+crash record rather than in the harness's kill: the deadline counts from QEMU's launch and `B` from the later start of the watchdog thread, a missed
+`B` is seen at the next tick (`watchdog.c:159-163`), and the record takes time to print. The 60 is a test margin, not a promise about the boot. The time to the first pet has not been measured, since no ERTS has reached it: the first native boot
 prints it under both accelerators. A first pet past 60 seconds under HVF is a finding to explain, not a number to raise.
 
 ### The end path
@@ -848,7 +851,7 @@ the tests.
 | --- | --- |
 | **Image and banner.** `tools/erx check-boot-image` and the QEMU gate's `boot_image` suite: the banner image, the two-file form, and the damage cases, each refusing with its reason | a damaged entry that boots fails the case |
 | **Boot information.** Host tests of `erx_boot_info_build` and `erx_boot_args_parse` at every limit, with fuzz targets on the page's reader and the command line; the root and the hosted entry fill the page from one manifest and a test compares the two field by field, those the table says differ excepted | a seeded unchecked `args_off` fails the reader's bounds case under AddressSanitizer; a word past the strings limit that does not refuse fails its case; a seeded wrong `pack_flags` in the root fails the comparison |
-| **The watchdog from the command line.** A test release boots under `erx.watchdog=1,5,600` with `erx_watchdog` running: its transcript shows the first pet's time, and it runs past 60 seconds under TCG, then halts cleanly | `erx.watchdog=1,5,2`: the same release ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` before its first pet, which shows the numbers came from the command line; a release whose `erx_watchdog` stops ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` at `D`; a malformed `erx.watchdog=` refuses the boot, naming the word |
+| **The watchdog from the command line.** A test release boots under `erx.watchdog=1,5,600` with `erx_watchdog` running: its transcript shows the first pet's time, the machine stays up for more than `D` after that pet, then halts cleanly | The same release with its first pet withheld, under `erx.watchdog=1,5,7` and `1,5,14`: each ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` at its own `B`, which shows the numbers came from the command line; a release whose `erx_watchdog` stops after a pet ends the machine with `ERX_CRASH_CAUSE_WATCHDOG` at `D`; a malformed `erx.watchdog=`, and `1,5,2`, whose `B` is under `D` (`watchdog.c:262-264`), refuse the boot, naming the word |
 | **Native boot.** The QEMU gate's `native_boot` suite: the root accepts the record through `user_ptr`, checks the archive's last entry, writes one line through `l4_vcon_write`, and shuts down, so QEMU exits by itself | shutdown removed: the deadline fires. `user_ptr` left 0: the root's accept refuses. The archive's sub-type removed: `sigma0` refuses the page fault and the root's line never comes |
 | **Debug log.** `tools/erx check-debug-log` and the gate's `debug_log` suite: the probe's calls, good and malformed, on the hosted backend and as the root over the native path to `l4_vcon_write`, compared record by record | `make check-qemu-mutant`: the native call asks for one byte more than a full message, and only the target's transcript differs |
 | **Memory.** The QEMU gate's `native_memory` suite, in the root first: commit, write, raise R to RW; decommit and recommit reads zeros; no access and back keeps contents; every protection change keeps contents and its one page; the whole pool committed at once; the pool's count before and after agree | wrong window page: contents differ. Zeroing skipped: old bytes. Protect takes a fresh page: zeros. Pool check removed: a refused protect is not refused |

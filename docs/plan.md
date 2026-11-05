@@ -537,8 +537,8 @@ domains and deterministic mode run; the adapter's first five changes
 (executors and workers, sleep over `erx_park`, wake over
 `erx_executor_wake`, no busy waiting, the safe point with capacity), with
 no cooperation flag enabled
-([design-runtime.md](design-runtime.md#scheduling)), among the 36 edits
-in 36 files that ERTS's own files take in all, of which M3 makes only
+([design-runtime.md](design-runtime.md#scheduling)), among the 41 edits
+in 41 files that ERTS's own files take in all, of which M3 makes only
 those the shell needs
 ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos));
 threads, memory, time, files (release file system and `/tmp`) and crash

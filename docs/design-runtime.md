@@ -334,7 +334,7 @@ the network service ([plan.md](plan.md#m12-storage-networking-boards)).
 NIF libraries: `socket` and `net` dropped; `prim_file` kept with erXos's
 platform layer; `zlib`, `zstd`, `erl_tracer` and `prim_buffer` kept;
 `prim_tty`'s NIF dropped, since the console service renders in
-`prim_tty`'s terminal-less mode over the console's driver; and
+`prim_tty`'s terminal-less mode over the console's driver (edit 38); and
 erXos's own added: the per-byte primitives, the device NIF, the pipe NIF,
 the domain library's NIFs and the watchdog NIF
 ([Per-byte primitives](#per-byte-primitives),
@@ -347,8 +347,8 @@ fails until the list names it.
 ### The edits outside `sys/erxos`
 
 Everything the adapter adds lives in `sys/erxos`, the drivers and NIFs
-included. The edits to ERTS's own files, and the one to `kernel`'s
-`net_adm`, are these, each at a seam named above; an edit is one change
+included. The edits to ERTS's own files, and those to four files of
+`kernel`, are these, each at a seam named above; an edit is one change
 of behaviour, however many lines it touches:
 
 | File | Edit |
@@ -378,10 +378,15 @@ of behaviour, however many lines it touches:
 | `lib_src/common/erl_misc_utils.c` | 32. `erts_cpu_info_update` counts the boot information page's `cpuset`, in place of `sysconf` and `sched_getaffinity` |
 | `beam/erl_time_sup.c` (CPU time) | 33. `erts_runtime_elapsed_both` reads the group's usage from `erx_group_info`; where that is `unsupported`, `statistics(runtime)` fails with `notsup` |
 | `beam/erl_crash_dump.c` | 34. the dump goes to the sink of [Crash handling](#crash-handling), with no `open`, `fdopen` or thread suspension |
-| `beam/bif.c` | 35. `display_string/2`'s standard-input branch, which feeds a terminal through `TIOCSTI`, is compiled out |
+| `beam/bif.c` | 35. `display_string/2`'s standard-input branch, which feeds a terminal through `TIOCSTI`, is compiled out, and its write loop adds to the offset only what a write wrote, retrying an interrupted or blocked write at the same offset, where stock adds the -1 too (`bif.c:4275-4279`) |
 | `beam/sys.h`, `beam/erl_drv_thread.c`, `beam/erl_driver.h`, `sys/common/erl_sys_common_misc.c`, `nifs/common/zlib_nif.c`, `include/internal/erl_misc_utils.h`, and the two event files above | 36. `__erxos__`, which every erXos build defines, turns off each block keyed on `__APPLE__` or `__DARWIN__`, so a hosted build compiles what a native build compiles |
+| `beam/bif.c`, `lib_src/common/erl_printf.c` | 37. each `write` is `erx_output_write`, under the same signature ([What ERTS imports](#what-erts-imports)) |
+| `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers `{error, enotsup}`, so terminal-less rendering reaches no NIF ([The console](#the-console-and-standard-io)) |
+| `lib/kernel/src/standard_error.erl` | 39. `server/0` calls no `prim_tty`: its encoding is `unicode`, and it writes with `erlang:display_string(stderr, Bytes)` |
+| `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
+| `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load |
 
-Thirty-six edits outside `sys/erxos`, in thirty-six files, the JIT's
+Forty-one edits outside `sys/erxos`, in forty-one files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
@@ -1357,8 +1362,15 @@ in [hosted mode](#hosted-mode) libSystem's.
   `_umtx_op` rather than Linux's futex extensions
   ([design-kernel.md](design-kernel.md#umtx)).
 * **ethread's events are the futex variant in every build** (edit 31),
-  with `ETHR_FUTEX__` over `erx_umtx_wait` and `erx_umtx_wake`, a relative
-  timeout turned into `erx_clock_ns() + timeout`. Left to itself, configure
+  with `ETHR_FUTEX__` over `erx_umtx_wait` and `erx_umtx_wake`. The events' word
+  protocol stays stock's, and the macro keeps its answer, 0 or a positive errno
+  (`ethr_event.h:70-72`, `ethr_event.c:177-187`). A wake answers 0 for any
+  count, since `erx_umtx_wake` returns how many it woke. A wait with no timeout
+  has the deadline `ERX_WAIT_FOREVER`; a relative one has `erx_clock_ns()` plus
+  the timeout, and a sum that overflows is `ERX_WAIT_FOREVER`. `ERX_OK`, which includes a
+  word that already differs, is 0; `ERX_ETIMEDOUT` is `ETIMEDOUT`; `ERX_EINTR` is
+  `EINTR`; any other status, a wake's negative result included, is `EINVAL`,
+  which stock's fatal branch ends. Left to itself, configure
   finds no `linux/futex.h` on either C library, and `ethr_event.c` then falls
   to its other form, which keeps a pipe in each event for timed waits
   (`setup_nonblocking_pipe`, `select`, `read`, `write`). Over umtx there is
@@ -1532,8 +1544,9 @@ listing and the working directory work on all three; writing, renaming,
 deleting and creating directories work on the RAM file system and return
 `{error, erofs}` on the read-only ones; anything else returns
 `{error, enotsup}`. Paths are UTF-8 with POSIX syntax, at most 4,096 bytes,
-resolved component by component with `.` and `..` handled lexically.
-`erl_prim_loader` reads code through `prim_file` unchanged. Persistent
+resolved component by component with `.` and `..` handled lexically:
+`f/.` is `f` even where `f` is a file, and `missing/../x` is `x`, where stock's
+`stat` answers `enotdir` and `enoent`. `erl_prim_loader` reads code through `prim_file` unchanged. Persistent
 storage is a file server, mounted in the namespace through the domain's
 facet ([design-storage.md](design-storage.md)).
 
@@ -1552,7 +1565,8 @@ directory cannot exist, and nothing can disagree with the index.
 | --- | --- |
 | `read_file`, `open` for reading, `read`, `pread`, `position` | a file's bytes, from `release_addr` plus the entry's offset; a file's position is its handle's, under `prim_file`'s own per-file state; opening a directory is `eisdir` |
 | `list_dir` | the next names, without `.` and `..` |
-| `read_file_info`, `read_link_info` | the same for both: `regular` mode `0444` or `directory` mode `0555`, `read` access, size, one link, owner, group and times 0, since an archive records none and a build is reproducible |
+| `close` | `ok`: it ends the handle and releases its NIF resource, as stock's `efile_close` does (`unix_prim_file.c:257`); `read_file` closes through it too (`prim_file_nif.c:1380`) |
+| `read_file_info`, `read_link_info`, `read_handle_info` | the same for all three: `read_handle_info`, which `read_file` asks first, answers for the handle's entry; `regular` mode `0444` or `directory` mode `0555`, `read` access, size, one link, owner, group and times 0, since an archive records none and a build is reproducible |
 | `read_link` | `einval`, as stock for a path that is not a link: the provider has no links |
 | `get_cwd`, `set_cwd` | starts at `/`; set takes a directory that exists, under the NIF's lock |
 | any write mode, `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
@@ -1587,24 +1601,53 @@ The machine's console is a device like any other, and its UART belongs
 to the system domain in every manifest: the console's driver, an Erlang
 process over the device NIF in the system domain, reads and writes the
 UART ([design-system.md](design-system.md#drivers)), and the kernel keeps
-only its early console for its own log. The console service, in the
-same domain, renders with `prim_tty`'s terminal-less mode, drives the
-shell's group process, and exchanges bytes with the console's driver by
-ordinary messages, with no connection between them; it is the console's
-one sink, and every byte it hands the driver has passed its escaping
-function ([design-live.md](design-live.md#the-console)). Every other domain's
+only its early console for its own log. Every other domain's
 standard I/O goes through Erlang's I/O protocol to a group leader in the
 system domain, over the domain's system connection, so no other domain
-can write to a terminal at all. `standard_error` in a domain writes
-through the debug log, `erx_debug_log` with the line in the caller's
-UTCB, which the kernel escapes.
+can write to a terminal at all. `standard_error` writes to descriptor 2
+(edit 39), which in a domain is the debug log, `erx_debug_log` with the line
+in the caller's UTCB, which the kernel escapes as a source's text.
+
+**The console service is a program with its own line editor on a raw terminal,
+as on Unix.** The device carries bytes; `edlin` and `group`, stock OTP in user
+mode, edit the line and keep its history. `erx_console`, in the system domain,
+sits between them and the console's driver, exchanging ordinary messages with no
+connection: input bytes go to the group as `{self(), {data, Chars}}`, and each
+request from the group goes through `prim_tty:handle_request/2` to become bytes
+for the driver. What it shows of another source's text is
+[design-live.md](design-live.md#the-console)'s concern. `-user erx_console`
+([Configuration](#configuration)) makes `user_sup` call `erx_console:start/0`,
+which starts the driver and one group, `group:start(self(), {shell, start, [init]}, Options)`,
+and registers that group as `user`.
+
+`prim_tty` stays because the group's requests (insert, move, delete, redraw) carry
+edit state across wrapped lines, so a console without it would be a larger
+renderer of its own, while a cooked line discipline and `-oldshell` give no arrow
+keys or history, which the first shell's demo needs. Its state comes from
+`init_ssh/3`, which needs neither a terminal descriptor nor terminfo. This path
+calls two helpers of the removed NIF, `isprint/1` for each ASCII character
+(`prim_tty.erl:1280`) and `wcwidth/1` for each column count, a prompt's included
+(`:1139`). Edit 38 makes both pure: `{error, enotsup}` is the answer
+`npwcwidth/2` already takes to `unicode_util:is_wide/1`, so a combining mark
+counts as one column.
+
+**A runtime's own output is raw.** `erlang:display/1`, `erlang:display_string/2`,
+ERTS's `erts_printf` to standard output and error, and stdio deliver their bytes
+unchanged to descriptors 1 and 2, as on Unix: nothing in ERTS or `sys/erxos`
+escapes or filters them, and they do not pass through `erx_console`. Hosted, the
+descriptors are the process's own; in Phase 1 natively, the seam's console write
+([design-stopgap.md](design-stopgap.md)). A shell or session may filter what it
+displays; an output function does not touch the data.
 
 **`erx_stdio`, hosted mode's console driver.** `erx_console` is one program in
 every build, and the driver is the one process that differs, since a hosted
 process has no UART to map (`erx_mem_create_physical` and `ERX_IRQ_LINE` are
-refused there). Both drivers take the same two messages,
-`{erx_console_output, Bytes}` from `erx_console` and
-`{erx_console_input, Bytes}` to it, and `-erx console_driver Module`, an ordinary
+refused there). Both drivers speak the same messages:
+`{erx_console_output, From, Bytes}` from `erx_console`, answered
+`{erx_console_written, From}` once the bytes are written, and
+`{erx_console_input, Bytes}` and `erx_console_eof` to it. `erx_console` answers
+a `put_chars_sync` only on that answer, so `io:format` returns when its bytes are
+out, as `write` on a Unix terminal does. `-erx console_driver Module`, an ordinary
 argument of the boot information page, names the driver: the hosted entry adds
 `erx_stdio`, and otherwise the manifest's console UART has its driver.
 `erx_stdio` is an Erlang process in `kernel` over `erx_stdio_nif`. A worker
@@ -1613,7 +1656,14 @@ exit, reads standard input into a ring and triggers a software IRQ object bound
 to the group, whose label the event table registers to `erx_stdio`, so input
 travels the same path as a device's interrupt and every executor can park while
 the terminal is idle. Output is `write` on standard output from a dirty I/O NIF.
-End of file on standard input is `halt(0)`, and a read error prints its reason
+End of file is the ring's last entry, an input event in order: `erx_stdio` sends
+`erx_console_eof` after every byte read before it, and `erx_console` hands the
+group `{self(), eof}`, the stock message. `group` holds a driver's messages until a
+reader asks (`group.erl:253`), so the shell evaluates each command ahead of the
+end, then reads `eof` and halts with status 0, its own stock branch
+(`shell.erl:384-392`). The shell's last line before `halt()` is a synchronous
+write, so all earlier output is out when it halts. The UART driver never sends
+the message. A read error prints its reason
 through the debug log and is `halt(1)`. `erx_stdio_nif.c` is the one source in
 the runtime that touches a host file descriptor. Only the hosted image's static
 NIF list names it, and natively the module is present and never started. It
@@ -2024,14 +2074,23 @@ included, may import from outside themselves only `liberx`'s calls and the names
 in `sys/erxos/imports.txt`:
 
 * ISO C's memory, string, character, conversion, `math.h`, `malloc` family, `abort`
-  and `exit`; `gmtime_r`, `localtime_r`, `mktime` and `tzset`;
-* output through `stdout` and `stderr`, and `write` on descriptors 1 and 2;
-* `sysconf`, for `_SC_PAGESIZE` and `_SC_THREAD_STACK_MIN` alone
-  (`ethr_aux.c:208`, `:235`);
+  and `exit`; `gmtime_r`, `localtime_r`, `mktime` and `tzset`; `getpagesize`;
+* output through `stdout` and `stderr`;
 * the pthreads calls for threads, attributes, mutexes, condition variables,
   read-write locks and keys, and `sched_yield`;
 * a short section for each C library of the names its compile emits, such as
   `__errno_location` for musl and `__error` for libSystem.
+
+A name check cannot read an argument, so the list holds no call that is safe only
+for some arguments. stdio can name only `stdout` and `stderr`, since `fopen` and
+`fdopen` are not listed. `erx_output_write(fd, bytes, length)`, in
+`sys/erxos/erx_output.c`, has `write`'s signature and answers `EBADF` for any
+descriptor but 1 and 2, and its object alone imports `write` (edit 37). `sysconf` is
+off the list: the page size is `getpagesize()`, which takes no argument (edit 40),
+`ethr_aux.c:235` is not compiled because both C libraries define
+`PTHREAD_STACK_MIN` (`:230`), and edits 30 and 32 and the deleted `erl_poll.c` remove
+the rest. A `sysconf(_SC_NPROCESSORS_ONLN)`, which musl answers with 1 where the
+seam refuses the affinity call and libSystem with the host's count, fails the check.
 
 `open`, `read`, `close`, `pipe`, `fcntl`, `socket`, `poll`, `select`, `sigaction`,
 `fork`, `uname` and `getrusage` are not on it, so `sys/erxos` cannot assume a file
@@ -2047,10 +2106,9 @@ before each link, and fails on a name not on the list, naming the object. Then
 same check reads the native image's calls to `__erx_syscall` and fails on a
 number the seam refuses, except a closed list of pairs of number and musl function
 that musl copes with, each with its reason: `mremap` in `realloc`, `__map_file`'s
-calls, `exit`'s `ppoll`, `clock_gettime`'s `gettimeofday`, and `sysconf`'s calls for
-names ERTS does not ask. A number the disassembly cannot read is closed by the name
-check. The object of `erx_stdio_nif.c`, in the hosted image alone, is read against a
-list of its own.
+calls, `exit`'s `ppoll` and `clock_gettime`'s `gettimeofday`. A number the disassembly
+cannot read is closed by the name check. The objects of `erx_output.c` and, in the
+hosted image alone, `erx_stdio_nif.c` are each read against a list of their own.
 
 **How each refused call ends.** A probe linked an unmodified interpreter
 `beam.smp` against the Phase 1 seam: 60 refused call names, plus an `unknown`
@@ -2077,8 +2135,9 @@ What a read cannot settle, and what settles it:
   import check closes it by name at link, and any remaining number shows at the `default:` of `__erx_syscall`, traced during the
   first native boot. The probe's own native run ended at the spin above, so
   nothing after `erts_sys_pre_init` has been observed.
-* **Whether `kernel` starts without sockets, ports or `heart`.** The first hosted
-  boot with those NIFs and drivers removed settles it.
+* **Whether `kernel`'s children of [Configuration](#configuration) start without
+  sockets or ports.** The first hosted boot with those NIFs and drivers removed
+  settles it. `heart` is not among them: `init` starts it only under `-heart`.
 * **Which of OTP's suites need `statistics(runtime)`.** Of `kernel` and `stdlib`,
   `dist_util` alone calls it, and the suites are unread. A `notsup` that the oracle comparison shows to
   matter gets a body in the Fiasco backend, from `l4_thread_stats_time`.
@@ -2452,8 +2511,48 @@ Everything not listed behaves as stock OTP 29.1.2.
 ### Configuration
 
 A domain's runtime takes its arguments from its specification through the
-boot information page, in ERTS's command-line syntax. The adapter's
-defaults and limits:
+boot information page, as `erl_start` reads them: emulator flags, `--`, then
+`init`'s arguments. There is no `erlexec`. Its conversion (`+` rewritten to `-`
+and emulator flags gathered ahead of the `--`, `erlexec.c:943-965`; `-root`,
+`-bindir` and `-progname` placed after it, `:1151-1161`) serves people typing at a
+shell, and here would be a table of flags and a second grammar in `sys/erxos`,
+when a specification is written once and can say `-S 2:2`. A word in the wrong
+form stops in `erts_usage`: `+S` fails the test at `erl_init.c:1357`, and `-root`
+ahead of the `--` is taken as `-r` (`:2293`) and its path then fails that test.
+`erx_runtime_main` builds the vector:
+`argv[0]` is `beam`, which only the usage message prints (`erl_init.c:826`); the
+words are copied to writable memory, since the page may be read-only and
+`erl_start` edits its vector (`-M` flags are removed from it); and the page's node
+name follows them, as `-name` under a dotted host and `-sname` otherwise.
+
+The system release's arguments are:
+
+```
+-- -root / -bindir /bin -progname erl -home / -boot /bin/start
+-user erx_console -nocookie -kernel start_distribution false
+```
+
+`init` exits without `-bindir` (`init.erl:1235`), though nothing is read from it.
+`-home` answers `filename:basedir` and `c`, as no `HOME` exists. `-user` replaces
+`user_drv`, which loads the removed NIF (`user_drv.erl:182`), with `erx_console`,
+and `user_sup` waits ten seconds for it to register `user` (`user_sup.erl:105-119`).
+A release with a carrier replaces `-kernel start_distribution false` with
+`-no_epmd -proto_dist erx`, and `-nocookie` then spares `auth` from reading or
+creating a cookie, which a read-only release with no `HOME` cannot satisfy and
+whose mode `0444` it refuses (`auth.erl:347-374`, `:513`).
+
+`kernel_sup` then starts these, in stock's order with `erx_watchdog` added (edit 41):
+
+| Child | In erXos |
+| --- | --- |
+| `erx_watchdog` | [design-stopgap.md](design-stopgap.md) |
+| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system |
+| `standard_error` | stock's I/O protocol over descriptor 2 (edit 39) |
+| `user` | `user_sup`, then `erx_console` and the group it registers |
+| `rex`, `global_name_server`, `net_sup`, `global_group` | with a carrier only: `net_sup` holds `auth` and `net_kernel` over `erx_dist`, with no `erl_epmd` |
+
+The adapter's defaults and limits follow, in `erl`'s familiar spelling; a
+specification writes each `+` as `-`:
 
 | Flag | In erXos |
 | --- | --- |
@@ -2824,13 +2923,17 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 
 | Case | Seeded failure, and what it shows |
 | --- | --- |
-| `make check-runtime-seam` passes on the hosted and the native image | a call to `open` in a `sys/erxos` file fails it, naming the object; a call to `uname` in a native-only object fails the number check; a `HAVE_` answer changed in one target's file fails the comparison; `#ifdef __APPLE__` in `sys/erxos` fails the source check |
-| A pty test drives the hosted image: `1> 1+1.` answers `2`, an arrow key recalls history, `halt().` ends the process with status 0 and the terminal is restored | the NIF's `erx_irq_trigger` removed: input never arrives, the test's deadline fires, and an idle sample shows every executor parked; the mode restore removed: the test sees the terminal still raw |
-| The same image with input at end of file ends with status 0 | the end-of-file branch removed: the deadline fires |
+| `make check-runtime-seam` passes on the hosted and the native image | a call to `open` in a `sys/erxos` file fails it, naming the object; a call to `uname` in a native-only object fails the number check; a `HAVE_` answer changed in one target's file fails the comparison; `#ifdef __APPLE__` in `sys/erxos` fails the source check; a `sysconf(_SC_NPROCESSORS_ONLN)`, and a `write` outside `erx_output.c`, fail the name check |
+| `erx_output_write` on descriptors 1 and 2 writes, and on an open descriptor 3 answers `EBADF` | the descriptor check removed: the bytes arrive on descriptor 3 |
+| `erlang:display_string/2` with all 256 byte values, to a full non-blocking pipe that is then drained, delivers exactly those bytes in order | stock's `written += res` restored: the bytes differ and AddressSanitizer reports the read; an escaping step added: the comparison fails |
+| A host test of `erx_runtime_main`'s vector over a read-only page: `argv[0]`, every word in order, the node name's flag, a final null, and each word writable. The hosted boot of [Configuration](#configuration)'s arguments lists `kernel_sup`'s children as its table says, and `whereis(user)` is the group | the words not copied: the write faults; `--` removed from the arguments: the boot stops in `erts_usage`, naming the flag; `-user erx_console` removed: `user_drv` fails at its load and the boot ends with `init`'s diagnostic; in a release with a carrier, `-nocookie` removed: `auth` fails on the read-only release |
+| A pty test drives the hosted image: `1> 1+1.` answers `2`, an arrow key recalls history, `halt().` ends the process with status 0 and the terminal is restored | the NIF's `erx_irq_trigger` removed: input never arrives, the test's deadline fires, and an idle sample shows every executor parked; the mode restore removed: the test sees the terminal still raw; `isprint/1` returned to its NIF stub: the first prompt raises `undef` and the deadline fires |
+| The image with empty input ends with status 0. With `1+1.` and `2+2.` immediately followed by end of file, the output holds both results and the status is 0 | `erx_stdio` halting at end of file: the results are missing; `erx_console_eof` dropped: the deadline fires; `put_chars_sync` answered before the write: a test driver that holds back `erx_console_written` sees `io:format` return |
 | An executor made by `erx_pthread_create_executor`, hosted and in the `native_musl` suite: its slot is not `ERX_NO_EXECUTOR_SLOT`, `erx_park` with a deadline gives `ERX_ETIMEDOUT`, and a plain `pthread_create` thread gives `ERX_ETYPE` | the call delegating to plain `pthread_create`: the park gives `ERX_ETYPE` |
 | 64 executors succeed and the next gets `EAGAIN` in its creator; slots return after both a return and a `pthread_exit`, so 64 more succeed | the cleanup handler removed: the second round gets `EAGAIN` |
-| `ethr_event` timed waits and wakes in a storm, hosted and native, each with a deadline | `ETHR_FUTEX__`'s wake dropped: the storm's deadline fires |
-| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree | a binary search off by one, and a listing that yields a name twice, each fail the comparison |
+| `ethr_event` timed waits and wakes in a storm, hosted and native, each with a deadline | `ETHR_FUTEX__`'s wake dropped: the storm's deadline fires; its wake returning the woken count: the first wake of a waiter ends the runtime; `ERX_ETIMEDOUT` passed through untranslated: the first timed wait ends it |
+| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree. The two lexical differences, `f/.` where `f` is a file and `missing/../x`, are named in the comparison and pinned | a binary search off by one, and a listing that yields a name twice, each fail the comparison; a resolver that looks up `.` and `..` fails the pins |
+| 10,000 `read_file` calls and as many `open` and `close` pairs leave the NIF's resource count where it began, and `read_handle_info` on an open handle answers its entry's type and size | `close` answering `enotsup`: the pair's `close` fails; the release removed: the count grows; `read_handle_info` answering size 0: the comparison fails |
 | The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_resolve` and the core under `make check-fuzz` | the name-length check removed: AddressSanitizer reports it from the fuzz target's seed |
 | A hosted boot reaches `init` through `erl_prim_loader` from the archive alone, with `HOME` and the working directory unset and no other file readable to it | `start.boot` removed from the archive: `init` ends with its own diagnostic, with no spin; a flipped index byte: the hosted entry refuses the archive, naming the check |
 
