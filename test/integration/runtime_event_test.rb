@@ -43,25 +43,27 @@ class RuntimeEventTest < Minitest::Test
   end
 
   # The harness drives the core's exit; this ties it to the wait itself, whose loop is ERTS's
-  # and runs only in the hosted runtime. The old exit, a break with nothing taken after it,
-  # has no call here.
+  # and runs only in the hosted runtime. It reads text, so it pins the call's place and
+  # cannot tell a call from a comment.
   def test_scheduler_wait_leaves_through_the_core
     assert_equal 1, exit_calls(File.read(File.join(ROOT, 'otp/erts/emulator/beam/erl_process.c')))
   end
 
-  def test_the_source_check_catches_the_old_exit
+  def test_the_source_check_catches_a_wait_that_takes_nothing_as_it_leaves
     assert_equal 0, exit_calls("scheduler_wait(int *fcalls, ErtsSchedulerData *esdp, ErtsRunQueue *rq)\n{\n" \
                                "    while (1) { break; }\n    erts_runq_lock(rq);\n    sched_active(esdp->no, rq);\n}\n")
   end
 
   private
 
-  # Calls of the exit in scheduler_wait's body, after its loop and before it takes the run
-  # queue's lock again.
+  # Calls of the exit in what scheduler_wait does last: after the last block closed at the
+  # function's own indent, which puts thread progress back to active as a delivery needs, and
+  # before it takes the run queue's lock again.
   def exit_calls(source)
     body = source[/^scheduler_wait\(int \*fcalls.*?^}$/m]
-    tail = body[/.*\berts_runq_lock\(rq\);\s*sched_active\(esdp->no, rq\);/m]
-    tail.rpartition(/^    }$/).last.scan('erx_event_leave_wait(ssi->park_slot);').size
+    up_to_relock = body[/.*\berts_runq_lock\(rq\);\s*sched_active\(esdp->no, rq\);/m]
+    after_last_block = up_to_relock.rpartition(/^    }$/).last
+    after_last_block.scan('erx_event_leave_wait(ssi->park_slot);').size
   end
 
   def run_harness(*extra)

@@ -25,6 +25,11 @@ run([Seed]) ->
 round_of(Bytes) ->
     {Events, Left} = feed(chunks(Bytes), <<>>, []),
     true = byte_size(Left) < 4,
+    %% Only a character cut short waits, so a key typed reaches the group at once.
+    case Left of
+        <<>> -> ok;
+        _ -> {incomplete, <<>>, Left} = unicode:characters_to_binary(Left)
+    end,
     lists:foreach(fun({data, Bin}) -> true = is_binary(unicode:characters_to_binary(Bin));
                      (_) -> ok
                   end, Events),

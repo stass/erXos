@@ -28,7 +28,7 @@ void	erx_event_unregister(uint32_t label);
 
 /* Takes the group's ready list and delivers it. Only a thread with an executor slot may. */
 void	erx_event_dispatch(void);
-/* scheduler_wait's one exit (erx_event_leave_wait_ready). A thread with no slot takes nothing. */
+/* scheduler_wait's exit after its loop (erx_event_leave_wait_ready). A thread with no slot takes nothing. */
 void	erx_event_leave_wait(uint32_t slot);
 
 static inline bool

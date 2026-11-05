@@ -112,10 +112,11 @@ crossed_deliver(const erx_event_sink_t *sink, void *arg)
 }
 
 /*
- * A waker's wake and a fire cross, which no run can be made to do on demand. The loop of
- * scheduler_wait has dispatched and goes to sleep; the fire lands at each gap of that step,
- * and the waker's cleared flag or a park answering at once sends the executor out with no
- * pass of the loop's dispatch. Leaving by the one exit must take the label.
+ * A label listed as an executor leaves its wait, which a waker's wake crossing a fire makes
+ * and no run can be made to do on demand. Single-threaded, with no waker and no park: the
+ * fire lands at each gap of the sleep step, and the executor then leaves, with the flag still
+ * set or already cleared. A cleared flag returns before gaps 2 and 3, so those never fire and
+ * nothing is delivered. Whatever is listed, the exit must take.
  */
 static void
 check_no_executor_leaves_with_a_label(void)

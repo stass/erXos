@@ -60,7 +60,7 @@ typedef struct {
 uint32_t erx_event_dispatch_ready(const erx_event_table_t *table, const erx_event_ops_t *ops);
 
 /*
- * The one exit of an executor's wait. A fire wakes one executor, and that may be the one a
+ * The exit of an executor's wait that has slept. A fire wakes one executor, and that may be the one a
  * waker has just told to leave, whose flags then say nothing of the fire. So a leaver takes
  * whatever `ready` shows, whatever woke it, and no executor leaves with a label listed that
  * it could have seen. Answers how many it took.

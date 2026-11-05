@@ -810,7 +810,7 @@ void os_flavor(char* namebuf, unsigned size) {
     strcpy(namebuf, "erxos");
 }
 
-/* erXos's version, never the host's; nothing else in the tree names one yet. */
+/* erXos's version, never the host's. This is the one place that names it. */
 void os_version(int *pMajor, int *pMinor, int *pBuild) {
     *pMajor = 0;
     *pMinor = 1;

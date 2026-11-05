@@ -59,9 +59,11 @@ check_part(const char *at, const erx_boot_words_t *part)
 	if (memcmp(at, part->bytes, part->length) != 0)
 		abort();
 	at += part->length;
-	if (part->bytes[part->length - 1] != '\0' && *at++ != '\0')
+	if (part->bytes[part->length - 1] == '\0')
+		return (at);
+	if (*at != '\0')
 		abort();
-	return (at);
+	return (at + 1);
 }
 
 static void

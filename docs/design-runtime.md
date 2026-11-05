@@ -391,7 +391,7 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/user_sup.erl` | 45. `get_user/1` answers `{erx_console, start, []}` when the flags hold `-user erx_console`, whatever `-noshell`, `-noinput` and their kin say, since `erx_console` reads those itself and no flag reaches `user_drv`, whose NIF is gone |
 | `lib/kernel/src/user_drv.erl` | 46. `whereis_group/0` reads the current group from `erx_console`'s process when `user_drv` is not running |
 | `beam/break.c` | 47. the break menu prints no clear-screen sequence, so it asks no terminal whether to |
-| `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, which stopped `stdlib` from rebuilding after a source edit |
+| `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, since `stdlib` would not rebuild after a source edit with one |
 
 Forty-eight edits outside `sys/erxos`, in forty-seven files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
