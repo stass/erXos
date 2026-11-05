@@ -305,7 +305,6 @@ it; git history is the record of completed work.
 * [Medium] tools, `tools/lib/erx/pack_provenance.rb`: a `compiled` receipt declares its sources and names no `.hrl`; nothing ties a beam to them, and a `release` pack accepts it. Derive them with `erlc -M`, and hold them under a registered import.
 * [Medium] tools, `tools/lib/erx/release.rb`: `boot_file` puts paths into an Erlang expression, so a checkout path holding `"` or `\` breaks or changes it. Pass them with `-extra`.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
-* [Medium] runtime, `liberx/backend/core/boot_manifest.c`: no fuzz target covers `erx_boot_manifest_read` or `erx_boot_info_build`; chain them onto the manifest target.
 * [Medium] runtime, `erx_prim_file.c`: a release file is served with no check of its hash, where `docs/design-kernel.md` says every file passes `erx_pack_file_check` before its first use. Hosted checks the manifest alone.
 * [Medium] runtime, `otp/lib/kernel/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
 * [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.
