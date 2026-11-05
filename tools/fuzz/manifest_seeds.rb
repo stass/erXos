@@ -20,11 +20,15 @@ module Erx
       fixture = ManifestContextFixture.arguments(codec)
       platform = JsonInput.parse(File.binread(File.join(repository, 'config/platforms/qemu-virt.json')),
                                  max_bytes: 65_536, label: 'config/platforms/qemu-virt.json')
-      development = Manifest.admit(source: File.binread(File.join(repository, 'config/manifest/qemu-virt-development.txt')),
-                                   codec: codec, context: Manifest::Context.new(**fixture, platform: platform))
+      source = File.binread(File.join(repository, 'config/manifest/qemu-virt-development.txt'))
+      context = Manifest::Context.new(**fixture, platform: platform)
+      development = Manifest.admit(source: source, codec: codec, context: context)
+      # A terminal escape in an argument, which the boot page's reader refuses.
+      escape = Manifest.admit(source: source.sub(/^\s*system_args .*$/, '  system_args hex:2d5a1b5d323b7265766965770700'),
+                              codec: codec, context: context)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),
                                           codec: codec, context: Manifest::Context.new(**fixture))
-      PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes)
+      PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes)
     end
   end
 end

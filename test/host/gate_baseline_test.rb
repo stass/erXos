@@ -48,7 +48,7 @@ class GateBaselineTest < Minitest::Test
                                             kernel/crypto/blake3/blake3_portable.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                                      kernel/crypto/blake3/blake3_portable.c] },
-    'manifest' => { seeds: 11, sources: %w[liberx/generated/abi_reader.c] },
+    'manifest' => { seeds: 12, sources: %w[liberx/generated/abi_reader.c] },
     'sched' => { seeds: 5, sources: %w[kernel/sched/sched.c] },
     'sha256' => { seeds: 8, sources: %w[kernel/crypto/sha2/sha256c.c] },
     'space' => { seeds: 4, sources: %w[kernel/core/space.c kernel/core/cap.c] },

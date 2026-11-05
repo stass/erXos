@@ -16,6 +16,21 @@ string_at(const erx_manifest_view_t *view, const erx_mf_str_t *string)
 	return (view->bytes + view->header.strings.offset + string->offset);
 }
 
+/*
+ * ERTS echoes a flag it refuses to the terminal, with %s at dozens of sites of its
+ * argument parsing, so a word holds printable ASCII alone and none of them can carry
+ * a terminal escape. The words are separated by NUL.
+ */
+static bool
+words_are_printable(const uint8_t *bytes, size_t length)
+{
+	for (size_t at = 0; at < length; at++) {
+		if (bytes[at] != '\0' && (bytes[at] < 0x20 || bytes[at] > 0x7e))
+			return (false);
+	}
+	return (true);
+}
+
 bool
 erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t *result,
     const char **reason)
@@ -35,6 +50,10 @@ erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t 
 	}
 	if (!erx_manifest_runtime_limits_at(&view, view.header.system_runtime_limits, &limits)) {
 		*reason = "system_runtime_limits";
+		return (false);
+	}
+	if (!words_are_printable(string_at(&view, &view.header.system_args), view.header.system_args.length)) {
+		*reason = "system_args_text";
 		return (false);
 	}
 	host = string_at(&view, &view.header.host);

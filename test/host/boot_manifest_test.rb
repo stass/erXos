@@ -57,7 +57,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nocookie -kernel start_distribution false \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -kernel start_distribution false \n"
     assert_includes output, "limits 65536 1048576 64 256 0 0 65536 1024 4096\n"
   end
 
@@ -71,6 +71,15 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted(@source.sub(/^  system_args .*\n/, "  system_args hex:2d61006200\n")))
     assert status.success?, output
     assert_includes output, "words-a b \n"
+  end
+
+  # ERTS echoes a flag it does not know to the terminal, so these bytes would be a terminal escape.
+  def test_a_word_outside_printable_ascii_is_refused
+    %w[2d5a1b5d323b7265766965770700 2d5a7f00 2d5ac29b00 2d5ae280ae00].each do |word|
+      output, status = read(admitted(@source.sub(/^  system_args .*\n/, "  system_args hex:#{word}\n")))
+      assert_equal 1, status.exitstatus, output
+      assert_equal "refused system_args_text\n", output
+    end
   end
 
   def test_a_truncated_or_empty_manifest_is_refused_with_its_check

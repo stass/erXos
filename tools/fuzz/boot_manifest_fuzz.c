@@ -68,6 +68,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	args = (const uint8_t *)manifest.system_args.bytes;
 	if (args < bytes || args > bytes + length || manifest.system_args.length > (size_t)(bytes + length - args))
 		abort();
+	for (size_t at = 0; at < manifest.system_args.length; at++) {
+		if (args[at] != '\0' && (args[at] < 0x20 || args[at] > 0x7e))
+			abort();
+	}
 	check_the_page_says_the_same(&manifest);
 	return (0);
 }
