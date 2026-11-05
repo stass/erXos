@@ -1,0 +1,163 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/*
+ * Runs erx_ns_resolve and the release file system's core over commands from a
+ * file, one per line, each operand in hex so a path can hold any byte:
+ *
+ *   F <path>            a file of the release, in sorted order
+ *   M <point> <root>    a mount, kind ERX_NS_RELEASE
+ *   C <cwd>             the working directory
+ *   Q <path>            answer one line:
+ *                       <status> <mount or -> <nnames> <names> <path> <kind> <file> <listing>
+ *
+ * status is erx_ns_status_t's number, mount the table's index, kind
+ * erx_release_fs_kind_t's number and listing the names joined by `,`. A refused
+ * path answers its status and nothing more. An operand may be `-`, for empty.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "erx/ns.h"
+#include "erx/release_fs.h"
+
+#define DRIVER_FILES_MAX	256
+#define DRIVER_LINE_MAX		(4 * ERX_PATH_MAX + 64)
+
+static erx_ns_t ns;
+static erx_ns_result_t out;
+static erx_release_fs_file_t files[DRIVER_FILES_MAX];
+static uint32_t nfiles;
+static char line[DRIVER_LINE_MAX];
+
+static size_t driver_unhex(const char *, uint8_t *, size_t);
+static void driver_put_hex(const char *, size_t);
+static void driver_field(const char *, char *, size_t);
+static void driver_answer(const uint8_t *, size_t);
+
+static size_t
+driver_unhex(const char *text, uint8_t *bytes, size_t capacity)
+{
+	size_t length;
+	unsigned int value;
+
+	if (strcmp(text, "-") == 0)
+		return (0);
+	length = 0;
+	while (sscanf(text, "%2x", &value) == 1) {
+		if (length == capacity)
+			abort();
+		bytes[length++] = (uint8_t)value;
+		text += 2;
+	}
+	return (length);
+}
+
+static void
+driver_put_hex(const char *bytes, size_t length)
+{
+	if (length == 0)
+		fputs("-", stdout);
+	for (size_t index = 0; index < length; index++)
+		printf("%02x", (unsigned char)bytes[index]);
+}
+
+static void
+driver_field(const char *text, char *field, size_t capacity)
+{
+	size_t length;
+
+	length = driver_unhex(text, (uint8_t *)field, capacity - 1);
+	field[length] = '\0';
+}
+
+static void
+driver_answer(const uint8_t *path, size_t length)
+{
+	erx_release_fs_t fs = { .files = files, .count = nfiles };
+	erx_release_fs_kind_t kind;
+	erx_ns_status_t status;
+	const uint8_t *name;
+	size_t name_length;
+	uint32_t file, cursor;
+	bool first;
+
+	status = erx_ns_resolve(&ns, path, length, &out);
+	if (status != ERX_NS_OK) {
+		printf("%d\n", (int)status);
+		return;
+	}
+	printf("%d ", (int)status);
+	if (out.mount == NULL)
+		fputs("- ", stdout);
+	else
+		printf("%d ", (int)(out.mount - ns.mounts));
+	printf("%u ", out.nnames);
+	driver_put_hex(out.names, out.names_length);
+	putchar(' ');
+	driver_put_hex(out.path, out.path_length);
+	file = UINT32_MAX;
+	kind = erx_release_fs_lookup(&fs, (const uint8_t *)out.names, out.names_length, &file);
+	printf(" %d %d ", (int)kind, kind == ERX_RELEASE_FS_FILE ? (int)file : -1);
+	first = true;
+	if (kind == ERX_RELEASE_FS_DIRECTORY) {
+		cursor = erx_release_fs_list_start(&fs, (const uint8_t *)out.names, out.names_length);
+		while (erx_release_fs_list_next(&fs, (const uint8_t *)out.names, out.names_length,
+		    &cursor, &name, &name_length)) {
+			if (!first)
+				putchar(',');
+			first = false;
+			fwrite(name, 1, name_length, stdout);
+		}
+	}
+	if (first)
+		putchar('-');
+	putchar('\n');
+}
+
+int
+main(int argc, char **argv)
+{
+	static uint8_t path[2 * ERX_PATH_MAX];
+	static char first[DRIVER_LINE_MAX], second[DRIVER_LINE_MAX];
+	FILE *input;
+	size_t length;
+
+	if (argc != 2 || (input = fopen(argv[1], "r")) == NULL)
+		return (2);
+	ns.cwd[0] = '/';
+	while (fgets(line, sizeof(line), input) != NULL) {
+		first[0] = second[0] = '\0';
+		if (sscanf(line + 1, "%s %s", first, second) < 1)
+			return (2);
+		switch (line[0]) {
+		case 'F':
+			length = driver_unhex(first, path, sizeof(path));
+			files[nfiles].path = malloc(length);
+			memcpy((void *)(uintptr_t)files[nfiles].path, path, length);
+			files[nfiles].length = length;
+			nfiles++;
+			break;
+		case 'M':
+			driver_field(first, ns.mounts[ns.count].point, ERX_PATH_MAX);
+			driver_field(second, ns.mounts[ns.count].root, ERX_PATH_MAX);
+			ns.count++;
+			break;
+		case 'C':
+			driver_field(first, ns.cwd, ERX_PATH_MAX);
+			break;
+		case 'Q':
+			length = driver_unhex(first, path, sizeof(path));
+			driver_answer(path, length);
+			break;
+		default:
+			return (2);
+		}
+	}
+	fclose(input);
+	return (0);
+}

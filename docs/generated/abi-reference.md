@@ -331,6 +331,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MF_WINDOW_ROLE_VERIFIED_IMAGE` | 8 |
 | `ERX_MSG_CAPS` | 4 |
 | `ERX_MSG_WORDS` | 63 |
+| `ERX_NAME_MAX` | 255 |
+| `ERX_NS_MOUNTS_MAX` | 64 |
+| `ERX_NS_NAMES_MAX` | 256 |
 | `ERX_OK` | 0 |
 | `ERX_PACK_DEVELOPMENT` | 1 |
 | `ERX_PACK_ENTRIES_MAX` | 65536 |
@@ -340,6 +343,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_PACK_UNCONFINED_DMA` | 2 |
 | `ERX_PACK_VERSION` | 2 |
 | `ERX_PAGE_SIZE` | 4096 |
+| `ERX_PATH_MAX` | 4096 |
 | `ERX_PERIOD_MAX` | 1000000000 |
 | `ERX_PERIOD_MIN` | 1000000 |
 | `ERX_PROT_NONE` | 0 |

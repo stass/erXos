@@ -684,11 +684,12 @@ grant with it.
 the path's bytes:
 
 1. Refuse a path over `ERX_PATH_MAX` bytes (`enametoolong`), one that is
-   not valid UTF-8 or contains NUL (`einval`). Join a relative path to
-   `cwd`.
+   not valid UTF-8 or contains NUL (`einval`), and an empty one (`enoent`,
+   as POSIX says). Join a relative path to `cwd`.
 2. Split on `/`; drop empty names and `.`; for `..`, drop the last name
-   kept, or nothing at `/`. Refuse a name over 255 bytes and a path of
-   more than 256 names (`enametoolong`).
+   kept, or nothing at `/`. Refuse a name over 255 bytes, a path of
+   more than 256 names, and a normalised path that with its NUL does not
+   fit `ERX_PATH_MAX` (`enametoolong`), so it always fits `cwd`.
 3. Find the mount whose point is the longest prefix of the names,
    comparing whole names, so `/data` never matches `/database`. A
    namespace that the domain service builds always has `/`, but a

@@ -1,3 +1,4 @@
+/* Modified by erXos */
 /*
  * %CopyrightBegin%
  *
@@ -121,6 +122,11 @@ typedef struct {
 } efile_data_t;
 
 typedef ErlNifBinary efile_path_t;
+
+/** @brief Prepares the layer once, when the NIF loads.
+ *
+ * @return 0, or anything else to fail the load. */
+int efile_load(void);
 
 /** @brief Translates the given "raw name" into the format expected by the APIs
  * used by the underlying implementation. The result is transient and does not

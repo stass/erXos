@@ -11926,6 +11926,24 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "name_max".b => Constant.new(
+            name: "name_max".b,
+            value: 255,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "ns_mounts_max".b => Constant.new(
+            name: "ns_mounts_max".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "ns_names_max".b => Constant.new(
+            name: "ns_names_max".b,
+            value: 256,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "ok" => Constant.new(
             name: "ok",
             value: 0,
@@ -11976,6 +11994,12 @@ module Erx
           ).freeze,
           "page_size".b => Constant.new(
             name: "page_size".b,
+            value: 4096,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "path_max".b => Constant.new(
+            name: "path_max".b,
             value: 4096,
             type: types.fetch("u32"),
             description: nil

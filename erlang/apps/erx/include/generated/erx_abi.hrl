@@ -323,6 +323,9 @@
 -define(ERX_MF_WINDOW_ROLE_VERIFIED_IMAGE, 8).
 -define(ERX_MSG_CAPS, 4).
 -define(ERX_MSG_WORDS, 63).
+-define(ERX_NAME_MAX, 255).
+-define(ERX_NS_MOUNTS_MAX, 64).
+-define(ERX_NS_NAMES_MAX, 256).
 -define(ERX_OK, 0).
 -define(ERX_PACK_DEVELOPMENT, 1).
 -define(ERX_PACK_ENTRIES_MAX, 65536).
@@ -332,6 +335,7 @@
 -define(ERX_PACK_UNCONFINED_DMA, 2).
 -define(ERX_PACK_VERSION, 2).
 -define(ERX_PAGE_SIZE, 4096).
+-define(ERX_PATH_MAX, 4096).
 -define(ERX_PERIOD_MAX, 1000000000).
 -define(ERX_PERIOD_MIN, 1000000).
 -define(ERX_PROT_NONE, 0).

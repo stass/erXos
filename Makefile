@@ -72,6 +72,7 @@ check-runtime-seam:
 check-runtime-hosted:
 	$(RUBY) tools/erx build runtime --jobs $(JOBS)
 	$(RUBY) test/integration/runtime_hosted_smoke_test.rb
+	$(RUBY) test/integration/runtime_prim_file_test.rb
 	$(RUBY) tools/erx check-runtime-seam
 
 check-conformance:

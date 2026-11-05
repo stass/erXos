@@ -42,6 +42,7 @@ class GateBaselineTest < Minitest::Test
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
     'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
+    'ns' => { seeds: 13, sources: %w[liberx/ns.c liberx/release_fs.c] },
     'map' => { seeds: 6, sources: %w[kernel/core/map.c] },
     'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
                                             kernel/crypto/blake3/blake3_portable.c] },

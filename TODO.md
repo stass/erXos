@@ -291,6 +291,14 @@ it; git history is the record of completed work.
   two `config.h` files, the source check for `__APPLE__` and the like, and the own lists of `erx_output.c` and
   `erx_stdio_nif.c` wait for the native configure and for `sys/erxos` to shrink
   ([design-runtime.md](docs/design-runtime.md#what-erts-imports)).
+* [Medium] runtime, `otp/erts/emulator/nifs/erxos/erx_prim_file_stage.c`: stock's `unix_prim_file.c` stays
+  linked beside the release file system, chosen by `ERX_RELEASE_ARCHIVE` when the NIF loads, and
+  `runtime_prim_file_test.rb`'s reference is that stock layer in the same executable. A release booting from
+  its archive deletes the stage, the makefile's renames and the variable's read in
+  `liberx/backend/hosted/release.c`, and moves the reference to the stock oracle.
+* [Low] runtime, `erx_prim_file.c`: EROFS, `/tmp` and file servers have no provider yet, so a path on them
+  cannot arise: the namespace holds the one row `/`. Their rows' fields of `erx_ns_mount_t`
+  ([design-files.md](docs/design-files.md#namespaces)) arrive with them.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
 * [Medium] runtime, the native boot page: `erx_boot_info_build` and `erx_boot_args_parse` have no native caller, and `tools/lib/erx/production_image.rb`'s root writes no page. The root needs `erx_boot_info`, its page written from the manifest and `bootargs`, and `erx_runtime_main` called from `liberx/backend/fiasco/libc_start.c`. The comparison of the two entries' pages waits for it, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)). `erx_boot_args_t.refused` is text from the boot loader, so the root's refusal prints it through the console's escaping function.

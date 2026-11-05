@@ -52,11 +52,18 @@ __swbuf __udivti3 __vsprintf_chk bzero memset_pattern16
 [stock_limits]
 sysconf
 
-# Emptied by erx_prim_file.c and the archive reader.
+# Emptied when a release booting from its archive deletes stock's unix_prim_file.c
+# and the stage that keeps it linked: nothing else imports these.
 [stock_files]
-access chdir chmod chown close closedir dirfd fclose fdopen fileno fopen
-fstat ftruncate getcwd link lseek lstat mkdir mkstemp open opendir pread pwrite
-read readdir readlink readv rename rmdir stat symlink unlink utime write writev
+chmod chown ftruncate link lseek lstat mkdir pread pwrite readlink readv rename rmdir
+stat symlink unlink utime
+
+# What else reaches descriptors and directories: the drivers, ports and forker, the
+# poll set's wake pipes, prim_tty, the socket NIFs, the crash dump and sys.c. Each
+# goes with its own layer in the event table, the console and the removal of the rest.
+[stock_descriptors]
+access chdir close closedir dirfd fclose fdopen fileno fopen fstat getcwd mkstemp open
+opendir read readdir write writev
 
 # Emptied by the event table, which replaces the poll set and poll threads, and by
 # deleting the fd, spawn and forker ports.

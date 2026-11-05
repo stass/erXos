@@ -25,6 +25,11 @@ block a milestone's numbers.
   resolving the name at the driver's start so an access takes an index; a
   loader-specialised instruction in the interpreter and the BeamAsm image that
   performs the access inline.
+* **`read_file` copies from the release's pages.** `erx_prim_file.c` serves `prim_file:read_file/1` through
+  stock's `read_file` in `prim_file_nif.c`, which allocates a binary and fills it, where the design allows a
+  binary over the slice's pages. Settled by timing a boot that loads every module of `kernel` and `stdlib`
+  from an archive, with and without the copy.
+
 * **[Low] Fiasco backend, the cost of a commit in the root.** Each committed
   page zeroes through `root_mem.c`'s word loop and makes one `l4_task_map` call.
   Settled by a `tools/erx bench` workload of committing and touching a large

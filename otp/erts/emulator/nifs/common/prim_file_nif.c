@@ -1,3 +1,4 @@
+/* Modified by erXos */
 /*
  * %CopyrightBegin%
  *
@@ -229,6 +230,10 @@ static ErlNifResourceDynCall dyncall;
 static int load(ErlNifEnv *env, void** priv_data, ERL_NIF_TERM prim_file_pid)
 {
     ErlNifResourceTypeInit callbacks;
+
+    if(efile_load() != 0) {
+        return -1;
+    }
 
     if(!enif_get_local_pid(env, prim_file_pid, &erts_prim_file_pid)) {
         ASSERT(!"bad pid passed to prim_file_nif");

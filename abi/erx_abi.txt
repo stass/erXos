@@ -29,6 +29,10 @@ limit grace_max_us u32 1000
 limit urgency_max u8 63
 limit pack_version u32 2
 limit pack_entries_max u32 65536
+limit path_max u32 4096
+limit name_max u32 255
+limit ns_mounts_max u32 64
+limit ns_names_max u32 256
 limit pack_path_max u32 4096
 limit pack_strings_max u32 4194304
 limit pack_hash_size u32 32

@@ -1556,8 +1556,11 @@ deleting and creating directories work on the RAM file system and return
 `{error, erofs}` on the read-only ones; anything else returns
 `{error, enotsup}`. Paths are UTF-8 with POSIX syntax, at most 4,096 bytes,
 resolved component by component with `.` and `..` handled lexically:
-`f/.` is `f` even where `f` is a file, and `missing/../x` is `x`, where stock's
-`stat` answers `enotdir` and `enoent`. `erl_prim_loader` reads code through `prim_file` unchanged. Persistent
+`f/.` and `f/` are `f` even where `f` is a file, and `missing/../x` is `x`, where
+stock's `stat` answers `enotdir` and `enoent`. A name over the limit is refused
+before any walk, so `missing/` and a 256-byte name is `enametoolong` where stock
+answers `enoent`, and macOS's own limit of 1,024 bytes on a path does not apply.
+`erl_prim_loader` reads code through `prim_file` unchanged. Persistent
 storage is a file server, mounted in the namespace through the domain's
 facet ([design-storage.md](design-storage.md)).
 
@@ -1577,7 +1580,7 @@ directory cannot exist, and nothing can disagree with the index.
 | `read_file`, `open` for reading, `read`, `pread`, `position` | a file's bytes, from `release_addr` plus the entry's offset; a file's position is its handle's, under `prim_file`'s own per-file state; opening a directory is `eisdir` |
 | `list_dir` | the next names, without `.` and `..` |
 | `close` | `ok`: it ends the handle and releases its NIF resource, as stock's `efile_close` does (`unix_prim_file.c:257`); `read_file` closes through it too (`prim_file_nif.c:1380`) |
-| `read_file_info`, `read_link_info`, `read_handle_info` | the same for all three: `read_handle_info`, which `read_file` asks first, answers for the handle's entry; `regular` mode `0444` or `directory` mode `0555`, `read` access, size, one link, owner, group and times 0, since an archive records none and a build is reproducible |
+| `read_file_info`, `read_link_info`, `read_handle_info` | the same for all three: `read_handle_info`, which `read_file` asks first, answers for the handle's entry; `regular` mode `0444` or `directory` mode `0555`, carrying the type's bits as stock's `st_mode` does, `read` access, size, 0 for a directory, one link, owner, group and times 0, since an archive records none and a build is reproducible |
 | `read_link` | `einval`, as stock for a path that is not a link: the provider has no links |
 | `get_cwd`, `set_cwd` | starts at `/`; set takes a directory that exists, under the NIF's lock |
 | any write mode, `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
@@ -3028,9 +3031,9 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 | An executor made by `erx_pthread_create_executor`, hosted and in the `native_musl` suite: its slot is not `ERX_NO_EXECUTOR_SLOT`, `erx_park` with a deadline gives `ERX_ETIMEDOUT`, and a plain `pthread_create` thread gives `ERX_ETYPE` | the call delegating to plain `pthread_create`: the park gives `ERX_ETYPE` |
 | 64 executors succeed and the next gets `EAGAIN` in its creator; slots return after both a return and a `pthread_exit`, so 64 more succeed | the cleanup handler removed: the second round gets `EAGAIN` |
 | `ethr_event` timed waits and wakes in a storm, hosted and native, each with a deadline | `ETHR_FUTEX__`'s wake dropped: the storm's deadline fires; its wake returning the woken count: the first wake of a waiter ends the runtime; `ERX_ETIMEDOUT` passed through untranslated: the first timed wait ends it |
-| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree. The two lexical differences, `f/.` where `f` is a file and `missing/../x`, are named in the comparison and pinned | a binary search off by one, and a listing that yields a name twice, each fail the comparison; a resolver that looks up `.` and `..` fails the pins |
+| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree. The lexical differences, `f/.` and `f/` where `f` is a file and `missing/../x`, and a path over a limit, are named in the comparison and pinned | a binary search off by one, and a listing that yields a name twice, each fail the comparison; a resolver that looks up `.` and `..` fails the pins |
 | 10,000 `read_file` calls and as many `open` and `close` pairs leave the NIF's resource count where it began, and `read_handle_info` on an open handle answers its entry's type and size | `close` answering `enotsup`: the pair's `close` fails; the release removed: the count grows; `read_handle_info` answering size 0: the comparison fails |
-| The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_resolve` and the core under `make check-fuzz` | the name-length check removed: AddressSanitizer reports it from the fuzz target's seed |
+| The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_resolve` and the core under `make check-fuzz` | the name-length check removed: the fuzz target's seed of a 256-byte name fails its property that no name is over the limit; the count check removed: AddressSanitizer reports the walk's overrun from the seed of 257 names |
 | A hosted boot reaches `init` through `erl_prim_loader` from the archive alone, with `HOME` and the working directory unset and no other file readable to it | `start.boot` removed from the archive: `init` ends with its own diagnostic, with no spin; a flipped index byte: the hosted entry refuses the archive, naming the check |
 
 ## Performance
