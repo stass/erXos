@@ -587,11 +587,12 @@ within about 20 percent of the length, write plain code.
   codec, the program startup message and protocol, executable headers (`erx_elf_plan`), log records, the funnel,
   cross-domain frames and their reassembly, the host link deframer, device
   ring processing, PCIe configuration snapshots, `/proc` names, the command
-  shell's parser and its `where` predicates, each terminal escaper, the
+  shell's parser and its `where` predicates, each line escaper, the
   partition table, EROFS, F2FS, littlefs and FAT images, update manifests,
   the boot-selection record, the harness's slot parser, the pipe ring and
   record checks, the pipe reader page, the pipe protocol frames, the
-  terminal-mode parser, the per-byte primitives, and the host tool's
+  line discipline's input and `termios` checks, the tty's messages between
+  domains, the per-byte primitives, and the host tool's
   decoder. Fuzz targets build the same sources for the host;
   `make check-fuzz` runs each for its configured budget.
 * **`make check-oracle`** runs OTP's suites on erXos and on stock OTP
