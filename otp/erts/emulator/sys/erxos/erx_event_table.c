@@ -74,6 +74,22 @@ erx_event_dispatch_ready(const erx_event_table_t *table, const erx_event_ops_t *
 	return (total);
 }
 
+uint32_t
+erx_event_leave_wait_ready(const erx_group_stat_t *status, const erx_event_table_t *table, const erx_event_ops_t *ops)
+{
+#ifdef ERX_EVENT_SEED_LEAVE_WITHOUT_TAKING
+	/* The seeded exit: a fire that crossed the waker's wake stays listed behind this executor. */
+	(void)status;
+	(void)table;
+	(void)ops;
+	return (0);
+#else
+	if (atomic_load_explicit(&status->ready, memory_order_acquire) == 0)
+		return (0);
+	return (erx_event_dispatch_ready(table, ops));
+#endif
+}
+
 static void
 read_epochs(const erx_group_stat_t *status, uint32_t slot, erx_event_epochs_t *epochs)
 {

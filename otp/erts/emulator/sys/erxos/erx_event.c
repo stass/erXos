@@ -125,11 +125,18 @@ read_unlock(void *arg)
 	erts_rwmtx_runlock(&event_lock);
 }
 
+static const erx_event_ops_t event_ops = { .take = take_labels, .read_lock = read_lock, .read_unlock = read_unlock,
+	.deliver = deliver };
+
 void
 erx_event_dispatch(void)
 {
-	static const erx_event_ops_t ops = { .take = take_labels, .read_lock = read_lock, .read_unlock = read_unlock,
-		.deliver = deliver };
+	(void)erx_event_dispatch_ready(&event_table, &event_ops);
+}
 
-	(void)erx_event_dispatch_ready(&event_table, &ops);
+void
+erx_event_leave_wait(uint32_t slot)
+{
+	if (slot != ERX_NO_EXECUTOR_SLOT)
+		(void)erx_event_leave_wait_ready(erx_group_status(), &event_table, &event_ops);
 }

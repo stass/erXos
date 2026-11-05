@@ -5,7 +5,8 @@
  * The event table's core against a model of the group's status page. It fires at every gap
  * of an executor's sleep step and checks that no fire is lost, then has dispatchers and
  * firers race under ThreadSanitizer. Built with ERX_EVENT_SEED_LOOK_BEFORE_EPOCHS it must
- * report the lost wake, which proves the first check sees one.
+ * report the lost wake, which proves the first check sees one, and built with
+ * ERX_EVENT_SEED_LEAVE_WITHOUT_TAKING it must report the label a leaver left behind.
  */
 
 #include <pthread.h>
@@ -85,6 +86,70 @@ check_a_cleared_flag_stops_the_sleep(void)
 
 	memset(&model_status, 0, sizeof(model_status));
 	CHECK(!erx_event_sleep_prepare(&model_status, 0, flag_set, &still_waiting, &epochs));
+}
+
+static uint32_t crossed_delivered;
+
+static int
+crossed_take(uint32_t *labels, void *arg)
+{
+	(void)arg;
+	if (atomic_exchange(&model_listed[0], 0) == 0)
+		return (0);
+	atomic_fetch_sub(&model_status.ready, 1);
+	labels[0] = ERX_LABEL_SPLIT;
+	return (1);
+}
+
+static void crossed_nothing(void *arg) { (void)arg; }
+
+static void
+crossed_deliver(const erx_event_sink_t *sink, void *arg)
+{
+	(void)sink;
+	(void)arg;
+	crossed_delivered++;
+}
+
+/*
+ * A waker's wake and a fire cross, which no run can be made to do on demand. The loop of
+ * scheduler_wait has dispatched and goes to sleep; the fire lands at each gap of that step,
+ * and the waker's cleared flag or a park answering at once sends the executor out with no
+ * pass of the loop's dispatch. Leaving by the one exit must take the label.
+ */
+static void
+check_no_executor_leaves_with_a_label(void)
+{
+	static erx_event_table_t table;
+	const erx_event_sink_t sink = { .kind = ERX_EVENT_SINK_PROCESS };
+	const erx_event_ops_t ops = { .take = crossed_take, .read_lock = crossed_nothing, .read_unlock = crossed_nothing,
+		.deliver = crossed_deliver };
+	uint32_t label;
+
+	CHECK(erx_event_table_add(&table, &sink, &label) == ERX_OK && label == ERX_LABEL_SPLIT);
+	for (int cleared = 0; cleared <= 1; cleared++) {
+		for (fire_at_gap = 0; fire_at_gap <= 3; fire_at_gap++) {
+			erx_event_epochs_t epochs;
+			bool still_waiting = cleared == 0;
+			bool fired;
+
+			memset(&model_status, 0, sizeof(model_status));
+			memset(model_listed, 0, sizeof(model_listed));
+			crossed_delivered = 0;
+			(void)erx_event_sleep_prepare(&model_status, 0, flag_set, &still_waiting, &epochs);
+			fired = atomic_load(&model_status.ready) != 0;
+			(void)erx_event_leave_wait_ready(&model_status, &table, &ops);
+			if (atomic_load(&model_status.ready) != 0) {
+				printf("LEFT WITH A LABEL: fire at gap %d, flag %s\n", fire_at_gap,
+				    cleared != 0 ? "cleared" : "set");
+				exit(1);
+			}
+			CHECK(crossed_delivered == (fired ? 1u : 0u));
+		}
+	}
+	fire_at_gap = -1;
+	/* The exit with nothing listed takes nothing: the next fire stays for whoever it wakes. */
+	CHECK(erx_event_leave_wait_ready(&model_status, &table, &ops) == 0);
 }
 
 static void
@@ -245,6 +310,7 @@ main(void)
 {
 	check_every_gap_of_the_sleep_step();
 	check_a_cleared_flag_stops_the_sleep();
+	check_no_executor_leaves_with_a_label();
 	check_the_table();
 	check_a_long_burst_arrives_whole();
 	check_the_race();

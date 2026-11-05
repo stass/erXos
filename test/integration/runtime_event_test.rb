@@ -36,7 +36,33 @@ class RuntimeEventTest < Minitest::Test
     assert_match(/^LOST WAKE: fire at gap 1: /, output)
   end
 
+  def test_the_seeded_exit_leaves_with_a_label
+    output, status = run_harness('-DERX_EVENT_SEED_LEAVE_WITHOUT_TAKING')
+    refute status.success?, output
+    assert_match(/^LEFT WITH A LABEL: fire at gap 0, flag set$/, output)
+  end
+
+  # The harness drives the core's exit; this ties it to the wait itself, whose loop is ERTS's
+  # and runs only in the hosted runtime. The old exit, a break with nothing taken after it,
+  # has no call here.
+  def test_scheduler_wait_leaves_through_the_core
+    assert_equal 1, exit_calls(File.read(File.join(ROOT, 'otp/erts/emulator/beam/erl_process.c')))
+  end
+
+  def test_the_source_check_catches_the_old_exit
+    assert_equal 0, exit_calls("scheduler_wait(int *fcalls, ErtsSchedulerData *esdp, ErtsRunQueue *rq)\n{\n" \
+                               "    while (1) { break; }\n    erts_runq_lock(rq);\n    sched_active(esdp->no, rq);\n}\n")
+  end
+
   private
+
+  # Calls of the exit in scheduler_wait's body, after its loop and before it takes the run
+  # queue's lock again.
+  def exit_calls(source)
+    body = source[/^scheduler_wait\(int \*fcalls.*?^}$/m]
+    tail = body[/.*\berts_runq_lock\(rq\);\s*sched_active\(esdp->no, rq\);/m]
+    tail.rpartition(/^    }$/).last.scan('erx_event_leave_wait(ssi->park_slot);').size
+  end
 
   def run_harness(*extra)
     Dir.mktmpdir('erx-event-') do |directory|

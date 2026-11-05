@@ -3561,8 +3561,7 @@ scheduler_wait(int *fcalls, ErtsSchedulerData *esdp, ErtsRunQueue *rq)
     }
 
     /* A fire wakes one executor, which may be this one, so none leaves with a label pending. */
-    if (erx_event_pending(ssi->park_slot))
-        erx_event_dispatch();
+    erx_event_leave_wait(ssi->park_slot);
 
     erts_runq_lock(rq);
     sched_active(esdp->no, rq);
