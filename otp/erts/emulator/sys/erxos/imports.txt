@@ -89,7 +89,7 @@ _exit getpid pthread_kill pthread_sigmask select sigwait
 # erx_stdio_nif.c alone, hosted mode's console device: the only object of the runtime
 # that may use these for a host terminal.
 [only_erx_stdio_nif]
-cfmakeraw poll tcgetattr tcsetattr
+cfmakeraw fcntl ioctl pipe poll sigaction tcgetattr tcsetattr
 
 # Stock callers not yet traced: each caller goes with its layer, or the name joins
 # the design's list with a reason.

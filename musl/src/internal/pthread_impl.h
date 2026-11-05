@@ -1,3 +1,4 @@
+/* Modified by erXos: an attribute field and a clone flag for an executor. */
 #ifndef _PTHREAD_IMPL_H
 #define _PTHREAD_IMPL_H
 

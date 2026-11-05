@@ -8620,6 +8620,7 @@ erts_multi_scheduling_blockers(Process *p, int normal)
     return res;
 }
 
+#ifdef ERX_TRACE_START
 /*
  * The schedulers that run holding an executor slot, which erts_start_schedulers counts and
  * says, and whether it has said so. Normal schedulers wait for that, so the line comes before
@@ -8634,6 +8635,9 @@ count_executor(Uint32 slot)
     if (slot != ERX_NO_EXECUTOR_SLOT)
         erts_atomic32_inc_nob(&executors_running);
 }
+#else
+#define count_executor(slot) ((void) (slot))
+#endif
 
 static void *
 sched_thread_func(void *vesdp)
@@ -8661,8 +8665,10 @@ sched_thread_func(void *vesdp)
     ERTS_SCHED_SLEEP_INFO_IX(no - 1)->event = tse;
     esdp->ssi->park_slot = erx_executor_slot();
     count_executor(esdp->ssi->park_slot);
+#ifdef ERX_TRACE_START
     while (erts_atomic32_read_acqb(&executors_said) == 0)
         (void) erts_milli_sleep(1);
+#endif
     erts_tse_return(tse);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8849,8 +8855,10 @@ erts_start_schedulers(void)
 
     ASSERT(erts_no_schedulers > 0 && erts_no_schedulers <= ERTS_MAX_NO_OF_SCHEDULERS);
 
+#ifdef ERX_TRACE_START
     erts_atomic32_init_nob(&executors_running, 0);
     erts_atomic32_init_nob(&executors_said, 0);
+#endif
     opts.executor = 1;
 
     for (ix = 0; ix < erts_no_schedulers; ix++) {
@@ -8901,6 +8909,7 @@ erts_start_schedulers(void)
 	    ix++;
     }
 
+#ifdef ERX_TRACE_START
     /* Says what ran, not what was asked for: a thread with no slot leaves the count short and the boot stops here. */
     while (erts_atomic32_read_nob(&executors_running)
            != (erts_aint32_t) (erts_no_schedulers + erts_no_dirty_cpu_schedulers))
@@ -8908,6 +8917,7 @@ erts_start_schedulers(void)
     erts_fprintf(stderr, "erx: erts: %d schedulers and %d dirty CPU schedulers hold executor slots\n",
                  (int) erts_no_schedulers, (int) erts_no_dirty_cpu_schedulers);
     erts_atomic32_set_relb(&executors_said, 1);
+#endif
 }
 
 BIF_RETTYPE

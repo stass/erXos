@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: no stealing of Darwin's main thread.
+ *
  * %CopyrightEnd%
  */
 

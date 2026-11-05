@@ -6003,15 +6003,6 @@ Third-party notices remain in their original files.
       "non_ascii_lines": [],
       "copied_from": "erts/emulator/sys/unix/sys_float.c"
     },
-    "erts/emulator/sys/erxos/sys_signal_stack.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "c6f93ab7aaa6ac6edab1752208b3a9e3222e54d944c45a068d5781e4244b6542",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/sys_signal_stack.c"
-    },
     "erts/emulator/sys/erxos/sys_time.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",

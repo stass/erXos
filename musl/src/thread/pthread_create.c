@@ -1,3 +1,4 @@
+/* Modified by erXos: an attribute field that makes the thread an executor. */
 #define _GNU_SOURCE
 #include "pthread_impl.h"
 #include "stdio_impl.h"
