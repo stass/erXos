@@ -30,8 +30,10 @@ These shape every design and change; the rules below apply them.
    a lot of simplicity.
 4. **Declarative where it simplifies.** Describe the system declaratively
    wherever that is simpler: Datalog, awklog (`~/projects/awklog`), relic
-   (`~/projects/relic`) or another fitting language, never where it adds
-   complexity. Barrelfish's "Tackling OS Complexity with Declarative
+   (`~/projects/relic`), Soufflé or another fitting language, never where
+   it adds complexity. Extending the chosen language, or making a new one,
+   is acceptable when that is what makes a description declarative and
+   simple. Barrelfish's "Tackling OS Complexity with Declarative
    Techniques" and the BOOM project are the references
    ([research-os-ideas.md](docs/research-os-ideas.md)).
 5. **Unix look and feel.** To its users the system feels like Unix, as QNX
