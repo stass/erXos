@@ -19,6 +19,9 @@ module Erx
       MEASURES = %w[value bytes length packed].freeze
       RELATIONS = %w[le le_nonempty].freeze
       MAX_FIELDS = 32
+      # The kind by which a request names a node: only a field of this kind can be
+      # marked "directory".
+      DIRECTORY_KIND = 'fid'
       MAX_ERRORS = 64
       # Names become Erlang atoms and functions: no reserved word, no dot, and no
       # kind whose check would clash with a BIF or a helper of the generated module.
@@ -161,13 +164,22 @@ module Erx
         request = []
         reply = []
         checks = []
+        directories = []
         marker = nil
         refused = false
         children.each do |child|
           keyword, *rest = child.words
           case [keyword, rest.size]
           in ['request', 2] then request << field(rest, child, kinds)
+          in ['request', 3]
+            request << field(rest.take(2), child, kinds)
+            directories << directory_field(rest, child)
           in ['reply', 2] then reply << field(rest, child, kinds)
+          in ['reply', 3]
+            # A bad name, kind or attribute word is reported as such first.
+            field(rest.take(2), child, kinds)
+            directory_field(rest, child)
+            child.fail!('only a request field can be a directory')
           in ['refused', 0] then refused = true
           in ['check', 3] then checks << rest
           in ['writes', 1..4]
@@ -182,12 +194,25 @@ module Erx
           line.fail!('too many fields') if fields.size > MAX_FIELDS
         end
         { name: name, type: type, request: request.freeze, reply: refused ? nil : reply.freeze,
+          directories: directories.freeze,
           checks: checks.map { |item| check(item, line, request, reply, kinds) }.freeze,
           writes: writes(marker, line, request, constants) }.freeze
       end
 
       def field(words, line, kinds)
         [atom_name(words[0], line: line), known_kind(words[1], line, kinds)].freeze
+      end
+
+      # NAME KIND directory: a fid that must name a directory. The generated
+      # directory_fids/1 lists it, so a server refuses a request whose fid there
+      # names anything else from the table, not from a list of its own.
+      def directory_field(words, line)
+        name, kind_name, attribute = words
+        line.fail!("unknown field attribute #{attribute}") unless attribute == 'directory'
+        unless kind_name == DIRECTORY_KIND
+          line.fail!("only a field of kind #{DIRECTORY_KIND} can be a directory, not #{kind_name}")
+        end
+        name
       end
 
       def check(words, line, request, reply, kinds)

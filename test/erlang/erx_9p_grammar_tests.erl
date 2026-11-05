@@ -326,6 +326,20 @@ writes_test() ->
                    {version, 8192, <<>>}, {xattrwalk, 1, 2, <<>>},
                    {getlock, 1, 1, 0, 0, 1, <<>>}]).
 
+directory_fids_test() ->
+    Directories = fun(Request) -> ok(Request), ?G:directory_fids(Request) end,
+    ?assertEqual([1], Directories({lcreate, 1, <<"f">>, 0, 0, 0})),
+    ?assertEqual([1], Directories({symlink, 1, <<"l">>, <<"t">>, 0})),
+    ?assertEqual([1], Directories({mknod, 1, <<"n">>, 0, 0, 0, 0})),
+    ?assertEqual([1], Directories({readdir, 1, 0, 1})),
+    ?assertEqual([1], Directories({link, 1, 2, <<"h">>})),
+    ?assertEqual([1], Directories({unlinkat, 1, <<"f">>, 0})),
+    ?assertEqual([1, 2], Directories({renameat, 1, <<"a">>, 2, <<"b">>})),
+    ?assertEqual([1], Directories(mkdir(<<"d">>))),
+    lists:foreach(fun(Request) -> ?assertEqual([], Directories(Request)) end,
+                  [{read, 1, 0, 1}, walk([]), {clunk, 1}, {remove, 1}, {lopen, 1, 0},
+                   {getattr, 1, 0}, {flush, make_ref()}, {xattrwalk, 1, 2, <<>>}]).
+
 builders_test() ->
     ?assertEqual({walk, 1, 2, [<<"a">>]}, ?G:walk_request(1, 2, [<<"a">>])),
     ?assertEqual({write, 1, 0, <<"x">>}, ?G:write_request(1, 0, <<"x">>)),

@@ -366,7 +366,8 @@ admit(Alias, _, {flush, OldTag}, #grant{pending = Pending, in_flight = InFlight}
     Waiting = Record#pending{flushes = [Alias | Flushes]},
     {[], Grant#grant{pending = Pending#{OldTag := Waiting}, in_flight = InFlight + 1}};
 admit(Alias, Owner, Request, Grant) ->
-    case lists:all(fun(Fid) -> directory_or_unheld(Fid, Grant) end, directory_fids(Request)) of
+    Directories = erx_9p_grammar:directory_fids(Request),
+    case lists:all(fun(Fid) -> directory_or_unheld(Fid, Grant) end, Directories) of
         true ->
             case dispatch(Owner, Request, Grant) of
                 {{to_file, Node, Call}, Grant1} -> drain(to_file(Alias, Request, Node, Call, Grant1));
@@ -376,24 +377,15 @@ admit(Alias, Owner, Request, Grant) ->
             finish(Alias, Request, {error, enotdir}, Grant)
     end.
 
-%% The fids of a request that must name a directory: the directory a make,
-%% an unlink or a rename acts in, and the fid a listing reads, opened or not.
-%% A request that names a file or a link there is enotdir before dispatch, so
-%% no callback is handed a node that is no directory as one, since a node's
-%% qid, recorded when its fid was walked, keeps its type while the node lives
-%% (design-files.md, qid identity). A walk checks each name it passes itself
-%% (walk_step/3).
-directory_fids({lcreate, Fid, _, _, _, _}) -> [Fid];
-directory_fids({mkdir, Dfid, _, _, _}) -> [Dfid];
-directory_fids({symlink, Dfid, _, _, _}) -> [Dfid];
-directory_fids({mknod, Dfid, _, _, _, _, _}) -> [Dfid];
-directory_fids({link, Dfid, _, _}) -> [Dfid];
-directory_fids({unlinkat, Dfid, _, _}) -> [Dfid];
-directory_fids({renameat, OldDfid, _, NewDfid, _}) -> [OldDfid, NewDfid];
-directory_fids({readdir, Fid, _, _}) -> [Fid];
-directory_fids(_) -> [].
-
-%% A fid the grant does not hold is left to dispatch/3, which answers ebadf.
+%% Whether Fid, one that erx_9p_grammar:directory_fids/1 lists for a request
+%% (the directory a make, an unlink or a rename acts in, or the fid a listing
+%% reads, as the protocol table marks them), may be dispatched: true when it
+%% names a directory or the grant does not hold it. A request failing this is
+%% enotdir before dispatch, so no callback is handed a node that is no
+%% directory as one, since a node's qid, recorded when its fid was walked,
+%% keeps its type while the node lives (design-files.md, qid identity). A walk
+%% checks each name it passes itself (walk_step/3). A fid the grant does not
+%% hold is left to dispatch/3, which answers ebadf.
 directory_or_unheld(Fid, #grant{fids = Fids}) ->
     case Fids of
         #{Fid := #fid{path = [{_, {Type, _, _}, _} | _]}} -> Type band ?ERX_P9_QTDIR =/= 0;

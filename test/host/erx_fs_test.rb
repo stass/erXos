@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/abi'
 
 # The erx_fs grant and the domain's file version counter: test/erlang/erx_fs_tests.erl and
 # erx_fs_version_tests.erl run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
 # supplies) against the sources as they are, and against each seeded fault of
-# docs/design-files.md#verification-and-testing, where the named test must fail.
+# docs/design-files.md#verification-and-testing, where the named test must fail. A fault
+# in the protocol table reaches the grant through the grammar generated from it.
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[
@@ -27,6 +30,7 @@ class ErxFsTest < Minitest::Test
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
   GRAMMAR = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
   VERSION = 'erlang/apps/erx_files/src/erx_fs_version.erl'
+  TABLE = 'abi/protocols/9p.txt'
 
   Fault = Data.define(:name, :file, :from, :to, :caught_by)
 
@@ -156,16 +160,16 @@ class ErxFsTest < Minitest::Test
               from: '    case entries(Entries) of',
               to: '    case is_list(Entries) andalso lists:all(fun(Entry) -> entries([Entry]) end, Entries) of',
               caught_by: 'improper_listing_is_eio_test'),
-    Fault.new(name: "a rename's new directory may be a file", file: GRANT,
-              from: 'directory_fids({renameat, OldDfid, _, NewDfid, _}) -> [OldDfid, NewDfid];',
-              to: 'directory_fids({renameat, OldDfid, _, _, _}) -> [OldDfid];',
+    Fault.new(name: "a rename's new directory may be a file", file: TABLE,
+              from: "    request new_dir_fid fid directory\n", to: "    request new_dir_fid fid\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
-    Fault.new(name: "a link's checked fid is its source, not its directory", file: GRANT,
-              from: 'directory_fids({link, Dfid, _, _}) -> [Dfid];',
-              to: 'directory_fids({link, _, Fid, _}) -> [Fid];',
+    Fault.new(name: "a link's checked fid is its source, not its directory", file: TABLE,
+              from: "  operation link 70\n    request dfid fid directory\n    request fid fid\n",
+              to: "  operation link 70\n    request dfid fid\n    request fid fid directory\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
-    Fault.new(name: 'a file opened is listed by the tree', file: GRANT,
-              from: "directory_fids({readdir, Fid, _, _}) -> [Fid];\n", to: '',
+    Fault.new(name: 'a file opened is listed by the tree', file: TABLE,
+              from: "  operation readdir 40\n    request fid fid directory\n",
+              to: "  operation readdir 40\n    request fid fid\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test')
   ].freeze
 
@@ -179,7 +183,7 @@ class ErxFsTest < Minitest::Test
     define_method(:"test_seeded_fault_#{index}_is_caught") do
       original = File.read(File.join(ROOT, fault.file))
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
-      output, status = eunit(fault.file => original.sub(fault.from) { fault.to })
+      output, status = eunit(replacements(fault.file, original.sub(fault.from) { fault.to }))
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
       # EUnit's verbose line for one test: its name, then its verdict on the same line.
       assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*(?:failed|timed out)\*/, output, fault.name)
@@ -187,6 +191,19 @@ class ErxFsTest < Minitest::Test
   end
 
   private
+
+  # The sources a fault replaces: the file itself, or for the protocol table the grammar
+  # generated from it in a scratch copy of abi/.
+  def replacements(file, text)
+    return { file => text } unless file == TABLE
+
+    Dir.mktmpdir('erx-fs-table-') do |root|
+      FileUtils.cp_r(File.join(ROOT, 'abi'), root)
+      File.write(File.join(root, TABLE), text)
+      schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
+      { GRAMMAR => Erx::ABI::ProtocolEmitter.outputs(schema).fetch(GRAMMAR) }
+    end
+  end
 
   # Compiles the sources, with any replaced by the given text, and runs both suites.
   def eunit(replaced)

@@ -445,9 +445,11 @@ it; git history is the record of completed work.
   when the point is the tree's root; a bind of a directory below the root is removed or renamed through the
   bind where Linux answers `ebusy`; the remote answer's place says so (`Names =:= Root`), so the check is one
   comparison in `remove`, `renamed` and `make` once `Try` receives the place.
-* [Low] runtime, `erlang/apps/erx_files/src/erx_fs_grant.erl`: `directory_fids/1` lists by hand which
-  fid of each request must name a directory, and an operation it misses gets no check; a "directory fid"
-  field type in `abi/protocols/9p.txt` would let `tools/gen_abi.rb` emit the list from the grammar.
+* [Medium] abi, `abi/protocols/9p.txt`: a request field of kind `fid` without `directory` is taken to
+  name any node, so an operation added without the mark reaches erx_fs's callbacks with a file or a link
+  where a directory belongs; requiring every `fid` field to state what it names from a closed set
+  (`directory`, `node`, `new`), or splitting the kind, would make the choice forced in
+  `tools/lib/erx/abi_protocol.rb`.
 * [Low] runtime, `erx_file_remote`: a relative symbolic link among a bind's root names (a bind made
   through a link) answers `enoent`, since the bind fixed its root as names and the link's directory lies
   above the entry's point; resolving `From`'s links when `erx_ns:bind` binds would remove the case.

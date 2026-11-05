@@ -15500,6 +15500,7 @@ module Erx
                 :type => 8,
                 :request => [["fid".b, "fid".b].freeze].freeze,
                 :reply => [["statfs".b, "statfs".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15508,6 +15509,7 @@ module Erx
                 :type => 12,
                 :request => [["fid".b, "fid".b].freeze, ["flags".b, "u32".b].freeze].freeze,
                 :reply => [["qid".b, "qid".b].freeze, ["iounit".b, "u32".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "any",
@@ -15535,6 +15537,7 @@ module Erx
                   ["gid".b, "u32".b].freeze
                 ].freeze,
                 :reply => [["qid".b, "qid".b].freeze, ["iounit".b, "u32".b].freeze].freeze,
+                :directories => ["fid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15550,6 +15553,7 @@ module Erx
                   ["gid".b, "u32".b].freeze
                 ].freeze,
                 :reply => [["qid".b, "qid".b].freeze].freeze,
+                :directories => ["fid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15567,6 +15571,7 @@ module Erx
                   ["gid".b, "u32".b].freeze
                 ].freeze,
                 :reply => [["qid".b, "qid".b].freeze].freeze,
+                :directories => ["dfid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15577,6 +15582,7 @@ module Erx
                 :type => 22,
                 :request => [["fid".b, "fid".b].freeze].freeze,
                 :reply => [["target".b, "target".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15585,6 +15591,7 @@ module Erx
                 :type => 24,
                 :request => [["fid".b, "fid".b].freeze, ["request_mask".b, "u64".b].freeze].freeze,
                 :reply => [["attr".b, "attr".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15593,6 +15600,7 @@ module Erx
                 :type => 26,
                 :request => [["fid".b, "fid".b].freeze, ["attr".b, "set_attr".b].freeze].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15607,6 +15615,7 @@ module Erx
                   ["name".b, "xattr_name".b].freeze
                 ].freeze,
                 :reply => [["size".b, "xattr_size".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15620,6 +15629,7 @@ module Erx
                   ["flags".b, "u32".b].freeze
                 ].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15634,6 +15644,7 @@ module Erx
                   ["count".b, "io_count".b].freeze
                 ].freeze,
                 :reply => [["entries".b, "dirents".b].freeze].freeze,
+                :directories => ["fid".b].freeze,
                 :checks => [
                   {
                     :reply => {
@@ -15656,6 +15667,7 @@ module Erx
                 :type => 50,
                 :request => [["fid".b, "fid".b].freeze, ["datasync".b, "u32".b].freeze].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15672,6 +15684,7 @@ module Erx
                   ["client_id".b, "string".b].freeze
                 ].freeze,
                 :reply => [["status".b, "u8".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "equal",
@@ -15700,6 +15713,7 @@ module Erx
                   ["proc_id".b, "u32".b].freeze,
                   ["client_id".b, "string".b].freeze
                 ].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15712,6 +15726,7 @@ module Erx
                   ["name".b, "name".b].freeze
                 ].freeze,
                 :reply => [].freeze,
+                :directories => ["dfid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15727,6 +15742,7 @@ module Erx
                   ["gid".b, "u32".b].freeze
                 ].freeze,
                 :reply => [["qid".b, "qid".b].freeze].freeze,
+                :directories => ["dfid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15742,6 +15758,7 @@ module Erx
                   ["new_name".b, "name".b].freeze
                 ].freeze,
                 :reply => [].freeze,
+                :directories => ["old_dir_fid".b, "new_dir_fid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15756,6 +15773,7 @@ module Erx
                   ["flags".b, "unlink_flags".b].freeze
                 ].freeze,
                 :reply => [].freeze,
+                :directories => ["dir_fid".b].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"
@@ -15766,6 +15784,7 @@ module Erx
                 :type => 100,
                 :request => [["msize".b, "u32".b].freeze, ["version".b, "string".b].freeze].freeze,
                 :reply => [["msize".b, "u32".b].freeze, ["version".b, "string".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [
                   {
                     :reply => {
@@ -15793,6 +15812,7 @@ module Erx
                   ["n_uname".b, "u32".b].freeze
                 ].freeze,
                 :reply => nil,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15807,6 +15827,7 @@ module Erx
                   ["n_uname".b, "u32".b].freeze
                 ].freeze,
                 :reply => [["qid".b, "qid".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15815,6 +15836,7 @@ module Erx
                 :type => 108,
                 :request => [["old_tag".b, "alias".b].freeze].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15827,6 +15849,7 @@ module Erx
                   ["names".b, "walk_names".b].freeze
                 ].freeze,
                 :reply => [["qids".b, "qids".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [
                   {
                     :reply => {
@@ -15853,6 +15876,7 @@ module Erx
                   ["count".b, "io_count".b].freeze
                 ].freeze,
                 :reply => [["data".b, "data".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [
                   {
                     :reply => {
@@ -15879,6 +15903,7 @@ module Erx
                   ["data".b, "data".b].freeze
                 ].freeze,
                 :reply => [["count".b, "u32".b].freeze, ["at".b, "at".b].freeze].freeze,
+                :directories => [].freeze,
                 :checks => [
                   {
                     :reply => {
@@ -15903,6 +15928,7 @@ module Erx
                 :type => 120,
                 :request => [["fid".b, "fid".b].freeze].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => nil
               }.freeze,
@@ -15911,6 +15937,7 @@ module Erx
                 :type => 122,
                 :request => [["fid".b, "fid".b].freeze].freeze,
                 :reply => [].freeze,
+                :directories => [].freeze,
                 :checks => [].freeze,
                 :writes => {
                   :rule => "always"

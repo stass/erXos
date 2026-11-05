@@ -13,7 +13,7 @@
 -module(erx_9p_grammar).
 
 -export([decode_request/1, decode_request_frame/1, decode_reply/2, writes/1,
-         operations/0, message_type/1]).
+         directory_fids/1, operations/0, message_type/1]).
 -export([packed_dirents/1, statfs_request/1, lopen_request/2, lcreate_request/5,
          symlink_request/4, mknod_request/6, readlink_request/1, getattr_request/2,
          setattr_request/2, xattrwalk_request/3, xattrcreate_request/4, readdir_request/3,
@@ -334,6 +334,64 @@ writes({clunk, _}) ->
     false;
 writes({remove, _}) ->
     true.
+
+%% The fids of Request that must name a directory ("directory" in the table), in
+%% request order. Request must have passed decode_request/1.
+-spec directory_fids(tuple()) -> [non_neg_integer()].
+directory_fids({statfs, _}) ->
+    [];
+directory_fids({lopen, _, _}) ->
+    [];
+directory_fids({lcreate, Fid, _, _, _, _}) ->
+    [Fid];
+directory_fids({symlink, Fid, _, _, _}) ->
+    [Fid];
+directory_fids({mknod, Dfid, _, _, _, _, _}) ->
+    [Dfid];
+directory_fids({readlink, _}) ->
+    [];
+directory_fids({getattr, _, _}) ->
+    [];
+directory_fids({setattr, _, _}) ->
+    [];
+directory_fids({xattrwalk, _, _, _}) ->
+    [];
+directory_fids({xattrcreate, _, _, _, _}) ->
+    [];
+directory_fids({readdir, Fid, _, _}) ->
+    [Fid];
+directory_fids({fsync, _, _}) ->
+    [];
+directory_fids({lock, _, _, _, _, _, _, _}) ->
+    [];
+directory_fids({getlock, _, _, _, _, _, _}) ->
+    [];
+directory_fids({link, Dfid, _, _}) ->
+    [Dfid];
+directory_fids({mkdir, Dfid, _, _, _}) ->
+    [Dfid];
+directory_fids({renameat, OldDirFid, _, NewDirFid, _}) ->
+    [OldDirFid, NewDirFid];
+directory_fids({unlinkat, DirFid, _, _}) ->
+    [DirFid];
+directory_fids({version, _, _}) ->
+    [];
+directory_fids({auth, _, _, _, _}) ->
+    [];
+directory_fids({attach, _, _, _, _, _}) ->
+    [];
+directory_fids({flush, _}) ->
+    [];
+directory_fids({walk, _, _, _}) ->
+    [];
+directory_fids({read, _, _, _}) ->
+    [];
+directory_fids({write, _, _, _}) ->
+    [];
+directory_fids({clunk, _}) ->
+    [];
+directory_fids({remove, _}) ->
+    [].
 
 %% The operations of the table and their 9P2000.L request message types.
 -spec operations() -> [atom()].

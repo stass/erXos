@@ -36,7 +36,10 @@
 # reply field R to request field Q, measured by value, bytes, length or
 # packed; "le_nonempty" also requires R at least 1 when Q is. "writes"
 # marks an operation a read-only grant refuses: "always", "any F M..." when
-# F has a bit of any mask M set, "equal F N" when F is N.
+# F has a bit of any mask M set, "equal F N" when F is N. A request field of
+# kind fid may end in "directory": the fid must name a directory, and the
+# generated directory_fids/1 lists it, so erx_fs answers enotdir before any
+# callback when it names a file or a link.
 
 limit p9_nofid u32 0xffffffff
 limit p9_notag u16 0xffff
@@ -170,7 +173,7 @@ protocol erx_9p
     reply iounit u32
     writes any flags @p9_o_accmode @p9_o_trunc
   operation lcreate 14
-    request fid fid
+    request fid fid directory
     request name name
     request flags u32
     request mode u32
@@ -179,14 +182,14 @@ protocol erx_9p
     reply iounit u32
     writes always
   operation symlink 16
-    request fid fid
+    request fid fid directory
     request name name
     request target target
     request gid u32
     reply qid qid
     writes always
   operation mknod 18
-    request dfid fid
+    request dfid fid directory
     request name name
     request mode u32
     request major u32
@@ -217,7 +220,7 @@ protocol erx_9p
     request flags u32
     writes always
   operation readdir 40
-    request fid fid
+    request fid fid directory
     request offset u64
     request count io_count
     reply entries dirents
@@ -248,25 +251,25 @@ protocol erx_9p
     reply proc_id u32
     reply client_id string
   operation link 70
-    request dfid fid
+    request dfid fid directory
     request fid fid
     request name name
     writes always
   operation mkdir 72
-    request dfid fid
+    request dfid fid directory
     request name name
     request mode u32
     request gid u32
     reply qid qid
     writes always
   operation renameat 74
-    request old_dir_fid fid
+    request old_dir_fid fid directory
     request old_name name
-    request new_dir_fid fid
+    request new_dir_fid fid directory
     request new_name name
     writes always
   operation unlinkat 76
-    request dir_fid fid
+    request dir_fid fid directory
     request name name
     request flags unlink_flags
     writes always

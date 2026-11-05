@@ -70,6 +70,41 @@ class Erx9pGrammarTest < Minitest::Test
     end
   end
 
+  # Operations go at the end of the table, after the kinds they name.
+  def test_malformed_directory_fields_are_refused
+    {
+      "  operation odd 200\n    request name name directory" => /only a field of kind fid can be a directory, not name/,
+      "  operation odd 200\n    request fid fid\n    reply other fid directory" => /only a request field can be a directory/,
+      "  operation odd 200\n    request fid fid dir" => /unknown field attribute dir/
+    }.each do |addition, message|
+      error = assert_raises(Erx::Error) do
+        with_table(->(text) { "#{text}#{addition}\n" }) do |root|
+          Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))
+        end
+      end
+      assert_match(message, error.message, addition)
+    end
+  end
+
+  def test_a_directory_field_is_listed_by_directory_fids
+    source = with_table(->(text) { "#{text}  operation odd 200\n    request fid fid\n    request at_fid fid directory\n" }) do |root|
+      Erx::ABI::ProtocolEmitter.outputs(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))).fetch(GENERATED)
+    end
+    assert_includes source, "directory_fids({odd, _, AtFid}) ->\n    [AtFid]"
+  end
+
+  # directory_fids/1 answers for every operation the table declares and for nothing
+  # else: a clause per operation, and none that matches any request.
+  def test_directory_fids_has_a_clause_per_operation_and_no_catch_all
+    source = File.binread(File.join(ROOT, GENERATED))
+    protocol = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)).protocols.first
+    clauses = source.scan(/^directory_fids\(\{(\w+)[,}]/).flatten
+    assert_equal protocol.fetch(:operations).map { |operation| operation.fetch(:name) }.sort, clauses.sort
+    refute_match(/^directory_fids\([^{]/, source)
+    assert_includes source, "directory_fids({renameat, OldDirFid, _, NewDirFid, _}) ->\n    [OldDirFid, NewDirFid]"
+    assert_includes source, "directory_fids({walk, _, _, _}) ->\n    []"
+  end
+
   def test_fields_that_share_a_variable_are_refused
     error = assert_raises(Erx::Error) do
       with_table(->(text) { text.sub("protocol erx_9p\n", "protocol erx_9p\n  operation odd 200\n    request a_1 u32\n    request a1 u32\n") }) do |root|

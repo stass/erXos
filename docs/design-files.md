@@ -1086,11 +1086,14 @@ other client's request can come between its parts:
   only what the funnel admitted, so no path reaches a callback with a
   writing request on a read-only grant. A refused `remove` still clunks
   its fid. `erx_fs` then checks the bounds, maps fids to nodes, and
-  refuses with `enotdir` a request whose directory fid (the one of
-  `lcreate`, `mkdir`, `symlink`, `mknod`, `link` and `unlinkat`, both of
-  `renameat`, and the fid of `readdir`) names a node whose qid is
-  not a directory, so no callback is handed a file or a link as a
-  directory, whatever the tree checks itself. It replies only to the
+  refuses with `enotdir` a request whose directory fid (such as the
+  one of `mkdir`, both of `renameat`, or the fid of `readdir`) names a
+  node whose qid is not a directory, so no callback is handed a file or a link as a
+  directory, whatever the tree checks itself. The list comes from the
+  protocol table, which marks each such field `directory`: the
+  generated grammar's `directory_fids/1` answers it with one clause per
+  operation and none for anything else, so an operation the table adds
+  states its directory fids where it is declared. It replies only to the
   request's alias, holding each reply to its request with the grammar's
   reply check, so a callback's malformed
   answer reaches the client as `eio`. Each operation builds the grant it
@@ -1923,7 +1926,12 @@ report, so a passing run shows the code under test ran.
   an owner, is answered `eio` at the client and the grant goes on
   serving; seeded: a grant that takes a directory's `make` answering
   `{ok, Node, Qid, State1}` for a file's, and one that crashes on an
-  answer that is not an error, which that case catches. A tree that
+  answer that is not an error, which that case catches. Each operation
+  whose directory fid names a file or a link is answered `enotdir` and
+  the tree records no call; seeded: a protocol table that leaves
+  `renameat`'s new directory or `readdir`'s fid unmarked, or marks
+  `link`'s source in place of its directory, regenerated, which that
+  case catches. A tree that
   answers root, walk or `lcreate` with a malformed qid is answered `eio`
   and the grant records no fid, opens nothing, starts no file process
   and clunks the handle the tree opened; a `remove` whose tree answers

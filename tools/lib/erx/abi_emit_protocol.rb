@@ -44,7 +44,7 @@ module Erx
 
       def emit
         [ErlangEmitter::NOTICE.chomp, header, exports, macros, decoding, requests, replies, checks,
-         writes, catalog, builders, kind_checks, helpers].join("\n\n") + "\n"
+         writes, directories, catalog, builders, kind_checks, helpers].join("\n\n") + "\n"
       end
 
       private
@@ -72,7 +72,7 @@ module Erx
         # A server fitting a reply to a request's byte count sizes it as the wire would.
         packed = @kinds.select { |_, kind| kind[:packed] }.map { |kind_name, _| "packed_#{kind_name}/1" }
         ["-export([decode_request/1, decode_request_frame/1, decode_reply/2, writes/1,\n" \
-         '         operations/0, message_type/1]).',
+         '         directory_fids/1, operations/0, message_type/1]).',
          export_list(packed + builders)].join("\n")
       end
 
@@ -195,6 +195,20 @@ module Erx
         "%% Whether a read-only grant refuses Request before any callback (F5). Request must\n" \
           "%% have passed decode_request/1.\n" \
           "-spec writes(tuple()) -> boolean().\n" + clauses.join(";\n") + '.'
+      end
+
+      # A clause for each operation and none for any other term, so an operation the
+      # table adds answers its own list, empty or not, and never falls through.
+      def directories
+        clauses = @operations.map do |operation|
+          listed = operation.fetch(:directories)
+          pattern_names = operation.fetch(:request).map { |item, _| listed.include?(item) ? variable(item) : '_' }
+          "directory_fids(#{pattern(operation.fetch(:name), pattern_names)}) ->\n    " \
+            "[#{listed.map { |item| variable(item) }.join(', ')}]"
+        end
+        "%% The fids of Request that must name a directory (\"directory\" in the table), in\n" \
+          "%% request order. Request must have passed decode_request/1.\n" \
+          "-spec directory_fids(tuple()) -> [non_neg_integer()].\n" + clauses.join(";\n") + '.'
       end
 
       def catalog

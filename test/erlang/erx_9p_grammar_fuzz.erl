@@ -32,6 +32,7 @@ request_round(Term) ->
     case ?G:decode_request(Term) of
         {ok, Term} ->
             true = is_boolean(?G:writes(Term)),
+            true = is_list(?G:directory_fids(Term)),
             Term = build(Term),
             {ok, Alias, _, Term} = ?G:decode_request_frame({erx_9p, Alias, self(), Term});
         {error, einval} ->
