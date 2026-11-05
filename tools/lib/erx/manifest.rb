@@ -155,7 +155,7 @@ module Erx
 
     module Frontend
       FIELDS = {
-        'machine' => %w[flags host console hostlink platform root_memory system_baseline system_share users_share system_principal max_domains max_connections system_lane system_queue peer_held system_reserve sealing system_runtime_limits native_limits],
+        'machine' => %w[flags host console hostlink platform root_memory system_baseline system_share users_share system_principal max_domains max_connections system_lane system_queue peer_held system_reserve sealing system_runtime_limits native_limits system_args],
         'share' => %w[quota_ns period_ns cpuset capacity_mcpu capacity_first slice_us grace_us base ceiling flags],
         'principal' => %w[memory grant domains names default_limits ceiling_limits],
         'runtime_limits' => %w[max_frame max_message_heap funnel_depth exports tmp overlay atoms foreign_atoms processes],
@@ -169,7 +169,7 @@ module Erx
         'image' => %w[device input salt],
         'partial_boot' => %w[image]
       }.freeze
-      OPTIONAL = { 'domain' => %w[args env], 'service' => %w[name],
+      OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt] }.freeze
       DIRECTIVES = { 'introduce' => 2, 'liveness' => 1, 'shell_principal' => 1 }.freeze
       IDENTIFIER = /\A[a-z0-9][a-z0-9._-]{0,62}\z/.freeze
@@ -410,7 +410,8 @@ module Erx
         check_and_place(rows, root_memory: root_memory, baseline: baseline, max_domains: max_domains)
         header = {
           'magic' => @codec.constant('manifest_magic'), 'version' => @codec.constant('manifest_version'),
-          'flags' => flags, 'host' => text(machine, 'host'), 'console' => console,
+          'flags' => flags, 'host' => text(machine, 'host'), 'system_args' => words(machine, 'system_args'),
+          'console' => console,
           'hostlink' => hostlink, 'platform' => platform_name, 'root_memory' => root_memory,
           'system_baseline' => baseline, 'system_reservation' => 0,
           'system_share' => system_share, 'users_share' => users_share,
@@ -464,6 +465,18 @@ module Erx
           return [token.value.delete_prefix('hex:')].pack('H*')
         end
         record.line.fail!("#{key} requires quoted or hexadecimal bytes")
+      end
+
+      # A word list as the page holds it, each word ended by a NUL. A source writes it
+      # quoted, with its words separated by spaces, since the arguments it holds have no
+      # empty word and no space.
+      def words(record, key)
+        return ''.b unless record.properties.key?(key)
+
+        token = one(record, key)
+        return text(record, key) unless token.quoted
+
+        token.value.b.split(' ').map { |word| "#{word}\0" }.join
       end
 
       def number(record, key)

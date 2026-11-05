@@ -291,17 +291,22 @@ it; git history is the record of completed work.
   two `config.h` files, the source check for `__APPLE__` and the like, and the own lists of `erx_output.c` and
   `erx_stdio_nif.c` wait for the native configure and for `sys/erxos` to shrink
   ([design-runtime.md](docs/design-runtime.md#what-erts-imports)).
-* [Medium] runtime, `otp/erts/emulator/nifs/erxos/erx_prim_file_stage.c`: stock's `unix_prim_file.c` stays
-  linked beside the release file system, chosen by `ERX_RELEASE_ARCHIVE` when the NIF loads, and
-  `runtime_prim_file_test.rb`'s reference is that stock layer in the same executable. A release booting from
-  its archive deletes the stage, the makefile's renames and the variable's read in
-  `liberx/backend/hosted/release.c`, and moves the reference to the stock oracle.
+* [Medium] runtime, `tools/lib/erx/runtime.rb`: the build record covers neither the pack's own inputs (`tools/lib/erx/release.rb`, `pack*.rb`, `manifest.rb`, `config/platforms`, `config/provenance`) nor the archive's bytes, and is written before the pack runs, so a test run alone can read an older `system.pack`. Wants a release record written after the pack.
+* [Medium] tools, `tools/lib/erx/pack_provenance.rb`: a `compiled` receipt declares its sources and names no `.hrl`; nothing ties a beam to them, and a `release` pack accepts it. Derive them with `erlc -M`, and hold them under a registered import.
+* [Medium] tools, `tools/lib/erx/release.rb`: `boot_file` puts paths into an Erlang expression, so a checkout path holding `"` or `\` breaks or changes it. Pass them with `-extra`.
+* [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
+* [Medium] runtime, `liberx/backend/core/boot_manifest.c`: no fuzz target covers `erx_boot_manifest_read` or `erx_boot_info_build`; chain them onto the manifest target.
+* [Medium] runtime, `erx_prim_file.c`: a release file is served with no check of its hash, where `docs/design-kernel.md` says every file passes `erx_pack_file_check` before its first use. Hosted checks the manifest alone.
+* [Medium] runtime, `config/manifest/qemu-virt-development.txt`: `system_args` has no `-user erx_console`
+  until the console exists, so `user_sup` starts stock's `user_drv` over `prim_tty`'s NIF.
+* [Medium] runtime, `liberx/backend/fiasco`: the native root does not read the release's manifest: its page takes
+  `erx.arg=WORD` alone, with `system_args`, `limits`, `pack_flags` and `release_addr` empty, and no archive holds
+  a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
+  `Erx::Release.differences` the comparison `test/integration/runtime_release_test.rb` runs over two hosted packs
+  until then.
 * [Low] runtime, `erx_prim_file.c`: EROFS, `/tmp` and file servers have no provider yet, so a path on them
   cannot arise: the namespace holds the one row `/`. Their rows' fields of `erx_ns_mount_t`
   ([design-files.md](docs/design-files.md#namespaces)) arrive with them.
-* [Medium] runtime, `otp/erts/emulator/Makefile.in`: `nifs/erxos/*.c` is in no depend file, so a change to
-  `erx_ns_result_t`, `erx_release_entry_t` or an ABI limit recompiles liberx and leaves `erx_prim_file.o` with the
-  old layout: an incremental build can then write past a stack buffer. Remove `build/runtime` after such a change.
 * [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:
@@ -315,7 +320,7 @@ it; git history is the record of completed work.
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
 * [Medium] runtime, the native boot page: `erx_boot_info_build` and `erx_boot_args_parse` have no native caller, and `tools/lib/erx/production_image.rb`'s root writes no page. The root needs `erx_boot_info`, its page written from the manifest and `bootargs`, and `erx_runtime_main` called from `liberx/backend/fiasco/libc_start.c`. The comparison of the two entries' pages waits for it, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)). `erx_boot_args_t.refused` is text from the boot loader, so the root's refusal prints it through the console's escaping function.
 * [Medium] runtime, `otp/lib/kernel/src/dist_util.erl`: `gen_challenge/0` calls `statistics(runtime)`, which fails with `notsup`, so a distribution handshake ends there. No `1>` reaches it; the first carrier does.
-* [Low] runtime, `liberx/backend/hosted/start.c`: six names of the host's environment reach the page for the stock fd, spawn and forker ports and the stock terminal driver, where the design's page holds none. They go with those layers. Its `system_args`, the words `-erx console_driver erx_stdio`, `limits`, `pack_flags` and `release_addr` wait for the manifest, the archive and the console, and the node name's host is fixed until then.
+* [Low] runtime, `liberx/backend/hosted/start.c`: six names of the host's environment reach the page for the stock fd, spawn and forker ports and the stock terminal driver, where the design's page holds none. They go with those layers. The forker exits when `BINDIR` is unset and runs `erl_child_setup` from that host directory, so a boot is not yet free of host files.
 * [Low] runtime, `beam/erl_time_sup.c`: edit 20 of the design is open. The stock correction runs over `erx_clock_ns`, and stays idle since system time moves with it by one offset; deleting it changes nothing a shell sees.
 * [Low] runtime, `otp/erts/emulator/sys/erxos/sys_time.c`: `os_monotonic_time_source` and `os_system_time_source` report the nanosecond unit as the resolution, where macOS's clock ticks by the microsecond; a backend call for the granularity would make it true.
 * [Low] runtime, `otp/lib/tools`, `otp/erts/etc`, `otp/erts/start_scripts`: not buildable from the imported

@@ -238,6 +238,25 @@ class PackProvenanceTest < Minitest::Test
     @resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'development')
   end
 
+  # A file a compiler made from sources alone: its record is the sources it names.
+  def resolve_compiled(receipt_fields)
+    receipt = write('compiled.json', JSON.generate({ 'version' => 1, 'kind' => 'compiled', 'artifact' => reference(@artifact) }.merge(receipt_fields)))
+    @resolver.instance_variable_set(:@catalog, build_catalog)
+    @resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'development')
+  end
+
+  def test_a_compiled_receipt_attributes_its_sources
+    records = resolve_compiled('sources' => [reference(@source)])
+    assert_equal ['root.c'], records.map { |record| record.fetch('path') }
+    assert_equal 'BSD-2-Clause', records.first.fetch('license')
+  end
+
+  def test_a_compiled_receipt_needs_a_source_it_can_verify
+    assert_raises(Erx::Error) { resolve_compiled('sources' => []) }
+    assert_raises(Erx::Error) { resolve_compiled('sources' => [reference(@source).merge('sha256' => '0' * 64)]) }
+    assert_raises(Erx::Error) { resolve_compiled('sources' => [reference(@source)], 'extra' => 1) }
+  end
+
   def test_actual_object_closure_has_stable_names_and_notices
     records = resolve
     assert_equal ['root.c'], records.map { |record| record.fetch('path') }

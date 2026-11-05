@@ -93,7 +93,7 @@ layout erx_share 1 wire_le 8 48
   field ceiling urgency 41
   field flags group_flags 42
   padding 44 4
-layout erx_manifest 1 wire_le 8 368
+layout erx_manifest 1 wire_le 8 376
   field magic u32 0
   field version u16 4
   field flags manifest_flags 6
@@ -138,6 +138,7 @@ layout erx_manifest 1 wire_le 8 368
   field shell_principals erx_mf_span 344
   field partial_boot erx_mf_span 352
   field strings erx_mf_span 360
+  field system_args erx_mf_str 368
 layout erx_mf_principal 1 wire_le 8 80
   field name erx_mf_str 0
   field memory u64 8
@@ -291,7 +292,7 @@ reader manifest erx_manifest @manifest_bytes_max
   extent root.length
   value root.magic @manifest_magic
   value root.version @manifest_version
-  value root.header_size 368
+  value root.header_size 376
   range root.max_domains 0 65536
   range root.max_connections 1 65536
   range root.system_reserve 1 1000
@@ -327,6 +328,7 @@ reader manifest erx_manifest @manifest_bytes_max
   string root.console.offset root.console.length strings dt_path 4096 empty no
   string root.hostlink.offset root.hostlink.length strings dt_path 4096 empty yes
   string root.platform.offset root.platform.length strings identifier 63 empty no
+  string root.system_args.offset root.system_args.length strings args 2048 empty yes
   string principals[].name.offset principals[].name.length strings identifier 63 empty no
   index principals[].default_limits limits
   index principals[].ceiling_limits limits

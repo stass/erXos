@@ -6,6 +6,7 @@
 require 'optparse'
 require 'rbconfig'
 require_relative 'lib/erx/runner'
+require_relative 'lib/erx/release'
 require_relative 'lib/erx/output_directory'
 require_relative 'lib/erx/dependencies'
 require_relative 'lib/erx/tla'
@@ -417,6 +418,13 @@ module Erx
       report.violations.empty? ? 0 : 1
     end
 
+    # The hosted runtime and the release it boots, both of which `make check-runtime-hosted` reads.
+    def self.build_runtime(jobs)
+      built = Runtime.new(root: ROOT).build(jobs: jobs)
+      Release.new(root: ROOT, output: built).build
+      built.archive
+    end
+
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
@@ -430,7 +438,7 @@ module Erx
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       path = case component
-             when 'runtime' then Runtime.new(root: ROOT).build(jobs: jobs).beam
+             when 'runtime' then build_runtime(jobs)
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")

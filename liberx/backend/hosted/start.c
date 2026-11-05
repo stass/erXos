@@ -3,23 +3,30 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 
+#include "erx/release.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/core/boot_manifest.h"
+#include "liberx/backend/hosted/internal.h"
 #include "liberx/backend/runtime_entry.h"
 
 /*
- * The hosted entry (docs/design-stopgap.md, "The hosted backend"): gathers what the page
- * holds, fills it, and starts ERTS on it. Everything host-specific about a start is here.
+ * The hosted entry (docs/design-stopgap.md, "The hosted backend"): main(ARCHIVE, ARGS...)
+ * maps the boot archive, gathers what the page holds from its manifest and the host, fills
+ * the page, and starts ERTS on it. Everything host-specific about a start is here.
  */
 
-#define HOSTED_NODE		"system@hosted"
 #define HOSTED_DOMAIN_ID	4
 #define MCPU_PER_CPU		1000
 #define NS_PER_S		UINT64_C(1000000000)
@@ -38,20 +45,30 @@ static const char *const inherited[] = { "BINDIR", "ROOTDIR", "EMU", "PROGNAME",
 #define INHERITED_COUNT	(sizeof(inherited) / sizeof(inherited[0]))
 
 /*
- * What liberx's own reports look for (vm.c, group.c). They stay beside TZ in libSystem's
+ * What liberx's group report looks for (group.c). It stays beside TZ in libSystem's
  * environment, which only liberx reads: ERTS's environment is the page's.
  */
-static const char *const report_words[] = { "ERX_HOSTED_VM_RUNS", "ERX_HOSTED_GROUP_REPORT" };
+static const char *const report_words[] = { "ERX_HOSTED_GROUP_REPORT" };
 #define REPORT_WORDS_COUNT	(sizeof(report_words) / sizeof(report_words[0]))
 
 /* libSystem's own environment: its local time reads TZ, and nothing else of the host's stays. */
 static char zone_word[] = "TZ=UTC";
 static char *hosted_environ[1 + REPORT_WORDS_COUNT + 1] = { zone_word };
 
+/* What the entry adds after the manifest's words: the console's driver, read at its start. */
+static const char console_driver_words[] = "-erx\0console_driver\0erx_stdio";
+
 _Noreturn static void
 fail(const char *reason)
 {
 	fprintf(stderr, "erx: hosted: %s\n", reason);
+	exit(1);
+}
+
+_Noreturn static void
+refuse_archive(const char *reason)
+{
+	fprintf(stderr, "erx: hosted: boot archive refused: %s\n", reason);
 	exit(1);
 }
 
@@ -125,35 +142,82 @@ host_cpus(void)
 	return (count > 64 ? 64 : (uint32_t)count);
 }
 
+/*
+ * Maps the archive read-only for the process's life and makes it the release. A file
+ * truncated during the run faults, as the host's does.
+ */
+static void
+release_map(const char *path)
+{
+	struct stat status;
+	const char *reason;
+	void *bytes;
+	int descriptor;
+
+	descriptor = open(path, O_RDONLY);
+	if (descriptor < 0 || fstat(descriptor, &status) != 0 || status.st_size <= 0)
+		refuse_archive("unreadable");
+	bytes = mmap(NULL, (size_t)status.st_size, PROT_READ, MAP_PRIVATE, descriptor, 0);
+	close(descriptor);
+	if (bytes == MAP_FAILED)
+		refuse_archive("unreadable");
+	if (erx_release_bind(bytes, (size_t)status.st_size, &reason) != 0)
+		refuse_archive(reason);
+}
+
+/* The release's manifest, checked against its hash, then by its reader. */
+static void
+manifest_read(erx_boot_manifest_t *manifest)
+{
+	const uint8_t *bytes;
+	const char *reason;
+	size_t length;
+
+	if (erx_release_manifest(&bytes, &length, &reason) != 0 ||
+	    !erx_boot_manifest_read(bytes, length, manifest, &reason))
+		refuse_archive(reason);
+}
 int
 main(int argc, char **argv)
 {
-	const size_t nargs = argc > 1 ? (size_t)argc - 1 : 0;
-	erx_boot_words_t *const args = calloc(nargs + 1, sizeof(*args));
+	const size_t nwords = argc > 2 ? (size_t)argc - 2 : 0;
+	/* The manifest's words and the driver's, then the command line after the archive's path. */
+	const size_t nargs = 2 + nwords;
+	erx_boot_words_t *const args = calloc(nargs, sizeof(*args));
 	erx_boot_words_t env[INHERITED_COUNT];
 	const uint32_t cpus = host_cpus();
+	erx_boot_manifest_t manifest;
 	erx_boot_info_status_t status;
 
+	if (argc < 2)
+		fail("usage: beam ARCHIVE [ARGS...]");
 	if (args == NULL)
 		fail("no memory for the arguments");
-	for (size_t at = 0; at < nargs; at++) {
+	release_map(argv[1]);
+	manifest_read(&manifest);
+	args[0] = manifest.system_args;
+	args[1] = (erx_boot_words_t){ console_driver_words, sizeof(console_driver_words) };
+	for (size_t at = 0; at < nwords; at++) {
 		/* The NUL is what tells the page an empty argument from no words at all. */
-		args[at] = (erx_boot_words_t){ argv[at + 1], strlen(argv[at + 1]) + 1 };
+		args[2 + at] = (erx_boot_words_t){ argv[at + 2], strlen(argv[at + 2]) + 1 };
 	}
 	wall_offset_init();
 
 	const erx_boot_inputs_t inputs = {
 		.domain_id = HOSTED_DOMAIN_ID,
 		.flags = ERX_BOOT_ROOT,
+		.pack_flags = erx_release_pack_flags(),
 		.capacity_mcpu = MCPU_PER_CPU * cpus,
 		.group = { .raw = ERX_CAP_SELF },
+		.release_addr = (uint64_t)(uintptr_t)erx_release_addr(),
 		.cpuset = cpus == 64 ? UINT64_MAX : (UINT64_C(1) << cpus) - 1,
-		.node = HOSTED_NODE,
-		.node_len = strlen(HOSTED_NODE),
+		.node = manifest.node,
+		.node_len = manifest.node_len,
 		.args = args,
 		.nargs = nargs,
 		.env = env,
 		.nenv = inherited_words(env),
+		.limits = manifest.limits,
 	};
 
 	status = erx_boot_info_build(&inputs, boot_page, sizeof(boot_page));
@@ -161,6 +225,8 @@ main(int argc, char **argv)
 		fail(erx_boot_info_reason(status));
 	free(args);
 	keep_report_words();
+	if (getenv("ERX_HOSTED_VM_RUNS") != NULL)
+		erx_hosted_vm_report_runs();
 	environ = hosted_environ;
 	erx_runtime_main();
 	return (0);

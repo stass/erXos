@@ -25,9 +25,10 @@ module Erx
     HOST_OTP_FLAVOUR = 'emu'
     # The function API's test has a main of its own, so the entry and what only it calls join here.
     LIBERX_SOURCES = [*FunctionApi::HOSTED_SOURCES.reject { |source| source.start_with?(FunctionApi::GUEST) },
-                      'liberx/backend/core/boot_info.c', 'liberx/backend/hosted/start.c'].freeze
-    # What the hosted archive is compiled from, for the build record.
-    LIBERX_TREES = %w[include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
+                      'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
+                      'liberx/backend/hosted/start.c'].freeze
+    # What the hosted archive is compiled from and the release's manifest, for the build record.
+    LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
     # What a shell needs; it boots from the tracked bootstrap/bin/start.boot. OTP's
@@ -35,18 +36,22 @@ module Erx
     # includes public_key.hrl and erts/start_scripts needs lib/os_mon/vsn.mk, and
     # the import excludes both.
     APPLICATIONS = %w[kernel stdlib compiler].freeze
+    # otp/ tracks prebuilt beams with their sources' file times, so make could keep one
+    # older than a source edit. These never enter the copy, and make compiles them.
+    BUILT_BEAMS = %w[kernel stdlib].map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }.freeze
     # The templates configure turns into the makefiles and headers make reads.
     CONFIGURE_INPUTS = %w[**/*.in **/configure **/config.sub **/config.guess].freeze
     # Deadlines in seconds, each many times what a clean build took on an idle host.
     DEADLINES = { compile: 120, copy: 300, configure: 1_800, emulator: 1_800, libs: 1_800 }.freeze
     # What the build leaves for the hosted smoke test and the seam check.
-    Output = Data.define(:root, :beam, :objects, :liberx)
+    Output = Data.define(:root, :beam, :objects, :liberx, :archive)
 
     def self.output(root:)
       otp = File.join(root, 'build/runtime/hosted/otp')
       Output.new(root: otp, beam: File.join(otp, 'bin', TARGET, 'beam.emu'),
                  objects: File.join(otp, 'erts/emulator/obj', TARGET, 'opt/emu'),
-                 liberx: File.join(root, 'build/runtime/hosted/liberx/liberx_hosted.a'))
+                 liberx: File.join(root, 'build/runtime/hosted/liberx/liberx_hosted.a'),
+                 archive: File.join(root, 'build/runtime/hosted/release/system.pack'))
     end
 
     # Whether what is built is what the tree holds: a check that read an older
@@ -126,7 +131,7 @@ module Erx
       stamp = self.class.configure_stamp(otp: otp, sdk_root: sdk_root)
       FileUtils.rm_rf(@output.root) unless stored(in_copy('.erx-configure-stamp')) == stamp
       FileUtils.mkdir_p(@output.root)
-      @runner.run(['rsync', '-a', "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
+      @runner.run(['rsync', '-a', *BUILT_BEAMS, "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
       paths = Dir.glob('**/*', File::FNM_DOTMATCH, base: otp).sort
       (stored(in_copy('.erx-paths')).to_s.lines(chomp: true) - paths).each { |path| FileUtils.rm_f(in_copy(path)) }
       File.write(in_copy('.erx-paths'), paths.join("\n"))
@@ -168,6 +173,8 @@ module Erx
     def build_environment
       Oracle::CLEAN_ERLANG_ENV.merge(
         'ERL_TOP' => @output.root,
+        # No host path in a beam, so another checkout builds the same bytes.
+        'ERL_COMPILE_FLAGS' => '+deterministic',
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,

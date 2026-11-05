@@ -1464,7 +1464,7 @@ Storage: `wire_le`. Prefix size: 48. Alignment: 8.
 
 ### `erx_manifest_t`
 
-Storage: `wire_le`. Prefix size: 368. Alignment: 8.
+Storage: `wire_le`. Prefix size: 376. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -1512,6 +1512,7 @@ Storage: `wire_le`. Prefix size: 368. Alignment: 8.
 | `shell_principals` | `erx_mf_span` | 344 | 1 |
 | `partial_boot` | `erx_mf_span` | 352 | 1 |
 | `strings` | `erx_mf_span` | 360 | 1 |
+| `system_args` | `erx_mf_str` | 368 | 1 |
 
 ### `erx_mf_limits_t`
 

@@ -1007,16 +1007,6 @@ $(OBJDIR)/%.o: nifs/common/%.c
 $(OBJDIR)/%.o: nifs/common/%.cpp
 	$(V_CXX) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
-# prim_file's platform layer: the release file system beside stock's.
-# erx_prim_file_stage.c holds the same list of names.
-EFILE_LAYER = marshal_path get_handle dup_handle readv writev preadv pwritev seek sync \
-	advise allocate truncate open from_fd close read_info read_handle_info set_time \
-	set_permissions set_owner read_link list_dir rename make_hard_link make_soft_link \
-	make_dir del_file del_dir get_cwd set_cwd get_device_cwd altname
-
-$(OBJDIR)/unix_prim_file.o: CFLAGS += $(foreach name,$(EFILE_LAYER),-Defile_$(name)=stock_efile_$(name))
-$(OBJDIR)/erx_prim_file.o: CFLAGS += $(foreach name,$(EFILE_LAYER) load,-Defile_$(name)=release_efile_$(name))
-
 $(OBJDIR)/%.o: nifs/erxos/%.c
 	$(V_CC) $(CFLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
@@ -1283,9 +1273,7 @@ OS_OBJS = \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/sys_uds.o \
 	$(OBJDIR)/driver_tab.o \
-	$(OBJDIR)/unix_prim_file.o \
 	$(OBJDIR)/erx_prim_file.o \
-	$(OBJDIR)/erx_prim_file_stage.o \
 	$(OBJDIR)/sys_float.o \
 	$(OBJDIR)/sys_time.o \
 	$(OBJDIR)/sys_signal_stack.o \
@@ -1534,6 +1522,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(NIF_COMMON_SRC) > $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(wildcard nifs/erxos/*.c) >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)

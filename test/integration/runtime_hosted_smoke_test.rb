@@ -159,7 +159,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'catch erlang:statistics(runtime).' => /^\{'EXIT',\{notsup,/,
       'erlang:localtime_to_universaltime({{2026,7,1},{12,0,0}}).' => /^\{\{2026,7,1\},\{12,0,0\}\}$/,
       'os:getenv("ERX_SMOKE_LEAK").' => /^false$/,
-      'init:get_argument(sname).' => /^\{ok,\[\["system@hosted"\]\]\}$/,
+      'init:get_argument(sname).' => /^\{ok,\[\["system@erxos"\]\]\}$/,
       "abs(os:system_time(second) - #{Time.now.to_i}) < 300." => /^true$/,
       'file:native_name_encoding().' => /^utf8$/,
       'T0 = erlang:monotonic_time(millisecond), timer:sleep(20), erlang:monotonic_time(millisecond) - T0 >= 20.' => /^true$/
@@ -183,9 +183,58 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   def test_a_word_the_page_refuses_stops_the_start_with_its_reason
-    output, status = Open3.capture2e('gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam, 'word', '', stdin_data: '')
+    output, status = Open3.capture2e('gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam, OUTPUT.archive, 'word', '',
+                                     stdin_data: '')
     assert_equal 1, status.exitstatus, output
     assert_match(/empty word/, output)
+  end
+
+  def test_a_start_with_no_archive_stops_with_its_reason
+    expected = { [] => /usage: beam ARCHIVE/, ['/nonexistent/system.pack'] => /boot archive refused: unreadable/ }
+    expected.each do |arguments, pattern|
+      output, status = Open3.capture2e('gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam, *arguments, stdin_data: '')
+      assert_equal 1, status.exitstatus, output
+      assert_match pattern, output
+    end
+  end
+
+  # The release alone serves init: its arguments are the manifest's, its code and every
+  # path answer from the archive, and no host file is in reach. The transcript prints what
+  # kernel_sup started and whether a port or a socket module is in use at the prompt.
+  def test_init_runs_from_the_archive_alone
+    expected = {
+      'init:get_argument(root).' => %r{^\{ok,\[\["/"\]\]\}$},
+      'init:get_argument(boot).' => %r{^\{ok,\[\["/bin/start"\]\]\}$},
+      'init:get_argument(erx).' => /^\{ok,\[\["console_driver","erx_stdio"\]\]\}$/,
+      'code:which(lists).' => %r{^"/lib/stdlib-[0-9.]+/ebin/lists\.beam"$},
+      'file:read_file_info("/bin/start.boot") =/= {error,enoent}.' => /^true$/,
+      'file:read_file("/etc/hosts").' => /^\{error,enoent\}$/,
+      'file:write_file("/x", <<>>).' => /^\{error,erofs\}$/,
+      'file:list_dir("/").' => /"bin"/,
+      'erlang:system_info(emu_flavor).' => /^emu$/,
+      '[element(1, C) || C <- supervisor:which_children(kernel_sup)].' => /code_server/,
+      'erlang:port_info(hd(erlang:ports()), name).' => /forker/,
+      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, rex]].' => /^\[undefined,<[0-9.]+>,undefined,undefined,undefined\]$/,
+      '[M || {M, _} <- code:all_loaded(), lists:member(M, [socket, prim_socket, prim_net, socket_registry, gen_tcp, inet_tcp, heart, erl_epmd])].' => /\[/,
+      'application:which_applications().' => /kernel/
+    }
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home) do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        answers = expected.each_with_index.map do |(expression, _), index|
+          writer.write("#{expression}\n")
+          read_until(reader, transcript, /^#{index + 2}> /, deadline)
+          plain(transcript)[/^#{index + 1}> .*\z/m]
+        end
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        @reaped = true if wait_for(pid, deadline, transcript)
+        puts plain(transcript)
+        expected.values.zip(answers).each { |pattern, answer| assert_match pattern, answer }
+      end
+    end
   end
 
   private
@@ -231,16 +280,15 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_operator high.to_i, :<, limit.to_i
   end
 
+  # The release's manifest holds every argument; the host names only what the page still
+  # inherits for the stock ports and terminal driver.
   def spawn_shell(home, extra_environment = {})
     bin = File.dirname(OUTPUT.beam)
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
-      'BINDIR' => bin, 'ROOTDIR' => OUTPUT.root, 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
-      'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes',
-      **extra_environment
+      'BINDIR' => bin, 'ROOTDIR' => '/', 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
+      'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment
     )
-    arguments = ['--', '-root', OUTPUT.root, '-bindir', bin, '-progname', 'erl', '--', '-home', home, '--',
-                 '-boot', File.join(OUTPUT.root, 'bootstrap/bin/start'), '-kernel', 'start_distribution', 'false']
-    PTY.spawn(environment, OUTPUT.beam, *arguments, chdir: home) do |reader, writer, pid|
+    PTY.spawn(environment, OUTPUT.beam, OUTPUT.archive, chdir: home) do |reader, writer, pid|
       yield reader, writer, pid
     ensure
       end_if_running(pid)

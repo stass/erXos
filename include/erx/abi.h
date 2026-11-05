@@ -3157,7 +3157,7 @@ _Static_assert(offsetof(erx_share_t, ceiling) ==
 _Static_assert(offsetof(erx_share_t, flags) ==
     ERX_SHARE_OFF_FLAGS, "erx_share.flags offset");
 
-#define ERX_MANIFEST_SIZE 368
+#define ERX_MANIFEST_SIZE 376
 #define ERX_MANIFEST_ALIGN 8
 #define ERX_MANIFEST_OFF_MAGIC 0
 #define ERX_MANIFEST_OFF_VERSION 4
@@ -3203,6 +3203,7 @@ _Static_assert(offsetof(erx_share_t, flags) ==
 #define ERX_MANIFEST_OFF_SHELL_PRINCIPALS 344
 #define ERX_MANIFEST_OFF_PARTIAL_BOOT 352
 #define ERX_MANIFEST_OFF_STRINGS 360
+#define ERX_MANIFEST_OFF_SYSTEM_ARGS 368
 typedef struct erx_manifest erx_manifest_t;
 struct erx_manifest {
 	_Alignas(8) uint32_t	magic;
@@ -3249,6 +3250,7 @@ struct erx_manifest {
 	erx_mf_span_t	shell_principals;
 	erx_mf_span_t	partial_boot;
 	erx_mf_span_t	strings;
+	erx_mf_str_t	system_args;
 };
 _Static_assert(sizeof(erx_manifest_t) == ERX_MANIFEST_SIZE, "erx_manifest size");
 _Static_assert(_Alignof(erx_manifest_t) == ERX_MANIFEST_ALIGN, "erx_manifest alignment");
@@ -3340,6 +3342,8 @@ _Static_assert(offsetof(erx_manifest_t, partial_boot) ==
     ERX_MANIFEST_OFF_PARTIAL_BOOT, "erx_manifest.partial_boot offset");
 _Static_assert(offsetof(erx_manifest_t, strings) ==
     ERX_MANIFEST_OFF_STRINGS, "erx_manifest.strings offset");
+_Static_assert(offsetof(erx_manifest_t, system_args) ==
+    ERX_MANIFEST_OFF_SYSTEM_ARGS, "erx_manifest.system_args offset");
 
 #define ERX_MF_LIMITS_SIZE 160
 #define ERX_MF_LIMITS_ALIGN 8

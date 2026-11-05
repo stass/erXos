@@ -52,12 +52,6 @@ __swbuf __udivti3 __vsprintf_chk bzero memset_pattern16
 [stock_limits]
 sysconf
 
-# Emptied when a release booting from its archive deletes stock's unix_prim_file.c
-# and the stage that keeps it linked: nothing else imports these.
-[stock_files]
-chmod chown ftruncate link lseek lstat mkdir pread pwrite readlink readv rename rmdir
-stat symlink unlink utime
-
 # What else reaches descriptors and directories: the drivers, ports and forker, the
 # poll set's wake pipes, prim_tty, the socket NIFs, the crash dump and sys.c. Each
 # goes with its own layer in the event table, the console and the removal of the rest.
@@ -70,7 +64,7 @@ opendir read readdir write writev
 [stock_ports]
 __darwin_check_fd_set_overflow
 _exit alarm dlclose dlerror dlopen dlsym dup dup2 execle execv execve fcntl fork
-getegid geteuid getpid ioctl kevent kqueue nice pipe poll
+getpid ioctl kevent kqueue nice pipe poll
 pthread_kill pthread_sigmask select setsid sigaction sigprocmask
 sigwait uname waitpid
 

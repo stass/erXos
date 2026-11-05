@@ -25,7 +25,7 @@ module Erx
           seed: { 'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_pack_entry_at(0, 0, 0); }\n" }
         )
       ],
-      unchecked_objects: %w[liberx/backend/hosted/release.c liberx/backend/hosted/release.h liberx/ns.c
+      unchecked_objects: %w[liberx/ns.c
                             liberx/release.c liberx/release_fs.c]
     )
   end

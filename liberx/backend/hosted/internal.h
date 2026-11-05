@@ -15,6 +15,9 @@
 /* Puts one line this backend built, its newline included, on the console, unescaped. */
 void	erx_hosted_note(const char *line);
 
+/* Asks for a line at each change of the range table's runs; called before the first vm call. */
+void	erx_hosted_vm_report_runs(void);
+
 /* Says why on the console and ends the process, as a fault ends the machine natively. */
 _Noreturn void	erx_hosted_fatal(const char *why);
 

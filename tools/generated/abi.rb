@@ -8877,7 +8877,7 @@ module Erx
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 368,
+        size: 376,
         fields: [
           Field.new(
             name: "magic".b,
@@ -9485,6 +9485,20 @@ module Erx
             name: "strings".b,
             type: types.fetch("erx_mf_span"),
             offset: 360,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "system_args".b,
+            type: types.fetch("erx_mf_str"),
+            offset: 368,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -13344,7 +13358,7 @@ module Erx
                   offset: 12,
                   field: types.fetch("erx_manifest").fields.fetch(4)
                 ).freeze,
-                :values => [368].freeze,
+                :values => [376].freeze,
                 :line => source_line
               }.freeze,
               {
@@ -13636,6 +13650,26 @@ module Erx
                 :class => "identifier".b,
                 :maximum => 63,
                 :empty => false
+              }.freeze,
+              {
+                :kind => "string".b,
+                :offset => FieldPath.new(
+                  scope: "root",
+                  fields: ["system_args".b, "offset".b].freeze,
+                  offset: 368,
+                  field: types.fetch("erx_mf_str").fields.fetch(0)
+                ).freeze,
+                :count => FieldPath.new(
+                  scope: "root",
+                  fields: ["system_args".b, "length".b].freeze,
+                  offset: 372,
+                  field: types.fetch("erx_mf_str").fields.fetch(1)
+                ).freeze,
+                :table => "strings".b,
+                :line => source_line,
+                :class => "args".b,
+                :maximum => 2048,
+                :empty => true
               }.freeze,
               {
                 :kind => "string".b,

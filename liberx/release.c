@@ -91,3 +91,43 @@ erx_release_addr(void)
 {
 	return (release_view.bytes);
 }
+
+int
+erx_release_manifest(const uint8_t **bytes, size_t *length, const char **reason)
+{
+	static const uint8_t name[] = ERX_SYSTEM_MANIFEST_PATH_BYTES;
+	erx_blake3_ctx_t hasher;
+	erx_pack_error_t error;
+	erx_pack_entry_t raw;
+	const uint8_t *path;
+	size_t path_length;
+
+	for (uint32_t index = 0; index < release_view.header.nentries; index++) {
+		bool same;
+
+		if (!erx_pack_path_at(&release_view, index, &path, &path_length))
+			continue;
+		same = path_length == sizeof(name);
+		for (size_t cursor = 0; same && cursor < path_length; cursor++)
+			same = path[cursor] == name[cursor];
+		if (!same)
+			continue;
+		error = (erx_pack_error_t){ .reason = "manifest", .entry = index };
+		if (!erx_pack_file_check(&release_view, index, &hasher, &error) ||
+		    !erx_pack_entry_at(&release_view, index, &raw)) {
+			*reason = error.reason;
+			return (ERX_EINVAL);
+		}
+		*bytes = release_view.bytes + raw.data_off;
+		*length = raw.data_size;
+		return (0);
+	}
+	*reason = "manifest";
+	return (ERX_EINVAL);
+}
+
+uint32_t
+erx_release_pack_flags(void)
+{
+	return (release_view.header.flags);
+}

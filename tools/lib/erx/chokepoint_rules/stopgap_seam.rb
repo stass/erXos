@@ -100,6 +100,8 @@ module Erx
         liberx/backend/core/vm_table.h
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
+        liberx/backend/core/boot_manifest.c
+        liberx/backend/core/boot_manifest.h
         liberx/backend/hosted/start.c
         liberx/backend/runtime_entry.h
         liberx/pthread_executor.h

@@ -11,15 +11,16 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/pack_tools'
 require_relative '../../tools/lib/erx/pack_wire'
+require_relative '../../tools/lib/erx/release'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
 
 # The release file system against stock's prim_file (design-runtime.md, Files and
-# Verification). The hosted runtime runs one set of prim_file calls twice over the
-# same files: over a test archive, booting through erl_prim_loader from it alone, and
-# with stock's unix_prim_file.c over the tree unpacked, read-only. The two transcripts
-# agree line by line except for the paths named below.
+# Verification). One set of prim_file calls runs twice over the same files: on the
+# hosted runtime over a test archive, booting through erl_prim_loader from it alone,
+# and on stock OTP's own emulator of the same release over the tree unpacked,
+# read-only. The two transcripts agree line by line except for the paths named below.
 #
 # `make check-runtime-hosted` builds the runtime and runs this. It is excused from
 # `make check`, which does not build the runtime.
@@ -153,6 +154,29 @@ class RuntimePrimFileTest < Minitest::Test
     assert(output.any? { |line| line.include?('boot archive refused: index_hash') }, output.last(20).join("\n"))
   end
 
+  # Its diagnostic and its end, with no spin (design-runtime.md, Verification).
+  def test_a_release_with_no_boot_script_ends_with_inits_diagnostic
+    archive = File.join(@fixture.directory, 'no-boot.pack')
+    pack(@fixture.tree, archive, File.join(@fixture.directory, 'no-boot'), except: 'bin/start.boot')
+    output, status = run_beam(archive, '/', 'release', boot: '/bin/start')
+    refute status.success?, output.last(20).join("\n")
+    assert_equal 1, status.exitstatus, output.last(20).join("\n")
+    assert(output.any? { |line| line.include?('cannot get bootfile') }, output.last(20).join("\n"))
+  end
+
+  # The index stays intact, so only the manifest's own hash can see this.
+  def test_a_changed_manifest_byte_is_refused_before_it_is_read
+    changed = File.join(@fixture.directory, 'changed.pack')
+    bytes = File.binread(@fixture.archive)
+    at = bytes.index("/bin/start\0".b)
+    bytes[at, 10] = '/bin/stbrt'.b
+    File.binwrite(changed, bytes)
+    output, status = run_beam(changed, '/', 'release', boot: '/bin/start')
+    assert_equal 1, status.exitstatus, output.last(20).join("\n")
+    assert(output.any? { |line| line.include?('boot archive refused:') }, output.last(20).join("\n"))
+    refute(output.any? { |line| line.include?('bootfile') }, output.last(20).join("\n"))
+  end
+
   private
 
   # A path over 64 bytes appears on its line as its MD5.
@@ -217,7 +241,7 @@ class RuntimePrimFileTest < Minitest::Test
     File.write(File.join(corpus, 'sub/deep/c.txt'), "gamma\n")
     File.write(File.join(corpus, 'sub-x'), "sorts before sub/\n")
     File.write(File.join(corpus, 'sub0'), "sorts after sub/\n")
-    File.write(File.join(tree, 'manifest'), "test manifest\n")
+    File.binwrite(File.join(tree, 'manifest'), Erx::Release.file_bytes(archive: OUTPUT.archive, path: 'system/manifest', codec: codec))
     File.write(File.join(tree, 'root'), "a root image's place\n")
     FileUtils.mkdir_p(File.join(tree, 'bin'))
     FileUtils.cp(File.join(OUTPUT.root, 'bootstrap/bin/start.boot'), File.join(tree, 'bin/start.boot'))
@@ -229,22 +253,31 @@ class RuntimePrimFileTest < Minitest::Test
     FileUtils.mkdir_p(File.join(tree, 'test/ebin'))
   end
 
-  # The hosted runtime over stock's layer compiles the driver.
+  def codec = (@codec ||= Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: ROOT).schema))
+
+  # Stock OTP's emulator and its files, from the oracle build of the same release.
+  def stock_beam
+    install = File.dirname(File.dirname(Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR)))
+    Dir.glob(File.join(install, '{lib/erlang/,}erts-*/bin/beam.smp')).first or flunk("no stock beam under #{install}")
+  end
+
   def compile_driver(tree)
     source = File.expand_path('prim_file_compare.erl', __dir__)
     expression = "{ok,_}=compile:file(\"#{source}\",[{outdir,\"#{tree}/test/ebin\"},{i,\"#{OUTPUT.root}/lib\"}]),halt()."
-    output, status = capture_beam({}, OUTPUT.root, ['-noshell', '-pa', "#{OUTPUT.root}/lib/compiler/ebin", '-eval', expression],
-                                  boot: File.join(OUTPUT.root, 'bootstrap/bin/start'))
-    assert status.success?, output.join("\n")
+    output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', RUN_SECONDS.to_s,
+                                     Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR),
+                                     '-noshell', '-eval', expression, stdin_data: '')
+    assert status.success?, output
   end
 
-  def pack(tree, archive, directory)
+  def pack(tree, archive, directory, except: nil)
+    FileUtils.mkdir_p(directory)
     runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
     tools = Erx::PackTools.build(root: ROOT, owner_root: directory, directory: File.join(directory, 'tools'),
                                  runner: runner, compiler: ENV.fetch('ERX_CLANG', 'clang'))
-    codec = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: ROOT).schema)
     system = codec.member('entry_flags', 'system')
-    rows = Dir.glob('**/*', base: tree).select { |path| File.file?(File.join(tree, path)) }.sort.map do |path|
+    files = Dir.glob('**/*', base: tree).select { |path| File.file?(File.join(tree, path)) && path != except }
+    rows = files.sort.map do |path|
       name = "system/#{path}"
       kind = codec.member('entry_kind', name == 'system/root' ? 'image' : 'file')
       { 'path' => name, 'kind' => kind, 'flags' => system, 'size' => File.size(File.join(tree, path)),
@@ -258,19 +291,19 @@ class RuntimePrimFileTest < Minitest::Test
   end
 
   def run_beam(archive, root, mode, boot:)
-    environment = archive ? { 'ERX_RELEASE_ARCHIVE' => archive } : {}
-    capture_beam(environment, root, ['-noshell', '-pa', "#{root == '/' ? '' : root}/test/ebin",
-                                     '-run', 'prim_file_compare', 'main', root, mode], boot: boot)
+    test = ['-noshell', '-pa', "#{root == '/' ? '' : root}/test/ebin", '-run', 'prim_file_compare', 'main', root, mode]
+    return capture_beam({ 'ROOTDIR' => root, 'BINDIR' => File.dirname(OUTPUT.beam) }, [OUTPUT.beam, archive, *test]) if archive
+
+    bin = File.dirname(stock_beam)
+    capture_beam({ 'ROOTDIR' => root, 'BINDIR' => bin },
+                 [stock_beam, '--', '-root', root, '-bindir', bin, '-progname', 'erl', '--', '-home', '/', '--', '-boot', boot, *test])
   end
 
-  # Output and exit status of a beam with the root and boot script given; no shell.
-  def capture_beam(extra_environment, root, arguments, boot:)
-    bin = File.dirname(OUTPUT.beam)
+  # Output and exit status of a command with no shell, no terminal and no home.
+  def capture_beam(extra_environment, command)
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
-      'BINDIR' => bin, 'ROOTDIR' => root, 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => nil, 'ERL_CRASH_DUMP_BYTES' => '0'
+      'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => nil, 'ERL_CRASH_DUMP_BYTES' => '0'
     ).merge(extra_environment)
-    command = [OUTPUT.beam, '--', '-root', root, '-bindir', bin, '-progname', 'erl', '--', '-home', '/', '--',
-               '-boot', boot, *arguments]
     output, status = Timeout.timeout(RUN_SECONDS) do
       Open3.capture2e(environment, 'gtimeout', '-k', '10', RUN_SECONDS.to_s, *command, stdin_data: '', chdir: '/')
     end

@@ -102,7 +102,12 @@ vm_init(void)
 	    vm_area + VM_AREA_BYTES);
 	vm_table.placement = vm_host_page;
 	vm_free = VM_POOL_PAGES;
-	vm_runs_reported = getenv("ERX_HOSTED_VM_RUNS") != NULL;
+}
+
+void
+erx_hosted_vm_report_runs(void)
+{
+	vm_runs_reported = true;
 }
 
 static void

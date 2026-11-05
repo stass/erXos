@@ -96,7 +96,8 @@
     'liveness' := erx_mf_span_t(),
     'shell_principals' := erx_mf_span_t(),
     'partial_boot' := erx_mf_span_t(),
-    'strings' := erx_mf_span_t()
+    'strings' := erx_mf_span_t(),
+    'system_args' := erx_mf_str_t()
 }.
 
 -type erx_mf_boot_order_t() :: #{
@@ -1401,7 +1402,7 @@ reader_spec() ->
                     'size' => 4,
                     'label' => <<"root.header_size">>
                 },
-                'values' => [368]
+                'values' => [376]
             },
             #{
                 'kind' => 'range',
@@ -1715,6 +1716,27 @@ reader_spec() ->
                 'class' => 'identifier',
                 'maximum' => 63,
                 'empty' => false
+            },
+            #{
+                'kind' => 'string',
+                'offset' => #{
+                    'scope' => 'root',
+                    'fields' => ['system_args', 'offset'],
+                    'offset' => 368,
+                    'size' => 4,
+                    'label' => <<"root.system_args.offset">>
+                },
+                'count' => #{
+                    'scope' => 'root',
+                    'fields' => ['system_args', 'length'],
+                    'offset' => 372,
+                    'size' => 4,
+                    'label' => <<"root.system_args.length">>
+                },
+                'table' => 'strings',
+                'class' => 'args',
+                'maximum' => 2048,
+                'empty' => true
             },
             #{
                 'kind' => 'string',
@@ -2866,7 +2888,7 @@ reader_spec() ->
 type('erx_manifest') ->
     #{
         'kind' => 'layout',
-        'size' => 368,
+        'size' => 376,
         'fields' => [
             #{
                 'name' => 'magic',
@@ -3216,6 +3238,14 @@ type('erx_manifest') ->
                 'name' => 'strings',
                 'type' => 'erx_mf_span',
                 'offset' => 360,
+                'count' => 'scalar',
+                'zero' => 0,
+                'input_masks' => #{}
+            },
+            #{
+                'name' => 'system_args',
+                'type' => 'erx_mf_str',
+                'offset' => 368,
                 'count' => 'scalar',
                 'zero' => 0,
                 'input_masks' => #{}

@@ -1642,6 +1642,9 @@ erx_manifest_decode(const uint8_t *bytes, size_t length,
 	if (!erx_mf_span_decode(bytes + 360,
 	    ERX_MF_SPAN_SIZE, &value.strings))
 		return (false);
+	if (!erx_mf_str_decode(bytes + 368,
+	    ERX_MF_STR_SIZE, &value.system_args))
+		return (false);
 
 	*result = value;
 	return (true);
@@ -1976,7 +1979,7 @@ erx_manifest_check_root(const uint8_t *bytes ERX_UNUSED,
 	if (!(header->version == UINT16_C(1)))
 		return (erx_abi_fail(error, "value",
 		    "root.version", base + 4));
-	if (!(header->header_size == UINT32_C(368)))
+	if (!(header->header_size == UINT32_C(376)))
 		return (erx_abi_fail(error, "value",
 		    "root.header_size", base + 12));
 	if (!(header->max_domains <= UINT32_C(65536)))
@@ -2055,6 +2058,12 @@ erx_manifest_check_root(const uint8_t *bytes ERX_UNUSED,
 	if (!(erx_abi_identifier(file + (size_t)header->strings.offset + (size_t)header->platform.offset, (size_t)header->platform.length)))
 		return (erx_abi_fail(error, "string_class",
 		    "root.platform.offset", base + 40));
+	if (!(header->system_args.offset <= header->strings.count && header->system_args.length <= header->strings.count - header->system_args.offset && header->system_args.length <= UINT64_C(2048)))
+		return (erx_abi_fail(error, "string_range",
+		    "root.system_args.offset", base + 368));
+	if (!(header->system_args.length == 0 || erx_abi_vector(file + (size_t)header->strings.offset + (size_t)header->system_args.offset, (size_t)header->system_args.length, false)))
+		return (erx_abi_fail(error, "string_class",
+		    "root.system_args.offset", base + 368));
 	return (true);
 }
 
@@ -2720,7 +2729,7 @@ erx_manifest_open(const uint8_t *bytes, size_t length,
 	if (!erx_manifest_decode(bytes, length, &header))
 		return (erx_abi_fail(error, "truncated", "root", 0));
 
-	cursor = 368;
+	cursor = 376;
 	if (header.length != length)
 		return (erx_abi_fail(error, "length",
 		    "root.length", 8));
