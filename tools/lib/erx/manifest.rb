@@ -662,12 +662,29 @@ module Erx
             end
             normalized['flags'] = normalized.fetch('flags', 0)
             normalized['dma_memory'] = normalized.fetch('dma_memory', 0)
+            normalized.merge!(device_window(normalized))
             check_device(normalized)
             rows.fetch('devices') << normalized
           end
           rows.fetch('units') << { 'name' => record.name, 'holder' => @codec.constant('mf_none'),
                                    'devices' => { 'table' => 'devices', 'first' => first, 'count' => rows.fetch('devices').size - first } }
         end
+      end
+
+      # A device-tree device's register window and interrupt line, which the platform record
+      # must carry (docs/design-abi.md, "Devices and partition windows"); a PCIe function's
+      # come from configuration space and are zero here.
+      def device_window(device)
+        fields = %w[base size line]
+        unless device.fetch('selector') == @codec.member('mf_selector', 'dt')
+          invalid('a PCIe function carries a window or line', 'context', 'platform.devices') if fields.any? { |field| device.fetch(field, 0) != 0 }
+          return fields.to_h { |field| [field, 0] }
+        end
+
+        missing = fields.reject { |field| device[field].is_a?(Integer) }
+        invalid("device-tree device lacks #{missing.join(', ')}", 'context', 'platform.devices') unless missing.empty?
+        invalid('device-tree device has an empty window', 'context', 'platform.devices') if device.fetch('size').zero?
+        device.slice(*fields)
       end
 
       def check_uarts(rows, console, hostlink)

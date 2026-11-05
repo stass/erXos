@@ -18,6 +18,7 @@
 #include "erx/log.h"
 #include "abi_calls.h"
 #include "dispatch_impl.h"
+#include "erx/core/debug_log.h"
 
 _Static_assert(sizeof(erx_log_rate_t) == ERX_LOG_RATE_STATE_BYTES,
     "a space's opaque log rate state");
@@ -32,7 +33,8 @@ static void erx_debug_log_drain(void);
  * time.
  */
 static erx_log_t erx_debug_log_ring;
-static uint64_t erx_debug_log_cursor;
+static uint64_t erx_debug_log_cursor;	/* where what has been taken ends */
+static bool erx_debug_log_for_reader;
 static uint8_t erx_debug_log_window[ERX_LOG_RECORD_MAX];
 static char erx_debug_log_text[ERX_LOG_TEXT_MAX];
 static char erx_debug_log_line[ERX_LOG_LINE_MAX];
@@ -75,8 +77,39 @@ erx_sys_debug_log(erx_sys_context_t *context,
 	    (erx_log_rate_t *)caller->log_rate, caller->space,
 	    erx_effect_clock_ns(), (const erx_utcb_t *)caller->utcb,
 	    arguments->len);
-	if (status == ERX_OK)
+	if (status == ERX_OK && !erx_debug_log_for_reader)
 		erx_debug_log_drain();
 	erx_effect_log_unlock();
 	return (status);
+}
+
+void
+erx_debug_log_hand_to_reader(void)
+{
+	erx_effect_log_lock();
+	erx_debug_log_for_reader = true;
+	erx_effect_log_unlock();
+}
+
+void
+erx_debug_log_take_back(void)
+{
+	erx_effect_log_lock();
+	erx_debug_log_for_reader = false;
+	erx_debug_log_drain();
+	erx_effect_log_unlock();
+}
+
+erx_log_copy_result_t
+erx_debug_log_read(uint64_t cursor, uint8_t *window, size_t window_size)
+{
+	erx_log_copy_result_t copied;
+
+	erx_effect_log_lock();
+	copied = erx_log_copy(&erx_debug_log_ring, cursor < erx_debug_log_cursor ? erx_debug_log_cursor : cursor, window,
+	    window_size);
+	if (copied.status == ERX_OK)
+		erx_debug_log_cursor = copied.next_cursor;
+	erx_effect_log_unlock();
+	return (copied);
 }

@@ -39,12 +39,18 @@ int	main(int, char **, char **);
 
 static const char	*release_read(const erx_boot_handoff_view_t *, erx_boot_manifest_t *);
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
+static size_t		 console_uart_build(const erx_boot_console_t *);
+static size_t		 console_uart_number(char *, uint64_t);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /* The manifest's words, then each erx.arg word, which takes a byte and its NUL at the least. */
 static erx_boot_words_t arg_words[2 + ERX_BOOT_STRINGS_MAX / 2];
-/* The driver erx_console starts, until the PL011 has one: output through the debug log. */
-static const char console_driver_words[] = "-erx\0console_driver\0erx_debug_console";
+/* -erx console_uart BASE SIZE LINE: three numbers, each at most UINT64_MAX's 20 digits and its NUL. */
+#define CONSOLE_UART_NUMBER_MAX	(20 + 1)
+static const char console_uart_prefix[] = "-erx\0console_uart";
+static char console_uart_words[sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX];
+_Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX,
+    "the console words hold the prefix and three numbers");
 
 const erx_boot_info_t *
 erx_boot_info(void)
@@ -67,6 +73,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	reason = release_read(handoff, &manifest);
 	if (reason != NULL)
 		return (reason);
+	erx_fiasco_task_console_set(manifest.console.base);
 	reason = gather_args(handoff, &manifest, &nargs);
 	if (reason != NULL)
 		return (reason);
@@ -112,7 +119,12 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 	return (NULL);
 }
 
-/* The manifest's system_args, the console's driver, then each erx.arg word of the kernel command line, in its order. */
+/*
+ * The manifest's system_args, what its driver opens of the console's device entry, then each
+ * erx.arg word of the kernel command line, in its order. A plain word joins the flag before
+ * it, which erx_pl011 expects. A manifest with no console entry has no such words, and the
+ * driver's start then says why the console has none.
+ */
 static const char *
 gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *manifest, size_t *nargs)
 {
@@ -121,11 +133,49 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	size_t word_len;
 
 	arg_words[(*nargs)++] = manifest->system_args;
-	arg_words[(*nargs)++] = (erx_boot_words_t){ console_driver_words, sizeof(console_driver_words) };
+	if (manifest->console.size != 0)
+		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words,
+		    console_uart_build(&manifest->console) };
 	while (erx_boot_args_next_arg(handoff->bootargs, handoff->bootargs_len, &cursor, &word, &word_len)) {
 		if (*nargs == sizeof(arg_words) / sizeof(arg_words[0]))
 			return ("the kernel command line: more erx.arg words than the page holds");
 		arg_words[(*nargs)++] = (erx_boot_words_t){ word, word_len };
 	}
 	return (NULL);
+}
+
+/*
+ * Writes the words into console_uart_words and returns their whole length, the last NUL
+ * included. The buffer holds the prefix and three numbers of at most CONSOLE_UART_NUMBER_MAX
+ * bytes each, as its _Static_assert says, so no write can fail.
+ */
+static size_t
+console_uart_build(const erx_boot_console_t *console)
+{
+	size_t used = sizeof(console_uart_prefix);
+
+	for (size_t at = 0; at < used; at++)
+		console_uart_words[at] = console_uart_prefix[at];
+	used += console_uart_number(console_uart_words + used, console->base);
+	used += console_uart_number(console_uart_words + used, console->size);
+	used += console_uart_number(console_uart_words + used, console->line);
+	return (used);
+}
+
+/* VALUE in decimal and its NUL at WORD, at most CONSOLE_UART_NUMBER_MAX bytes; returns their count. */
+static size_t
+console_uart_number(char *word, uint64_t value)
+{
+	char digits[CONSOLE_UART_NUMBER_MAX - 1];
+	size_t count = 0;
+	size_t used = 0;
+
+	do {
+		digits[count++] = (char)('0' + value % 10);
+		value /= 10;
+	} while (value != 0);
+	while (count > 0)
+		word[used++] = digits[--count];
+	word[used++] = '\0';
+	return (used);
 }

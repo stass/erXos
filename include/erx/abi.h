@@ -2645,7 +2645,7 @@ _Static_assert(offsetof(erx_mf_parameter_t, reserved) ==
 
 typedef uint32_t erx_mf_selector_t;
 
-#define ERX_MF_DEVICE_SIZE 64
+#define ERX_MF_DEVICE_SIZE 80
 #define ERX_MF_DEVICE_ALIGN 8
 #define ERX_MF_DEVICE_OFF_SELECTOR 0
 #define ERX_MF_DEVICE_OFF_ROLE 4
@@ -2657,9 +2657,11 @@ typedef uint32_t erx_mf_selector_t;
 #define ERX_MF_DEVICE_OFF_FUNCTION 35
 #define ERX_MF_DEVICE_OFF_DMA 36
 #define ERX_MF_DEVICE_OFF_FLAGS 40
-#define ERX_MF_DEVICE_OFF_RESERVED 44
+#define ERX_MF_DEVICE_OFF_LINE 44
 #define ERX_MF_DEVICE_OFF_DMA_MEMORY 48
 #define ERX_MF_DEVICE_OFF_PLACEMENT_KEY 56
+#define ERX_MF_DEVICE_OFF_BASE 64
+#define ERX_MF_DEVICE_OFF_SIZE 72
 typedef struct erx_mf_device erx_mf_device_t;
 struct erx_mf_device {
 	_Alignas(8) erx_mf_selector_t	selector;
@@ -2672,9 +2674,11 @@ struct erx_mf_device {
 	uint8_t	function;
 	erx_mf_dma_t	dma;
 	erx_mf_device_flags_t	flags;
-	uint32_t	reserved;
+	uint32_t	line;
 	uint64_t	dma_memory;
 	erx_mf_str_t	placement_key;
+	uint64_t	base;
+	uint64_t	size;
 };
 _Static_assert(sizeof(erx_mf_device_t) == ERX_MF_DEVICE_SIZE, "erx_mf_device size");
 _Static_assert(_Alignof(erx_mf_device_t) == ERX_MF_DEVICE_ALIGN, "erx_mf_device alignment");
@@ -2698,12 +2702,16 @@ _Static_assert(offsetof(erx_mf_device_t, dma) ==
     ERX_MF_DEVICE_OFF_DMA, "erx_mf_device.dma offset");
 _Static_assert(offsetof(erx_mf_device_t, flags) ==
     ERX_MF_DEVICE_OFF_FLAGS, "erx_mf_device.flags offset");
-_Static_assert(offsetof(erx_mf_device_t, reserved) ==
-    ERX_MF_DEVICE_OFF_RESERVED, "erx_mf_device.reserved offset");
+_Static_assert(offsetof(erx_mf_device_t, line) ==
+    ERX_MF_DEVICE_OFF_LINE, "erx_mf_device.line offset");
 _Static_assert(offsetof(erx_mf_device_t, dma_memory) ==
     ERX_MF_DEVICE_OFF_DMA_MEMORY, "erx_mf_device.dma_memory offset");
 _Static_assert(offsetof(erx_mf_device_t, placement_key) ==
     ERX_MF_DEVICE_OFF_PLACEMENT_KEY, "erx_mf_device.placement_key offset");
+_Static_assert(offsetof(erx_mf_device_t, base) ==
+    ERX_MF_DEVICE_OFF_BASE, "erx_mf_device.base offset");
+_Static_assert(offsetof(erx_mf_device_t, size) ==
+    ERX_MF_DEVICE_OFF_SIZE, "erx_mf_device.size offset");
 
 typedef uint32_t erx_mf_window_rights_t;
 

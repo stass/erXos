@@ -10,6 +10,7 @@
       "key": "console-uart",
       "devices": [
         { "selector": "dt", "role": "uart", "path": "/pl011@9000000", "bridge": "",
+          "base": 150994944, "size": 4096, "line": 33,
           "compatible": "arm,pl011", "bus": 0, "device": 0, "function": 0,
           "dma": "none", "flags": 0, "dma_memory": 0, "placement_key": "console-uart" }
       ]
@@ -18,6 +19,7 @@
       "key": "hostlink-uart",
       "devices": [
         { "selector": "dt", "role": "uart", "path": "/pl011@9040000", "bridge": "",
+          "base": 151257088, "size": 4096, "line": 40,
           "compatible": "arm,pl011", "bus": 0, "device": 0, "function": 0,
           "dma": "none", "flags": 0, "dma_memory": 0, "placement_key": "hostlink-uart" }
       ]
@@ -26,6 +28,7 @@
       "key": "block",
       "devices": [
         { "selector": "dt", "role": "block", "path": "/virtio_mmio@a003e00", "bridge": "",
+          "base": 167788032, "size": 512, "line": 79,
           "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
           "dma": "unconfined", "flags": 1, "dma_memory": 2097152, "placement_key": "block" }
       ]

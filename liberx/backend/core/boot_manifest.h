@@ -21,11 +21,19 @@
 /* system@, then an identifier of at most 63 bytes. */
 #define ERX_BOOT_NODE_MAX	(sizeof("system@") - 1 + 63)
 
+/* The manifest's device entry for machine.console; size 0 when no entry names it. */
+typedef struct erx_boot_console {
+	uint64_t	base;
+	uint64_t	size;
+	uint32_t	line;
+} erx_boot_console_t;
+
 typedef struct erx_boot_manifest {
 	char			node[ERX_BOOT_NODE_MAX];
 	size_t			node_len;
 	erx_boot_words_t	system_args;	/* points into the manifest's bytes */
 	erx_runtime_limits_t	limits;
+	erx_boot_console_t	console;
 } erx_boot_manifest_t;
 
 /* Fills *result, or returns false and names the check that refused the bytes in *reason. */

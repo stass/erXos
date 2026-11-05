@@ -1311,7 +1311,7 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 
 ### `erx_mf_device_t`
 
-Storage: `wire_le`. Prefix size: 64. Alignment: 8.
+Storage: `wire_le`. Prefix size: 80. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -1325,9 +1325,11 @@ Storage: `wire_le`. Prefix size: 64. Alignment: 8.
 | `function` | `u8` | 35 | 1 |
 | `dma` | `mf_dma` | 36 | 1 |
 | `flags` | `mf_device_flags` | 40 | 1 |
-| `reserved` | `u32` | 44 | 1 |
+| `line` | `u32` | 44 | 1 |
 | `dma_memory` | `u64` | 48 | 1 |
 | `placement_key` | `erx_mf_str` | 56 | 1 |
+| `base` | `u64` | 64 | 1 |
+| `size` | `u64` | 72 | 1 |
 
 ### `erx_mf_window_t`
 

@@ -7272,7 +7272,7 @@ module Erx
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 64,
+        size: 80,
         fields: [
           Field.new(
             name: "selector".b,
@@ -7415,7 +7415,7 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "reserved".b,
+            name: "line".b,
             type: types.fetch("u32"),
             offset: 44,
             count: nil,
@@ -7423,7 +7423,7 @@ module Erx
             atomic: nil,
             writer: nil,
             owners: {}.freeze,
-            zero_mask: 4294967295,
+            zero_mask: 0,
             input_masks: {}.freeze,
             visibility: nil,
             line: source_line
@@ -7446,6 +7446,34 @@ module Erx
             name: "placement_key".b,
             type: types.fetch("erx_mf_str"),
             offset: 56,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "base".b,
+            type: types.fetch("u64"),
+            offset: 64,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "size".b,
+            type: types.fetch("u64"),
+            offset: 72,
             count: nil,
             bits: [].freeze,
             atomic: nil,

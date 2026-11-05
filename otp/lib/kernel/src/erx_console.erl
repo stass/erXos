@@ -152,11 +152,12 @@ handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, group = Group
 handle_info(_Message, State) ->
     {noreply, State}.
 
-%% The driver's module, from the argument the boot information page carries.
+%% The driver's module, from the argument the boot information page carries. The last naming
+%% wins, since the hosted entry adds its driver after the manifest's arguments, and a plain
+%% word of the command line may have joined it.
 driver_module() ->
     {ok, Arguments} = init:get_argument(erx),
-    [Module] = [Word || ["console_driver", Word] <- Arguments],
-    list_to_atom(Module).
+    list_to_atom(lists:last([Word || ["console_driver", Word | _] <- Arguments])).
 
 encoding(true) -> unicode;
 encoding(false) -> latin1.

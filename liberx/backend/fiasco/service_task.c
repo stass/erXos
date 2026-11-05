@@ -13,6 +13,7 @@
  * slot by index, and every page is in the task's range table or one of its objects.
  */
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,6 +24,7 @@
 
 #include "erx/abi.h"
 #include "erx/core/crash.h"
+#include "erx/core/debug_log.h"
 #include "erx/elf_plan.h"
 #include "erx/pack.h"
 #include "liberx/backend/fiasco/cache.h"
@@ -365,15 +367,36 @@ erx_fiasco_task_mem_create_body(uint32_t caller, uint64_t size, uint64_t flags, 
 	return (erx_fiasco_vm_object_create(caller, size, mem));
 }
 
+/*
+ * Written by the root's entry on the root thread before its program runs, and read on the
+ * service thread, so atomic. It publishes only itself.
+ */
+static _Atomic uint64_t task_console_base;
+
+void
+erx_fiasco_task_console_set(uint64_t base)
+{
+	atomic_store_explicit(&task_console_base, base, memory_order_relaxed);
+}
+
+/*
+ * The handoff (docs/design-stopgap.md, "The console"): the driver's first touch of a register
+ * needs this reply, so it follows the last log record the service wrote to the UART, and a
+ * failed map changes nothing.
+ */
 int
 erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem)
 {
-	const int status = request->attr > UINT32_MAX ? ERX_EINVAL :
+	const uint64_t console_base = atomic_load_explicit(&task_console_base, memory_order_relaxed);
+	int status = request->attr > UINT32_MAX ? ERX_EINVAL :
 	    erx_backend_physical_check(request->base, request->size, (uint32_t)request->attr);
 
 	if (status != ERX_OK)
 		return (status);
-	return (erx_fiasco_vm_physical_create(caller, request->base, request->size, mem));
+	status = erx_fiasco_vm_physical_create(caller, request->base, request->size, mem);
+	if (status == ERX_OK && console_base != 0 && request->base == console_base)
+		erx_debug_log_hand_to_reader();
+	return (status);
 }
 
 int

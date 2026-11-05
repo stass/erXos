@@ -31,6 +31,34 @@ words_are_printable(const uint8_t *bytes, size_t length)
 	return (true);
 }
 
+static bool
+string_equal(const erx_manifest_view_t *view, const erx_mf_str_t *left, const erx_mf_str_t *right)
+{
+	const uint8_t *const a = string_at(view, left);
+	const uint8_t *const b = string_at(view, right);
+
+	if (left->length != right->length)
+		return (false);
+	for (uint32_t at = 0; at < left->length; at++) {
+		if (a[at] != b[at])
+			return (false);
+	}
+	return (true);
+}
+
+static erx_boot_console_t
+console_read(const erx_manifest_view_t *view)
+{
+	erx_mf_device_t device;
+
+	for (uint32_t at = 0; view->header.console.length != 0 && at < view->header.devices.count; at++) {
+		if (erx_manifest_devices_at(view, at, &device) && device.selector == ERX_MF_SELECTOR_DT &&
+		    device.role == ERX_MF_DEVICE_ROLE_UART && string_equal(view, &device.path, &view->header.console))
+			return ((erx_boot_console_t){ .base = device.base, .size = device.size, .line = device.line });
+	}
+	return ((erx_boot_console_t){ 0 });
+}
+
 bool
 erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t *result,
     const char **reason)
@@ -76,5 +104,6 @@ erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t 
 		.foreign_atoms = limits.foreign_atoms,
 		.processes = limits.processes,
 	};
+	result->console = console_read(&view);
 	return (true);
 }

@@ -1766,8 +1766,8 @@ the terminal again.
 `io:format` returns when its bytes are out, as `write` on a Unix terminal does.
 It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
 `-erx console_driver Module`, an ordinary argument of the boot information page,
-names the driver: the hosted entry adds `erx_stdio`, and otherwise the manifest's
-console UART has its driver.
+names the driver, and the last naming wins: the manifest names the console UART's driver,
+`erx_pl011`, and the hosted entry adds `erx_stdio` after it.
 
 **Which input bytes mean something.** `erx_console` takes two bytes out of the
 stream, which no UTF-8 sequence contains: `Ctrl-C` becomes `exit(Group, interrupt)`,

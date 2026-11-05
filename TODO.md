@@ -136,8 +136,7 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter
   (M3) calls them; an IRQ object is never unbound or destroyed, which a restarted block driver would want.
 * [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the
-  counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device;
-  `erx_mem_create_physical` for the console UART does not yet do [the handoff](docs/design-stopgap.md#the-console).
+  counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/core/vm_table.c`: the range table sees an object's mapping as uncommitted, so
   `erx_space_protect` over mapped registers or a mapped run returns `ERX_OK` and puts a fresh pool page there, and a decommit or release leaves the
   mapping reachable. No caller does either. Nothing tests a task that ends holding a physical or contiguous object, so `vm_give`'s address check and
@@ -172,8 +171,10 @@ it; git history is the record of completed work.
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never destroyed: a restarted driver keeps the one its device's record holds.
+* [Low] `otp/lib/kernel/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
+* [Low] `otp/lib/kernel/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
-  record's `window` and `lines` become what that service builds, and drivers, which do not look inside the spec, stay as they are. Its Erlang path has run only hosted, through the stand-in, until the PL011 driver.
+  record's `window` and `lines` become what that service builds, and drivers, which do not look inside the spec, stay as they are.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made, a retry takes another mapping from the shared device
   window and finds the line `ERX_EBUSY`. A boot's devices are few and a failure is a misconfiguration; the record's cleanup comes with the device service.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
@@ -253,7 +254,6 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.
-* [Medium] console, `liberx/backend/fiasco/runtime_entry.c`: the native boot names `erx_debug_console`, which writes through the debug log and reads nothing, until the PL011's driver and `-erx console_driver` replace it.
 * [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
 * [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.

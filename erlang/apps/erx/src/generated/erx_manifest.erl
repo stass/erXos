@@ -115,9 +115,11 @@
     'function' := 0..255,
     'dma' := erx_mf_dma_t(),
     'flags' := erx_mf_device_flags_t(),
-    'reserved' := 0..4294967295,
+    'line' := 0..4294967295,
     'dma_memory' := 0..18446744073709551615,
-    'placement_key' := erx_mf_str_t()
+    'placement_key' := erx_mf_str_t(),
+    'base' := 0..18446744073709551615,
+    'size' := 0..18446744073709551615
 }.
 
 -type erx_mf_domain_t() :: #{
@@ -1105,7 +1107,7 @@ reader_spec() ->
                 'maximum' => 65536,
                 'alignment' => 8,
                 'type' => 'erx_mf_device',
-                'size' => 64
+                'size' => 80
             },
             'windows' => #{
                 'offset' => #{
@@ -3272,7 +3274,7 @@ type('erx_mf_boot_order') ->
 type('erx_mf_device') ->
     #{
         'kind' => 'layout',
-        'size' => 64,
+        'size' => 80,
         'fields' => [
             #{
                 'name' => 'selector',
@@ -3355,11 +3357,11 @@ type('erx_mf_device') ->
                 'input_masks' => #{}
             },
             #{
-                'name' => 'reserved',
+                'name' => 'line',
                 'type' => 'u32',
                 'offset' => 44,
                 'count' => 'scalar',
-                'zero' => 4294967295,
+                'zero' => 0,
                 'input_masks' => #{}
             },
             #{
@@ -3374,6 +3376,22 @@ type('erx_mf_device') ->
                 'name' => 'placement_key',
                 'type' => 'erx_mf_str',
                 'offset' => 56,
+                'count' => 'scalar',
+                'zero' => 0,
+                'input_masks' => #{}
+            },
+            #{
+                'name' => 'base',
+                'type' => 'u64',
+                'offset' => 64,
+                'count' => 'scalar',
+                'zero' => 0,
+                'input_masks' => #{}
+            },
+            #{
+                'name' => 'size',
+                'type' => 'u64',
+                'offset' => 72,
                 'count' => 'scalar',
                 'zero' => 0,
                 'input_masks' => #{}

@@ -62,6 +62,25 @@ class ManifestSystemOnlyTest < Minitest::Test
       "  rights read\n  image #{image}\n"
   end
 
+  # A device-tree row without its window or line would give its driver zeros to open.
+  def test_a_device_tree_row_must_carry_its_window_and_line
+    %w[base size line].each do |field|
+      platform = platform_with { |value| value.fetch('units').first.fetch('devices').first.delete(field) }
+      refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: platform), message: /lacks #{field}/)
+    end
+  end
+
+  def test_a_device_tree_row_must_have_a_window
+    platform = platform_with { |value| value.fetch('units').first.fetch('devices').first['size'] = 0 }
+    refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: platform), message: /empty window/)
+  end
+
+  # Configuration space gives a PCIe function its window, so a platform row that names one is wrong.
+  def test_a_pci_row_must_not_carry_a_window
+    source, against = with_extra_device(selector: 'pci', role: 'ordinary', bridge: '/pcie@0', path: '')
+    refused(Erx::Manifest::Invalid, 'context', 'platform.devices', source, against, message: /PCIe function carries/)
+  end
+
   def test_the_real_development_manifest_is_admitted
     result = admit
     assert_instance_of Erx::Manifest::Admitted, result
@@ -311,7 +330,7 @@ class ManifestSystemOnlyTest < Minitest::Test
   end
 
   def test_a_pci_function_is_refused
-    source, against = with_extra_device(selector: 'pci', role: 'ordinary', bridge: '/pcie@0', path: '')
+    source, against = with_extra_device(selector: 'pci', role: 'ordinary', bridge: '/pcie@0', path: '', base: 0, size: 0, line: 0)
     refused(Erx::Manifest::Invalid, 3, 'devices.selector', source, against, message: /M9/)
   end
 

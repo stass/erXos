@@ -61,6 +61,8 @@ int	erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes,
  * it cannot deliver: a write's result never depends on it.
  */
 void	erx_fiasco_task_write(const void *bytes, size_t length);
+/* The manifest's console UART, whose create hands the debug log to its reader. 0 is none. */
+void	erx_fiasco_task_console_set(uint64_t base);
 
 /* how is ERX_END_OFF or ERX_END_RESET; res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);

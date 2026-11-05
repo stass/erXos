@@ -12,7 +12,8 @@ module ManifestContextFixture
       'units' => [{ 'key' => 'uart0', 'devices' => [
         { 'selector' => 'dt', 'role' => 'uart', 'path' => '/uart@0', 'bridge' => '',
           'compatible' => 'arm,pl011', 'bus' => 0, 'device' => 0, 'function' => 0,
-          'dma' => 'none', 'flags' => 0, 'dma_memory' => 0, 'placement_key' => 'uart0' }
+          'dma' => 'none', 'flags' => 0, 'dma_memory' => 0, 'placement_key' => 'uart0',
+          'base' => 0, 'size' => 4096, 'line' => 33 }
       ] }] }
   end
 

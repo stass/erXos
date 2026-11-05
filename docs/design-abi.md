@@ -824,7 +824,7 @@ creation request cannot supply origin or parent fields.
 | Record and size | Fields |
 | --- | --- |
 | unit, 24 | `0: name str`; `8: holder u32`; `12: devices span`; `20: reserved u32` |
-| device, 64 | `0: selector u32`; `4: role u32`; `8: path str`; `16: bridge str`; `24: compatible str`; `32: bus u16`; `34: device u8`; `35: function u8`; `36: dma u32`; `40: flags u32`; `44: reserved u32`; `48: dma_memory u64`; `56: placement_key str` |
+| device, 80 | `0: selector u32`; `4: role u32`; `8: path str`; `16: bridge str`; `24: compatible str`; `32: bus u16`; `34: device u8`; `35: function u8`; `36: dma u32`; `40: flags u32`; `44: line u32`; `48: dma_memory u64`; `56: placement_key str`; `64: base u64`; `72: size u64` |
 | partition window, 32 | `0: holder u32`; `4: device u32`; `8: role u32`; `12: partition u32`; `16: rights u32`; `20: image u32`; `24: reserved u64` |
 
 A unit's `holder` is a domain reference. Its device span names a
@@ -836,9 +836,16 @@ string, confinement and hostile mark. The source configuration assigns
 the unit to a holder; it cannot override those platform facts.
 
 Selector 1 is a device-tree path: `path` is nonempty, `bridge` and the
-bus/function fields are zero. Selector 2 is a PCIe function: `bridge`
+bus/function fields are zero, and `base`, `size` and `line` are the
+device's register window and interrupt from its node: `base` and `size`
+are the physical address and length of the node's first `reg` entry, and
+`line` is its first interrupt, numbered as the platform's interrupt
+controller numbers the lines a device raises. The platform record carries
+all three for every device-tree device, and the production image suite
+checks them against the device tree QEMU builds. Selector 2 is a PCIe function: `bridge`
 names its host bridge by device-tree path, `path` is empty, bus is at
-most 255, device at most 31 and function at most 7. Role values are
+most 255, device at most 31 and function at most 7; its `base`, `size`
+and `line` are zero, since configuration space gives them. Role values are
 ordinary 1, UART 2, configuration space 3, network 4, block 5 and TPM 6.
 These classification values are platform-declared facts for manifest
 checks, not a kernel driver dispatch. `compatible` and `placement_key`

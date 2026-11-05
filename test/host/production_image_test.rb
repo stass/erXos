@@ -19,16 +19,23 @@ class ProductionImageTest < Minitest::Test
     \tpl011@9000000 {
     \t\tclock-names = "uartclk", "apb_pclk";
     \t\tcompatible = "arm,pl011", "arm,primecell";
+    \t\treg = <0x00 0x9000000 0x00 0x1000>;
+    \t\tinterrupts = <0x00 0x01 0x04>;
     \t};
 
     \tvirtio_mmio@a003e00 {
     \t\tcompatible = "virtio,mmio";
+    \t\treg = <0x00 0xa003e00 0x00 0x200>;
+    \t\tinterrupts = <0x00 0x2f 0x01>;
     \t};
     };
   DTS
 
-  def platform(path:, compatible: 'arm,pl011')
-    { 'units' => [{ 'devices' => [{ 'path' => path, 'compatible' => compatible }] }] }
+  UART_WINDOW = { base: 0x9000000, size: 0x1000, line: 33 }.freeze
+  BLOCK_WINDOW = { base: 0xa003e00, size: 0x200, line: 79 }.freeze
+
+  def platform(path:, compatible: 'arm,pl011', **window)
+    { 'units' => [{ 'devices' => [{ 'selector' => 'dt', 'path' => path, 'compatible' => compatible, **window.transform_keys(&:to_s) }] }] }
   end
 
   def test_every_import_the_root_links_is_registered
@@ -60,18 +67,47 @@ class ProductionImageTest < Minitest::Test
   end
 
   def test_a_device_the_tree_holds_has_no_problem
-    assert_empty Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000'), TREE)
-    assert_empty Erx::ProductionImage.device_path_problems(platform(path: '/virtio_mmio@a003e00', compatible: 'virtio,mmio'), TREE)
+    assert_empty Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000', **UART_WINDOW), TREE)
+    assert_empty Erx::ProductionImage.device_path_problems(platform(path: '/virtio_mmio@a003e00', compatible: 'virtio,mmio', **BLOCK_WINDOW), TREE)
   end
 
   def test_a_path_the_tree_lacks_is_named
-    problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9040000'), TREE)
+    problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9040000', **UART_WINDOW), TREE)
     assert_equal ['/pl011@9040000: not in the device tree'], problems
   end
 
   def test_a_node_of_another_kind_is_named
-    problems = Erx::ProductionImage.device_path_problems(platform(path: '/virtio_mmio@a003e00'), TREE)
+    problems = Erx::ProductionImage.device_path_problems(platform(path: '/virtio_mmio@a003e00', **BLOCK_WINDOW), TREE)
     assert_match(/compatible .* does not name arm,pl011/, problems.fetch(0))
+  end
+
+  # The line counts the interrupt's type: 33 is shared line 1, 17 would be private line 1.
+  def test_a_window_the_tree_does_not_give_is_named
+    [UART_WINDOW.merge(base: 0x9000400), UART_WINDOW.merge(size: 0x200), UART_WINDOW.merge(line: 1),
+     UART_WINDOW.merge(line: 17)].each do |window|
+      problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000', **window), TREE)
+      assert_match(/base, size or line .* differ/, problems.fetch(0), window.inspect)
+    end
+  end
+
+  def test_a_node_without_a_readable_window_is_named
+    tree = TREE.sub("\t\tinterrupts = <0x00 0x01 0x04>;\n", "\t\tinterrupts = <0x02 0x01 0x04>;\n")
+    problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000', **UART_WINDOW), tree)
+    assert_match(/unreadable reg or interrupts/, problems.fetch(0))
+  end
+
+  def test_a_row_without_its_window_is_named
+    problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000'), TREE)
+    assert_match(/base, size or line .* differ/, problems.fetch(0))
+  end
+
+  # A device tree path's unit address is its node's first reg address, so the checked-in
+  # record's base must agree with its own path without QEMU to ask.
+  def test_each_recorded_base_is_its_paths_unit_address
+    record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
+    windows = record.fetch('units').flat_map { |unit| unit.fetch('devices') }.select { |device| device.fetch('selector') == 'dt' }
+    refute_empty windows
+    windows.each { |device| assert_equal device.fetch('path')[/@(\h+)\z/, 1].to_i(16), device.fetch('base'), device.fetch('path') }
   end
 
   # The production path must not reach the structural recipe under test/fixtures, directly

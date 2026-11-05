@@ -1330,11 +1330,13 @@ erx_mf_device_decode(const uint8_t *bytes, size_t length,
 	value.function = bytes[35];
 	value.dma = erx_abi_load_u32(bytes + 36);
 	value.flags = erx_abi_load_u32(bytes + 40);
-	value.reserved = erx_abi_load_u32(bytes + 44);
+	value.line = erx_abi_load_u32(bytes + 44);
 	value.dma_memory = erx_abi_load_u64(bytes + 48);
 	if (!erx_mf_str_decode(bytes + 56,
 	    ERX_MF_STR_SIZE, &value.placement_key))
 		return (false);
+	value.base = erx_abi_load_u64(bytes + 64);
+	value.size = erx_abi_load_u64(bytes + 72);
 
 	*result = value;
 	return (true);
@@ -2259,7 +2261,7 @@ erx_manifest_check_units(const uint8_t *bytes ERX_UNUSED,
 	if (!(record->holder < header->domains.count || record->holder == UINT64_C(4294967295)))
 		return (erx_abi_fail(error, "index",
 		    "units[].holder", base + 8));
-	if (!(record->devices.offset >= header->devices.offset && ((uint64_t)record->devices.offset - header->devices.offset) % 64 == 0 && ((uint64_t)record->devices.offset - header->devices.offset) / 64 <= header->devices.count && record->devices.count <= header->devices.count - ((uint64_t)record->devices.offset - header->devices.offset) / 64))
+	if (!(record->devices.offset >= header->devices.offset && ((uint64_t)record->devices.offset - header->devices.offset) % 80 == 0 && ((uint64_t)record->devices.offset - header->devices.offset) / 80 <= header->devices.count && record->devices.count <= header->devices.count - ((uint64_t)record->devices.offset - header->devices.offset) / 80))
 		return (erx_abi_fail(error, "slice",
 		    "units[].devices.offset", base + 12));
 	if (!(record->devices.count >= UINT32_C(1) && record->devices.count <= UINT32_C(65536)))
@@ -2275,9 +2277,6 @@ erx_manifest_check_devices(const uint8_t *bytes ERX_UNUSED,
     const uint8_t *file ERX_UNUSED, size_t base ERX_UNUSED,
     erx_abi_error_t *error ERX_UNUSED)
 {
-	if (!(((uint64_t)record->reserved & UINT64_C(4294967295)) == 0))
-		return (erx_abi_fail(error, "reserved",
-		    "devices[].reserved", base + 44));
 	if (!(((uint64_t)record->flags & UINT64_C(4294967294)) == 0))
 		return (erx_abi_fail(error, "flags",
 		    "devices[].flags", base + 40));
@@ -2821,9 +2820,9 @@ erx_manifest_open(const uint8_t *bytes, size_t length,
 	if (header.devices.offset != cursor)
 		return (erx_abi_fail(error, "order", "devices", cursor));
 	if (header.devices.count > UINT64_C(65536) ||
-	    header.devices.count > (length - cursor) / 64)
+	    header.devices.count > (length - cursor) / 80)
 		return (erx_abi_fail(error, "extent", "devices", cursor));
-	cursor += (size_t)header.devices.count * 64;
+	cursor += (size_t)header.devices.count * 80;
 
 	padding = (8 - cursor % 8) % 8;
 	if (padding > length - cursor)
@@ -3011,7 +3010,7 @@ erx_manifest_open(const uint8_t *bytes, size_t length,
 			if (!erx_mf_unit_decode(bytes + base,
 			    24, &record))
 				return (erx_abi_fail(error, "truncated", "units[].devices.offset", base));
-			if (record.devices.offset != (size_t)header.devices.offset + covered * 64 ||
+			if (record.devices.offset != (size_t)header.devices.offset + covered * 80 ||
 			    record.devices.count > header.devices.count - covered)
 				return (erx_abi_fail(error, "partition", "units[].devices.offset",
 				    base + 12));
@@ -3019,7 +3018,7 @@ erx_manifest_open(const uint8_t *bytes, size_t length,
 		}
 		if (covered != header.devices.count)
 			return (erx_abi_fail(error, "partition", "units[].devices.offset",
-			    (size_t)header.devices.offset + covered * 64));
+			    (size_t)header.devices.offset + covered * 80));
 	}
 
 	{
@@ -3167,8 +3166,8 @@ erx_manifest_open(const uint8_t *bytes, size_t length,
 		erx_mf_device_t record;
 		size_t offset;
 
-		offset = (size_t)header.devices.offset + index * 64;
-		if (!erx_mf_device_decode(bytes + offset, 64, &record))
+		offset = (size_t)header.devices.offset + index * 80;
+		if (!erx_mf_device_decode(bytes + offset, 80, &record))
 			return (erx_abi_fail(error, "truncated", "devices", offset));
 		if (!erx_manifest_check_devices(bytes + offset, &record,
 		    &header, bytes, offset, error))
@@ -3419,10 +3418,10 @@ erx_manifest_devices_at(const erx_manifest_view_t *view,
 		return (false);
 	if (view->header.devices.offset > view->length || index >= view->header.devices.count)
 		return (false);
-	if (view->header.devices.count > (view->length - view->header.devices.offset) / 64)
+	if (view->header.devices.count > (view->length - view->header.devices.offset) / 80)
 		return (false);
 	return (erx_mf_device_decode(view->bytes +
-	    (size_t)view->header.devices.offset + index * 64, 64, result));
+	    (size_t)view->header.devices.offset + index * 80, 80, result));
 }
 
 bool

@@ -26,6 +26,7 @@
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
+#include "erx/core/debug_log.h"
 #include "erx/core/dispatch.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
@@ -363,6 +364,7 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 
 		if (how != ERX_END_OFF && how != ERX_END_RESET)
 			return (ERX_EINVAL);
+		erx_debug_log_take_back();
 		erx_fiasco_end(NULL, (uint32_t)how);
 	}
 	default:

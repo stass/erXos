@@ -9,7 +9,7 @@ require 'minitest/autorun'
 # C, so this rule over Erlang sources lives here. A new driver is a new site.
 class ConsoleSinkTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SITES = %w[otp/lib/kernel/src/erx_debug_console.erl otp/lib/kernel/src/erx_console.erl otp/lib/kernel/src/erx_stdio.erl].freeze
+  SITES = %w[otp/lib/kernel/src/erx_pl011.erl otp/lib/kernel/src/erx_console.erl otp/lib/kernel/src/erx_stdio.erl].freeze
   PATTERN = /\berx_console_output\b/
 
   def offenders(files) = files.select { |path, text| !SITES.include?(path) && PATTERN.match?(text) }.keys

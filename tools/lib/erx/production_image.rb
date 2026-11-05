@@ -117,21 +117,48 @@ module Erx
     end
 
     # The problems of a platform record against a device tree as dtc prints it: a path the
-    # tree lacks, or a node whose compatible list does not name what the record says.
+    # tree lacks, a node whose compatible list does not name what the record says, or a
+    # window or line other than the node's.
     def self.device_path_problems(platform, dts)
       nodes = dts.scan(/^\t([^\s{}]+) \{\n(.*?)^\t\};/m).to_h do |name, body|
-        ["/#{name}", body[/^\t\tcompatible = (.*?);/, 1].to_s.scan(/"([^"]+)"/).flatten]
+        ["/#{name}", { compatible: body[/^\t\tcompatible = (.*?);/, 1].to_s.scan(/"([^"]+)"/).flatten,
+                       window: node_window(body) }]
       end
-      devices = platform.fetch('units').flat_map { |unit| unit.fetch('devices') }
+      devices = platform.fetch('units').flat_map { |unit| unit.fetch('devices') }.select { |device| device.fetch('selector') == 'dt' }
       devices.filter_map do |device|
         path = device.fetch('path')
-        if !nodes.key?(path)
+        node = nodes[path]
+        recorded = %i[base size line].to_h { |field| [field, device[field.to_s]] }
+        if node.nil?
           "#{path}: not in the device tree"
-        elsif !nodes.fetch(path).include?(device.fetch('compatible'))
-          "#{path}: compatible #{nodes.fetch(path).inspect} does not name #{device.fetch('compatible')}"
+        elsif !node.fetch(:compatible).include?(device.fetch('compatible'))
+          "#{path}: compatible #{node.fetch(:compatible).inspect} does not name #{device.fetch('compatible')}"
+        elsif recorded != node.fetch(:window)
+          "#{path}: base, size or line #{recorded} differ from the tree's #{node.fetch(:window) || 'unreadable reg or interrupts'}"
         end
       end
     end
+
+    # The numbers of a property such as `reg = <0x00 0x9000000 0x00 0x1000>;`.
+    def self.cells(body, property) = body[/^\t\t#{property} = <(.*?)>;/, 1].to_s.split.map { |cell| Integer(cell) }
+    private_class_method :cells
+
+    # How virt's interrupt controller numbers a line by the type in an interrupt's first cell:
+    # shared lines from 32, lines private to a CPU from 16.
+    INTERRUPT_FIRST = { 0 => 32, 1 => 16 }.freeze
+
+    # A node's window and line: virt's tree gives each reg entry two address and two size
+    # cells, and each interrupt three cells, its type, its number within the type and its
+    # flags. nil when the node has no whole reg entry or interrupt of a known type.
+    def self.node_window(body)
+      reg = cells(body, 'reg')
+      type, number = cells(body, 'interrupts')
+      return nil unless reg.size >= 4 && INTERRUPT_FIRST.key?(type) && number
+
+      high_base, low_base, high_size, low_size = reg
+      { base: (high_base << 32) | low_base, size: (high_size << 32) | low_size, line: INTERRUPT_FIRST.fetch(type) + number }
+    end
+    private_class_method :node_window
 
     # Boots the production image under each accelerator and CPU count, after checking
     # the platform record's device paths against QEMU's own device tree. Any disagreement raises.
@@ -140,8 +167,7 @@ module Erx
       # "The watchdog"). HVF runs the defaults.
       TCG_WATCHDOG = '1,30,600'
       COMMAND_LINES = { 'tcg' => "erx.watchdog=#{TCG_WATCHDOG}" }.freeze
-      # One more word on the deterministic boot's line, which the page must carry too: a flag,
-      # since a plain word would join the last flag's arguments, -erx console_driver's.
+      # One more word on the deterministic boot's line, which the page must carry too.
       DETERMINISTIC_LINE = 'erx.det=1 erx.arg=-deterministic'
       # The watchdog's numbers for each accelerator's proof boot: a boot deadline it beats, and
       # a pet deadline. TCG's working line gives 600 seconds, which no test waits out.
@@ -170,8 +196,12 @@ module Erx
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name and the node flag with its name, before the page's words, and
-      # the three words of -erx console_driver, which the root adds to the manifest's.
-      ARGUMENTS_ALWAYS = 6
+      # the five words of -erx console_uart, which the root adds to the manifest's.
+      ARGUMENTS_ALWAYS = 8
+      # What a plain erx.arg word used to break: it joins the last flag's arguments.
+      CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
+      # An output longer than any FIFO, so the driver writes it through the transmit check.
+      CONSOLE_LONG_BYTES = 20_000
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -199,6 +229,7 @@ module Erx
           end
           prove_pet(accel, count, built) if count == cpus.first
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
+          console_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -208,8 +239,8 @@ module Erx
       # The transcript of a boot as far as ERTS gets, each line in order. The manifest line
       # carries the numbers the source says, so a root that misread it fails. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
-      # release, `kernel` starts, and erx_console's two banners, written through its stand-in
-      # driver, prove the release ran that far. The prompt ends no line, so no point names it.
+      # release, `kernel` starts, and erx_console's two banners, written through erx_pl011,
+      # prove the release ran that far. The prompt ends no line, so no point names it.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)))
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
@@ -228,6 +259,31 @@ module Erx
          SLOGAN,
          { name: 'release-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze].freeze
       end
+
+      # A person at the serial console. The first line is typed at the boot's development
+      # warning, before the driver starts, so the FIFO holds it when the driver takes the UART. Each answer then
+      # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
+      # the mistake is a syntax error, and an output longer than any FIFO.
+      def self.console_checkpoints
+        boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
+          point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
+        end
+        raise Error, 'the boot transcript has no development warning to type at' unless boot.any? { |point| point.key?(:type) }
+
+        [*boot, SLOGAN,
+         console_point('shell', /\AEshell V/n),
+         console_point('sum-echo', /1\+1\.\r*\n\z/n),
+         console_point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
+         console_point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{CONSOLE_LONG_BYTES},$x)),io:nl().\r"),
+         console_point('long-output', /x{#{CONSOLE_LONG_BYTES}}/n),
+         console_point('long-answer', /\Aok\r*\n\z/n)].freeze
+      end
+
+      # A line of the console's transcript, and what the person types once it is seen.
+      def self.console_point(name, pattern, type: nil)
+        { name: name, pattern: pattern, seconds: EVAL_SECONDS, **(type ? { type: type } : {}) }.freeze
+      end
+      private_class_method :console_point
 
       # The release's boot with its children named, then the line that outlived the deadlines.
       # init's -eval writes beside the shell, so a line of its may follow the unended prompt.
@@ -290,6 +346,11 @@ module Erx
         return if waited.between?(earliest, latest)
 
         raise Error, "a stopped pet ended the machine #{waited.round(1)} seconds after it stopped, not within #{earliest} to #{latest}"
+      end
+
+      def console_boot(accel, count, built)
+        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.console_checkpoints,
+                                  command_line: [COMMAND_LINES[accel], CONSOLE_PLAIN_WORD].compact.join(' '))
       end
 
       def judge_missed_pet(serial)
