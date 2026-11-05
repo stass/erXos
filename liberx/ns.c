@@ -282,3 +282,171 @@ erx_ns_resolve(const erx_ns_t *ns, const uint8_t *path, size_t length,
 	out->res_mount = mount;
 	return (ERX_NS_OK);
 }
+
+/*
+ * The changes to a table, reentrant: their state is on the stack, about 16 KiB
+ * for a bind. Each resolves its paths with erx_ns_resolve, so a point
+ * is normalised and absolute exactly as a path that reaches it is, then checks
+ * the whole change before it writes the one entry it adds or removes.
+ */
+
+static bool
+erx_ns_same_field(const char *field, const char *bytes, size_t length)
+{
+	if (erx_ns_field_length(field) != length)
+		return (false);
+	for (size_t index = 0; index < length; index++) {
+		if (field[index] != bytes[index])
+			return (false);
+	}
+	return (true);
+}
+
+/* The index of the entry at exactly the point, or ns->count when there is none. */
+static uint32_t
+erx_ns_find_point(const erx_ns_t *ns, const erx_ns_result_t *at)
+{
+	uint32_t index;
+
+	for (index = 0; index < ns->count; index++) {
+		if (erx_ns_same_field(ns->mounts[index].point, at->res_path,
+		    at->res_path_length))
+			break;
+	}
+	return (index);
+}
+
+/*
+ * Where a new entry would go: the point's path resolves (a narrowed namespace's
+ * path above or beside its mounts does not, ERX_NS_ENOENT), no entry is there
+ * yet, and the table has room.
+ */
+static erx_ns_status_t
+erx_ns_new_point(const erx_ns_t *ns, const uint8_t *path, size_t length,
+    erx_ns_result_t *at)
+{
+	erx_ns_status_t status;
+
+	status = erx_ns_resolve(ns, path, length, at);
+	if (status != ERX_NS_OK)
+		return (status);
+	if (erx_ns_find_point(ns, at) != ns->count)
+		return (ERX_NS_EEXIST);
+	if (ns->count >= ERX_NS_MOUNTS_MAX)
+		return (ERX_NS_ELIMIT);
+	return (ERX_NS_OK);
+}
+
+/* One name of a file server's trees: 1 to ERX_NAME_MAX bytes of UTF-8, not `.` or `..`. */
+static bool
+erx_ns_tree_valid(const uint8_t *tree, size_t length)
+{
+	if (length == 0 || length > ERX_NAME_MAX || !erx_ns_utf8_valid(tree, length))
+		return (false);
+	if ((length == 1 && tree[0] == '.') ||
+	    (length == 2 && tree[0] == '.' && tree[1] == '.'))
+		return (false);
+	for (size_t index = 0; index < length; index++) {
+		if (tree[index] == '/')
+			return (false);
+	}
+	return (true);
+}
+
+erx_ns_status_t
+erx_ns_mount(erx_ns_t *ns, const uint8_t *point, size_t point_length,
+    uint64_t server, const uint8_t *tree, size_t tree_length,
+    erx_ns_rights_t rights)
+{
+	erx_ns_result_t at;
+	erx_ns_mount_t *entry;
+	erx_ns_status_t status;
+	size_t used;
+
+	status = erx_ns_new_point(ns, point, point_length, &at);
+	if (status != ERX_NS_OK)
+		return (status);
+	if (server == 0 || !erx_ns_tree_valid(tree, tree_length) ||
+	    (rights != ERX_NS_RO && rights != ERX_NS_RW && rights != ERX_NS_RX))
+		return (ERX_NS_EINVAL);
+
+	entry = &ns->mounts[ns->count];
+	used = 0;
+	(void)erx_ns_append(entry->point, &used, at.res_path, at.res_path_length);
+	used = 0;
+	(void)erx_ns_append(entry->root, &used, "/", 1);
+	for (size_t index = 0; index < tree_length; index++)
+		entry->tree[index] = (char)tree[index];
+	entry->tree[tree_length] = '\0';
+	entry->kind = ERX_NS_SERVER;
+	entry->server = server;
+	entry->rights = rights;
+	ns->count++;
+	return (ERX_NS_OK);
+}
+
+erx_ns_status_t
+erx_ns_bind(erx_ns_t *ns, const uint8_t *from, size_t from_length,
+    const uint8_t *to, size_t to_length, bool read_only)
+{
+	erx_ns_result_t source, at;
+	erx_ns_mount_t *entry;
+	erx_ns_status_t status;
+	size_t used;
+
+	status = erx_ns_resolve(ns, from, from_length, &source);
+	if (status != ERX_NS_OK)
+		return (status);
+	if (source.res_mount == NULL)
+		return (ERX_NS_ENOENT);
+	status = erx_ns_new_point(ns, to, to_length, &at);
+	if (status != ERX_NS_OK)
+		return (status);
+	/* The root is the source's names, under the leading `/` and before a NUL. */
+	if (source.res_names_length + 1 >= ERX_PATH_MAX)
+		return (ERX_NS_ENAMETOOLONG);
+
+	entry = &ns->mounts[ns->count];
+	*entry = *source.res_mount;
+	used = 0;
+	(void)erx_ns_append(entry->point, &used, at.res_path, at.res_path_length);
+	used = 0;
+	(void)erx_ns_append(entry->root, &used, "/", 1);
+	(void)erx_ns_append(entry->root, &used, source.res_names,
+	    source.res_names_length);
+	if (read_only)
+		entry->rights = ERX_NS_RO;
+	ns->count++;
+	return (ERX_NS_OK);
+}
+
+erx_ns_status_t
+erx_ns_unmount(erx_ns_t *ns, const uint8_t *point, size_t length)
+{
+	erx_ns_result_t at;
+	erx_ns_status_t status;
+	uint32_t index;
+
+	status = erx_ns_resolve(ns, point, length, &at);
+	if (status != ERX_NS_OK)
+		return (status);
+	if (at.res_path_length == 1)
+		return (ERX_NS_EBUSY);
+	index = erx_ns_find_point(ns, &at);
+	if (index == ns->count)
+		return (ERX_NS_EINVAL);
+	/* The entries after it move down one, so the table keeps its order. */
+	for (; index + 1 < ns->count; index++)
+		ns->mounts[index] = ns->mounts[index + 1];
+	ns->count--;
+	return (ERX_NS_OK);
+}
+
+bool
+erx_ns_fid_of(uint64_t value, uint32_t *fid)
+{
+	if ((uint32_t)value == ERX_NS_NOFID)
+		return (false);
+	*fid = (uint32_t)value;
+	return (true);
+}

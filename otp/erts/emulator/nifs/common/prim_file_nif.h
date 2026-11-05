@@ -121,12 +121,40 @@ typedef struct {
     ErlNifMonitor monitor;
 } efile_data_t;
 
-typedef ErlNifBinary efile_path_t;
+#include "erx/ns.h"
+
+/** @brief erXos: a path's bytes and where the namespace resolved it, taken once,
+ * under the namespace's lock, when the path is marshalled (erx_prim_file.c).
+ * Nothing in it points into the namespace's table: result.res_mount is never
+ * read, and the mount's kind is copied out beside it. */
+typedef struct {
+    ErlNifBinary bytes;        /* ends in its one NUL */
+    int on_mount;              /* 0 for the empty root above a narrowed namespace's mounts */
+    erx_ns_kind_t kind;        /* the mount's kind, when on_mount */
+    ERL_NIF_TERM remote;       /* {remote, Pid, Names}, when marshalling answered EFILE_EREMOTE */
+    erx_ns_result_t result;
+} efile_path_t;
+
+/** @brief erXos: what efile_marshal_path answers for a path on a file server's
+ * grant. The NIF then answers the path's `remote` term, and prim_file runs the
+ * operation through erx_file_remote (design-files.md, Erlang clients). */
+#define EFILE_EREMOTE (-1)
 
 /** @brief Prepares the layer once, when the NIF loads.
  *
  * @return 0, or anything else to fail the load. */
-int efile_load(void);
+int efile_load(ErlNifEnv *env);
+
+/** @brief erXos: marshals a symbolic link's text, which is not a path of the
+ * namespace and is not resolved. */
+posix_errno_t efile_marshal_text(ErlNifEnv *env, ERL_NIF_TERM text, efile_path_t *result);
+
+/** @brief erXos: the namespace's changes and the runtime's fid counter
+ * (erx_ns, design-files.md, Building, binding and mounting). */
+ERL_NIF_TERM efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM efile_ns_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM efile_ns_unmount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 
 /** @brief Translates the given "raw name" into the format expected by the APIs
  * used by the underlying implementation. The result is transient and does not

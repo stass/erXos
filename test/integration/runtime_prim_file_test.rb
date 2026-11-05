@@ -97,7 +97,7 @@ class RuntimePrimFileTest < Minitest::Test
     stock = table(@fixture.stock)
     assert_operator stock.size, :>, 200, 'the comparison ran its corpus'
     differences = (stock.keys | release.keys).filter_map do |key|
-      next if release[key] == stock[key] || key.start_with?('pin ', 'resources')
+      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'resources')
       next if named?(key)
 
       "#{describe(key)}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
@@ -147,6 +147,20 @@ class RuntimePrimFileTest < Minitest::Test
        write_file_info].each { |name| assert_equal '{error,erofs}', release.fetch("pin #{name}"), name }
     assert_equal '{error,enotsup}', release.fetch('pin open_directory')
     assert_equal '{error,enotsup}', release.fetch('pin altname')
+  end
+
+  # erx_ns changes the namespace for the whole runtime: a grant's paths reach
+  # erx_file_remote's stub, unmounting gives them back to the release, and a grant
+  # whose process ended answers eio until it is unmounted.
+  def test_a_mount_routes_its_paths_to_erx_file_remote
+    release = table(@fixture.release)
+    { 'ns before' => '{error,enoent}', 'ns mount' => 'ok', 'ns info' => '{error,enotsup}',
+      'ns read' => '{error,enotsup}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
+      'ns bind' => 'ok', 'ns bound' => '{error,enotsup}', 'ns unmount' => 'ok', 'ns after' => '{error,enoent}',
+      'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok', 'ns gone' => '{error,eio}',
+      'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}' }.each do |step, want|
+      assert_equal want, release.fetch(step), step
+    end
   end
 
   def test_modules_load_from_the_archive_through_erl_prim_loader

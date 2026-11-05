@@ -984,6 +984,9 @@ $(OBJDIR)/%.o: drivers/common/%.c
 $(OBJDIR)/%.o: drivers/$(STOCK_OSTYPE)/%.c
 	$(V_CC) $(CFLAGS) $(INCLUDES) -Idrivers/common -Idrivers/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
 
+# prim_file_nif.h names erx_prim_file.c's view of a resolved path (erx/ns.h).
+$(OBJDIR)/prim_file_nif.o: CFLAGS += -I$(ERX_SOURCE_ROOT)/include
+
 $(OBJDIR)/%.o: nifs/common/%.c
 	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 

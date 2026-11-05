@@ -10,6 +10,15 @@
  *   F <path>            a file of the release, in sorted order
  *   M <point> <root>    a mount, kind ERX_NS_RELEASE
  *   C <cwd>             the working directory
+ *   S <point> <server> <tree> <rights>
+ *                       erx_ns_mount, server in decimal, rights erx_ns_rights_t's
+ *                       number; answers its status
+ *   B <from> <to> <ro>  erx_ns_bind, ro 1 for read-only; answers its status
+ *   U <point>           erx_ns_unmount; answers its status
+ *   L                   answers each entry of the table on a line:
+ *                       E <point> <kind> <server> <tree> <root> <rights>
+ *   N <value>           erx_ns_fid_of on a 64-bit value in decimal; answers
+ *                       <1 or 0> <fid>
  *   Q <path>            answer one line:
  *                       <status> <mount or -> <nnames> <names> <path> <kind> <file> <listing>
  *
@@ -18,6 +27,7 @@
  * path answers its status and nothing more. An operand may be `-`, for empty.
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,16 +133,21 @@ int
 main(int argc, char **argv)
 {
 	static uint8_t path[2 * ERX_PATH_MAX];
+	static uint8_t other[2 * ERX_PATH_MAX];
 	static char first[DRIVER_LINE_MAX], second[DRIVER_LINE_MAX];
+	static char third[DRIVER_LINE_MAX], fourth[DRIVER_LINE_MAX];
 	FILE *input;
-	size_t length;
+	size_t length, other_length;
+	uint32_t fid;
+	bool found;
 
 	if (argc != 2 || (input = fopen(argv[1], "r")) == NULL)
 		return (2);
 	ns.cwd[0] = '/';
 	while (fgets(line, sizeof(line), input) != NULL) {
-		first[0] = second[0] = '\0';
-		if (sscanf(line + 1, "%s %s", first, second) < 1)
+		first[0] = second[0] = third[0] = fourth[0] = '\0';
+		if (line[0] != 'L' &&
+		    sscanf(line + 1, "%s %s %s %s", first, second, third, fourth) < 1)
 			return (2);
 		switch (line[0]) {
 		case 'F':
@@ -149,6 +164,42 @@ main(int argc, char **argv)
 			break;
 		case 'C':
 			driver_field(first, ns.cwd, ERX_PATH_MAX);
+			break;
+		case 'S':
+			length = driver_unhex(first, path, sizeof(path));
+			other_length = driver_unhex(third, other, sizeof(other));
+			printf("%d\n", (int)erx_ns_mount(&ns, path, length,
+			    strtoull(second, NULL, 10), other, other_length,
+			    (erx_ns_rights_t)strtoul(fourth, NULL, 10)));
+			break;
+		case 'B':
+			length = driver_unhex(first, path, sizeof(path));
+			other_length = driver_unhex(second, other, sizeof(other));
+			printf("%d\n", (int)erx_ns_bind(&ns, path, length, other,
+			    other_length, strcmp(third, "1") == 0));
+			break;
+		case 'U':
+			length = driver_unhex(first, path, sizeof(path));
+			printf("%d\n", (int)erx_ns_unmount(&ns, path, length));
+			break;
+		case 'L':
+			for (uint32_t index = 0; index < ns.count; index++) {
+				const erx_ns_mount_t *mount = &ns.mounts[index];
+
+				printf("E ");
+				driver_put_hex(mount->point, strlen(mount->point));
+				printf(" %d %llu ", (int)mount->kind,
+				    (unsigned long long)mount->server);
+				driver_put_hex(mount->tree, strlen(mount->tree));
+				printf(" ");
+				driver_put_hex(mount->root, strlen(mount->root));
+				printf(" %d\n", (int)mount->rights);
+			}
+			break;
+		case 'N':
+			fid = 0;
+			found = erx_ns_fid_of(strtoull(first, NULL, 10), &fid);
+			printf("%d %lu\n", found ? 1 : 0, (unsigned long)fid);
 			break;
 		case 'Q':
 			length = driver_unhex(first, path, sizeof(path));

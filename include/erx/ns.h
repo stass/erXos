@@ -6,6 +6,7 @@
 #ifndef ERX_NS_H
 #define ERX_NS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,27 +18,50 @@
  * path's bytes: it uses no heap and recurses nowhere. `.` and `..` are handled
  * lexically, so no provider ever sees either, and a path reaches a provider
  * only as the names of a result.
+ *
+ * erx_ns_mount, erx_ns_bind and erx_ns_unmount are the only changes to a table
+ * (design-files.md, Building, binding and mounting). Each is a pure function of the
+ * table and its arguments: it checks the whole change first and, on any refusal,
+ * leaves the table as it was. The caller owns the table and its locking.
  */
 
 typedef enum erx_ns_kind {
 	ERX_NS_RELEASE,		/* the domain's release slice, read-only */
 	ERX_NS_EROFS,		/* an EROFS image the domain holds a window on */
-	ERX_NS_RAM,		/* the domain's RAM file system */
-	ERX_NS_SERVER		/* a grant at a file server */
+	ERX_NS_SERVER		/* a grant at a file server, by pid */
 } erx_ns_kind_t;
+
+typedef enum erx_ns_rights {	/* no value writes and runs together (F6) */
+	ERX_NS_RO,
+	ERX_NS_RW,
+	ERX_NS_RX
+} erx_ns_rights_t;
 
 typedef enum erx_ns_status {
 	ERX_NS_OK,
 	ERX_NS_EINVAL,		/* not UTF-8, or holds a NUL */
 	ERX_NS_ENAMETOOLONG,	/* over a limit of the path, a name or the count */
-	ERX_NS_ENOENT		/* empty, or reaches no mount */
+	ERX_NS_ENOENT,		/* empty, or reaches no mount */
+	ERX_NS_EEXIST,		/* a mount or bind at a point the table already has */
+	ERX_NS_EBUSY,		/* unmounting `/` */
+	ERX_NS_ELIMIT		/* the table already holds ERX_NS_MOUNTS_MAX entries */
 } erx_ns_status_t;
 
-/* point and root are normalised and absolute: `/` or `/a/b`. */
+/*
+ * point and root are normalised and absolute: `/` or `/a/b`. No two entries of a
+ * table share a point. A root other than `/` comes only from erx_ns_bind.
+ */
 typedef struct erx_ns_mount {
 	char		point[ERX_PATH_MAX];
 	erx_ns_kind_t	kind;
+	uint64_t	server;			/* ERX_NS_SERVER: the grant's pid, as the
+						 * runtime names it, never 0; 0 once the
+						 * runtime has seen the pid end */
+	char		tree[ERX_NAME_MAX + 1];	/* ERX_NS_SERVER: the tree the grant
+						 * roots in, its attach name */
 	char		root[ERX_PATH_MAX];
+	erx_ns_rights_t	rights;			/* what the provider or grant allows
+						 * through this entry */
 } erx_ns_mount_t;
 
 typedef struct erx_ns {
@@ -67,5 +91,31 @@ typedef struct erx_ns_result {
 /* Anything but ERX_NS_OK leaves res_mount NULL and every count zero. */
 erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 	    erx_ns_result_t *);
+
+/*
+ * Adds an ERX_NS_SERVER entry for the grant `server` at the point the path
+ * resolves to, with the tree it roots in, which must be one name, and `rights`.
+ */
+erx_ns_status_t	erx_ns_mount(erx_ns_t *, const uint8_t *, size_t, uint64_t,
+	    const uint8_t *, size_t, erx_ns_rights_t);
+/*
+ * Adds an entry at the second path's point that shows what the first path
+ * resolves to: its mount, with the names below it as its root, read-only if
+ * asked. The first path must reach a mount (ERX_NS_ENOENT otherwise).
+ */
+erx_ns_status_t	erx_ns_bind(erx_ns_t *, const uint8_t *, size_t,
+	    const uint8_t *, size_t, bool);
+/* Removes the entry whose point is exactly where the path resolves to. */
+erx_ns_status_t	erx_ns_unmount(erx_ns_t *, const uint8_t *, size_t);
+
+/*
+ * 9P's NOFID, which no fid takes. A runtime draws fids from one 64-bit counter
+ * (design-files.md, Version and attach): a draw adds one and keeps the low 32
+ * bits, drawing again for NOFID.
+ */
+#define ERX_NS_NOFID	UINT32_MAX
+
+/* The fid a draw that gave `value` yields, or false for NOFID: draw again. */
+bool		erx_ns_fid_of(uint64_t, uint32_t *);
 
 #endif /* ERX_NS_H */

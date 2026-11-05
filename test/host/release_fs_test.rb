@@ -23,6 +23,14 @@ class ReleaseFsTest < Minitest::Test
   NS_EINVAL = 1
   NS_ENAMETOOLONG = 2
   NS_ENOENT = 3
+  NS_EEXIST = 4
+  NS_EBUSY = 5
+  NS_ELIMIT = 6
+  NS_SERVER = 2
+  RIGHTS_RO = 0
+  RIGHTS_RW = 1
+  RIGHTS_RX = 2
+  MOUNTS_MAX = 64
   KIND_FILE = 0
   KIND_DIRECTORY = 1
   KIND_MISSING = 2
@@ -38,6 +46,7 @@ class ReleaseFsTest < Minitest::Test
   WORKING_DIRECTORIES = %w[/ /d /d/e].freeze
 
   Answer = Data.define(:status, :mount, :nnames, :names, :path, :kind, :file, :listing)
+  Entry = Data.define(:point, :kind, :server, :tree, :root, :rights)
   CORE = %w[liberx/ns.c liberx/release_fs.c].freeze
 
   def setup
@@ -100,6 +109,97 @@ class ReleaseFsTest < Minitest::Test
     assert_nil ask(['/a'], mounts: deep).first.mount
     assert_equal NS_OK, ask(['/a/b'], mounts: deep).first.status
     assert_equal NS_ENOENT, ask(['/a/x'], mounts: deep).first.status
+  end
+
+  # A server mount is an entry of its own: the paths below its point reach it, with
+  # its pid, tree and rights; a refused mount leaves the table as it was.
+  def test_a_server_mount_takes_the_paths_below_its_point
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), 'L', query('/tmp/a/b'), query('/tmpx'), query('tmp')])
+    assert_equal '0', lines[0]
+    assert_equal [Entry.new(point: '/', kind: 0, server: 0, tree: '', root: '/', rights: RIGHTS_RO),
+                  Entry.new(point: '/tmp', kind: NS_SERVER, server: 7, tree: 'tmp', root: '/', rights: RIGHTS_RW)],
+                 entries(lines)
+    answers = lines.reject { |line| line.start_with?('E ') }.drop(1).map { |line| parse(line) }
+    assert_equal [[1, 'a/b'], [0, 'tmpx'], [1, '']], answers.map { |answer| [answer.mount, answer.names] }
+  end
+
+  def test_a_mount_is_refused_whole
+    long_tree = 'n' * 256
+    cases = {
+      mount('/', 7, 'tmp', RIGHTS_RW) => NS_EEXIST, mount('/tmp/', 7, 'tmp', RIGHTS_RW) => NS_EEXIST,
+      mount('/x', 0, 'tmp', RIGHTS_RW) => NS_EINVAL, mount('/x', 7, '', RIGHTS_RW) => NS_EINVAL,
+      mount('/x', 7, 'a/b', RIGHTS_RW) => NS_EINVAL, mount('/x', 7, '.', RIGHTS_RW) => NS_EINVAL,
+      mount('/x', 7, '..', RIGHTS_RW) => NS_EINVAL, mount('/x', 7, "a\0b", RIGHTS_RW) => NS_EINVAL,
+      mount('/x', 7, "\xff", RIGHTS_RW) => NS_EINVAL, mount('/x', 7, long_tree, RIGHTS_RW) => NS_EINVAL,
+      mount('/x', 7, 'tmp', 3) => NS_EINVAL, mount("/x\0", 7, 'tmp', RIGHTS_RW) => NS_EINVAL,
+      mount('', 7, 'tmp', RIGHTS_RW) => NS_ENOENT, mount("/#{long_tree}", 7, 'tmp', RIGHTS_RW) => NS_ENAMETOOLONG
+    }
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), *cases.keys, 'L'])
+    assert_equal ['0', *cases.values.map(&:to_s)], lines.first(cases.size + 1)
+    assert_equal %w[/ /tmp], entries(lines).map(&:point)
+    assert_equal NS_OK.to_s, edit([mount('/x', 7, 'n' * 255, RIGHTS_RX)]).first
+  end
+
+  def test_a_relative_point_joins_the_working_directory
+    lines = edit([mount('t', 7, 'tmp', RIGHTS_RW), 'L'], cwd: '/d/e')
+    assert_equal '/d/e/t', entries(lines).last.point
+  end
+
+  def test_the_table_holds_at_most_its_limit
+    mounts = (1...MOUNTS_MAX).map { |index| mount("/m#{index}", index, 't', RIGHTS_RO) }
+    lines = edit([*mounts, mount('/over', 99, 't', RIGHTS_RO), bind('/m1', '/over', false), unmount('/m5'),
+                  mount('/over', 99, 't', RIGHTS_RO), 'L'])
+    assert_equal ['0'] * (MOUNTS_MAX - 1), lines.first(MOUNTS_MAX - 1)
+    assert_equal [NS_ELIMIT, NS_ELIMIT, NS_OK, NS_OK].map(&:to_s), lines[MOUNTS_MAX - 1, 4]
+    points = entries(lines).map(&:point)
+    assert_equal MOUNTS_MAX, points.size
+    refute_includes points, '/m5'
+    assert_includes points, '/over'
+  end
+
+  # Unmounting removes exactly the entry at the point, and the paths below it fall to
+  # the mount above; `/` stays.
+  def test_unmount_removes_the_entry_at_exactly_its_point
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), unmount('/tmp/a'), unmount('/'), unmount('/./'),
+                  unmount('/nothing'), unmount('/tmp/.'), unmount('/tmp'), query('/tmp/a'), 'L'])
+    assert_equal [NS_OK, NS_EINVAL, NS_EBUSY, NS_EBUSY, NS_EINVAL, NS_OK, NS_EINVAL].map(&:to_s), lines.first(7)
+    assert_equal [0, 'tmp/a'], [parse(lines[7]).mount, parse(lines[7]).names]
+    assert_equal ['/'], entries(lines).map(&:point)
+  end
+
+  # A bind shows what its source resolves to: the same provider or grant, rooted at
+  # the source's names, read-only when asked, never wider.
+  def test_a_bind_shows_its_source_from_another_point
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), bind('/tmp/a/../b/c', '/x', false), bind('/tmp', '/y', true),
+                  bind('/x/d', '/z', true), bind('/d', '/w', false), query('/x/e'), query('/z/f'), 'L'])
+    assert_equal ['0'] * 5, lines.first(5)
+    assert_equal [[2, 'b/c/e'], [4, 'b/c/d/f']], lines[5, 2].map { |line| [parse(line).mount, parse(line).names] }
+    assert_equal [Entry.new(point: '/x', kind: NS_SERVER, server: 7, tree: 'tmp', root: '/b/c', rights: RIGHTS_RW),
+                  Entry.new(point: '/y', kind: NS_SERVER, server: 7, tree: 'tmp', root: '/', rights: RIGHTS_RO),
+                  Entry.new(point: '/z', kind: NS_SERVER, server: 7, tree: 'tmp', root: '/b/c/d', rights: RIGHTS_RO),
+                  Entry.new(point: '/w', kind: 0, server: 0, tree: '', root: '/d', rights: RIGHTS_RO)],
+                 entries(lines).drop(2)
+  end
+
+  def test_a_bind_is_refused_whole
+    # With the root's 99 bytes and its `/`, the source's names are 4,095 bytes: they
+    # fit the result, but not with the new root's leading `/` and its NUL.
+    deep = "/#{(['n' * 199] * 19).join('/')}/#{'n' * 195}"
+    lines = edit([bind('/x', '/', false), bind("/x\0", '/y', false), bind('/x', "/y\xff", false),
+                  bind('/a', '/a/b', false), bind('/a/b', '/a', false), 'L'])
+    assert_equal [NS_EEXIST, NS_EINVAL, NS_EINVAL, NS_OK, NS_OK].map(&:to_s), lines.first(5)
+    assert_equal %w[/ /a/b /a], entries(lines).map(&:point)
+    # Nothing above a narrowed namespace's mounts can be bound.
+    assert_equal NS_ENOENT.to_s, edit([bind('/', '/x', false)], mounts: [['/data', '/']]).first
+    # A root that would not fit with its leading `/`.
+    assert_equal NS_ENAMETOOLONG.to_s, edit([bind(deep, '/x', false)], mounts: [['/', "/#{'r' * 99}"]]).first
+  end
+
+  # A draw keeps the counter's low 32 bits and skips NOFID, also past a wrap.
+  def test_a_fid_is_the_low_32_bits_and_never_nofid
+    values = [0, 1, 0xffff_fffe, 0xffff_ffff, 0x1_0000_0000, 0x1_0000_0005, 0x1_ffff_ffff, 0xffff_ffff_ffff_ffff]
+    lines = edit(values.map { |value| "N #{value}" })
+    assert_equal ['1 0', '1 1', '1 4294967294', '0 0', '1 0', '1 5', '0 0', '0 0'], lines
   end
 
   def test_mutants_of_the_core_fail
@@ -239,6 +339,30 @@ class ReleaseFsTest < Minitest::Test
 
   def hex(bytes) = bytes.empty? ? '-' : bytes.unpack1('H*')
   def unhex(text) = text == '-' ? '' : [text].pack('H*')
+
+  # One run of the driver's table commands after the tree, the mounts and the working
+  # directory; answers its output lines as they are.
+  def edit(commands, cwd: '/', mounts: [['/', '/']])
+    lines = TREE.map { |file| "F #{hex(file)}" } + mounts.map { |point, root| "M #{hex(point)} #{hex(root)}" } +
+            ["C #{hex(cwd)}"] + commands
+    input = File.join(@directory, 'commands')
+    File.write(input, "#{lines.join("\n")}\n")
+    record = @runner.run([@driver, input], name: 'release-fs-driver', deadline: 300)
+    File.readlines(record.fetch('log'), chomp: true)
+  end
+
+  def mount(point, server, tree, rights) = "S #{hex(point.b)} #{server} #{hex(tree.b)} #{rights}"
+  def bind(from, to, read_only) = "B #{hex(from.b)} #{hex(to.b)} #{read_only ? 1 : 0}"
+  def unmount(point) = "U #{hex(point.b)}"
+  def query(path) = "Q #{hex(path.b)}"
+
+  def entries(lines)
+    lines.select { |line| line.start_with?('E ') }.map do |line|
+      _, point, kind, server, tree, root, rights = line.split(' ')
+      Entry.new(point: unhex(point), kind: Integer(kind), server: Integer(server), tree: unhex(tree),
+                root: unhex(root), rights: Integer(rights))
+    end
+  end
 
   # One run: the tree, the mounts, then the paths from one working directory.
   def ask(paths, cwd: '/', mounts: [['/', '/']], driver: @driver)

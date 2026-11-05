@@ -21,6 +21,7 @@ main([PrefixText, Mode]) ->
     cwd(Prefix),
     loader(Prefix),
     pins(Mode),
+    namespace(Mode),
     resources(),
     io:format("end\tok~n"),
     erlang:halt(0).
@@ -159,6 +160,41 @@ loader(Prefix) ->
     io:format("loader_link_info\t~0tp~n", [info({ok, Linked})]),
     io:format("loader_cwd\t~0tp~n", [named_cwd(Prefix, Cwd)]),
     io:format("loader_missing\t~0tp~n", [erl_prim_loader:get_file(Missing)]).
+
+%% Only the release has erx_ns. A grant's paths reach erx_file_remote, here its stub,
+%% and leave with the entry; a grant whose process ended answers eio; fids are drawn
+%% one after another.
+namespace("stock") -> ok;
+namespace("release") ->
+    Show = fun(Step, Result) -> io:format("ns ~s\t~0tp~n", [Step, Result]) end,
+    Show("before", prim_file:read_file_info(<<"/tmp/a">>)),
+    Show("mount", erx_ns:mount(self(), <<"/tmp">>, [{tree, <<"tmp">>}, rw])),
+    Show("info", prim_file:read_file_info(<<"/tmp/a">>)),
+    Show("read", prim_file:read_file(<<"/tmp/a">>)),
+    Show("again", erx_ns:mount(self(), <<"/tmp/">>, [{tree, <<"tmp">>}])),
+    Show("bad tree", erx_ns:mount(self(), <<"/x">>, [{tree, <<"a/b">>}])),
+    Show("bind", erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro])),
+    Show("bound", prim_file:read_file_info(<<"/b/c">>)),
+    Show("unmount", erx_ns:unmount(<<"/tmp">>)),
+    Show("after", prim_file:read_file_info(<<"/tmp/a">>)),
+    Show("root", erx_ns:unmount(<<"/">>)),
+    {Gone, Ref} = spawn_monitor(fun() -> receive stop -> ok end end),
+    Show("mount gone", erx_ns:mount(Gone, <<"/gone">>, [{tree, <<"t">>}])),
+    Gone ! stop,
+    receive {'DOWN', Ref, process, Gone, _} -> ok end,
+    Show("gone", ended(<<"/gone/x">>, 100)),
+    Show("unmount gone", erx_ns:unmount(<<"/gone">>)),
+    Show("unmount bound", erx_ns:unmount(<<"/b">>)),
+    First = prim_file:erx_fid(),
+    Show("fids", {is_integer(First), prim_file:erx_fid() - First}).
+
+%% The NIF learns of a process's end on its own monitor, so it may answer a moment later.
+ended(Path, 0) -> prim_file:read_file_info(Path);
+ended(Path, Tries) ->
+    case prim_file:read_file_info(Path) of
+        {error, eio} = Ended -> Ended;
+        _ -> receive after 10 -> ended(Path, Tries - 1) end
+    end.
 
 %% Only the release answers these: its fixed values and its refusals.
 pins("stock") -> ok;

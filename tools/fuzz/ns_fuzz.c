@@ -6,9 +6,13 @@
 /*
  * erx_ns_resolve and the release file system's core. The input is lines: the
  * first byte's low bits say how many of them are mount points and which root and
- * working directory they have, the next is the
+ * working directory they have; with 0x20 set, 1 + (first byte >> 6) lines of
+ * changes follow (`m<point>` mounts a grant, `b<from>\t<to>` binds, `B` binds
+ * read-only, `u<point>` unmounts); the next is the
  * path, and the rest are the release's file paths. Whatever the path holds, a
- * resolved result keeps design-files.md's properties; a lookup and a listing
+ * resolved result keeps design-files.md's properties; a change keeps the table's
+ * (points normalised and unique, at most ERX_NS_MOUNTS_MAX, `/` never removed) or
+ * leaves it as it was, and a bind's point reaches what its source did; a lookup and a listing
  * agree with a plain scan of the table.
  */
 
@@ -34,6 +38,9 @@ static void fuzz_check_lookup(const erx_release_fs_t *, const uint8_t *, size_t)
 static void fuzz_check_listing(const erx_release_fs_t *, const uint8_t *, size_t);
 static bool fuzz_below(const erx_release_fs_file_t *, const uint8_t *, size_t);
 static bool fuzz_under(const char *, const char *);
+static bool fuzz_normal(const char *);
+static void fuzz_check_table(const erx_ns_t *);
+static void fuzz_change(erx_ns_t *, const uint8_t *, size_t);
 
 static bool
 fuzz_next_line(const uint8_t *bytes, size_t length, size_t *cursor,
@@ -99,6 +106,118 @@ fuzz_under(const char *path, const char *point)
 		return (true);
 	return (strncmp(path, point, length) == 0 &&
 	    (path[length] == '\0' || path[length] == '/'));
+}
+
+/* `/`, or names after `/` that are neither empty, `.` nor `..`. */
+static bool
+fuzz_normal(const char *path)
+{
+	size_t start, length;
+
+	length = strlen(path);
+	if (length == 0 || length >= ERX_PATH_MAX || path[0] != '/')
+		return (false);
+	if (length == 1)
+		return (true);
+	start = 1;
+	for (size_t index = 1; index <= length; index++) {
+		if (index < length && path[index] != '/')
+			continue;
+		if (index == start || (index - start == 1 && path[start] == '.') ||
+		    (index - start == 2 && path[start] == '.' && path[start + 1] == '.'))
+			return (false);
+		start = index + 1;
+	}
+	return (true);
+}
+
+static void
+fuzz_check_table(const erx_ns_t *ns)
+{
+	if (ns->count > ERX_NS_MOUNTS_MAX)
+		abort();
+	for (uint32_t index = 0; index < ns->count; index++) {
+		const erx_ns_mount_t *mount = &ns->mounts[index];
+
+		if (!fuzz_normal(mount->point) || !fuzz_normal(mount->root))
+			abort();
+		if (mount->kind == ERX_NS_SERVER && (mount->server == 0 ||
+		    strlen(mount->tree) == 0 || strchr(mount->tree, '/') != NULL))
+			abort();
+		for (uint32_t other = 0; other < index; other++) {
+			if (strcmp(ns->mounts[other].point, mount->point) == 0)
+				abort();
+		}
+	}
+}
+
+/* One change from a line; a refused one leaves the table as it was. */
+static void
+fuzz_change(erx_ns_t *ns, const uint8_t *line, size_t length)
+{
+	static erx_ns_t before;
+	static erx_ns_result_t source, again;
+	const uint8_t *tab;
+	erx_ns_status_t status, source_status;
+	bool had_root;
+
+	if (length == 0)
+		return;
+	before.count = ns->count;
+	memcpy(before.mounts, ns->mounts, ns->count * sizeof(ns->mounts[0]));
+	memcpy(before.cwd, ns->cwd, sizeof(ns->cwd));
+	had_root = false;
+	for (uint32_t index = 0; index < ns->count; index++)
+		had_root = had_root || strcmp(ns->mounts[index].point, "/") == 0;
+	tab = NULL;
+	switch (line[0]) {
+	case 'm':
+		status = erx_ns_mount(ns, line + 1, length - 1, 1 + length,
+		    (const uint8_t *)"t", 1, ERX_NS_RW);
+		if (status == ERX_NS_OK && (ns->count != before.count + 1 ||
+		    ns->mounts[before.count].kind != ERX_NS_SERVER ||
+		    strcmp(ns->mounts[before.count].root, "/") != 0))
+			abort();
+		break;
+	case 'b':
+	case 'B':
+		tab = memchr(line + 1, '\t', length - 1);
+		if (tab == NULL)
+			return;
+		source_status = erx_ns_resolve(ns, line + 1, (size_t)(tab - line - 1), &source);
+		status = erx_ns_bind(ns, line + 1, (size_t)(tab - line - 1), tab + 1,
+		    length - (size_t)(tab - line) - 1, line[0] == 'B');
+		if (status != ERX_NS_OK)
+			break;
+		/* The new point reaches what the source reached, never wider. */
+		if (source_status != ERX_NS_OK || source.res_mount == NULL ||
+		    ns->count != before.count + 1 ||
+		    erx_ns_resolve(ns, (const uint8_t *)ns->mounts[before.count].point,
+		    strlen(ns->mounts[before.count].point), &again) != ERX_NS_OK ||
+		    again.res_mount != &ns->mounts[before.count] ||
+		    strcmp(again.res_names, source.res_names) != 0 ||
+		    again.res_mount->kind != before.mounts[source.res_mount - ns->mounts].kind ||
+		    (line[0] == 'B' && again.res_mount->rights != ERX_NS_RO) ||
+		    (again.res_mount->rights != ERX_NS_RO && again.res_mount->rights !=
+		    before.mounts[source.res_mount - ns->mounts].rights))
+			abort();
+		break;
+	case 'u':
+		status = erx_ns_unmount(ns, line + 1, length - 1);
+		if (status == ERX_NS_OK && ns->count + 1 != before.count)
+			abort();
+		break;
+	default:
+		return;
+	}
+	if (status != ERX_NS_OK && (ns->count != before.count ||
+	    memcmp(ns->mounts, before.mounts, ns->count * sizeof(ns->mounts[0])) != 0))
+		abort();
+	for (uint32_t index = 0; index < ns->count && had_root; index++)
+		had_root = strcmp(ns->mounts[index].point, "/") != 0;
+	if (had_root)
+		abort();
+	fuzz_check_table(ns);
 }
 
 static void
@@ -257,6 +376,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		ns.count = 1;
 		strcpy(ns.mounts[0].point, "/");
 		strcpy(ns.mounts[0].root, "/");
+		ns.mounts[0].kind = ERX_NS_RELEASE;
+		ns.mounts[0].server = 0;
+		ns.mounts[0].tree[0] = '\0';
+		ns.mounts[0].rights = ERX_NS_RO;
 	}
 	for (uint32_t index = 0; index < mounts &&
 	    fuzz_next_line(bytes, length, &cursor, &line, &line_length); index++) {
@@ -268,7 +391,22 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		memcpy(mount->point, line, line_length);
 		mount->point[line_length] = '\0';
 		strcpy(mount->root, (bytes[0] & 8) != 0 ? "/under" : "/");
-		ns.count++;
+		mount->kind = ERX_NS_RELEASE;
+		mount->server = 0;
+		mount->tree[0] = '\0';
+		mount->rights = ERX_NS_RO;
+		/* A table never holds one point twice. */
+		for (uint32_t other = 0; other < ns.count && mount != NULL; other++) {
+			if (strcmp(ns.mounts[other].point, mount->point) == 0)
+				mount = NULL;
+		}
+		if (mount != NULL)
+			ns.count++;
+	}
+	if ((bytes[0] & 32) != 0) {
+		for (uint32_t change = 0; change < 1u + (bytes[0] >> 6) &&
+		    fuzz_next_line(bytes, length, &cursor, &line, &line_length); change++)
+			fuzz_change(&ns, line, line_length);
 	}
 	if (!fuzz_next_line(bytes, length, &cursor, &line, &line_length))
 		return (0);

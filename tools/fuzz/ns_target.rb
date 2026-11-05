@@ -5,7 +5,8 @@
 # erx_ns_resolve and the release file system's core. The seeds start mutation on
 # both sides of each limit: a name of 255 and 256 bytes, 256 and 257 names, `..` at
 # the top, a NUL, bad UTF-8, a narrowed namespace, and a release's table with a
-# directory beside a name that sorts around it.
+# directory beside a name that sorts around it, and changes to the table: a server
+# mount, binds of it, an unmount, the refusals at `/`, and a bind of the empty root.
 long_name = 'n' * 256
 many_names = (['n'] * 257).join('/')
 long = ->(total) { ("/#{'n' * 200}" * ((total / 201) + 1)).byteslice(0, total) }
@@ -28,6 +29,12 @@ Erx::PackFuzz.declare_target(
     "\x04#{long.call(4095)}\nf",
     "\x04#{long.call(4096)}\nf",
     "\x04#{long.call(4097)}\nf",
-    "\x0d/a\n/a#{long.call(4091)}\nf"
+    "\x0d/a\n/a#{long.call(4091)}\nf",
+    "\x24m/tmp\n/tmp/a\nf",
+    "\x64m/tmp\nb/tmp/a\t/x\n/x/b\nf",
+    "\xa4m/tmp\nB/tmp\t/y\nu/tmp\n/y/z\nf",
+    "\xe4u/\nm/\nb/d\t/d\nu/./\n/d\nf",
+    "\x21/data\nb/\t/x\n/x\nf",
+    "\x64m/a\nb/a/#{long_name[1..]}\t/b\n/b\nf"
   ].map(&:b))
 )
