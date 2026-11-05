@@ -197,6 +197,9 @@ int erts_sys_cpu_time_ms(ErtsMonotonicTime *user, ErtsMonotonicTime *sys);
 /* The boot information page's environment: NUL-ended KEY=VALUE words. */
 void erx_runtime_env(const char **words, size_t *length);
 
+/* The startup limits' cap of the domain's /tmp, in bytes. */
+uint64_t erx_runtime_tmp_limit(void);
+
 /*
  * Functions for getting the performance counter
  */

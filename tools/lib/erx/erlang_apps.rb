@@ -5,6 +5,7 @@
 require 'fileutils'
 require_relative 'error'
 require_relative 'oracle'
+require_relative 'serving_set'
 
 module Erx
   # erXos's own Erlang applications, erlang/apps/<application>, compiled into a runtime's
@@ -48,12 +49,14 @@ module Erx
       @erlc = erlc
     end
 
-    # Compiles every application into otp/lib/<application>/ebin.
+    # Compiles every application into otp/lib/<application>/ebin, then holds /tmp's
+    # serving set to what the built beams reach (ServingSet).
     def build(otp:)
       unlisted = Dir.children(File.join(@root, SOURCE)).sort - APPLICATIONS
       raise Error, "#{SOURCE} holds applications ErlangApps does not list: #{unlisted.join(' ')}" unless unlisted.empty?
 
       APPLICATIONS.each { |application| build_application(application, otp: otp) }
+      ServingSet.check(erl: File.join(File.dirname(@erlc), 'erl'), directories: ServingSet.directories(otp: otp), root: @root)
     end
 
     private
@@ -67,7 +70,8 @@ module Erx
       ebin = File.join(otp, 'lib', application, 'ebin')
       FileUtils.rm_rf(File.dirname(ebin))
       FileUtils.mkdir_p(ebin)
-      @runner.run([@erlc, *FLAGS, *includes, '-o', ebin, *modules], name: "erlang-app-#{application}",
+      # -pa ebin: a module of the application may name another's behaviour, compiled first.
+      @runner.run([@erlc, *FLAGS, *includes, '-pa', ebin, '-o', ebin, *modules], name: "erlang-app-#{application}",
                                                                    deadline: DEADLINE, chdir: @root, env: Oracle::CLEAN_ERLANG_ENV)
       File.write(File.join(ebin, "#{application}.app"), resource)
     end

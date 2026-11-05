@@ -394,7 +394,7 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers `{error, enotsup}`, so terminal-less rendering reaches no NIF; `isatty/1` answers `false` and the terminfo calls answer that no capability exists, which is what `io_ansi` reads when a terminal has no terminfo ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/standard_error.erl` | 39. `server/0` calls no `prim_tty`: its encoding is `unicode`, and it writes with `erlang:display_string(stderr, Bytes)`, which waits as any process's write does |
 | `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
-| `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load |
+| `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load; `kernel_safe_sup`'s `init/1` makes the domain's file version counter (`erx_fs_version:init/0`) and adds `erx_ramfs_sup`, the domain's `/tmp`, as its last child ([design-tmp.md](design-tmp.md#starting-and-mounting)) |
 | `beam/bif.c` | 42. while another process holds `erx_tty_owner`, `halt_2` with `{flush, true}` traps to `erx_output:halt/2`, which drains the tty before it halts ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
 | `lib/stdlib/src/shell.erl` | 44. `prompt_width/1` asks no group when `erx_console` calls it, as when `user_drv` does |

@@ -475,7 +475,7 @@ it; git history is the record of completed work.
 * [Low] runtime, `prim_file_nif.h`: `efile_path_t` keeps an `erx_ns_result_t` whose `res_mount` still points
   into the namespace's table after the lock is released; nothing reads it, but holding only copied values
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
-* [Low] runtime, `erx_ns`: `which/1`, `list/0` and `tmp_limit/0` of
+* [Low] runtime, `erx_ns`: `which/1` and `list/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written; `set_cwd` into a grant answers through
   `erx_file_remote`, which cannot yet set the working directory (see the open-files item above).
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
@@ -484,6 +484,11 @@ it; git history is the record of completed work.
   ends `kernel` and halts the node. A Phase 1 residual: `/tmp` is the domain's own, so the domain ends
   with it. The restart test of [/tmp's verification](docs/design-tmp.md#verification) covers one crash,
   not a recurring one; a recurring crash would want `erx_ramfs_sup` to give up on `/tmp` alone.
+* [Low] /tmp, `erx_ramfs_serving`: the serving set's `xref` closure follows only calls it can
+  name, so a module a serving process reaches through `apply/3` or a fun value it was handed is
+  not in it; the cold-code case of [/tmp's verification](docs/design-tmp.md#verification) runs in
+  a runtime that has used `/tmp` before, not a fresh one, and the seeded faults of that section
+  (a module left out of the list, inode numbers from the tree's own counter) are not yet run.
 * [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:

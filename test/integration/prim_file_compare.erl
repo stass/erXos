@@ -24,6 +24,7 @@ main([PrefixText, Mode]) ->
     cwd(Prefix),
     loader(Prefix),
     pins(Mode),
+    tmp(Prefix, Mode),
     namespace(Mode),
     remote(Mode),
     resources(),
@@ -171,6 +172,8 @@ loader(Prefix) ->
 namespace("stock") -> ok;
 namespace("release") ->
     Show = fun(Step, Result) -> io:format("ns ~s\t~0tp~n", [Step, Result]) end,
+    %% The domain's own /tmp leaves the point to these mounts.
+    ok = erx_ns:unmount(<<"/tmp">>),
     Show("before", prim_file:read_file_info(<<"/tmp/a">>)),
     Show("mount", erx_ns:mount(test_grant(), <<"/tmp">>, [{tree, <<"test">>}, rw])),
     Show("info", info(prim_file:read_file_info(<<"/tmp/a">>))),
@@ -825,4 +828,175 @@ seeded(Seed) ->
         "append" -> appends(Show);
         "cap" -> past_the_cap(Show);
         "unknown" -> unknown_at(Show)
+    end.
+
+%% /tmp against stock (design-tmp.md, Verification, "Against stock OTP"): the same
+%% file calls run under the domain's /tmp and, in stock, in a fresh host directory
+%% beside the tree; each prints `tmp <step>\t<result>`, with #file_info{} reduced to
+%% what the design maps and listings sorted. runtime_prim_file_test.rb compares the two
+%% and names each difference. Then, on erXos only (`tmpx` lines), the size limit, a
+%% restart and code loaded from /tmp.
+tmp(Prefix, Mode) ->
+    Top = case Mode of
+              "release" -> <<"/tmp/seq">>;
+              "stock" -> <<Prefix/binary, "/../stock-tmp">>
+          end,
+    ok = file:make_dir(Top),
+    At = fun(Name) -> <<Top/binary, "/", Name/binary>> end,
+    Show = fun(Step, Result) -> io:format("tmp ~s\t~0tp~n", [Step, Result]) end,
+    Show("write", file:write_file(At(<<"x">>), <<"hello">>)),
+    Show("read", file:read_file(At(<<"x">>))),
+    Show("info", tmp_info(file:read_file_info(At(<<"x">>)))),
+    Show("make dir", file:make_dir(At(<<"d">>))),
+    Show("make dir again", file:make_dir(At(<<"d">>))),
+    Show("write in dir", file:write_file(At(<<"d/f">>), <<"f">>)),
+    Show("dir info", tmp_info(file:read_file_info(At(<<"d">>)))),
+    Show("del dir full", file:del_dir(At(<<"d">>))),
+    Show("rename", file:rename(At(<<"d/f">>), At(<<"d/g">>))),
+    Show("list", sorted(file:list_dir(At(<<"d">>)))),
+    Show("delete", file:delete(At(<<"d/g">>))),
+    Show("delete again", file:delete(At(<<"d/g">>))),
+    Show("del dir", file:del_dir(At(<<"d">>))),
+    Show("gone", file:read_file_info(At(<<"d">>))),
+    %% Open after unlink: the handle keeps the file.
+    {ok, Fd} = file:open(At(<<"u">>), [read, write, binary]),
+    Show("unlink open", file:delete(At(<<"u">>))),
+    Show("write unlinked", file:write(Fd, <<"kept">>)),
+    Show("pread unlinked", file:pread(Fd, 0, 10)),
+    Show("close unlinked", file:close(Fd)),
+    Show("unlinked gone", file:read_file(At(<<"u">>))),
+    %% Rename over an open file: its handle still reads the old bytes.
+    ok = file:write_file(At(<<"a">>), <<"old">>),
+    ok = file:write_file(At(<<"b">>), <<"new">>),
+    {ok, Old} = file:open(At(<<"a">>), [read, binary]),
+    Show("rename over", file:rename(At(<<"b">>), At(<<"a">>))),
+    Show("old handle", file:pread(Old, 0, 10)),
+    Show("new name", file:read_file(At(<<"a">>))),
+    ok = file:close(Old),
+    Show("append", tmp_appends(At(<<"log">>))),
+    %% Truncation through a read-only descriptor, and through a writable one after
+    %% chmod 0444; write_file_info of what read_file_info answered.
+    {ok, Ro} = file:open(At(<<"a">>), [read]),
+    Show("truncate ro", file:truncate(Ro)),
+    ok = file:close(Ro),
+    {ok, Rw} = file:open(At(<<"a">>), [read, write]),
+    ok = file:change_mode(At(<<"a">>), 8#444),
+    Show("truncate 0444", file:truncate(Rw)),
+    ok = file:close(Rw),
+    Show("read 0444", tmp_info(file:read_file_info(At(<<"a">>)))),
+    {ok, Read} = file:read_file_info(At(<<"x">>)),
+    Show("write info", file:write_file_info(At(<<"x">>), Read)),
+    %% The client's rules for a last . or .. (design-tmp.md, Verification).
+    ok = file:make_dir(At(<<"child">>)),
+    ok = file:write_file(At(<<"file">>), <<"f">>),
+    ok = file:make_symlink(<<"f">>, At(<<"victim">>)),
+    Special = [{"del_dir missing/.", fun() -> file:del_dir(At(<<"missing/.">>)) end},
+               {"del_dir child/..", fun() -> file:del_dir(At(<<"child/..">>)) end},
+               {"delete file/.", fun() -> file:delete(At(<<"file/.">>)) end},
+               {"rename child/..", fun() -> file:rename(At(<<"child/..">>), At(<<"y">>)) end},
+               {"rename to child/.", fun() -> file:rename(At(<<"x">>), At(<<"child/.">>)) end},
+               {"make_dir child/.", fun() -> file:make_dir(At(<<"child/.">>)) end},
+               {"make_dir missing/..", fun() -> file:make_dir(At(<<"missing/..">>)) end},
+               {"symlink child/..", fun() -> file:make_symlink(<<"t">>, At(<<"child/..">>)) end},
+               {"link to child/.", fun() -> file:make_link(At(<<"file">>), At(<<"child/.">>)) end},
+               {"link from child/.", fun() -> file:make_link(At(<<"child/.">>), At(<<"new">>)) end},
+               {"delete missing/victim", fun() -> file:delete(At(<<"missing/victim">>)) end},
+               {"victim kept", fun() -> file:read_link(At(<<"victim">>)) end},
+               {"file kept", fun() -> file:read_file(At(<<"file">>)) end}],
+    [Show(Step, Call()) || {Step, Call} <- Special],
+    Show("listing", sorted(file:list_dir(Top))),
+    tmp_erxos(Mode).
+
+%% What the design compares of a #file_info{}: type, access and permission bits,
+%% and a regular file's size and links; a directory's size and links are Linux's
+%% tmpfs's (design-tmp.md, Differences from stock OTP).
+tmp_info({ok, #file_info{type = regular, size = Size, access = Access, mode = Mode, links = Links}}) ->
+    {ok, regular, Size, Access, Mode band 8#7777, Links};
+tmp_info({ok, #file_info{type = Type, access = Access, mode = Mode}}) ->
+    {ok, Type, Access, Mode band 8#7777};
+tmp_info(Other) ->
+    Other.
+
+%% Two processes append one distinct byte each, many times: each finds its own byte
+%% before its position, and the file holds every byte.
+tmp_appends(Path) ->
+    Self = self(),
+    Writer = fun(Byte) ->
+                     fun() ->
+                             {ok, F} = file:open(Path, [append, read, binary]),
+                             Own = lists:all(fun(_) ->
+                                                     ok = file:write(F, <<Byte>>),
+                                                     {ok, At} = file:position(F, cur),
+                                                     {ok, <<Byte>>} =:= file:pread(F, At - 1, 1)
+                                             end, lists:seq(1, 200)),
+                             ok = file:close(F),
+                             Self ! {appended, Byte, Own}
+                     end
+             end,
+    [spawn(Writer(Byte)) || Byte <- [$a, $b]],
+    Own = [receive {appended, Byte, O} -> O end || Byte <- [$a, $b]],
+    {ok, Bytes} = file:read_file(Path),
+    {Own, byte_size(Bytes), lists:sort(maps:to_list(lists:foldl(fun(B, M) -> maps:update_with(B, fun(N) -> N + 1 end, 1, M) end, #{}, binary_to_list(Bytes))))}.
+
+tmp_erxos("stock") -> ok;
+tmp_erxos("release") ->
+    Show = fun(Step, Result) -> io:format("tmpx ~s\t~0tp~n", [Step, Result]) end,
+    Show("limit", erx_ns:tmp_limit() > 0),
+    %% A second instance under a small cap: a write past it is refused whole, and
+    %% a cap of 0 refuses every creation.
+    {ok, Small} = erx_ramfs_sup:start_link(100000, <<"/small">>, erx_ramfs_small),
+    Show("small fits", file:write_file(<<"/small/a">>, binary:copy(<<1>>, 60000))),
+    Show("small past", file:write_file(<<"/small/b">>, binary:copy(<<2>>, 60000))),
+    Show("small b", tmp_info(file:read_file_info(<<"/small/b">>))),
+    {ok, Big} = file:open(<<"/small/a">>, [read, write, binary]),
+    Show("small write", file:pwrite(Big, 0, binary:copy(<<3>>, 60000))),
+    Show("small kept", file:pread(Big, 0, 1)),
+    ok = file:close(Big),
+    unlink(Small),
+    exit(Small, shutdown),
+    {ok, Zero} = erx_ramfs_sup:start_link(0, <<"/zero">>, erx_ramfs_zero),
+    Show("zero list", file:list_dir(<<"/zero">>)),
+    Show("zero write", file:write_file(<<"/zero/a">>, <<>>)),
+    Show("zero dir", file:make_dir(<<"/zero/d">>)),
+    unlink(Zero),
+    exit(Zero, shutdown),
+    %% Restart: kill the tree process with a file open; the open file answers eio,
+    %% and /tmp comes back empty, mounted again.
+    ok = file:write_file(<<"/tmp/before">>, <<"b">>),
+    {ok, Open} = file:open(<<"/tmp/before">>, [read, binary]),
+    {ok, #file_info{inode = OldInode}} = file:read_file_info(<<"/tmp/before">>),
+    OldTree = whereis(erx_ramfs),
+    exit(OldTree, kill),
+    Show("restarted", tmp_restarted(OldTree, 100)),
+    Show("old fd", file:read(Open, 1)),
+    Show("empty", file:list_dir(<<"/tmp">>)),
+    ok = file:write_file(<<"/tmp/after">>, <<"a">>),
+    {ok, #file_info{inode = NewInode}} = file:read_file_info(<<"/tmp/after">>),
+    Show("inode above", NewInode > OldInode),
+    %% Code from /tmp: a module written as a .beam, found through the code path.
+    Loaded = erlang:loaded(),
+    {ok, tmp_cold, Beam} = compile:forms([{attribute, 1, module, tmp_cold},
+                                          {attribute, 1, export, [{f, 0}]},
+                                          {function, 1, f, 0, [{clause, 1, [], [], [{atom, 1, cold}]}]}],
+                                         [binary]),
+    true = code:add_patha("/tmp"),
+    Show("cold missing", code:ensure_loaded(tmp_nowhere)),
+    ok = file:write_file(<<"/tmp/tmp_cold.beam">>, Beam),
+    Show("cold load", code:ensure_loaded(tmp_cold)),
+    Show("cold call", tmp_cold:f()),
+    Show("serving loaded", [M || M <- erx_ramfs_serving:modules(), not lists:member(M, Loaded)]),
+    true = code:del_path("/tmp"),
+    ok.
+
+tmp_restarted(_OldTree, 0) ->
+    timeout;
+tmp_restarted(OldTree, Tries) ->
+    case whereis(erx_ramfs) of
+        Pid when is_pid(Pid), Pid =/= OldTree ->
+            case file:list_dir(<<"/tmp">>) of
+                {ok, _} -> ok;
+                _ -> receive after 20 -> tmp_restarted(OldTree, Tries - 1) end
+            end;
+        _ ->
+            receive after 20 -> tmp_restarted(OldTree, Tries - 1) end
     end.

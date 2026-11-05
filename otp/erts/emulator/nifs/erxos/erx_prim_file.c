@@ -588,6 +588,15 @@ efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_uint(env, fid));
 }
 
+/* prim_file:erx_tmp_limit_nif(): the cap of the domain's /tmp, from its startup limits. */
+ERL_NIF_TERM
+efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	(void)argc;
+	(void)argv;
+	return (enif_make_uint64(env, erx_runtime_tmp_limit()));
+}
+
 /* New kinds of file are new rows here; the callers below do not move. */
 static posix_errno_t
 erx_find(const efile_path_t *path, erx_release_fs_kind_t *kind, uint32_t *file)

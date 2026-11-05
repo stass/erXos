@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: ERTS starts on the boot information page, whose entry owns main.
+ * Modified by erXos: ERTS starts on the boot information page, whose entry owns main,
+ * and reads the startup limits from it.
  *
  * %CopyrightEnd%
  */
@@ -38,6 +39,13 @@ erx_runtime_env(const char **words, size_t *length)
 {
     *words = boot_view.env;
     *length = boot_view.info.env_len;
+}
+
+/* The startup limits' cap of the domain's /tmp, in bytes (docs/design-tmp.md). */
+uint64_t
+erx_runtime_tmp_limit(void)
+{
+    return boot_view.info.limits.tmp;
 }
 
 /*

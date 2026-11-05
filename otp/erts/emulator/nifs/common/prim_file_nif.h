@@ -164,6 +164,7 @@ ERL_NIF_TERM efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM arg
 ERL_NIF_TERM efile_ns_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_ns_unmount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 
 /** @brief Translates the given "raw name" into the format expected by the APIs
  * used by the underlying implementation. The result is transient and does not

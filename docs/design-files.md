@@ -521,8 +521,9 @@ file's data or size, in the same step that makes the change visible to
 reads; the counter starts at 1, and a server whose counter would pass 2^64
 - 1 refuses every change with `eio` and reports it. The counter is an
 unsigned 64-bit `atomics` cell that the runtime makes once, before any
-file server starts (in its kernel application's startup, before
-`kernel_safe_sup`), and publishes through `persistent_term`, so it lives
+file server starts (in its kernel application's startup, in
+`kernel_safe_sup`'s `init/1` before its children), and publishes through
+`persistent_term`, so it lives
 as long as the runtime and no server's restart resets it. A server draws
 from it with a `compare_exchange/4` loop that refuses at 2^64 - 1, since
 `atomics:add_get/3` would wrap to 0 and hand out old values again. A

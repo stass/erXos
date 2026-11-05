@@ -10,7 +10,10 @@
   {modules, [erx_fs,
              erx_fs_grant,
              erx_fs_version,
-             erx_ramfs_core]},
-  {registered, []},
+             erx_ramfs,
+             erx_ramfs_core,
+             erx_ramfs_serving,
+             erx_ramfs_sup]},
+  {registered, [erx_ramfs]},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

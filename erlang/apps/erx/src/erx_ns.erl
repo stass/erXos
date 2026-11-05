@@ -12,7 +12,7 @@
 
 -module(erx_ns).
 
--export([mount/3, unmount/1, bind/2, bind/3]).
+-export([mount/3, unmount/1, bind/2, bind/3, tmp_limit/0]).
 
 -type option() :: {tree, binary()} | ro | rw | rx.
 -type reason() :: einval | enametoolong | enoent | eexist | ebusy | system_limit.
@@ -55,6 +55,13 @@ mount_options([Rights | Rest], Tree, undefined) when Rights =:= ro; Rights =:= r
     mount_options(Rest, Tree, Rights);
 mount_options(_Options, _Tree, _Rights) ->
     error.
+
+%% The cap of the domain's /tmp in bytes, from the tmp field of the runtime's startup
+%% limits (design-tmp.md, Starting and mounting); 0 makes a /tmp that refuses every
+%% creation with enospc.
+-spec tmp_limit() -> non_neg_integer().
+tmp_limit() ->
+    prim_file:erx_tmp_limit().
 
 %% A name prim_file cannot encode is malformed.
 change(Change) ->

@@ -482,6 +482,9 @@ where macOS writes at the offset, and `file:allocate/3` answering
 * A directory's size is 0 and its `nlink` is 2 plus its subdirectories,
   as on Linux's tmpfs; macOS reports others.
 * Reads never change `atime`.
+* A removal whose path ends in `..` answers `eexist` (Linux's `ENOTEMPTY`) and
+  a rename whose source or target ends in `.` or `..` answers `ebusy`, as
+  Linux's do; macOS answers `einval`.
 * The owner and group are 0, permissions are checked as for the owner
   and never bypassed, and changing the owner to anyone else fails with
   `eperm`.

@@ -41,7 +41,8 @@
 -export([read_file/1, write_file/2]).
 
 %% erXos: the namespace's changes, for erx_ns, and the runtime's fid counter.
--export([erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1]).
+-export([erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1,
+         erx_tmp_limit/0]).
 
 -export([read_link/1, read_link_all/1,
          read_link_info/1, read_link_info/2,
@@ -83,6 +84,7 @@
        get_handle_nif/1, delayed_close_nif/1, altname_nif/1,
        file_desc_to_ref_nif/1,
        erx_ns_mount_nif/4, erx_ns_bind_nif/3, erx_ns_unmount_nif/1, erx_fid_nif/0,
+       erx_tmp_limit_nif/0,
        erx_resolve_nif/1, erx_resolve_nif/2]).
 
 -type prim_file_name() :: string() | unicode:unicode_binary().
@@ -606,6 +608,11 @@ erx_ns_unmount(Point) ->
 erx_fid() ->
     erx_fid_nif().
 
+%% erXos: the cap of the domain's /tmp in bytes, the tmp field of the runtime's startup
+%% limits (design-tmp.md, Starting and mounting), for erx_ns.
+erx_tmp_limit() ->
+    erx_tmp_limit_nif().
+
 %% erXos: where one path lies, or the two of a rename or a link, as their operations
 %% would find them, acting on nothing: their remote term, local for the NIF's own
 %% providers, or the refusal. erx_file_remote asks it for the path a symbolic link
@@ -632,6 +639,8 @@ erx_resolve_nif(_Path) ->
 erx_resolve_nif(_Path, _OtherPath) ->
     erlang:nif_error(undef).
 erx_fid_nif() ->
+    erlang:nif_error(undef).
+erx_tmp_limit_nif() ->
     erlang:nif_error(undef).
 
 write_file(Filename, Bytes) ->

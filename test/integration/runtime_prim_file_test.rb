@@ -87,7 +87,8 @@ class RuntimePrimFileTest < Minitest::Test
     refute_includes lines.join("\n"), Digest::MD5.digest(changed).bytes.join(',')
     refute_includes lines.join("\n"), 'torts before'
     # Two runs' memory figures differ by nature, and test_results_agree_with_stock... exempts them too.
-    other = (lines - @fixture.release).reject { |line| line.start_with?('resources') }
+    # The restart case's supervisor report carries the time of each run.
+    other = (lines - @fixture.release).reject { |line| line.start_with?('resources', '=SUPERVISOR REPORT') }
     diagnostics, refused = other.partition { |line| line.start_with?('prim_file: ') }
     assert_includes diagnostics.first.to_s, 'file_hash'
     name = 'sub-x'.unpack1('H*')
@@ -99,12 +100,53 @@ class RuntimePrimFileTest < Minitest::Test
     stock = table(@fixture.stock)
     assert_operator stock.size, :>, 200, 'the comparison ran its corpus'
     differences = (stock.keys | release.keys).filter_map do |key|
-      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'remote ', 'resources')
+      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'remote ', 'resources', 'tmp')
       next if named?(key)
 
       "#{describe(key)}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
     end
     assert_empty differences, differences.join("\n")
+  end
+
+  # /tmp against stock OTP in a fresh host directory (design-tmp.md, Verification, "Against
+  # stock OTP"): every step agrees but those named here, each as [stock, release], a
+  # difference the design states (Differences from stock OTP) or one TODO.md records. A
+  # last `..` of a removal and a last `.` or `..` of a rename answer as Linux's
+  # (ENOTEMPTY, which prim_file answers as eexist, and EBUSY), where macOS answers einval.
+  TMP_DIFFERENCES = {
+    'tmp del_dir child/..' => ['{error,einval}', '{error,eexist}'],
+    'tmp rename child/..' => ['{error,einval}', '{error,ebusy}'],
+    'tmp rename to child/.' => ['{error,einval}', '{error,ebusy}']
+  }.freeze
+
+  def test_tmp_agrees_with_stock_except_where_named
+    release = table(@fixture.release).select { |key, _| key.start_with?('tmp ') }
+    stock = table(@fixture.stock).select { |key, _| key.start_with?('tmp ') }
+    assert_operator stock.size, :>, 30, 'the /tmp corpus ran'
+    differences = (stock.keys | release.keys).filter_map do |key|
+      pinned = TMP_DIFFERENCES[key]
+      next if pinned ? [stock[key], release[key]] == pinned : release[key] == stock[key]
+
+      "#{key}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
+    end
+    assert_empty differences, differences.join("\n")
+  end
+
+  # /tmp's own cases, which stock has no counterpart for. A write past the cap is refused
+  # whole: the file it made stays, empty. A restart leaves /tmp empty and the old open file
+  # answering eio, and the code server reads /tmp with every serving module loaded.
+  TMP_ERXOS = {
+    'tmpx limit' => 'true', 'tmpx small fits' => 'ok', 'tmpx small past' => '{error,enospc}',
+    'tmpx small b' => '{ok,regular,0,read_write,420,1}', 'tmpx small write' => 'ok', 'tmpx small kept' => '{ok,<<3>>}',
+    'tmpx zero list' => '{ok,[]}', 'tmpx zero write' => '{error,enospc}', 'tmpx zero dir' => '{error,enospc}',
+    'tmpx restarted' => 'ok', 'tmpx old fd' => '{error,eio}', 'tmpx empty' => '{ok,[]}',
+    'tmpx inode above' => 'true', 'tmpx cold missing' => '{error,nofile}',
+    'tmpx cold load' => '{module,tmp_cold}', 'tmpx cold call' => 'cold', 'tmpx serving loaded' => '[]'
+  }.freeze
+
+  def test_tmp_serves_the_domain
+    release = table(@fixture.release)
+    TMP_ERXOS.each { |step, want| assert_equal want, release[step], step }
   end
 
   # The design's sentence: `f/.` is `f`, where stock's stat answers enotdir.

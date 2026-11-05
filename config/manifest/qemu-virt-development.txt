@@ -33,7 +33,7 @@ runtime_limits system
   max_message_heap 1048576
   funnel_depth 64
   exports 256
-  tmp 0
+  tmp 33554432
   overlay 0
   atoms 65536
   foreign_atoms 1024
