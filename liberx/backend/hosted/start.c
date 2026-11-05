@@ -37,13 +37,6 @@ static _Alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 static uint64_t wall_offset_ns;
 
 /*
- * What of the host's environment reaches the page: only what the stock terminal
- * driver reads.
- */
-static const char *const inherited[] = { "PROGNAME", "HOME", "TERM" };
-#define INHERITED_COUNT	(sizeof(inherited) / sizeof(inherited[0]))
-
-/*
  * What liberx's group report looks for (group.c). It stays beside TZ in libSystem's
  * environment, which only liberx reads: ERTS's environment is the page's.
  */
@@ -95,23 +88,16 @@ wall_offset_init(void)
 	wall_offset_ns = (uint64_t)now.tv_sec * NS_PER_S + (uint64_t)now.tv_nsec - erx_clock_ns();
 }
 
-static size_t
-inherited_words(erx_boot_words_t *words)
+/* The host's online CPUs, which the interpreter's schedulers take as the group's set. */
+static uint32_t
+host_cpus(void)
 {
-	bool taken[INHERITED_COUNT] = { false };
-	size_t count = 0;
+	int count = 0;
+	size_t size = sizeof(count);
 
-	for (char **entry = environ; *entry != NULL; entry++) {
-		for (size_t at = 0; at < INHERITED_COUNT; at++) {
-			const size_t key = strlen(inherited[at]);
-
-			if (!taken[at] && strncmp(*entry, inherited[at], key) == 0 && (*entry)[key] == '=') {
-				taken[at] = true;
-				words[count++] = (erx_boot_words_t){ *entry, strlen(*entry) };
-			}
-		}
-	}
-	return (count);
+	if (sysctlbyname("hw.activecpu", &count, &size, NULL, 0) != 0 || count <= 0)
+		fail("the host does not say how many CPUs it has");
+	return (count > 64 ? 64 : (uint32_t)count);
 }
 
 static void
@@ -127,18 +113,6 @@ keep_report_words(void)
 				hosted_environ[count++] = *entry;
 		}
 	}
-}
-
-/* The host's online CPUs, which the interpreter's schedulers take as the group's set. */
-static uint32_t
-host_cpus(void)
-{
-	int count = 0;
-	size_t size = sizeof(count);
-
-	if (sysctlbyname("hw.activecpu", &count, &size, NULL, 0) != 0 || count <= 0)
-		fail("the host does not say how many CPUs it has");
-	return (count > 64 ? 64 : (uint32_t)count);
 }
 
 /*
@@ -183,7 +157,6 @@ main(int argc, char **argv)
 	/* The manifest's words and the driver's, then the command line after the archive's path. */
 	const size_t nargs = 2 + nwords;
 	erx_boot_words_t *const args = calloc(nargs, sizeof(*args));
-	erx_boot_words_t env[INHERITED_COUNT];
 	const uint32_t cpus = host_cpus();
 	erx_boot_manifest_t manifest;
 	erx_boot_info_status_t status;
@@ -214,8 +187,6 @@ main(int argc, char **argv)
 		.node_len = manifest.node_len,
 		.args = args,
 		.nargs = nargs,
-		.env = env,
-		.nenv = inherited_words(env),
 		.limits = manifest.limits,
 	};
 

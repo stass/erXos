@@ -16,6 +16,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: no NIF; isprint/1, wcwidth/1 and the terminfo calls are pure, for terminal-less rendering.
+%%
 %% %CopyrightEnd%
 %%
 -module(prim_tty).
@@ -120,13 +122,9 @@
 %% Export to io_ansi
 -export([tigetstr/1, tputs/2, tigetflag/1, tigetnum/1, tinfo/0]).
 
--nifs([isatty/1, tty_create/1, tty_init/2, setlocale/1,
-       tty_select/2, tty_window_size/1,
-       tty_encoding/1, tty_is_open/2, write_nif/2, read_nif/3, isprint/1,
-       wcwidth/1, wcswidth/1,
-       sizeof_wchar/0, setupterm_nif/0, tigetnum_nif/1, tigetflag_nif/1,
-       tigetstr_nif/1, tinfo_nif/0, tputs_nif/2
-    ]).
+%% erXos has no NIF behind this module: load/0 fails, so a stock terminal driver stops
+%% at its first line. What init_ssh/3's state reaches is pure, and the rest stays as
+%% stubs for that driver's paths. There is no terminfo: every capability is absent.
 
 -export([reader_loop/2, writer_loop/2]).
 
@@ -1372,7 +1370,7 @@ dbg(_) ->
 %% Nif functions
 -spec isatty(stdin | stdout | stderr | tty()) -> boolean() | ebadf.
 isatty(_Fd) ->
-    erlang:nif_error(undef).
+    false.
 -spec tty_create(stdout | stderr) -> {ok, tty()}.
 tty_create(_Fd) ->
     erlang:nif_error(undef).
@@ -1392,36 +1390,23 @@ read_nif(_TTY, _Ref, _N) ->
     erlang:nif_error(undef).
 tty_window_size(_TTY) ->
     erlang:nif_error(undef).
-isprint(_Char) ->
-    erlang:nif_error(undef).
+isprint(Char) ->
+    Char >= $\s andalso Char < $\d.
 wcwidth(_Char) ->
-    erlang:nif_error(undef).
+    {error, enotsup}.
 sizeof_wchar() ->
     erlang:nif_error(undef).
 wcswidth(_Char) ->
     erlang:nif_error(undef).
 setupterm() ->
-    setupterm_nif().
-tigetnum(Char) ->
-    tigetnum_nif([Char,0]).
-tigetflag(Char) ->
-    tigetflag_nif([Char,0]).
-tigetstr(Char) ->
-    tigetstr_nif([Char,0]).
+    false.
+tigetnum(_Char) ->
+    -1.
+tigetflag(_Char) ->
+    false.
+tigetstr(_Char) ->
+    false.
 tinfo() ->
-    tinfo_nif().
-tputs(Char, Args) ->
-    tputs_nif([Char,0], Args).
-
-setupterm_nif() ->
-    erlang:nif_error(undef).
-tigetnum_nif(_Char) ->
-    erlang:nif_error(undef).
-tigetflag_nif(_Char) ->
-    erlang:nif_error(undef).
-tinfo_nif() ->
-    erlang:nif_error(undef).
-tigetstr_nif(_Char) ->
-    erlang:nif_error(undef).
-tputs_nif(_Ent, _Args) ->
-    erlang:nif_error(undef).
+    #{ bool => [], num => [], str => [] }.
+tputs(_Char, _Args) ->
+    erlang:error(badarg).

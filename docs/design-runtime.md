@@ -381,7 +381,7 @@ of behaviour, however many lines it touches:
 | `beam/bif.c` | 35. `display_string/2`'s standard-input branch, which feeds a terminal through `TIOCSTI`, is compiled out; its write loop adds to the offset only what a write wrote, retrying an interrupted or blocked write at the same offset, where stock adds the -1 too (`bif.c:4275-4279`), which only a hosted descriptor can answer, and whose reader is outside the runtime; `display/1` formats into a temporary buffer in place of `erts_printf` and goes on as `display_string/2` does; and while another process holds `erx_tty_owner`, both trap to `erx_output:write/2` with the bytes |
 | `beam/sys.h`, `beam/erl_drv_thread.c`, `beam/erl_driver.h`, `sys/common/erl_sys_common_misc.c`, `nifs/common/zlib_nif.c`, `include/internal/erl_misc_utils.h`, and the two event files above | 36. `__erxos__`, which every erXos build defines, turns off each block keyed on `__APPLE__` or `__DARWIN__`, so a hosted build compiles what a native build compiles |
 | `beam/bif.c`, `lib_src/common/erl_printf.c` | 37. each `write` is `erx_output_write`, under the same signature, and the retry loops around it stay, since natively it never answers blocked ([The console](#the-console-and-standard-io), [What ERTS imports](#what-erts-imports)) |
-| `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers `{error, enotsup}`, so terminal-less rendering reaches no NIF ([The console](#the-console-and-standard-io)) |
+| `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers `{error, enotsup}`, so terminal-less rendering reaches no NIF; `isatty/1` answers `false` and the terminfo calls answer that no capability exists, which is what `io_ansi` reads when a terminal has no terminfo ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/standard_error.erl` | 39. `server/0` calls no `prim_tty`: its encoding is `unicode`, and it writes with `erlang:display_string(stderr, Bytes)`, which waits as any process's write does |
 | `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
 | `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load |
@@ -1644,8 +1644,10 @@ request from the group goes through `prim_tty:handle_request/2` to become bytes
 for the driver. A session in another domain does the same beside its own
 tty ([design-live.md](design-live.md#the-tty)). `-user erx_console`
 ([Configuration](#configuration)) makes `user_sup` call `erx_console:start/0`,
-which starts the driver and one group, `group:start(self(), {shell, start, [init]}, Options)`,
-and registers that group as `user`.
+which starts the driver and two groups, as `user_drv` does: the shell's,
+`group:start(self(), {shell, start, [init]}, Options)`, which gets the input, and
+a group with no shell registered as `user`, since `shell:prompt_width/1` calls
+`io:getopts(user)` from inside the shell's group and a group cannot answer itself.
 
 The first shell needs no more than this. Its `erx_console`, group and terminal-less
 `prim_tty` over a raw-byte driver are the system shell's permanent path, not a
@@ -1729,21 +1731,51 @@ nothing to drain: its bytes are with the kernel, the host or the UART already.
 **`erx_stdio`, hosted mode's console driver.** `erx_console` is one program in
 every build, and the driver is the one process that differs, since a hosted
 process has no UART to map (`erx_mem_create_physical` and `ERX_IRQ_LINE` are
-refused there). Both drivers speak the same messages:
-`{erx_console_output, From, Bytes}` from `erx_console`, answered
-`{erx_console_written, From}` once the bytes are written, and
-`{erx_console_input, Bytes}` and `erx_console_eof` to it. `erx_console` answers
-a `put_chars_sync` only on that answer, so `io:format` returns when its bytes are
-out, as `write` on a Unix terminal does. `-erx console_driver Module`, an ordinary
-argument of the boot information page, names the driver: the hosted entry adds
-`erx_stdio`, and otherwise the manifest's console UART has its driver.
+refused there). A driver is a module with `start_link(Console) -> {ok, Pid, Terminal}`,
+where `Terminal` says whether a person's terminal is on the line, which it always
+is for a UART. With none, as `user_drv` does, the shell's group is `dumb` and
+`prim_tty`'s output raw, so a pipe gets bytes with no editing or echo. Both drivers
+speak the same messages:
+
+| Message | Direction | Meaning |
+| --- | --- | --- |
+| `{erx_console_output, From, Bytes}` | to the driver | write these bytes, whole and in order; `From` is opaque to the driver |
+| `{erx_console_written, From}` | to `erx_console` | those bytes are written or the line is gone; every output message gets this answer |
+| `{erx_console_input, Bytes}` | to `erx_console` | bytes as read, in order, cut anywhere |
+| `{erx_console_size, Columns, Rows}` | to `erx_console` | the line's size is known or has changed; `erx_console` ignores a side outside 1 to 65,535 |
+| `erx_console_eof` | to `erx_console` | input has ended, after every byte read before it |
+
+`-user erx_console` holds against `-noshell` and `-noinput`, which `erx_console`
+reads: it starts no shell's group and gives `user` the input. A console whose driver
+or shell's group ends prints why and halts with status 1, since nothing would read
+the terminal again.
+
+`erx_console` answers a `put_chars_sync` only on `erx_console_written`, so
+`io:format` returns when its bytes are out, as `write` on a Unix terminal does.
+It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
+`-erx console_driver Module`, an ordinary argument of the boot information page,
+names the driver: the hosted entry adds `erx_stdio`, and otherwise the manifest's
+console UART has its driver.
+
+**Which input bytes mean something.** `erx_console` takes two bytes out of the
+stream, which no UTF-8 sequence contains: `Ctrl-C` becomes `exit(Group, interrupt)`,
+and `Ctrl-G` opens the console's menu ([design-live.md](design-live.md#the-console)).
+The rest goes to the shell's group as UTF-8, with a character cut across two reads
+held until its end arrives and a byte that belongs to no character read as latin-1,
+as `prim_tty`'s reader does. `erx_console:input/2` is that decision, a pure function
+with a fuzz target. `Ctrl-Z` and `Ctrl-\` are ordinary bytes on this path, as on any
+raw terminal.
+
 `erx_stdio` is an Erlang process in `kernel` over `erx_stdio_nif`. A worker
-thread of the NIF sets a terminal on standard input to raw mode, restores it at
-exit, reads standard input into a ring and triggers a software IRQ object bound
-to the group, whose label the event table registers to `erx_stdio`, so input
-travels the same path as a device's interrupt and every executor can park while
-the terminal is idle. Output is `write` on standard output from a dirty I/O NIF.
-End of file is the ring's last entry, an input event in order: `erx_stdio` sends
+thread of the NIF, blocked in `poll`, reads standard input into a buffer and
+triggers a software IRQ object bound to the group, whose label the event table
+registers to `erx_stdio`, so input travels the same path as a device's interrupt
+and every executor can park while the terminal is idle. A terminal on standard
+input is raw from the driver's start until the runtime's exit path, whose
+`sys_tty_reset` restores it; a fatal signal does not take that path. `SIGWINCH` writes
+to a pipe the same thread polls, and the size travels in the same event.
+Output is `write` on standard output from a dirty I/O NIF.
+End of file is an input event in order: `erx_stdio` sends
 `erx_console_eof` after every byte read before it, and `erx_console` hands the
 group `{self(), eof}`, the stock message. `group` holds a driver's messages until a
 reader asks (`group.erl:253`), so the shell evaluates each command ahead of the
@@ -1751,7 +1783,7 @@ end, then reads `eof` and halts with status 0, its own stock branch
 (`shell.erl:384-392`). The shell's last line before `halt()` is a synchronous
 write, so all earlier output is out when it halts. The UART driver never sends
 the message. A read error prints its reason
-through the debug log and is `halt(1)`. `erx_stdio_nif.c` is the one source in
+on standard error and is `halt(1)`. `erx_stdio_nif.c` is the one source in
 the runtime that touches a host file descriptor. Only the hosted image's static
 NIF list names it, and natively the module is present and never started. It
 stays as long as hosted mode does: it is hosted mode's device, not a step toward
@@ -2197,7 +2229,8 @@ number the seam refuses, except a closed list of pairs of number and musl functi
 that musl copes with, each with its reason: `mremap` in `realloc`, `__map_file`'s
 calls, `exit`'s `ppoll` and `clock_gettime`'s `gettimeofday`. A number the disassembly
 cannot read is closed by the name check. The objects of `erx_output.c` and, in the
-hosted image alone, `erx_stdio_nif.c` are each read against a list of their own.
+hosted image alone, `erx_stdio_nif.c` are each read against a list of their own,
+the `only_` sections of `imports.txt`.
 
 **How each refused call ends.** A probe linked an unmodified interpreter
 `beam.smp` against the Phase 1 seam: 60 refused call names, plus an `unknown`
@@ -3036,7 +3069,7 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 | With one executor, a flood of `erts_printf` and of `fprintf(stderr, ...)` past the debug log's rate returns, `ferror(stderr)` stays clear, the executor parks afterwards, and the log reports a count of lines dropped | `erx_output_write` answering `EAGAIN` past the rate: `erl_printf.c`'s loop spins and the deadline fires |
 | `erlang:display_string(stdout, <<"done\r\n">>), erlang:halt(0)` in a session's domain delivers those bytes; on a stopped tty it halts at once and on a tty whose master stops answering it halts within 5 s | the trap in `halt_2` removed: the bytes are lost; `tty_drain` that waits on a stopped tty: the halt misses its deadline |
 | Before any owner runs, and from the owner itself, `erlang:display_string/2` reaches `erx_output_write`; the same with the owner killed in mid-write | the owner test removed: the owner waits on itself and the deadline fires; the monitor removed: the writer waits past the deadline |
-| A host test of `erx_runtime_main`'s vector over a read-only page: `argv[0]`, every word in order, the node name's flag, a final null, and each word writable. The hosted boot of [Configuration](#configuration)'s arguments lists `kernel_sup`'s children as its table says, and `whereis(user)` is the group | the words not copied: the write faults; `--` removed from the arguments: the boot stops in `erts_usage`, naming the flag; `-user erx_console` removed: `user_drv` fails at its load and the boot ends with `init`'s diagnostic; in a release with a carrier, `-nocookie` removed: `auth` fails on the read-only release |
+| A host test of `erx_runtime_main`'s vector over a read-only page: `argv[0]`, every word in order, the node name's flag, a final null, and each word writable. The hosted boot of [Configuration](#configuration)'s arguments lists `kernel_sup`'s children as its table says, and `whereis(user)` is the group with no shell | the words not copied: the write faults; `--` removed from the arguments: the boot stops in `erts_usage`, naming the flag; `-user erx_console` removed: `user_drv` fails at its load and the boot ends with `init`'s diagnostic; in a release with a carrier, `-nocookie` removed: `auth` fails on the read-only release |
 | A pty test drives the hosted image: `1> 1+1.` answers `2`, an arrow key recalls history, `halt().` ends the process with status 0 and the terminal is restored | the NIF's `erx_irq_trigger` removed: input never arrives, the test's deadline fires, and an idle sample shows every executor parked; the mode restore removed: the test sees the terminal still raw; `isprint/1` returned to its NIF stub: the first prompt raises `undef` and the deadline fires |
 | The image with empty input ends with status 0. With `1+1.` and `2+2.` immediately followed by end of file, the output holds both results and the status is 0 | `erx_stdio` halting at end of file: the results are missing; `erx_console_eof` dropped: the deadline fires; `put_chars_sync` answered before the write: a test driver that holds back `erx_console_written` sees `io:format` return |
 | An executor made by `erx_pthread_create_executor`, hosted and in the `native_musl` suite: its slot is not `ERX_NO_EXECUTOR_SLOT`, `erx_park` with a deadline gives `ERX_ETIMEDOUT`, and a plain `pthread_create` thread gives `ERX_ETYPE` | the call delegating to plain `pthread_create`: the park gives `ERX_ETYPE` |

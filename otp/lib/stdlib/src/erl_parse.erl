@@ -1,5 +1,7 @@
 %% This file was automatically generated from the file "erl_parse.yrl".
 %%
+%% Modified by erXos: no -file line names the machine that generated this, which a regenerated deps.mk would ask make for.
+%%
 %% Copyright Ericsson AB 1996-2015. All Rights Reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -1679,7 +1681,6 @@ add_anno_check({check_expr,Loc,Args}, AnnoCheck) ->
 
 %% vim: ft=erlang
 
--file("/buildroot/otp/bootstrap/lib/parsetools/include/yeccpre.hrl", 0).
 %%
 %% %CopyrightBegin%
 %%

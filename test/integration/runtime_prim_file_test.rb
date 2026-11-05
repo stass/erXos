@@ -295,6 +295,8 @@ class RuntimePrimFileTest < Minitest::Test
     return capture_beam({ 'ROOTDIR' => root, 'BINDIR' => File.dirname(OUTPUT.beam) }, [OUTPUT.beam, archive, *test]) if archive
 
     bin = File.dirname(stock_beam)
+    # Stock's own kernel first: the tree's has erx_console in place of the terminal NIF stock's -noshell starts.
+    test = ['-pa', Dir[File.join(bin, '../../lib/kernel-*/ebin')].fetch(0), *test]
     capture_beam({ 'ROOTDIR' => root, 'BINDIR' => bin },
                  [stock_beam, '--', '-root', root, '-bindir', bin, '-progname', 'erl', '--', '-home', '/', '--', '-boot', boot, *test])
   end

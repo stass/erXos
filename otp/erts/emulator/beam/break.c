@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the break menu asks no terminal whether to clear the screen.
+ *
  * %CopyrightEnd%
  */
 /* This File contains functions which are called if a user hits ^C */
@@ -575,7 +577,6 @@ do_break(void)
         "       (l)oaded (v)ersion (k)ill (D)b-tables (d)istribution\n";
     int i;
 #ifdef __WIN32__
-    char *clearscreen = "\033[J";
     char *mode; /* enough for storing "window" */
 
     /* check if we're in console mode and, if so,
@@ -585,7 +586,6 @@ do_break(void)
 	erts_exit(0, "");
     erts_free_read_env(mode);
 #else
-    char *clearscreen = "\E[J";
 #endif
 
     ASSERT(erts_thr_progress_is_blocking());
@@ -593,11 +593,7 @@ do_break(void)
     /* If we are writing to something known to be a tty we clear the screen
        after doing newline as the shell tab completion may have written
        things there. */
-    if (!isatty(fileno(stdin)) || !isatty(fileno(stdout))) {
-        clearscreen = "";
-    }
-
-    erts_printf("\n%s%s", clearscreen, helpstring);
+    erts_printf("\n%s", helpstring);
 
     while (1) {
 	if ((i = sys_get_key(0)) <= 0)

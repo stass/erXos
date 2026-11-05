@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: whereis_group/0 answers for erx_console, which has one group.
+%%
 %% %CopyrightEnd%
 %%
 -module(user_drv).
@@ -157,8 +159,12 @@ flush() ->
 
 -spec whereis_group() -> pid() | undefined.
 whereis_group() ->
-    {dictionary, Dict} =
-        erlang:process_info(whereis(?MODULE), dictionary),
+    %% erXos: erx_console keeps the shell's group where this process does.
+    Drv = case whereis(?MODULE) of
+              undefined -> whereis(erx_console);
+              Pid -> Pid
+          end,
+    {dictionary, Dict} = erlang:process_info(Drv, dictionary),
     proplists:get_value(current_group, Dict).
 
 %% Backwards compatibility with pre OTP-26 for Elixir/LFE etc

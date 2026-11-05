@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: no prim_tty; bytes go out unchanged through erlang:display_string/2.
+%%
 %% %CopyrightEnd%
 %%
 -module(standard_error).
@@ -64,85 +66,71 @@ init([]) ->
 start() ->
     spawn(fun server/0).
 
+%% erXos: no prim_tty and no terminal here. Bytes go out unchanged, with the same wait
+%% any process's write has, so a raw terminal shows a newline as that one byte.
 server() ->
     process_flag(trap_exit, true),
     register(?NAME, self()),
-    ok = prim_tty:load(),
-    TTY = prim_tty:init(#{ input => disabled,
-                           output => cooked,
-                           ofd => stderr}),
-    run(TTY).
-
-run(TTY) ->
-    put(encoding, encoding(TTY)),
-    put(onlcr, prim_tty:isatty(stderr)),
+    put(encoding, unicode),
+    put(onlcr, false),
     put(log, none),
-    server_loop(TTY).
+    server_loop().
 
-encoding(TTY) ->
-    case prim_tty:unicode(TTY) of
-        true -> unicode;
-        false -> latin1
-    end.
-
-server_loop(TTY) ->
+server_loop() ->
     receive
         {io_request,From,ReplyAs,Request} = IoReq when is_pid(From) ->
             group:log_io_request(IoReq, get(log), ?MODULE),
-            case io_request(Request, TTY) of
+            case io_request(Request) of
                 {stop, Reason} ->
                     io_reply(From, ReplyAs, {error, Reason}),
                     stop;
                 {reply, Reply} ->
                     io_reply(From, ReplyAs, Reply),
-                    server_loop(TTY)
+                    server_loop()
             end;
         _Other ->               % Ignore other messages
-            server_loop(TTY)
+            server_loop()
     end.
 
-get_fd_geometry(TTY) ->
-    case prim_tty:window_size(TTY) of
-        {ok, {W, H}} -> {W, H};
-        _ -> error
-    end.
+get_fd_geometry() ->
+    error.
 
 %% New in R13B
 %% Encoding option (unicode/latin1)
-io_request({put_chars,unicode,Chars}, TTY) ->
+io_request({put_chars,unicode,Chars}) ->
     case wrap_characters_to_binary(Chars, unicode, get(encoding)) of
         error ->
             {reply,{error,put_chars}};
         Bin ->
-            put_chars(Bin, TTY)
+            put_chars(Bin)
     end;
-io_request({put_chars,unicode,Mod,Func,Args}, TTY) ->
+io_request({put_chars,unicode,Mod,Func,Args}) ->
     case catch apply(Mod, Func, Args) of
         Data when is_list(Data); is_binary(Data) ->
             case wrap_characters_to_binary(Data, unicode, get(encoding)) of
                 Bin when is_binary(Bin) ->
-                    put_chars(Bin, TTY);
+                    put_chars(Bin);
                 error ->
                     {reply,{error,put_chars}}
             end;
         _ ->
             {reply,{error,put_chars}}
     end;
-io_request({put_chars,latin1,Chars}, TTY) ->
+io_request({put_chars,latin1,Chars}) ->
     case catch unicode:characters_to_binary(Chars, latin1, get(encoding)) of
         Data when is_binary(Data) ->
-            put_chars(Data, TTY);
+            put_chars(Data);
         _ ->
             {reply,{error,put_chars}}
     end;
-io_request({put_chars,latin1,Mod,Func,Args}, TTY) ->
+io_request({put_chars,latin1,Mod,Func,Args}) ->
     case catch apply(Mod, Func, Args) of
         Data when is_list(Data); is_binary(Data) ->
             case
                 catch unicode:characters_to_binary(Data, latin1, get(encoding))
             of
                 Bin when is_binary(Bin) ->
-                    put_chars(Bin, TTY);
+                    put_chars(Bin);
                 _ ->
                     {reply,{error,put_chars}}
             end;
@@ -150,43 +138,43 @@ io_request({put_chars,latin1,Mod,Func,Args}, TTY) ->
             {reply,{error,put_chars}}
     end;
 %% BC if called from pre-R13 node
-io_request({put_chars,Chars}, TTY) ->
-    io_request({put_chars,latin1,Chars}, TTY);
-io_request({put_chars,Mod,Func,Args}, TTY) ->
-    io_request({put_chars,latin1,Mod,Func,Args}, TTY);
+io_request({put_chars,Chars}) ->
+    io_request({put_chars,latin1,Chars});
+io_request({put_chars,Mod,Func,Args}) ->
+    io_request({put_chars,latin1,Mod,Func,Args});
 %% New in R12
-io_request({get_geometry,columns},TTY) ->
-    case get_fd_geometry(TTY) of
+io_request({get_geometry,columns}) ->
+    case get_fd_geometry() of
         {W,_H} ->
             {reply,W};
         _ ->
             {reply,{error,enotsup}}
     end;
-io_request({get_geometry,rows},TTY) ->
-    case get_fd_geometry(TTY) of
+io_request({get_geometry,rows}) ->
+    case get_fd_geometry() of
         {_W,H} ->
             {reply,H};
         _ ->
             {reply,{error,enotsup}}
     end;
-io_request(getopts, _TTY) ->
+io_request(getopts) ->
     getopts();
-io_request({setopts,Opts}, _TTY) when is_list(Opts) ->
+io_request({setopts,Opts}) when is_list(Opts) ->
     setopts(Opts);
-io_request({requests,Reqs}, TTY) ->
-    io_requests(Reqs, {reply,ok}, TTY);
-io_request(R, _TTY) ->                      %Unknown request
+io_request({requests,Reqs}) ->
+    io_requests(Reqs, {reply,ok});
+io_request(R) ->                      %Unknown request
     {reply,{error,{request,R}}}.        %Ignore but give error (?)
 
-%% Status = io_requests(RequestList, PrevStat, TTY)
+%% Status = io_requests(RequestList, PrevStat)
 %%  Process a list of output requests as long as the previous status is 'ok'.
-io_requests([_|_], {reply,{error, _}} = Error, _TTY) ->
+io_requests([_|_], {reply,{error, _}} = Error) ->
     Error;
-io_requests([R|Rs], {reply,_Ok}, TTY) ->
-    io_requests(Rs, io_request(R, TTY), TTY);
-io_requests([_|_], Error, _) ->
+io_requests([R|Rs], {reply,_Ok}) ->
+    io_requests(Rs, io_request(R));
+io_requests([_|_], Error) ->
     Error;
-io_requests([], Stat, _) ->
+io_requests([], Stat) ->
     Stat.
 
 %% io_reply(From, ReplyAs, Reply)
@@ -198,17 +186,9 @@ io_reply(From, ReplyAs, Reply) ->
     ok.
 
 %% put_chars
-put_chars(Chars, TTY) when is_binary(Chars) ->
-    {ok, MonitorRef} = prim_tty:write(TTY, Chars, self()),
-    #{ write := WriteRef } = prim_tty:handles(TTY),
-    receive
-        {WriteRef, ok} ->
-            erlang:demonitor(MonitorRef, [flush]),
-            {reply, ok};
-        {'DOWN', MonitorRef, _, _, Reason} ->
-            ?LOG_INFO("Failed to write to standard error (~p)", [Reason]),
-            {stop, Reason}
-    end.
+put_chars(Chars) when is_binary(Chars) ->
+    true = erlang:display_string(stderr, Chars),
+    {reply, ok}.
 
 %% setopts
 setopts(Opts0) ->

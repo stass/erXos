@@ -77,7 +77,7 @@ machine
   sealing none
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
-  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nocookie -kernel start_distribution false"
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -kernel start_distribution false"
 unit console
   placement "console-uart"
   holder system

@@ -36,7 +36,6 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
-#include <termios.h>
 #include <ctype.h>
 #include <sys/utsname.h>
 #include <sys/select.h>
@@ -45,7 +44,6 @@
 #include <sys/bsdtypes.h>
 #endif
 
-#include <termios.h>
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
@@ -82,6 +80,7 @@
 
 #include "erl_cpu_topology.h"
 #include "erl_osenv.h"
+#include "erx_stdio.h"
 #include "erl_dyn_lock_check.h"
 extern int  driver_interrupt(int, int);
 extern void do_break(void);
@@ -130,8 +129,7 @@ erts_atomic32_t erts_break_requested;
 
 
 /* set early so the break handler has access to initial mode */
-struct termios erl_sys_initial_tty_mode;
-static int replace_intr = 0;
+static void (*tty_reset)(void);
 /* assume yes initially, ttsl_init will clear it */
 int using_oldshell = 1;
 
@@ -174,12 +172,13 @@ erts_sys_misc_mem_sz(void)
  */
 void sys_tty_reset(int exit_code)
 {
-  if (using_oldshell && !replace_intr) {
-    SET_BLOCKING(0);
-  }
-  else if (isatty(0) && isatty(1)) {
-    tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
-  }
+  if (tty_reset != NULL)
+    tty_reset();
+}
+
+void erx_sys_set_tty_reset(void (*restore)(void))
+{
+  tty_reset = restore;
 }
 
 #ifdef __tile__
@@ -417,12 +416,6 @@ erl_sys_init(void)
 #endif
 
     erts_sys_init_float();
-
-    /* we save this so the break handler can set and reset it properly */
-    /* also so that we can reset on exit (break handler or not) */
-    if (isatty(0)) {
-	tcgetattr(0,&erl_sys_initial_tty_mode);
-    }
 }
 
 /* signal handling */
@@ -771,22 +764,8 @@ void erts_set_ignore_break(void) {
     sys_signal(SIGTSTP, SIG_IGN);       /* Ctrl+Z */
 }
 
-/* Don't use Ctrl+C for break handler but let it be
-   used by the shell instead (see user_drv.erl) */
+/* A raw terminal already delivers Ctrl+C as a byte, to erx_console. */
 void erts_replace_intr(void) {
-  struct termios mode;
-
-  if (isatty(0)) {
-    tcgetattr(0, &mode);
-
-    /* here's an example of how to replace Ctrl+C with Ctrl+U */
-    /* mode.c_cc[VKILL] = 0;
-       mode.c_cc[VINTR] = CKILL; */
-
-    mode.c_cc[VINTR] = 0;	/* disable Ctrl+C */
-    tcsetattr(0, TCSANOW, &mode);
-    replace_intr = 1;
-  }
 }
 
 void init_break_handler(void)
@@ -871,8 +850,6 @@ void os_version(int *pMajor, int *pMinor, int *pBuild) {
 
 void erts_do_break_handling(void)
 {
-    struct termios temp_mode;
-    int saved = 0;
 
     /*
      * Most functions that do_break() calls are intentionally not thread safe;
@@ -881,31 +858,12 @@ void erts_do_break_handling(void)
      */
     erts_thr_progress_block();
 
-    /* during break we revert to initial settings */
-    /* this is done differently for oldshell */
-    if (using_oldshell && !replace_intr) {
-      SET_BLOCKING(1);
-    }
-    else if (isatty(0)) {
-      tcgetattr(0,&temp_mode);
-      tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
-      saved = 1;
-    }
-
     /* call the break handling function, reset the flag */
     do_break();
 
     ERTS_UNSET_BREAK_REQUESTED;
 
     fflush(stdout);
-
-    /* after break we go back to saved settings */
-    if (using_oldshell && !replace_intr) {
-      SET_NONBLOCKING(1);
-    }
-    else if (saved) {
-      tcsetattr(0,TCSANOW,&temp_mode);
-    }
 
     erts_thr_progress_unblock();
 }

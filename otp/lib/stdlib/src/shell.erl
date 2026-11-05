@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: prompt_width/1 asks no group from erx_console, as from user_drv.
+%%
 %% %CopyrightEnd%
 %%
 -module(shell).
@@ -2217,7 +2219,7 @@ Equivalent to `prompt_width/2` with `Encoding` set to the encoding used by
 -spec prompt_width(unicode:chardata()) -> non_neg_integer().
 prompt_width(String) ->
     Encoding =
-        case whereis(user_drv) =:= self() of
+        case whereis(user_drv) =:= self() orelse whereis(erx_console) =:= self() of
             %% When in JCL mode edlin can be called by
             %% user_drv, which in turn calls this function.
             %% Since JCL is very rudimentary we can assume

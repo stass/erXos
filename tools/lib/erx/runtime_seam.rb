@@ -22,6 +22,8 @@ module Erx
       lib/internal/#{Runtime::TARGET}/libethread.a lib/internal/#{Runtime::TARGET}/liberts_internal_r.a
     ].freeze
 
+    OWN_LIST_PREFIX = 'only_'
+
     module_function
 
     # A list holds names separated by white space; `#` starts a comment and
@@ -58,23 +60,30 @@ module Erx
       end.uniq.freeze
     end
 
+    # A section named only_OBJECT lists what the one object OBJECT.o may use besides.
     def check(undefined_by_object:, inside:, imports:)
-      listed = imports.values.flatten
+      shared = shared_names(imports)
       violations = undefined_by_object.flat_map do |object, names|
-        (names - inside - listed).map { |name| Violation.new(object: object, name: name) }
+        own = imports.fetch("#{OWN_LIST_PREFIX}#{File.basename(object, '.o')}", [])
+        (names - inside - shared - own).map { |name| Violation.new(object: object, name: name) }
       end
       used = undefined_by_object.values.flatten.uniq
-      Report.new(violations: violations.freeze, unused: (listed - used).freeze)
+      Report.new(violations: violations.freeze, unused: (imports.values.flatten - used).freeze)
     end
+
+    def shared_names(imports) = imports.reject { |section, _| section.start_with?(OWN_LIST_PREFIX) }.values.flatten
+    def own_names(imports) = imports.select { |section, _| section.start_with?(OWN_LIST_PREFIX) }.values.flatten
 
     # The effects: read the objects with nm. The executable is read too, less what
     # liberx itself imports, so a leftover object or a library missing from the
     # list of objects cannot hide what the link really brought in.
     def check_objects(objects:, executable:, liberx:, imports_path:)
       undefined = objects.to_h { |object| [object, symbol_names(nm('-u', object))] }
-      undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx))
+      imports = parse_imports(File.read(imports_path))
+      # The objects answer for an own list's names, so the executable holds them for its one object.
+      undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
       inside = [*objects, liberx].flat_map { |object| defined_names(object) }.uniq
-      check(undefined_by_object: undefined, inside: inside, imports: parse_imports(File.read(imports_path)))
+      check(undefined_by_object: undefined, inside: inside, imports: imports)
     end
 
     def defined_names(path) = symbol_names(nm('-g', '-U', '-j', path))

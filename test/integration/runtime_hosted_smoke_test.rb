@@ -12,7 +12,7 @@ require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
 
 # ERTS built with ERLANG_OSTYPE=erxos, driven through a terminal as a person would:
-# `1>`, an expression, its answer, then halt, over the stock terminal driver.
+# `1>`, an expression, its answer, then halt, over erx_console and erx_stdio.
 #
 # `make check-runtime-hosted` builds the runtime and runs this. It is excused from
 # `make check`, which does not build the runtime. With no runtime, or one older
@@ -340,11 +340,9 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_operator high.to_i, :<, limit.to_i
   end
 
-  # The release's manifest holds every argument; the host names only what the page still
-  # inherits for the stock terminal driver.
+  # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
   def spawn_shell(home, extra_environment = {})
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
-      'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
       'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment
     )
     PTY.spawn(environment, OUTPUT.beam, OUTPUT.archive, chdir: home) do |reader, writer, pid|

@@ -149,12 +149,10 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `erl_erxos_sys_ddll.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
   `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
   Darwin's main thread, `nice`, `alarm`, `uname`, `dlopen` and the crash dump's descriptors (edit 34). The first native boot answers each,
-  as `ENOSYS` tracing shows it; `poll`, `tcgetattr` and the rest of `[stock_terminal]` go with `erx_console`.
+  as `ENOSYS` tracing shows it;
 * [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
   group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
   The first native consumer needs the unbind defined in the interface, with its status checked.
-* [Low] `otp/erts/emulator/nifs/common/prim_tty_nif.c`: `tty_reader_start`'s failure paths leak and report a stale `errno`, its IRQ object is never
-  destroyed and a second `tty_select` on one resource stops input; `erx_console` replaces the NIF.
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
 * [Low] `otp/lib/kernel/src/inet_gethost_native.erl`: a lookup set to `native` by an inetrc halts the runtime, since its program cannot
@@ -309,8 +307,16 @@ it; git history is the record of completed work.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: no fuzz target covers `erx_boot_manifest_read` or `erx_boot_info_build`; chain them onto the manifest target.
 * [Medium] runtime, `erx_prim_file.c`: a release file is served with no check of its hash, where `docs/design-kernel.md` says every file passes `erx_pack_file_check` before its first use. Hosted checks the manifest alone.
-* [Medium] runtime, `config/manifest/qemu-virt-development.txt`: `system_args` has no `-user erx_console`
-  until the console exists, so `user_sup` starts stock's `user_drv` over `prim_tty`'s NIF.
+* [Medium] runtime, `otp/lib/kernel/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
+* [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.
+* [Low] runtime, `otp/lib/stdlib/src/io_ansi.erl`: with no terminfo a shell's `io_ansi` is plain text where stock on an xterm has colour. A fixed table of the ANSI sequences would answer it.
+* [Low] runtime, `shell:start_interactive/0` calls `user_drv`, which does not run: it exits with `noproc` where stock answers `{error, already_started}`.
+* [Medium] runtime, `otp/erts/emulator/sys/erxos/sys.c`: `kill -INT` runs the break menu while `erx_stdio`'s reader still reads standard input, so a key can go to either; on this port SIGINT should leave through the exit path. No test.
+* [Medium] runtime, `erx_console.erl`: `get_terminal_state` reports standard input's answer for all three streams and `tty_geometry` answers 80 by 24 with no terminal, where stock asks each descriptor and refuses. A start failure of the driver loses its step and reason in `user_sup`'s ten-second wait, and `erx_stdio_nif.c` reports every IRQ failure as `eagain`.
+* [Medium] runtime, `test/erlang/erx_console_input_fuzz.erl`: runs under `check-runtime-hosted`, not `make check-fuzz`, from a fixed seed, with no reference decoder for the latin-1 branch.
+* [Low] runtime, `tools/lib/erx/runtime_seam.rb`: the executable check drops an own list's names, so a library missing from the object list that calls them passes.
+* [Low] runtime, `erx_stdio_nif.c`: a fatal signal or SIGKILL leaves the terminal raw; `start_nif`'s failure paths leave what they made; a stalled standard output delays input, which one process handles; `SIGWINCH`'s `sigaction` skips `sys_signal`'s `SA_ONSTACK`; and `Makefile.in` links the object in every image, where the design says the hosted image alone.
+* [Low] runtime, `standard_error.erl`: a failed write crashes the server with no log, which a later `set_unicode_state` carries into `erx_console`.
 * [Medium] runtime, `liberx/backend/fiasco`: the native root does not read the release's manifest: its page takes
   `erx.arg=WORD` alone, with `system_args`, `limits`, `pack_flags` and `release_addr` empty, and no archive holds
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and

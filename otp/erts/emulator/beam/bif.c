@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote.
+ *
  * %CopyrightEnd%
  */
 
@@ -4212,17 +4214,6 @@ BIF_RETTYPE display_string_2(BIF_ALIST_2)
     } else if (ERTS_IS_ATOM_STR("stderr", BIF_ARG_1)) {
         fd = fileno(stderr);
     }
-#if defined(HAVE_SYS_IOCTL_H) && defined(TIOCSTI)
-    else if (ERTS_IS_ATOM_STR("stdin", BIF_ARG_1)) {
-        const char stdin_fname[] = "/dev/tty";
-        fd = open(stdin_fname,0);
-        if (fd < 0) {
-            fprintf(stderr,"failed to open %s (%s)\r\n", stdin_fname,
-                    strerror(errno));
-            goto error;
-        }
-    }
-#endif
 #endif
     else {
         BIF_ERROR(p, BADARG);
@@ -4247,21 +4238,6 @@ BIF_RETTYPE display_string_2(BIF_ALIST_2)
         BIF_ERROR(p, BADARG);
     }
 
-#if defined(HAVE_SYS_IOCTL_H) && defined(TIOCSTI)
-    if (ERTS_IS_ATOM_STR("stdin", BIF_ARG_1)) {
-        for (int i = 0; i < len; i++) {
-            if (ioctl(fd, TIOCSTI, str+i) < 0) {
-                fprintf(stderr,"failed to write to %s (%s)\r\n"
-                        "to solve this you may need to enable legacy tiocsti\r\n"
-                        "  sudo sysctl -w dev.tty.legacy_tiocsti=1\r\n",
-                        "/proc/self/fd/0", strerror(errno));
-                close(fd);
-                goto error;
-            }
-        }
-        close(fd);
-    } else
-#endif
     {
 #ifdef __WIN32__
         Uint32 w;
@@ -4275,7 +4251,8 @@ BIF_RETTYPE display_string_2(BIF_ALIST_2)
             res = write(fd, str+written, len-written);
             if (res < 0 && errno != ERRNO_BLOCK && errno != EINTR)
                 goto error;
-            written += res;
+            if (res > 0)
+                written += res;
         } while (written < len);
 #endif
     }

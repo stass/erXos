@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: -user erx_console holds against -noshell and its kin.
+%%
 %% %CopyrightEnd%
 %%
 -module(user_sup).
@@ -119,6 +121,13 @@ wait_for_user_p(N) ->
     end.
 
 get_user(Flags) ->
+    case lists:member({user, ["erx_console"]}, Flags) of
+        %% erXos: no flag reaches user_drv, whose NIF is gone; erx_console reads them.
+        true -> {erx_console, start, []};
+        false -> get_stock_user(Flags)
+    end.
+
+get_stock_user(Flags) ->
     check_flags(Flags, lists:keymember(detached, 1, Flags), {user_drv, start, []}).
 
 %% These flags depend upon what arguments the erl script passes on

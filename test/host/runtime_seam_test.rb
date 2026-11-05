@@ -31,6 +31,15 @@ class RuntimeSeamTest < Minitest::Test
     assert_equal [Seam::Violation.new(object: 'sys.o', name: 'open')], report.violations
   end
 
+  def test_an_own_list_binds_its_one_object
+    imports = { 'only_erx_stdio_nif' => %w[poll], 'common' => %w[read] }
+    own = Erx::RuntimeSeam.check(undefined_by_object: { 'x/erx_stdio_nif.o' => %w[poll read] }, inside: [], imports: imports)
+    assert_empty own.violations
+    assert_empty own.unused
+    other = Erx::RuntimeSeam.check(undefined_by_object: { 'x/sys.o' => %w[poll read] }, inside: [], imports: imports)
+    assert_equal %w[poll], other.violations.map(&:name)
+  end
+
   def test_a_listed_name_nobody_imports_is_reported_so_the_list_can_shrink
     report = Seam.check(undefined_by_object: { 'sys.o' => %w[malloc] }, inside: [],
                         imports: { 'libc' => %w[malloc free] })

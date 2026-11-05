@@ -5386,17 +5386,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/emulator/nifs/common/prim_tty_nif.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "785df8c8336dcd3191b69f00b393478dc401bc1973a2913fbf28386c80e05316",
-      "kind": "file",
-      "non_ascii_lines": [
-        "435173fb9a86bac6ee7c2fa0f491881c52c8f91a75e6f8c2487e0fba74025434",
-        "606abb75506f3840171c744d52203b515044398fc94986908fd6d72507172d25"
-      ]
-    },
     "erts/emulator/nifs/common/zlib_nif.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",

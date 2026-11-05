@@ -6,3 +6,4 @@
 .aws/
 .ssh/
 .gnupg/
+erl_crash.dump
