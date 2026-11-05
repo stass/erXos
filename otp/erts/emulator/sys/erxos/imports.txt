@@ -14,6 +14,7 @@
 # The calls ERTS makes into liberx. The rest of liberx, a backend's internal names
 # included, is off limits.
 [liberx]
+erx_watchdog_pet
 erx_boot_argv_fill erx_boot_argv_plan erx_boot_info erx_boot_info_read
 erx_boot_info_reason erx_clock_ns erx_executor_slot erx_executor_wake
 erx_group_info erx_group_status erx_group_take_ready erx_irq_bind erx_irq_create
@@ -69,10 +70,6 @@ __stack_chk_fail __stack_chk_guard __udivti3 fwrite_unlocked
 lround memrchr pthread_spin_destroy pthread_spin_init pthread_spin_lock
 pthread_spin_unlock putc_unlocked sqrtf stderr
 stdout tolower toupper
-
-# erl_misc_utils's processor counts, which edits 30 and 32 replace.
-[stock_limits]
-sysconf
 
 # The crash dump (edit 34), erlang:display and halt's output in bif.c, the terminal's
 # stderr, erl_printf's stdio, and ethread's waits. Each is answered as ENOSYS tracing

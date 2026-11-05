@@ -643,8 +643,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `exit_group` | `erx_space_stop(ERX_CAP_SELF, status)` | whoever started the program reads the status's low byte; in the root the stop is `erx_machine_end` |
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
-| `prctl` | answered with no effect for `PR_SET_NAME`, `EINVAL` for any other | `pthread_setname_np` on the caller: a thread's name is kept nowhere |
-| `sched_getaffinity` | `erx_fiasco_cpus_online`: the machine's online CPUs in the root, the first CPU in a task | the word `sysconf` counts for `_SC_NPROCESSORS_*`, so ERTS starts a scheduler per CPU |
+| `sched_getaffinity`, `prctl` | not offered: `ENOSYS` | so `sysconf(_SC_NPROCESSORS_*)` answers musl's default of 1 in any program, and `pthread_setname_np` on the caller fails, which ERTS ignores; ERTS counts CPUs from the boot information page |
 | `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's (`libc_root_write.c`, alone in its file so that musl's reference pulls in the console and not the start path) to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
@@ -783,16 +782,15 @@ A root thread at priority 255 runs `watchdog.c`'s step machine: sleep one period
 In deterministic mode the step is off and the machine page says so. A missed pet takes the end path, with `ERX_END_OFF`, as a root fault does.
 
 Its numbers and mode come from [the command line](#the-command-line), with the design's defaults of 1, 5 and 60 seconds. **The pet is the design's
-own**: `erx_watchdog`, a process at priority `max` of the release's `kernel`, started among `kernel`'s first children, calling the watchdog NIF from a
-normal scheduler each period `P`. Its liveness list is the manifest's `liveness` records, which may be empty, so nothing is special about a release with
+own**: `erx_watchdog`, a process at priority `max` of the release's `kernel`, started among `kernel`'s first children, right after `on_load` lets a module with a NIF load, calling the watchdog NIF from a
+normal scheduler every half second, shorter than any `P` or `D` the command line can set, since those count in seconds. Its liveness list is the manifest's `liveness` records, which may be empty, so nothing is special about a release with
 no services: the first pet follows the first period. Until then the boot races `B` alone, from the watchdog thread's start, which covers ERTS's start,
 `init` and `kernel`'s start up to that process. A hang in any of them ends the machine with a crash record at `B`, as it should.
 
 The root itself never pets on ERTS's behalf: a pet must mean that schedulers run and timers fire. The harness gives QEMU `-append` from one table: TCG
 `erx.watchdog=1,30,600`, HVF the defaults, deterministic runs `erx.det=1`. A run's own deadline is at least `B + P + 60` seconds, so a stuck boot ends in the
 crash record rather than in the harness's kill: the deadline counts from QEMU's launch and `B` from the later start of the watchdog thread, a missed
-`B` is seen at the next tick (`watchdog.c:159-163`), and the record takes time to print. The 60 is a test margin, not a promise about the boot. The time to the first pet has not been measured, since no ERTS has reached it: the first native boot
-prints it under both accelerators. A first pet past 60 seconds under HVF is a finding to explain, not a number to raise.
+`B` is seen at the next tick (`watchdog.c:159-163`), and the record takes time to print. The 60 is a test margin, not a promise about the boot. The time to the first pet is about the time to `erx_console`'s banner, which `production_image`'s report holds under both accelerators. A first pet past 60 seconds under HVF is a finding to explain, not a number to raise.
 
 ### The end path
 
@@ -808,6 +806,8 @@ A root fault and `erx_machine_end` reach it on the service, a missed pet on the 
    deadline.
 
 ### The console
+
+The native boot's console driver, until the PL011's is written, is `erx_debug_console`: the root adds `-erx console_driver erx_debug_console` to the manifest's arguments, and the driver writes through descriptor 1 to the debug log and reads nothing, so the boot reaches a prompt that cannot be answered.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the
@@ -1069,10 +1069,7 @@ The gate's `function_api` suite has run `l4sigma0_map_iomem` over QEMU's `fw_cfg
 
 The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
 
-**The ERTS port:**
-
-* The native interpreter boots as the root to `erl_start`'s first line under TCG and HVF, so nothing after that line has been seen to run natively.
-* `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`; `l4_scheduler_info` as a CPU count (`scheduler.h:129`); a release's first pet.
+The gate's `production_image` suite has run ERTS's interpreter as the root, `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`, `l4_scheduler_info` as a CPU count, the release's files through `erx_prim_file` from the archive, `init`, `kernel_sup`'s children to `erx_console`'s banners, under TCG and HVF at 1 and 4 CPUs, and a release's pets, kept past the deadlines and then stopped, under both at 1 CPU.
 
 **Later packages:**
 

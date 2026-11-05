@@ -17,7 +17,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: adds erx_console and erx_stdio.
+%% Modified by erXos: adds erx_console, erx_debug_console, erx_stdio and erx_watchdog.
 %%
 %% %CopyrightEnd%
 %%
@@ -56,7 +56,9 @@
 	     group,
 	     group_history,
 	     erx_console,
+	     erx_debug_console,
 	     erx_stdio,
+	     erx_watchdog,
 	     heart,
 	     inet6_tcp,
 	     inet6_tcp_dist,

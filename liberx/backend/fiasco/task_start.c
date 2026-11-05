@@ -41,10 +41,3 @@ erx_fiasco_task_main(uint64_t argument)
 	(void)erx_space_stop(ERX_CAP_SELF, status);
 	erx_fiasco_sleep_forever();
 }
-
-/* A task has no scheduler capability to ask, and runs where its thread was started. */
-uint64_t
-erx_fiasco_cpus_online(void)
-{
-	return (UINT64_C(1));
-}

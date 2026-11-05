@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: no affinity reader, and sleeps on a umtx.
+ * Modified by erXos: CPU counts from the boot information page, no affinity reader,
+ * and sleeps on a umtx.
  *
  * %CopyrightEnd%
  */
@@ -33,6 +34,8 @@
 #include <stdint.h>
 
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/runtime_entry.h"
 
 /* A program of erXos has no CPU topology to read and no affinity mask but its group's. */
 #undef HAVE_SCHED_xETAFFINITY
@@ -175,8 +178,11 @@ erts_milli_sleep(long ms)
 #else
 	/* Nothing wakes this word, so the wait runs to its deadline. */
 	uint32_t word = 0;
-	if (erx_umtx_wait((uint64_t) (uintptr_t) &word, 0, erx_deadline_after((uint64_t) ms * UINT64_C(1000000))) == ERX_EINTR)
+	int status = erx_umtx_wait((uint64_t) (uintptr_t) &word, 0, erx_deadline_after((uint64_t) ms * UINT64_C(1000000)));
+	if (status == ERX_EINTR)
 	    return 1;
+	if (status != ERX_OK && status != ERX_ETIMEDOUT)
+	    return -1;
 #endif
     }
     return 0;
@@ -275,6 +281,17 @@ erts_cpu_info_destroy(erts_cpu_info_t *cpuinfo)
     }
 }
 
+/* The CPUs of the program's share, which erl_main has read the page for already. */
+static int
+boot_cpus(void)
+{
+    erx_boot_view_t view;
+
+    if (erx_boot_info_read(erx_boot_info(), ERX_PAGE_SIZE, &view) != ERX_BOOT_INFO_OK)
+	return 0;
+    return __builtin_popcountll(view.info.cpuset);
+}
+
 int
 erts_cpu_info_update(erts_cpu_info_t *cpuinfo,
                      int skip_read_topology)
@@ -290,50 +307,8 @@ erts_cpu_info_update(erts_cpu_info_t *cpuinfo,
     cpu_set_t cpuset;
 #endif
 
-#ifdef __WIN32__
-    {
-	int i;
-	SYSTEM_INFO sys_info;
-	GetSystemInfo(&sys_info);
-	configured = (int) sys_info.dwNumberOfProcessors;
-	for (i = 0; i < sizeof(DWORD)*8; i++)
-	    if (sys_info.dwActiveProcessorMask & (((DWORD) 1) << i))
-		online++;
-    }
-#elif !defined(NO_SYSCONF) && (defined(_SC_NPROCESSORS_CONF) \
-			       || defined(_SC_NPROCESSORS_ONLN))
-#ifdef _SC_NPROCESSORS_CONF
-    configured = (int) sysconf(_SC_NPROCESSORS_CONF);
-    if (configured < 0)
-	configured = 0;
-#endif
-#ifdef _SC_NPROCESSORS_ONLN
-    online = (int) sysconf(_SC_NPROCESSORS_ONLN);
-    if (online < 0)
-	online = 0;
-#endif
-#elif defined(HAVE_SYS_SYSCTL_H) && defined(CTL_HW) && (defined(HW_NCPU) \
-							|| defined(HW_AVAILCPU))
-    {
-	int mib[2];
-	size_t len;
-
-#ifdef HW_NCPU
-	len = sizeof(int);
-	mib[0] = CTL_HW;
-	mib[1] = HW_NCPU;
-	if (sysctl(&mib[0], 2, &configured, &len, NULL, 0) < 0)
-	    configured = 0;
-#endif
-#ifdef HW_AVAILCPU
-	len = sizeof(int);
-	mib[0] = CTL_HW;
-	mib[1] = HW_AVAILCPU;
-	if (sysctl(&mib[0], 2, &online, &len, NULL, 0) < 0)
-	    online = 0;
-#endif
-    }
-#endif
+    /* erXos: the program's share is all the CPUs it has, whatever the machine holds. */
+    configured = online = available = boot_cpus();
 
     if (online > configured)
 	online = configured;
@@ -342,84 +317,6 @@ erts_cpu_info_update(erts_cpu_info_t *cpuinfo,
 	changed = 1;
     if (cpuinfo->online != online)
 	changed = 1;
-
-#if defined(ERTS_HAVE_MISC_UTIL_AFFINITY_MASK__)
-    if (ERTS_MU_GET_PROC_AFFINITY__(cpuinfo, &cpuset) == 0) {
-	if (!changed && !cpu_sets_are_eq(&cpuset, &cpuinfo->cpuset))
-	    changed = 1;
-
-	if (!changed)
-	    available = cpuinfo->available;
-	else {
-	    int i, c, cn, si;
-
-	    memcpy((void *) &cpuinfo->cpuset,
-		   (void *) &cpuset,
-		   sizeof(cpu_set_t));
-
-	    c = cn = 0;
-	    si = sizeof(cpuinfo->affinity_str_buf) - 1;
-	    cpuinfo->affinity_str_buf[si] = '\0';
-	    for (i = 0; i < CPU_SETSIZE; i++) {
-		if (CPU_ISSET(i, &cpuinfo->cpuset)) {
-		    c |= 1 << cn;
-		    available++;
-		}
-		cn++;
-		if (cn == 4) {
-		    cpuinfo->affinity_str_buf[--si] = (c < 10
-						       ? '0' + c
-						       : 'A' + c - 10);
-		    c = cn = 0;
-		}
-	    }
-	    if (c)
-		cpuinfo->affinity_str_buf[--si] = (c < 10
-						   ? '0' + c
-						   : 'A' + c - 10);
-	    while (cpuinfo->affinity_str_buf[si] == '0')
-		si++;
-	    cpuinfo->affinity_str = &cpuinfo->affinity_str_buf[si];
-	}
-    }
-#elif defined(HAVE_PSET_INFO)
-    {
-	processorid_t *cpuids;
-	uint_t numcpus = configured;
-	cpuids = malloc(sizeof(processorid_t)*numcpus);
-	if (cpuids) {
-	    if (pset_info(PS_MYID, NULL, &numcpus, &cpuids) == 0)
-		available = (int) numcpus;
-	    if (available < 0) {
-		free(cpuids);
-		cpuids = NULL;
-		available = 0;
-	    }
-	}
-	if (!cpuids) {
-	    if (cpuinfo->cpuids)
-		changed = 1;
-	}
-	else {
-	    if (cpuinfo->cpuids)
-		changed = 1;
-	    if (memcmp((void *) cpuinfo->cpuids,
-		       (void *) cpuids,
-		       sizeof(processorid_t)*numcpus) != 0)
-		changed = 1;
-
-	}
-	if (!changed) {
-	    if (cpuids)
-		free(cpuids);
-	}
-	else {
-	    if (cpuinfo->cpuids)
-		free(cpuinfo->cpuids);
-	    cpuinfo->cpuids = cpuids;
-	}
-    }
-#endif
 
     if (available > online)
 	available = online;

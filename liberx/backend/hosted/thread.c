@@ -349,6 +349,13 @@ erx_executor_slot(void)
 	return (thread_self != NULL ? thread_self->slot : ERX_NO_EXECUTOR_SLOT);
 }
 
+/* Hosted mode has no machine to end, so no watchdog to tell. */
+int
+erx_watchdog_pet(void)
+{
+	return (ERX_OK);
+}
+
 /* The sanitizers' own exit paths run, so what they found decides the status. */
 int
 erx_machine_end(uint64_t res, uint32_t how)

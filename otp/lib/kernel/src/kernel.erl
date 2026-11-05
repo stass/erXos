@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: kernel_sup starts erx_watchdog right after on_load.
+
 -module(kernel).
 -moduledoc false.
 
@@ -137,6 +139,14 @@ init([]) ->
                type => worker,
                modules => [?MODULE]},
 
+    %% erXos: the machine's watchdog, once on_load has let a module with a NIF load.
+    Watchdog = #{id => erx_watchdog,
+                 start => {erx_watchdog, start_link, []},
+                 restart => permanent,
+                 shutdown => brutal_kill,
+                 type => worker,
+                 modules => [erx_watchdog]},
+
     %% Must be started before user
     SigSrv = #{id => erl_signal_server,
                start => {gen_event, start_link, [{local, erl_signal_server}]},
@@ -198,7 +208,7 @@ init([]) ->
         {ok, [["minimal"]|_]} ->
             {ok, {SupFlags,
                   [Code, StdError | EarlyFile] ++
-                      [OnLoad | LateFile] ++
+                      [OnLoad, Watchdog | LateFile] ++
                       [SigSrv | Peer] ++
                       [User, LoggerSup, Config, RefC, SafeSup]}};
         _ ->
@@ -220,7 +230,7 @@ init([]) ->
 
             {ok, {SupFlags,
                   [Code, StdError | EarlyFile] ++
-                      [OnLoad, InetDb | DistChildren] ++ LateFile ++
+                      [OnLoad, Watchdog, InetDb | DistChildren] ++ LateFile ++
                       [SigSrv | Peer] ++
                       [User, LoggerSup, Config, RefC, SafeSup] ++
                       Timer ++ CompileServer}}

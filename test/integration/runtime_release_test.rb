@@ -5,12 +5,14 @@
 require 'fileutils'
 require 'json'
 require 'minitest/autorun'
+require_relative '../../tools/lib/erx/native_runtime'
 require_relative '../../tools/lib/erx/release'
 
 # The release as tools/erx build runtime packed it (docs/design-stopgap.md, "The archive
 # has a root that never runs"). A second pack through the same steps gives the same bytes,
 # and two archives holding the same release compare equal over their release files, the
-# root, the manifest and the notices excepted.
+# root, the manifest and the notices excepted. So do the hosted archive and the production
+# image's, when both were built from the same sources.
 #
 # `make check-runtime-hosted` builds the runtime and runs this. It is excused from
 # `make check`, which does not build the runtime.
@@ -53,6 +55,18 @@ class RuntimeReleaseTest < Minitest::Test
     refute_empty tracked
     assert_empty tracked.select { |path| bytes.include?(File.binread(path)) }
     refute_includes bytes, ROOT.b
+  end
+
+  # What the native boot runs is what the hosted suites ran. The native build lives in
+  # another gate, so an image of other sources says nothing and the run says so.
+  def test_the_production_image_holds_the_same_release
+    native = Erx::NativeRuntime.output(root: ROOT)
+    image = File.join(ROOT, 'build/production-image/boot/image.erxpack')
+    record = Erx::NativeRuntime.record_path(native)
+    skip 'no production image of these sources: build one with the production_image suite' unless
+      File.file?(image) && File.file?(record) && File.read(record) == File.read(Erx::Runtime.record_path(OUTPUT))
+
+    assert_empty Erx::Release.differences(@table, Erx::Release.file_table(archive: image, codec: @codec))
   end
 
   def test_a_second_pack_is_byte_identical

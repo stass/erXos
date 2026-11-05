@@ -165,7 +165,7 @@ module Erx
     end
 
     def build_application(application, jobs:)
-      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}", 'opt', "TARGET=#{TARGET}"],
+      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}", 'opt', "TARGET=#{self.class::TARGET}"],
                   name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
     end

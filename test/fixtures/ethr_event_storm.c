@@ -18,6 +18,19 @@
 
 #include "ethread.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/runtime_entry.h"
+
+/*
+ * ethr_init counts CPUs from the boot information page, and this program links liberx
+ * without the hosted entry that fills one. A blank page reads as an unknown count.
+ */
+const erx_boot_info_t *
+erx_boot_info(void)
+{
+	static _Alignas(ERX_PAGE_SIZE) uint8_t blank[ERX_PAGE_SIZE];
+
+	return ((const erx_boot_info_t *)(const void *)blank);
+}
 
 #define ROUNDS		20000
 #define TIMEOUT_NS	INT64_C(2000000)

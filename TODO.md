@@ -188,9 +188,6 @@ it; git history is the record of completed work.
   `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
   break under its older `json`. The oracle's `probe` operation should exercise a
   duplicate-key refusal there.
-* [Low] stopgap, `liberx/backend/fiasco/root.c`: nothing pets the system root's watchdog until
-  M3's root does, so a system root that outlives its boot deadline (600 seconds under TCG, the
-  default under HVF) ends the machine.
 * [Low] tooling, `tools/lib/erx/qemu.rb`: the harness gives `erx.det=1` boots no `-icount`, and they
   run under HVF and at any CPU count too, so `production_image`'s deterministic boot checks the
   switch (watchdog off, the extra `erx.arg` word) and not deterministic mode's clock or transcript.
@@ -246,7 +243,9 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.
-* [Medium] production image, `tools/lib/erx/production_image.rb`: the archive's `system/` holds only the root and `NOTICES`, so native ERTS binds a release with no boot script.
+* [Medium] console, `liberx/backend/fiasco/runtime_entry.c`: the native boot names `erx_debug_console`, which writes through the debug log and reads nothing, until the PL011's driver and `-erx console_driver` replace it.
+* [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does, and any object of ERTS may call it, though only `erx_watchdog`'s NIF should: no build check holds that.
+* [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
 * [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
   registers travel in the UTCB. One call taking the start state and the word to clear ends the order and the leak
@@ -260,9 +259,6 @@ it; git history is the record of completed work.
   Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
   can supply its 16 bytes at program start.
-* [Medium] runtime, `otp/erts/lib_src/common/erl_misc_utils.c`: `erts_cpu_info_update` counts through `sysconf` and the `sched_getaffinity` row, the machine's
-  online CPUs, instead of the boot page's `cpuset` (`docs/design-runtime.md`, edit 32), so a manifest share smaller than the machine starts more schedulers than
-  its capacity. Edit 32 deletes that row and `task_start.c`'s `erx_fiasco_cpus_online`.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted
   driver's cases (no attribute, no free slot, the slot given back at exit), `sysconf(_SC_NPROCESSORS_ONLN)` and `pthread_setname_np`.
 * [Low] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_process.c`, `beam/erl_driver.h`: what signals' deletion leaves unused: the break flag and `erts_do_break_handling`, `thr_create_sigmask`,

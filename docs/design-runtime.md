@@ -2688,12 +2688,13 @@ A release with a carrier replaces `-kernel start_distribution false` with
 creating a cookie, which a read-only release with no `HOME` cannot satisfy and
 whose mode `0444` it refuses (`auth.erl:347-374`, `:513`).
 
-`kernel_sup` then starts these, in stock's order with `erx_watchdog` added (edit 41):
+`kernel_sup` then starts these, in stock's order with `erx_watchdog` added right after `on_load` (edit 41):
 
 | Child | In erXos |
 | --- | --- |
-| `erx_watchdog` | [design-stopgap.md](design-stopgap.md) |
-| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system; `inet_db`'s lookup is `file`, its hosts table, with no resolver and no `inet_gethost` until the network service, `inet_gethost_native` answering `{error, notsup}` for a well-formed lookup, `localhost` too when this module is asked directly, since none ran, where stock answers `{error, notfound}` for a name its resolver does not know; `inet`'s calls read any error as not found and still answer `nxdomain`, and the difference is `inet_SUITE:t_gethostnative`'s, which accepts neither; and `inet_config` finding no UDP port names the host `nohost` |
+| `code_server`, `file_server_2`, `on_load` | stock: the first two over `erl_prim_loader` and the release file system |
+| `erx_watchdog` | [design-stopgap.md](design-stopgap.md#the-watchdog) |
+| `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: `inet_db`'s lookup is `file`, its hosts table, with no resolver and no `inet_gethost` until the network service, `inet_gethost_native` answering `{error, notsup}` for a well-formed lookup, `localhost` too when this module is asked directly, since none ran, where stock answers `{error, notfound}` for a name its resolver does not know; `inet`'s calls read any error as not found and still answer `nxdomain`, and the difference is `inet_SUITE:t_gethostnative`'s, which accepts neither; and `inet_config` finding no UDP port names the host `nohost` |
 | `standard_error` | stock's I/O protocol over descriptor 2 (edit 39) |
 | `user` | `user_sup`, then `erx_console` and the group it registers |
 | `rex`, `global_name_server`, `net_sup`, `global_group` | with a carrier only: `net_sup` holds `auth` and `net_kernel` over `erx_dist`, with no `erl_epmd` |

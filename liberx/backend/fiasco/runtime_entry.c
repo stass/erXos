@@ -42,7 +42,9 @@ static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_m
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /* The manifest's words, then each erx.arg word, which takes a byte and its NUL at the least. */
-static erx_boot_words_t arg_words[1 + ERX_BOOT_STRINGS_MAX / 2];
+static erx_boot_words_t arg_words[2 + ERX_BOOT_STRINGS_MAX / 2];
+/* The driver erx_console starts, until the PL011 has one: output through the debug log. */
+static const char console_driver_words[] = "-erx\0console_driver\0erx_debug_console";
 
 const erx_boot_info_t *
 erx_boot_info(void)
@@ -110,7 +112,7 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 	return (NULL);
 }
 
-/* The manifest's system_args, then each erx.arg word of the kernel command line, in its order. */
+/* The manifest's system_args, the console's driver, then each erx.arg word of the kernel command line, in its order. */
 static const char *
 gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *manifest, size_t *nargs)
 {
@@ -119,6 +121,7 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	size_t word_len;
 
 	arg_words[(*nargs)++] = manifest->system_args;
+	arg_words[(*nargs)++] = (erx_boot_words_t){ console_driver_words, sizeof(console_driver_words) };
 	while (erx_boot_args_next_arg(handoff->bootargs, handoff->bootargs_len, &cursor, &word, &word_len)) {
 		if (*nargs == sizeof(arg_words) / sizeof(arg_words[0]))
 			return ("the kernel command line: more erx.arg words than the page holds");

@@ -8,6 +8,7 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'musl'
 require_relative 'native_root'
+require_relative 'release_files'
 require_relative 'runtime'
 require_relative 'runtime_seam'
 
@@ -23,7 +24,7 @@ module Erx
     # configure and ERTS ask for these libraries by name, and musl keeps them all in libc.a.
     EMPTY_LIBRARIES = %w[m pthread rt dl util].freeze
     # What the root's link takes: OTP's objects and archives, and musl's libc.a.
-    Built = Data.define(:otp_archives, :libc)
+    Built = Data.define(:otp_archives, :libc, :otp)
 
     def self.output(root:)
       base = File.join(root, 'build/runtime/native')
@@ -48,14 +49,18 @@ module Erx
     # must have run.
     def build(jobs: 4)
       @oracle.verify(HOST_OTP_FLAVOUR)
+      FileUtils.rm_f(self.class.record_path(@output))
+      digest = self.class.source_digest(root: @root)
       libc = build_sysroot(jobs: jobs)
       build_liberx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
+      ReleaseFiles::APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
       check_imports
+      File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),
-                       *RuntimeSeam.libraries(@output, target: TARGET)].freeze, libc: libc)
+                       *RuntimeSeam.libraries(@output, target: TARGET)].freeze, libc: libc, otp: @output.root)
     end
 
     # Takes away everything build made, so the next build reruns musl's and OTP's own.
@@ -119,6 +124,8 @@ module Erx
     def build_environment
       Oracle::CLEAN_ERLANG_ENV.merge(
         'ERL_TOP' => @output.root,
+        # The release's beams, the same bytes as the hosted build's.
+        'ERL_COMPILE_FLAGS' => '+deterministic',
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
         'ERX_CLANG' => @compiler,
         'ERX_CLANG_INCLUDE' => File.join(resource_directory, 'include'),

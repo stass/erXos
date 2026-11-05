@@ -17,7 +17,4 @@
  */
 const char	*erx_fiasco_watchdog_start(const erx_watchdog_config_t *, erx_watchdog_mode_t);
 
-/* A local store of the time, in the root. */
-int	erx_watchdog_pet(void) ERX_WARN_UNUSED_RESULT;
-
 #endif /* ERX_FIASCO_WATCHDOG_THREAD_H */

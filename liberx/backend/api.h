@@ -154,4 +154,7 @@ int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_
 /* how is ERX_END_OFF or ERX_END_RESET, and res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 
+/* Tells the machine's watchdog that the caller's schedulers run. A store, and takes no lock. */
+int	erx_watchdog_pet(void) ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_BACKEND_API_H */

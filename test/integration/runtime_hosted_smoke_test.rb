@@ -297,6 +297,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'file:list_dir("/").' => /"bin"/,
       'erlang:system_info(emu_flavor).' => /^emu$/,
       '[element(1, C) || C <- supervisor:which_children(kernel_sup)].' => /code_server/,
+      'lists:keymember(erx_watchdog, 1, supervisor:which_children(kernel_sup)).' => /^true$/,
       'erlang:ports().' => /^\[\]$/,
       'catch open_port({spawn, "ls"}, []).' => /badarg/,
       'catch os:cmd("ls").' => /open_port,badarg/,

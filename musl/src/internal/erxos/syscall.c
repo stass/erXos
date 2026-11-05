@@ -17,7 +17,6 @@
 #include <signal.h>
 #include <stdint.h>
 #include <strings.h>
-#include <sys/prctl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/uio.h>
@@ -261,16 +260,6 @@ tid_set_address(uint64_t word)
 	return (status == ERX_OK ? (long)index + 1 : errno_of(status));
 }
 
-/* The CPUs this program may use, which sysconf counts: the mask's first word, as set_affinity takes. */
-static long
-get_affinity(size_t size, unsigned long *mask)
-{
-	if (size < sizeof(unsigned long))
-		return (-EINVAL);
-	mask[0] = erx_fiasco_cpus_online();
-	return ((long)sizeof(unsigned long));
-}
-
 static long
 set_affinity(long tid, size_t size, const unsigned long *mask)
 {
@@ -355,11 +344,6 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_exit_group:
 		/* Whoever started the program reads the status's low byte, as POSIX's parent does. */
 		return (errno_of(erx_space_stop(ERX_CAP_SELF, a & EXIT_STATUS_MASK)));
-	case SYS_prctl:
-		/* A thread's name is a debugging aid, kept nowhere. */
-		return ((int)a == PR_SET_NAME ? 0 : -EINVAL);
-	case SYS_sched_getaffinity:
-		return (get_affinity((size_t)b, (unsigned long *)c));
 	case SYS_sched_setaffinity:
 		return (set_affinity(a, (size_t)b, (const unsigned long *)c));
 	case SYS_sched_yield:

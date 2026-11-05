@@ -8,6 +8,7 @@ require 'json'
 require_relative 'abi'
 require_relative 'boot_file'
 require_relative 'build_inputs'
+require_relative 'crash_frame'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
@@ -20,6 +21,7 @@ require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
 require_relative 'qemu'
+require_relative 'release_files'
 require_relative 'runner'
 
 module Erx
@@ -38,8 +40,8 @@ module Erx
     LICENSE = 'LICENSE'
     # The trees imported into the source tree that the root builds from: BLAKE3 for its
     # reader of the archive and the entropy generator's mixing, ChaCha20 for that
-    # generator's stream.
-    IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent' }.freeze
+    # generator's stream, and OTP for the release's beams.
+    IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent', 'otp' => 'permanent' }.freeze
 
     # One of Fiasco's archives that the root links, attributed whole under the license
     # stated here. TODO.md holds the gap: the boot cores hold BLAKE3 as well.
@@ -71,8 +73,9 @@ module Erx
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
-      report = pack(entries: entries(root_task, kernel, sigma0), root_task: root_task, receipts: [kernel, sigma0],
-                    erts: erts, output: archive)
+      release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release], root_task: root_task,
+                    receipts: [kernel, sigma0, *ReleaseFiles.inputs_of(release)], erts: erts, output: archive)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -131,12 +134,32 @@ module Erx
       # "The watchdog"). HVF runs the defaults.
       TCG_WATCHDOG = '1,30,600'
       COMMAND_LINES = { 'tcg' => "erx.watchdog=#{TCG_WATCHDOG}" }.freeze
-      # One more word on the deterministic boot's line, which the page must carry too.
-      DETERMINISTIC_LINE = 'erx.det=1 erx.arg=deterministic'
+      # One more word on the deterministic boot's line, which the page must carry too: a flag,
+      # since a plain word would join the last flag's arguments, -erx console_driver's.
+      DETERMINISTIC_LINE = 'erx.det=1 erx.arg=-deterministic'
+      # The watchdog's numbers for each accelerator's proof boot: a boot deadline it beats, and
+      # a pet deadline. TCG's working line gives 600 seconds, which no test waits out.
+      PET_PROOF = { 'tcg' => { period: 1, pet: 30, boot: 120 }, 'hvf' => { period: 1, pet: 5, boot: 60 } }.freeze
+      # How far past the boot deadline the proof boot stays up.
+      PET_MARGIN_SECONDS = 5
+      # erx_console's first line, which only a release that started `kernel` writes.
+      SLOGAN = { name: 'release-slogan', pattern: %r{\AErlang/OTP 29 }n, seconds: 240 }.freeze
+      # kernel_sup's children at a boot with no carrier, in which_children's order: the last
+      # started first (docs/design-runtime.md, Configuration).
+      KERNEL_CHILDREN = %w[kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
+                           inet_db erx_watchdog on_load file_server_2 standard_error code_server].freeze
+      # From the banner to -eval's first output, which loads the evaluator: long under TCG.
+      EVAL_SECONDS = 120
+      # An expression for init's -eval: one word, since the kernel command line splits on spaces.
+      CHILDREN = 'erlang:display([element(1,C)||C<-supervisor:which_children(kernel_sup)])'
+      # The suspender must outlive the suspension, which ends when it does.
+      STOP_PET = 'erlang:suspend_process(whereis(erx_watchdog)),erlang:display(pet_stopped),timer:sleep(infinity).'
+
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
-      # The program's name and the node flag with its name, before the page's words.
-      ARGUMENTS_ALWAYS = 3
+      # The program's name and the node flag with its name, before the page's words, and
+      # the three words of -erx console_driver, which the root adds to the manifest's.
+      ARGUMENTS_ALWAYS = 6
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -161,6 +184,7 @@ module Erx
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
                                       points: Run.command_line_refusal_checkpoints)
           end
+          prove_pet(accel, count, built) if count == cpus.first
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -169,13 +193,16 @@ module Erx
 
       # The transcript of a boot as far as ERTS gets, each line in order. The manifest line
       # carries the numbers the source says, so a root that misread it fails. Schedulers are
-      # one per CPU. Erlang's init then runs on them and asks for the boot script, which the
-      # archive does not hold, so that refusal is the boot's last line and proves code ran.
+      # one per CPU of the system's share on this machine. Erlang's init then boots the
+      # release, `kernel` starts, and erx_console's two banners, written through its stand-in
+      # driver, prove the release ran that far. The prompt ends no line, so no point names it.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0)
         source = File.read(File.join(root, MANIFEST))
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
         arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
+        share = source[/^share system\n(?:  .*\n)*?  cpuset (\d+)$/, 1].to_i
+        schedulers = (share & ((1 << cpus) - 1)).to_s(2).count('1')
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
@@ -183,8 +210,19 @@ module Erx
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
          point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
          point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60),
-         point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{cpus} schedulers and #{cpus} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
-         point('erts-init-runs', /\ARuntime terminating during boot/n, /\ARuntime terminating during boot \(\{'cannot get bootfile','\/bin\/start\.boot'\}\)\r*\n\z/n, seconds: 60)].freeze
+         point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{schedulers} schedulers and #{schedulers} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
+         SLOGAN,
+         { name: 'release-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze].freeze
+      end
+
+      # The release's boot with its children named, then the line that outlived the deadlines.
+      # init's -eval writes beside the shell, so a line of its may follow the unended prompt.
+      def self.survival_checkpoints(seconds:)
+        children = KERNEL_CHILDREN.join(',')
+        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+         SLOGAN,
+         point('kernel-children', /\A(?:1> )?\[[a-z0-9_,]+\]\r*\n\z/n, /\A(?:1> )?\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
+         { name: 'past-the-deadlines', pattern: /\A(?:1> )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
       end
 
       # A machine with less RAM than root_memory: the same image boots to the root, which
@@ -207,6 +245,30 @@ module Erx
       private_class_method :point
 
       private
+
+      # The pet at work: the machine outlives its deadlines, and once erx_watchdog stops being
+      # scheduled it ends, with the watchdog's own crash record. Neither alone is the proof: a
+      # watchdog that never fires passes the first, and one that ignores pets the second.
+      def prove_pet(accel, count, built)
+        proof = PET_PROOF.fetch(accel)
+        seconds = proof.fetch(:boot) + PET_MARGIN_SECONDS
+        line = "erx.watchdog=#{proof.values_at(:period, :pet, :boot).join(',')} erx.arg=-eval"
+        expression = "#{CHILDREN},timer:sleep(#{seconds * 1000}),erlang:display(past_the_deadlines)."
+        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.survival_checkpoints(seconds: seconds),
+                                  command_line: "#{line} erx.arg=#{expression}")
+        stopped = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
+                                            points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+                                                     { name: 'pet-stopped', pattern: /\A(?:1> )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze])
+        judge_missed_pet(File.binread(stopped.fetch('serial_log')))
+      end
+
+      def judge_missed_pet(serial)
+        result = CrashFrame.read(serial)
+        raise Error, CrashFrame.report(result).join(' / ') unless result.status == :valid
+
+        cause = result.record.fetch('cause')
+        raise Error, "a stopped pet ended the machine with cause #{cause}" unless cause == CrashFrame::CODEC.member('crash_cause', 'watchdog')
+      end
 
       def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil)
         Qemu.new(root: @root, runner: @runner, program: @qemu)

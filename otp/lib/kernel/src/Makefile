@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modified by erXos: adds erx_console and erx_stdio.
+# Modified by erXos: adds erx_console, erx_debug_console, erx_stdio and erx_watchdog.
 #
 # %CopyrightEnd%
 #
@@ -94,7 +94,9 @@ MODULES = \
 	gen_sctp \
 	global \
 	erx_console \
+	erx_debug_console \
 	erx_stdio \
+	erx_watchdog \
 	global_group \
 	global_search \
 	group \
