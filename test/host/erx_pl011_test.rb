@@ -15,7 +15,7 @@ class ErxPl011Test < Minitest::Test
 
   def test_console_uart_cases_pass_under_eunit
     Dir.mktmpdir('erx-pl011-test') do |work|
-      sources = [File.join(ROOT, 'otp/lib/kernel/src/erx_pl011.erl'), File.join(ROOT, 'test/erlang/erx_pl011_tests.erl')]
+      sources = [File.join(ROOT, 'erlang/apps/erx_uart/src/erx_pl011.erl'), File.join(ROOT, 'test/erlang/erx_pl011_tests.erl')]
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *sources, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

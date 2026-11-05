@@ -93,7 +93,7 @@ module Erx
       File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release], root_task: root_task, manifest_source: manifest_source,
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release)], erts: erts, output: archive)
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root)], erts: erts, output: archive)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))

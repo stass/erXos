@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'open3'
+require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'hosted_sources'
 require_relative 'oracle'
@@ -61,13 +62,13 @@ module Erx
       raise Error, 'hosted runtime not built: run tools/erx build runtime' unless File.file?(record)
       return if File.read(record) == source_digest(root: root)
 
-      raise Error, 'hosted runtime is stale, otp/ or liberx changed: run tools/erx build runtime'
+      raise Error, 'hosted runtime is stale, otp/, erlang/apps or liberx changed: run tools/erx build runtime'
     end
 
     def self.record_path(output) = File.join(output.root, '.erx-build-record')
 
     def self.source_digest(root:)
-      digests = ['otp', *LIBERX_TREES].flat_map do |tree|
+      digests = ['otp', ErlangApps::SOURCE, *LIBERX_TREES].flat_map do |tree|
         Dir.glob(File.join(tree, '**/*'), File::FNM_DOTMATCH, base: root).sort.filter_map do |path|
           absolute = File.join(root, path)
           "#{path} #{Digest::SHA256.file(absolute).hexdigest}" if File.file?(absolute)
@@ -103,11 +104,24 @@ module Erx
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
       APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
+      build_erlang_apps
       File.write(self.class.record_path(@output), digest)
       @output
     end
 
     private
+
+    # make removes nothing, so a beam it built for a module whose source has since left
+    # otp/lib, or moved to erlang/apps, would stay in the copy's ebin and reach the release.
+    # Each one goes before make runs.
+    def remove_orphan_beams(otp)
+      APPLICATIONS.each do |application|
+        modules = Dir.glob('**/*.{erl,yrl,xrl}', base: File.join(otp, 'lib', application)).map { |path| File.basename(path, '.*') }
+        ebin = in_copy(File.join('lib', application, 'ebin'))
+        Dir.glob('*.beam', base: ebin).reject { |beam| modules.include?(File.basename(beam, '.beam')) }
+           .each { |beam| FileUtils.rm_f(File.join(ebin, beam)) }
+      end
+    end
 
     def build_liberx
       directory = File.dirname(@output.liberx)
@@ -135,6 +149,7 @@ module Erx
       paths = Dir.glob('**/*', File::FNM_DOTMATCH, base: otp).sort
       (stored(in_copy('.erx-paths')).to_s.lines(chomp: true) - paths).each { |path| FileUtils.rm_f(in_copy(path)) }
       File.write(in_copy('.erx-paths'), paths.join("\n"))
+      remove_orphan_beams(otp)
       File.write(in_copy('.erx-configure-stamp'), stamp)
     end
 
@@ -169,6 +184,12 @@ module Erx
       @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}", 'opt', "TARGET=#{self.class::TARGET}"],
                   name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
+    end
+
+    # erXos's own applications, into the copy's lib/ beside OTP's, by the same erlc.
+    def build_erlang_apps
+      erlc = File.join(File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), 'erlc')
+      ErlangApps.new(root: @root, runner: @runner, erlc: erlc).build(otp: @output.root)
     end
 
     def build_environment

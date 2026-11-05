@@ -13,7 +13,7 @@ require 'tmpdir'
 # that shows the reference reads duplicates.
 module ErxPl011ConsoleUartFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'otp/lib/kernel/src/erx_pl011.erl')
+  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_uart/src/erx_pl011.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_pl011_console_uart_fuzz.erl')
   ONE_ENTRY = '[[Base, Size, Line | _]] ->'
   FIRST_OF_SEVERAL = '[[Base, Size, Line | _] | _] ->'

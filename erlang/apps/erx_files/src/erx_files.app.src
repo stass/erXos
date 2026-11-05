@@ -1,0 +1,16 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% Erlang file servers (docs/design-files.md, "Serving the erx_fs behaviour"): the
+%% erx_fs behaviour and its grant's pure core, the version counter, and the RAM file
+%% system's core (docs/design-tmp.md).
+{application, erx_files,
+ [{description, "erXos file servers"},
+  {vsn, "1"},
+  {modules, [erx_fs,
+             erx_fs_grant,
+             erx_fs_version,
+             erx_ramfs_core]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {env, []}]}.

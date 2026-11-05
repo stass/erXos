@@ -5,6 +5,7 @@
 require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
+require_relative 'device_callers'
 require_relative 'origin'
 require_relative 'runner'
 require_relative 'source_text'
@@ -102,6 +103,7 @@ module Erx
       own_sources = listed.reject { |relative| imported?(relative) }
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_json_parsing(own_sources)
+      check_device_callers(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
       # below kernel/ they read as erXos's own C (chokepoint_upstream?).
@@ -212,6 +214,13 @@ module Erx
           raise Error, "JSON used other than to write, outside #{JSON_PARSER}: #{relative_path}:#{number}"
         end
       end
+    end
+
+    # Imports included: a stock module edited to call erx_device is as much a violation.
+    def check_device_callers(listed)
+      sources = listed.select { |relative| DeviceCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = DeviceCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
     end
 
     def ruby_source?(path)

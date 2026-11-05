@@ -942,7 +942,9 @@ share is one description, so they share its offset as POSIX processes do.
 
 A file server in Erlang is a module of the `erx_fs` behaviour, which owns
 the protocol, the fids, the locks and the checks, and calls back for the
-tree:
+tree. The behaviour, its grant's pure core and the file servers erXos
+writes in Erlang form the `erx_files` application
+(`erlang/apps/erx_files/`):
 
 ```erlang
 -callback init(Args :: term()) -> {ok, Fs :: term()}.

@@ -26,6 +26,12 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks", check: 'StackProof', test: 'test/host/stack_proof_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'device-callers', rule: 'only erx_device and the driver applications name erx_device, whose NIF and BIFs ' \
+                                        'reach a device',
+          design: 'docs/design-runtime.md#the-device-nif', check: 'DeviceCallers, in Checks',
+          test: 'test/host/device_callers_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )

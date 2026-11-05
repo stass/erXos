@@ -16,7 +16,8 @@ Decisions every reader needs:
 
 * **`/tmp` is a file server like any other.** `erx_ramfs` is a module of
   the `erx_fs` behaviour ([design-files.md](design-files.md#serving-the-erx_fs-behaviour))
-  that runs in the domain itself. The runtime mounts its grant at `/tmp`
+  that runs in the domain itself; it, `erx_ramfs_core` and `erx_ramfs_sup`
+  belong to the `erx_files` application with `erx_fs`. The runtime mounts its grant at `/tmp`
   as it mounts any grant, and `prim_file` reaches it through
   `erx_file_remote`, the client every file server has. There is no
   local provider for it and no namespace kind of its own.

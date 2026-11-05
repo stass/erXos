@@ -5,18 +5,22 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'oracle'
 require_relative 'runtime'
 
 module Erx
-  # The system release's files as entries for Pack#build: `kernel` and `stdlib`'s beams
-  # and application files with a start.boot of their own, as docs/design-runtime.md's
-  # Configuration starts them. The hosted archive (Release) and the native one
-  # (ProductionImage) both take their files from here, each from its own build of the
-  # two applications, and `+deterministic` makes those builds the same bytes.
+  # The system release's files as entries for Pack#build: the beams and application files
+  # of `kernel`, `stdlib` and erXos's own applications (ErlangApps), with a start.boot of
+  # their own, as docs/design-runtime.md's Configuration starts them. The hosted archive
+  # (Release) and the native one (ProductionImage) both take their files from here, each
+  # from its own build of the applications, and `+deterministic` makes those builds the
+  # same bytes.
   class ReleaseFiles
-    APPLICATIONS = %w[kernel stdlib].freeze
+    OTP_APPLICATIONS = %w[kernel stdlib].freeze
+    # In the release file's order, each after the applications it depends on.
+    APPLICATIONS = [*OTP_APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
     NAME = 'erxos'
     BOOT_DEADLINE = 120
     # A file of the release: its path in the archive, the built file and what it came from.
@@ -38,8 +42,12 @@ module Erx
       [*application_files, boot_file].map { |file| file_entry(file) }
     end
 
-    # The files a pack's build inputs must name for these entries.
-    def self.inputs_of(entries) = entries.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }
+    # The files a pack's build inputs must name for these entries: each built file and its
+    # receipt, and the sources the receipts name in erXos's own applications. OTP's
+    # sources are in its imported tree's catalog already.
+    def self.inputs_of(entries, root:)
+      [*entries.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }, *ErlangApps.sources(root: root)]
+    end
 
     private
 
@@ -56,15 +64,22 @@ module Erx
     # The source a built file is compiled from. A file with none named is a failure, so
     # no file reaches the archive without its licence.
     def sources_of(application, name)
-      source = File.join(@root, 'otp/lib', application, 'src')
+      source = File.join(@root, source_directory(application), 'src')
       base = File.basename(name, '.*')
       return [File.join(source, "#{base}.app.src")] if name.end_with?('.app')
 
       found = %w[erl yrl xrl].map { |extension| File.join(source, "#{base}.#{extension}") }.find { |path| File.file?(path) } ||
-              Dir.glob(File.join(@root, 'otp/lib', application, '**', "#{base}.erl")).min
-      raise Error, "no source in otp/lib/#{application} for #{name}" unless found
+              Dir.glob(File.join(@root, source_directory(application), '**', "#{base}.erl")).min
+      raise Error, "no source in #{source_directory(application)} for #{name}" unless found
 
       [found]
+    end
+
+    # Where an application's sources are, relative to the root: OTP's own under otp/lib.
+    def source_directory(application)
+      return ErlangApps.source(application) if ErlangApps::APPLICATIONS.include?(application)
+
+      File.join('otp/lib', application)
     end
 
     def version(application)
@@ -88,7 +103,7 @@ module Erx
       @runner.run([@oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), '-noshell', '-noinput', '-eval', expression],
                   name: 'release-boot-script', deadline: BOOT_DEADLINE, chdir: @directory, env: Oracle::CLEAN_ERLANG_ENV)
       ReleaseFile.new(path: 'system/bin/start.boot', artifact: "#{name}.boot",
-                      sources: APPLICATIONS.map { |application| File.join(@root, 'otp/lib', application, 'src', "#{application}.app.src") })
+                      sources: APPLICATIONS.map { |application| File.join(@root, source_directory(application), 'src', "#{application}.app.src") })
     end
 
     def file_entry(file)

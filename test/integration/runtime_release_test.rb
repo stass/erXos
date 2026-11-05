@@ -38,14 +38,27 @@ class RuntimeReleaseTest < Minitest::Test
 
   Minitest.after_run { FileUtils.rm_f(second) if second }
 
-  def test_the_release_holds_its_two_applications_and_its_boot_script
+  def test_the_release_holds_its_applications_and_its_boot_script
     paths = @table.map(&:first)
     assert_includes paths, 'system/bin/start.boot'
-    %w[kernel/ebin/kernel.app kernel/ebin/code_server.beam stdlib/ebin/stdlib.app stdlib/ebin/lists.beam].each do |file|
+    %w[kernel/ebin/kernel.app kernel/ebin/code_server.beam stdlib/ebin/stdlib.app stdlib/ebin/lists.beam
+       erx/ebin/erx.app erx/ebin/erx_console.beam erx_files/ebin/erx_files.app erx_uart/ebin/erx_pl011.beam].each do |file|
       application, rest = file.split('/', 2)
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end
     assert_empty paths.grep(%r{/compiler}), 'the release holds what init needs and no more'
+  end
+
+  # Each of erXos's applications holds the modules of its sources and no other, and
+  # OTP's applications hold none of erXos's.
+  def test_erxos_modules_are_in_their_own_applications
+    paths = @table.map(&:first)
+    Erx::ErlangApps::APPLICATIONS.each do |application|
+      sources = Dir.glob('src/**/*.erl', base: File.join(ROOT, Erx::ErlangApps.source(application)))
+      beams = paths.filter_map { |path| path[%r{\Asystem/lib/#{application}-[^/]+/ebin/([^/]+\.beam)\z}, 1] }
+      assert_equal sources.map { |source| "#{File.basename(source, '.erl')}.beam" }.sort, beams.sort, application
+    end
+    assert_empty paths.grep(%r{\Asystem/lib/(?:kernel|stdlib)-[^/]+/ebin/erx_}), 'OTP applications hold no erx_ module'
   end
 
   # Built here from the tree's sources, not the prebuilt beams otp/ tracks, and naming

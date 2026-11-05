@@ -27,7 +27,9 @@ require_relative '../../tools/lib/erx/runtime_seam'
 class RuntimePrimFileTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   OUTPUT = Erx::Runtime.output(root: ROOT)
-  APPLICATIONS = %w[kernel stdlib compiler].freeze
+  # The bootstrap boot script's code path names OTP's three; erXos's own, whose watchdog
+  # kernel_sup starts, join it by -pa.
+  APPLICATIONS = [*%w[kernel stdlib compiler], *Erx::ErlangApps::APPLICATIONS].freeze
   RUN_SECONDS = 180
   # A leak of one small resource per call, over 10,000 calls, grows past this.
   RESOURCE_GROWTH_BYTES = 256 * 1024
@@ -367,8 +369,8 @@ class RuntimePrimFileTest < Minitest::Test
 
   # The driver, a grant over erx_fs_test_tree for erx_file_remote's cases, and, for the
   # seeded run, a client whose walks act in place.
-  GRANT_SOURCES = %w[erlang/apps/erx/src/erx_fs.erl erlang/apps/erx/src/erx_fs_grant.erl
-                     erlang/apps/erx/src/erx_fs_version.erl erlang/apps/erx/src/generated/erx_9p_grammar.erl
+  GRANT_SOURCES = %w[erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_grant.erl
+                     erlang/apps/erx_files/src/erx_fs_version.erl erlang/apps/erx/src/generated/erx_9p_grammar.erl
                      test/erlang/erx_fs_test_tree.erl].freeze
   CLIENT = 'otp/erts/preloaded/src/erx_file_remote.erl'
   WALK_INTO_NEW = "    {[{walk, From, New, NameList}], New};\n"
@@ -420,7 +422,9 @@ class RuntimePrimFileTest < Minitest::Test
   end
 
   def run_beam(archive, root, mode, boot:)
-    test = ['-noshell', '-pa', "#{root == '/' ? '' : root}/test/ebin", '-run', 'prim_file_compare', 'main', root, mode]
+    prefix = root == '/' ? '' : root
+    erxos = Erx::ErlangApps::APPLICATIONS.flat_map { |application| ['-pa', "#{prefix}/lib/#{application}/ebin"] }
+    test = ['-noshell', *erxos, '-pa', "#{prefix}/test/ebin", '-run', 'prim_file_compare', 'main', root, mode]
     return capture_beam({ 'ROOTDIR' => root, 'BINDIR' => File.dirname(OUTPUT.beam) }, [OUTPUT.beam, archive, *test]) if archive
 
     bin = File.dirname(stock_beam)

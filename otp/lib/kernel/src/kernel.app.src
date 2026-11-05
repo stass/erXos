@@ -17,8 +17,6 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: adds erx_console, erx_device, erx_log, erx_ns, erx_pl011, erx_ramfs_core, erx_stdio and erx_watchdog.
-%%
 %% %CopyrightEnd%
 %%
 %% This is an -*- erlang -*- file.
@@ -55,14 +53,6 @@
 	     global_search,
 	     group,
 	     group_history,
-	     erx_console,
-	     erx_device,
-	     erx_log,
-	     erx_ns,
-	     erx_pl011,
-	     erx_ramfs_core,
-	     erx_stdio,
-	     erx_watchdog,
 	     heart,
 	     inet6_tcp,
 	     inet6_tcp_dist,

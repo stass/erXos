@@ -17,8 +17,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modified by erXos: adds erx_console, erx_device, erx_log, erx_ns, erx_pl011, erx_ramfs_core, erx_stdio and erx_watchdog.
-#
 # %CopyrightEnd%
 #
 
@@ -93,14 +91,6 @@ MODULES = \
 	gen_udp_socket \
 	gen_sctp \
 	global \
-	erx_console \
-	erx_device \
-	erx_log \
-	erx_ns \
-	erx_pl011 \
-	erx_ramfs_core \
-	erx_stdio \
-	erx_watchdog \
 	global_group \
 	global_search \
 	group \

@@ -92,7 +92,7 @@ module Erx
                                         runner: @runner, compiler: @compiler, linker: @linker)
       files = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle).entries
       entries = [root_entry(root_task), *files]
-      catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of(files)))
+      catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of(files, root: @root)))
       pack_with(tools, catalog).build(
         entries: entries, root_path: 'system/root', build_kind: 'development',
         platform: JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 1024 * 1024, label: 'platform record'),

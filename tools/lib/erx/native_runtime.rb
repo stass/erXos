@@ -56,7 +56,8 @@ module Erx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
-      ReleaseFiles::APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
+      ReleaseFiles::OTP_APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
+      build_erlang_apps
       check_imports
       File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),

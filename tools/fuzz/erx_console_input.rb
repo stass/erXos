@@ -14,7 +14,7 @@ require 'tmpdir'
 # shows the reference reads that branch.
 module ErxConsoleInputFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'otp/lib/kernel/src/erx_console.erl')
+  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_console.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_console_input_fuzz.erl')
   LATIN1_BRANCH = 'data(latin1(<<Bad>>))'
   WRONG_BRANCH = 'data(<<(Bad band 16#7f)>>)'

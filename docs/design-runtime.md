@@ -324,10 +324,19 @@ reader, and `erx_file_remote`, the client of every file server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)); `kernel`, with `os:type/0` returning `{unix, erxos}`, `os:cmd/1`
 raising `badarg`, `heart` and `erl_boot_server` not started, and
 `net_kernel` started in every domain under the domain's node name with
-erXos's carrier, plus erXos's `erx_connections`, `erx_dist`,
-`erx_program`, `erx_device` and `erx_watchdog`; `stdlib` unchanged;
-`compiler` and `runtime_tools`; `sasl`
-and `tools` where a release asks for them. `crypto`, `ssl`, `ssh`, `inets`
+erXos's carrier, and otherwise stock but for the edits listed below, the
+hooks that start erXos's watchdog and console among them; `stdlib`
+unchanged; `compiler` and `runtime_tools`; `sasl` and `tools` where a
+release asks for them. erXos's own Erlang code is applications of its own
+under `erlang/apps/` ([design.md](design.md#repository-layout)), listed
+after `kernel` and `stdlib` in the release file: `erx`, the runtime's
+services (`erx_connections`, `erx_dist`, `erx_program`, `erx_device`,
+`erx_watchdog`, the console, the kernel log and the namespace); `erx_files`,
+the Erlang file servers; and one driver application per device class,
+`erx_uart` the first. None has an application callback: what must run is
+started by `kernel`'s hooks, and the boot script's code path, which names
+every application of the release, finds the modules they call, which the
+code server loads on first call. `crypto`, `ssl`, `ssh`, `inets`
 and the rest are outside the shipped set: they depend on a network stack
 and on OpenSSL 3.5 ([design.md](design.md#dependencies)), and arrive with
 the network service ([plan.md](plan.md#m12-storage-networking-boards)).
@@ -2000,6 +2009,17 @@ a marked register or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one
 call of the bulk copy.
+Only the driver's modules reference the device NIF: ERTS binds a static NIF
+only to the module of its name, and the register BIFs are that module's, so
+Erlang reaches a device only by naming `erx_device`, and a source check
+(`tools/lib/erx/device_callers.rb`, in `make check`) fails the build when any
+Erlang source under `otp/` or `erlang/` other than `erx_device` itself and
+the modules of the driver applications names it, in a call, an apply, a
+quoted atom or a string, with a seeded violation in
+`test/host/device_callers_test.rb`. It reads text, so it catches a slip,
+not code that spells the atom with escapes or builds it from pieces; what
+keeps a device from every other domain is that its capabilities are
+installed only in its driver's domain.
 
 ### Per-byte primitives
 

@@ -171,8 +171,8 @@ it; git history is the record of completed work.
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never destroyed: a restarted driver keeps the one its device's record holds.
-* [Low] `otp/lib/kernel/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
-* [Low] `otp/lib/kernel/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
+* [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
+* [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
   record's `window` and `lines` become what that service builds, and drivers, which do not look inside the spec, stay as they are.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made, a retry takes another mapping from the shared device
@@ -300,20 +300,20 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: an open file's owner process is one per grant, keyed by the node,
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: an open file's owner process is one per grant, keyed by the node,
   where `docs/design-files.md` starts one per open file on any grant; a file open through two grants of one tree has
   two owners, so its requests are ordered against each other only by the tree. /tmp serves one grant per tree. Add
   a per-tree registry of owners before a tree is served on more than one grant.
-* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: no read helper exists, so an open file's owner calls `read` itself
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: no read helper exists, so an open file's owner calls `read` itself
   whatever the module's `read_mode/0` says, and a read that waits for a medium holds up the file's other requests.
   Build the helper of `docs/design-files.md` (state-stamped results the owner's core accepts or retries) with the
   first tree that answers `helper`.
-* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a clunk of an opened fid is answered at once and its file process
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: a clunk of an opened fid is answered at once and its file process
   leaves `files` when its last clunk is queued, so a tree whose `clunk` is slow can gather file processes still
   draining clunks, beyond the pool and outside the in-flight bound, and two processes of one file can run at once.
   /tmp's clunk is one in-memory step. Defer the clunk's answer to the file process (counted in flight), or keep the
   file in a closing state that new opens join, before a tree with a slow `clunk` is served.
-* [Low] `erlang/apps/erx/src/erx_fs_grant.erl`: `add_fid` and `end_fid` push effects into the grant's state, which
+* [Low] `erlang/apps/erx_files/src/erx_fs_grant.erl`: `add_fid` and `end_fid` push effects into the grant's state, which
   every exported step must drain, and an owner's monitor is `pending` until the shell hands its reference back with
   `monitored/3`, as an open file's owner is until `file_started/4`. Thread the effects through the step's return instead, so a step that both makes and ends one
   owner's fid can never emit `{demonitor, pending}`.
@@ -326,7 +326,7 @@ it; git history is the record of completed work.
 * [Medium] `test/guest/native_irq/guest.c`: the line's unbind and rebind come before the first typed character, so
   nothing checks that a line still fires after it was delivered, acked, detached and attached again. Type a third
   character after the rebind and add its checkpoint to `tools/lib/erx/native_irq.rb`.
-* [Medium] `otp/lib/kernel/src/erx_pl011.erl`: QEMU 11.1's PL011 writes each byte straight to its backend, so `FR.TXFF`
+* [Medium] `erlang/apps/erx_uart/src/erx_pl011.erl`: QEMU 11.1's PL011 writes each byte straight to its backend, so `FR.TXFF`
   never sets, and it forces the receive interrupt level to one byte, so the receive timeout never has a byte below the
   level to report; a character also arrives whole, never in flight. The `production_image` suite therefore still passes
   with the TXFF check before each `DR` write removed, with `RTIM` left masked, or with the character wait after
@@ -396,7 +396,7 @@ it; git history is the record of completed work.
 * [Low] runtime, `erx_prim_file.c`: a refused file is hashed and reported again at each open; `docs/design-kernel.md` has later uses fail at once.
 * [Low] runtime, `liberx/backend/core/boot_manifest.c`: the printable rule for `system_args` lives in the reader, so `Manifest.admit` packs a manifest that then fails at boot, and `domains[].args`, the same string class, is not covered. The rule belongs in the `args` class of the ABI generator.
 * [Low] runtime, `tools/fuzz/release_fuzz.c`: does not call `erx_release_check` or compare `erx_release_fs_lookup`'s index with the entry's, and has no seed at the longest path; its `fix_index` is a copy of `pack_fuzz.c`'s.
-* [Medium] runtime, `otp/lib/kernel/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
+* [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
 * [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.
 * [Low] runtime, `otp/lib/stdlib/src/io_ansi.erl`: with no terminfo a shell's `io_ansi` is plain text where stock on an xterm has colour. A fixed table of the ANSI sequences would answer it.
 * [Low] runtime, `shell:start_interactive/0` calls `user_drv`, which does not run: it exits with `noproc` where stock answers `{error, already_started}`.
@@ -1306,7 +1306,7 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
-* [Low] `erlang/apps/erx/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
+* [Low] `erlang/apps/erx_files/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
   owner's `DOWN` by matching Erlang references, which a process that can guess one can forge (`list_to_ref/1` on the
   server's node, a crafted external term from a client node). A forged answer can only answer the client's own request
   in flight early, and a forged `DOWN` clunk a fid early. Bind both to the sender when erXos's kernel carries a

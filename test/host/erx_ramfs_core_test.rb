@@ -13,7 +13,7 @@ require 'tmpdir'
 # shows that case runs the code the fault breaks.
 class ErxRamfsCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'otp/lib/kernel/src/erx_ramfs_core.erl')
+  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_files/src/erx_ramfs_core.erl')
   TESTS_SOURCE = File.join(ROOT, 'test/erlang/erx_ramfs_core_tests.erl')
 
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case)

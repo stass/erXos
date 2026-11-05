@@ -1,0 +1,23 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% erXos's runtime services (docs/design-runtime.md): the console and hosted mode's
+%% console driver, the kernel log, the namespace, the watchdog's petter, a driver's view
+%% of its device, and the modules tools/gen_abi.rb and tools/gen_terminal.rb generate.
+%% It starts nothing of its own: kernel's hooks start the watchdog (kernel.erl) and the
+%% console (user_sup.erl), and the boot script's code path finds their modules here.
+{application, erx,
+ [{description, "erXos runtime services"},
+  {vsn, "1"},
+  {modules, [erx_9p_grammar,
+             erx_console,
+             erx_device,
+             erx_log,
+             erx_manifest,
+             erx_ns,
+             erx_stdio,
+             erx_text_tables,
+             erx_watchdog]},
+  {registered, [erx_console, erx_watchdog]},
+  {applications, [kernel, stdlib]},
+  {env, []}]}.

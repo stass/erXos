@@ -14,7 +14,7 @@ require 'tmpdir'
 # must catch: that shows the sequences reach truncation and check/1 reads the charge.
 module ErxRamfsCoreFuzz
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'otp/lib/kernel/src/erx_ramfs_core.erl')
+  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_files/src/erx_ramfs_core.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_ramfs_core_fuzz.erl')
   TRUNCATE_CHARGE = 'Charge = -(map_size(Chunks) - map_size(Kept)) * ?CHUNK_BYTES,'
   KEPT_CHARGE = 'Charge = 0 * map_size(Kept) * map_size(Chunks),'
