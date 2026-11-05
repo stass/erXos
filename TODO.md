@@ -300,6 +300,13 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `otp/lib/kernel/src/erx_pl011.erl`: QEMU 11.1's PL011 writes each byte straight to its backend, so `FR.TXFF`
+  never sets, and it forces the receive interrupt level to one byte, so the receive timeout never has a byte below the
+  level to report; a character also arrives whole, never in flight. The `production_image` suite therefore still passes
+  with the TXFF check before each `DR` write removed, with `RTIM` left masked, or with the character wait after
+  disabling the UART removed. Run the real `erx_pl011` against a host register model behind `erx_device` that holds
+  `TXFF` set for a while, delivers input below the level only through the receive timeout, counts `DR` reads and
+  refuses a control register write while a received character is in flight, and require each of those mutations to fail.
 * [Low] `test/guest/function_api/cases.c`: the hosted function-API binary exits 0 when a case prints `FAILED`, so only
   `hosted_function_api_test.rb`'s comparison against the expected lines catches a failure. Exit nonzero when any case fails.
 * [Medium] `liberx/backend/fiasco/runtime_main.c`: `liberxroot.a` holds a `main`, and OTP links a tool with the archive ahead of its

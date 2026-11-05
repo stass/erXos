@@ -27,7 +27,7 @@
 -export([irq_bind/2, irq_ack/2]).
 -export([stand_in_fire/2]).
 
--export_type([device/0, register_name/0]).
+-export_type([device/0, register_name/0, spec/0]).
 
 -on_load(init/0).
 

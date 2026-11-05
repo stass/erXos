@@ -505,10 +505,7 @@ module Erx
     # All parsing and rendering completes before the first output is written.
     # The directory is owned by this frontend, making orphan checks explicit.
     def output_plan(root:)
-      devices = Dir.glob(File.join(root, 'hw/svd/**/*.svd')).sort.map do |path|
-        parse_svd(BoundedFile.read(path, maximum: 4 * 1024 * 1024))
-      end
-      raise Error, 'hardware input inventory is empty' if devices.empty?
+      devices = devices(root: root)
       names = devices.map { |device| device.name.downcase }
       raise Error, 'SVD device names collide' unless names.uniq == names
       raise Error, 'SVD device is named for a device table header' unless (names & DEVICE_HEADERS).empty?
@@ -519,11 +516,24 @@ module Erx
                  'include/erx/hw/device_table.h' => device_table_header(devices).freeze,
                  'include/erx/hw/device_access.h' => device_access_header.freeze }
       devices.each_with_object(tables) do |device, files|
-        files["include/erx/hw/#{device.name.downcase}.h"] = device_header(device).freeze
+        files[device_header_path(device)] = device_header(device).freeze
       end.freeze
+    end
+
+    # Every device the SVD inventory describes, parsed, in path order.
+    def devices(root:)
+      devices = Dir.glob(File.join(root, 'hw/svd/**/*.svd')).sort.map do |path|
+        parse_svd(BoundedFile.read(path, maximum: 4 * 1024 * 1024))
+      end
+      raise Error, 'hardware input inventory is empty' if devices.empty?
+
+      devices
     rescue SystemCallError => error
       raise Error, "cannot read hardware input: #{error.message}"
     end
+
+    # The generated header of one device's accessors, relative to the root.
+    def device_header_path(device) = "include/erx/hw/#{device.name.downcase}.h"
 
     def output_inventory(root:)
       directory = File.join(root, 'include/erx/hw')

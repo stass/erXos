@@ -807,7 +807,7 @@ A root fault, the root's own stop and `erx_machine_end` reach it on the service,
 
 ### The console
 
-The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. A plain `erx.arg` word that joins either list of arguments is ignored.
+The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64 and 32 bits), and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). A plain `erx.arg` word that joins either list of arguments is ignored.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the

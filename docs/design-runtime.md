@@ -1985,7 +1985,7 @@ decides batching per device class
 
 **Chokepoints.** Only `erx_device` calls `erx_mem_create_physical`, `erx_vm_map`, `erx_dma_map`, `erx_mem_dma_addr`
 and the user-mode cache maintenance in a runtime, so nothing else in a runtime has a mapping of device memory; only its generated
-accessors, called only by its BIFs and its NIF, touch a register window, and a record's window is private to the source that holds them; only its one address function writes
+accessors, called only by its BIFs and its NIF, touch a register window, and no runtime source includes a peripheral header that `tools/gen_hw.rb` generates or names one of its accessors, which the kernel platform layer alone uses ([design-hardware-generation.md](design-hardware-generation.md)); a record's window is private to the source that holds them; only its one address function writes
 a marked register or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one

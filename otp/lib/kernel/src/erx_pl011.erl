@@ -23,16 +23,22 @@
 
 -export([start_link/1]).
 -export([init/1]).
+-export([console_uart/1]).
 
 %% The spec's one line.
 -define(RX_LINE, 0).
 %% LCR_H's word length for eight bits.
 -define(WLEN_8, 3).
-%% QEMU virt's UART clock of 24 MHz at 115200 baud, for a UART the boot left unprogrammed
-%% (3-10: an integer divisor of 0 is invalid), as Fiasco leaves it on virt. Only the board
-%% knows its clock, which belongs in the platform record (TODO.md).
+%% QEMU virt's UART clock of 24 MHz, which times a character for reprogramming, and the
+%% divisors for 115200 baud at that clock, for a UART the boot left unprogrammed (3-10: an
+%% integer divisor of 0 is invalid), as Fiasco leaves it on virt. Only the board knows its
+%% clock, which belongs in the platform record (TODO.md).
+-define(UART_CLOCK_HZ, 24000000).
 -define(IBRD_DEFAULT, 13).
 -define(FBRD_DEFAULT, 1).
+%% The longest character a line format the boot chose can have: a start bit, eight data
+%% bits, a parity bit and two stop bits.
+-define(CHARACTER_BITS, 12).
 %% How many reads of FR wait for the transmitter to go idle before reprogramming.
 -define(BUSY_READS, 100000).
 -define(FULL_WAIT_MS, 1).
@@ -53,29 +59,73 @@ init(Console) ->
     deliver_input(Dev, Console),
     loop(Dev, Console).
 
-%% The root's words from the manifest's device entry for the console. A plain word of the
-%% kernel command line can follow them, so the list may be longer.
+%% The root's words from the manifest's device entry for the console, as the boot information
+%% carries them to init's arguments. A failure exits with a stated reason, so a malformed
+%% entry stops the driver with that reason rather than a crash in the middle of the parse.
 spec() ->
     {ok, Arguments} = init:get_argument(erx),
-    case [{Base, Size, Line} || ["console_uart", Base, Size, Line | _] <- Arguments] of
-        [{Base, Size, Line}] ->
-            #{peripheral => pl011,
-              window => {physical, list_to_integer(Base), list_to_integer(Size)},
-              lines => [list_to_integer(Line)]};
-        [] ->
-            exit({no_console_uart, "the manifest names no device entry as machine.console"})
+    case console_uart(Arguments) of
+        {ok, Spec} -> Spec;
+        {error, Reason} -> exit(Reason)
     end.
 
-%% The control registers change only with the UART disabled and its line idle (3-16): the
-%% driver waits for the transmitter to send what the boot left, then disables it. The FIFOs
-%% are not flushed by clearing FEN: the transmit FIFO is empty by then, and the receive
-%% FIFO holds what a person typed. The boot's divisors stay.
+%% `-erx console_uart BASE SIZE LINE`, once, each number in decimal and within its field of
+%% the boot manifest's console (64, 64 and 32 bits). A plain word of the kernel command line
+%% can follow the three numbers, so an entry may be longer. A pure function, exported for its
+%% tests and fuzz target.
+-spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
+console_uart(Arguments) ->
+    case [Words || ["console_uart" | Words] <- Arguments] of
+        [[Base, Size, Line | _]] ->
+            case {number(Base, 64), number(Size, 64), number(Line, 32)} of
+                {{ok, B}, {ok, S}, {ok, L}} ->
+                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L]}};
+                _ ->
+                    {error, {bad_console_uart, "console_uart's base, size or line is not a decimal "
+                                              "number of its field's width"}}
+            end;
+        [_] ->
+            {error, {bad_console_uart, "console_uart has fewer than three numbers"}};
+        [] ->
+            {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
+        [_, _ | _] ->
+            {error, {bad_console_uart, "more than one console_uart entry"}}
+    end.
+
+%% Digits only, at most as many as the field's largest value has, so no word builds a large
+%% integer before the range check.
+number(Word, Bits) ->
+    Max = (1 bsl Bits) - 1,
+    case Word =/= [] andalso length(Word) =< length(integer_to_list(Max))
+        andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Word) of
+        true ->
+            case list_to_integer(Word) of
+                Value when Value =< Max -> {ok, Value};
+                _ -> error
+            end;
+        false ->
+            error
+    end.
+
+%% The control registers change only with the UART disabled and the character in flight
+%% finished, since a disabled UART completes the character it is sending or receiving before
+%% it stops (3-16). The driver waits for the transmitter to send what the boot left, disables
+%% the UART, and waits one character time at the boot's divisors: a received character has no
+%% flag to say it has finished, and a sent one, at the same rate, finishes within that time
+%% too. BUSY is not waited on again: the kernel's console can write the UART at any time, and
+%% a byte it queues while the UART is disabled holds BUSY set until the driver enables it.
+%% The FIFOs are not flushed by clearing FEN: what the kernel queued goes out once the UART
+%% is enabled, and the receive FIFO holds what a person typed, that last character included.
+%% The boot's divisors stay.
 reprogram(Dev) ->
     wait_idle(Dev, ?BUSY_READS),
     ok = erx_device:write_field(Dev, cr, uarten, 0),
+    IntegerDivisor = erx_device:read_field(Dev, ibrd, baud_divint),
+    Wait = character_ms(IntegerDivisor, erx_device:read_field(Dev, fbrd, baud_divfrac)),
+    receive after Wait -> ok end,
     ok = erx_device:write(Dev, imsc, 0),
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, ris)),
-    set_divisors(Dev, erx_device:read_field(Dev, ibrd, baud_divint)),
+    set_divisors(Dev, IntegerDivisor),
     ok = erx_device:write_field(Dev, lcr_h, wlen, ?WLEN_8),
     ok = erx_device:write_field(Dev, lcr_h, fen, 1),
     ok = erx_device:write_field(Dev, cr, rxe, 1),
@@ -89,6 +139,17 @@ wait_idle(Dev, Reads) ->
         0 -> ok;
         1 -> wait_idle(Dev, Reads - 1)
     end.
+
+%% One character at divisor Int + Frac / 64 lasts CHARACTER_BITS * 16 * divisor / clock
+%% seconds (3-10), rounded up to whole milliseconds and at least one. The clock is virt's
+%% (UART_CLOCK_HZ); on a board with a slower one the time is short by their ratio, which the
+%% floor of one millisecond still covers at any rate of 12000 baud or more. An unprogrammed
+%% divisor receives nothing, so the one millisecond is enough for it.
+character_ms(Int, Frac) ->
+    Sixtyfourths = Int * 64 + Frac,
+    Numerator = ?CHARACTER_BITS * 16 * 1000 * Sixtyfourths,
+    Denominator = 64 * ?UART_CLOCK_HZ,
+    max(1, (Numerator + Denominator - 1) div Denominator).
 
 set_divisors(Dev, 0) ->
     ok = erx_device:write_field(Dev, ibrd, baud_divint, ?IBRD_DEFAULT),

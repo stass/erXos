@@ -2,11 +2,28 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative '../hardware'
+
 module Erx
   module ChokepointRules
     DEVICE_DESIGN = 'docs/design-runtime.md#the-device-nif'
     DEVICE_NIFS = 'otp/erts/emulator/nifs/erxos'
     DEVICE_SCOPE = Chokepoints::Scope.new(own: true, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*'])
+    # The accessors tools/gen_hw.rb writes for each SVD peripheral, and their headers, read from
+    # the generator, so a new device or register is covered as it is generated. A runtime reaches
+    # a register window only through erx_device's table; in the kernel only the platform layer
+    # may use them, where the kernel's own row narrows them to the early-console writer
+    # (docs/design-kernel.md, "Chokepoint checks"). These text rules catch a slip, not a
+    # determined bypass (a macro include, token pasting, a hand-written volatile access): what
+    # keeps a runtime off device registers is that only erx_device maps device memory.
+    PERIPHERALS = Hardware.devices(root: REPOSITORY)
+    PERIPHERAL_HEADERS = PERIPHERALS.map { |device| Hardware.device_header_path(device) }.freeze
+    PERIPHERAL_SYMBOLS = PERIPHERALS.flat_map { |device| Hardware.generated_symbols(device) }.freeze
+    # An include of one of those headers by its path below include/, in any case, so a header
+    # elsewhere that shares a peripheral's file name (timer.h, rtc.h) stays free.
+    PERIPHERAL_INCLUDE_PATHS = PERIPHERAL_HEADERS.map { |header| Regexp.escape(header.delete_prefix('include/')) }.freeze
+    PERIPHERAL_INCLUDE = %r{#{INCLUDE}[<"](?:#{PERIPHERAL_INCLUDE_PATHS.join('|')})[>"]}i
+    PERIPHERAL_OWNERS = [Chokepoints::Site.new(glob: 'kernel/platform/**/*')].freeze
 
     declare_group(
       rules: [
@@ -30,6 +47,26 @@ module Erx
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
                   Chokepoints::Site.new(glob: 'include/erx/hw/device_access.h')],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_device_access_load32(0, 0); }\n" }
+        ),
+        # The generated peripheral accessors are static inline, so they leave no symbol for the
+        # import check, and a header and a call are all a bypass of erx_device needs.
+        Chokepoints::Forbidden.new(
+          name: 'device-peripheral-headers',
+          rule: 'only the kernel platform layer includes a generated peripheral header',
+          design: DEVICE_DESIGN,
+          scope: DEVICE_SCOPE,
+          pattern: PERIPHERAL_INCLUDE,
+          sites: PERIPHERAL_OWNERS,
+          seed: { 'otp/erts/emulator/beam/seeded.c' => "#include <erx/hw/pl011.h>\n" }
+        ),
+        Chokepoints::Forbidden.new(
+          name: 'device-peripheral-accessors',
+          rule: 'only the generated peripheral headers and the kernel platform layer name their accessors',
+          design: DEVICE_DESIGN,
+          scope: DEVICE_SCOPE,
+          pattern: /\b(?:#{PERIPHERAL_SYMBOLS.map { |symbol| Regexp.escape(symbol) }.join('|')})\b/,
+          sites: PERIPHERAL_HEADERS.map { |header| Chokepoints::Site.new(glob: header) } + PERIPHERAL_OWNERS,
+          seed: { 'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(erx_mmio_t d) { erx_pl011_dr_write(d, 65); }\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'device-register-callers',
