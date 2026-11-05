@@ -365,14 +365,16 @@ dies with a removed file open frees the file's charge
 `erx_file_remote` turns the tree's answers into what stock `prim_file`
 answers on a Unix host, by rules it applies to every server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)):
-its error steps (`rename` of `"/"` and `del_dir` of a path ending in `.`
-answer `einval`; `del_dir` of a path ending in `..` answers `eexist`; a
-mount point, `/tmp` itself, answers `ebusy`; `enotempty` becomes `eexist`
-and `eisdir` from `delete` becomes `eperm`; a failed `del_dir` of the
-working directory answers `einval`, while an empty one is removed), its
-mapping of `getattr` to `#file_info{}`, and its offsets: a write moves an
-open file's offset to `At` plus the count, so an append leaves it after
-the appender's own bytes.
+its error steps (`rename` of `"/"` answers `einval`; a removal, rename or
+creation whose path ends in `.` or `..` resolves the rest of the path and
+then answers Linux's error for such a name, `del_dir`'s `einval` for `.`
+and `enotempty` for `..` among them; a mount point, `/tmp` itself,
+answers `ebusy`; `enotempty` becomes `eexist` and `eisdir` from `delete`
+becomes `eperm`; a failed `del_dir` of the working directory answers
+`einval`, while an empty one is removed), its mapping of `getattr` to
+`#file_info{}`, and its offsets: a write moves an open file's offset to
+`At` plus the count, so an append leaves it after the appender's own
+bytes.
 
 ## Starting and mounting
 
@@ -495,14 +497,20 @@ the code under test ran.
   (`build/oracle/jit/install`) in a fresh host directory, and their
   results, `#file_info{}` records included, are compared after mapping
   the listed differences; every other difference fails the test. Cases
-  added for the client's rules: `rename("/", "x")`, `del_dir(".")`, the
-  removal of an empty working directory and of a non-empty one, a
-  truncate through a read-only descriptor and through a writable one
-  after `chmod 0444`, and `write_file_info` of a record read with
-  `read_file_info`. Seeded: the client without its `ENOTEMPTY`-to-`eexist`
-  rule, which the `del_dir` of a non-empty directory catches; `setattr`
-  checking the node's mode for an open handle, which the `chmod 0444`
-  case catches.
+  added for the client's rules: `rename("/", "x")`, `del_dir(".")`,
+  `del_dir("missing/.")`, `del_dir("child/..")` from the directory
+  holding `child`, `delete("file/.")`, the removal of an empty working
+  directory and of a non-empty one, `delete("missing/victim")` while
+  `victim` exists, a truncate through a read-only descriptor and through
+  a writable one after `chmod 0444`, and `write_file_info` of a record
+  read with `read_file_info`. Seeded: the client without its
+  `ENOTEMPTY`-to-`eexist` rule, which the `del_dir` of a non-empty
+  directory catches; a client that answers a last `.` or `..` before
+  resolving the rest, which `del_dir("missing/.")` catches; one that
+  resolves a last `.` on the text, which `delete("file/.")` catches as
+  the file removed; a path operation that walks its fid in place, which
+  the `victim` case catches as `victim` removed; `setattr` checking the
+  node's mode for an open handle, which the `chmod 0444` case catches.
 * **Fids and nodes.** A fid walked to a file, the file removed, then an
   `lopen` and a `getattr` through the fid, which answer `enoent`, and a
   new file made between. Seeded: a tree that gives the next node a freed
