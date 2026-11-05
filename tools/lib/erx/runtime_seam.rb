@@ -15,8 +15,9 @@ module Erx
     Violation = Data.define(:object, :name)
     Report = Data.define(:violations, :unused)
     IMPORTS_FILE = 'erts/emulator/sys/erxos/imports.txt'
-    # What one C library's headers and compiler make of the same calls: each build's
-    # check leaves out the other's.
+    # Sections only the hosted build uses: libSystem's names, and the calls of
+    # erx_stdio_nif.c, an object the native build does not link. The native check leaves
+    # them out, so they do not count as unused there.
     HOSTED_ONLY = %w[libsystem only_erx_stdio_nif].freeze
     NATIVE_ONLY = %w[musl stock_native].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_$.]*\z/
@@ -72,13 +73,14 @@ module Erx
     def shared_names(imports) = imports.reject { |section, _| section.start_with?(OWN_LIST_PREFIX) }.values.flatten
     def own_names(imports) = imports.select { |section, _| section.start_with?(OWN_LIST_PREFIX) }.values.flatten
 
-    # The effects: read the objects with nm. The executable is read too, less what
-    # liberx itself imports, so a leftover object or a library missing from the
-    # list of objects cannot hide what the link really brought in.
+    # The effects: read the objects with nm. The executable is checked as one more
+    # object, so that a leftover object or a library missing from the list cannot hide
+    # what the link really brought in. Its undefined names leave out two groups that
+    # are checked elsewhere: those liberx's own object leaves undefined, and the names
+    # of the own lists, which their one object answers for.
     def check_objects(objects:, executable:, liberx:, imports_path:)
       undefined = objects.to_h { |object| [object, symbol_names(nm('-u', object))] }
       imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY)
-      # The objects answer for an own list's names, so the executable holds them for its one object.
       undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
       inside = objects.flat_map { |object| defined_names(object) }.uniq
       check(undefined_by_object: undefined, inside: inside, imports: imports)

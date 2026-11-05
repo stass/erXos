@@ -289,6 +289,7 @@ it; git history is the record of completed work.
   `libc_root_write.c`. Moving `main` out of the archive, into ERTS's own `erl_main.o`, which is linked explicitly, removes the rule.
 * [Medium] `tools/lib/erx/runtime_seam.rb`: `check_elf_objects` reads only the emulator's objects and six named libraries, unlike the hosted
   check, which reads the executable, so a library added only to the native link can import an unlisted name. Derive the list from the root's link map.
+* [Low] `tools/lib/erx/fiasco.rb`: `Fiasco#build` records the audit report again before pack audits it, so a build output edited after the build, which `make` leaves alone, is recorded as built rather than refused. (From reading the code; not run.)
 * [Low] `test/fixtures/runtime_event_harness.c`: the `scheduler_wait` exit test (`erx_event_leave_wait_ready`) is single-threaded and pins the
   call by source text, so the real crossing of a scheduler and its waker is not run.
 * [Low] `tools/fuzz/boot_build_target.rb`: the boot fuzz targets do not require that any input is accepted, so a target that

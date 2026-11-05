@@ -26,6 +26,12 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/runtime_entry.h"
 
+/*
+ * The system domain's id is 4 because a domain's id is its node's creation and stock
+ * ERTS gives no node a creation below 4 (docs/design-domains.md, "Domain ids, pids and
+ * references"). It is a rule of the domain design, not an ABI constant: the hosted entry
+ * names the same number.
+ */
 #define SYSTEM_DOMAIN_ID	4
 #define MCPU_PER_CPU		1000
 
@@ -85,7 +91,11 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	erx_fiasco_libc_root_start(main);
 }
 
-/* The archive sigma0 mapped one to one for the root's life, as the release, and what of its manifest reaches the page. */
+/*
+ * Binds the boot archive as the release, then reads its manifest into *manifest. The
+ * archive is the one sigma0 mapped one to one for the root's life. Returns NULL, or the
+ * reason the archive or its manifest was refused.
+ */
 static const char *
 release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manifest)
 {

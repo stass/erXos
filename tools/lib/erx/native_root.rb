@@ -21,6 +21,11 @@ module Erx
     # A section task.ld does not name would take the segments of the one before it, and a
     # writable one after .tbss would shrink every thread's TLS, so such a link fails.
     TASK_LINK_FLAGS = %w[--orphan-handling=error].freeze
+    # Flags of every link that build makes, root and task. The scripts place each segment
+    # on a page of its own and the program has nothing to relocate, so the linker adds no
+    # RELRO header: root.ld names no program headers and would get one for it, and task.ld
+    # names its own, so there the flag changes nothing.
+    ROOT_LINK_FLAGS = %w[-z max-page-size=4096 -z norelro].freeze
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory: the effects over sigma0 and the two pure cores.
@@ -120,8 +125,11 @@ module Erx
       objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, *link_flags, '-z', 'max-page-size=4096', '-z', 'norelro', *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
-                   '-o', program, *objects, '--start-group', *archives, @fiasco.boot_core_archive, *libraries, '--end-group'],
+      @runner.run([@linker, '-T', script, *link_flags, *ROOT_LINK_FLAGS, *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
+                   '-o', program, *objects,
+                   # The archives name one another's symbols in no fixed order, so the linker
+                   # rescans them as a group until nothing new resolves.
+                   '--start-group', *archives, @fiasco.boot_core_archive, *libraries, '--end-group'],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program
     end

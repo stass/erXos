@@ -216,4 +216,25 @@ class LibcTestTest < Minitest::Test
       assert_equal(%w[functional/argv functional/tls_align], Erx::LibcTest.discover(source))
     end
   end
+
+  # OTP links a tool with the archives ahead of its objects, so what an early libc reference
+  # pulls in from the archive comes before the tool's own main. Every stdio call reaches the
+  # root's write: were its member to reach the start path, that would bring runtime_main.c's
+  # main and collide with the tool's, as yielding_c_fun's link did. So it needs the console alone.
+  def test_the_root_write_member_needs_only_the_console
+    compiler = ENV.fetch('ERX_CLANG', '')
+    skip 'set ERX_CLANG to the installed LLVM clang' if compiler.empty?
+
+    root = File.expand_path('../..', __dir__)
+    source = Erx::NativeRoot::SYSTEM.find do |path|
+      path.end_with?('.c') && File.read(File.join(root, path)).match?(/^erx_fiasco_libc_write\(/)
+    end
+    Dir.mktmpdir('erx-root-write-') do |directory|
+      object = File.join(directory, 'write.o')
+      assert system(compiler, *Erx::NativeRoot::FLAGS, '-c', source, '-o', object, chdir: root), "#{source} compiles"
+      nm = File.join(File.dirname(compiler), 'llvm-nm')
+      undefined = IO.popen([nm, '--undefined-only', '--format=just-symbols', object], &:read).split
+      assert_equal %w[erx_fiasco_console_write], undefined, "what #{source} makes the link pull in"
+    end
+  end
 end

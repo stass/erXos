@@ -26,20 +26,27 @@
 _Noreturn void	erx_fiasco_call_on_stack(void *top, void (*entry)(void));
 
 static void	root_enter(void);
-static uint64_t	main_stack_top(void);
+static uint64_t	main_stack_alloc_or_machine_off(void);
 
+/*
+ * The program to run, kept here because erx_fiasco_call_on_stack passes its entry no
+ * argument: root_enter reads it from this variable after the switch to main's stack.
+ */
 static int (*root_program)(int, char **, char **);
 
 void
 erx_fiasco_libc_root_start(int (*program)(int, char **, char **))
 {
 	root_program = program;
-	erx_fiasco_call_on_stack((void *)(uintptr_t)main_stack_top(), root_enter);
+	erx_fiasco_call_on_stack((void *)(uintptr_t)main_stack_alloc_or_machine_off(), root_enter);
 }
 
-/* A reserved page that nothing commits lies below the stack, so an overrun faults. */
+/*
+ * Returns the top of main's new stack, or ends the machine when memory for it cannot
+ * be had. A reserved page that nothing commits lies below the stack, so an overrun faults.
+ */
 static uint64_t
-main_stack_top(void)
+main_stack_alloc_or_machine_off(void)
 {
 	static const char refused[] = "erx: root task: no memory for main's stack\n";
 	uint64_t base;
