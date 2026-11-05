@@ -419,22 +419,20 @@ it; git history is the record of completed work.
   `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
 * [Medium] runtime, `otp/lib/kernel/src/erx_file_remote.erl`: the client of a file server's grant is a stub
   that answers every operation `{error, enotsup}`; the path and open-file operations of
-  [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace it, preloaded,
-  and settle a two-path operation (`rename`, `make_link`) whose paths lie on different mounts.
-* [Medium] runtime, `erx_prim_file.c` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
-  the `{remote, Pid, Names}` answer leaves out the entry's tree and rights, so two mounts of one grant on
-  different trees answer alike and a read-only bind of an `rw` grant would let its client write; the
-  answer should carry both, copied under the namespace's lock. A two-path operation (`rename`, `make_link`)
-  answers for its first path on a grant only, and the client must resolve the other again outside that
-  lock; the NIF should resolve both under one lock and answer both, or `exdev`.
+  [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace it, preloaded.
+* [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
+  a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
+  link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers
+  `ebusy`, `rename("/tmp/x", "/tmp")` reaches the grant with an empty name where Linux answers `exdev`, and
+  `rename("/tmp/missing/x", "/u/y")` answers `exdev` where Linux first finds the missing directory (`enoent`).
+  Two entries of one grant, tree and rights also take a rename together where Linux answers `exdev` between
+  two bind mounts. The /tmp oracle cases settle which rules the design states.
 * [Low] runtime, `prim_file_nif.h`: `efile_path_t` keeps an `erx_ns_result_t` whose `res_mount` still points
   into the namespace's table after the lock is released; nothing reads it, but holding only copied values
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
 * [Low] runtime, `erx_ns`: `which/1`, `list/0` and `tmp_limit/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written; `set_cwd` into a grant answers through
   `erx_file_remote`, which cannot yet set the working directory.
-* [Low] runtime, `include/erx/ns.h`: `ERX_NS_NOFID` is 9P's `NOFID` by hand; it moves to the frame profile
-  of `abi/erx_abi.txt` when the profile is written.
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
   ([design-tmp.md](docs/design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
   on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which

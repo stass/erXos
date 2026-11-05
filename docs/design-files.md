@@ -1335,8 +1335,15 @@ mount the NIF returns `{erofs, Image, Names}`, and the operation runs in
 the calling process through `erx_erofs`, the EROFS reader, which returns
 OTP's file descriptor record with itself as the module for an open file
 ([design-storage.md](design-storage.md#reading-erofs-images)). For a grant
-the NIF returns `{remote, Pid, Names}`, and the operation runs in the
-calling process through `erx_file_remote`. `erx_file_remote` is preloaded,
+the NIF returns `{remote, {Pid, Tree, Rights}, Names}`, and the operation
+runs in the calling process through `erx_file_remote`. The middle element
+is the grant as the path's mount entry reaches it, copied out under the
+namespace's lock with the names: `Tree` is the tree the client attaches
+to, so two entries of one grant on two trees reach two trees, and
+`Rights` is the entry's `ro`, `rw` or `rx`, so a read-only bind of an
+`rw` grant reaches its client read-only and the client never sends a
+request that writes through it. `Names` are the path's names from the
+tree's root, the entry's root included. `erx_file_remote` is preloaded,
 as `prim_file` and the EROFS reader are, and calls only BIFs and preloaded
 modules: whatever process calls `file` or `erl_prim_loader` on a server's
 path runs it, the code server included when a server's directory is on
@@ -1396,8 +1403,16 @@ the node.
   terminal is. A server that dies while files are open turns their next
   operations into `{error, eio}`.
 
-A rename or a `make_link` between two mounts returns `{error, exdev}`, as
-between two Unix file systems, without asking either server.
+A rename or a `make_link` resolves its two paths in one call,
+`erx_ns_resolve_two`, under one hold of the namespace's lock, so a
+mount, bind or unmount cannot fall between them. Two paths on one
+grant's tree through one set of rights, whatever entries they pass,
+return `{remote, {Pid, Tree, Rights}, Names, OtherNames}`, and
+`erx_file_remote` sends the one request that takes both. A path on a
+grant paired with a path on another grant, another tree, other rights
+or a provider of the NIF returns `{error, exdev}`, as between two Unix
+file systems, without asking either server. Two paths neither on a
+grant are the NIF's own providers', which are read-only.
 
 **Modes.** A file that `open` creates is sent with stock's mode `8#666`
 and a directory that `make_dir` makes with `8#777`, the modes stock's
@@ -1672,7 +1687,8 @@ table:
 * a working directory is a path, so a domain or program whose working
   directory is renamed stays at the old path, where Unix follows the
   directory;
-* a rename between two mounts fails with `exdev`;
+* a rename between two grants, two trees or two sets of rights fails
+  with `exdev`, where Linux also fails between two mounts of one tree;
 * every operation on a file whose server died fails with `eio`;
 * a write larger than 64 KiB is several requests, each atomic, which
   another writer's may fall between, where a local Linux file system

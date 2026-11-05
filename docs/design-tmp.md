@@ -155,7 +155,7 @@ answer it gives is one POSIX allows ([Fids and nodes](#fids-and-nodes)).
 
 1. The caller's path is resolved by `erx_ns_resolve` in the NIF; `/tmp`'s
    row is an ordinary `ERX_NS_SERVER` row whose pid is the domain's own
-   grant, so the NIF answers `{remote, G, Names}`.
+   grant, so the NIF answers `{remote, {G, Tree, rw}, Names}`.
 2. `erx_file_remote`, in the calling process, sends the protocol's
    requests to `G` as local messages, as it sends them across a
    connection to a grant in another domain, each naming the caller as the
@@ -468,7 +468,7 @@ included, answering an error for each case it refuses.
 These add to the differences every server has
 ([design-files.md](design-files.md#compatibility-and-migration)): `..`
 resolved on the text, a working directory that is a path, `exdev`
-between mounts, links followed by the client, writes atomic per 64 KiB
+between grants, trees or rights, links followed by the client, writes atomic per 64 KiB
 request, a positioned write to an `append` file appending as on Linux
 where macOS writes at the offset, and `file:allocate/3` answering
 `enotsup`. Each is pinned by the oracle comparison, which maps it.

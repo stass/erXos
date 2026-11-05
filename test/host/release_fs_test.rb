@@ -26,6 +26,7 @@ class ReleaseFsTest < Minitest::Test
   NS_EEXIST = 4
   NS_EBUSY = 5
   NS_ELIMIT = 6
+  NS_EXDEV = 7
   NS_SERVER = 2
   RIGHTS_RO = 0
   RIGHTS_RW = 1
@@ -195,6 +196,22 @@ class ReleaseFsTest < Minitest::Test
     assert_equal NS_ENAMETOOLONG.to_s, edit([bind(deep, '/x', false)], mounts: [['/', "/#{'r' * 99}"]]).first
   end
 
+  # A rename or a link takes two paths only where one provider takes both: one
+  # grant's tree through one set of rights, whatever the entries' points and roots,
+  # or the release file system; any other pair is exdev, and both results are empty.
+  def test_two_paths_resolve_together_or_answer_exdev
+    exdev = [NS_EXDEV, nil, '', nil, '']
+    einval = [NS_EINVAL, nil, '', nil, '']
+    cases = { ['/tmp/b', '/tmp/c/d'] => [NS_OK, 1, 'b', 1, 'c/d'], ['/tmp/b', '/x/e'] => [NS_OK, 1, 'b', 4, 'a/e'],
+              ['/tmp/b', '/u/b'] => exdev, ['/tmp/b', '/v/b'] => exdev, ['/tmp/b', '/ro/b'] => exdev,
+              ['/tmp/b', '/etc'] => exdev, ['/etc', '/tmp/b'] => exdev, ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'],
+              ['/tmp/b', "/x\xff"] => einval, ["/a\0", '/u/b'] => einval, ['/ro/a', '/ro/b'] => [NS_OK, 5, 'a/a', 5, 'a/b'] }
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), mount('/u', 7, 'u', RIGHTS_RW), mount('/v', 8, 'tmp', RIGHTS_RW),
+                  bind('/tmp/a', '/x', false), bind('/tmp/a', '/ro', true)] + cases.keys.map { |first, second| two(first, second) })
+    assert_equal ['0'] * 5, lines.first(5)
+    cases.keys.zip(lines.drop(5)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
+  end
+
   # A draw keeps the counter's low 32 bits and skips NOFID, also past a wrap.
   def test_a_fid_is_the_low_32_bits_and_never_nofid
     values = [0, 1, 0xffff_fffe, 0xffff_ffff, 0x1_0000_0000, 0x1_0000_0005, 0x1_ffff_ffff, 0xffff_ffff_ffff_ffff]
@@ -355,6 +372,13 @@ class ReleaseFsTest < Minitest::Test
   def bind(from, to, read_only) = "B #{hex(from.b)} #{hex(to.b)} #{read_only ? 1 : 0}"
   def unmount(point) = "U #{hex(point.b)}"
   def query(path) = "Q #{hex(path.b)}"
+  def two(first, second) = "T #{hex(first.b)} #{hex(second.b)}"
+
+  def pair(line)
+    status, first_mount, first_names, second_mount, second_names = line.split(' ')
+    [Integer(status), first_mount == '-' ? nil : Integer(first_mount), unhex(first_names),
+     second_mount == '-' ? nil : Integer(second_mount), unhex(second_names)]
+  end
 
   def entries(lines)
     lines.select { |line| line.start_with?('E ') }.map do |line|

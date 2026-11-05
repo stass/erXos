@@ -44,7 +44,8 @@ typedef enum erx_ns_status {
 	ERX_NS_ENOENT,		/* empty, or reaches no mount */
 	ERX_NS_EEXIST,		/* a mount or bind at a point the table already has */
 	ERX_NS_EBUSY,		/* unmounting `/` */
-	ERX_NS_ELIMIT		/* the table already holds ERX_NS_MOUNTS_MAX entries */
+	ERX_NS_ELIMIT,		/* the table already holds ERX_NS_MOUNTS_MAX entries */
+	ERX_NS_EXDEV		/* two paths that one provider cannot take together */
 } erx_ns_status_t;
 
 /*
@@ -71,7 +72,7 @@ typedef struct erx_ns {
 } erx_ns_t;
 
 /*
- * What a path resolved to; a source check lets only erx_ns_resolve write these
+ * What a path resolved to; a source check lets only liberx/ns.c write these
  * fields. res_mount is NULL for the empty root, a read-only
  * directory above the mount points of a narrowed namespace. res_names is the names
  * after the mount's point, under its root, joined by `/` with no leading `/`,
@@ -91,6 +92,25 @@ typedef struct erx_ns_result {
 /* Anything but ERX_NS_OK leaves res_mount NULL and every count zero. */
 erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 	    erx_ns_result_t *);
+/*
+ * Resolves the two paths of a rename or a link, the first into the first result,
+ * in one call, so a caller holding its lock across the call sees both on one
+ * table. The pair is ERX_NS_OK when one provider takes both: one grant's tree
+ * through one set of rights (erx_ns_same_grant), or, for two paths neither on a
+ * grant, the runtime's own read-only providers. A path on a grant with any other
+ * path is ERX_NS_EXDEV, as between two Unix file systems, and no server is asked
+ * (design-files.md, Erlang clients). A path that fails answers its own status,
+ * the first path's first. Anything but ERX_NS_OK leaves both results as a refused
+ * erx_ns_resolve leaves its one.
+ */
+erx_ns_status_t	erx_ns_resolve_two(const erx_ns_t *, const uint8_t *, size_t,
+	    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
+/*
+ * Whether two entries reach the same tree of the same grant through the same
+ * rights, whatever their points and roots: a request through one may name
+ * anything the other reaches. False unless both are ERX_NS_SERVER.
+ */
+bool		erx_ns_same_grant(const erx_ns_mount_t *, const erx_ns_mount_t *);
 
 /*
  * Adds an ERX_NS_SERVER entry for the grant `server` at the point the path
@@ -109,13 +129,11 @@ erx_ns_status_t	erx_ns_bind(erx_ns_t *, const uint8_t *, size_t,
 erx_ns_status_t	erx_ns_unmount(erx_ns_t *, const uint8_t *, size_t);
 
 /*
- * 9P's NOFID, which no fid takes. A runtime draws fids from one 64-bit counter
- * (design-files.md, Version and attach): a draw adds one and keeps the low 32
- * bits, drawing again for NOFID.
+ * A runtime draws fids from one 64-bit counter (design-files.md, Version and
+ * attach): a draw adds one and keeps the low 32 bits, drawing again for 9P's
+ * NOFID (ERX_P9_NOFID), which no fid takes. This gives the fid a draw that gave
+ * `value` yields, or false for NOFID: draw again.
  */
-#define ERX_NS_NOFID	UINT32_MAX
-
-/* The fid a draw that gave `value` yields, or false for NOFID: draw again. */
 bool		erx_ns_fid_of(uint64_t, uint32_t *);
 
 #endif /* ERX_NS_H */

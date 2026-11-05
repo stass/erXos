@@ -185,8 +185,53 @@ namespace("release") ->
     Show("gone", ended(<<"/gone/x">>, 100)),
     Show("unmount gone", erx_ns:unmount(<<"/gone">>)),
     Show("unmount bound", erx_ns:unmount(<<"/b">>)),
+    two_paths(Show),
     First = prim_file:erx_fid(),
     Show("fids", {is_integer(First), prim_file:erx_fid() - First}).
+
+%% A read-only bind of a writable grant reaches erx_file_remote read-only, with the
+%% grant's tree; a rename or a link reaches it only when both paths lie on one grant's
+%% tree through one set of rights, and is exdev otherwise, before any server is asked.
+%% erx_file_remote is traced, so each step shows what reached it, or none.
+two_paths(Show) ->
+    Reached = fun(Call) -> reached(Call) end,
+    ok = erx_ns:mount(self(), <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:mount(self(), <<"/u">>, [{tree, <<"u">>}, rw]),
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/ro">>, [ro]),
+    {module, erx_file_remote} = code:ensure_loaded(erx_file_remote),
+    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, true, [local]),
+    Show("ro bind", Reached(fun() -> prim_file:read_file_info(<<"/ro/c">>) end)),
+    Show("rw mount", Reached(fun() -> prim_file:make_dir(<<"/tmp/c">>) end)),
+    Show("rename one", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/tmp/a/y">>) end)),
+    Show("rename two", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/u/y">>) end)),
+    Show("rename ro", Reached(fun() -> prim_file:rename(<<"/tmp/a/x">>, <<"/ro/y">>) end)),
+    Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/lib/y">>) end)),
+    Show("link one", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/u/y">>) end)),
+    Show("link two", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/tmp/y">>) end)),
+    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, false, [local]),
+    [ok = erx_ns:unmount(Point) || Point <- [<<"/ro">>, <<"/u">>, <<"/tmp">>]],
+    ok.
+
+%% The operation's answer and the call that reached erx_file_remote, its pid left out.
+%% The operation runs in a process of its own, traced by this one: ERTS sends a
+%% process no trace message of its own calls.
+reached(Operation) ->
+    Parent = self(),
+    {Runner, Monitor} = spawn_monitor(fun() -> receive go -> Parent ! {self(), Operation()} end end),
+    1 = erlang:trace(Runner, true, [call]),
+    Runner ! go,
+    Result = receive
+                 {Runner, Answer} -> Answer;
+                 {'DOWN', Monitor, process, Runner, Reason} -> {died, Reason}
+             end,
+    Delivered = erlang:trace_delivered(Runner),
+    receive {trace_delivered, Runner, Delivered} -> ok end,
+    receive
+        {trace, Runner, call, {erx_file_remote, Function, [{Pid, Tree, Rights} | Rest]}}
+          when is_pid(Pid) ->
+            {Result, Function, Tree, Rights, Rest}
+    after 0 -> {Result, none}
+    end.
 
 %% The NIF learns of a process's end on its own monitor, so it may answer a moment later.
 ended(Path, 0) -> prim_file:read_file_info(Path);

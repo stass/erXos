@@ -125,19 +125,25 @@ typedef struct {
 
 /** @brief erXos: a path's bytes and where the namespace resolved it, taken once,
  * under the namespace's lock, when the path is marshalled (erx_prim_file.c).
- * Nothing in it points into the namespace's table: result.res_mount is never
- * read, and the mount's kind is copied out beside it. */
+ * Nothing read from it after the lock is released points into the namespace's
+ * table: result.res_mount is read only under the lock, and what the operation
+ * needs of the mount entry is copied out beside it. */
 typedef struct {
     ErlNifBinary bytes;        /* ends in its one NUL */
     int on_mount;              /* 0 for the empty root above a narrowed namespace's mounts */
     erx_ns_kind_t kind;        /* the mount's kind, when on_mount */
-    ERL_NIF_TERM remote;       /* {remote, Pid, Names}, when marshalling answered EFILE_EREMOTE */
+    uint64_t server;           /* ERX_NS_SERVER: the entry's grant pid, 0 once it ended */
+    char tree[ERX_NAME_MAX + 1];       /* ERX_NS_SERVER: the entry's tree */
+    erx_ns_rights_t rights;    /* ERX_NS_SERVER: the entry's rights */
+    ERL_NIF_TERM remote;       /* the answer, when marshalling answered EFILE_EREMOTE */
     erx_ns_result_t result;
 } efile_path_t;
 
-/** @brief erXos: what efile_marshal_path answers for a path on a file server's
- * grant. The NIF then answers the path's `remote` term, and prim_file runs the
- * operation through erx_file_remote (design-files.md, Erlang clients). */
+/** @brief erXos: what marshalling answers for a path on a file server's grant.
+ * The NIF then answers the first path's `remote` term, {remote, Grant, Names},
+ * or {remote, Grant, Names, OtherNames} for two paths, Grant being {Pid, Tree,
+ * Rights}, and prim_file runs the operation through erx_file_remote
+ * (design-files.md, Erlang clients). */
 #define EFILE_EREMOTE (-1)
 
 /** @brief Prepares the layer once, when the NIF loads.
@@ -166,6 +172,13 @@ ERL_NIF_TERM efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
  * @param path The term to translate; it must have been encoded with
  * prim_file:internal_native2name for compatibility reasons. */
 posix_errno_t efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result);
+
+/** @brief erXos: marshals the two paths of a rename or a hard link under one
+ * hold of the namespace's lock, so no change falls between them. Two paths
+ * that do not lie on one grant's tree through one set of rights, where either
+ * is on a grant, answer EXDEV without asking a server. */
+posix_errno_t efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
+                                  efile_path_t *first_result, efile_path_t *second_result);
 
 /** @brief Returns the underlying handle as an implementation-defined term.
  *

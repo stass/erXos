@@ -158,7 +158,14 @@ class RuntimePrimFileTest < Minitest::Test
       'ns read' => '{error,enotsup}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
       'ns bind' => 'ok', 'ns bound' => '{error,enotsup}', 'ns unmount' => 'ok', 'ns after' => '{error,enoent}',
       'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok', 'ns gone' => '{error,eio}',
-      'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}' }.each do |step, want|
+      'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
+      'ns ro bind' => '{{error,enotsup},read_file_info,<<"tmp">>,ro,[<<"a/c">>,1,local]}',
+      'ns rw mount' => '{{error,enotsup},make_dir,<<"tmp">>,rw,[<<"c">>]}',
+      'ns rename one' => '{{error,enotsup},rename,<<"tmp">>,rw,[<<"x">>,<<"a/y">>,<<"/tmp/x">>,<<"/tmp/a/y">>]}',
+      'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
+      'ns rename local' => '{{error,exdev},none}',
+      'ns link one' => '{{error,enotsup},make_link,<<"u">>,rw,[<<"x">>,<<"y">>,<<"/u/x">>,<<"/u/y">>]}',
+      'ns link two' => '{{error,exdev},none}' }.each do |step, want|
       assert_equal want, release.fetch(step), step
     end
   end

@@ -7,8 +7,9 @@
  * prim_file's platform layer over the namespace (design-runtime.md, Files;
  * design-files.md, Erlang clients). Every path passes erx_ns_resolve once, when it
  * is marshalled. The one provider served here is the release file system,
- * read-only; a path on a file server's grant answers {remote, Pid, Names}, and
- * prim_file runs the operation in the calling process through erx_file_remote. A
+ * read-only; a path on a file server's grant answers {remote, Grant, Names},
+ * Grant being the entry's {Pid, Tree, Rights}, and prim_file runs the operation in
+ * the calling process through erx_file_remote. A
  * handle holds a file of the release and a position, under prim_file_nif.c's
  * per-file state, and no file descriptor exists anywhere in the layer.
  *
@@ -19,8 +20,10 @@
  * swapped out could be freed only once its last reader is known to be done, a
  * second mechanism with nothing to gain while changes are rare. Under the read
  * lock, marshalling resolves a path and copies out all the operation needs (the
- * result, the mount's kind and the grant's pid), so nothing a reader keeps points
- * into the table, and a change made after the lock is released cannot reach it.
+ * result, the mount's kind and the grant's pid, tree and rights), so nothing a
+ * reader keeps points into the table, and a change made after the lock is
+ * released cannot reach it. The two paths of a rename or a link resolve under
+ * one hold of the lock, so both are answered from one table.
  *
  * Every grant pid in the table is watched by one monitor, all held by the one
  * resource ns_watcher. When the process ends, its entries keep their place and
@@ -87,10 +90,18 @@ static erx_release_fs_t	release_fs;
  */
 static erts_atomic32_t	*file_checked;
 
+/* The atoms erx_ns:mount takes and a remote answer carries. */
+static const char *const rights_names[] = {
+	[ERX_NS_RO] = "ro", [ERX_NS_RW] = "rw", [ERX_NS_RX] = "rx"
+};
+
 static int erx_build_table(void);
 static posix_errno_t erx_ns_errno(erx_ns_status_t);
 static ERL_NIF_TERM erx_ns_answer(ErlNifEnv *, erx_ns_status_t);
 static int erx_inspect_path(ErlNifEnv *, ERL_NIF_TERM, ErlNifBinary *);
+static void erx_copy_entry(efile_path_t *);
+static ERL_NIF_TERM erx_grant_term(ErlNifEnv *, const efile_path_t *);
+static ERL_NIF_TERM erx_names_term(ErlNifEnv *, const efile_path_t *);
 static ErlNifPid erx_pid_of(uint64_t);
 static bool erx_ns_holds(uint64_t);
 static void erx_ns_end_server(uint64_t);
@@ -171,7 +182,7 @@ efile_load(ErlNifEnv *env)
 	return (erx_build_table());
 }
 
-/* What erx_ns_resolve refuses a path with. */
+/* What erx_ns_resolve or erx_ns_resolve_two refuses a path with. */
 static posix_errno_t
 erx_ns_errno(erx_ns_status_t status)
 {
@@ -186,6 +197,8 @@ erx_ns_errno(erx_ns_status_t status)
 		return (EEXIST);
 	case ERX_NS_EBUSY:
 		return (EBUSY);
+	case ERX_NS_EXDEV:
+		return (EXDEV);
 	case ERX_NS_EINVAL:
 	case ERX_NS_ELIMIT:
 		break;
@@ -217,6 +230,9 @@ erx_ns_answer(ErlNifEnv *env, erx_ns_status_t status)
 	case ERX_NS_ELIMIT:
 		reason = "system_limit";
 		break;
+	case ERX_NS_EXDEV:
+		reason = "exdev";
+		break;
 	case ERX_NS_EINVAL:
 		reason = "einval";
 		break;
@@ -243,43 +259,113 @@ erx_pid_of(uint64_t server)
 }
 
 /*
+ * Under ns_lock: copies out of the entry a resolved path reached all its
+ * operation needs, so nothing read later points into the table. A refused path
+ * reached no entry.
+ */
+static void
+erx_copy_entry(efile_path_t *path)
+{
+	const erx_ns_mount_t *mount = path->result.res_mount;
+
+	path->on_mount = mount != NULL;
+	path->kind = mount != NULL ? mount->kind : ERX_NS_RELEASE;
+	path->server = 0;
+	path->tree[0] = '\0';
+	path->rights = ERX_NS_RO;
+	if (mount != NULL && mount->kind == ERX_NS_SERVER) {
+		path->server = mount->server;
+		memcpy(path->tree, mount->tree, sizeof(path->tree));
+		path->tree[sizeof(path->tree) - 1] = '\0';
+		path->rights = mount->rights;
+	}
+}
+
+/* {Pid, Tree, Rights}: the grant as the path's entry reaches it, for erx_file_remote. */
+static ERL_NIF_TERM
+erx_grant_term(ErlNifEnv *env, const efile_path_t *path)
+{
+	ERL_NIF_TERM tree;
+	size_t length;
+
+	length = strlen(path->tree);
+	memcpy(enif_make_new_binary(env, length, &tree), path->tree, length);
+	return (enif_make_tuple3(env, (ERL_NIF_TERM)path->server, tree,
+	    enif_make_atom(env, rights_names[path->rights])));
+}
+
+/* The names from the tree's root, the entry's root included, joined by `/`. */
+static ERL_NIF_TERM
+erx_names_term(ErlNifEnv *env, const efile_path_t *path)
+{
+	ERL_NIF_TERM names;
+
+	memcpy(enif_make_new_binary(env, path->result.res_names_length, &names),
+	    path->result.res_names, path->result.res_names_length);
+	return (names);
+}
+
+/*
  * Marshalling resolves the path, and copies out under the lock all the
- * operation needs. A path on a grant answers {remote, Pid, Names}, or eio once
+ * operation needs. A path on a grant answers {remote, Grant, Names}, or eio once
  * the grant's process has ended.
  */
 posix_errno_t
 efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result)
 {
-	const erx_ns_mount_t *mount;
 	erx_ns_status_t status;
-	ERL_NIF_TERM names;
-	uint64_t server;
 
 	if (!erx_inspect_path(env, path, &result->bytes))
 		return (EINVAL);
-	result->on_mount = 0;
-	result->kind = ERX_NS_RELEASE;
-	server = 0;
 	enif_rwlock_rlock(ns_lock);
 	status = erx_ns_resolve(&name_space, result->bytes.data, result->bytes.size - 1,
 	    &result->result);
-	mount = result->result.res_mount;
-	if (status == ERX_NS_OK && mount != NULL) {
-		result->on_mount = 1;
-		result->kind = mount->kind;
-		server = mount->server;
-	}
+	erx_copy_entry(result);
 	enif_rwlock_runlock(ns_lock);
 	if (status != ERX_NS_OK)
 		return (erx_ns_errno(status));
 	if (!result->on_mount || result->kind != ERX_NS_SERVER)
 		return (0);
-	if (server == 0)
+	if (result->server == 0)
 		return (EIO);
-	memcpy(enif_make_new_binary(env, result->result.res_names_length, &names),
-	    result->result.res_names, result->result.res_names_length);
 	result->remote = enif_make_tuple3(env, enif_make_atom(env, "remote"),
-	    (ERL_NIF_TERM)server, names);
+	    erx_grant_term(env, result), erx_names_term(env, result));
+	return (EFILE_EREMOTE);
+}
+
+/*
+ * Both paths resolve under one hold of the lock (erx_ns_resolve_two), so a
+ * mount between them cannot split the pair. Two paths on one grant answer
+ * {remote, Grant, Names, OtherNames} in the first path's `remote`; two paths
+ * neither on a grant are the release file system's.
+ */
+posix_errno_t
+efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
+    efile_path_t *first_result, efile_path_t *second_result)
+{
+	erx_ns_status_t status;
+
+	if (!erx_inspect_path(env, first, &first_result->bytes) ||
+	    !erx_inspect_path(env, second, &second_result->bytes))
+		return (EINVAL);
+	enif_rwlock_rlock(ns_lock);
+	status = erx_ns_resolve_two(&name_space, first_result->bytes.data,
+	    first_result->bytes.size - 1, second_result->bytes.data,
+	    second_result->bytes.size - 1, &first_result->result,
+	    &second_result->result);
+	erx_copy_entry(first_result);
+	erx_copy_entry(second_result);
+	enif_rwlock_runlock(ns_lock);
+	if (status != ERX_NS_OK)
+		return (erx_ns_errno(status));
+	/* erx_ns_resolve_two answered OK, so either both are on the grant or neither. */
+	if (!first_result->on_mount || first_result->kind != ERX_NS_SERVER)
+		return (0);
+	if (first_result->server == 0)
+		return (EIO);
+	first_result->remote = enif_make_tuple4(env, enif_make_atom(env, "remote"),
+	    erx_grant_term(env, first_result), erx_names_term(env, first_result),
+	    erx_names_term(env, second_result));
 	return (EFILE_EREMOTE);
 }
 
@@ -290,6 +376,9 @@ efile_marshal_text(ErlNifEnv *env, ERL_NIF_TERM text, efile_path_t *result)
 		return (EINVAL);
 	result->on_mount = 0;
 	result->kind = ERX_NS_RELEASE;
+	result->server = 0;
+	result->tree[0] = '\0';
+	result->rights = ERX_NS_RO;
 	return (0);
 }
 
@@ -396,9 +485,6 @@ erx_ns_down(ErlNifEnv *env, void *watcher, ErlNifPid *pid, ErlNifMonitor *monito
 ERL_NIF_TERM
 efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	static const char *const rights_names[] = {
-		[ERX_NS_RO] = "ro", [ERX_NS_RW] = "rw", [ERX_NS_RX] = "rx"
-	};
 	ErlNifBinary point, tree;
 	erx_ns_rights_t rights;
 	erx_ns_status_t status;

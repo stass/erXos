@@ -41,6 +41,9 @@ static bool fuzz_under(const char *, const char *);
 static bool fuzz_normal(const char *);
 static void fuzz_check_table(const erx_ns_t *);
 static void fuzz_change(erx_ns_t *, const uint8_t *, size_t);
+static void fuzz_check_two(const erx_ns_t *, const uint8_t *, size_t,
+    const uint8_t *, size_t);
+static bool fuzz_same_result(const erx_ns_result_t *, const erx_ns_result_t *);
 
 static bool
 fuzz_next_line(const uint8_t *bytes, size_t length, size_t *cursor,
@@ -355,6 +358,63 @@ for (uint32_t other = 0; other < fs->count; other++) {
 }
 }
 
+static bool
+fuzz_same_result(const erx_ns_result_t *a, const erx_ns_result_t *b)
+{
+	return (a->res_mount == b->res_mount && a->res_nnames == b->res_nnames &&
+	    a->res_names_length == b->res_names_length &&
+	    a->res_path_length == b->res_path_length &&
+	    memcmp(a->res_names, b->res_names, a->res_names_length) == 0 &&
+	    memcmp(a->res_path, b->res_path, a->res_path_length) == 0);
+}
+
+/*
+ * erx_ns_resolve_two agrees with two calls of erx_ns_resolve: the first
+ * failure's status, else exdev exactly when a grant's path is paired with
+ * a path not on the same grant's tree through the same rights; and both
+ * results empty unless it answers ERX_NS_OK.
+ */
+static void
+fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
+    const uint8_t *second, size_t second_length)
+{
+	static erx_ns_result_t one, two, pair_one, pair_two;
+	erx_ns_status_t first_status, second_status, status, want;
+	bool on_grant;
+
+	first_status = erx_ns_resolve(ns, first, first_length, &one);
+	second_status = erx_ns_resolve(ns, second, second_length, &two);
+	status = erx_ns_resolve_two(ns, first, first_length, second,
+	    second_length, &pair_one, &pair_two);
+	if (first_status != ERX_NS_OK)
+		want = first_status;
+	else if (second_status != ERX_NS_OK)
+		want = second_status;
+	else {
+		on_grant = (one.res_mount != NULL &&
+		    one.res_mount->kind == ERX_NS_SERVER) ||
+		    (two.res_mount != NULL && two.res_mount->kind == ERX_NS_SERVER);
+		want = !on_grant || (one.res_mount != NULL && two.res_mount != NULL &&
+		    one.res_mount->kind == ERX_NS_SERVER &&
+		    two.res_mount->kind == ERX_NS_SERVER &&
+		    one.res_mount->server == two.res_mount->server &&
+		    one.res_mount->rights == two.res_mount->rights &&
+		    strcmp(one.res_mount->tree, two.res_mount->tree) == 0) ?
+		    ERX_NS_OK : ERX_NS_EXDEV;
+	}
+	if (status != want)
+		abort();
+	if (status == ERX_NS_OK) {
+		if (!fuzz_same_result(&one, &pair_one) ||
+		    !fuzz_same_result(&two, &pair_two))
+			abort();
+	} else if (pair_one.res_mount != NULL || pair_one.res_nnames != 0 ||
+	    pair_one.res_names_length != 0 || pair_one.res_path_length != 0 ||
+	    pair_two.res_mount != NULL || pair_two.res_nnames != 0 ||
+	    pair_two.res_names_length != 0 || pair_two.res_path_length != 0)
+		abort();
+}
+
 int
 LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 {
@@ -415,6 +475,15 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	else if (out.res_mount != NULL || out.res_nnames != 0 || out.res_names_length != 0 ||
 	    out.res_path_length != 0)
 		abort();
+	/* The path paired with each entry's point, both ways. */
+	for (uint32_t index = 0; index < ns.count; index++) {
+		const char *point = ns.mounts[index].point;
+
+		fuzz_check_two(&ns, line, line_length, (const uint8_t *)point,
+		    strlen(point));
+		fuzz_check_two(&ns, (const uint8_t *)point, strlen(point), line,
+		    line_length);
+	}
 
 	count = 0;
 	{

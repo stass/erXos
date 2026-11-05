@@ -319,7 +319,7 @@ static ERL_NIF_TERM posix_error_to_tuple(ErlNifEnv *env, posix_errno_t posix_err
     return enif_make_tuple2(env, am_error, error);
 }
 
-/* erXos: a path on a file server's grant answers {remote, Pid, Names}, and any
+/* erXos: a path on a file server's grant answers its remote term, and any
  * other refusal of a path its error tuple. */
 static ERL_NIF_TERM marshal_error_to_term(ErlNifEnv *env, const efile_path_t *path,
         posix_errno_t posix_errno) {
@@ -1174,10 +1174,9 @@ static ERL_NIF_TERM rename_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
 
     ASSERT(argc == 2);
 
-    if((posix_errno = efile_marshal_path(env, argv[0], &existing_path))) {
+    /* erXos: both paths resolve under one hold of the namespace's lock. */
+    if((posix_errno = efile_marshal_paths(env, argv[0], argv[1], &existing_path, &new_path))) {
         return marshal_error_to_term(env, &existing_path, posix_errno);
-    } else if((posix_errno = efile_marshal_path(env, argv[1], &new_path))) {
-        return marshal_error_to_term(env, &new_path, posix_errno);
     } else if((posix_errno = efile_rename(&existing_path, &new_path))) {
         return posix_error_to_tuple(env, posix_errno);
     }
@@ -1192,10 +1191,9 @@ static ERL_NIF_TERM make_hard_link_nif(ErlNifEnv *env, int argc, const ERL_NIF_T
 
     ASSERT(argc == 2);
 
-    if((posix_errno = efile_marshal_path(env, argv[0], &existing_path))) {
+    /* erXos: both paths resolve under one hold of the namespace's lock. */
+    if((posix_errno = efile_marshal_paths(env, argv[0], argv[1], &existing_path, &new_path))) {
         return marshal_error_to_term(env, &existing_path, posix_errno);
-    } else if((posix_errno = efile_marshal_path(env, argv[1], &new_path))) {
-        return marshal_error_to_term(env, &new_path, posix_errno);
     } else if((posix_errno = efile_make_hard_link(&existing_path, &new_path))) {
         return posix_error_to_tuple(env, posix_errno);
     }

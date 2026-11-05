@@ -141,7 +141,7 @@ open(Name, Modes) ->
     %% "raw files."
     try open_nif(encode_path(Name), Modes) of
         {ok, Ref} -> {ok, make_fd(Modes, Ref)};
-        {remote, Pid, Names} -> erx_file_remote:open(Pid, Names, Modes);
+        {remote, Grant, Names} -> erx_file_remote:open(Grant, Names, Modes);
         {error, Reason} -> {error, Reason}
     catch
         error:badarg -> {error, badarg}
@@ -572,7 +572,7 @@ read_file(Filename) ->
     %% We're doing this operation in the NIF to avoid excessive rescheduling.
     try
         remote(read_file_nif(encode_path(Filename)),
-               fun(Pid, Names) -> erx_file_remote:read_file(Pid, Names) end)
+               fun(Grant, Names) -> erx_file_remote:read_file(Grant, Names) end)
     catch
         error:badarg -> {error, badarg}
     end.
@@ -580,11 +580,14 @@ read_file_nif(_Filename) ->
     erlang:nif_error(undef).
 
 %% erXos: a path on a file server's grant comes back from the NIF as
-%% {remote, Pid, Names}, Names below the grant's root, and the operation runs in
-%% this process through erx_file_remote (design-files.md, Erlang clients). A
-%% two-path operation's answer names the first of its paths on a grant, and the
-%% operation gets both paths as given.
-remote({remote, Pid, Names}, Operation) -> Operation(Pid, Names);
+%% {remote, Grant, Names}, Grant {Pid, Tree, Rights} as the path's mount entry
+%% holds it and Names from the tree's root, the entry's root included, and the operation runs
+%% in this process through erx_file_remote (design-files.md, Erlang clients). A
+%% rename or a hard link whose paths both lie on one grant's tree, through one
+%% set of rights, answers {remote, Grant, Names, OtherNames}; paths that do not
+%% answer {error, exdev} from the NIF, which asks no server.
+remote({remote, Grant, Names}, Operation) -> Operation(Grant, Names);
+remote({remote, Grant, Names, OtherNames}, Operation) -> Operation(Grant, Names, OtherNames);
 remote(Result, _Operation) -> Result.
 
 %% erXos: the namespace's changes, for erx_ns, which checks their arguments.
@@ -631,7 +634,7 @@ read_link_all(Name) -> read_link_1(Name, true).
 read_link_1(Name, AcceptRawNames) ->
     try read_link_nif(encode_path(Name)) of
         {ok, RawName} -> translate_raw_name(RawName, AcceptRawNames);
-        {remote, Pid, Names} -> erx_file_remote:read_link(Pid, Names, AcceptRawNames);
+        {remote, Grant, Names} -> erx_file_remote:read_link(Grant, Names, AcceptRawNames);
         {error, Reason} -> {error, Reason}
     catch
         error:badarg -> {error, badarg}
@@ -650,7 +653,7 @@ list_dir_all(Name) -> list_dir_1(Name, false).
 list_dir_1(Name, SkipInvalid) ->
     try list_dir_nif(encode_path(Name)) of
         {ok, RawNames} -> list_dir_convert(RawNames, SkipInvalid, []);
-        {remote, Pid, Names} -> erx_file_remote:list_dir(Pid, Names, SkipInvalid);
+        {remote, Grant, Names} -> erx_file_remote:list_dir(Grant, Names, SkipInvalid);
         {error, Reason} -> {error, Reason}
     catch
         error:badarg -> {error, badarg}
@@ -698,8 +701,8 @@ read_info_1(Name, FollowLinks, TimeType) ->
     try
         case read_info_nif(encode_path(Name), FollowLinks) of
             {error, Reason} -> {error, Reason};
-            {remote, Pid, Names} ->
-                erx_file_remote:read_file_info(Pid, Names, FollowLinks, TimeType);
+            {remote, Grant, Names} ->
+                erx_file_remote:read_file_info(Grant, Names, FollowLinks, TimeType);
             FileInfo -> {ok, adjust_times(FileInfo, TimeType)}
         end
     catch
@@ -760,7 +763,7 @@ write_file_info_1(Filename, Info, TimeType) ->
         throw_on_error(set_permissions(EncodedName, Modes)),
         throw_on_error(set_time(EncodedName, ATime, MTime, CTime))
     catch
-        throw:{remote, Pid, Names} -> erx_file_remote:write_file_info(Pid, Names, Info);
+        throw:{remote, Grant, Names} -> erx_file_remote:write_file_info(Grant, Names, Info);
         throw:Reason -> {error, Reason};
         error:_ -> {error, badarg}
     end.
@@ -787,7 +790,7 @@ set_time_nif(_Path, _ATime, _MTime, _CTime) ->
     erlang:nif_error(undef).
 
 throw_on_error(ok) -> ok;
-throw_on_error({remote, _Pid, _Names} = Remote) -> throw(Remote);
+throw_on_error({remote, _Grant, _Names} = Remote) -> throw(Remote);
 throw_on_error({error, enotsup}) -> ok;
 throw_on_error({error, Reason}) -> throw(Reason).
 
@@ -840,7 +843,7 @@ set_cwd(Path) ->
         case is_path_translatable(Path) of
             true ->
                 remote(set_cwd_nif(encode_path(Path)),
-                       fun(Pid, Names) -> erx_file_remote:set_cwd(Pid, Names) end);
+                       fun(Grant, Names) -> erx_file_remote:set_cwd(Grant, Names) end);
             false -> {error, no_translation}
         end
     catch
@@ -850,7 +853,7 @@ set_cwd(Path) ->
 delete(Path) ->
     try
         remote(del_file_nif(encode_path(Path)),
-               fun(Pid, Names) -> erx_file_remote:delete(Pid, Names) end)
+               fun(Grant, Names) -> erx_file_remote:delete(Grant, Names) end)
     catch
         error:badarg -> {error, badarg}
     end.
@@ -858,35 +861,39 @@ delete(Path) ->
 rename(Source, Destination) ->
     try
         remote(rename_nif(encode_path(Source), encode_path(Destination)),
-               fun(Pid, Names) -> erx_file_remote:rename(Pid, Names, Source, Destination) end)
+               fun(Grant, Names, OtherNames) ->
+                       erx_file_remote:rename(Grant, Names, OtherNames, Source, Destination)
+               end)
     catch
         error:badarg -> {error, badarg}
     end.
 make_dir(Path) ->
     try
         remote(make_dir_nif(encode_path(Path)),
-               fun(Pid, Names) -> erx_file_remote:make_dir(Pid, Names) end)
+               fun(Grant, Names) -> erx_file_remote:make_dir(Grant, Names) end)
     catch
         error:badarg -> {error, badarg}
     end.
 del_dir(Path) ->
     try
         remote(del_dir_nif(encode_path(Path)),
-               fun(Pid, Names) -> erx_file_remote:del_dir(Pid, Names) end)
+               fun(Grant, Names) -> erx_file_remote:del_dir(Grant, Names) end)
     catch
         error:badarg -> {error, badarg}
     end.
 make_link(Existing, New) ->
     try
         remote(make_hard_link_nif(encode_path(Existing), encode_path(New)),
-               fun(Pid, Names) -> erx_file_remote:make_link(Pid, Names, Existing, New) end)
+               fun(Grant, Names, OtherNames) ->
+                       erx_file_remote:make_link(Grant, Names, OtherNames, Existing, New)
+               end)
     catch
         error:badarg -> {error, badarg}
     end.
 make_symlink(Existing, New) ->
     try
         remote(make_soft_link_nif(encode_path(Existing), encode_path(New)),
-               fun(Pid, Names) -> erx_file_remote:make_symlink(Pid, Names, Existing) end)
+               fun(Grant, Names) -> erx_file_remote:make_symlink(Grant, Names, Existing) end)
     catch
         error:badarg -> {error, badarg}
     end.

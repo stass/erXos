@@ -43227,9 +43227,9 @@ Third-party notices remain in their original files.
   },
   "changes": {
     "erts/preloaded/ebin/prim_file.beam": {
-      "evidence": "compiled from the modified erts/preloaded/src/prim_file.erl by the host oracle OTP 29.1.2 erlc, +deterministic",
+      "evidence": "compiled from the modified erts/preloaded/src/prim_file.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include +nowarn_deprecated_catch +deterministic)",
       "license": "Apache-2.0",
-      "sha256": "c7119d0a1cbd00deca8b0a79275a2464bb09b92e5448beacc964c93edfd8742e"
+      "sha256": "6c29a49e2e955aeb46b42678f2e7a2866badfe27d44fc20d2a1448c38390cb00"
     }
   }
 }
