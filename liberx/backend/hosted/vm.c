@@ -311,6 +311,18 @@ erx_vm_free_pages(void)
 	return (count);
 }
 
+int
+erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot)
+{
+	(void)space;
+	(void)addr;
+	(void)size;
+	(void)mem;
+	(void)offset;
+	(void)prot;
+	return (ERX_EINVAL);
+}
+
 /* No device exists here, so a device's address would be made up: docs/design-stopgap.md, "The hosted backend". */
 int
 erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr, uint64_t *mem)

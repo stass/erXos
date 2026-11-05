@@ -110,10 +110,13 @@ uint32_t	erx_executor_slot(void);
 void	erx_group_trigger(void);
 
 /*
- * IRQ objects. ERX_IRQ_SOFT alone is software's; a bind moves the object's label to
- * the group, and a bind to ERX_CAP_NULL unbinds it. A trigger of an object not bound
- * delivers nothing and never waits. A delivery carries the label bound when it is
- * taken, so an object that fired and was then unbound delivers label 0.
+ * IRQ objects. ERX_IRQ_SOFT alone is software's. The group is ERX_CAP_SELF or what
+ * erx_group_create gave; a bind moves the object's label to the group, and a bind to
+ * ERX_CAP_NULL unbinds it and masks a line, which unbinding again leaves as it is. No
+ * object delivers while unbound and no trigger waits; a software object's fire while
+ * unbound is owed to the next bind on Fiasco, as on erXos's kernel, and dropped hosted,
+ * so a sink treats any delivery as a hint. A delivery carries the label bound when it
+ * is taken, so an object that fired and was then unbound delivers label 0.
  */
 int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;
@@ -141,6 +144,12 @@ int	erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, u
 int	erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit,
 	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
 int	erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
+/*
+ * Maps part of a memory object at addresses the caller reserved in its own task; space
+ * is ERX_CAP_SELF, and any other is ERX_ENOTSUP. Hosted, where no handle names an object
+ * a caller can map, every call is ERX_EINVAL.
+ */
+int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Entropy: at most ERX_ENTROPY_BYTES_MAX bytes a call, at the head of the caller's UTCB's

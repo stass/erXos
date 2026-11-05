@@ -37,8 +37,8 @@ int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
 int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;
 /*
- * Binds the object to the group with the label its deliveries report, and lets a
- * line deliver. Binding an object twice is ERX_ENOTSUP.
+ * Binds the object to the group with the label its deliveries report, and lets a line
+ * deliver. Binding a bound object moves its label; a group of ERX_CAP_NULL unbinds it.
  */
 int	erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label) ERX_WARN_UNUSED_RESULT;
 /* Lets a line deliver again, which it does not after a delivery until this call. */
@@ -48,6 +48,7 @@ int	erx_irq_trigger(uint64_t irq) ERX_WARN_UNUSED_RESULT;
 /* The calls' bodies, on the service. */
 int	erx_fiasco_irq_create_body(uint64_t kind, uint64_t selector, uint64_t *irq);
 int	erx_fiasco_irq_bind_body(uint64_t irq, uint64_t thread, uint64_t record);
+int	erx_fiasco_irq_unbind_body(uint64_t irq);
 int	erx_fiasco_irq_ack_body(uint64_t irq);
 int	erx_fiasco_irq_trigger_body(uint64_t irq);
 

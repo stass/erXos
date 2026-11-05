@@ -1846,14 +1846,15 @@ its device's capabilities ([design-system.md](design-system.md#drivers)).
 The C under it is `erx_device`, one module that exposes `liberx`'s
 DMA envelope and parses nothing a device wrote. Its register accesses are
 BIFs in ERTS, because a driver makes them one at a time and a BIF costs
-less than a NIF's entry and exit; the rest of the module is a NIF. A device's record reaches
+less than a NIF's entry and exit, and so is `erx_device:irq_ack/2`, made once per interrupt; the rest of the module
+is a NIF. Its pure decisions are `erx_device_core`, its effects `erx_device.c`, in plain C, under both. A device's record reaches
 the driver from the device service over the system connection: the slots
 of its register windows, IRQ objects and DMA window or contiguous memory,
 its peripheral's name in the CMSIS-SVD source, whether it is
 `dma-coherent`, and which queue layouts of the ABI file it uses.
 
 **What the NIF keeps.** The NIF keeps one record for each device the
-domain holds, for the boot, since the manifest gives each device one
+domain holds, a small integer its driver names it by, for the boot, since the manifest gives each device one
 holder ([design-system.md](design-system.md#devices)): its register
 mappings, the binding of each of its lines, and every pool and queue
 made for it. Pools and queues are state of that record, never resources
@@ -1874,13 +1875,18 @@ name to its window, offset, width, access and field masks, and a name the
 table lacks is `badarg`. No raw address or offset exists in the interface,
 so the one-source rule holds in Erlang as in C
 ([design.md](design.md#one-source-for-the-abi-and-the-hardware)). Every
-register of a peripheral the NIF drives carries a mark in the SVD source
+register of a peripheral the NIF drives carries a mark in the SVD source,
+`holdsDeviceAddress`,
 saying whether it holds a device address, such as a ring's base, and the
 generator refuses a register without the mark; `write/3` and
 `write_field/4` refuse a marked register with `badarg`, so only the NIF
 writes one, with an address it built itself. A read or write is one
 volatile access through the window's mapping and never waits; a device
 that hangs a bus is the platform's residual, not the runtime's.
+`write_field/4` on an ordinary field is that read and that write, allowed only
+where the read has no side effect and every writable field means replacement; on a
+one-to-clear field it is the write alone, and elsewhere `badarg`, so the
+register is written whole with `write/3`.
 
 **The buffer pool.** `erx_device:pool_create(Dev, BufferSize, Count)`
 adds a pool to the device's record: for a confined device a memory object
@@ -1951,13 +1957,14 @@ the queues and their memory stay in the device's record, so a restarted
 driver uses them as its predecessor did. The pool's count is the
 driver's bound on what the device may hold at once.
 
-**Interrupts.** `erx_device:irq_bind(Dev, Line)` binds the line's IRQ
+**Interrupts.** `erx_device:irq_bind(Dev, Line)`, whose `Line` indexes
+the lines of the device's record, binds the line's IRQ
 object, which the domain holds with `BIND` and `ACK`, to the domain's
-group under a fresh label the event table registers to the calling
-process, records the label as the line's binding in the device's record,
+group under a label the event table registers to the calling
+process, the lowest free one, so a hint already taken under a label just given up can reach this sink, records the label as the line's binding in the device's record,
 and acknowledges the line once, so a line that a former driver left
 masked is unmasked for the new one, and a level still asserted fires at
-once. The process receives `{erx_irq, Dev, Line}` at the next safe point
+once. A line another process holds moves to the caller. The process receives `{erx_irq, Dev, Line}` at the next safe point
 after the line fires; it services the device and calls
 `erx_device:irq_ack(Dev, Line)`, which unmasks the line as its kind
 requires
@@ -1971,9 +1978,9 @@ latency passes through the runtime's scheduler, which is why gate G9
 decides batching per device class
 ([design-system.md](design-system.md#the-driver-table)).
 
-**Chokepoints.** Only `erx_device` calls `erx_dma_map`, `erx_mem_dma_addr`
-and the user-mode cache maintenance in a runtime; only its generated
-accessors, called only by its BIFs and its NIF, touch a register window; only its one address function writes
+**Chokepoints.** Only `erx_device` calls `erx_mem_create_physical`, `erx_vm_map`, `erx_dma_map`, `erx_mem_dma_addr`
+and the user-mode cache maintenance in a runtime, so nothing else in a runtime has a mapping of device memory; only its generated
+accessors, called only by its BIFs and its NIF, touch a register window, and a record's window is private to the source that holds them; only its one address function writes
 a marked register or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one

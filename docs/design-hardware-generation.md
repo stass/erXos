@@ -10,9 +10,11 @@ Unknown semantics fail; a source is never partially interpreted.
 
 CMSIS-SVD supplies peripheral register names, offsets, widths, access,
 fields and enumerated values. The input profile uses bounded XML with
-no document types, entities or external references. Unsupported arrays,
-inheritance or access-sequence extensions fail until their semantic
-consumer is implemented. Registers fit their address block and cannot
+no document types, entities or external references. A register array is
+`NAME[%s]` with `dim` and `dimIncrement`. Each register carries the profile's
+one extension, `holdsDeviceAddress`, saying whether it holds a device address;
+a register without it is refused. Unsupported inheritance or access-sequence
+extensions fail until their semantic consumer is implemented. Registers fit their address block and cannot
 overlap. Fields fit their register, cannot overlap, and every enumerated
 value fits its field. Names and generated symbols are unique.
 
@@ -29,6 +31,16 @@ fields with one-to-clear fields: clearing one field cannot silently replace
 the ordinary siblings. Such a device needs an explicit access sequence.
 Hardware access remains an effect owned by the device shim or the
 kernel's early-console writer, as their separate chokepoints require.
+
+The same model produces the table `erx_device` resolves Erlang's register
+names through ([design-runtime.md](design-runtime.md#the-device-nif)):
+`include/erx/hw/device_types.h` its shapes, `device_table.h` each peripheral's
+registers and fields, lower-cased, with window, offset, width, array shape,
+access, masks, the device-address mark and whether a field may be replaced by
+a read and a write, and `device_access.h` the one volatile load and store of each
+width. No peripheral may take one of those names. A bit the source does not declare
+is written as zero, by a field's update too, so a register's source declares every bit
+the hardware implements.
 
 The system-register extractor consumes the pinned Arm register package
 and a checked selection/attribute file. Encodings, widths and field ranges

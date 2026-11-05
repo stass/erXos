@@ -153,6 +153,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_IRQ_BIND` | 33 |
 | `ERX_FIASCO_CALL_IRQ_CREATE` | 32 |
 | `ERX_FIASCO_CALL_IRQ_TRIGGER` | 35 |
+| `ERX_FIASCO_CALL_IRQ_UNBIND` | 37 |
 | `ERX_FIASCO_CALL_MACHINE_END` | 9 |
 | `ERX_FIASCO_CALL_MEM_CREATE` | 12 |
 | `ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS` | 19 |

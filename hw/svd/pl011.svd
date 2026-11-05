@@ -12,7 +12,7 @@
       <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
       <registers>
         <register>
-          <name>DR</name><addressOffset>0</addressOffset><access>read-write</access>
+          <name>DR</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0</addressOffset><access>read-write</access>
           <readAction>modify</readAction>
           <fields>
             <field><name>DATA</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
@@ -20,7 +20,7 @@
           </fields>
         </register>
         <register>
-          <name>FR</name><addressOffset>0x18</addressOffset><access>read-only</access>
+          <name>FR</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x18</addressOffset><access>read-only</access>
           <fields>
             <field><name>CTS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>DSR</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
@@ -34,7 +34,103 @@
           </fields>
         </register>
         <register>
-          <name>ICR</name><addressOffset>0x44</addressOffset><access>write-only</access>
+          <name>IBRD</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x24</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>DIVINT</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>FBRD</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x28</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>DIVFRAC</name><bitOffset>0</bitOffset><bitWidth>6</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>LCR_H</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x2c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>BRK</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>PEN</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>EPS</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>STP2</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>FEN</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>WLEN</name><bitOffset>5</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>SPS</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CR</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x30</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>UARTEN</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SIREN</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SIRLP</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>LBE</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXE</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXE</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DTR</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTS</name><bitOffset>11</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OUT1</name><bitOffset>12</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OUT2</name><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTSEN</name><bitOffset>14</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTSEN</name><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>IFLS</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x34</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>TXIFLSEL</name><bitOffset>0</bitOffset><bitWidth>3</bitWidth></field>
+            <field><name>RXIFLSEL</name><bitOffset>3</bitOffset><bitWidth>3</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>IMSC</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x38</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RIMIM</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTSMIM</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DCDMIM</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DSRMIM</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXIM</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXIM</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTIM</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>FEIM</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>PEIM</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BEIM</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OEIM</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RIS</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x3c</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>RIMRIS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTSMRIS</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DCDMRIS</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DSRMRIS</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXRIS</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXRIS</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTRIS</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>FERIS</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>PERIS</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BERIS</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OERIS</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>MIS</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x40</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>RIMMIS</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTSMMIS</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DCDMMIS</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DSRMMIS</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXMIS</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXMIS</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTMIS</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>FEMIS</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>PEMIS</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BEMIS</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OEMIS</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>ICR</name><holdsDeviceAddress>false</holdsDeviceAddress><addressOffset>0x44</addressOffset><access>write-only</access>
           <fields>
             <field><name>IRQS</name><bitOffset>0</bitOffset><bitWidth>11</bitWidth>
               <modifiedWriteValues>oneToClear</modifiedWriteValues>

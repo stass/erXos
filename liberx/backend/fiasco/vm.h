@@ -79,10 +79,8 @@ int	erx_vm_release(uint64_t addr, uint64_t size) ERX_WARN_UNUSED_RESULT;
 int	erx_space_protect(uint64_t addr, uint64_t size, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 /*
  * flags is ERX_MEM_JIT or 0; a JIT object is ERX_ERIGHTS from a task made without
- * ERX_SPACE_JIT. The addresses of erx_vm_map are reserved in the caller's task, and space
- * is ERX_CAP_SELF: any other is ERX_ENOTSUP.
+ * ERX_SPACE_JIT.
  */
 int	erx_mem_create(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem) ERX_WARN_UNUSED_RESULT;
-int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 
 #endif /* ERX_FIASCO_VM_H */

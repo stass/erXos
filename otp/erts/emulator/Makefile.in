@@ -982,6 +982,10 @@ $(OBJDIR)/%.o: nifs/common/%.c
 $(OBJDIR)/%.o: nifs/common/%.cpp
 	$(V_CXX) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
+# A hosted runtime has no devices; its stand-in lets tests reach the BIFs (docs/design-stopgap.md,
+# "The hosted backend").
+$(OBJDIR)/erx_device.o $(OBJDIR)/erx_device_nif.o: CFLAGS += $(if $(findstring hosted,$(TARGET)),-DERX_DEVICE_STAND_IN)
+
 $(OBJDIR)/%.o: nifs/erxos/%.c
 	$(V_CC) $(CFLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
@@ -1205,6 +1209,7 @@ LTTNG_OBJS = $(OBJDIR)/erlang_lttng.o
 NIF_OBJS = \
 	$(if $(findstring hosted,$(TARGET)),$(OBJDIR)/erx_stdio_nif.o) \
 	$(OBJDIR)/erx_watchdog_nif.o \
+	$(OBJDIR)/erx_device_nif.o \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \
 	$(OBJDIR)/prim_file_nif.o \
@@ -1232,6 +1237,9 @@ OS_OBJS = \
 	$(OBJDIR)/sys.o \
 	$(OBJDIR)/erx_event.o \
 	$(OBJDIR)/erx_event_table.o \
+	$(OBJDIR)/erx_device.o \
+	$(OBJDIR)/erx_device_core.o \
+	$(OBJDIR)/erx_device_bif.o \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \
 	$(OBJDIR)/erx_prim_file.o \

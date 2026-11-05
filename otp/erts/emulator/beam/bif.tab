@@ -19,6 +19,8 @@
 #
 # %CopyrightEnd%
 #
+# Modified by erXos: adds erx_device's BIFs.
+#
 
 #
 # File format:
@@ -859,3 +861,14 @@ bif records:is_exported/1
 bif records:create/4
 bif records:update/4
 bif records:get_definition/2
+
+#
+# erXos: a driver's register accesses and interrupt acknowledgement (docs/design-runtime.md,
+# "The device NIF").
+#
+
+bif erx_device:read/2
+bif erx_device:write/3
+bif erx_device:read_field/3
+bif erx_device:write_field/4
+bif erx_device:irq_ack/2

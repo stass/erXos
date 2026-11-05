@@ -69,13 +69,26 @@ erx_fiasco_irq_bind_body(uint64_t irq, uint64_t thread, uint64_t record)
 	if (irq >= IRQ_OBJECTS_MAX || !irq_objects[irq].present || thread >= ERX_FIASCO_THREADS_MAX ||
 	    record >= IRQ_OBJECTS_MAX)
 		return (ERX_EINVAL);
+	/* The dispatcher stays its receiver: a move changes only the label the group keeps. */
 	if (irq_objects[irq].bound)
-		return (ERX_ENOTSUP);
+		return (ERX_OK);
 	if (l4_error(l4_rcv_ep_bind_thread(irq_cap((uint32_t)irq), (l4_cap_idx_t)erx_fiasco_thread_cap((uint32_t)thread),
 	    record)) < 0)
 		return (ERX_EINVAL);
 	irq_objects[irq].bound = true;
 	(void)l4_irq_unmask(irq_cap((uint32_t)irq));
+	return (ERX_OK);
+}
+
+/* Fiasco masks a line it detaches, and owes a software object's later fire to the next bind. */
+int
+erx_fiasco_irq_unbind_body(uint64_t irq)
+{
+	if (irq >= IRQ_OBJECTS_MAX || !irq_objects[irq].present)
+		return (ERX_EINVAL);
+	if (irq_objects[irq].bound && l4_error(l4_irq_detach(irq_cap((uint32_t)irq))) < 0)
+		return (ERX_EINVAL);
+	irq_objects[irq].bound = false;
 	return (ERX_OK);
 }
 

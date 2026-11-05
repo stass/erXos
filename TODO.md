@@ -152,6 +152,10 @@ it; git history is the record of completed work.
 * [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
   group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
   The first native consumer needs the unbind defined in the interface, with its status checked.
+* [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
+  `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
+  Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
+  as `ENOSYS` tracing shows it;
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
 * [Low] `otp/erts/preloaded/src/prim_inet.erl`: `gen_tcp:listen` answers `{error, eprotonosupport}`, stock's answer for a
@@ -167,8 +171,14 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
-* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: an IRQ object is never unbound or destroyed, which a restarted block driver would want. The
-  `native_irq` suite reaches the UART through a test hook until `erx_mem_create_physical` lands with the device NIF.
+* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never destroyed: a restarted driver keeps the one its device's record holds.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`: `erx_device:open/1` takes a physical window and line selectors, since no device service hands a driver a record of slots yet; the
+  record's `window` and `lines` become what that service builds, and drivers, which do not look inside the spec, stay as they are. Its Erlang path has run only hosted, through the stand-in, until the PL011 driver.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made, a retry takes another mapping from the shared device
+  window and finds the line `ERX_EBUSY`. A boot's devices are few and a failure is a misconfiguration; the record's cleanup comes with the device service.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
+  line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
+* [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "only the one address function writes a marked register" and "no loop over device-written bytes in the NIF" have no check until pools and queues give them sites (M6); `write/3` and `write_field/4` refuse every marked register, so no site exists.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
   a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.

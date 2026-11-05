@@ -342,6 +342,7 @@ enum fiasco_call u32
   value irq_ack 34
   value irq_trigger 35
   value time_set_wall 36
+  value irq_unbind 37
 
 layout erx_group_report 1 wire_le 8 32
   field cpuset u64 0

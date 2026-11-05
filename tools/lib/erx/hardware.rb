@@ -14,9 +14,14 @@ module Erx
   module Hardware
     XmlNode = Struct.new(:name, :attributes, :text, :children, keyword_init: true)
     Field = Struct.new(:name, :offset, :width, :access, :clear, :values, keyword_init: true)
-    Register = Struct.new(:name, :offset, :width, :access, :read_action, :fields, keyword_init: true)
+    Register = Struct.new(:name, :offset, :width, :access, :read_action, :fields, :holds_device_address, :count, :stride,
+                          keyword_init: true)
     Device = Struct.new(:name, :size, :registers, keyword_init: true)
     IDENTIFIER = /\A[A-Za-z][A-Za-z0-9_]*\z/
+    ARRAY_NAME = /\A(.*)\[%s\]\z/
+    ELEMENTS_MAX = 256
+    # Headers the device table owns under include/erx/hw, so no peripheral may be named for one.
+    DEVICE_HEADERS = %w[device_types device_table device_access].freeze
     CONTAINERS = %w[device peripherals peripheral addressBlock registers register fields field
                     enumeratedValues enumeratedValue].freeze
     module_function
@@ -154,8 +159,8 @@ module Erx
       raise Error, 'SVD requires 1..4096 registers' unless list.size.between?(1, 4096)
       names = list.map { |register| register.name.downcase }
       raise Error, 'SVD register names collide' unless names.uniq == names
-      list.sort_by(&:offset).each_cons(2) do |left, right|
-        raise Error, 'SVD register ranges overlap' if left.offset + left.width / 8 > right.offset
+      element_ranges(list).each_cons(2) do |left, right|
+        raise Error, 'SVD register ranges overlap' if left.end > right.begin
       end
       Device.new(name: identifier(text(peripheral, 'name')), size: size,
                  registers: list.freeze).freeze.then do |device|
@@ -164,12 +169,54 @@ module Erx
       end
     end
 
+    # The byte range of each register, one for each element of an array, in address order.
+    def element_ranges(registers)
+      registers.flat_map do |register|
+        Array.new(register.count) do |index|
+          first = register.offset + index * register.stride
+          first...(first + register.width / 8)
+        end
+      end.sort_by(&:begin)
+    end
+
+    # The mark erXos adds to the SVD profile: whether a register holds a device address, such
+    # as a ring's base, which only erx_device's address function may write. A register
+    # without it is refused, so no one adds a register without deciding.
+    def device_address_mark(node)
+      case text(node, 'holdsDeviceAddress', default: '')
+      when 'true' then true
+      when 'false' then false
+      else raise Error, 'SVD register lacks its holdsDeviceAddress mark'
+      end
+    end
+
+    # An array is `NAME[%s]` with dim and dimIncrement, one element per index from zero.
+    def register_shape(node, width:)
+      name = text(node, 'name')
+      if child(node, 'dim', required: false).nil?
+        raise Error, 'SVD dimIncrement without dim' if child(node, 'dimIncrement', required: false)
+
+        return [name, 1, 0]
+      end
+
+      base = name[ARRAY_NAME, 1]
+      count = number(text(node, 'dim'), maximum: ELEMENTS_MAX)
+      stride = number(text(node, 'dimIncrement'), maximum: 1024 * 1024)
+      unless base && count >= 2 && stride >= width / 8 && stride % (width / 8) == 0
+        raise Error, 'invalid SVD register array'
+      end
+      [base, count, stride]
+    end
+
     def parse_register(node, default_width:, block_size:)
-      known_elements(node, allowed: %w[name description addressOffset size access readAction fields])
+      known_elements(node, allowed: %w[name description addressOffset size access readAction fields
+                                       holdsDeviceAddress dim dimIncrement])
       width = number(text(node, 'size', default: default_width.to_s))
       raise Error, 'SVD access width must be 32 or 64 bits' unless [32, 64].include?(width)
       offset = number(text(node, 'addressOffset'), maximum: block_size)
-      unless offset % (width / 8) == 0 && offset <= block_size && width / 8 <= block_size - offset
+      name, count, stride = register_shape(node, width: width)
+      span = (count - 1) * stride + width / 8
+      unless offset % (width / 8) == 0 && offset <= block_size && span <= block_size - offset
         raise Error, 'SVD register is outside its aligned block'
       end
       mode = access(text(node, 'access'))
@@ -192,8 +239,8 @@ module Erx
       if writable.any?(&:clear) && writable.any? { |field| !field.clear }
         raise Error, 'mixed SVD write semantics require an explicit access sequence'
       end
-      Register.new(name: identifier(text(node, 'name')), offset: offset, width: width,
-                   access: mode, read_action: action.freeze, fields: fields.freeze).freeze
+      Register.new(name: identifier(name), offset: offset, width: width, access: mode, read_action: action.freeze,
+                   fields: fields.freeze, holds_device_address: device_address_mark(node), count: count, stride: stride).freeze
     end
 
     def parse_field(node, width:, register_access:)
@@ -288,23 +335,26 @@ module Erx
         type = "uint#{register.width}_t"
         name = "#{prefix}_#{register.name.downcase}"
         bytes = register.width / 8
+        array = register.count > 1
+        index = array ? ', uint32_t index' : ''
+        last = register.offset + (register.count - 1) * register.stride + bytes
+        at = array ? "#{register.offset} + index * #{register.stride}" : register.offset.to_s
+        in_range = array ? "index >= #{register.count} || " : ''
         readable = register.access != 'write-only'
         writable = register.access != 'read-only'
-        writable_mask = register.fields.reject { |field| field.access == 'read-only' }
-                                .sum { |field| ((1 << field.width) - 1) << field.offset }
         if readable
-          lines.concat(['static inline bool', "#{name}_read(erx_mmio_t device, #{type} *out)", '{',
-                        "\tif (out == NULL || device.base == NULL || device.length < #{register.offset + bytes} ||",
+          lines.concat(['static inline bool', "#{name}_read(erx_mmio_t device#{index}, #{type} *out)", '{',
+                        "\tif (#{in_range}out == NULL || device.base == NULL || device.length < #{last} ||",
                         "\t    (uintptr_t)device.base % #{bytes} != 0)", "\t\treturn (false);",
-                        "\t*out = *(volatile #{type} *)(device.base + #{register.offset});",
+                        "\t*out = *(volatile #{type} *)(device.base + #{at});",
                         "\treturn (true);", '}', ''])
         end
         if writable
-          lines.concat(['static inline bool', "#{name}_write(erx_mmio_t device, #{type} value)", '{',
-                        "\tif (device.base == NULL || device.length < #{register.offset + bytes} ||",
+          lines.concat(['static inline bool', "#{name}_write(erx_mmio_t device#{index}, #{type} value)", '{',
+                        "\tif (#{in_range}device.base == NULL || device.length < #{last} ||",
                         "\t    (uintptr_t)device.base % #{bytes} != 0 ||",
-                        "\t    (value & ~#{c_integer(writable_mask, width: register.width)}) != 0)",
-                        "\t\treturn (false);", "\t*(volatile #{type} *)(device.base + #{register.offset}) = value;",
+                        "\t    (value & ~#{c_integer(writable_mask(register), width: register.width)}) != 0)",
+                        "\t\treturn (false);", "\t*(volatile #{type} *)(device.base + #{at}) = value;",
                         "\treturn (true);", '}', ''])
         end
         register.fields.each do |field|
@@ -319,9 +369,9 @@ module Erx
           end
           next if field.access == 'read-only'
           if field.clear
-            lines.concat(['static inline bool', "#{field_name}_clear(erx_mmio_t device, #{type} value)", '{',
+            lines.concat(['static inline bool', "#{field_name}_clear(erx_mmio_t device#{index}, #{type} value)", '{',
                           "\tif ((value & ~#{mask}) != 0)", "\t\treturn (false);",
-                          "\treturn (#{name}_write(device, value << #{field.offset}));", '}', ''])
+                          "\treturn (#{name}_write(device#{array ? ', index' : ''}, value << #{field.offset}));", '}', ''])
           else
             lines.concat(['static inline bool', "#{field_name}_set(#{type} word, #{type} value, #{type} *out)", '{',
                           "\tif (out == NULL || (value & ~#{mask}) != 0)", "\t\treturn (false);",
@@ -333,6 +383,124 @@ module Erx
       lines.concat(['#endif', '']).join("\n")
     end
 
+    def writable_mask(register)
+      register.fields.reject { |field| field.access == 'read-only' }.sum { |field| ((1 << field.width) - 1) << field.offset }
+    end
+
+    # Whether a field of the register may be replaced by reading the word and writing it back:
+    # the read has no side effect and no writable field means anything but replacement.
+    def plain_update?(register)
+      register.access == 'read-write' && register.read_action.empty? &&
+        register.fields.none? { |field| field.clear || field.access == 'write-only' }
+    end
+
+    def generated_header(guard, body, includes: [])
+      ['/* Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>', ' * SPDX-License-Identifier: BSD-2-Clause',
+       ' * Generated by tools/gen_hw.rb. Do not edit.', ' */', "#ifndef #{guard}", "#define #{guard}",
+       *includes.map { |file| "#include #{file}" }, '', *body, '#endif', ''].join("\n")
+    end
+
+    # The shapes of the device table, and the most any peripheral needs, so a device's record
+    # holds its atoms in place.
+    def device_types_header(devices)
+      registers_max = devices.map { |device| device.registers.size }.max
+      fields_max = devices.map { |device| device.registers.sum { |register| register.fields.size } }.max
+      generated_header('ERX_HW_DEVICE_TYPES_H', <<~C.lines(chomp: true), includes: %w[<stdbool.h> <stdint.h>])
+        #define ERX_DEVICE_REGISTERS_MAX #{registers_max}u
+        #define ERX_DEVICE_FIELDS_MAX #{fields_max}u
+
+        typedef enum erx_device_access {
+        \tERX_DEVICE_READ_ONLY,
+        \tERX_DEVICE_WRITE_ONLY,
+        \tERX_DEVICE_READ_WRITE
+        } erx_device_access_t;
+
+        typedef struct erx_device_field {
+        \tconst char\t*name;
+        \tuint64_t\tmask;
+        \tuint8_t\t\tshift;
+        \tuint8_t\t\taccess;
+        \tbool\t\tclear;
+        } erx_device_field_t;
+
+        typedef struct erx_device_register {
+        \tconst char\t*name;
+        \tuint64_t\twritable;
+        \tuint32_t\toffset;
+        \tuint32_t\tcount;
+        \tuint32_t\tstride;
+        \tuint32_t\tfirst_field;
+        \tuint32_t\tfield_count;
+        \tuint8_t\t\twindow;
+        \tuint8_t\t\twidth;
+        \tuint8_t\t\taccess;
+        \tbool\t\tholds_device_address;
+        \tbool\t\tplain_update;
+        } erx_device_register_t;
+
+        typedef struct erx_device_peripheral {
+        \tconst char\t\t\t*name;
+        \tconst erx_device_register_t\t*registers;
+        \tconst erx_device_field_t\t*fields;
+        \tuint64_t\t\t\twindow_size;
+        \tuint32_t\t\t\tregister_count;
+        \tuint32_t\t\t\tfield_count;
+        } erx_device_peripheral_t;
+      C
+    end
+
+    ACCESS_NAMES = { 'read-only' => 'ERX_DEVICE_READ_ONLY', 'write-only' => 'ERX_DEVICE_WRITE_ONLY',
+                     'read-write' => 'ERX_DEVICE_READ_WRITE' }.freeze
+
+    def table_field(field, width:)
+      mask = c_integer(((1 << field.width) - 1) << field.offset, width: width)
+      "\t{ .name = \"#{field.name.downcase}\", .mask = #{mask}, .shift = #{field.offset}, " \
+        ".access = #{ACCESS_NAMES.fetch(field.access)}, .clear = #{field.clear} },"
+    end
+
+    def table_register(register, first_field:)
+      "\t{ .name = \"#{register.name.downcase}\", .writable = #{c_integer(writable_mask(register), width: register.width)}, " \
+        ".offset = #{register.offset}, .count = #{register.count}, .stride = #{register.stride}, " \
+        ".first_field = #{first_field}, .field_count = #{register.fields.size}, .window = 0, .width = #{register.width}, " \
+        ".access = #{ACCESS_NAMES.fetch(register.access)}, .holds_device_address = #{register.holds_device_address}, " \
+        ".plain_update = #{plain_update?(register)} },"
+    end
+
+    def table_device(device)
+      prefix = "erx_device_#{device.name.downcase}"
+      fields = device.registers.flat_map { |register| register.fields.map { |field| table_field(field, width: register.width) } }
+      firsts = device.registers.reduce([0]) { |sums, register| sums + [sums.last + register.fields.size] }
+      registers = device.registers.zip(firsts).map { |register, first| table_register(register, first_field: first) }
+      ["static const erx_device_field_t #{prefix}_fields[] = {", *fields, '};', '',
+       "static const erx_device_register_t #{prefix}_registers[] = {", *registers, '};', '']
+    end
+
+    # Static data for the one source that includes it, erx_device_core.c.
+    def device_table_header(devices)
+      entries = devices.map do |device|
+        prefix = "erx_device_#{device.name.downcase}"
+        "\t{ .name = \"#{device.name.downcase}\", .registers = #{prefix}_registers, .fields = #{prefix}_fields, " \
+          ".window_size = #{device.size}, .register_count = #{device.registers.size}, " \
+          ".field_count = #{device.registers.sum { |register| register.fields.size }} },"
+      end
+      generated_header('ERX_HW_DEVICE_TABLE_H', [*devices.flat_map { |device| table_device(device) },
+                                                 'static const erx_device_peripheral_t erx_device_peripherals[] = {',
+                                                 *entries, '};', ''], includes: ['"erx/hw/device_types.h"'])
+    end
+
+    # The one volatile access of each width the table holds, for erx_device.c alone: the funnel
+    # that the chokepoint device-register-access keeps.
+    def device_access_header
+      body = [32, 64].flat_map do |width|
+        type = "uint#{width}_t"
+        ["static inline #{type}", "erx_device_access_load#{width}(volatile uint8_t *window, uint64_t offset)", '{',
+         "\treturn (*(volatile #{type} *)(void *)(window + offset));", '}', '',
+         'static inline void', "erx_device_access_store#{width}(volatile uint8_t *window, uint64_t offset, #{type} value)", '{',
+         "\t*(volatile #{type} *)(void *)(window + offset) = value;", '}', '']
+      end
+      generated_header('ERX_HW_DEVICE_ACCESS_H', body, includes: ['<stdint.h>'])
+    end
+
     # All parsing and rendering completes before the first output is written.
     # The directory is owned by this frontend, making orphan checks explicit.
     def output_plan(root:)
@@ -342,9 +510,14 @@ module Erx
       raise Error, 'hardware input inventory is empty' if devices.empty?
       names = devices.map { |device| device.name.downcase }
       raise Error, 'SVD device names collide' unless names.uniq == names
+      raise Error, 'SVD device is named for a device table header' unless (names & DEVICE_HEADERS).empty?
       symbols = %w[ERX_MMIO_H erx_mmio erx_mmio_t] + devices.flat_map { |device| generated_symbols(device) }
       raise Error, 'SVD combined C symbols collide' unless symbols.uniq == symbols
-      devices.each_with_object({ 'include/erx/mmio.h' => mmio_header.freeze }) do |device, files|
+      tables = { 'include/erx/mmio.h' => mmio_header.freeze,
+                 'include/erx/hw/device_types.h' => device_types_header(devices).freeze,
+                 'include/erx/hw/device_table.h' => device_table_header(devices).freeze,
+                 'include/erx/hw/device_access.h' => device_access_header.freeze }
+      devices.each_with_object(tables) do |device, files|
         files["include/erx/hw/#{device.name.downcase}.h"] = device_header(device).freeze
       end.freeze
     rescue SystemCallError => error

@@ -274,6 +274,8 @@ service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_irq_bind_body(((const erx_fiasco_irq_bind_request_t *)words)->irq,
 		    ((const erx_fiasco_irq_bind_request_t *)words)->thread,
 		    ((const erx_fiasco_irq_bind_request_t *)words)->record));
+	case ERX_FIASCO_CALL_IRQ_UNBIND:
+		return (erx_fiasco_irq_unbind_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	case ERX_FIASCO_CALL_IRQ_ACK:
 		return (erx_fiasco_irq_ack_body(((const erx_fiasco_irq_request_t *)words)->irq));
 	case ERX_FIASCO_CALL_IRQ_TRIGGER:
@@ -322,6 +324,7 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		    (uint32_t)flagged->flags, NULL));
 	case ERX_FIASCO_CALL_IRQ_CREATE:
 	case ERX_FIASCO_CALL_IRQ_BIND:
+	case ERX_FIASCO_CALL_IRQ_UNBIND:
 	case ERX_FIASCO_CALL_IRQ_ACK:
 	case ERX_FIASCO_CALL_IRQ_TRIGGER:
 		return (service_irq(decoded, reply));

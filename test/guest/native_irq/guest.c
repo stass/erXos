@@ -25,20 +25,16 @@
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/vm.h"
+#include "otp/erts/emulator/nifs/erxos/erx_device.h"
 
 /* QEMU virt's PL011: its registers, and its receive line, SPI 1. */
 #define UART_PHYS	UINT64_C(0x9000000)
 #define UART_LINE	33u
-#define UART_DR		0x00u
-#define UART_FR		0x18u
-#define UART_FR_RXFE	(1u << 4)
-#define UART_IMSC	0x38u
-#define UART_IMSC_RXIM	(1u << 4)
-#define UART_IMSC_RTIM	(1u << 6)
 
 #define LABEL_UART	UINT64_C(0x55a0)
 #define LABEL_SOFT	UINT64_C(0x55b1)
 #define LABEL_OTHER	UINT64_C(0x55c2)
+#define LABEL_MOVED	UINT64_C(0x55d3)
 
 #define NS_PER_MS	UINT64_C(1000000)
 /* How long a park waits before the case says the wake was lost. */
@@ -53,7 +49,7 @@ void erx_fiasco_root_main(void);
 
 static _Alignas(16) uint8_t executor_stack[STACK_BYTES];
 static uint64_t irq_uart, irq_soft, irq_other;
-static uint64_t uart_registers;
+static const erx_device_t *uart;
 /* The executor's ask of the first thread: ring the software object once it is parked. */
 static _Atomic uint32_t ring_wanted;
 static _Atomic uint32_t cases_done;
@@ -96,16 +92,48 @@ report(const char *what, uint64_t value, uint64_t other)
 	erx_fiasco_console_write(line, at);
 }
 
-static uint32_t
-uart_read(uint32_t offset)
+static const erx_device_register_t *
+uart_register(const char *name)
 {
-	return (*(volatile uint32_t *)(uintptr_t)(uart_registers + offset));
+	const erx_device_peripheral_t *const peripheral = erx_device_peripheral(uart);
+	const uint32_t index = erx_device_register_named(peripheral, name);
+
+	if (index == peripheral->register_count)
+		fail("erx: irq: the table lacks a register FAILED\n");
+	return (&peripheral->registers[index]);
+}
+
+static const erx_device_field_t *
+uart_field(const erx_device_register_t *reg, const char *name)
+{
+	const erx_device_peripheral_t *const peripheral = erx_device_peripheral(uart);
+	const uint32_t index = erx_device_field_named(peripheral, reg, name);
+
+	if (index == reg->field_count)
+		fail("erx: irq: the table lacks a field FAILED\n");
+	return (&peripheral->fields[reg->first_field + index]);
+}
+
+static uint64_t
+uart_read_field(const char *reg_name, const char *field_name)
+{
+	const erx_device_register_t *const reg = uart_register(reg_name);
+	const erx_device_element_t element = { .indexed = false };
+	uint64_t value;
+
+	if (!erx_device_read_field(uart, reg, element, uart_field(reg, field_name), &value))
+		fail("erx: irq: the table refused a field's read FAILED\n");
+	return (value);
 }
 
 static void
-uart_write(uint32_t offset, uint32_t value)
+uart_set_field(const char *reg_name, const char *field_name)
 {
-	*(volatile uint32_t *)(uintptr_t)(uart_registers + offset) = value;
+	const erx_device_register_t *const reg = uart_register(reg_name);
+	const erx_device_element_t element = { .indexed = false };
+
+	if (!erx_device_write_field(uart, reg, element, uart_field(reg, field_name), 1))
+		fail("erx: irq: the table refused a field's update FAILED\n");
 }
 
 static uint32_t
@@ -236,6 +264,35 @@ case_once_and_order(void)
 	say("erx: irq: each label once, oldest first\n");
 }
 
+/*
+ * Binding again moves an object's label, and ERX_CAP_SELF names the caller's own group.
+ * Unbinding twice is the same as once. A fire while unbound is owed to the next bind, and
+ * reaches that bind's label once.
+ */
+static void
+case_move_and_unbind(void)
+{
+	if (erx_irq_bind(irq_other, ERX_CAP_SELF, LABEL_MOVED) != ERX_OK)
+		fail("erx: irq: a move to ERX_CAP_SELF was refused FAILED\n");
+	trigger_and_see(irq_other);
+	if (wait_label(false) != LABEL_MOVED)
+		fail("erx: irq: the moved object kept its old label FAILED\n");
+	expect_empty();
+	if (erx_irq_bind(irq_other, ERX_CAP_NULL, 0) != ERX_OK || erx_irq_bind(irq_other, ERX_CAP_NULL, 0) != ERX_OK)
+		fail("erx: irq: an unbind was refused FAILED\n");
+	trigger(irq_other);
+	trigger_and_see(irq_soft);
+	if (wait_label(false) != LABEL_SOFT)
+		fail("erx: irq: an unbound object delivered FAILED\n");
+	expect_empty();
+	if (erx_irq_bind(irq_other, ERX_CAP_SELF, LABEL_OTHER) != ERX_OK)
+		fail("erx: irq: a bind after an unbind was refused FAILED\n");
+	if (wait_label(false) != LABEL_OTHER)
+		fail("erx: irq: the owed fire did not reach the new bind FAILED\n");
+	expect_empty();
+	say("erx: irq: a bind moves, an unbind stops, a fire stays owed\n");
+}
+
 static void
 case_timed_park(void)
 {
@@ -266,14 +323,14 @@ static void
 case_uart(const char *prompt)
 {
 	uint64_t label;
-	uint32_t byte;
+	uint64_t byte;
 
 	say(prompt);
 	label = wait_label(false);
-	if ((uart_read(UART_FR) & UART_FR_RXFE) != 0)
+	if (uart_read_field("fr", "rxfe") != 0)
 		fail("erx: irq: the line fired with no byte waiting FAILED\n");
-	byte = uart_read(UART_DR) & 0xff;
-	if ((uart_read(UART_FR) & UART_FR_RXFE) == 0)
+	byte = uart_read_field("dr", "data");
+	if (uart_read_field("fr", "rxfe") == 0)
 		fail("erx: irq: more than one byte waited FAILED\n");
 	report("erx: irq: uart label byte", label, byte);
 	if (erx_irq_ack(irq_uart) != ERX_OK)
@@ -287,10 +344,14 @@ executor_main(uint64_t unused)
 	case_parked_wake();
 	case_trigger_before_park();
 	case_once_and_order();
+	case_move_and_unbind();
 	case_timed_park();
 	case_rounds();
 	atomic_store_explicit(&cases_done, 1, memory_order_release);
 	case_uart("erx: irq: type a character\n");
+	/* A restarted driver's path on a real line: an unbind masks it, and the bind opens it. */
+	if (erx_irq_bind(irq_uart, ERX_CAP_NULL, 0) != ERX_OK || erx_irq_bind(irq_uart, ERX_CAP_SELF, LABEL_UART) != ERX_OK)
+		fail("erx: irq: the line was not bound again FAILED\n");
 	case_uart("erx: irq: type another\n");
 	say("erx: irq: done\n");
 	erx_fiasco_machine_off();
@@ -358,22 +419,28 @@ check_time(void)
 static void
 bind_objects(void)
 {
-	uint64_t group, unused, uart;
-	int status;
+	const erx_device_spec_t spec = { .peripheral = "pl011", .peripheral_length = 5, .base = UART_PHYS,
+	    .size = ERX_PAGE_SIZE, .line_count = 1, .lines = { UART_LINE } };
+	erx_device_spec_t too_small = spec;
+	uint32_t device, again;
+	uint64_t group, unused;
 
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		fail("erx: irq: no group FAILED\n");
 	if (erx_group_create(0, 0, &unused) != ERX_ELIMIT)
 		fail("erx: irq: a second group was not refused FAILED\n");
-	if (erx_mem_create_physical(0, 0, UART_PHYS, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &uart) != ERX_OK ||
-	    erx_vm_reserve(0, ERX_PAGE_SIZE, 0, &uart_registers) != ERX_OK ||
-	    erx_vm_map(ERX_CAP_SELF, uart_registers, ERX_PAGE_SIZE, uart, 0, ERX_PROT_RW) != ERX_OK)
-		fail("erx: irq: sigma0 refused the UART's registers FAILED\n");
+	too_small.size = ERX_PAGE_SIZE / 2;
+	if (erx_device_open(&too_small, NULL, NULL, &device) != ERX_EINVAL)
+		fail("erx: irq: a window smaller than its registers was not refused FAILED\n");
+	if (erx_device_open(&spec, NULL, NULL, &device) != ERX_OK)
+		fail("erx: irq: sigma0 refused the UART's registers, or its line is taken FAILED\n");
+	uart = erx_device_get(device);
+	if (!erx_device_line_irq(uart, 0, &irq_uart) || erx_device_line_irq(uart, 1, &unused))
+		fail("erx: irq: the record has the wrong lines FAILED\n");
 	say("erx: irq: sigma0 gave the UART's registers\n");
-	status = erx_irq_create(0, 0, ERX_IRQ_LINE, UART_LINE, &irq_uart);
-	if (status != ERX_OK)
-		fail("erx: irq: the UART's receive line is taken FAILED\n");
 	say("erx: irq: the UART's receive line is free\n");
+	if (erx_device_open(&spec, NULL, NULL, &again) != ERX_OK || again != device)
+		fail("erx: irq: a second open was not the same device FAILED\n");
 	if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_soft) != ERX_OK ||
 	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &irq_other) != ERX_OK)
 		fail("erx: irq: no software object FAILED\n");
@@ -382,7 +449,7 @@ bind_objects(void)
 	if (erx_irq_bind(irq_uart, group, LABEL_UART) != ERX_OK || erx_irq_bind(irq_soft, group, LABEL_SOFT) != ERX_OK ||
 	    erx_irq_bind(irq_other, group, LABEL_OTHER) != ERX_OK)
 		fail("erx: irq: the service refused a bind FAILED\n");
-	if (erx_irq_bind(irq_soft, group, LABEL_SOFT) != ERX_ENOTSUP || erx_irq_bind(77, group, 0) != ERX_EINVAL ||
+	if (erx_irq_bind(77, group, 0) != ERX_EINVAL ||
 	    erx_irq_bind(irq_soft, group + 1, 0) != ERX_EINVAL || erx_irq_ack(77) != ERX_EINVAL ||
 	    erx_irq_trigger(77) != ERX_EINVAL)
 		fail("erx: irq: a malformed call was not refused FAILED\n");
@@ -390,7 +457,8 @@ bind_objects(void)
 		fail("erx: irq: a worker's take_ready was not refused FAILED\n");
 	if (erx_park(0, 0, 0) != ERX_ETYPE)
 		fail("erx: irq: a worker's park was not refused FAILED\n");
-	uart_write(UART_IMSC, uart_read(UART_IMSC) | UART_IMSC_RXIM | UART_IMSC_RTIM);
+	uart_set_field("imsc", "rxim");
+	uart_set_field("imsc", "rtim");
 }
 
 void

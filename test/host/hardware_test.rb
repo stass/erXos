@@ -20,8 +20,8 @@ class HardwareTest < Minitest::Test
 
   def test_register_facts_and_side_effects
     device = Erx::Hardware.parse_svd(@source)
-    assert_equal [0, 0x18, 0x44], device.registers.map(&:offset)
-    assert_equal [32, 32, 32], device.registers.map(&:width)
+    assert_equal [0, 0x18, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c, 0x40, 0x44], device.registers.map(&:offset)
+    assert_equal [32], device.registers.map(&:width).uniq
     assert_equal 'modify', device.registers.first.read_action
     assert device.registers.last.fields.first.clear
     output = Erx::Hardware.device_header(device)
@@ -41,6 +41,42 @@ class HardwareTest < Minitest::Test
                  @source.sub('<name>PL011</name>', '<name>PL011<hidden/></name>'),
                  @source.sub('oneToClear', 'zeroToToggle'), "\xff".b]
     malformed.each { |bytes| assert_raises(Erx::Error) { Erx::Hardware.parse_svd(bytes) } }
+  end
+
+  def test_a_register_without_its_device_address_mark_is_refused
+    missing = @source.sub('<holdsDeviceAddress>false</holdsDeviceAddress>', '')
+    error = assert_raises(Erx::Error) { Erx::Hardware.parse_svd(missing) }
+    assert_match(/holdsDeviceAddress/, error.message)
+    assert_raises(Erx::Error) { Erx::Hardware.parse_svd(@source.sub('<holdsDeviceAddress>false<', '<holdsDeviceAddress>maybe<')) }
+    refute(Erx::Hardware.parse_svd(@source).registers.any?(&:holds_device_address))
+    marked = @source.sub('<holdsDeviceAddress>false<', '<holdsDeviceAddress>true<')
+    assert_includes Erx::Hardware.device_table_header([Erx::Hardware.parse_svd(marked)]), '.holds_device_address = true'
+  end
+
+  def test_a_register_array_is_checked_whole
+    array = lambda do |dim, stride, name: 'FR[%s]'|
+      @source.sub('<name>FR</name>', "<name>#{name}</name><dim>#{dim}</dim><dimIncrement>#{stride}</dimIncrement>")
+    end
+    fr = Erx::Hardware.parse_svd(array.call(2, 4)).registers.find { |register| register.name == 'FR' }
+    assert_equal [2, 4], [fr.count, fr.stride]
+    assert_includes Erx::Hardware.device_header(Erx::Hardware.parse_svd(array.call(2, 4))), 'erx_pl011_fr_read(erx_mmio_t device, uint32_t index,'
+    # No wider than its stride, no element past its neighbour or the block, and a name that says it is an array.
+    [array.call(2, 2), array.call(4, 4), array.call(2, 4, name: 'FR'), array.call(0, 4), array.call(1, 4), array.call(1000, 4),
+     array.call(2, 0x1000), @source.sub('<name>FR</name>', '<name>FR</name><dimIncrement>4</dimIncrement>')].each { |bytes| assert_raises(Erx::Error) { Erx::Hardware.parse_svd(bytes) } }
+  end
+
+  def test_the_device_table_says_what_a_register_allows
+    table = Erx::Hardware.device_table_header([Erx::Hardware.parse_svd(@source)])
+    assert_match(/\.name = "imsc", \.writable = UINT32_C\(0x7ff\), \.offset = 56,.*\.plain_update = true/, table)
+    assert_match(/\.name = "dr", \.writable = UINT32_C\(0xff\),.*\.plain_update = false/, table)
+    assert_match(/\.name = "icr", .*\.access = ERX_DEVICE_WRITE_ONLY,.*\.plain_update = false/, table)
+    assert_match(/\.name = "irqs", \.mask = UINT32_C\(0x7ff\), \.shift = 0, .*\.clear = true/, table)
+    assert table.ascii_only?
+  end
+
+  def test_a_peripheral_cannot_take_a_device_table_header_name
+    File.binwrite(File.join(@root, 'hw/svd/pl011.svd'), @source.gsub('PL011', 'DEVICE_TABLE'))
+    assert_raises(Erx::Error) { Erx::Hardware.output_plan(root: @root) }
   end
 
   def test_foreign_or_malformed_xml_encodings_are_typed_rejections

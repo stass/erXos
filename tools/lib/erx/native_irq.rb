@@ -16,7 +16,8 @@ module Erx
   # harness types, whose label and byte come back on the same serial line.
   module NativeIrq
     MEMORY_MIB = 512
-    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_irq/guest.c'].freeze
+    SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'otp/erts/emulator/nifs/erxos/erx_device_core.c',
+               'otp/erts/emulator/nifs/erxos/erx_device.c', 'test/guest/native_irq/guest.c'].freeze
     LABEL_UART = 0x55a0
     # What the harness types, one character per prompt.
     FIRST = 'a'
@@ -37,6 +38,7 @@ module Erx
        point('irq-parked-wake', /\Aerx: irq: a parked executor woke/n, 60),
        point('irq-before-park', /\Aerx: irq: a trigger before the park returned/n, 60),
        point('irq-once-and-order', /\Aerx: irq: each label once, oldest first/n, 60),
+       point('irq-move-unbind', /\Aerx: irq: a bind moves, an unbind stops/n, 60),
        point('irq-timed-park', /\Aerx: irq: a timed park ended/n, 60),
        point('irq-rounds', /\Aerx: irq: rounds of ring and park/n, 120),
        point('irq-prompt-first', /\Aerx: irq: type a character/n, 30, type: FIRST),

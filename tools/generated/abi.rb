@@ -6423,6 +6423,7 @@ module Erx
           "irq_bind".b => 33,
           "irq_create".b => 32,
           "irq_trigger".b => 35,
+          "irq_unbind".b => 37,
           "machine_end".b => 9,
           "mem_create".b => 12,
           "mem_create_contiguous".b => 19,
@@ -10869,6 +10870,12 @@ module Erx
           "fiasco_call_irq_trigger".b => Constant.new(
             name: "fiasco_call_irq_trigger".b,
             value: 35,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_irq_unbind".b => Constant.new(
+            name: "fiasco_call_irq_unbind".b,
+            value: 37,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

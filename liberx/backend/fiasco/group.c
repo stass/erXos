@@ -35,10 +35,11 @@ static _Atomic bool group_created;
 static _Atomic bool group_up;
 /* The dispatcher's index: written before group_up's release, read after its acquire. */
 static uint64_t group_dispatcher;
-/* Guards the claim of a record. A record's label is written before its object can fire. */
-static erx_fiasco_lock_t group_lock;
-static bool group_record_used[ERX_BACKEND_PARK_OBJECTS_MAX];
-static uint64_t group_label[ERX_BACKEND_PARK_OBJECTS_MAX];
+/*
+ * An object's record in the group is its index in the root's table of IRQ objects. Its label
+ * is written before the bind lets it fire, and a move changes the label a later take reads.
+ */
+static _Atomic uint64_t group_label[ERX_BACKEND_PARK_OBJECTS_MAX];
 static _Atomic uint64_t group_cpuset;
 
 /*
@@ -121,7 +122,8 @@ erx_group_take_ready(uint32_t max)
 		return (ERX_ETYPE);
 	count = erx_fiasco_group_take(max < ERX_MSG_WORDS ? max : ERX_MSG_WORDS, objects);
 	for (uint32_t index = 0; index < count; index++)
-		atomic_store_explicit(&utcb->mr[index], group_label[objects[index]], memory_order_relaxed);
+		atomic_store_explicit(&utcb->mr[index], atomic_load_explicit(&group_label[objects[index]], memory_order_acquire),
+		    memory_order_relaxed);
 	return ((int)count);
 }
 
@@ -141,44 +143,37 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 	return (status);
 }
 
-/* Returns ERX_BACKEND_PARK_OBJECTS_MAX when every record is taken. */
-static uint32_t
-group_record_claim(void)
-{
-	uint32_t record = 0;
-
-	erx_fiasco_lock(&group_lock);
-	while (record < ERX_BACKEND_PARK_OBJECTS_MAX && group_record_used[record])
-		record++;
-	if (record < ERX_BACKEND_PARK_OBJECTS_MAX)
-		group_record_used[record] = true;
-	erx_fiasco_unlock(&group_lock);
-	return (record);
-}
-
+/*
+ * ERX_CAP_NULL unbinds; ERX_CAP_SELF and the handle erx_group_create gave both name the
+ * one group. Binding a bound object moves its label, which only the group's table holds.
+ */
 int
 erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label)
 {
 	erx_fiasco_reply_t reply;
-	uint32_t record;
+	uint64_t previous;
 	int status;
 
-	if (group != GROUP_HANDLE || !atomic_load_explicit(&group_up, memory_order_acquire))
+	if (irq >= ERX_BACKEND_PARK_OBJECTS_MAX)
 		return (ERX_EINVAL);
-	record = group_record_claim();
-	if (record == ERX_BACKEND_PARK_OBJECTS_MAX)
-		return (ERX_ENOMEM);
-	group_label[record] = label;
+	if (group == ERX_CAP_NULL) {
+		const erx_fiasco_irq_request_t request = { .caller = erx_fiasco_thread_self()->index, .irq = irq };
+
+		status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &request, sizeof(request), &reply);
+		if (status == ERX_OK)
+			atomic_store_explicit(&group_label[irq], 0, memory_order_release);
+		return (status);
+	}
+	if ((group != GROUP_HANDLE && group != ERX_CAP_SELF) || !atomic_load_explicit(&group_up, memory_order_acquire))
+		return (ERX_EINVAL);
+	previous = atomic_exchange_explicit(&group_label[irq], label, memory_order_acq_rel);
 
 	const erx_fiasco_irq_bind_request_t request = { .caller = erx_fiasco_thread_self()->index,
-	    .irq = irq, .thread = group_dispatcher, .record = record };
+	    .irq = irq, .thread = group_dispatcher, .record = irq };
 
 	status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &request, sizeof(request), &reply);
-	if (status != ERX_OK) {
-		erx_fiasco_lock(&group_lock);
-		group_record_used[record] = false;
-		erx_fiasco_unlock(&group_lock);
-	}
+	if (status != ERX_OK)
+		atomic_store_explicit(&group_label[irq], previous, memory_order_release);
 	return (status);
 }
 
