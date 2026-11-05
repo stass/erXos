@@ -13,21 +13,33 @@ module Erx
   class TranscriptTimeout < Error; end
 
   module QemuPlan
+    # The guest CPU counts a plan accepts.
+    CPUS = (1..8)
+    # As serial, the guest's serial line on this process's own standard input
+    # and output, with QEMU's monitor multiplexed onto it: Ctrl-A C switches
+    # between the two and Ctrl-A X quits QEMU. For a person at a terminal,
+    # never for a harness, which reads the line from a file.
+    CONSOLE = :console
+
     module_function
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
-      raise Error, 'CPU count must be between 1 and 8' unless cpus.is_a?(Integer) && cpus.between?(1, 8)
+      unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
+        raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
+      end
       unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
         raise Error, 'guest memory must be between 128 and 4096 MiB'
       end
-      [image, serial, program].each do |value|
+      [image, *(serial == CONSOLE ? [] : [serial]), program].each do |value|
         raise Error, 'invalid QEMU path' unless value.is_a?(String) && !value.empty? && !value.include?("\0")
       end
 
       machine = 'virt-11.1,gic-version=3'
       machine += ',msi=gicv2m' if accel == 'tcg'
+      # `-monitor none` turns off only QEMU's default monitor; CONSOLE's
+      # `mon:stdio` brings its own, multiplexed onto the serial line.
       [program, '-machine', machine, '-accel', accel,
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, '-m', memory_mib.to_s,
@@ -37,8 +49,14 @@ module Erx
     end
 
     # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
-    # bytes written there arrive on its receive side.
+    # bytes written there arrive on its receive side. CONSOLE puts both sides
+    # on this terminal instead.
     def serial_arguments(serial, input)
+      if serial == CONSOLE
+        raise Error, 'a console serial line takes no input file' if input
+
+        return ['-serial', 'mon:stdio']
+      end
       return ['-serial', "file:#{serial}"] unless input
       raise Error, 'invalid QEMU path' unless input.is_a?(String) && !input.empty? && !input.match?(/[\0,]/) && !serial.include?(',')
 

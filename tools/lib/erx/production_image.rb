@@ -64,6 +64,18 @@ module Erx
     # to know the image is of the tree it checks, whatever else rebuilt the runtime since.
     def self.sources_path(archive) = "#{archive}.sources"
 
+    # Removes the image an earlier build left at path under root, so the next
+    # build starts clean, and returns the directory. The check comes first and
+    # refuses a path that is, or passes through, a link, so the removal never
+    # leaves root.
+    def self.clear_directory(root:, path:)
+      directory = OutputDirectory.check(root: root, path: path)
+      raise Error, 'an image directory must lie below its root' if directory == File.realpath(root)
+
+      FileUtils.remove_entry(directory) if File.exist?(directory)
+      directory
+    end
+
     # Packs the image from Fiasco's last build into a directory that must be clean, so a
     # stale file cannot stand in for this build's.
     def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
@@ -386,8 +398,7 @@ module Erx
       end
 
       def image(fiasco, directory: 'build/production-image/boot', manifest_source: nil)
-        directory = File.join(@root, directory)
-        FileUtils.remove_entry(directory) if File.exist?(directory)
+        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, directory))
         ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                        .build(directory: directory, **{ manifest_source: manifest_source }.compact)
       end

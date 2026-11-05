@@ -14,6 +14,7 @@ require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/runtime'
 require_relative 'lib/erx/runtime_seam'
 require_relative 'lib/erx/qemu'
+require_relative 'lib/erx/interactive_boot'
 require_relative 'lib/erx/conformance'
 require_relative 'lib/erx/boot_image_check'
 require_relative 'lib/erx/debug_log_probe'
@@ -68,6 +69,8 @@ module Erx
         build(command_arguments, **collaborators)
       when 'check-runtime-seam'
         check_runtime_seam(command_arguments, **collaborators)
+      when 'boot'
+        boot(command_arguments, **collaborators)
       when 'qemu'
         qemu(command_arguments, **collaborators)
       when 'conformance'
@@ -393,7 +396,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | build runtime | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
       0
     end
 
@@ -448,6 +451,20 @@ module Erx
              end
       Terminal.puts("built #{path}")
       0
+    end
+
+    # The development boot image in QEMU with its serial line on this terminal,
+    # for a person to type at (InteractiveBoot). The arguments are read whole
+    # before anything is built or run.
+    def self.boot(arguments, runner_class: Runner)
+      request = InteractiveBoot.request(arguments)
+      runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      accel = request.accel || InteractiveBoot.default_accel(QemuGate.available_accelerators(runner: runner))
+      Terminal.puts("building the development boot image into #{InteractiveBoot::DIRECTORY}")
+      image = InteractiveBoot.build_image(root: ROOT, runner: runner, jobs: request.jobs)
+      argv = InteractiveBoot.argv(accel: accel, cpus: request.cpus, image: image)
+      Terminal.puts("booting: accelerator #{accel}, #{request.cpus} guest CPU(s); #{InteractiveBoot::QUIT_HINT}")
+      InteractiveBoot.run(argv)
     end
 
     def self.qemu(input_arguments)

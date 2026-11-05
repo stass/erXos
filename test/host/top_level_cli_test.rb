@@ -190,8 +190,22 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, 'unexpected arguments'
   end
 
+  def test_boot_refuses_bad_arguments_before_setting_anything_up
+    [%w[--cpus 0], %w[--cpus 9], %w[--accel kvm], %w[extra]].each do |arguments|
+      status, output = run_cli('boot', *arguments, runner_class: UnexpectedRunner)
+      assert_equal 2, status, arguments.join(' ')
+      refute_empty output
+    end
+  end
+
+  def test_help_names_the_interactive_boot
+    status, output = run_cli('--help')
+    assert_equal 0, status
+    assert_includes output, 'boot [--accel tcg|hvf] [--cpus N]'
+  end
+
   def test_commands_refuse_unsupported_collaborators
-    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build qemu oracle bench check-oracle gates --help -h].each do |command|
+    %w[check check-generated check-reproducible check-fuzz check-sanitizers check-ubsan check-stack-proof pack status fetch check-tla check-sources check-arch-terms build boot qemu oracle bench check-oracle gates --help -h].each do |command|
       assert_raises(ArgumentError, command) { run_cli(command, unexpected: Object.new) }
     end
   end

@@ -89,6 +89,21 @@ select this combined host gate. `check-ubsan` also runs the host gate, then
 fails explicitly because its required kernel UBSan boot is unsupported
 until erXos's kernel exists.
 
+## Boot erXos
+
+```sh
+tools/erx boot
+tools/erx boot --accel tcg --cpus 4
+```
+
+`tools/erx boot` builds the development boot image the QEMU suites boot,
+into `build/production-image/interactive/`, and runs it in QEMU with the
+guest's serial console on your terminal, where the Erlang shell's `1>`
+prompt comes up. It uses HVF when QEMU offers it and TCG otherwise;
+`--accel` chooses, and `--cpus` sets the guest's CPUs (1 to 8, default 1).
+Quit with Ctrl-A then X; Ctrl-A then C switches to the QEMU monitor and
+back. The first build of ERTS takes a while.
+
 ## Guest and stock oracle
 
 ```sh

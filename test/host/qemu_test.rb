@@ -46,6 +46,21 @@ class QemuTest < Minitest::Test
     assert_equal 'file,id=serial0,path=serial,input-path=keys', typed.fetch(typed.index('-chardev') + 1)
   end
 
+  def test_a_console_serial_line_is_this_terminal_with_the_monitor_muxed
+    console = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE)
+    assert_equal 'mon:stdio', console.fetch(console.index('-serial') + 1)
+    assert_raises(Erx::Error) do
+      Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE, serial_input: 'keys')
+    end
+  end
+
+  def test_cpu_counts_outside_the_plan_range_are_refused
+    [0, 9, '2', nil].each do |cpus|
+      assert_raises(Erx::Error, cpus.inspect) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', cpus: cpus) }
+    end
+    assert_includes Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', cpus: 8), '8'
+  end
+
   def test_a_comma_in_a_serial_input_path_is_refused
     assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'a,b') }
     assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'a,b', serial_input: 'keys') }

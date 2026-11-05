@@ -188,4 +188,24 @@ class ProductionImageTest < Minitest::Test
     verify.call("erx: root task: manifest root_memory 402653184 baseline 134217728 units 3 pool pages 12\n")
     assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 134217728 units 3 pool pages 12\n") }
   end
+
+  # A build/production-image that links out of the tree is refused before
+  # anything is removed, so the harness never deletes what the link names.
+  def test_an_image_directory_through_a_link_is_refused_before_removal
+    Dir.mktmpdir('erx-image-clear-') do |scratch|
+      tree = File.join(scratch, 'tree')
+      outside = File.join(scratch, 'outside')
+      FileUtils.mkdir_p([File.join(tree, 'build'), File.join(outside, 'boot')])
+      File.write(File.join(outside, 'boot', 'keep'), 'not the tree')
+      File.symlink(outside, File.join(tree, 'build/production-image'))
+      run = Erx::ProductionImage::Run.new(root: tree, runner: Object.new)
+      assert_raises(Erx::Error) { run.send(:image, nil) }
+      assert File.file?(File.join(outside, 'boot', 'keep'))
+      assert_raises(Erx::Error) do
+        Erx::ProductionImage.clear_directory(root: tree, path: File.join(tree, 'build/production-image/interactive'))
+      end
+      assert_raises(Erx::Error) { Erx::ProductionImage.clear_directory(root: tree, path: tree) }
+      assert File.directory?(File.join(tree, 'build'))
+    end
+  end
 end
