@@ -320,7 +320,8 @@ process locks; tracing; and both execution flavours, one per image.
 
 Kept from OTP's Erlang code: the preloaded modules less `prim_socket`,
 `socket_registry` and `prim_net`, plus erXos's `erx_erofs`, the EROFS
-reader; `kernel`, with `os:type/0` returning `{unix, erxos}`, `os:cmd/1`
+reader, and `erx_file_remote`, the client of every file server
+([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)); `kernel`, with `os:type/0` returning `{unix, erxos}`, `os:cmd/1`
 raising `badarg`, `heart` and `erl_boot_server` not started, and
 `net_kernel` started in every domain under the domain's node name with
 erXos's carrier, plus erXos's `erx_connections`, `erx_dist`,

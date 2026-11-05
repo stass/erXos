@@ -516,7 +516,14 @@ runtime, shared by every file server of the domain and kept across a
 server's restarts, when it first meets the file and at every change to the
 file's data or size, in the same step that makes the change visible to
 reads; the counter starts at 1, and a server whose counter would pass 2^64
-- 1 refuses every change with `eio` and reports it. A domain's id is never
+- 1 refuses every change with `eio` and reports it. The counter is an
+unsigned 64-bit `atomics` cell that the runtime makes once, before any
+file server starts (in its kernel application's startup, before
+`kernel_safe_sup`), and publishes through `persistent_term`, so it lives
+as long as the runtime and no server's restart resets it. A server draws
+from it with a `compare_exchange/4` loop that refuses at 2^64 - 1, since
+`atomics:add_get/3` would wrap to 0 and hand out old values again. A
+domain's id is never
 reused, so domain, tree, path and version together never name two
 different contents, across a server's restarts and its domain's, which
 lets a client cache a file's bytes under them, as a session's file objects
@@ -953,12 +960,17 @@ tree:
 %% A tree that writes adds these; one without them is read-only (F5).
 -callback write(Handle :: term(), Offset :: non_neg_integer(), binary(),
                 State :: term()) ->
-              {ok, non_neg_integer(), State1 :: term()} | {error, file:posix()}.
+              {ok, Count :: non_neg_integer(), At :: non_neg_integer(),
+               State1 :: term()} | {error, file:posix()}.
+%% A {file, ...} make answers with the open Handle; every other kind without.
 -callback make(Dir :: term(), Name :: binary(), What :: what(), State :: term()) ->
-              {ok, Node :: term(), qid(), State1 :: term()} | {error, file:posix()}.
--callback setattr(Node :: term(), Changes :: map(), State :: term()) ->
+              {ok, Node :: term(), qid(), Handle :: term(), State1 :: term()}
+            | {ok, Node :: term(), qid(), State1 :: term()} | {error, file:posix()}.
+-callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
+                  Changes :: map(), State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
--callback unlink(Dir :: term(), Name :: binary(), State :: term()) ->
+-callback unlink(Dir :: term(), Name :: binary(), Kind :: file | directory | any,
+                 State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
                  NewName :: binary(), State :: term()) ->
@@ -967,10 +979,11 @@ tree:
               {ok, State1 :: term()} | {error, file:posix()}.
 -callback xattr(Node :: term(), Op :: xattr_op(), State :: term()) ->
               {ok, term(), State1 :: term()} | {error, file:posix()}.
--optional_callbacks([readlink/2, write/4, make/4, setattr/3, unlink/3,
+-optional_callbacks([readlink/2, write/4, make/4, setattr/3, unlink/4,
                      rename/5, fsync/2, xattr/3]).
 
--type what() :: {file, Mode :: 0..8#7777} | {directory, Mode :: 0..8#7777}
+-type what() :: {file, Mode :: 0..8#7777, Flags :: non_neg_integer()}
+              | {directory, Mode :: 0..8#7777}
               | {symlink, Target :: binary()} | {link, Node :: term()}
               | {node, Mode :: non_neg_integer(), Major :: non_neg_integer(),
                  Minor :: non_neg_integer()}.
@@ -980,7 +993,26 @@ tree:
 callback for every operation that adds a name, so a module states once
 which kinds its format keeps and refuses the rest with `eperm`; `unlink`
 serves `remove` and `unlinkat`, and `rename` serves `rename` and
-`renameat`.
+`renameat`. Each decision POSIX makes in one step is one callback, so no
+other client's request can come between its parts:
+
+* `make` of `{file, Mode, Flags}` serves `lcreate` whole: it creates the
+  file, or, without `EXCL`, opens the regular file `Name` already names,
+  and either way returns the open `Handle`, counted as an open as `open`'s
+  is, with the answers of `lcreate`'s row above. Making the file and
+  opening it in two callbacks would let another client remove the new
+  file between them, and could not open a file that already exists.
+* `unlink` receives the request's `Kind`: `unlinkat` passes `directory`
+  with `AT_REMOVEDIR` and `file` without, so the module answers `rmdir` of
+  a file with `enotdir` and `unlink` of a directory with `eisdir`, and
+  `remove` passes `any`.
+* `setattr` receives `{open, Handle}` for an opened fid and `{node, Node}`
+  for an unopened one, so a size change checks the open's access through
+  an opened fid and the file's permission otherwise, as `setattr`'s row
+  above requires.
+* `write` returns `Count` and `At`, the offset the bytes were written at,
+  which only the module knows for an append, and which `write`'s reply
+  carries ([Open files and offsets](#open-files-and-offsets)).
 
 * **One process per grant.** A service serves a tree by starting one
   `erx_fs` process per grant, as a facet stands for one grant, so a slow
@@ -1245,7 +1277,12 @@ the calling process through `erx_erofs`, the EROFS reader, which returns
 OTP's file descriptor record with itself as the module for an open file
 ([design-storage.md](design-storage.md#reading-erofs-images)). For a grant
 the NIF returns `{remote, Pid, Names}`, and the operation runs in the
-calling process through `erx_file_remote`:
+calling process through `erx_file_remote`. `erx_file_remote` is preloaded,
+as `prim_file` and the EROFS reader are, and calls only BIFs and preloaded
+modules: whatever process calls `file` or `erl_prim_loader` on a server's
+path runs it, the code server included when a server's directory is on
+the code path, and a module the code server would have to load then halts
+the node.
 
 * path operations (`read_file_info`, `list_dir`, `make_dir`, `delete`,
   `rename`, `make_link`, `make_symlink`, `read_link`, `read_file`,
@@ -1532,7 +1569,7 @@ Interaction with other subsystems:
 | Domains | requests are frames on the connection between client and server, to a grant pid the server exported to the client, each to a fresh alias; servers in the system domain stand behind facets ([design-domains.md](design-domains.md#facets)) |
 | System | the domain service builds namespaces and the facets they mount ([design-system.md](design-system.md#creating-a-domain)) |
 | Kernel | a session's shared object for a mapped file is an ordinary shared memory object of the session's budget, which the session grows, fills, maps into its programs' images and writes back from the pages `erx_mem_dirty` reports; its faults resolve from its own pages ([design-kernel.md](design-kernel.md#virtual-memory)) |
-| Runtime | `prim_file` resolves through the namespace; the release provider stays in the NIF, the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)), and each domain runs its own RAM file server for `/tmp` ([design-tmp.md](design-tmp.md)) |
+| Runtime | `prim_file` resolves through the namespace; the release provider stays in the NIF, the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)), `erx_file_remote`, preloaded Erlang too, is the client of every file server, and each domain runs its own RAM file server for `/tmp` ([design-tmp.md](design-tmp.md)) |
 | Programs | a handler keeps each program's namespace, fids and descriptions, relays its requests and moves bytes through the data area; the session's mappers serve its programs' shared mappings ([design-programs.md](design-programs.md#the-handler)) |
 | Live machine | `/proc` and the session's export are `erx_fs` servers ([design-live.md](design-live.md#the-proc-tree)); the host link's bridge and the host-tree domain carry 9P2000.L to and from the host ([design-live.md](design-live.md#files-between-the-host-and-the-machine)) |
 | Storage | the storage services and the FAT server, in Erlang, serve the data partition's and FAT partitions' files through `erx_fs`, behind each principal's facet ([design-storage.md](design-storage.md)) |

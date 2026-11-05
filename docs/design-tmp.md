@@ -316,11 +316,11 @@ as under a `umask` of `022`, unless the request names a mode.
 | `statfs()` | block size 4,096, blocks `cap div 4096`, free `(cap - held) div 4096` | none |
 | `xattr(...)` | refused: the tree keeps no extended attributes | `EOPNOTSUPP` |
 
-The table assumes four changes to `erx_fs`'s callbacks, each so that a
-decision POSIX makes in one step is made in one step here: `unlink`
-receives the request's kind, `make` of a file carries the flags and
-returns an open handle, `setattr` receives an open fid's handle, and
-`write` returns `At`; see [Open questions](#open-questions).
+`erx_fs`'s callbacks make each decision POSIX makes in one step in one
+step: `unlink` receives the request's kind, `make` of a file carries the
+flags and returns an open handle, `setattr` receives an open fid's
+handle, and `write` returns `At`
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)).
 
 **Times and versions.** Reads and listings never change `atime`, as under
 Linux's `noatime`, and a write of zero bytes changes nothing. Otherwise:
@@ -418,6 +418,14 @@ atomic for every observer. The unit is one request: a write over 64 KiB
 is several, and another writer's may fall between them
 ([design-files.md](design-files.md#open-files-and-offsets)). The cap is
 a field of the one value, so concurrent writers cannot together pass it.
+
+**Reads in helpers.** `/tmp`'s reads run in `erx_fs`'s read helpers, as
+every server's do, though a tree in memory never makes a read wait for a
+medium and the helper only adds a process. `erx_fs` offers no way for a
+module to declare its reads immediate: that waits for the measurement of
+`/tmp`'s hops per operation on the
+[performance watch list](todo-performance.md), which decides whether the
+extra process costs enough to matter.
 
 **Work per step.** A write touches at most 17 chunks, a read its
 count's, a listing page `Max` entries, and a lookup or a change of a
@@ -576,57 +584,6 @@ The tree parses no bytes: names and payloads reach it only through
 frames, and paths only through `erx_ns_resolve`, which has its own. The
 sequence test is the tree's fuzz target, run by `make check-fuzz` for
 its budget.
-
-## Open questions
-
-* **`erx_fs`'s callbacks miss four things a tree needs**, each a decision
-  POSIX makes in one step. `unlink/3` carries neither 9P2000.L's
-  `AT_REMOVEDIR` nor `remove`'s "either kind", so a tree cannot answer
-  `rmdir` of a file with `ENOTDIR` or `unlink` of a directory with
-  `EISDIR`. `make/4` returns a node and no handle, so another client can
-  remove a new file between `make` and `open`, and it cannot open a file
-  that already exists, which `lcreate` without `O_EXCL` must. `setattr/3`
-  receives a node, so it cannot tell a truncation through a read-only
-  open from one through a writable open. And `write/4` returns a count
-  alone, which cannot say where an append landed. Recommendation:
-  `unlink(Dir, Name, Kind, State)` with `Kind` one of `file`, `directory`
-  or `any`, `remove` passing `any`; `make` for `{file, Mode, Flags}`
-  returning `{ok, Node, qid(), Handle, State1}`, counted as an open,
-  whether it made the file or opened one; `setattr(Target, Changes,
-  State)` with `Target` `{open, Handle}` for an opened fid and `{node,
-  Node}` otherwise; and `write` returning `{ok, Count, At, State1}`. This
-  document's table treats them so.
-* **Where the domain's file version counter lives.** Every server of a
-  domain draws from it and it outlives their restarts, but no document
-  names its home. Recommendation: an unsigned 64-bit `atomics` cell the
-  runtime makes before any file server starts, reached through
-  `persistent_term`, drawn by a `compare_exchange/4` loop that refuses at
-  2^64 - 1, since `atomics:add_get/3` would wrap to 0 and draw old values
-  again.
-* **When `erx_fs` and `erx_file_remote` are built.** `/tmp` as a server
-  needs both, which the roadmap places with the file services after
-  `/tmp`. Recommendation: build first, as the package that unblocks
-  OTP's suites, a complete minimum: `version` and `attach`; `walk`,
-  `lopen`, `lcreate` with create-or-open, `read`, `write` with `At`,
-  `readdir`, `getattr`, `setattr`, `mkdir`, `symlink`, `link`,
-  `readlink`, `unlinkat`, `renameat`, `statfs`, `fsync` (a no-op for
-  `/tmp`, which OTP's `sync` and `datasync` cases need to succeed),
-  `flush` and `clunk`; fid owners and their cleanup; the reply checks;
-  and the client's last-name, error, file-information and offset rules.
-  Locks, extended attributes, freezing, `mknod`, `remove`, `rename`'s fid
-  form and `auth` come with the storage services.
-* **`erx_file_remote` must be preloaded.** Whatever process calls `file`
-  or `erl_prim_loader` on a server's path runs `erx_file_remote`, the
-  code server included whenever a server's directory is on the code path
-  (T6); if it is not loaded then, the code server halts the node.
-  [design-files.md](design-files.md) does not say it is preloaded, as it
-  says of the EROFS reader. Recommendation: preload it, and hold every
-  module it calls to BIFs and preloaded modules, as `prim_file` is held.
-* **A read helper per read.** `erx_fs` runs a read in a helper so a slow
-  medium does not block the file's owner; for a tree in memory the
-  helper only adds a process. Recommendation: leave it until the
-  watch-list measurement asks, then let a module declare its reads
-  immediate.
 
 ## References
 

@@ -545,8 +545,21 @@ no cooperation flag enabled
 in 41 files that ERTS's own files take in all, of which M3 makes only
 those the shell needs
 ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos));
-threads, memory, time, files (release file system and `/tmp`) and crash
-handling in `sys/erxos`; the watchdog process, `erx_watchdog`, petting
+threads, memory, time, files and crash handling in `sys/erxos`; files
+are the release file system, the namespace's mounts, the file protocol's
+frame profile with its term grammar generated from `abi/erx_abi.txt`,
+`erx_fs`'s core (the grant process, fids and their owners, open files
+with their owners, `lcreate`'s create-or-open, and `write` answering
+with `At`, and the reply checks), the preloaded `erx_file_remote` with
+the client's last-name, error, file-information and offset rules
+([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)),
+both for the operations `/tmp` needs: `version`, `attach`, `walk`,
+`lopen`, `lcreate`, `read`, `write`, `readdir`, `getattr`, `setattr`,
+`mkdir`, `symlink`, `link`, `readlink`, `unlinkat`, `renameat`,
+`statfs`, `fsync` (a no-op for `/tmp` that succeeds, as OTP's `sync` and
+`datasync` cases need), `flush` and `clunk`; and `/tmp` as the domain's
+own `erx_fs` server ([design-tmp.md](design-tmp.md#where-tmp-runs));
+the watchdog process, `erx_watchdog`, petting
 from the system release; musl behind `liberx`; the console service and
 the console's driver, an Erlang process in the system domain over the
 device NIF, with no console NIF
@@ -590,8 +603,10 @@ violation of each property in its scope and on a seeded record outside that
 scope; a manifest whose console differs from
 `/chosen/stdout-path` is refused at boot; the interpreter image links no
 BeamAsm, asmjit or libc++ symbol, and the boot image's root entry carries
-no `ERX_IMAGE_JIT`; the fuzz target of the Erlang manifest reader runs
-its budget clean.
+no `ERX_IMAGE_JIT`; the fuzz targets of the Erlang manifest reader, of
+the file protocol's frame grammar, which feeds both local messages and
+frames to `erx_fs`, and of `/tmp`'s tree, its sequence test, run their
+budgets clean.
 
 **Gate G3.** Measures: W1 of E-S1 (same-domain ping-pong and ring, spawn,
 switch) against stock OTP 29.1.2 on the host; footprint; boot time to the
@@ -624,8 +639,9 @@ code store in memory, with loads by hash, checked by the SHA-256
 primitive ([design-runtime.md](design-runtime.md#per-byte-primitives)),
 manifests, history and the missing-blob exchange
 ([design-live.md](design-live.md#the-code-store)); the system domain's
-namespace, `erx_ns_resolve` in `prim_file` with its fuzz target, the file
-protocol, which is 9P2000.L, with its codec and fuzz target, `erx_fs` and
+namespace, `erx_ns_resolve` in `prim_file` with its fuzz target, the
+9P2000.L byte codec `erx_9p` built from the frame profile, with its fuzz
+target, `erx_fs`'s locks, read helpers and flush of helper work, and
 `/proc`, with the previous boot's crash record under `[kernel, crash]`
 where the platform keeps one ([design-files.md](design-files.md)); the
 host link's files stream, stream 4, which `tools/erx files` relays to a
@@ -724,8 +740,8 @@ and watch the machine come back from the reset with nothing to reconcile.
   introductions, domain pids, facets, code facets,
   `erx_domain:introduce/1,2`, with `erlang:disconnect_node/1` taking a
   connection down; namespaces
-  built for every domain, with facets mounted as file servers and
-  `erx_file_remote` ([design-files.md](design-files.md)); identifiers
+  built for every domain, with facets mounted as file servers, reached
+  through `erx_file_remote` ([design-files.md](design-files.md)); identifiers
   checked by `erx_ident`
   ([design-system.md](design-system.md#identifiers)); domain ids
   allocated by the domain service, never reused within a boot
