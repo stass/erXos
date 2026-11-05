@@ -300,6 +300,9 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `test/guest/native_irq/guest.c`: the line's unbind and rebind come before the first typed character, so
+  nothing checks that a line still fires after it was delivered, acked, detached and attached again. Type a third
+  character after the rebind and add its checkpoint to `tools/lib/erx/native_irq.rb`.
 * [Medium] `otp/lib/kernel/src/erx_pl011.erl`: QEMU 11.1's PL011 writes each byte straight to its backend, so `FR.TXFF`
   never sets, and it forces the receive interrupt level to one byte, so the receive timeout never has a byte below the
   level to report; a character also arrives whole, never in flight. The `production_image` suite therefore still passes
