@@ -2628,7 +2628,7 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `erlang:system_flag(scheduler_bind_type, _)` | raises `notsup`, as ERTS does where binding is unsupported; executors are pinned by the adapter, or unpinned with `+sbt u` |
 | `erlang:halt/0,1` | the domain stops itself with the status; in the system domain, the machine shuts down ([Crash handling](#crash-handling)) |
 | `erlang:halt/1` with a string | a crash dump with that slogan, then the domain stops ([Crash handling](#crash-handling)) |
-| `erlang:load_nif/2` | only NIFs linked into the domain's runtime image |
+| `erlang:load_nif/2`, `erl_ddll` | only NIFs linked into the domain's runtime image; any other load is refused by `erl_erxos_sys_ddll.c`, which reaches no dynamic linker, with `{error, {load_failed, Text}}` and `{error, no_ddll_available}` |
 | `code:load_binary/3`, `erlang:load_module/2` in the system domain | `{error, not_installed}` unless the module is installed storage ([Code in the system domain](#code-in-the-system-domain)) |
 | `file`, `prim_file` | the release file system read-only at `/`, EROFS images read-only where a release mounts them, a RAM file system at `/tmp` ([Files](#files)) |
 | `gen_tcp`, `gen_udp`, `socket`, `net` | served by the network service through the domain's grant of it, whose design maps each call ([design.md](design.md#networking)); without a grant, `{error, eacces}`, as POSIX's `socket` answers a refused protocol |

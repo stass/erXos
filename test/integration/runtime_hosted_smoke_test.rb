@@ -240,6 +240,18 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # A library is not looked for at all: only NIFs linked into the runtime image load.
+  def test_a_library_load_is_refused_without_reaching_the_host
+    probe = compiled_load_nif_probe
+    assert_answers(
+      "{module, load_nif_probe} = code:load_binary(load_nif_probe, \"probe\", base64:decode(\"#{probe}\")), loaded." =>
+        /^loaded$/,
+      'load_nif_probe:go("/nosuch/lib").' =>
+        %r{^\{error,\{load_failed,"Failed to load NIF library /nosuch/lib: 'only NIFs linked into the runtime image load'"\}\}$},
+      'erl_ddll:load_driver("/nosuch", "nodrv").' => /^\{error,no_ddll_available\}$/
+    )
+  end
+
   def test_a_word_the_page_refuses_stops_the_start_with_its_reason
     output, status = Open3.capture2e('gtimeout', '-k', '10', BUDGET_SECONDS.to_s, OUTPUT.beam, OUTPUT.archive, 'word', '',
                                      stdin_data: '')
@@ -371,6 +383,16 @@ class RuntimeHostedSmokeTest < Minitest::Test
         @reaped = true if wait_for(pid, deadline, transcript)
         expected.values.zip(answers).each { |pattern, answer| assert_match pattern, answer }
       end
+    end
+  end
+
+  # The fixture's BEAM, in base64: the release has no compiler, and the runtime's build needs the oracle.
+  def compiled_load_nif_probe
+    Dir.mktmpdir('erx-hosted-probe-') do |directory|
+      log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '-o', directory,
+                                    File.join(ROOT, 'test/fixtures/load_nif_probe.erl'))
+      assert status.success?, log
+      [File.binread(File.join(directory, 'load_nif_probe.beam'))].pack('m0')
     end
   end
 
