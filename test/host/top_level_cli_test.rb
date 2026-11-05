@@ -133,6 +133,23 @@ class TopLevelCliTest < Minitest::Test
     end
   end
 
+  # `make check` builds no runtime, so a test that reads the hosted build fails its setup
+  # there on a clean checkout; `make check-runtime-hosted` builds it and runs them. The one
+  # runtime test left in `make check` compiles its own harness and reads no build.
+  def test_a_test_of_the_hosted_build_leaves_make_check_for_its_own_gate
+    root = File.expand_path('../..', __dir__)
+    tests = Dir.glob('*_test.rb', base: File.join(root, 'test/integration'))
+    reads_build = tests.select { |name| File.read(File.join(root, 'test/integration', name)).include?('Runtime.check_current') }
+    assert_equal %w[runtime_console_test.rb runtime_hosted_smoke_test.rb runtime_prim_file_test.rb runtime_release_test.rb],
+                 reads_build.sort
+    ordinary = Erx::CLI.integration_tests(root).map { |path| File.basename(path) }
+    assert_empty reads_build & ordinary
+    assert_equal %w[runtime_event_test.rb], ordinary.grep(/\Aruntime_/)
+
+    recipe = File.read(File.join(root, 'Makefile'))[/^check-runtime-hosted:\n(?:\t.*\n)+/]
+    tests.grep(/\Aruntime_/).each { |name| assert_includes recipe, "test/integration/#{name}" }
+  end
+
   def test_gates_lists_what_each_discovered_gate_runs
     status, output = run_cli('gates')
     assert_equal 0, status, output
