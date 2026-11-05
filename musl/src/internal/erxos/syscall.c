@@ -27,7 +27,7 @@
 #include "syscall.h"
 
 #include "erx/abi.h"
-#include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/libc_start.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
@@ -174,7 +174,7 @@ console_write(int fd, const void *bytes, size_t length)
 {
 	if (fd != 1 && fd != 2)
 		return (-EBADF);
-	erx_fiasco_console_write(bytes, length);
+	erx_fiasco_libc_write(bytes, length);
 	return ((long)length);
 }
 

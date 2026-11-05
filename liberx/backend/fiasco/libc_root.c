@@ -14,6 +14,12 @@
 void	erx_fiasco_root_main(void);
 
 void
+erx_fiasco_libc_write(const void *bytes, size_t length)
+{
+	erx_fiasco_console_write(bytes, length);
+}
+
+void
 erx_fiasco_root_main(void)
 {
 	const char *reason = erx_fiasco_root_up(NULL, 0);

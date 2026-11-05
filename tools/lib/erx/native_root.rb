@@ -18,6 +18,9 @@ module Erx
     BACKEND = 'liberx/backend/fiasco'
     LINK_SCRIPT = "#{BACKEND}/root.ld"
     TASK_LINK_SCRIPT = "#{BACKEND}/task.ld"
+    # A section task.ld does not name would take the segments of the one before it, and a
+    # writable one after .tbss would shrink every thread's TLS, so such a link fails.
+    TASK_LINK_FLAGS = %w[--orphan-handling=error].freeze
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory: the effects over sigma0 and the two pure cores.
@@ -89,7 +92,7 @@ module Erx
 
     # A task's program for the boot image: fixed addresses, as task.ld gives.
     def build_task(name:, sources:, directory:, flags: [])
-      build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT)
+      build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS)
     end
 
     # Compiles sources in source's tree and links them into directory/name, with Fiasco's
@@ -97,11 +100,11 @@ module Erx
     # further archives. Headers of
     # Fiasco are system headers here: they are inherited, so -pedantic judges only
     # erXos's own code.
-    def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT)
+    def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT, link_flags: [])
       objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, '-z', 'max-page-size=4096', '-Map', map_path(program), '-o', program, *objects, *archives,
+      @runner.run([@linker, '-T', script, *link_flags, '-z', 'max-page-size=4096', '-Map', map_path(program), '-o', program, *objects, *archives,
                    @fiasco.boot_core_archive, *libraries],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
       program

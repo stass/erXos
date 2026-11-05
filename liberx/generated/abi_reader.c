@@ -579,6 +579,22 @@ erx_fiasco_task_join_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_task_write_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_task_write_request_t *result)
+{
+	erx_fiasco_task_write_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_TASK_WRITE_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.len = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_create_request_t *result)
 {

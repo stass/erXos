@@ -488,6 +488,9 @@ run_wire(void)
 	got = decode(0, ERX_CALL_DEBUG_LOG, 1, 0);
 	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
 		fail("a debug log of any other word count is ERX_EINVAL");
+	got = decode(0, ERX_FIASCO_CALL_TASK_WRITE, 1, 0);
+	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
+		fail("a task write of any other word count is ERX_EINVAL");
 	got = decode(0, ERX_FIASCO_CALL_THREAD_START, start_words + 1, 0);
 	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
 		fail("a word count the ABI does not give is ERX_EINVAL");

@@ -162,6 +162,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_SPACE_PROTECT` | 8 |
 | `ERX_FIASCO_CALL_SPACE_STOP` | 16 |
 | `ERX_FIASCO_CALL_TASK_JOIN` | 17 |
+| `ERX_FIASCO_CALL_TASK_WRITE` | 23 |
 | `ERX_FIASCO_CALL_THREAD_CREATE` | 2 |
 | `ERX_FIASCO_CALL_THREAD_REAP` | 11 |
 | `ERX_FIASCO_CALL_THREAD_SET_AFFINITY` | 10 |
@@ -762,6 +763,15 @@ Storage: `wire_le`. Prefix size: 16. Alignment: 8.
 | --- | --- | ---: | ---: |
 | `caller` | `u64` | 0 | 1 |
 | `task` | `u64` | 8 | 1 |
+
+### `erx_fiasco_task_write_request_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `len` | `u64` | 8 | 1 |
 
 ### `erx_fiasco_thread_create_request_t`
 

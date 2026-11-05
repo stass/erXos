@@ -53,6 +53,13 @@ int	erx_space_stop(uint64_t space, int64_t status);
 int	erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes,
 	    erx_fiasco_reply_t *reply);
 
+/*
+ * A task's standard output and standard error: the service writes these bytes to the
+ * console unchanged, one call per ERX_UTCB_BYTES_MAX. Like the console, it drops what
+ * it cannot deliver: a write's result never depends on it.
+ */
+void	erx_fiasco_task_write(const void *bytes, size_t length);
+
 /* how is ERX_END_OFF or ERX_END_RESET; res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 

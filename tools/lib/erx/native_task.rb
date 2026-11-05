@@ -35,6 +35,8 @@ module Erx
     FORGED_LINE = 'erx: task: forged ok'
     # The log case's record: the service's opening, then the text with each control byte a token.
     LOG_RECORD = /\A#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ space [1-9][0-9]*: \\x0A#{FORGED_LINE}\\x0A\\x1B\[2J\r?\n\z/n
+    # What test/guest/native_task/modes.h says the write case writes.
+    WRITE_BYTES = ("write case:\t\n\e[2J\xFF\n".b + Array.new(1103) { |index| index & 0xff }.pack('C*') + "\n").freeze
 
     module_function
 
@@ -42,7 +44,8 @@ module Erx
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), case_point('program_found', seconds: 30),
        { name: 'task-cpus', pattern: /\Aerx: task: cpus [1-9]/n, seconds: 30 }.freeze,
        case_point('service', seconds: 180), case_point('write_rx', seconds: 30), case_point('run_rw', seconds: 30),
-       case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30), case_point('log', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),
+       case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30), case_point('log', seconds: 30),
+       case_point('write', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),
        case_point('request_against_exit', seconds: RACE_SECONDS),
        { name: 'task-done', pattern: /\Aerx: task: done/n, seconds: 30 }.freeze].freeze
     end
@@ -62,6 +65,7 @@ module Erx
     # later lines are what the transcript checks.
     def judge(serial)
       judge_log(serial)
+      judge_write(serial)
       statuses = serial.b.scan(ADDRESS_LINE).flatten
       raise Error, "#{statuses.size} address lines, not #{FAULTS.size}" unless statuses.size == FAULTS.size
 
@@ -79,6 +83,13 @@ module Erx
 
       forged = lines.grep(LOG_RECORD)
       raise Error, "#{forged.size} forged records, not 1" unless forged.size == 1
+    end
+
+    # A task's write reaches the serial log as the program wrote it. Fiasco's console
+    # puts a carriage return ahead of every newline, whoever writes it, and that is the
+    # one difference (docs/design-stopgap.md, "The console").
+    def judge_write(serial)
+      raise Error, "the task's write is not in the serial log byte for byte" unless serial.b.include?(WRITE_BYTES.gsub("\n", "\r\n"))
     end
 
     def judge_fault(rest, fault, address)

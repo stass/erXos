@@ -7,7 +7,9 @@
  * The root that runs musl's libc-test: every program under boot/libc-test/ in the
  * boot image runs as a task of its own, one after another, in one boot, since a task's
  * fault leaves the machine running. It reports what it saw and judges nothing:
- * tools/lib/erx/libc_test.rb reads these lines.
+ * tools/lib/erx/libc_test.rb reads these lines. A task's output lies between them as it
+ * wrote it, so each end line opens with a newline: output with no final newline stays
+ * on a line of its own, and the line after it is still a whole one of the root's.
  *
  *   erx: libc-test: run NAME          the task is about to start
  *   erx: libc-test: end NAME status N the program exited with N
@@ -119,6 +121,7 @@ test_run(uint32_t entry, const uint8_t *name, size_t length)
 			result = erx_fiasco_task_join(space, &status);
 		}
 	}
+	say("\n");
 	say_line_start("end", name, length);
 	if (result != ERX_OK) {
 		say(launched ? " join-refused " : " launch-refused ");

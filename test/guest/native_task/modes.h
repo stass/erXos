@@ -18,9 +18,18 @@
 #define MODE_WAIT	7	/* sleeps until the root stops the task */
 #define MODE_IRQ_REFUSED	8	/* every IRQ call through the service: each refused */
 #define MODE_LOG	9	/* forges the root's lines with erx_debug_log: ends with 0 */
+#define MODE_WRITE	10	/* writes every byte value through a task's standard output: ends with 0 */
 
 /* The line the log case tries to forge, which must appear only inside a record. */
 #define LOG_FORGED_LINE	"erx: task: forged ok"
+
+/*
+ * What the write case writes, and tools/lib/erx/native_task.rb reads back: this head, then
+ * this many bytes counting up from 0 and wrapping, past two splits of the UTCB, then a newline.
+ * The last piece ends part of the way through a word.
+ */
+#define WRITE_HEAD	"write case:\t\n\033[2J\xff\n"
+#define WRITE_RUN_BYTES	1103
 
 /* The status a spinning task stops with. */
 #define STATUS_SPIN_STOP	7

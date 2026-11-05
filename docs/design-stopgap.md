@@ -619,7 +619,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `exit_group` | `erx_space_stop(ERX_CAP_SELF, status)` | whoever started the program reads the status's low byte; in the root the stop is `erx_machine_end` |
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
-| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_console_write` | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
 | `sched_yield` | `erx_yield` | |
@@ -640,13 +640,20 @@ binary128 arithmetic.
 `tools/lib/erx/libc_test.rb` builds `libc-test`, fetched at its pinned commit, against this musl: each test of
 `functional`, `regression`, `math` and `musl` becomes a program for the boot image, and `test/guest/native_libc_test`'s root
 runs every one as a task, one after another, many to a boot, since a task's fault leaves the machine running. It
-joins each with `erx_fiasco_task_join_until` and stops one still running at its deadline. A task holds no log
-capability, so a test's own output goes nowhere and its exit status is its result.
+joins each with `erx_fiasco_task_join_until` and stops one still running at its deadline. A test's exit status is its
+result. What it prints reaches the serial log as the program wrote it, so triage can read it. The root's lines lie between a test's
+output: the root opens each `end` line with a newline, so output with no final newline stays on its own line and the result stays
+whole, and the `run` line after it starts a line too.
+
+Test programs are trusted, and the runner's reading has that limit. A program can print a line of the root's form, and a boot
+says no more than its log. The last `end` line for a name counts, so the root's line outweighs one the test printed before it. A printed
+`end` that nothing of the root's for that name follows stands as that test's result: one for a test the boot stopped during, or one naming
+an earlier test of the same boot. Nothing escapes a program's output to prevent that.
 
 A test whose own object calls what Phase 1 does not offer (files, processes, signals, sockets, shared objects) is not
 run, and its result names the calls. Every test ends with one result in `build/libc-test`, never in the tree: passed, failed with its
 exit status, its fault or its build error, timed out, not run with its cause, or unknown. A test the root did not reach is
-not run, and how the one under way when a boot stopped went is unknown, with what stopped it named. Only the root's end
+not run, and how the one under way when a boot stopped went is unknown, with what stopped it named. Only the end
 line of that boot says how a test ended: `tools/erx check-libc-test ACCEL CPUS` relinks every program and deletes each
 boot's old log first.
 
@@ -717,7 +724,7 @@ and erXos's kernel has none of it, so [Transport](#transport) records it as a di
 | reply | zero | `erx_fiasco_reply`: `mr[0]` the status; `mr[1]` and `mr[2]` the results |
 | fault | Fiasco's negative `L4_PROTO_PAGE_FAULT` or `L4_PROTO_EXCEPTION` | as Fiasco sends them |
 
-**Payloads never cross the native UTCB.** What the ABI puts in the caller's UTCB (the bytes of `erx_debug_log`, up to
+**Payloads never cross the native UTCB.** What the ABI puts in the caller's UTCB (the bytes of `erx_debug_log` and of a task's `task_write`, up to
 `utcb_bytes_max`; starting registers; results larger than the registers) stays in the caller's public UTCB, which the service reads
 and writes through the window, by the index in `mr[0]`. So 63 message words are always enough. The ABI's memory windows are reached
 through the object's window addresses.
@@ -782,9 +789,21 @@ harness's deadline ends the run.
 `l4_vcon_write` on `L4_BASE_LOG_CAP`, the kernel's polled UART output, or to a ring of `log.c` records. `erx_log_read` runs `erx_log_copy` into
 its window for the Erlang log reader. The service is the serialization `log.h` requires.
 
+**A program's standard output and standard error** deliver its bytes unchanged, whoever holds the program. The root writes them
+to the console itself. A task holds no log capability, so `libc_task.c` hands them to `erx_fiasco_task_write`, one `task_write` call
+per `utcb_bytes_max`, and the service copies each piece from the caller's public UTCB to `erx_fiasco_console_write`: no record, no
+escape and no rate limit, because every task in Phase 1 is a trusted test program. The pieces of a long write are separate calls, so
+another thread's output can fall between them. A shell or session may filter what it displays; `write` does not. Program output
+goes to `l4_vcon_write` whatever the sink is, as the ring's records have no form for unchanged bytes, so it can interleave with
+the driver's writes at any byte ([design-runtime.md](design-runtime.md#the-console-and-standard-io)).
+`erx_debug_log` is the other way out: a program that wants a labelled, escaped record calls it, and `write` never does.
+
+Fiasco's own console (`glue_libc.cc`) puts a carriage return ahead of every newline, whoever writes it, as a terminal's output
+mapping does. That is the one difference between what a program writes and what the serial log holds.
+
 **The handoff.** The `erx_mem_create_physical` body for the manifest's console UART maps the UART, and on failure returns with the sink
 unchanged; it then sets the sink to the ring and replies. The driver's first touch of a register needs that reply, so it follows the service's
-last `l4_vcon_write`. A partial boot never maps the entry, so its log lines reach the UART for the whole run.
+last `l4_vcon_write` of a log record; a program's output goes on as above. A partial boot never maps the entry, so its log lines reach the UART for the whole run.
 
 ## littlefs in the system domain
 
@@ -937,6 +956,7 @@ the tests.
 | **A second task**, the QEMU gate's `native_task` suite: a program from the boot image, built through `elf_plan.c`, commits memory and creates a thread through the service, writes code through a JIT object's read-write alias and runs it through the read-execute alias, then rewrites the page on one CPU and runs it on each other CPU in turn, 2,000 times each, with a status of 0. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show. A write in the read-execute alias and a run in the read-write alias each end the task with a crash frame the suite reads back, and the machine continues. Each IRQ call from the task is `ERX_ENOTSUP` | RW alias mapped RX: the write faults, and the case's status is not 0. The range table's own seeds, in `fiasco_vm_test.rb`, catch an index that ignores the label. Without the IRQ refusal, the `irq_refused` case's status is 80 |
 | **Task exit**: with a thread spinning on each CPU, the first thread stops the task; `l4_task_cap_valid` is 0 for every thread, semaphore, gate and space of the task; the pool's count returns; the root's stop does the same | thread deletion skipped: the capability stays valid. Memory step skipped: the pool is short |
 | **Request against exit**, in `native_task`: one thread loops on `erx_vm_commit` while another faults, 1,000 times, and a new task reuses the label; the service's count of dropped requests, `erx_fiasco_test_dropped`, stays 0, and the pool's count returns | no seed of its own: **Task exit**'s thread deletion seed stops the suite at its earlier `service` case, before this one runs |
+| **A task's write**, `native_task`'s `write` case: a task writes tab, newline, an escape sequence and every byte value through `erx_fiasco_task_write`, past two splits of `utcb_bytes_max`, and the suite finds exactly those bytes in the serial log, with Fiasco's carriage return ahead of each newline; lengths past the UTCB and an index past the thread table are refused. The `log` case holds `erx_debug_log` to its escape and its refusals. A task's link refuses a section `task.ld` does not name, in `test/host/libc_test_test.rb` | the write sent through `erx_debug_log`: the judge finds no such bytes |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
 | **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ready list and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
 | **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |

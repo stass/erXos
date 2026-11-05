@@ -168,6 +168,7 @@ struct erx_rights {
 #define ERX_FIASCO_CALL_SPACE_PROTECT UINT32_C(8)
 #define ERX_FIASCO_CALL_SPACE_STOP UINT32_C(16)
 #define ERX_FIASCO_CALL_TASK_JOIN UINT32_C(17)
+#define ERX_FIASCO_CALL_TASK_WRITE UINT32_C(23)
 #define ERX_FIASCO_CALL_THREAD_CREATE UINT32_C(2)
 #define ERX_FIASCO_CALL_THREAD_REAP UINT32_C(11)
 #define ERX_FIASCO_CALL_THREAD_SET_AFFINITY UINT32_C(10)
@@ -1326,6 +1327,22 @@ _Static_assert(offsetof(erx_fiasco_task_join_request_t, caller) ==
     ERX_FIASCO_TASK_JOIN_REQUEST_OFF_CALLER, "erx_fiasco_task_join_request.caller offset");
 _Static_assert(offsetof(erx_fiasco_task_join_request_t, task) ==
     ERX_FIASCO_TASK_JOIN_REQUEST_OFF_TASK, "erx_fiasco_task_join_request.task offset");
+
+#define ERX_FIASCO_TASK_WRITE_REQUEST_SIZE 16
+#define ERX_FIASCO_TASK_WRITE_REQUEST_ALIGN 8
+#define ERX_FIASCO_TASK_WRITE_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_TASK_WRITE_REQUEST_OFF_LEN 8
+typedef struct erx_fiasco_task_write_request erx_fiasco_task_write_request_t;
+struct erx_fiasco_task_write_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	len;
+};
+_Static_assert(sizeof(erx_fiasco_task_write_request_t) == ERX_FIASCO_TASK_WRITE_REQUEST_SIZE, "erx_fiasco_task_write_request size");
+_Static_assert(_Alignof(erx_fiasco_task_write_request_t) == ERX_FIASCO_TASK_WRITE_REQUEST_ALIGN, "erx_fiasco_task_write_request alignment");
+_Static_assert(offsetof(erx_fiasco_task_write_request_t, caller) ==
+    ERX_FIASCO_TASK_WRITE_REQUEST_OFF_CALLER, "erx_fiasco_task_write_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_task_write_request_t, len) ==
+    ERX_FIASCO_TASK_WRITE_REQUEST_OFF_LEN, "erx_fiasco_task_write_request.len offset");
 
 #define ERX_FIASCO_THREAD_CREATE_REQUEST_SIZE 48
 #define ERX_FIASCO_THREAD_CREATE_REQUEST_ALIGN 8

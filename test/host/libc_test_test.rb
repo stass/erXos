@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dependencies'
 require_relative '../../tools/lib/erx/libc_test'
@@ -38,7 +39,7 @@ class LibcTestTest < Minitest::Test
     assert_equal(:passed, read(["erx: libc-test: end a/pass status 0\r"], %w[a/pass]).first.state)
   end
 
-  # What a task prints reaches the log only inside a record, which the service opens.
+  # A record of erx_debug_log opens with the service's words, so it is no result.
   def test_a_tasks_record_is_no_result
     results = read(['erx: libc-test: run a/forged',
                     '#7 1.000000 debug space 3: erx: libc-test: end a/forged status 0'], %w[a/forged], machine: 'QEMU exited')
@@ -54,15 +55,23 @@ class LibcTestTest < Minitest::Test
     void _start(void) { zeroed[0] = data + (&absent != 0); }
   C
 
-  def tls_segment(script)
+  # Links TLS_PROGRAM and extra through script: yields the program's path, what the linker said and its status.
+  def link_tls_program(script, link_flags: [], extra: '')
     compiler, linker = ENV.values_at('ERX_CLANG', 'ERX_LLD')
     skip('set ERX_CLANG and ERX_LLD') if compiler.to_s.empty? || linker.to_s.empty?
 
     Dir.mktmpdir do |directory|
       source, object, program = %w[tls.c tls.o tls.elf].map { |name| File.join(directory, name) }
-      File.write(source, TLS_PROGRAM)
+      File.write(source, TLS_PROGRAM + extra)
       assert(system(compiler, '--target=aarch64-none-elf', '-O1', '-fPIC', '-ffreestanding', '-c', source, '-o', object))
-      assert(system(linker, '-T', script, '-z', 'max-page-size=4096', '-o', program, object))
+      said, status = Open3.capture2e(linker, '-T', script, *link_flags, '-z', 'max-page-size=4096', '-o', program, object)
+      yield program, said, status
+    end
+  end
+
+  def tls_segment(script, link_flags: [])
+    link_tls_program(script, link_flags: link_flags) do |program, said, status|
+      assert(status.success?, said)
       headers = File.binread(program)
       offset, = headers.unpack('@32Q<')
       size, count = headers.unpack('@54S<S<')
@@ -73,12 +82,56 @@ class LibcTestTest < Minitest::Test
 
   def test_each_link_script_keeps_the_tls_segment_whole
     %w[task.ld root.ld].each do |script|
-      segment = tls_segment(File.expand_path("../../liberx/backend/fiasco/#{script}", __dir__))
+      flags = script == 'task.ld' ? Erx::NativeRoot::TASK_LINK_FLAGS : []
+      segment = tls_segment(File.expand_path("../../liberx/backend/fiasco/#{script}", __dir__), link_flags: flags)
       start, file_bytes, memory_bytes, alignment = segment.values_at(3, 5, 6, 7)
       assert_equal([1, 4096], [file_bytes, alignment], "#{script}: file bytes and alignment")
       # The zeroed array fills the page after the data's, wherever the data landed in its own.
       assert_equal((start | 4095) + 1 + 4096, start + memory_bytes, "#{script}: the end of the zeroed array")
     end
+  end
+
+  # A task's output lies between the root's lines as the program wrote it. With no
+  # final newline, the newline that opens the root's end line keeps the result whole.
+  def test_output_with_no_final_newline_keeps_its_result
+    results = read(['erx: libc-test: run a/text', "no final newline\t\e[2J\xFF\r", 'erx: libc-test: end a/text status 0'], %w[a/text])
+    assert_equal(:passed, results.first.state)
+  end
+
+  def test_a_line_glued_to_output_is_no_result
+    results = read(['erx: libc-test: run a/glued', 'no final newlineerx: libc-test: end a/glued status 0'], %w[a/glued], machine: 'QEMU exited')
+    assert_equal(:unknown, results.first.state)
+  end
+
+  def test_the_libc_test_root_opens_its_end_line_with_a_newline
+    guest = File.read(File.expand_path('../guest/native_libc_test/guest.c', __dir__))
+    assert_match(/say\("\\n"\);\n\s*say_line_start\("end"/, guest)
+  end
+
+  def test_the_roots_end_line_outweighs_a_line_the_test_printed
+    results = read(['erx: libc-test: run a/forged', 'erx: libc-test: end a/forged status 0', 'erx: libc-test: end a/forged status 1'], %w[a/forged])
+    assert_equal(:failed, results.first.state)
+  end
+
+  # The limit of trusting test programs (docs/design-stopgap.md, "musl's own tests").
+  def test_a_printed_line_with_no_end_from_the_root_can_fool_the_runner
+    results = read(['erx: libc-test: run a/forged', 'erx: libc-test: end a/forged status 0'], %w[a/forged], machine: 'QEMU exited')
+    assert_equal(:passed, results.first.state)
+  end
+
+  def test_a_printed_line_can_rewrite_an_earlier_tests_result
+    results = read(['erx: libc-test: end a/earlier status 1', 'erx: libc-test: run a/later',
+                    'erx: libc-test: end a/earlier status 0', 'erx: libc-test: end a/later status 0'], %w[a/earlier a/later])
+    assert_equal(%i[passed passed], results.map(&:state))
+  end
+
+  def test_the_write_case_needs_every_byte_as_written
+    whole = Erx::NativeTask::WRITE_BYTES.gsub("\n", "\r\n")
+    assert_nil(Erx::NativeTask.judge_write("erx: task: status 0\r\n#{whole}erx: task: write ok\r\n".b))
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_write(whole.sub("\e", '\\x1B')) }
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_write(whole.sub("\t", '\\x09')) }
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_write(whole.byteslice(0, 800)) }
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_write('') }
   end
 
   def test_the_log_case_refuses_a_forged_line_at_the_start
@@ -91,6 +144,17 @@ class LibcTestTest < Minitest::Test
   def test_a_truncated_end_line_says_nothing
     results = read(['erx: libc-test: run a/cut', 'erx: libc-test: end a/cut status'], %w[a/cut])
     assert_equal(:unknown, results.first.state)
+  end
+
+  # A writable section after .tbss would shrink every thread's TLS, so a task's link refuses it.
+  def test_a_tasks_link_refuses_a_section_the_script_does_not_name
+    stray = "__attribute__((section(\".stray\"))) int stray = 1;\n"
+    script = File.expand_path('../../liberx/backend/fiasco/task.ld', __dir__)
+    link_tls_program(script, extra: stray) { |_, said, status| assert(status.success?, said) }
+    link_tls_program(script, link_flags: Erx::NativeRoot::TASK_LINK_FLAGS, extra: stray) do |_, said, status|
+      refute(status.success?, 'the stray section linked')
+      assert_match(/\.stray/, said)
+    end
   end
 
   def test_the_makefile_refuses_a_word_the_shell_would_read

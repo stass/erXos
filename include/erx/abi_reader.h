@@ -65,6 +65,8 @@ bool erx_fiasco_space_stop_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_space_stop_request_t *result);
 bool erx_fiasco_task_join_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_task_join_request_t *result);
+bool erx_fiasco_task_write_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_task_write_request_t *result);
 bool erx_fiasco_thread_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_thread_create_request_t *result);
 bool erx_fiasco_thread_reap_request_decode(const uint8_t *bytes, size_t length,

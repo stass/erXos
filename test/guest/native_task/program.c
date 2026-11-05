@@ -7,7 +7,7 @@
  * The second task's program, loaded from the boot image by test/guest/native_task/guest.c.
  * It reaches the root only through the service, so its way to report is its status, or
  * the crash frame of a fault: 0 is success, and any other status names the first step
- * that went wrong. What it logs is what the log case's judge reads, not a report.
+ * that went wrong. What it logs and writes is what those cases' judges read, not a report.
  */
 
 #include <stdatomic.h>
@@ -310,6 +310,32 @@ mode_log(void)
 	return (erx_debug_log((erx_utcb_length_t){ .raw = ERX_UTCB_BYTES_MAX }) == ERX_OK ? 0 : 84);
 }
 
+/*
+ * The judge compares the serial log with these bytes. A length past the UTCB, one past
+ * its register's width and an index past the thread table are refused, and nothing is written.
+ */
+static int64_t
+mode_write(void)
+{
+	static uint8_t bytes[sizeof(WRITE_HEAD) - 1 + WRITE_RUN_BYTES + 1];
+	const uint64_t self = erx_fiasco_thread_self()->index;
+	const erx_fiasco_task_write_request_t past = { .caller = self, .len = ERX_UTCB_BYTES_MAX + 1 };
+	const erx_fiasco_task_write_request_t wide = { .caller = self, .len = UINT64_C(1) << 32 };
+	const erx_fiasco_task_write_request_t past_table = { .caller = ERX_FIASCO_THREADS_MAX, .len = 1 };
+	erx_fiasco_reply_t reply;
+
+	__builtin_memcpy(bytes, WRITE_HEAD, sizeof(WRITE_HEAD) - 1);
+	for (uint32_t index = 0; index < WRITE_RUN_BYTES; index++)
+		bytes[sizeof(WRITE_HEAD) - 1 + index] = (uint8_t)index;
+	bytes[sizeof(bytes) - 1] = '\n';
+	erx_fiasco_task_write(bytes, sizeof(bytes));
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_WRITE, &past, sizeof(past), &reply) != ERX_EINVAL)
+		return (90);
+	if (erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_WRITE, &wide, sizeof(wide), &reply) != ERX_EINVAL)
+		return (91);
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_WRITE, &past_table, sizeof(past_table), &reply) == ERX_EINVAL ? 0 : 92);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -341,6 +367,8 @@ erx_task_main(uint64_t argument)
 		return (mode_race());
 	case MODE_LOG:
 		return (mode_log());
+	case MODE_WRITE:
+		return (mode_write());
 	case MODE_WAIT:
 		erx_fiasco_sleep_forever();
 	case MODE_IRQ_REFUSED:

@@ -5,9 +5,9 @@
 
 /*
  * The kernel's log object and platform control object, as the root task holds
- * them from the start (docs/design-stopgap.md, "Boot handoff"). Text reaches
- * erx_fiasco_console_write from code that has already escaped what is not its
- * own, so bytes go out as given.
+ * them from the start (docs/design-stopgap.md, "Boot handoff"). Bytes go out as
+ * given: a record of the debug log is already escaped, and a program's standard
+ * output is delivered as the program wrote it.
  */
 
 #include <l4/sys/consts.h>

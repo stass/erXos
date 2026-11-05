@@ -80,6 +80,7 @@ static l4_sched_param_t service_sched_param(uint64_t);
 static uint64_t service_cpus_online(void);
 static const char *service_thread_table_init(void);
 static int service_debug_log(uint32_t, const erx_fiasco_debug_log_request_t *);
+static int service_task_write(uint32_t, const erx_fiasco_task_write_request_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static void	service_fault(uint32_t, const erx_crash_fault_t *);
@@ -292,6 +293,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	switch (decoded->call) {
 	case ERX_CALL_DEBUG_LOG:
 		return (service_debug_log(decoded->task, words));
+	case ERX_FIASCO_CALL_TASK_WRITE:
+		return (service_task_write(decoded->task, words));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
 		return (service_thread_create(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_THREAD_START:
@@ -382,6 +385,31 @@ service_debug_log(uint32_t task, const erx_fiasco_debug_log_request_t *request)
 	erx_dispatch(&(erx_sys_caller_t){ .utcb = &record->utcb, .log_rate = &erx_fiasco_task(task)->log_rate, .space = task },
 	    ERX_CALL_DEBUG_LOG, args, results);
 	return ((int)(int32_t)(uint32_t)results[0]);
+}
+
+/*
+ * A task's standard output and standard error, which reach the console as the program
+ * wrote them (docs/design-stopgap.md, "The console"). The bytes stay in the caller's
+ * public UTCB, and this copy loads each word once. A program that wants a labelled,
+ * escaped record calls erx_debug_log instead.
+ */
+static int
+service_task_write(uint32_t task, const erx_fiasco_task_write_request_t *request)
+{
+	const erx_fiasco_thread_record_t *const record = erx_fiasco_task_record(task, (uint32_t)request->caller);
+	char text[ERX_UTCB_BYTES_MAX];
+
+	if (record == NULL || request->len > sizeof(text))
+		return (ERX_EINVAL);
+	for (size_t done = 0; done < request->len; done += sizeof(uint64_t)) {
+		const size_t left = request->len - done;
+		uint64_t word = 0;
+
+		(void)erx_utcb_mr_load(&record->utcb, done / sizeof(word), &word);
+		__builtin_memcpy(text + done, &word, left < sizeof(word) ? left : sizeof(word));
+	}
+	erx_fiasco_console_write(text, request->len);
+	return (ERX_OK);
 }
 
 /*

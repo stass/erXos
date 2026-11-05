@@ -332,6 +332,7 @@ enum fiasco_call u32
   value mem_dma_addr 20
   value entropy_read 21
   value entropy_add 22
+  value task_write 23
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -357,6 +358,10 @@ layout erx_fiasco_thread_set_affinity_request 1 wire_le 8 24
   field mask u64 16
 
 layout erx_fiasco_debug_log_request 1 wire_le 8 16
+  field caller u64 0
+  field len u64 8
+
+layout erx_fiasco_task_write_request 1 wire_le 8 16
   field caller u64 0
   field len u64 8
 

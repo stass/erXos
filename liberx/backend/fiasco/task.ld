@@ -7,8 +7,9 @@
  * elf_plan.c asks, and each segment on a page of its own. A program linked with
  * musl finds its TLS image through the headers, and its constructors in .init_array.
  * musl sizes each thread's TLS from the tls segment, so that holds .tdata and .tbss and
- * nothing else. A section this script does not name takes the segments of the one before
- * it, so .got has its place ahead of them.
+ * nothing else. A section this script does not name would take the segments of the one before
+ * it, so .got has its place ahead of them, and a task's link refuses an unnamed section
+ * (NativeRoot::TASK_LINK_FLAGS).
  */
 ENTRY(_start)
 PHDRS {
@@ -32,5 +33,8 @@ SECTIONS {
 	.tbss : { *(.tbss .tbss.*) } :data :tls
 	.data : { *(.data .data.*) } :data
 	.bss : { *(.bss .bss.* COMMON) } :data
+	.symtab 0 : { *(.symtab) }
+	.strtab 0 : { *(.strtab) }
+	.shstrtab 0 : { *(.shstrtab) }
 	/DISCARD/ : { *(.comment) *(.eh_frame*) *(.note.GNU-stack) *(.note.gnu.*) }
 }

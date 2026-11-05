@@ -114,7 +114,10 @@ module Erx
 
     # What the serial log of one boot says about the tests it was to run, in order.
     # machine says why the boot stopped short, if it did: how a test that started and has
-    # no end went is unknown, and one never started was not run.
+    # no end went is unknown, and one never started was not run. A test's own output lies
+    # between the root's lines, unchanged: the last end line for a name is the one that
+    # counts. Test programs are trusted, so a program that prints such a line can fool this,
+    # for itself if the boot stops before the root's line, or for an earlier test.
     def read_boot(serial, tests:, machine: nil)
       started = {}
       ended = {}
@@ -324,7 +327,7 @@ module Erx
           inputs = ["#{output}/#{name}.o", *extra, *link_inputs]
           [object_rule(name, source: source, output: output, compiler: compiler, cflags: cflags),
            "#{output}/#{name}.elf: #{inputs.join(' ')} #{common_objects.join(' ')} #{archives.join(' ')}\n" \
-           "\t#{linker} -T #{script} -z max-page-size=4096 --strip-all -o $@ #{inputs.join(' ')} --start-group #{common_objects.join(' ')} #{archives.join(' ')} --end-group 2>$@.err\n"]
+           "\t#{linker} -T #{script} #{NativeRoot::TASK_LINK_FLAGS.join(' ')} -z max-page-size=4096 --strip-all -o $@ #{inputs.join(' ')} --start-group #{common_objects.join(' ')} #{archives.join(' ')} --end-group 2>$@.err\n"]
         end
         dependencies = "-include $(wildcard #{output}/*/*.d)\n"
         ["all: #{programs.join(' ')}\n", ".DELETE_ON_ERROR:\n", *common, *helpers, *rules, dependencies].join("\n")

@@ -2977,6 +2977,48 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_fiasco_task_write_request"] = Layout.new(
+        name: "erx_fiasco_task_write_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "len".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_thread_create_request"] = Layout.new(
         name: "erx_fiasco_thread_create_request".b,
         version: 1,
@@ -6292,6 +6334,7 @@ module Erx
           "space_protect".b => 8,
           "space_stop".b => 16,
           "task_join".b => 17,
+          "task_write".b => 23,
           "thread_create".b => 2,
           "thread_reap".b => 11,
           "thread_set_affinity".b => 10,
@@ -9784,6 +9827,7 @@ module Erx
           "erx_fiasco_space_create_request".b,
           "erx_fiasco_space_stop_request".b,
           "erx_fiasco_task_join_request".b,
+          "erx_fiasco_task_write_request".b,
           "erx_fiasco_thread_create_request".b,
           "erx_fiasco_thread_reap_request".b,
           "erx_fiasco_thread_set_affinity_request".b,
@@ -10766,6 +10810,12 @@ module Erx
           "fiasco_call_task_join".b => Constant.new(
             name: "fiasco_call_task_join".b,
             value: 17,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_task_write".b => Constant.new(
+            name: "fiasco_call_task_write".b,
+            value: 23,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

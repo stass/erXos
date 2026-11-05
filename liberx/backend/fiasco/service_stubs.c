@@ -19,10 +19,10 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
-#include "liberx/generated/calls.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
+#include "liberx/generated/calls.h"
 
 static int stub_range(uint32_t, uint64_t, uint64_t);
 static int stub_flagged(uint32_t, uint64_t, uint64_t, uint64_t, uint64_t *);
@@ -78,6 +78,30 @@ erx_debug_log(erx_utcb_length_t len)
 	erx_fiasco_reply_t reply;
 
 	return (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &request, sizeof(request), &reply));
+}
+
+void
+erx_fiasco_task_write(const void *bytes, size_t length)
+{
+	const uint8_t *next = bytes;
+	erx_utcb_t *const utcb = erx_utcb_self();
+	erx_fiasco_task_write_request_t request = { .caller = erx_fiasco_thread_self()->index };
+	erx_fiasco_reply_t reply;
+
+	while (length > 0) {
+		const size_t part = length < ERX_UTCB_BYTES_MAX ? length : ERX_UTCB_BYTES_MAX;
+
+		for (size_t done = 0; done < part; done += sizeof(uint64_t)) {
+			uint64_t word = 0;
+
+			__builtin_memcpy(&word, next + done, part - done < sizeof(word) ? part - done : sizeof(word));
+			(void)erx_utcb_mr_store(utcb, done / sizeof(word), word);
+		}
+		request.len = part;
+		(void)erx_fiasco_service_call(ERX_FIASCO_CALL_TASK_WRITE, &request, sizeof(request), &reply);
+		next += part;
+		length -= part;
+	}
 }
 
 int

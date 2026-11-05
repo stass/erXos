@@ -169,6 +169,7 @@ erx_fiasco_root_main(void)
 	case_ends("no_jit", 0, MODE_NO_JIT, 0);
 	case_ends("irq_refused", 0, MODE_IRQ_REFUSED, 0);
 	case_ends("log", 0, MODE_LOG, 0);
+	case_ends("write", 0, MODE_WRITE, 0);
 	case_ends("spin_stop", 0, MODE_SPIN_STOP, STATUS_SPIN_STOP);
 	case_root_stops();
 	case_race();
