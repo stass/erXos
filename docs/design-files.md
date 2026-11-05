@@ -264,7 +264,7 @@ clients](#native-clients-liberxs-file-client)).
 | **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made; a walk of `..` at the root stays at the root, as 9P2000.L specifies, and the grammar refuses a name holding `/` or NUL; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; clients resolve `.` and `..` lexically and send neither | a server that accepts `/` inside a name, walks above its root on `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test that walks `..` from the root and from below it, and whose links point above the root, at other mounts and in loops |
 | **F3.** Rearranging a namespace or narrowing it for a program never adds authority | `bind` copies an entry that exists, narrowed to a subtree; `unmount` removes one; `mount` takes a pid, which by F1 reaches only what the domain holds; a handler gives a program only fids it walked from its starter's fids, with rights in the program's table no wider than the starter's, and walks from them only names the resolver produced | an operation that creates a pid or a fid beyond its source; a handler that walks `..` for a program or records wider rights than its starter's | property tests over sequences of operations: the set of pids in the table only shrinks or gains pids the domain already held; a property test over chains of spawns that every program's mounts lie within, and carry rights within, its starter's |
 | **F4.** A client spends a server's CPU and memory only within the server's admission | the protocol checks fid, request, payload and lock bounds before any callback; a grant is one process with a `max_heap_size` that counts its binaries, so what it holds for its client is bounded by its fid pool times the server's per-fid bound; the server runs on its own group's grant and its grant processes schedule among themselves as Erlang processes do, so a flooding client fills its own lane and waits in its own runtime ([design-domains.md](design-domains.md#connections), [design-scheduler.md](design-scheduler.md#service-work)); a blocking lock waits as a pending request of the file's owner, within the client's requests in flight, and nothing in the server blocks | a callback before admission; a grant that holds unbounded state for one fid; a server thread that runs on a client's time; a request whose work grows with the client's input outside the grammar's bounds | hostile-client tests below: fid floods, lock floods, retained `/proc` results, a tiny expensive request, a client that never drains its replies |
-| **F5.** A read-only grant never writes | a grant with rights `ro` or `rx` refuses, before any callback, every operation the protocol's table marks as writing: `lopen` and `lcreate` for writing or with truncation, `write`, `setattr`, `remove`, `unlinkat`, `rename`, `renameat`, `link`, `symlink`, `mknod`, `mkdir`, `xattrcreate`, and a write lock | an operation added to the table and not marked; a callback path that skips the refusal | the refusal set is generated from the protocol's operation table, each operation marked as reading or writing; a test of every writing operation through a read-only grant |
+| **F5.** A read-only grant never writes | a grant with rights `ro` or `rx` refuses with `erofs`, as part of decoding the request and so before any callback, every operation the protocol's table marks as writing: `lopen` for writing or with truncation, `lcreate` whatever its flags, since whether it creates a file only the server learns, `write`, `setattr`, `remove`, `unlinkat`, `rename`, `renameat`, `link`, `symlink`, `mknod`, `mkdir`, `xattrcreate`, and a write lock | an operation added to the table and not marked; a request that reaches the grant's dispatch by a path other than its decoding funnel | the refusal set is generated from the protocol's operation table, each operation marked as reading or writing; a test of every writing operation through a read-only grant |
 | **F6.** No grant carries write and execute together, and a session runs only what it read through an `rx` mount, the file-level twin of K8 | a grant's rights are one of `ro`, `rw` and `rx`, a type with no value for both; an `rx` grant writes nothing (F5); a handler gives a program rights within its starter's, and the session's command server fills a code object only from a fid the handler opened through a mount whose rights are `rx` ([design-programs.md](design-programs.md#file-objects)) | a rights representation with separate write and execute bits; a code object filled from a fid on an `ro` or `rw` mount | the grammar's rights type; a test that running a file through an `ro` and through an `rw` mount fails with `EACCES` and that an `rx` grant refuses every writing operation |
 | **F7.** A file's bytes, as one session's programs see them, live in one place per session | while any program of a session maps a file shared, the session's one object for the file holds them: every mapping of the file in the session maps that object, and the handlers send every read, write and size change of the file by the session's programs to the file's mapper, which serves them from the object; the session's file table holds at most one mapper per file, keyed by the server's domain, the tree and the qid path | a second object for one file in one session; a handler that relays such a read or write to the server past the mapper; a mapping installed past the filled extent; a write's bytes put in the object before the server acknowledged them | an exhaustive model of one mapper, its object and its server under interleaved stores, reads, writes the server takes whole, in part or not at all, extending writes, truncations, failed fills and write-backs up to depth 8, against a flat file; two programs of one session, one storing through a mapping and one reading through a descriptor |
 | **F8.** Every store through a shared mapping reaches the file's server as an ordinary write, at a point POSIX names | the mapper writes back, with the protocol's `write`, every page the kernel reports as stored to since the last write-back (`erx_mem_dirty`), at `msync`, at every close of a mapping's open (a program's last `munmap` of the file, its `exec` and its end) and at the `close` that leaves the session's programs no open of the file, and deletes the object only after its last write-back; a write-back that fails is returned to the call that caused it, or logged at a program's end ([Shared mappings](#shared-mappings)) | an object deleted before its last write-back; a stored page the report leaves out; a program's end that the mapper does not see; a failed write-back reported nowhere | a test per write-back point, reading the file through another domain after it; a store made while a write-back runs, which the next write-back carries; a server that fails a write-back, whose `msync`, `munmap` and `close` return `EIO` and whose program's end leaves a log line |
@@ -944,6 +944,8 @@ tree:
 
 ```erlang
 -callback init(Args :: term()) -> {ok, State :: term()}.
+%% The tree the grant roots in: its name, which attach's Aname must match, and its root.
+-callback root(State :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
 -callback walk(Node :: term(), Name :: binary(), State :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
 -callback getattr(Node :: term(), State :: term()) ->
@@ -1041,12 +1043,21 @@ other client's request can come between its parts:
   since a helper would only add a process to every read. `erx_fs` reads
   the answer once, when the grant starts; a module without the callback
   gets helpers.
-* **Checks before callbacks.** `erx_fs` decodes each request with the
-  protocol's grammar, checks the bounds, maps fids to nodes, refuses
-  writing operations when the tree has no `write` callback or the grant is
-  `ro` or `rx` (F5), and replies only to the request's alias. A request
-  that fails is answered with an error and counted; it never reaches a
-  callback.
+* **Checks before callbacks.** Every message a grant receives, but its
+  owners' `DOWN`s, passes one decoding funnel, which takes the frame and
+  the grant's rights and admits a request only if the protocol's grammar
+  accepts it, its alias is the client domain's (the frame is dropped
+  otherwise, so no client has the grant answer a third domain), its
+  `Owner` is a process of the client's domain (`einval` otherwise), and
+  it does not write while the tree has no `write`
+  callback or the grant is `ro` or `rx` (`erofs`, F5); dispatch takes
+  only what the funnel admitted, so no path reaches a callback with a
+  writing request on a read-only grant. A refused `remove` still clunks
+  its fid. `erx_fs` then checks the bounds, maps fids to nodes, and
+  replies only to the request's alias, holding each reply to its
+  request with the grammar's reply check, so a callback's malformed
+  answer reaches the client as `eio`. A request that fails is answered
+  with an error and counted; it never reaches a callback.
 * **Bounded work on the server's grant.** A grant process runs on its
   server's own group, as every process of the server does; no client's
   time is lent to it ([design-scheduler.md](design-scheduler.md#service-work)).
@@ -1478,7 +1489,13 @@ The POSIX functions map onto 9P2000.L as Linux's 9P client maps them.
 handler resolves, then sends the walk, the clone and the `lopen`, or with
 `O_CREAT` the walk to the directory, the clone, the `lcreate` and the
 walk to the new file, together ([Open files and
-offsets](#open-files-and-offsets)); `read` and `write` use the
+offsets](#open-files-and-offsets)). A read-only grant refuses every
+`lcreate` (F5), so on a read-only mount the handler turns an
+`open(O_CREAT)` without `O_EXCL` into the walk and the `lopen` of an
+open without `O_CREAT`, and answers `EROFS` only when the walk finds the
+name absent; with `O_EXCL` it answers `EEXIST` for a name the walk finds
+and `EROFS` otherwise, as Linux does on a read-only mount. `read` and
+`write` use the
 description's offset, and `pread` and `pwrite` explicit ones, at most 64
 KiB per request, looping for larger counts; `lseek` moves the
 description's offset; a description opened with `O_APPEND` opens its fid
@@ -1559,7 +1576,11 @@ display belongs to whatever displays a name under its source
   module on each program's table.
 * **`erx_fs`**, the behaviour above, and
   `erx_fs:start_link(Module, Args, Rights)` to serve one grant of a tree's
-  root; every file server is one.
+  root to the server's own domain, and `start_link/4`, whose options name
+  the client domain's node (`client`) and the grant's pool (`pool`);
+  every file server is one. `erx_fs_version:init/0` makes the domain's
+  file version counter and `erx_fs_version:draw/0` draws from it
+  ([Identity and version](#identity-and-version)).
 * **The file protocol**, 9P2000.L, as a **frame profile** of
   `abi/erx_abi.txt`: the operation table, with each message's fields,
   bounds, 9P2000.L layout and whether it writes, from which a Ruby

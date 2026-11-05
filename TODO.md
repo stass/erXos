@@ -300,6 +300,16 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a fid keeps the path it was walked by, so after a `renameat`
+  its `remove` unlinks whatever the old name names now (another node, if one was made there) and its `..` returns to
+  the old parent. 9P's `remove` acts on the fid's file, and QEMU re-paths fids on rename. Decide in
+  `docs/design-files.md` whether `unlink` receives the fid's node, refusing with `enoent` when the name no longer
+  names it, and whether `renameat` re-paths the grant's live fids; then test both against the test tree.
+* [Low] `erlang/apps/erx/src/erx_fs_grant.erl`: `add_fid` and `end_fid` push effects into the grant's state, which
+  every exported step must drain, and an owner's monitor is `pending` until the shell hands its reference back with
+  `monitored/3`. Thread the effects through the step's return instead, so a step that both makes and ends one
+  owner's fid can never emit `{demonitor, pending}`.
+
 * [Medium] `abi/manifest.txt`: the `devices[].selector` choice does not make `base`, `size` and `line` inactive for
   selector 2, so a PCIe row with any of them nonzero is admitted, where `docs/design-abi.md` says they are zero; and
   nothing refuses a device-tree row whose `base + size` wraps. Add the three fields to the choice's `dt` case, decide
