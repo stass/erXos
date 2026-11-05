@@ -70,6 +70,83 @@ erx_pl011_dr_oe_get(uint32_t word)
 }
 
 static inline bool
+erx_pl011_rsr_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 8 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4);
+	return (true);
+}
+
+static inline bool
+erx_pl011_rsr_write(erx_mmio_t device, uint32_t value)
+{
+	if (device.base == NULL || device.length < 8 ||
+	    (uintptr_t)device.base % 4 != 0 ||
+	    (value & ~UINT32_C(0xf)) != 0)
+		return (false);
+	*(volatile uint32_t *)(device.base + 4) = value;
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_rsr_fe_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_rsr_fe_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_rsr_write(device, value << 0));
+}
+
+static inline uint32_t
+erx_pl011_rsr_pe_get(uint32_t word)
+{
+	return ((word >> 1) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_rsr_pe_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_rsr_write(device, value << 1));
+}
+
+static inline uint32_t
+erx_pl011_rsr_be_get(uint32_t word)
+{
+	return ((word >> 2) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_rsr_be_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_rsr_write(device, value << 2));
+}
+
+static inline uint32_t
+erx_pl011_rsr_oe_get(uint32_t word)
+{
+	return ((word >> 3) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_rsr_oe_clear(erx_mmio_t device, uint32_t value)
+{
+	if ((value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	return (erx_pl011_rsr_write(device, value << 3));
+}
+
+static inline bool
 erx_pl011_fr_read(erx_mmio_t device, uint32_t *out)
 {
 	if (out == NULL || device.base == NULL || device.length < 28 ||
@@ -134,6 +211,42 @@ erx_pl011_fr_ri_get(uint32_t word)
 }
 
 static inline bool
+erx_pl011_ilpr_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 36 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 32);
+	return (true);
+}
+
+static inline bool
+erx_pl011_ilpr_write(erx_mmio_t device, uint32_t value)
+{
+	if (device.base == NULL || device.length < 36 ||
+	    (uintptr_t)device.base % 4 != 0 ||
+	    (value & ~UINT32_C(0xff)) != 0)
+		return (false);
+	*(volatile uint32_t *)(device.base + 32) = value;
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_ilpr_ilpdvsr_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_ilpr_ilpdvsr_set(uint32_t word, uint32_t value, uint32_t *out)
+{
+	if (out == NULL || (value & ~UINT32_C(0xff)) != 0)
+		return (false);
+	*out = (word & ~(UINT32_C(0xff) << 0)) | (value << 0);
+	return (true);
+}
+
+static inline bool
 erx_pl011_ibrd_read(erx_mmio_t device, uint32_t *out)
 {
 	if (out == NULL || device.base == NULL || device.length < 40 ||
@@ -155,13 +268,13 @@ erx_pl011_ibrd_write(erx_mmio_t device, uint32_t value)
 }
 
 static inline uint32_t
-erx_pl011_ibrd_divint_get(uint32_t word)
+erx_pl011_ibrd_baud_divint_get(uint32_t word)
 {
 	return ((word >> 0) & UINT32_C(0xffff));
 }
 
 static inline bool
-erx_pl011_ibrd_divint_set(uint32_t word, uint32_t value, uint32_t *out)
+erx_pl011_ibrd_baud_divint_set(uint32_t word, uint32_t value, uint32_t *out)
 {
 	if (out == NULL || (value & ~UINT32_C(0xffff)) != 0)
 		return (false);
@@ -191,13 +304,13 @@ erx_pl011_fbrd_write(erx_mmio_t device, uint32_t value)
 }
 
 static inline uint32_t
-erx_pl011_fbrd_divfrac_get(uint32_t word)
+erx_pl011_fbrd_baud_divfrac_get(uint32_t word)
 {
 	return ((word >> 0) & UINT32_C(0x3f));
 }
 
 static inline bool
-erx_pl011_fbrd_divfrac_set(uint32_t word, uint32_t value, uint32_t *out)
+erx_pl011_fbrd_baud_divfrac_set(uint32_t word, uint32_t value, uint32_t *out)
 {
 	if (out == NULL || (value & ~UINT32_C(0x3f)) != 0)
 		return (false);
@@ -1018,6 +1131,212 @@ erx_pl011_icr_oeic_clear(erx_mmio_t device, uint32_t value)
 	if ((value & ~UINT32_C(0x1)) != 0)
 		return (false);
 	return (erx_pl011_icr_write(device, value << 10));
+}
+
+static inline bool
+erx_pl011_dmacr_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 76 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 72);
+	return (true);
+}
+
+static inline bool
+erx_pl011_dmacr_write(erx_mmio_t device, uint32_t value)
+{
+	if (device.base == NULL || device.length < 76 ||
+	    (uintptr_t)device.base % 4 != 0 ||
+	    (value & ~UINT32_C(0x7)) != 0)
+		return (false);
+	*(volatile uint32_t *)(device.base + 72) = value;
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_dmacr_rxdmae_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_dmacr_rxdmae_set(uint32_t word, uint32_t value, uint32_t *out)
+{
+	if (out == NULL || (value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	*out = (word & ~(UINT32_C(0x1) << 0)) | (value << 0);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_dmacr_txdmae_get(uint32_t word)
+{
+	return ((word >> 1) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_dmacr_txdmae_set(uint32_t word, uint32_t value, uint32_t *out)
+{
+	if (out == NULL || (value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	*out = (word & ~(UINT32_C(0x1) << 1)) | (value << 1);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_dmacr_dmaonerr_get(uint32_t word)
+{
+	return ((word >> 2) & UINT32_C(0x1));
+}
+
+static inline bool
+erx_pl011_dmacr_dmaonerr_set(uint32_t word, uint32_t value, uint32_t *out)
+{
+	if (out == NULL || (value & ~UINT32_C(0x1)) != 0)
+		return (false);
+	*out = (word & ~(UINT32_C(0x1) << 2)) | (value << 2);
+	return (true);
+}
+
+static inline bool
+erx_pl011_periphid0_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4068 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4064);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_periphid0_partnumber0_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_periphid1_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4072 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4068);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_periphid1_partnumber1_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xf));
+}
+
+static inline uint32_t
+erx_pl011_periphid1_designer0_get(uint32_t word)
+{
+	return ((word >> 4) & UINT32_C(0xf));
+}
+
+static inline bool
+erx_pl011_periphid2_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4076 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4072);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_periphid2_designer1_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xf));
+}
+
+static inline uint32_t
+erx_pl011_periphid2_revision_get(uint32_t word)
+{
+	return ((word >> 4) & UINT32_C(0xf));
+}
+
+static inline bool
+erx_pl011_periphid3_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4080 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4076);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_periphid3_configuration_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_pcellid0_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4084 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4080);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_pcellid0_uartpcellid0_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_pcellid1_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4088 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4084);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_pcellid1_uartpcellid1_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_pcellid2_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4092 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4088);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_pcellid2_uartpcellid2_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
+}
+
+static inline bool
+erx_pl011_pcellid3_read(erx_mmio_t device, uint32_t *out)
+{
+	if (out == NULL || device.base == NULL || device.length < 4096 ||
+	    (uintptr_t)device.base % 4 != 0)
+		return (false);
+	*out = *(volatile uint32_t *)(device.base + 4092);
+	return (true);
+}
+
+static inline uint32_t
+erx_pl011_pcellid3_uartpcellid3_get(uint32_t word)
+{
+	return ((word >> 0) & UINT32_C(0xff));
 }
 
 #endif

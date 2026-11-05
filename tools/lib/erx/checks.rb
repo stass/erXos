@@ -30,6 +30,7 @@ module Erx
       fiasco/l4re-core
       fiasco/libfdt
       fiasco/mk
+      hw/svd
       kernel/crypto/blake3
       kernel/crypto/chacha20
       kernel/crypto/sha2

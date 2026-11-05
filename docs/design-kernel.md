@@ -7843,7 +7843,9 @@ fails the build when a checked-in one differs.
 
 **Device registers** are described in CMSIS-SVD files under `hw/svd/`, one
 per device that erXos code touches, written by erXos from the devices'
-specifications: each platform's UARTs, interrupt controllers, MSI frames,
+specifications, except the PL011's, which is carved from the Raspberry Pi
+Pico SDK's RP2040 description ([hardware generation](design-hardware-generation.md#register-inputs)):
+each platform's UARTs, interrupt controllers, MSI frames,
 real-time clock and IOMMU, which the bindings list with the specification
 each follows
 ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources),

@@ -837,8 +837,9 @@ The AArch64 forms of the generic chokepoint rules
 ### Hardware register sources
 
 **Device registers** of the architecture's own devices are written into
-CMSIS-SVD files under `hw/svd/` from their specifications: the PL011 UART
-(Arm DDI 0183), the GICv3 distributor and redistributor (IHI 0069; the CPU
+CMSIS-SVD files under `hw/svd/` from their specifications, except the PL011 UART
+(Arm DDI 0183), whose file is the Raspberry Pi Pico SDK's UART0 description,
+checked against that manual: the GICv3 distributor and redistributor (IHI 0069; the CPU
 interface is system registers), the GICv2 distributor and CPU interface of
 the boards' GIC-400 (IHI 0048), the GICv2m frame (DEN 0029), the PL031
 real-time clock (Arm DDI 0224) and the SMMUv3's registers (IHI 0070). The
