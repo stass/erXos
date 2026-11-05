@@ -99,7 +99,9 @@ class DispatchTest < Minitest::Test
     'kernel/core/debug_log.c' => [
       ["\t\terx_debug_log_drain();\n", "\t\t(void)erx_debug_log_drain;\n"],
       ["caller->space,", "(uint64_t)0,"],
-      ["status == ERX_OK && !erx_debug_log_for_reader", "status == ERX_OK"],
+      # The handoff never switches the sink. Seeded at the write: dropping the read leaves the
+      # flag set but unused, which LLVM 23 refuses under -Werror.
+      ["erx_debug_log_for_reader = true;", "erx_debug_log_for_reader = false;"],
       ["\terx_debug_log_for_reader = false;\n\terx_debug_log_drain();", "\terx_debug_log_for_reader = false;"],
       ["if (cursor > erx_debug_log_cursor) {", "if (cursor > UINT64_MAX - 1) {"],
       ["if (copied.lost != 0) {", "if (copied.lost == UINT64_MAX) {"]
