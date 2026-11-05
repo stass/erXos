@@ -33,6 +33,8 @@ bool erx_abi_note_decode(const uint8_t *bytes, size_t length,
     erx_abi_note_t *result);
 bool erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
     erx_elf64_phdr_t *result);
+bool erx_fiasco_debug_log_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_debug_log_request_t *result);
 bool erx_fiasco_entropy_add_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_entropy_add_request_t *result);
 bool erx_fiasco_entropy_read_request_decode(const uint8_t *bytes, size_t length,

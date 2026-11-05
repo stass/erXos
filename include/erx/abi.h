@@ -975,6 +975,22 @@ _Static_assert(offsetof(erx_group_stat_t, ready) ==
 _Static_assert(offsetof(erx_group_stat_t, exec) ==
     ERX_GROUP_STAT_OFF_EXEC, "erx_group_stat.exec offset");
 
+#define ERX_FIASCO_DEBUG_LOG_REQUEST_SIZE 16
+#define ERX_FIASCO_DEBUG_LOG_REQUEST_ALIGN 8
+#define ERX_FIASCO_DEBUG_LOG_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_DEBUG_LOG_REQUEST_OFF_LEN 8
+typedef struct erx_fiasco_debug_log_request erx_fiasco_debug_log_request_t;
+struct erx_fiasco_debug_log_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	len;
+};
+_Static_assert(sizeof(erx_fiasco_debug_log_request_t) == ERX_FIASCO_DEBUG_LOG_REQUEST_SIZE, "erx_fiasco_debug_log_request size");
+_Static_assert(_Alignof(erx_fiasco_debug_log_request_t) == ERX_FIASCO_DEBUG_LOG_REQUEST_ALIGN, "erx_fiasco_debug_log_request alignment");
+_Static_assert(offsetof(erx_fiasco_debug_log_request_t, caller) ==
+    ERX_FIASCO_DEBUG_LOG_REQUEST_OFF_CALLER, "erx_fiasco_debug_log_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_debug_log_request_t, len) ==
+    ERX_FIASCO_DEBUG_LOG_REQUEST_OFF_LEN, "erx_fiasco_debug_log_request.len offset");
+
 #define ERX_FIASCO_ENTROPY_ADD_REQUEST_SIZE 48
 #define ERX_FIASCO_ENTROPY_ADD_REQUEST_ALIGN 8
 #define ERX_FIASCO_ENTROPY_ADD_REQUEST_OFF_CALLER 0

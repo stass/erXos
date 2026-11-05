@@ -26,6 +26,7 @@
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
+#include "erx/core/dispatch.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/group.h"
@@ -78,6 +79,7 @@ static int	service_thread_set_affinity(uint32_t, uint64_t, uint64_t);
 static l4_sched_param_t service_sched_param(uint64_t);
 static uint64_t service_cpus_online(void);
 static const char *service_thread_table_init(void);
+static int service_debug_log(uint32_t, const erx_fiasco_debug_log_request_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static void	service_fault(uint32_t, const erx_crash_fault_t *);
@@ -288,6 +290,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	const erx_fiasco_vm_flagged_request_t *const flagged = words;
 
 	switch (decoded->call) {
+	case ERX_CALL_DEBUG_LOG:
+		return (service_debug_log(decoded->task, words));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
 		return (service_thread_create(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_THREAD_START:
@@ -358,6 +362,26 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	default:
 		return (ERX_ENOTSUP);
 	}
+}
+
+/*
+ * The text stays in the caller's public UTCB, which the kernel's dispatch and log
+ * cores read through the window, as they read a UTCB under any kernel: every byte
+ * passes their escape, and each line opens with their sequence number and the
+ * task's, so a task's text never starts a line.
+ */
+static int
+service_debug_log(uint32_t task, const erx_fiasco_debug_log_request_t *request)
+{
+	const erx_fiasco_thread_record_t *const record = erx_fiasco_task_record(task, (uint32_t)request->caller);
+	const uint64_t args[ERX_TRAP_ARG_COUNT] = { request->len };
+	uint64_t results[ERX_TRAP_RESULT_COUNT];
+
+	if (record == NULL)
+		return (ERX_EINVAL);
+	erx_dispatch(&(erx_sys_caller_t){ .utcb = &record->utcb, .log_rate = &erx_fiasco_task(task)->log_rate, .space = task },
+	    ERX_CALL_DEBUG_LOG, args, results);
+	return ((int)(int32_t)(uint32_t)results[0]);
 }
 
 /*

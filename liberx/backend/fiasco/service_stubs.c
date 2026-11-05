@@ -19,6 +19,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
+#include "liberx/generated/calls.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -68,6 +69,15 @@ stub_flagged(uint32_t number, uint64_t addr, uint64_t size, uint64_t flags, uint
 	if (status == ERX_OK && first != NULL)
 		*first = reply.first;
 	return (status);
+}
+
+erx_status_t
+erx_debug_log(erx_utcb_length_t len)
+{
+	const erx_fiasco_debug_log_request_t request = { .caller = erx_fiasco_thread_self()->index, .len = len.raw };
+	erx_fiasco_reply_t reply;
+
+	return (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &request, sizeof(request), &reply));
 }
 
 int

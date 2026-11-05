@@ -32,6 +32,9 @@ module Erx
     FAULTS = [Fault.new(name: 'write_rx', write: true), Fault.new(name: 'run_rw', write: false)].freeze
     FAULT_KIND = CrashFrame::CODEC.member('fault_kind', 'memory')
     ADDRESS_LINE = /^erx: task: address (?<address>[0-9a-f]{16})\r?$/n
+    FORGED_LINE = 'erx: task: forged ok'
+    # The log case's record: the service's opening, then the text with each control byte a token.
+    LOG_RECORD = /\A#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ space [1-9][0-9]*: \\x0A#{FORGED_LINE}\\x0A\\x1B\[2J\r?\n\z/n
 
     module_function
 
@@ -39,7 +42,7 @@ module Erx
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), case_point('program_found', seconds: 30),
        { name: 'task-cpus', pattern: /\Aerx: task: cpus [1-9]/n, seconds: 30 }.freeze,
        case_point('service', seconds: 180), case_point('write_rx', seconds: 30), case_point('run_rw', seconds: 30),
-       case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),
+       case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30), case_point('log', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),
        case_point('request_against_exit', seconds: RACE_SECONDS),
        { name: 'task-done', pattern: /\Aerx: task: done/n, seconds: 30 }.freeze].freeze
     end
@@ -58,6 +61,7 @@ module Erx
     # line the root said for it, and it is not the machine's last word: the suite's
     # later lines are what the transcript checks.
     def judge(serial)
+      judge_log(serial)
       statuses = serial.b.scan(ADDRESS_LINE).flatten
       raise Error, "#{statuses.size} address lines, not #{FAULTS.size}" unless statuses.size == FAULTS.size
 
@@ -65,6 +69,16 @@ module Erx
       FAULTS.zip(statuses, offsets).to_h do |fault, address, offset|
         [fault.name, judge_fault(serial.b.byteslice(offset..), fault, address.to_i(16))]
       end
+    end
+
+    # A task's forged line reaches the serial log inside its record, with its newlines
+    # and its escape shown, and never at the start of a line.
+    def judge_log(serial)
+      lines = serial.b.lines
+      raise Error, "a task's text started a line" if lines.any? { |line| line.start_with?(FORGED_LINE) }
+
+      forged = lines.grep(LOG_RECORD)
+      raise Error, "#{forged.size} forged records, not 1" unless forged.size == 1
     end
 
     def judge_fault(rest, fault, address)

@@ -1969,6 +1969,48 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_fiasco_debug_log_request"] = Layout.new(
+        name: "erx_fiasco_debug_log_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "len".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_entropy_add_request"] = Layout.new(
         name: "erx_fiasco_entropy_add_request".b,
         version: 1,
@@ -9726,6 +9768,7 @@ module Erx
           "erx_elf64_phdr".b,
           "erx_exec_stat".b,
           "erx_group_stat".b,
+          "erx_fiasco_debug_log_request".b,
           "erx_fiasco_entropy_add_request".b,
           "erx_fiasco_entropy_read_request".b,
           "erx_fiasco_image_map_request".b,

@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/log.h"
 #include "erx/core/crash.h"
 #include "erx/pack.h"
 #include "liberx/backend/fiasco/service_wire.h"
@@ -46,6 +47,7 @@ typedef struct erx_fiasco_task {
 	int64_t			 status;
 	erx_fiasco_task_thread_t threads[ERX_FIASCO_THREADS_MAX];
 	uint64_t		 affinity[ERX_FIASCO_THREADS_MAX];	/* as last set, 0 for wherever it was created */
+	erx_log_rate_t		 log_rate;	/* what its erx_debug_log lines have cost, zero at its start */
 } erx_fiasco_task_t;
 
 erx_fiasco_task_t	*erx_fiasco_task(uint32_t task);

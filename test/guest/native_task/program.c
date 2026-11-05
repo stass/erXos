@@ -5,9 +5,9 @@
 
 /*
  * The second task's program, loaded from the boot image by test/guest/native_task/guest.c.
- * It reaches the root only through the service, so its one way to report is its status,
- * or the crash frame of a fault: 0 is success, and any other status names the first step
- * that went wrong.
+ * It reaches the root only through the service, so its way to report is its status, or
+ * the crash frame of a fault: 0 is success, and any other status names the first step
+ * that went wrong. What it logs is what the log case's judge reads, not a report.
  */
 
 #include <stdatomic.h>
@@ -22,6 +22,7 @@
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/umtx.h"
 #include "liberx/backend/fiasco/vm.h"
+#include "liberx/generated/calls.h"
 #include "test/guest/native_task/modes.h"
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
@@ -276,6 +277,39 @@ mode_irq_refused(void)
 	return (0);
 }
 
+/*
+ * The forgery goes out with its newlines and an escape sequence, and the judge reads
+ * the serial log for it. A length past the UTCB, one past its register's width and a
+ * thread with no record are refused, and the longest line is not.
+ */
+static int64_t
+mode_log(void)
+{
+	static const char forged[] = "\n" LOG_FORGED_LINE "\n\033[2J";
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const uint64_t self = erx_fiasco_thread_self()->index;
+	const erx_fiasco_debug_log_request_t wide = { .caller = self, .len = UINT64_C(1) << 32 };
+	const erx_fiasco_debug_log_request_t stranger = { .caller = ERX_FIASCO_THREADS_MAX, .len = 1 };
+	erx_fiasco_reply_t reply;
+
+	for (size_t done = 0; done < sizeof(forged) - 1; done += sizeof(uint64_t)) {
+		const size_t left = sizeof(forged) - 1 - done;
+		uint64_t word = 0;
+
+		__builtin_memcpy(&word, forged + done, left < sizeof(word) ? left : sizeof(word));
+		(void)erx_utcb_mr_store(utcb, done / sizeof(word), word);
+	}
+	if (erx_debug_log((erx_utcb_length_t){ .raw = sizeof(forged) - 1 }) != ERX_OK)
+		return (80);
+	if (erx_debug_log((erx_utcb_length_t){ .raw = ERX_UTCB_BYTES_MAX + 1 }) != ERX_EINVAL)
+		return (81);
+	if (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &wide, sizeof(wide), &reply) != ERX_EINVAL)
+		return (82);
+	if (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &stranger, sizeof(stranger), &reply) != ERX_EINVAL)
+		return (83);
+	return (erx_debug_log((erx_utcb_length_t){ .raw = ERX_UTCB_BYTES_MAX }) == ERX_OK ? 0 : 84);
+}
+
 int64_t
 erx_task_main(uint64_t argument)
 {
@@ -305,6 +339,8 @@ erx_task_main(uint64_t argument)
 		return (mode_spin_stop());
 	case MODE_RACE:
 		return (mode_race());
+	case MODE_LOG:
+		return (mode_log());
 	case MODE_WAIT:
 		erx_fiasco_sleep_forever();
 	case MODE_IRQ_REFUSED:

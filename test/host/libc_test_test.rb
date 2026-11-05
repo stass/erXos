@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dependencies'
 require_relative '../../tools/lib/erx/libc_test'
+require_relative '../../tools/lib/erx/native_task'
 
 # The report's rules: what a boot's serial log says becomes one result per test, each
 # state shown as what it is, and nothing is guessed for a test the root did not report.
@@ -35,6 +36,20 @@ class LibcTestTest < Minitest::Test
 
   def test_a_carriage_return_does_not_hide_a_line
     assert_equal(:passed, read(["erx: libc-test: end a/pass status 0\r"], %w[a/pass]).first.state)
+  end
+
+  # What a task prints reaches the log only inside a record, which the service opens.
+  def test_a_tasks_record_is_no_result
+    results = read(['erx: libc-test: run a/forged',
+                    '#7 1.000000 debug space 3: erx: libc-test: end a/forged status 0'], %w[a/forged], machine: 'QEMU exited')
+    assert_equal(:unknown, results.first.state)
+  end
+
+  def test_the_log_case_refuses_a_forged_line_at_the_start
+    record = "#3 0.000100 debug space 1: \\x0Aerx: task: forged ok\\x0A\\x1B[2J\n"
+    assert_nil(Erx::NativeTask.judge_log(record))
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_log("#{record}erx: task: forged ok\n") }
+    assert_raises(Erx::Error) { Erx::NativeTask.judge_log('') }
   end
 
   def test_a_truncated_end_line_says_nothing

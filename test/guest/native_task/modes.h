@@ -17,6 +17,10 @@
 #define MODE_RACE	6	/* a thread looping on commit while the first faults */
 #define MODE_WAIT	7	/* sleeps until the root stops the task */
 #define MODE_IRQ_REFUSED	8	/* every IRQ call through the service: each refused */
+#define MODE_LOG	9	/* forges the root's lines with erx_debug_log: ends with 0 */
+
+/* The line the log case tries to forge, which must appear only inside a record. */
+#define LOG_FORGED_LINE	"erx: task: forged ok"
 
 /* The status a spinning task stops with. */
 #define STATUS_SPIN_STOP	7

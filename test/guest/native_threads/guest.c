@@ -245,7 +245,7 @@ case_wire_refusals(void)
 	return (erx_fiasco_service_call(200, &good, sizeof(good), &reply) == ERX_EINVAL &&
 	    erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &good, sizeof(uint64_t), &reply) == ERX_EINVAL &&
 	    erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &bad_caller, sizeof(bad_caller), &reply) == ERX_EINVAL &&
-	    erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &good, sizeof(good), &reply) == ERX_ENOTSUP &&
+	    erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &good, sizeof(uint64_t), &reply) == ERX_EINVAL &&
 	    erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_START, &good, sizeof(good), &reply) == ERX_EINVAL);
 }
 

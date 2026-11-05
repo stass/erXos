@@ -58,6 +58,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_elf64_phdr_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_debug_log_request_t value;
+		(void)erx_fiasco_debug_log_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_entropy_add_request_t value;
 		(void)erx_fiasco_entropy_add_request_decode(bytes, length, &value);
 	}

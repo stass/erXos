@@ -289,6 +289,22 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_debug_log_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_debug_log_request_t *result)
+{
+	erx_fiasco_debug_log_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_DEBUG_LOG_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.len = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_entropy_add_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_entropy_add_request_t *result)
 {

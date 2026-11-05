@@ -31,7 +31,8 @@ module Erx
                  kernel/crypto/chacha20/chacha.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
-                 kernel/core/watchdog.c].freeze
+                 kernel/core/watchdog.c kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
+                 kernel/generated/abi_decode.c kernel/generated/abi_run.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
     LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c kernel/core/boot_handoff.c liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
@@ -44,7 +45,7 @@ module Erx
     # which does not hold the handoff record's core, since bootstrap only writes it.
     SYSTEM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c"].freeze
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
-               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I kernel/crypto -I .].freeze
+               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I kernel/crypto -I kernel/generated -I kernel/core -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
 
     # source is the tree the C comes from, which a test may seed with a fault.

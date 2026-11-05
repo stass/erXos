@@ -486,8 +486,8 @@ run_wire(void)
 	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
 		fail("an unknown negative number is ERX_EINVAL");
 	got = decode(0, ERX_CALL_DEBUG_LOG, 1, 0);
-	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_ENOTSUP)
-		fail("a call without a row is ERX_ENOTSUP");
+	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
+		fail("a debug log of any other word count is ERX_EINVAL");
 	got = decode(0, ERX_FIASCO_CALL_THREAD_START, start_words + 1, 0);
 	if (got.kind != ERX_FIASCO_WIRE_REFUSE || got.status != ERX_EINVAL)
 		fail("a word count the ABI does not give is ERX_EINVAL");

@@ -595,6 +595,15 @@ Storage: `shared`. Prefix size: 8320. Alignment: 8.
 | `ready` | `u32` | 56 | 1 |
 | `exec` | `erx_exec_stat` | 128 | 64 |
 
+### `erx_fiasco_debug_log_request_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `len` | `u64` | 8 | 1 |
+
 ### `erx_fiasco_entropy_add_request_t`
 
 Storage: `wire_le`. Prefix size: 48. Alignment: 8.

@@ -24,6 +24,8 @@ uint32_t
 erx_fiasco_wire_words(int64_t number)
 {
 	switch (number) {
+	case ERX_CALL_DEBUG_LOG:
+		return (sizeof(erx_fiasco_debug_log_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
 		return (sizeof(erx_fiasco_thread_create_request_t) / sizeof(uint64_t));
 	case ERX_FIASCO_CALL_THREAD_START:
@@ -98,10 +100,6 @@ erx_fiasco_wire_decode(const erx_fiasco_wire_input_t *input)
 	if (input->tag_label == ERX_FIASCO_WIRE_EXCEPTION) {
 		if (input->words == ERX_FIASCO_WIRE_EXCEPTION_WORDS)
 			decoded.kind = ERX_FIASCO_WIRE_FAULT_EXCEPTION;
-		return (decoded);
-	}
-	if (input->tag_label == ERX_CALL_DEBUG_LOG) {
-		decoded.status = ERX_ENOTSUP;
 		return (decoded);
 	}
 	expected = erx_fiasco_wire_words(input->tag_label);
