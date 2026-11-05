@@ -29,7 +29,7 @@ class NativeSeedsTest < Minitest::Test
   IRQ = 'liberx/backend/fiasco/irq.c'
   GROUP = 'liberx/backend/fiasco/group.c'
   IRQ_GUEST = 'test/guest/native_irq/guest.c'
-  ACK_BODY = "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n\t(void)l4_irq_unmask(irq_cap((uint32_t)irq));\n"
+  ACK_BODY = "\tif (irq_objects[irq].bound)\n\t\t(void)l4_irq_unmask(irq_cap((uint32_t)irq));\n"
   REAP_CALL = "\tif (erx_fiasco_service_call(ERX_FIASCO_CALL_THREAD_REAP, &request, sizeof(request), &reply) != ERX_OK)\n" \
               "\t\treaper_refused(\"erx: reaper: the service refused a deletion\\n\");\n"
   CLEAR = "\tif (record->clear_word != 0) {\n" \
@@ -61,7 +61,7 @@ class NativeSeedsTest < Minitest::Test
                                           suite: :task, cpus: 1, expected: /service FAILED/),
     'the pets ignored' => Seed.new(file: WATCHDOG, from: "\t\tif (pet != last_pet) {", to: "\t\tif (false && pet != last_pet) {",
                                    suite: :watchdog, cpus: 1, expected: /exited before completing its transcript/),
-    'the ack removed' => Seed.new(file: IRQ, from: ACK_BODY, to: "!irq_objects[irq].bound)\n\t\treturn (ERX_EINVAL);\n",
+    'the ack removed' => Seed.new(file: IRQ, from: ACK_BODY, to: '',
                                   suite: :irq, cpus: 1, expected: /a lost wake/),
     'the listed flag ignored' => Seed.new(file: PARK, from: 'if ((park->listed & (UINT64_C(1) << event->object)) == 0) {', to: '{',
                                           suite: :irq, cpus: 1, expected: /status page's ready disagrees/),
