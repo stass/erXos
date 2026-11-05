@@ -13,7 +13,7 @@ require 'tmpdir'
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[
-    erlang/apps/erx/src/generated/erx_9p_grammar.erl
+    otp/erts/preloaded/src/erx_9p_grammar.erl
     erlang/apps/erx_files/src/erx_fs_grant.erl
     erlang/apps/erx_files/src/erx_fs.erl
     erlang/apps/erx_files/src/erx_fs_version.erl
@@ -25,7 +25,7 @@ class ErxFsTest < Minitest::Test
     test/erlang/erx_fs_version_tests.erl
   ].freeze
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
-  GRAMMAR = 'erlang/apps/erx/src/generated/erx_9p_grammar.erl'
+  GRAMMAR = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
   VERSION = 'erlang/apps/erx_files/src/erx_fs_version.erl'
 
   Fault = Data.define(:name, :file, :from, :to, :caught_by)

@@ -11,8 +11,8 @@
 
 -include_lib("kernel/include/file.hrl").
 
-main([_, "seeded"]) ->
-    seeded(),
+main([_, "seeded", Seed]) ->
+    seeded(Seed),
     erlang:halt(0);
 main([PrefixText, Mode]) ->
     Prefix = case PrefixText of
@@ -396,6 +396,7 @@ remote("release") ->
     Show("ro kept", {Info(<<"/t/f">>), Info(<<"/t/a">>)}),
     Show("exdev rename", prim_file:rename(<<"/t/f">>, <<"/r/g">>)),
     Show("exdev link", prim_file:make_link(<<"/t/f">>, <<"/r/g">>)),
+    open_files(Show),
     Show("fids held", fids_held(Grant)),
     slashes(Show),
     links(Show),
@@ -601,16 +602,227 @@ hostile(Show) ->
 
 %% A getattr reply that calls a file a link which the walk did not find as one.
 link_attr() ->
-    #{qid => {0, 0, 2}, mode => 8#120644, uid => 0, gid => 0, nlink => 1, rdev => 0, size => 0,
-      atime_sec => 0, mtime_sec => 0, ctime_sec => 0}.
+    attr(8#120644, 0).
 
-%% A client whose walks act in place, loaded over the preloaded one: the delete of
-%% /t/missing/victim then removes /t/victim, which the seeded run must show.
-seeded() ->
-    {ok, Beam} = prim_file:read_file(<<"/test/seeded/erx_file_remote.beam">>),
+%% A getattr reply of every field, for a node of Mode and Size.
+attr(Mode, Size) ->
+    #{valid => 16#7ff, qid => {0, 0, 2}, mode => Mode, uid => 0, gid => 0, nlink => 1, rdev => 0,
+      size => Size, blksize => 4096, blocks => 0, atime_sec => 0, atime_nsec => 0,
+      mtime_sec => 0, mtime_nsec => 0, ctime_sec => 0, ctime_nsec => 0, btime_sec => 0,
+      btime_nsec => 0, gen => 0, data_version => 0}.
+
+%% Open files on a grant (design-files.md, Erlang clients, and Open files and offsets),
+%% through file's descriptors, on the grant at /t, its read-only bind at /r and fresh
+%% trees: the open modes and their refusals, reads, writes and positions, and the cases
+%% of design-tmp.md's verification that the seeded runs repeat.
+open_files(Show) ->
+    Raw = fun(Path, Modes) -> file:open(Path, [raw, binary | Modes]) end,
+    {ok, W} = Raw(<<"/t/o">>, [write]),
+    Show("open write", {file:write(W, [<<"hel">>, "lo"]), file:position(W, cur)}),
+    Show("read through a write fd", file:read(W, 1)),
+    Show("close", {file:close(W), file:close(W), file:write(W, <<"x">>)}),
+    Show("read file", prim_file:read_file(<<"/t/o">>)),
+    {ok, R} = Raw(<<"/t/o">>, [read]),
+    Show("read", {file:read(R, 3), file:read(R, 10), file:read(R, 1), file:read(R, 0)}),
+    Show("pread", {file:pread(R, 1, 2), file:pread(R, [{0, 1}, {9, 1}]), file:pread(R, -1, 1),
+                   file:position(R, cur)}),
+    Show("position", {file:position(R, {eof, -2}), file:read(R, 5), file:position(R, {cur, -10}),
+                      file:position(R, bof), file:position(R, x)}),
+    Show("pread none", {file:pread(R, 0, 0), file:pread(R, 0, -1), file:pread(R, [{0, 0}])}),
+    Show("write through a read fd", {file:write(R, <<"x">>), file:pwrite(R, 0, <<"x">>)}),
+    Show("truncate through a read fd", file:truncate(R)),
+    Show("info of an open file", info(file:read_file_info(R))),
+    Show("not on controlling process", elsewhere(fun() -> file:read(R, 1) end)),
+    ok = file:close(R),
+    {ok, P} = Raw(<<"/t/o">>, [read, write]),
+    Show("pwrite", {file:pwrite(P, 1, <<"EL">>), file:position(P, cur),
+                    file:pwrite(P, [{0, <<"H">>}, {5, <<"!">>}]), prim_file:read_file(<<"/t/o">>)}),
+    Show("truncate", {file:position(P, 4), file:truncate(P), prim_file:read_file(<<"/t/o">>)}),
+    Show("sync", {file:sync(P), file:datasync(P), file:advise(P, 0, 0, normal), file:allocate(P, 0, 1)}),
+    ok = file:close(P),
+    Show("write file", {prim_file:write_file(<<"/t/w">>, <<"one\r\ntwo\nthree">>), lines(<<"/t/w">>)}),
+    Show("write file truncates", {prim_file:write_file(<<"/t/w">>, <<"x">>), prim_file:read_file(<<"/t/w">>)}),
+    Show("open missing", Raw(<<"/t/missing">>, [read])),
+    Show("open to write a directory", {Raw(<<"/t/w">>, [write, directory]), prim_file:read_file(<<"/t/w">>)}),
+    Show("open a directory", Raw(<<"/t/a">>, [read])),
+    Show("open a directory as one", closed(Raw(<<"/t/a">>, [read, directory]))),
+    Show("open through a link", closed(Raw(<<"/t/l/f">>, [read]))),
+    Show("open exclusive existing", Raw(<<"/t/w">>, [write, exclusive])),
+    Show("open exclusive new", closed(Raw(<<"/t/x">>, [write, exclusive]))),
+    Show("open exclusive a link", Raw(<<"/t/l">>, [write, exclusive])),
+    Show("create in missing", Raw(<<"/t/missing/x">>, [write])),
+    Show("create slashed", Raw(<<"/t/y/">>, [write])),
+    Show("create a directory", Raw(<<"/t/a">>, [write])),
+    Show("create the root", Raw(<<"/t">>, [write])),
+    Show("ro open read", closed(Raw(<<"/r/w">>, [read]))),
+    Show("ro open write", Raw(<<"/r/w">>, [write])),
+    Show("ro create", Raw(<<"/r/new">>, [write])),
+    Show("ro create in missing", Raw(<<"/r/missing/x">>, [write])),
+    Show("ro exclusive", Raw(<<"/r/w">>, [write, exclusive])),
+    {ok, RO} = Raw(<<"/r/w">>, [read]),
+    Show("ro truncate", {file:truncate(RO), file:write(RO, <<"y">>)}),
+    ok = file:close(RO),
+    Show("ro unchanged", prim_file:read_file(<<"/t/w">>)),
+    Show("io server", io_server(<<"/t/w">>)),
+    appends(Show),
+    past_the_cap(Show),
+    split(Show),
+    unknown_at(Show),
+    grant_gone(Show).
+
+closed({ok, Fd}) -> file:close(Fd);
+closed(Other) -> Other.
+
+%% What a call answers in another process, or the error it raises there.
+elsewhere(Call) ->
+    Self = self(),
+    _ = spawn(fun() -> Self ! {elsewhere, try Call() catch error:Why -> {raised, Why} end} end),
+    receive {elsewhere, Answer} -> Answer after 5000 -> timeout end.
+
+lines(Path) ->
+    {ok, Fd} = file:open(Path, [raw, binary, read]),
+    Lines = read_lines(Fd, []),
+    ok = file:close(Fd),
+    Lines.
+
+read_lines(Fd, Lines) ->
+    case file:read_line(Fd) of
+        {ok, Line} -> read_lines(Fd, [Line | Lines]);
+        eof -> lists:reverse(Lines);
+        Error -> Error
+    end.
+
+%% file:open without raw: file's io server opens the file and reads it for this process.
+io_server(Path) ->
+    {ok, Device} = file:open(Path, [read]),
+    Answer = file:read(Device, 4),
+    {Answer, file:close(Device)}.
+
+%% A grant of erx_fs_test_tree with Args, mounted at Point.
+mounted(Point, Args) ->
+    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, Args, rw),
+    unlink(Grant),
+    ok = erx_ns:mount(Grant, Point, [{tree, <<"test">>}, rw]),
+    Grant.
+
+%% Two processes append one distinct byte each, many times, and after each write read the
+%% byte before their offset, which must be their own (design-tmp.md, Appends).
+appends(Show) ->
+    _ = mounted(<<"/p">>, []),
+    Self = self(),
+    [spawn(fun() ->
+                   {ok, Fd} = file:open(<<"/p/log">>, [raw, binary, append, read]),
+                   Self ! {appended, Byte, own(Fd, Byte, 1000, 0)},
+                   file:close(Fd)
+           end) || Byte <- [$a, $b]],
+    Own = lists:sort([receive {appended, Byte, Count} -> {Byte, Count} end || _ <- [1, 2]]),
+    {ok, Log} = prim_file:read_file(<<"/p/log">>),
+    Show("appends", {Own, byte_size(Log)}),
+    ok = erx_ns:unmount(<<"/p">>).
+
+own(_, _, 0, Own) ->
+    Own;
+own(Fd, Byte, Count, Own) ->
+    ok = file:write(Fd, <<Byte>>),
+    {ok, At} = file:position(Fd, cur),
+    Mine = case file:pread(Fd, At - 1, 1) of
+               {ok, <<Byte>>} -> 1;
+               _ -> 0
+           end,
+    own(Fd, Byte, Count - 1, Own + Mine).
+
+%% A 128 KiB write with room for 64 KiB: enospc, the first 64 KiB in the file and the
+%% offset after them; then a positioned write past the cap, which writes nothing
+%% (design-tmp.md, A write past the cap).
+past_the_cap(Show) ->
+    _ = mounted(<<"/c">>, [{cap, 100000}]),
+    {ok, Fd} = file:open(<<"/c/f">>, [raw, binary, write]),
+    Write = file:write(Fd, binary:copy(<<"x">>, 131072)),
+    Position = file:position(Fd, cur),
+    Positioned = file:pwrite(Fd, 99990, binary:copy(<<"y">>, 20)),
+    ok = file:close(Fd),
+    {ok, Data} = prim_file:read_file(<<"/c/f">>),
+    Show("past the cap", {Write, Position, Positioned, byte_size(Data)}),
+    ok = erx_ns:unmount(<<"/c">>).
+
+%% A write over 64 KiB is several requests, each one write of the tree.
+split(Show) ->
+    _ = mounted(<<"/q">>, [{observer, self()}]),
+    {ok, Fd} = file:open(<<"/q/f">>, [raw, binary, write]),
+    _ = tree_calls(write),
+    Bytes = << <<(N rem 251)>> || N <- lists:seq(1, 150000) >>,
+    Write = file:write(Fd, Bytes),
+    Requests = tree_calls(write),
+    ok = file:close(Fd),
+    Show("split", {Write, Requests, prim_file:read_file(<<"/q/f">>) =:= {ok, Bytes}}),
+    ok = erx_ns:unmount(<<"/q">>).
+
+%% How many of the observer's messages so far name Callback; all are taken.
+tree_calls(Callback) ->
+    receive
+        {tree_call, Callback} -> 1 + tree_calls(Callback);
+        {tree_call, _} -> tree_calls(Callback)
+    after 0 ->
+            0
+    end.
+
+%% A server outside erXos answers no At: through a fid without append, the offset moves
+%% to where the write was sent plus its count; through an append fid, to the file's size
+%% from a getattr after the reply.
+unknown_at(Show) ->
+    Server = spawn(fun Loop() ->
+                           receive
+                               {erx_9p, Alias, _, Request} ->
+                                   Alias ! {erx_9p, Alias, foreign(Request)},
+                                   Loop()
+                           end
+                   end),
+    ok = erx_ns:mount(Server, <<"/u">>, [{tree, <<"u">>}, rw]),
+    {ok, Plain} = file:open(<<"/u/x">>, [raw, binary, write]),
+    PlainAt = {file:write(Plain, <<"abc">>), file:write(Plain, <<"de">>), file:position(Plain, cur)},
+    {ok, Append} = file:open(<<"/u/x">>, [raw, binary, append]),
+    AppendAt = {file:write(Append, <<"abc">>), file:position(Append, cur)},
+    _ = [file:close(Fd) || Fd <- [Plain, Append]],
+    Show("unknown at", {PlainAt, AppendAt}),
+    ok = erx_ns:unmount(<<"/u">>),
+    exit(Server, kill).
+
+foreign({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+foreign({walk, _, _, Names}) -> {ok, [{16#80, 0, 2} || _ <- Names]};
+foreign({lcreate, _, _, _, _, _}) -> {ok, {0, 0, 3}, 0};
+foreign({write, _, _, Data}) -> {ok, byte_size(Data), unknown};
+foreign({getattr, _, _}) -> {ok, attr(8#100644, 100)};
+foreign(_) -> ok.
+
+%% Once the grant's process has ended, every operation on its open file answers eio.
+grant_gone(Show) ->
+    Grant = mounted(<<"/d">>, []),
+    {ok, Fd} = file:open(<<"/d/f">>, [raw, binary, read, write]),
+    Monitor = erlang:monitor(process, Grant),
+    exit(Grant, kill),
+    receive {'DOWN', Monitor, process, _, _} -> ok end,
+    Show("grant gone", {file:write(Fd, <<"x">>), file:read(Fd, 1), file:position(Fd, eof),
+                        file:close(Fd)}),
+    ok = erx_ns:unmount(<<"/d">>).
+
+%% A client with one seeded fault, loaded over the preloaded one, and the case that must
+%% catch it: walks that act on their fid in place, which delete /t/victim for
+%% /t/missing/victim; an append's offset from a getattr's size, which finds the other
+%% appender's byte; an offset left where it was on an error; an append's unknown At read
+%% as a fid's without append.
+seeded(Seed) ->
+    {ok, Beam} = prim_file:read_file(<<"/test/seeded/", (list_to_binary(Seed))/binary,
+                                       "/erx_file_remote.beam">>),
     _ = code:unstick_mod(erx_file_remote),
     {module, erx_file_remote} = code:load_binary(erx_file_remote, "seeded", Beam),
-    ok = erx_ns:mount(test_grant(), <<"/t">>, [{tree, <<"test">>}, rw]),
-    ok = prim_file:make_symlink(<<"f">>, <<"/t/victim">>),
-    io:format("seeded delete\t~0tp~n", [prim_file:delete(<<"/t/missing/victim">>)]),
-    io:format("seeded victim\t~0tp~n", [prim_file:read_link(<<"/t/victim">>)]).
+    Show = fun(Case, Result) -> io:format("seeded ~s\t~0tp~n", [Case, Result]) end,
+    case Seed of
+        "walk" ->
+            ok = erx_ns:mount(test_grant(), <<"/t">>, [{tree, <<"test">>}, rw]),
+            ok = prim_file:make_symlink(<<"f">>, <<"/t/victim">>),
+            Show("delete", prim_file:delete(<<"/t/missing/victim">>)),
+            Show("victim", prim_file:read_link(<<"/t/victim">>));
+        "append" -> appends(Show);
+        "cap" -> past_the_cap(Show);
+        "unknown" -> unknown_at(Show)
+    end.

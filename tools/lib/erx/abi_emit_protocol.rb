@@ -20,6 +20,9 @@ module Erx
         'u32' => 'is_integer(Value) andalso Value >= 0 andalso Value =< 16#ffffffff',
         'u64' => 'is_integer(Value) andalso Value >= 0 andalso Value =< 16#ffffffffffffffff'
       }.freeze
+      # Preloaded, so that erx_file_remote, a preloaded client, checks its requests and
+      # replies with it: what this file emits calls only BIFs.
+      OUTPUT_DIRECTORY = 'otp/erts/preloaded/src'
       REFUSAL_TESTS = {
         'empty' => 'Value =/= <<>>', 'dot' => 'Value =/= <<".">>', 'dotdot' => 'Value =/= <<"..">>'
       }.freeze
@@ -28,7 +31,7 @@ module Erx
 
       def self.outputs(schema)
         schema.protocols.to_h do |protocol|
-          ["erlang/apps/erx/src/generated/#{protocol.fetch(:module)}.erl", new(protocol).emit]
+          ["#{OUTPUT_DIRECTORY}/#{protocol.fetch(:module)}.erl", new(protocol).emit]
         end.freeze
       end
 
@@ -274,9 +277,12 @@ module Erx
         when 'list' then list_check(kind_name, kind)
         when 'map'
           fields = kind.fetch(:fields)
-          "is_#{kind_name}(Value) ->\n    " +
-            conjunction(['is_map(Value)', "map_size(Value) =:= #{fields.size}"] +
-                        fields.map { |field, item| "#{check(item)}(maps:get(#{field}, Value, absent))" }) + '.'
+          head = "is_#{kind_name}(\#{"
+          keys = fields.map { |field, _| "#{field} := #{variable(field)}" }
+                       .each_slice(4).map { |line| line.join(', ') }.join(",\n#{' ' * head.size}")
+          "is_#{kind_name}(\#{#{keys}} = Value) when map_size(Value) =:= #{fields.size} ->\n    " +
+            conjunction(fields.map { |field, item| "#{check(item)}(#{variable(field)})" }) +
+            ";\nis_#{kind_name}(_) ->\n    false."
         end
       end
 
@@ -308,8 +314,10 @@ module Erx
         arity = @kinds.fetch(kind.fetch(:element)).fetch(:elements).size
         elements = (['_'] * (arity - 1) + ['Name']).join(', ')
         text + "\n\n%% #{kind_name} as 9P2000.L packs them: #{literal(kind[:packed])} bytes for each, and its text's.\n" \
-               "packed_#{kind_name}(Entries) ->\n" \
-               "    lists:sum([#{literal(kind[:packed])} + byte_size(Name) || {#{elements}} <- Entries])."
+               "packed_#{kind_name}(Entries) ->\n    packed_#{kind_name}(Entries, 0).\n\n" \
+               "packed_#{kind_name}([{#{elements}} | Entries], Sum) ->\n" \
+               "    packed_#{kind_name}(Entries, Sum + #{literal(kind[:packed])} + byte_size(Name));\n" \
+               "packed_#{kind_name}([], Sum) ->\n    Sum."
       end
 
       def helpers

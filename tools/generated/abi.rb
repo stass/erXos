@@ -12270,9 +12270,39 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "p9_o_append".b => Constant.new(
+            name: "p9_o_append".b,
+            value: 1024,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_o_excl".b => Constant.new(
+            name: "p9_o_excl".b,
+            value: 128,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_o_rdwr".b => Constant.new(
+            name: "p9_o_rdwr".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_o_sync".b => Constant.new(
+            name: "p9_o_sync".b,
+            value: 1052672,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "p9_o_trunc".b => Constant.new(
             name: "p9_o_trunc".b,
             value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_o_wronly".b => Constant.new(
+            name: "p9_o_wronly".b,
+            value: 1,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

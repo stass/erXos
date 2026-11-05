@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources into the emulator and preloads erx_file_remote.
+# Modified by erXos: builds erXos sources into the emulator and preloads erx_file_remote and erx_9p_grammar.
 #
 # %CopyrightBegin%
 #
@@ -817,6 +817,7 @@ PRELOAD_BEAM =	$(ERL_TOP)/erts/preloaded/ebin/erts_code_purger.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_inet.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_file.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/erx_file_remote.beam \
+		$(ERL_TOP)/erts/preloaded/ebin/erx_9p_grammar.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/zlib.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_zip.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/erl_prim_loader.beam \

@@ -28,7 +28,7 @@ module Erx
                'liberx/backend/erx/arch/*/generated/*',
                'liberx/backend/fiasco/generated/*', 'liberx/backend/hosted/generated/*',
                'tools/generated/abi*', 'erlang/apps/erx/include/generated/*',
-               'erlang/apps/erx/src/generated/*',
+               'erlang/apps/erx/src/generated/*', 'otp/erts/preloaded/src/erx_9p_grammar.erl',
                'docs/generated/abi-reference.md', 'fuzz/generated/abi*'].freeze
       module_function
 

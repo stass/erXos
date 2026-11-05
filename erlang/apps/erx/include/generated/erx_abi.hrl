@@ -352,7 +352,12 @@
 -define(ERX_P9_NOFID, 4294967295).
 -define(ERX_P9_NOTAG, 65535).
 -define(ERX_P9_O_ACCMODE, 3).
+-define(ERX_P9_O_APPEND, 1024).
+-define(ERX_P9_O_EXCL, 128).
+-define(ERX_P9_O_RDWR, 2).
+-define(ERX_P9_O_SYNC, 1052672).
 -define(ERX_P9_O_TRUNC, 512).
+-define(ERX_P9_O_WRONLY, 1).
 -define(ERX_P9_QTDIR, 128).
 -define(ERX_P9_QTSYMLINK, 2).
 -define(ERX_P9_RLERROR, 7).

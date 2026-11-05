@@ -12968,7 +12968,7 @@ Third-party notices remain in their original files.
       "license": "Apache-2.0",
       "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
       "reviewed": true,
-      "sha256": "43e6047691751add10031718a66717b72940c8cf030d5ac41ade6fc6b7653171",
+      "sha256": "faed9182ee6f53523f4a2344feb423a1b3fc14c92ebc8b2882707109f84f1f42",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43226,10 +43226,15 @@ Third-party notices remain in their original files.
     }
   },
   "changes": {
+    "erts/preloaded/ebin/erx_9p_grammar.beam": {
+      "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_9p_grammar.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
+      "license": "BSD-2-Clause",
+      "sha256": "cca55a28ac16245f71146fe019c10b49ab98facdef15ecc70c8e34f0dd9c2a6f"
+    },
     "erts/preloaded/ebin/erx_file_remote.beam": {
       "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_file_remote.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
       "license": "BSD-2-Clause",
-      "sha256": "be1d3396d8967cf6d26f06e39ff4cd8e7f20884dab6290ea78fd8b61440be6cf"
+      "sha256": "0723fb2d6400b030268bf3f78c7d82b8a21de974a4ca72d26fea57322ecf94a2"
     },
     "erts/preloaded/ebin/prim_file.beam": {
       "evidence": "compiled from the modified erts/preloaded/src/prim_file.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",

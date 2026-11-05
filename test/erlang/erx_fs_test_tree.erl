@@ -32,6 +32,9 @@ Flags are Linux's, as 9P2000.L carries them. The tree has no `fsync`.
 With `{observer, Pid}` in its arguments, every callback first sends
 `{tree_call, Callback}` to `Pid`, so a test can show a request never reached
 the tree. A walk of ".." crashes the grant: erx_fs must answer ".." itself.
+
+With `{cap, Bytes}`, a write that would leave a file larger than `Bytes`
+answers `enospc` and writes nothing, as a full tree answers.
 """.
 
 -behaviour(erx_fs).
@@ -54,7 +57,10 @@ the tree. A walk of ".." crashes the grant: erx_fs must answer ".." itself.
 -define(DT_REG, 8).
 -define(DT_LNK, 10).
 
--doc "The tree above, in a process linked to the caller; `Args` may hold `{observer, Pid}`.".
+-doc """
+The tree above, in a process linked to the caller; `Args` may hold
+`{observer, Pid}` and `{cap, Bytes}`.
+""".
 init(Args) ->
     Nodes = #{1 => directory(#{<<"a">> => 2, <<"l">> => 5, <<"f">> => 6}),
               2 => directory(#{<<"b">> => 3, <<"f">> => 4}),
@@ -62,7 +68,8 @@ init(Args) ->
               4 => file(8#644),
               5 => #{kind => symlink, mode => 8#777, target => <<"a">>, links => 1, opens => 0},
               6 => file(8#644)},
-    Tree = spawn_link(fun() -> serve(#{nodes => Nodes, next => 7}) end),
+    Cap = proplists:get_value(cap, Args, infinity),
+    Tree = spawn_link(fun() -> serve(#{nodes => Nodes, next => 7, cap => Cap}) end),
     {ok, #{tree => Tree, observer => proplists:get_value(observer, Args, none)}}.
 
 directory(Entries) ->
@@ -187,12 +194,16 @@ write({Ino, _, Append}, Offset, Bytes, Fs) ->
     seen(write, Fs),
     apply_step(Fs, fun(T) ->
                                #{data := Data} = Node = node(Ino, T),
+                               #{cap := Cap} = T,
                                At = case Append of
                                         true -> byte_size(Data);
                                         false -> Offset
                                     end,
                                Data1 = spliced(Data, At, Bytes),
-                               {{ok, byte_size(Bytes), At}, put_node(Ino, Node#{data := Data1}, T)}
+                               case byte_size(Data1) > Cap of
+                                   true -> {{error, enospc}, T};
+                                   false -> {{ok, byte_size(Bytes), At}, put_node(Ino, Node#{data := Data1}, T)}
+                               end
                        end).
 
 spliced(Data, At, Bytes) when At >= byte_size(Data) ->

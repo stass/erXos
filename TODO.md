@@ -416,11 +416,26 @@ it; git history is the record of completed work.
   until then.
 * [Low] runtime, `erx_prim_file.c`: EROFS has no provider yet, so a path on it cannot arise; its row's
   `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
-* [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: the client serves the path operations, but
-  `open`, `read_file` and `set_cwd` on a grant still answer `{error, enotsup}`; the open files of
-  [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace them, and with
-  `set_cwd` comes error step 5, `del_dir` of the working directory answering `einval`, which cannot arise
-  while no working directory lies on a grant.
+* [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `set_cwd` on a grant still answers
+  `{error, enotsup}`; with a working directory on a grant
+  ([design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote)) comes error step 5,
+  `del_dir` of the working directory answering `einval`, which cannot arise while none lies on a grant.
+  `file:ipread_s32bu_p32bu/3` on an open file of a grant has no implementation, so it raises `undef`.
+* [Medium] runtime, `erx_file_remote`: `read_file` keeps up to the size a server's `getattr` answers and
+  `read_line` reads until a server sends a `"\n"`, so a hostile server can make the caller, perhaps the code
+  server, hold as much as it sends until the node dies; stock fails such a size up front with `enomem`. A
+  bound per call would make the caller's heap the client's to limit.
+* [Medium] runtime, `erx_file_remote`: `exchange/2`'s refusal of a writing request through rights other
+  than `rw` has no seeded test of its own, since every operation refuses first (`created/4`, `if_writable/3`,
+  the descriptor's access), and no build check keeps `sent/2` the module's only send; a seed that drops
+  `created/4`'s read-only clause, watched by the tree's observer, and a send-site count in
+  `test/host/erx_file_remote_test.rb` would make it a chokepoint as CLAUDE.md asks.
+* [Medium] test, `test/integration/runtime_prim_file_test.rb`: the open-file cases (`OPEN_FILES`) are
+  hand-written expectations rather than the same calls run on stock over a local directory, which the
+  oracle rule asks for. Known differences from stock: `position(Fd, {bof, 1 bsl 64})` answers `einval`
+  where stock answers `badarg`; a `pread` at a negative offset through a write-only descriptor answers
+  `ebadf` where Linux answers `einval`; `read_file` of a file whose `getattr` size is 0 answers `<<>>`
+  where stock reads to the end.
 * [Low] runtime, `erx_file_remote`: `list_dir` of a directory on a grant lists only the server's entries,
   not the mount points directly below it ([Resolving a path](docs/design-files.md#resolving-a-path),
   listings across mounts), which needs the namespace's table from the NIF.
@@ -442,11 +457,6 @@ it; git history is the record of completed work.
 * [Medium] runtime, `erx_file_remote`: on a read-only entry `erofs` is answered once the last name's directory is
   reached, before the last name is looked at, where Linux answers `eexist` or `enotdir` for the last name
   first (`make_dir` of an existing name on a read-only bind answers `erofs`, stock `eexist`).
-* [Medium] runtime, `erx_file_remote`: its reply checks are hand-written beside the generated
-  `erx_9p_grammar:decode_reply/2`, which is not preloaded (error atoms are not limited to the protocol's
-  list, and a getattr map is not held to its key set); generating the checks into a preloaded module
-  removes the copy. The rights refusal likewise lives in each operation rather than in `exchange/2`, where
-  the grammar's `writes/1` would refuse every writing request by construction.
 * [Medium] runtime, `erx_file_remote`: the server's replies, the client's untrusted input, have hand-written
   hostile cases in `test/integration/prim_file_compare.erl` but no fuzz target; the fuzz target covers the
   caller's path text only.
@@ -454,7 +464,7 @@ it; git history is the record of completed work.
   walk's `enotdir`; `list_dir` opens without `O_DIRECTORY`; a partial walk answers `enoent` for any refusal;
   negative times answer `einval`; an empty symlink target is sent; a listing may hold up to 2^20 names of
   255 bytes; the xref check exempts every call through a variable.
-* [Low] build, `otp/erts/preloaded/ebin`: the preloaded beams erXos changes (`prim_file`,
+* [Low] build, `otp/erts/preloaded/ebin`: the preloaded beams erXos changes (`prim_file`, `erx_9p_grammar`,
   `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
   `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
   remove the hand step and the hashes to keep.

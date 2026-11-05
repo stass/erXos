@@ -1361,7 +1361,12 @@ under the namespace's lock with the rest: `Tree` is the tree the client
 attaches to, so two entries of one grant on two trees reach two trees,
 and `Rights` is the entry's `ro`, `rw` or `rx`, so a read-only bind of an
 `rw` grant reaches its client read-only and the client never sends a
-request that writes through it. The third is where the path lies:
+request that writes through it: every request the client sends passes one
+function, which checks it against the generated grammar of the file
+protocol and refuses, with `erofs` and sending nothing, one that the
+grammar's `writes/1` marks as writing through rights other than `rw`, as
+the grant's own funnel refuses it. The grammar, `erx_9p_grammar`, is
+preloaded with the client and holds each reply to its request. The third is where the path lies:
 `Point` is the entry's point, a namespace path such as `<<"/tmp">>`,
 `Root` the entry's root as names (`<<>>` for the tree's root), and
 `Names` the path's names from the tree's root, `Root`'s first. `Point`
@@ -1399,8 +1404,8 @@ the node.
   through the link, counted with the path's others
   ([Resolving a path](#resolving-a-path)). It returns OTP's file
   descriptor record with `erx_file_remote` as its module, holding the
-  grant's pid, the fid, the opening process and an `atomics` cell for the
-  offset, so `file:read/2`, `file:pwrite/3`, `file:position/2` and
+  grant, the fid, the opening process and an `atomics` array holding the
+  offset and whether the file is closed, so `file:read/2`, `file:pwrite/3`, `file:position/2` and
   `file:close/1` dispatch to it as they dispatch to `prim_file` for local
   files. The opening process owns the fid, so the file closes when that
   process ends, and a call from any other process fails with

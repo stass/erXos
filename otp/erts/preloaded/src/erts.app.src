@@ -1,4 +1,4 @@
-%% Modified by erXos: erx_file_remote is added to the preloaded modules.
+%% Modified by erXos: erx_file_remote and erx_9p_grammar are added to the preloaded modules.
 %%
 %% %CopyrightBegin%
 %%
@@ -36,6 +36,7 @@
 		prim_eval,
 		prim_file,
 		erx_file_remote,
+		erx_9p_grammar,
 		prim_inet,
 		prim_zip,
                 atomics,

@@ -18,7 +18,7 @@
 # limitations under the License.
 #
 # Modified by erXos: prim_socket, prim_net and socket_registry are removed;
-# erx_file_remote is added, and the erXos ABI's Erlang header is on the include path.
+# erx_file_remote and the generated erx_9p_grammar are added, and the erXos ABI's Erlang header is on the include path.
 #
 # %CopyrightEnd%
 # 
@@ -43,6 +43,7 @@ PRE_LOADED_ERL_MODULES = \
 	prim_buffer \
 	prim_file \
 	erx_file_remote \
+	erx_9p_grammar \
 	prim_inet \
 	zlib \
 	prim_zip \

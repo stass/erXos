@@ -689,64 +689,77 @@ is_dirents(Value) ->
 
 %% dirents as 9P2000.L packs them: ?P9_DIRENT_FIXED bytes for each, and its text's.
 packed_dirents(Entries) ->
-    lists:sum([?P9_DIRENT_FIXED + byte_size(Name) || {_, _, _, Name} <- Entries]).
+    packed_dirents(Entries, 0).
+
+packed_dirents([{_, _, _, Name} | Entries], Sum) ->
+    packed_dirents(Entries, Sum + ?P9_DIRENT_FIXED + byte_size(Name));
+packed_dirents([], Sum) ->
+    Sum.
 
 %% attr: a map of exactly the keys
 %%   valid, qid, mode, uid, gid, nlink, rdev, size, blksize, blocks, atime_sec, atime_nsec,
 %%   mtime_sec, mtime_nsec, ctime_sec, ctime_nsec, btime_sec, btime_nsec, gen, data_version.
-is_attr(Value) ->
-    is_map(Value)
-        andalso map_size(Value) =:= 20
-        andalso is_u64(maps:get(valid, Value, absent))
-        andalso is_qid(maps:get(qid, Value, absent))
-        andalso is_u32(maps:get(mode, Value, absent))
-        andalso is_u32(maps:get(uid, Value, absent))
-        andalso is_u32(maps:get(gid, Value, absent))
-        andalso is_u64(maps:get(nlink, Value, absent))
-        andalso is_u64(maps:get(rdev, Value, absent))
-        andalso is_u64(maps:get(size, Value, absent))
-        andalso is_u64(maps:get(blksize, Value, absent))
-        andalso is_u64(maps:get(blocks, Value, absent))
-        andalso is_u64(maps:get(atime_sec, Value, absent))
-        andalso is_u64(maps:get(atime_nsec, Value, absent))
-        andalso is_u64(maps:get(mtime_sec, Value, absent))
-        andalso is_u64(maps:get(mtime_nsec, Value, absent))
-        andalso is_u64(maps:get(ctime_sec, Value, absent))
-        andalso is_u64(maps:get(ctime_nsec, Value, absent))
-        andalso is_u64(maps:get(btime_sec, Value, absent))
-        andalso is_u64(maps:get(btime_nsec, Value, absent))
-        andalso is_u64(maps:get(gen, Value, absent))
-        andalso is_u64(maps:get(data_version, Value, absent)).
+is_attr(#{valid := Valid, qid := Qid, mode := Mode, uid := Uid,
+          gid := Gid, nlink := Nlink, rdev := Rdev, size := Size,
+          blksize := Blksize, blocks := Blocks, atime_sec := AtimeSec, atime_nsec := AtimeNsec,
+          mtime_sec := MtimeSec, mtime_nsec := MtimeNsec, ctime_sec := CtimeSec, ctime_nsec := CtimeNsec,
+          btime_sec := BtimeSec, btime_nsec := BtimeNsec, gen := Gen, data_version := DataVersion} = Value) when map_size(Value) =:= 20 ->
+    is_u64(Valid)
+        andalso is_qid(Qid)
+        andalso is_u32(Mode)
+        andalso is_u32(Uid)
+        andalso is_u32(Gid)
+        andalso is_u64(Nlink)
+        andalso is_u64(Rdev)
+        andalso is_u64(Size)
+        andalso is_u64(Blksize)
+        andalso is_u64(Blocks)
+        andalso is_u64(AtimeSec)
+        andalso is_u64(AtimeNsec)
+        andalso is_u64(MtimeSec)
+        andalso is_u64(MtimeNsec)
+        andalso is_u64(CtimeSec)
+        andalso is_u64(CtimeNsec)
+        andalso is_u64(BtimeSec)
+        andalso is_u64(BtimeNsec)
+        andalso is_u64(Gen)
+        andalso is_u64(DataVersion);
+is_attr(_) ->
+    false.
 
 %% set_attr: a map of exactly the keys
 %%   valid, mode, uid, gid, size, atime_sec, atime_nsec, mtime_sec, mtime_nsec.
-is_set_attr(Value) ->
-    is_map(Value)
-        andalso map_size(Value) =:= 9
-        andalso is_u32(maps:get(valid, Value, absent))
-        andalso is_u32(maps:get(mode, Value, absent))
-        andalso is_u32(maps:get(uid, Value, absent))
-        andalso is_u32(maps:get(gid, Value, absent))
-        andalso is_u64(maps:get(size, Value, absent))
-        andalso is_u64(maps:get(atime_sec, Value, absent))
-        andalso is_u64(maps:get(atime_nsec, Value, absent))
-        andalso is_u64(maps:get(mtime_sec, Value, absent))
-        andalso is_u64(maps:get(mtime_nsec, Value, absent)).
+is_set_attr(#{valid := Valid, mode := Mode, uid := Uid, gid := Gid,
+              size := Size, atime_sec := AtimeSec, atime_nsec := AtimeNsec, mtime_sec := MtimeSec,
+              mtime_nsec := MtimeNsec} = Value) when map_size(Value) =:= 9 ->
+    is_u32(Valid)
+        andalso is_u32(Mode)
+        andalso is_u32(Uid)
+        andalso is_u32(Gid)
+        andalso is_u64(Size)
+        andalso is_u64(AtimeSec)
+        andalso is_u64(AtimeNsec)
+        andalso is_u64(MtimeSec)
+        andalso is_u64(MtimeNsec);
+is_set_attr(_) ->
+    false.
 
 %% statfs: a map of exactly the keys
 %%   type, bsize, blocks, bfree, bavail, files, ffree, fsid, namelen.
-is_statfs(Value) ->
-    is_map(Value)
-        andalso map_size(Value) =:= 9
-        andalso is_u32(maps:get(type, Value, absent))
-        andalso is_u32(maps:get(bsize, Value, absent))
-        andalso is_u64(maps:get(blocks, Value, absent))
-        andalso is_u64(maps:get(bfree, Value, absent))
-        andalso is_u64(maps:get(bavail, Value, absent))
-        andalso is_u64(maps:get(files, Value, absent))
-        andalso is_u64(maps:get(ffree, Value, absent))
-        andalso is_u64(maps:get(fsid, Value, absent))
-        andalso is_u32(maps:get(namelen, Value, absent)).
+is_statfs(#{type := Type, bsize := Bsize, blocks := Blocks, bfree := Bfree,
+            bavail := Bavail, files := Files, ffree := Ffree, fsid := Fsid,
+            namelen := Namelen} = Value) when map_size(Value) =:= 9 ->
+    is_u32(Type)
+        andalso is_u32(Bsize)
+        andalso is_u64(Blocks)
+        andalso is_u64(Bfree)
+        andalso is_u64(Bavail)
+        andalso is_u64(Files)
+        andalso is_u64(Ffree)
+        andalso is_u64(Fsid)
+        andalso is_u32(Namelen);
+is_statfs(_) ->
+    false.
 
 %% Walks at most Left elements of a proper list, and refuses any other term.
 is_list_of(_, [], _) ->

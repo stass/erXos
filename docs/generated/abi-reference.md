@@ -360,7 +360,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_P9_NOFID` | 4294967295 |
 | `ERX_P9_NOTAG` | 65535 |
 | `ERX_P9_O_ACCMODE` | 3 |
+| `ERX_P9_O_APPEND` | 1024 |
+| `ERX_P9_O_EXCL` | 128 |
+| `ERX_P9_O_RDWR` | 2 |
+| `ERX_P9_O_SYNC` | 1052672 |
 | `ERX_P9_O_TRUNC` | 512 |
+| `ERX_P9_O_WRONLY` | 1 |
 | `ERX_P9_QTDIR` | 128 |
 | `ERX_P9_QTSYMLINK` | 2 |
 | `ERX_P9_RLERROR` | 7 |

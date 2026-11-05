@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # The file protocol's frame profile: 9P2000.L's operations as Erlang terms
 # (docs/design-files.md#the-file-protocol). tools/lib/erx/abi_emit_protocol.rb
-# generates erlang/apps/erx/src/generated/erx_9p_grammar.erl from it.
+# generates otp/erts/preloaded/src/erx_9p_grammar.erl from it.
 #
 # Readings where docs/design-files.md states no bound:
 # * Uname, Aname, Version and a lock's ClientId are text of at most
@@ -54,6 +54,12 @@ limit p9_dirents_max u32 2621
 limit p9_at_removedir u32 0x200
 limit p9_o_accmode u32 3
 limit p9_o_trunc u32 0x200
+# The other open flags a client sends, Linux's values as 9P2000.L carries them.
+limit p9_o_wronly u32 1
+limit p9_o_rdwr u32 2
+limit p9_o_excl u32 0x80
+limit p9_o_append u32 0x400
+limit p9_o_sync u32 0x101000
 limit p9_lock_wrlck u8 1
 # A qid's type bits, and a mode's file type bits as Linux's st_mode carries
 # them (S_IFMT and its kinds), which getattr's mode includes.

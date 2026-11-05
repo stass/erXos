@@ -28,22 +28,37 @@
 %%
 %% The answers are stock prim_file's on a Unix host, by design-files.md's error steps, and
 %% the results have the shapes prim_file's NIF returns for a local path (a #file_info{}
-%% with POSIX times, raw names), so prim_file converts both alike. A server's reply is
-%% untrusted: a reply of any other shape answers eio and raises nothing in the caller, which
-%% may be the code server.
+%% with POSIX times, raw names), so prim_file converts both alike.
 %%
-%% This module is preloaded and calls only BIFs and preloaded modules (T6 of
-%% design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
+%% An open file is OTP's #file_descriptor{} with this module as its module, so file
+%% dispatches its operations here. Its data holds the grant, the fid it owns, the
+%% opening process, which alone may use it, and an atomics array holding the offset and
+%% whether the file is closed. Each read or write is one request of at most 64 KiB, and
+%% a write's reply sets the offset by the rule of design-files.md's Open files and
+%% offsets (offset_after/4).
+%%
+%% Every request passes exchange/2, which checks it against the generated protocol
+%% grammar, erx_9p_grammar, and sends nothing that writes through rights other than rw;
+%% the grammar holds each reply to its request. A server's reply is untrusted: a reply of
+%% any other shape answers eio and raises nothing in the caller, which may be the code
+%% server.
+%%
+%% This module and the grammar are preloaded and call only BIFs and preloaded modules
+%% (T6 of design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
 %%
 %% Not yet done here (TODO.md): a listing's entries for the mount points below a
-%% directory; open files, read_file and set_cwd, and with set_cwd the working-directory
-%% step of del_dir.
+%% directory; set_cwd, and with it the working-directory step of del_dir;
+%% file:ipread_s32bu_p32bu/3 on an open file.
 
 -module(erx_file_remote).
 
 -export([read_file_info/4, read_link/3, list_dir/3, write_file_info/4, make_dir/3,
          del_dir/3, delete/3, rename/5, make_link/5, make_symlink/4]).
--export([open/3, read_file/2, set_cwd/2]).
+-export([open/4, read_file/3, set_cwd/2]).
+%% An open file's operations, which file dispatches to by its descriptor's module.
+-export([close/1, read/2, read_line/1, pread/2, pread/3, write/2, pwrite/2, pwrite/3,
+         position/2, truncate/1, sync/1, datasync/1, advise/4, allocate/3,
+         read_handle_info/2, copy/3, sendfile/8]).
 -export([last_name/1, names/1]).
 
 -include("file.hrl").
@@ -81,6 +96,13 @@
 -define(LISTING_MAX, 1048576).
 %% The most links one operation follows, Linux's MAXSYMLINKS; the next answers eloop.
 -define(LINKS_MAX, 40).
+%% An open file's cells: its offset, and 1 once it is closed.
+-define(OFFSET, 1).
+-define(CLOSED, 2).
+-define(CELLS, 2).
+%% The largest offset, a file's size included, as off_t holds it.
+-define(OFFSET_MAX, 16#7fffffffffffffff).
+-define(U64_MAX, 16#ffffffffffffffff).
 
 %% Reading -----------------------------------------------------------------
 
@@ -157,10 +179,10 @@ read_link(Grant, Place, Path) ->
 -spec list_dir(grant(), place(), path()) -> {ok, [binary()]} | {error, posix()}.
 list_dir(Grant, Place, Path) ->
     one(Grant, Place, Path,
-        fun({Pid, _, _} = OnGrant, NameList, Text) ->
+        fun(OnGrant, NameList, Text) ->
                 session(OnGrant, [{NameList, followed(Text)}],
                         fun([Fid]) -> [{lopen, Fid, 0}] end,
-                        fun([Fid], [{ok, _Qid, _Iounit}]) -> listing(Pid, Fid, 0, 0, []);
+                        fun([Fid], [{ok, _Qid, _Iounit}]) -> listing(OnGrant, Fid, 0, 0, []);
                            (_, [{error, _} = Error]) -> Error
                         end)
         end,
@@ -175,14 +197,14 @@ list_dir(Grant, Place, Path) ->
 %% an empty page.
 listing(_, _, _, Count, _) when Count > ?LISTING_MAX ->
     {error, eio};
-listing(Pid, Fid, Offset, Count, Pages) ->
-    case exchange(Pid, [{readdir, Fid, Offset, ?READDIR_COUNT}]) of
+listing(Grant, Fid, Offset, Count, Pages) ->
+    case exchange(Grant, [{readdir, Fid, Offset, ?READDIR_COUNT}]) of
         [{ok, []}] ->
             {ok, [Name || Page <- lists:reverse(Pages, []), Name <- Page]};
         [{ok, Entries}] ->
             {_, Next, _, _} = last(Entries),
             Page = [Name || {_, _, _, Name} <- Entries, Name =/= <<".">>, Name =/= <<"..">>],
-            listing(Pid, Fid, Next, Count + length(Entries), [Page | Pages]);
+            listing(Grant, Fid, Next, Count + length(Entries), [Page | Pages]);
         [{error, _} = Error] ->
             Error
     end.
@@ -197,7 +219,7 @@ listing(Pid, Fid, Offset, Count, Pages) ->
 -spec write_file_info(grant(), place(), #file_info{}, path()) -> ok | {error, posix()}.
 write_file_info(Grant, Place, Info, Path) ->
     one(Grant, Place, Path,
-        fun({Pid, _, _} = OnGrant, NameList, Text) ->
+        fun(OnGrant, NameList, Text) ->
                 Walk = [{NameList, followed(Text)}],
                 case {writable(OnGrant), set_attrs(Info)} of
                     {_, {error, _} = Error} ->
@@ -209,17 +231,17 @@ write_file_info(Grant, Place, Info, Path) ->
                         end;
                     {true, {ok, Steps}} ->
                         session(OnGrant, Walk, fun(_) -> [] end,
-                                fun([Fid], []) -> set_each(Pid, Fid, Steps) end)
+                                fun([Fid], []) -> set_each(OnGrant, Fid, Steps) end)
                 end
         end,
         fun(Text) -> prim_file:write_file_info(Text, Info, [{time, posix}]) end).
 
 set_each(_, _, []) ->
     ok;
-set_each(Pid, Fid, [Attr | Steps]) ->
-    case exchange(Pid, [{setattr, Fid, Attr}]) of
-        [ok] -> set_each(Pid, Fid, Steps);
-        [{error, enotsup}] -> set_each(Pid, Fid, Steps);
+set_each(Grant, Fid, [Attr | Steps]) ->
+    case exchange(Grant, [{setattr, Fid, Attr}]) of
+        [ok] -> set_each(Grant, Fid, Steps);
+        [{error, enotsup}] -> set_each(Grant, Fid, Steps);
         [{error, _} = Error] -> Error
     end.
 
@@ -487,13 +509,520 @@ link_made(Grant, Walk, Made, Slashed) ->
             ok_of(act(Grant, [Walk, {Dir, follow}], fun([Fid, DirFid]) -> {link, DirFid, Fid, Name} end))
     end.
 
-%% Not yet served here: open files, read_file and a working directory on a grant.
--spec open(grant(), place(), list()) -> {error, enotsup}.
-open(_Grant, _Place, _Modes) -> {error, enotsup}.
+%% Open files ----------------------------------------------------------------
 
--spec read_file(grant(), place()) -> {error, enotsup}.
-read_file(_Grant, _Place) -> {error, enotsup}.
+%% Opens the file as stock's NIF opens one, with Linux's flags for the modes. An open
+%% that does not write walks the path and opens the file it reaches with lopen. One that
+%% writes walks the last name's directory and sends lcreate, which creates the file or
+%% opens the one already there in one step; a link there is followed, unless the open is
+%% exclusive, which answers eexist, as Linux's O_EXCL does. On an entry that is not rw
+%% the walks run, sending nothing that writes, before the answer. The descriptor names
+%% this module, so file dispatches the open file's operations here.
+-spec open(grant(), place(), list(), path()) -> {ok, #file_descriptor{}} | {error, posix()}.
+open(Grant, Place, Modes, Path) ->
+    Open = open_mode(Modes),
+    one(Grant, Place, Path,
+        fun(OnGrant, NameList, Text) -> open_on(OnGrant, NameList, Text, Open) end,
+        fun(Text) -> prim_file:open(Text, Modes) end).
 
+%% What the modes ask, as stock's efile_translate_modelist and get_flags read them:
+%% append and exclusive write, an open that neither reads nor writes reads, and only a
+%% write without read or append truncates.
+open_mode(Modes) ->
+    Append = has(append, Modes),
+    Writes = has(write, Modes) orelse Append orelse has(exclusive, Modes),
+    Access = case {has(read, Modes) orelse not Writes, Writes} of
+                 {true, false} -> read;
+                 {false, true} -> write;
+                 {true, true} -> read_write
+             end,
+    Flags = access_flag(Access)
+        bor flag(Access =:= write andalso not Append, ?ERX_P9_O_TRUNC)
+        bor flag(Append, ?ERX_P9_O_APPEND)
+        bor flag(has(exclusive, Modes), ?ERX_P9_O_EXCL)
+        bor flag(has(sync, Modes), ?ERX_P9_O_SYNC),
+    #{access => Access, flags => Flags, append => Append, directory => has(directory, Modes),
+      type_check => not has(skip_type_check, Modes)}.
+
+access_flag(read) -> 0;
+access_flag(write) -> ?ERX_P9_O_WRONLY;
+access_flag(read_write) -> ?ERX_P9_O_RDWR.
+
+flag(true, Flag) -> Flag;
+flag(false, _) -> 0.
+
+%% Whether the mode list holds Mode, reading only its proper part, as the NIF reads it.
+has(Mode, [Mode | _]) -> true;
+has(Mode, [_ | Modes]) -> has(Mode, Modes);
+has(_, _) -> false.
+
+open_on(Grant, NameList, Text, #{access := read, directory := Directory, flags := Flags} = Open) ->
+    Mode = case Directory orelse slashed(Text) of
+               true -> directory;
+               false -> follow
+           end,
+    described(kept(Grant, {NameList, Mode}, fun(Fid) -> {lopen, Fid, Flags} end), Grant, Open);
+open_on(_, _, _, #{directory := true}) ->
+    %% A directory is never opened to write: einval, as Linux answers O_DIRECTORY with
+    %% O_CREAT, before anything is walked or truncated.
+    {error, einval};
+open_on(Grant, NameList, Text, Open) ->
+    case last_name_step(Text, fun(_) -> {error, eisdir} end) of
+        plain when NameList =:= [] -> {error, eisdir};
+        plain -> created(Grant, NameList, slashed(Text), Open);
+        {error, _} = Error -> Error
+    end.
+
+%% An open that writes, on its last name's directory. A name written with a trailing "/"
+%% is never made: once the directory is found, eisdir, as Linux's open with O_CREAT
+%% answers. On an entry that is not rw, the name is looked at as Linux looks before it
+%% refuses: eexist for an exclusive open of any name there, eisdir for a directory, and
+%% erofs for a file or a missing name.
+created(Grant, NameList, true, _) ->
+    on_ok(ok_of(act(Grant, [{dir_of(NameList), follow}], fun stat/1)), {error, eisdir});
+created({_, _, rw} = Grant, NameList, false, #{flags := Flags} = Open) ->
+    {Dir, Name} = split_last(NameList),
+    Create = fun(DirFid) -> {lcreate, DirFid, Name, Flags, 8#666 band bnot ?UMASK, 0} end,
+    case {kept(Grant, {Dir, follow}, Create), exclusive(Flags)} of
+        {{error, eloop}, false} -> {link, 1, length(NameList) - 1};
+        {{error, eloop}, true} -> {error, eexist};
+        {Kept, _} -> described(Kept, Grant, Open)
+    end;
+created(Grant, NameList, false, #{flags := Flags}) ->
+    Last = case exclusive(Flags) of
+               true -> nofollow;
+               false -> follow
+           end,
+    case act(Grant, [{dir_of(NameList), follow}], fun stat/1) of
+        {ok, _} ->
+            case {act(Grant, [{NameList, Last}], fun stat/1), Last} of
+                {{ok, _}, nofollow} -> {error, eexist};
+                {{ok, #{mode := Mode}}, _} when Mode band ?ERX_P9_S_IFMT =:= ?ERX_P9_S_IFDIR -> {error, eisdir};
+                {{ok, _}, _} -> {error, erofs};
+                {{error, enoent}, _} -> {error, erofs};
+                {Other, _} -> Other
+            end;
+        Other ->
+            Other
+    end.
+
+exclusive(Flags) -> Flags band ?ERX_P9_O_EXCL =/= 0.
+
+stat([Fid | _]) -> {getattr, Fid, ?INFO_MASK}.
+
+%% Reaches a path into a new fid and sends Open on that fid with the walks. The fid is
+%% kept for the caller when the walk reached its end and Open succeeded, as
+%% {ok, Fid, Qid, Iounit}; otherwise it is clunked with the walk's other fids, and the
+%% answer is the first failure or link.
+kept({_, Tree, _} = Grant, Path, Open) ->
+    {Root, [{_, Fid, _}] = Reaches, Walks} = reaches([Path]),
+    Others = [Root | [New || {walk, _, New, _} <- Walks, New =/= Fid]],
+    [Attached | Replies] = exchange(Grant, [attach(Root, Tree) | Walks]
+                                    ++ [Open(Fid) | [{clunk, Other} || Other <- Others]]),
+    {Walked, [Reply | _]} = split_at(length(Walks), Replies),
+    case on_ok(reached(Attached, Reaches, Walked), Reply) of
+        {ok, Qid, Iounit} ->
+            {ok, Fid, Qid, Iounit};
+        Failed ->
+            _ = exchange(Grant, [{clunk, Fid}]),
+            Failed
+    end.
+
+%% The descriptor of a file kept open. Opening a directory without [directory] answers
+%% eisdir (error step 6), as stock's open answers.
+described({ok, Fid, {Type, _, _}, _}, Grant, #{directory := false, type_check := true})
+  when Type band ?ERX_P9_QTDIR =/= 0 ->
+    _ = exchange(Grant, [{clunk, Fid}]),
+    {error, eisdir};
+described({ok, Fid, _, Iounit}, Grant, #{access := Access, append := Append}) ->
+    Unit = case Iounit of
+               0 -> ?ERX_P9_IO_MAX;
+               _ -> min(Iounit, ?ERX_P9_IO_MAX)
+           end,
+    Cells = atomics:new(?CELLS, [{signed, false}]),
+    {ok, #file_descriptor{module = ?MODULE,
+                          data = #{grant => Grant, fid => Fid, owner => self(), cells => Cells,
+                                   access => Access, append => Append, unit => Unit}}};
+described(Other, _, _) ->
+    Other.
+
+%% The open file's state, for its controlling process alone: any other process's call
+%% raises, as stock's get_fd_data/1 raises. A closed file answers einval, as stock's does.
+on_open(#file_descriptor{module = ?MODULE, data = #{owner := Owner, cells := Cells} = File}, Act) ->
+    case {self(), atomics:get(Cells, ?CLOSED)} of
+        {Owner, 0} -> Act(File);
+        {Owner, _} -> {error, einval};
+        _ -> error(not_on_controlling_process)
+    end.
+
+%% The fid is clunked once: a second close answers einval.
+-spec close(#file_descriptor{}) -> ok | {error, posix()}.
+close(Fd) ->
+    on_open(Fd, fun(#{grant := Grant, fid := Fid, cells := Cells}) ->
+                        atomics:put(Cells, ?CLOSED, 1),
+                        [Reply] = exchange(Grant, [{clunk, Fid}]),
+                        Reply
+                end).
+
+%% Reading --------------------------------------------------------------------
+
+%% Reads from the offset and moves it past what was read.
+-spec read(#file_descriptor{}, non_neg_integer()) -> {ok, binary()} | eof | {error, posix()}.
+read(Fd, Size) when is_integer(Size), Size >= 0 ->
+    on_open(Fd, fun(#{cells := Cells} = File) ->
+                        Offset = atomics:get(Cells, ?OFFSET),
+                        case read_at(File, Offset, Size) of
+                            {ok, Data} = Read ->
+                                on_ok(moved_past(Cells, Offset + byte_size(Data)), Read);
+                            Other ->
+                                Other
+                        end
+                end);
+read(_, _) ->
+    {error, badarg}.
+
+%% One request of at most a unit at Offset, which may answer fewer bytes than asked, as
+%% read(2) may; eof when the file has none there. Through a file not opened for reading,
+%% ebadf, as stock answers, sending nothing.
+read_at(#{access := write}, _, _) ->
+    {error, ebadf};
+read_at(_, Offset, _) when Offset < 0; Offset > ?OFFSET_MAX ->
+    {error, einval};
+read_at(_, _, 0) ->
+    {ok, <<>>};
+read_at(#{grant := Grant, fid := Fid, unit := Unit}, Offset, Size) ->
+    case exchange(Grant, [{read, Fid, Offset, min(Size, Unit)}]) of
+        [{ok, <<>>}] -> eof;
+        [Reply] -> Reply
+    end.
+
+%% The offset after a read; a server that sent bytes past 2^63 - 1 answers eio.
+moved_past(Cells, Offset) ->
+    case checked_offset(Offset) of
+        {ok, _} -> atomics:put(Cells, ?OFFSET, Offset);
+        Error -> Error
+    end.
+
+%% A positioned read answers eof for no bytes, a request of none included, and einval
+%% for a negative size, as stock's pread_nif answers.
+-spec pread(#file_descriptor{}, integer(), integer()) -> {ok, binary()} | eof | {error, posix()}.
+pread(Fd, Offset, Size) when is_integer(Offset), is_integer(Size) ->
+    on_open(Fd, fun(File) -> read_placed(File, Offset, Size) end);
+pread(_, _, _) ->
+    {error, badarg}.
+
+read_placed(_, _, Size) when Size < 0 ->
+    {error, einval};
+read_placed(File, Offset, Size) ->
+    case read_at(File, Offset, Size) of
+        {ok, <<>>} -> eof;
+        Read -> Read
+    end.
+
+-spec pread(#file_descriptor{}, [{integer(), non_neg_integer()}]) ->
+          {ok, [binary() | eof]} | {error, posix()}.
+pread(Fd, Positions) ->
+    on_open(Fd, fun(File) -> read_each(File, Positions, []) end).
+
+read_each(_, [], Results) ->
+    {ok, lists:reverse(Results, [])};
+read_each(File, [{Offset, Size} | Positions], Results)
+  when is_integer(Offset), is_integer(Size) ->
+    case read_placed(File, Offset, Size) of
+        {ok, Data} -> read_each(File, Positions, [Data | Results]);
+        eof -> read_each(File, Positions, [eof | Results]);
+        Error -> Error
+    end;
+read_each(_, _, _) ->
+    {error, badarg}.
+
+%% The bytes up to and including the next "\n", a "\r\n" given as "\n" as stock gives
+%% it, or the rest of the file before its end; eof at the end. The offset moves past the
+%% line as the file holds it.
+-spec read_line(#file_descriptor{}) -> {ok, binary()} | eof | {error, posix()}.
+read_line(Fd) ->
+    on_open(Fd, fun(#{cells := Cells} = File) -> line(File, atomics:get(Cells, ?OFFSET), <<>>) end).
+
+line(#{cells := Cells, unit := Unit} = File, Offset, Seen) ->
+    case read_at(File, Offset + byte_size(Seen), Unit) of
+        {ok, Data} ->
+            case binary:match(Data, <<"\n">>) of
+                {At, 1} ->
+                    Line = <<Seen/binary, (binary_part(Data, 0, At + 1))/binary>>,
+                    on_ok(moved_past(Cells, Offset + byte_size(Line)), {ok, without_cr(Line)});
+                nomatch ->
+                    line(File, Offset, <<Seen/binary, Data/binary>>)
+            end;
+        eof when Seen =:= <<>> ->
+            eof;
+        eof ->
+            on_ok(moved_past(Cells, Offset + byte_size(Seen)), {ok, Seen});
+        Error ->
+            Error
+    end.
+
+without_cr(Line) when byte_size(Line) >= 2 ->
+    case binary_part(Line, byte_size(Line) - 2, 2) of
+        <<"\r\n">> -> <<(binary_part(Line, 0, byte_size(Line) - 2))/binary, "\n">>;
+        _ -> Line
+    end;
+without_cr(Line) ->
+    Line.
+
+%% The whole file, as stock's read_file reads it: up to the size getattr answers once the
+%% file is open, or to its end if that comes first.
+-spec read_file(grant(), place(), path()) -> {ok, binary()} | {error, posix()}.
+read_file(Grant, Place, Path) ->
+    one(Grant, Place, Path,
+        fun(OnGrant, NameList, Text) ->
+                case open_on(OnGrant, NameList, Text, open_mode([read])) of
+                    {ok, Fd} ->
+                        Contents = on_open(Fd, fun(File) -> contents(File) end),
+                        _ = close(Fd),
+                        Contents;
+                    Other ->
+                        Other
+                end
+        end,
+        fun(Text) -> prim_file:read_file(Text) end).
+
+contents(File) ->
+    case size_of(File) of
+        {ok, Size} -> contents(File, 0, Size, []);
+        Error -> Error
+    end.
+
+contents(_, Offset, Size, Parts) when Offset >= Size ->
+    {ok, iolist_to_binary(lists:reverse(Parts, []))};
+contents(File, Offset, Size, Parts) ->
+    case read_at(File, Offset, Size - Offset) of
+        {ok, Data} -> contents(File, Offset + byte_size(Data), Size, [Data | Parts]);
+        eof -> contents(File, Size, Size, Parts);
+        Error -> Error
+    end.
+
+%% Writing --------------------------------------------------------------------
+
+%% Writes at the offset, which moves past each request's bytes as it is answered.
+-spec write(#file_descriptor{}, iodata()) -> ok | {error, posix()}.
+write(Fd, Bytes) ->
+    on_open(Fd, fun(#{cells := Cells} = File) ->
+                        written(File, atomics:get(Cells, ?OFFSET), Bytes,
+                                fun(Offset) -> atomics:put(Cells, ?OFFSET, Offset) end)
+                end).
+
+%% A positioned write leaves the offset where it was, whatever the reply.
+-spec pwrite(#file_descriptor{}, integer(), iodata()) -> ok | {error, posix()}.
+pwrite(Fd, Offset, Bytes) when is_integer(Offset) ->
+    on_open(Fd, fun(File) -> written(File, Offset, Bytes, fun(_) -> ok end) end);
+pwrite(_, _, _) ->
+    {error, badarg}.
+
+%% As stock's: the writes in order, and the count of those that succeeded with the error.
+-spec pwrite(#file_descriptor{}, [{integer(), iodata()}]) ->
+          ok | {error, {non_neg_integer(), posix()}}.
+pwrite(Fd, Positions) ->
+    on_open(Fd, fun(File) -> write_each(File, Positions, 0) end).
+
+write_each(_, [], _) ->
+    ok;
+write_each(File, [{Offset, Bytes} | Positions], Done) when is_integer(Offset) ->
+    case written(File, Offset, Bytes, fun(_) -> ok end) of
+        ok -> write_each(File, Positions, Done + 1);
+        {error, Why} -> {error, {Done, Why}}
+    end;
+write_each(_, _, _) ->
+    {error, badarg}.
+
+%% Bytes written from Offset in requests of at most a unit each, each atomic against
+%% every other: a request refused part way leaves the ones before it written, and Moved
+%% has been given the offset past them. Through a file not opened for writing, ebadf,
+%% as stock answers, sending nothing.
+written(#{access := read}, _, _, _) ->
+    {error, ebadf};
+written(_, Offset, _, _) when Offset < 0; Offset > ?OFFSET_MAX ->
+    {error, einval};
+written(File, Offset, Bytes, Moved) ->
+    try iolist_to_binary(Bytes) of
+        Data -> requests(File, Offset, Data, Moved)
+    catch
+        error:badarg -> {error, badarg}
+    end.
+
+requests(_, _, <<>>, _) ->
+    ok;
+requests(#{grant := Grant, fid := Fid, unit := Unit} = File, Offset, Data, Moved) ->
+    Chunk = binary_part(Data, 0, min(Unit, byte_size(Data))),
+    case exchange(Grant, [{write, Fid, Offset, Chunk}]) of
+        [{ok, 0, _}] ->
+            {error, eio};
+        [{ok, Count, At}] ->
+            case offset_after(File, Offset, Count, At) of
+                {ok, Next} ->
+                    Moved(Next),
+                    requests(File, Next, binary_part(Data, Count, byte_size(Data) - Count), Moved);
+                Error ->
+                    Error
+            end;
+        [{error, _} = Error] ->
+            Error
+    end.
+
+%% The offset after Count bytes written by a request sent at Sent, by the rule of
+%% design-files.md's Open files and offsets: At plus the count when the reply names At,
+%% where the bytes landed; else the offset sent plus the count, or, through an append
+%% fid, the file's size once the reply has arrived. A server that answers an offset past
+%% 2^63 - 1, which no file reaches, answers eio.
+offset_after(File, Sent, Count, At) ->
+    case {At, File} of
+        {_, _} when is_integer(At) -> checked_offset(At + Count);
+        {unknown, #{append := false}} -> checked_offset(Sent + Count);
+        {unknown, #{append := true}} -> size_of(File)
+    end.
+
+checked_offset(Offset) when Offset =< ?OFFSET_MAX -> {ok, Offset};
+checked_offset(_) -> {error, eio}.
+
+size_of(#{grant := Grant, fid := Fid}) ->
+    case exchange(Grant, [{getattr, Fid, ?ERX_P9_GETATTR_MASK_SIZE}]) of
+        [{ok, #{size := Size}}] -> checked_offset(Size);
+        [{error, _} = Error] -> Error
+    end.
+
+%% Moves the offset as stock's seek does: from the start, the offset or the file's end,
+%% to a place from 0 to 2^63 - 1, else einval.
+-spec position(#file_descriptor{}, term()) -> {ok, non_neg_integer()} | {error, posix()}.
+position(Fd, At) ->
+    on_open(Fd, fun(File) -> moved(File, At) end).
+
+moved(File, Mark) when Mark =:= bof; Mark =:= cur; Mark =:= eof ->
+    moved(File, {Mark, 0});
+moved(File, Offset) when is_integer(Offset) ->
+    moved(File, {bof, Offset});
+moved(#{cells := Cells} = File, {Mark, Offset}) when is_integer(Offset) ->
+    case {base(File, Mark), Offset} of
+        {{ok, Base}, _} when Base + Offset >= 0, Base + Offset =< ?OFFSET_MAX ->
+            atomics:put(Cells, ?OFFSET, Base + Offset),
+            {ok, Base + Offset};
+        {{ok, _}, _} -> {error, einval};
+        {Error, _} -> Error
+    end;
+moved(_, _) ->
+    {error, badarg}.
+
+base(_, bof) -> {ok, 0};
+base(#{cells := Cells}, cur) -> {ok, atomics:get(Cells, ?OFFSET)};
+base(File, eof) -> size_of(File);
+base(_, _) -> {error, badarg}.
+
+%% Sets the size to the offset. Through a file not opened for writing, einval, as Linux's
+%% ftruncate answers, sending nothing.
+-spec truncate(#file_descriptor{}) -> ok | {error, posix()}.
+truncate(Fd) ->
+    on_open(Fd, fun(#{access := read}) ->
+                        {error, einval};
+                   (#{grant := Grant, fid := Fid, cells := Cells}) ->
+                        Size = (unset())#{valid := ?ERX_P9_SETATTR_VALID_SIZE,
+                                          size := atomics:get(Cells, ?OFFSET)},
+                        [Reply] = exchange(Grant, [{setattr, Fid, Size}]),
+                        Reply
+                end).
+
+-spec sync(#file_descriptor{}) -> ok | {error, posix()}.
+sync(Fd) -> synced(Fd, 0).
+
+-spec datasync(#file_descriptor{}) -> ok | {error, posix()}.
+datasync(Fd) -> synced(Fd, 1).
+
+synced(Fd, DataOnly) ->
+    on_open(Fd, fun(#{grant := Grant, fid := Fid}) ->
+                        [Reply] = exchange(Grant, [{fsync, Fid, DataOnly}]),
+                        Reply
+                end).
+
+%% 9P2000.L has no operation for advice, which is only a recommendation: ok, as stock's
+%% efile_advise answers without posix_fadvise.
+-spec advise(#file_descriptor{}, integer(), integer(), atom()) -> ok | {error, posix()}.
+advise(Fd, _Offset, _Length, _Advice) ->
+    on_open(Fd, fun(_) -> ok end).
+
+%% Nor for preallocation: enotsup, as stock answers without it.
+-spec allocate(#file_descriptor{}, integer(), integer()) -> {error, posix()}.
+allocate(Fd, _Offset, _Length) ->
+    on_open(Fd, fun(_) -> {error, enotsup} end).
+
+%% A remote file has no descriptor to hand to the host's sendfile: enotsup, on which
+%% file:sendfile/5 takes its fallback of reads and sends.
+-spec sendfile(#file_descriptor{}, term(), integer(), integer(), integer(), list(), list(),
+               list()) -> {error, enotsup}.
+sendfile(_Fd, _Socket, _Offset, _Bytes, _ChunkSize, _Headers, _Trailers, _Flags) ->
+    {error, enotsup}.
+
+%% file:read_file_info/2 on an open file: getattr through its fid, the record as
+%% read_file_info/4 builds it, its times in the type asked for.
+-spec read_handle_info(#file_descriptor{}, list()) -> {ok, #file_info{}} | {error, posix()}.
+read_handle_info(Fd, Options) ->
+    try
+        on_open(Fd, fun(#{grant := Grant, fid := Fid}) ->
+                            case time_type(Options) of
+                                badarg -> {error, badarg};
+                                Type -> handle_info(Grant, Fid, Type)
+                            end
+                    end)
+    catch
+        %% As stock's read_handle_info_1: a time a server sends past what the conversion
+        %% takes, or a call from another process, answers badarg and raises nothing.
+        error:_ -> {error, badarg}
+    end.
+
+handle_info(Grant, Fid, Type) ->
+    case exchange(Grant, [{getattr, Fid, ?INFO_MASK}]) of
+        [{ok, Attr}] -> {ok, times(file_info(Grant, Attr), Type)};
+        [Error] -> Error
+    end.
+
+time_type([{time, Type} | _]) when Type =:= posix; Type =:= universal; Type =:= local -> Type;
+time_type([{time, _} | _]) -> badarg;
+time_type([_ | Options]) -> time_type(Options);
+time_type(_) -> local.
+
+%% As stock's adjust_times/2 converts them.
+times(Info, posix) ->
+    Info;
+times(#file_info{atime = ATime, mtime = MTime, ctime = CTime} = Info, Type) ->
+    Info#file_info{atime = datetime(ATime, Type), mtime = datetime(MTime, Type),
+                   ctime = datetime(CTime, Type)}.
+
+datetime(Seconds, universal) -> erlang:posixtime_to_universaltime(Seconds);
+datetime(Seconds, local) -> erlang:universaltime_to_localtime(erlang:posixtime_to_universaltime(Seconds)).
+
+%% file:copy/3 between two open files of servers: reads and writes of a unit at a time.
+-spec copy(#file_descriptor{}, #file_descriptor{}, non_neg_integer() | infinity) ->
+          {ok, non_neg_integer()} | {error, posix()}.
+copy(Source, Destination, Length) ->
+    copied(Source, Destination, Length, 0).
+
+copied(_, _, 0, Done) ->
+    {ok, Done};
+copied(Source, Destination, Left, Done) ->
+    Chunk = case is_integer(Left) of
+                true -> min(Left, ?ERX_P9_IO_MAX);
+                false -> ?ERX_P9_IO_MAX
+            end,
+    case read(Source, Chunk) of
+        {ok, Data} ->
+            case write(Destination, Data) of
+                ok when not is_integer(Left) -> copied(Source, Destination, Left, Done + byte_size(Data));
+                ok -> copied(Source, Destination, Left - byte_size(Data), Done + byte_size(Data));
+                Error -> Error
+            end;
+        eof ->
+            {ok, Done};
+        Error ->
+            Error
+    end.
+
+%% A working directory on a grant is not served yet (TODO.md).
 -spec set_cwd(grant(), place()) -> {error, enotsup}.
 set_cwd(_Grant, _Place) -> {error, enotsup}.
 
@@ -742,28 +1271,28 @@ separated([Piece | Pieces]) -> [Piece, <<"/">> | separated(Pieces)].
 %% clunks every fid made, all together. The answer is the first path's failure or link,
 %% in order, else Act's reply.
 -spec act(grant(), [{[binary()], mode()}], fun(([non_neg_integer()]) -> tuple())) -> term().
-act({Pid, Tree, _}, Paths, Act) ->
+act({_, Tree, _} = Grant, Paths, Act) ->
     {Root, Reaches, Walks} = reaches(Paths),
     Made = [Root | [New || {walk, _, New, _} <- Walks]],
     Requests = [attach(Root, Tree) | Walks]
         ++ [Act([Fid || {_, Fid, _} <- Reaches]) | [{clunk, Fid} || Fid <- Made]],
-    [Attached | Replies] = exchange(Pid, Requests),
+    [Attached | Replies] = exchange(Grant, Requests),
     {Walked, [Reply | _]} = split_at(length(Walks), Replies),
     on_ok(reached(Attached, Reaches, Walked), Reply).
 
 %% As act/3, but First's requests go with the walks, and Then runs on the fids and
 %% First's replies before the clunks are sent, for an operation of several round trips.
-session({Pid, Tree, _}, Paths, First, Then) ->
+session({_, Tree, _} = Grant, Paths, First, Then) ->
     {Root, Reaches, Walks} = reaches(Paths),
     Fids = [Fid || {_, Fid, _} <- Reaches],
     Made = [Root | [New || {walk, _, New, _} <- Walks]],
-    [Attached | Replies] = exchange(Pid, [attach(Root, Tree) | Walks] ++ First(Fids)),
+    [Attached | Replies] = exchange(Grant, [attach(Root, Tree) | Walks] ++ First(Fids)),
     {Walked, Opened} = split_at(length(Walks), Replies),
     Answer = case reached(Attached, Reaches, Walked) of
                  ok -> Then(Fids, Opened);
                  Other -> Other
              end,
-    _ = exchange(Pid, [{clunk, Fid} || Fid <- Made]),
+    _ = exchange(Grant, [{clunk, Fid} || Fid <- Made]),
     Answer.
 
 attach(Fid, Tree) ->
@@ -843,10 +1372,33 @@ stopped({Type, _, _}, At) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> {link, At};
 stopped({Type, _, _}, _) when Type band ?ERX_P9_QTDIR =/= 0 -> {error, enoent};
 stopped(_, _) -> {error, enotdir}.
 
-%% Sends each request to an alias of its own, all at once, and answers their replies in
-%% order, each checked against its request. Once the grant's process has ended, a request
-%% whose reply has not arrived answers eio.
-exchange(Pid, Requests) ->
+%% Every request the client sends passes here, so what holds here holds for every
+%% operation: a request the protocol's grammar refuses sends nothing and answers einval,
+%% and a request that writes, through rights other than rw, sends nothing and answers
+%% erofs, as the grant's own funnel would. Nothing else is sent; else each request goes
+%% to an alias of its own, all at once, and the replies are answered in order.
+exchange({Pid, _, Rights}, Requests) ->
+    case refused(Requests, Rights) of
+        none -> sent(Pid, Requests);
+        Why -> [{error, Why} || _ <- Requests]
+    end.
+
+refused([], _) ->
+    none;
+refused([Request | Requests], Rights) ->
+    case erx_9p_grammar:decode_request(Request) of
+        {ok, _} when Rights =:= rw -> refused(Requests, Rights);
+        {ok, _} ->
+            case erx_9p_grammar:writes(Request) of
+                true -> erofs;
+                false -> refused(Requests, Rights)
+            end;
+        {error, einval} -> einval
+    end.
+
+%% Each reply is held to its request by the grammar; any other term is eio. Once the
+%% grant's process has ended, a request whose reply has not arrived answers eio.
+sent(Pid, Requests) ->
     Monitor = erlang:monitor(process, Pid),
     Sent = [{send(Pid, Request), Request} || Request <- Requests],
     Replies = collect(Sent, Monitor, live),
@@ -854,91 +1406,39 @@ exchange(Pid, Requests) ->
     Replies.
 
 send(Pid, Request) ->
-    Alias = erlang:alias([reply]),
+    Alias = erlang:alias(),
     erlang:send(Pid, {erx_9p, Alias, self(), Request}),
     Alias.
 
+%% Each alias stays active until its reply's shape arrives, so a message of another shape
+%% sent to it cannot end it before the reply; the alias ends when the reply is taken.
 collect([], _, _) ->
     [];
 collect([{Alias, Request} | Sent], Monitor, live) ->
     receive
         {erx_9p, Alias, Reply} ->
-            [checked(Request, Reply) | collect(Sent, Monitor, live)];
+            erlang:unalias(Alias),
+            [decoded(Request, Reply) | collect(Sent, Monitor, live)];
         {'DOWN', Monitor, process, _, _} ->
             collect([{Alias, Request} | Sent], Monitor, gone)
     end;
 collect([{Alias, Request} | Sent], Monitor, gone) ->
     receive
         {erx_9p, Alias, Reply} ->
-            [checked(Request, Reply) | collect(Sent, Monitor, gone)]
+            erlang:unalias(Alias),
+            [decoded(Request, Reply) | collect(Sent, Monitor, gone)]
     after 0 ->
             erlang:unalias(Alias),
             [{error, eio} | collect(Sent, Monitor, gone)]
     end.
 
-%% A reply in the shape its request's operation answers, with what this module reads of
-%% it in range; any other term is eio.
-checked(_, {error, Posix}) when is_atom(Posix) ->
-    {error, Posix};
-checked({attach, _, _, _, _, _}, {ok, Qid} = Reply) ->
-    if_valid(is_qid(Qid), Reply);
-checked({walk, _, _, NameList}, {ok, Qids} = Reply) ->
-    if_valid(is_list_of(fun is_qid/1, Qids, length(NameList))
-             andalso (NameList =:= [] orelse Qids =/= []), Reply);
-checked({getattr, _, _}, {ok, Attr} = Reply) ->
-    if_valid(is_attr(Attr), Reply);
-checked({readlink, _}, {ok, Target} = Reply) ->
-    if_valid(is_binary(Target) andalso byte_size(Target) =< ?ERX_P9_SYMLINK_MAX
-             andalso binary:match(Target, <<0>>) =:= nomatch, Reply);
-checked({lopen, _, _}, {ok, Qid, Iounit} = Reply) ->
-    if_valid(is_qid(Qid) andalso is_u(Iounit, 32), Reply);
-checked({readdir, _, _, _}, {ok, Entries} = Reply) ->
-    if_valid(is_list_of(fun is_dirent/1, Entries, ?ERX_P9_DIRENTS_MAX), Reply);
-checked({mkdir, _, _, _, _}, {ok, Qid} = Reply) ->
-    if_valid(is_qid(Qid), Reply);
-checked({symlink, _, _, _, _}, {ok, Qid} = Reply) ->
-    if_valid(is_qid(Qid), Reply);
-checked(Request, ok) ->
-    case element(1, Request) of
-        Operation when Operation =:= unlinkat; Operation =:= link; Operation =:= renameat;
-                       Operation =:= setattr; Operation =:= clunk -> ok;
-        _ -> {error, eio}
-    end;
-checked(_, _) ->
-    {error, eio}.
+decoded(Request, Reply) ->
+    case erx_9p_grammar:decode_reply(Request, Reply) of
+        {ok, Valid} -> Valid;
+        {error, eio} -> {error, eio}
+    end.
 
-if_valid(true, Reply) -> Reply;
-if_valid(false, _) -> {error, eio}.
-
-is_qid({Type, Version, Path}) -> is_u(Type, 8) andalso is_u(Version, 32) andalso is_u64(Path);
-is_qid(_) -> false.
-
-%% A listed name is one name: a caller joins it to the directory's path (file:del_dir_r/1
-%% does), so a "/", an empty name or a NUL would name another file.
-is_dirent({Qid, Offset, Type, Name}) ->
-    is_qid(Qid) andalso is_u64(Offset) andalso is_u(Type, 8) andalso is_entry_name(Name);
-is_dirent(_) -> false.
-
-is_entry_name(Name) ->
-    is_binary(Name) andalso Name =/= <<>> andalso byte_size(Name) =< ?ERX_P9_STRING_MAX
-        andalso binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch.
-
-is_attr(#{qid := Qid, mode := Mode, uid := Uid, gid := Gid, nlink := Links, rdev := Rdev,
-          size := Size, atime_sec := ATime, mtime_sec := MTime, ctime_sec := CTime}) ->
-    is_qid(Qid) andalso is_u(Mode, 32) andalso is_u(Uid, 32) andalso is_u(Gid, 32)
-        andalso is_u64(Links) andalso is_u64(Rdev) andalso is_u64(Size)
-        andalso is_u64(ATime) andalso is_u64(MTime) andalso is_u64(CTime);
-is_attr(_) -> false.
-
-%% Walks at most Left elements of a proper list, and refuses any other term.
-is_list_of(_, [], _) -> true;
-is_list_of(Check, [Head | Tail], Left) when Left > 0 ->
-    Check(Head) andalso is_list_of(Check, Tail, Left - 1);
-is_list_of(_, _, _) -> false.
-
-is_u64(Value) -> is_u(Value, 64).
-
-is_u(Value, Bits) -> is_integer(Value) andalso Value >= 0 andalso Value < (1 bsl Bits).
+is_u64(Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?U64_MAX.
 
 %% File information -----------------------------------------------------------
 

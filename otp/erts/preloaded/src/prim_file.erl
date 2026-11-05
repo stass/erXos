@@ -142,7 +142,7 @@ open(Name, Modes) ->
     %% "raw files."
     try open_nif(encode_path(Name), Modes) of
         {ok, Ref} -> {ok, make_fd(Modes, Ref)};
-        {remote, Grant, Place} -> erx_file_remote:open(Grant, Place, Modes);
+        {remote, Grant, Place} -> erx_file_remote:open(Grant, Place, Modes, encode_path(Name));
         {error, Reason} -> {error, Reason}
     catch
         error:badarg -> {error, badarg}
@@ -572,8 +572,9 @@ read_handle_info_nif(_FileRef) ->
 read_file(Filename) ->
     %% We're doing this operation in the NIF to avoid excessive rescheduling.
     try
-        remote(read_file_nif(encode_path(Filename)),
-               fun(Grant, Place) -> erx_file_remote:read_file(Grant, Place) end)
+        Encoded = encode_path(Filename),
+        remote(read_file_nif(Encoded),
+               fun(Grant, Place) -> erx_file_remote:read_file(Grant, Place, Encoded) end)
     catch
         error:badarg -> {error, badarg}
     end.
@@ -635,11 +636,12 @@ erx_fid_nif() ->
 
 write_file(Filename, Bytes) ->
     write_file(Filename, Bytes, []).
+%% erXos: the file may be a server's, whose descriptor names erx_file_remote.
 write_file(Filename, Bytes, Modes) ->
     case open(Filename, [write, binary | Modes]) of
-        {ok, Fd} ->
-            Result = write(Fd, Bytes),
-            close(Fd),
+        {ok, #file_descriptor{module = Module} = Fd} ->
+            Result = Module:write(Fd, Bytes),
+            Module:close(Fd),
             Result;
         {error, Reason} ->
             {error, Reason}

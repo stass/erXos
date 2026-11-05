@@ -158,7 +158,7 @@ class RuntimePrimFileTest < Minitest::Test
   def test_a_mount_routes_its_paths_to_erx_file_remote
     release = table(@fixture.release)
     { 'ns before' => '{error,enoent}', 'ns mount' => 'ok', 'ns info' => "{ok,directory,read_write,#{0o40755}}",
-      'ns read' => '{error,enotsup}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
+      'ns read' => '{error,eisdir}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
       'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
       'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
       'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
@@ -246,9 +246,40 @@ class RuntimePrimFileTest < Minitest::Test
     'hostile link attr' => '{error,eio}', 'hostile link attr info' => "{ok,symlink,none,#{0o120644}}"
   }.freeze
 
+  # erx_file_remote's open files (design-files.md, Erlang clients, and Open files and
+  # offsets), through file's descriptors: stock's answers for each mode and refusal, the
+  # offset rule, a write past a cap, writes split into requests of 64 KiB, a server that
+  # names no At, a grant that ended, and a call from a process that did not open the file.
+  OPEN_FILES = {
+    'open write' => '{ok,{ok,5}}', 'read through a write fd' => '{error,ebadf}',
+    'close' => '{ok,{error,einval},{error,einval}}', 'read file' => '{ok,<<"hello">>}',
+    'read' => '{{ok,<<"hel">>},{ok,<<"lo">>},eof,{ok,<<>>}}',
+    'pread' => '{{ok,<<"el">>},{ok,[<<"h">>,eof]},{error,einval},{ok,5}}',
+    'position' => '{{ok,3},{ok,<<"lo">>},{error,einval},{ok,0},{error,badarg}}',
+    'write through a read fd' => '{{error,ebadf},{error,ebadf}}', 'truncate through a read fd' => '{error,einval}',
+    'info of an open file' => "{ok,regular,5,read_write,#{0o100644}}",
+    'not on controlling process' => '{raised,not_on_controlling_process}',
+    'pwrite' => '{ok,{ok,0},ok,{ok,<<"HELlo!">>}}', 'truncate' => '{{ok,4},ok,{ok,<<"HELl">>}}',
+    'sync' => '{ok,ok,ok,{error,enotsup}}',
+    'write file' => '{ok,[<<"one\n">>,<<"two\n">>,<<"three">>]}', 'write file truncates' => '{ok,{ok,<<"x">>}}',
+    'pread none' => '{eof,{error,badarg},{ok,[eof]}}',
+    'open to write a directory' => '{{error,einval},{ok,<<"x">>}}',
+    'open missing' => '{error,enoent}', 'open a directory' => '{error,eisdir}', 'open a directory as one' => 'ok',
+    'open through a link' => 'ok', 'open exclusive existing' => '{error,eexist}', 'open exclusive new' => 'ok',
+    'open exclusive a link' => '{error,eexist}', 'create in missing' => '{error,enoent}',
+    'create slashed' => '{error,eisdir}', 'create a directory' => '{error,eisdir}', 'create the root' => '{error,eisdir}',
+    'ro open read' => 'ok', 'ro open write' => '{error,erofs}', 'ro create' => '{error,erofs}',
+    'ro create in missing' => '{error,enoent}', 'ro exclusive' => '{error,eexist}',
+    'ro truncate' => '{{error,einval},{error,ebadf}}', 'ro unchanged' => '{ok,<<"x">>}', 'io server' => '{{ok,"x"},ok}',
+    'appends' => '{[{97,1000},{98,1000}],2000}',
+    'past the cap' => '{{error,enospc},{ok,65536},{error,enospc},65536}', 'split' => '{ok,3,true}',
+    'unknown at' => '{{ok,ok,{ok,5}},{ok,{ok,100}}}',
+    'grant gone' => '{{error,eio},{error,eio},{error,eio},{error,eio}}'
+  }.freeze
+
   def test_erx_file_remote_answers_as_the_design_states
     release = table(@fixture.release)
-    wrong = REMOTE.filter_map do |step, want|
+    wrong = REMOTE.merge(OPEN_FILES).filter_map do |step, want|
       got = release.fetch("remote #{step}", 'missing')
       "#{step}: want #{want}, got #{got}" unless got == want
     end
@@ -258,9 +289,20 @@ class RuntimePrimFileTest < Minitest::Test
   # Seeded: a client whose walks act on their fid in place deletes /t/victim for
   # /t/missing/victim, which the victim case must catch.
   def test_seeded_walk_in_place_removes_the_victim
-    lines, = run_beam(@fixture.archive, '/', 'seeded', boot: '/bin/start')
-    seeded = table(lines)
+    seeded, lines = seeded_run('walk')
     assert_equal '{error,enoent}', seeded.fetch('seeded victim', 'missing'), lines.last(20).join("\n")
+  end
+
+  # Seeded: a client that sets an append's offset from a getattr's size, which the
+  # appends case catches as a byte of the other appender's before the offset; one that
+  # leaves the offset where it was on an error, which the write past the cap catches; one
+  # that reads an append's unknown At as a plain fid's, which the fake server catches.
+  def test_seeded_offset_faults_are_caught
+    { 'append' => 'appends', 'cap' => 'past the cap', 'unknown' => 'unknown at' }.each do |seed, step|
+      seeded, lines = seeded_run(seed)
+      got = seeded.fetch("seeded #{step}", 'missing')
+      refute_includes ['missing', OPEN_FILES.fetch(step)], got, "#{seed}: #{lines.last(20).join("\n")}"
+    end
   end
 
   def test_modules_load_from_the_archive_through_erl_prim_loader
@@ -317,6 +359,11 @@ class RuntimePrimFileTest < Minitest::Test
   private
 
   # A path over 64 bytes appears on its line as its MD5.
+  def seeded_run(seed)
+    lines, = run_beam(@fixture.archive, '/', 'seeded', seed, boot: '/bin/start')
+    [table(lines), lines]
+  end
+
   def line_key(operation, path)
     bytes = path.b
     "#{operation} #{(bytes.bytesize > 64 ? Digest::MD5.digest(bytes) : bytes).unpack1('H*')}"
@@ -398,25 +445,35 @@ class RuntimePrimFileTest < Minitest::Test
     Dir.glob(File.join(install, '{lib/erlang/,}erts-*/bin/beam.smp')).first or flunk("no stock beam under #{install}")
   end
 
-  # The driver, a grant over erx_fs_test_tree for erx_file_remote's cases, and, for the
-  # seeded run, a client whose walks act in place.
+  # The driver, a grant over erx_fs_test_tree for erx_file_remote's cases, and the seeded
+  # clients.
   GRANT_SOURCES = %w[erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_grant.erl
-                     erlang/apps/erx_files/src/erx_fs_version.erl erlang/apps/erx/src/generated/erx_9p_grammar.erl
+                     erlang/apps/erx_files/src/erx_fs_version.erl
                      test/erlang/erx_fs_test_tree.erl].freeze
   CLIENT = 'otp/erts/preloaded/src/erx_file_remote.erl'
-  WALK_INTO_NEW = "    {[{walk, From, New, NameList}], New};\n"
-  WALK_IN_PLACE = "    _ = New,\n    {[{walk, From, From, NameList}], From};\n"
+  # Each seeded client: the passage of the client it changes, once, and what it puts there.
+  SEEDS = {
+    'walk' => ["    {[{walk, From, New, NameList}], New};\n", "    _ = New,\n    {[{walk, From, From, NameList}], From};\n"],
+    'append' => ["        {_, _} when is_integer(At) -> checked_offset(At + Count);\n",
+                 "        {_, \#{append := false}} when is_integer(At) -> checked_offset(At + Count);\n" \
+                 "        {_, \#{append := true}} -> size_of(File);\n"],
+    'cap' => ["                    Moved(Next),\n", ''],
+    'unknown' => ["        {unknown, \#{append := false}} -> checked_offset(Sent + Count);\n",
+                  "        {unknown, _} -> checked_offset(Sent + Count);\n"]
+  }.freeze
 
   def compile_driver(tree)
     client = File.read(File.join(ROOT, CLIENT))
-    assert_equal 1, client.scan(WALK_INTO_NEW).size, 'the seeded passage is in the client once'
-    seeded = File.join(tree, 'test/seeded')
-    FileUtils.mkdir_p(seeded)
-    File.write(File.join(seeded, 'erx_file_remote.erl'), client.sub(WALK_INTO_NEW, WALK_IN_PLACE))
     includes = [File.join(ROOT, 'otp/lib/kernel/include'), File.join(ROOT, 'erlang/apps/erx/include')]
     erlc(GRANT_SOURCES.map { |source| File.join(ROOT, source) }, "#{tree}/test/ebin", includes)
-    erlc([File.join(seeded, 'erx_file_remote.erl')], seeded, includes)
-    File.delete(File.join(seeded, 'erx_file_remote.erl'))
+    SEEDS.each do |name, (passage, fault)|
+      assert_equal 1, client.scan(passage).size, "the #{name} seed's passage is in the client once"
+      seeded = File.join(tree, 'test/seeded', name)
+      FileUtils.mkdir_p(seeded)
+      File.write(File.join(seeded, 'erx_file_remote.erl'), client.sub(passage, fault))
+      erlc([File.join(seeded, 'erx_file_remote.erl')], seeded, includes)
+      File.delete(File.join(seeded, 'erx_file_remote.erl'))
+    end
     source = File.expand_path('prim_file_compare.erl', __dir__)
     expression = "{ok,_}=compile:file(\"#{source}\",[{outdir,\"#{tree}/test/ebin\"},{i,\"#{OUTPUT.root}/lib\"}]),halt()."
     output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', RUN_SECONDS.to_s,
@@ -452,10 +509,10 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
-  def run_beam(archive, root, mode, boot:)
+  def run_beam(archive, root, *arguments, boot:)
     prefix = root == '/' ? '' : root
     erxos = Erx::ErlangApps::APPLICATIONS.flat_map { |application| ['-pa', "#{prefix}/lib/#{application}/ebin"] }
-    test = ['-noshell', *erxos, '-pa', "#{prefix}/test/ebin", '-run', 'prim_file_compare', 'main', root, mode]
+    test = ['-noshell', *erxos, '-pa', "#{prefix}/test/ebin", '-run', 'prim_file_compare', 'main', root, *arguments]
     return capture_beam({ 'ROOTDIR' => root, 'BINDIR' => File.dirname(OUTPUT.beam) }, [OUTPUT.beam, archive, *test]) if archive
 
     bin = File.dirname(stock_beam)

@@ -15,7 +15,7 @@ require_relative '../../tools/lib/erx/abi'
 # and the table's refusals of malformed protocol declarations.
 class Erx9pGrammarTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  GENERATED = 'erlang/apps/erx/src/generated/erx_9p_grammar.erl'
+  GENERATED = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
   TABLE = 'abi/protocols/9p.txt'
   NAME_KIND = 'text name max @name_max utf8'
 
