@@ -686,6 +686,44 @@ stored_binaries_are_copies_test() ->
     {_, Tree3} = ok_step({write, Handle, 0, binary_part(Big, 3, 10)}, Tree2),
     ?assertEqual(ok, erx_ramfs_core:check(Tree3)).
 
+%% Every chunk a write or a truncation builds is a binary of exactly 4,096
+%% bytes that references nothing more, whether the write fills the chunk,
+%% covers part of it or crosses into the next one, and whatever part of a
+%% larger request it came from: check/1 after each step tests that. A whole
+%% stored chunk reads back as itself, so the reads then show that each kept
+%% binary holds the right bytes, each part joined at its place.
+chunks_are_built_alone_test() ->
+    Request = list_to_binary([I rem 251 || I <- lists:seq(1, 8 * ?CHUNK)]),
+    Part = fun(Offset, Length) -> binary_part(Request, Offset, Length) end,
+    {_, Handle, Tree1} = create(?ROOT, <<"f">>, tree()),
+    %% Chunks 0 to 3 whole, then part of chunk 0, then the end of chunk 1
+    %% and the start of chunk 2.
+    Tree2 = write(Handle, 0, Part(8, 4 * ?CHUNK), Tree1),
+    Tree3 = write(Handle, 10, Part(1, 100), Tree2),
+    Tree4 = write(Handle, 2 * ?CHUNK - 50, Part(3, 200), Tree3),
+    %% Truncation inside chunk 3 zeroes its tail; chunk 4 is written whole.
+    {ok, Tree5} = ok_step({setattr, {open, Handle}, #{size => 3 * ?CHUNK + 20}},
+                          Tree4),
+    Tree6 = write(Handle, 4 * ?CHUNK, Part(5, ?CHUNK), Tree5),
+    Expected = lists:foldl(
+                 fun({At, Bytes}, File) -> overlaid(File, At, Bytes) end,
+                 <<(Part(8, 3 * ?CHUNK + 20))/binary,
+                   0:((2 * ?CHUNK - 20) * 8)>>,
+                 [{10, Part(1, 100)}, {2 * ?CHUNK - 50, Part(3, 200)},
+                  {4 * ?CHUNK, Part(5, ?CHUNK)}]),
+    lists:foreach(
+      fun(I) ->
+              Chunk = read(Handle, I * ?CHUNK, ?CHUNK, Tree6),
+              ?assertEqual(binary_part(Expected, I * ?CHUNK, ?CHUNK), Chunk),
+              ?assertEqual(?CHUNK, binary:referenced_byte_size(Chunk))
+      end, lists:seq(0, 4)).
+
+%% File with Bytes written over it at At, inside its size.
+overlaid(File, At, Bytes) ->
+    End = At + byte_size(Bytes),
+    <<(binary_part(File, 0, At))/binary, Bytes/binary,
+      (binary_part(File, End, byte_size(File) - End))/binary>>.
+
 %% ---------------------------------------------------------------------------
 %% fsync, statfs, xattr and requests no callback builds
 %% ---------------------------------------------------------------------------

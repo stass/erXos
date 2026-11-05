@@ -36,6 +36,10 @@ class ErxRamfsCoreTest < Minitest::Test
              anchor: 'Stored = binary:copy(Name),',
              replacement: 'Stored = Name,',
              catching_case: 'stored_binaries_are_copies_test'),
+    Seed.new(fault: 'a chunk written whole and stored without copying',
+             anchor: '            binary:copy(New);',
+             replacement: '            New;',
+             catching_case: 'chunks_are_built_alone_test'),
     Seed.new(fault: 'a write that keeps the file version',
              anchor: "mtime = Now, ctime = Now, version = Stamp},\n        {done, {ok, byte_size(Bytes), At},",
              replacement: "mtime = Now, ctime = Now, version = N#node.version},\n        " \

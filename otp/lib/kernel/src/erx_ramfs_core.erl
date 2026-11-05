@@ -1027,22 +1027,34 @@ zero_tail(Chunks, Size) ->
         {0, _} ->
             Chunks;
         {Keep, #{Index := Chunk}} ->
-            Zeros = (?CHUNK_BYTES - Keep) * 8,
-            Chunks#{Index := binary:copy(<<(binary_part(Chunk, 0, Keep))/binary,
-                                           0:Zeros>>)};
+            Tail = binary_part(?ZERO_CHUNK, Keep, ?CHUNK_BYTES - Keep),
+            Chunks#{Index := iolist_to_binary([binary_part(Chunk, 0, Keep), Tail])};
         {_Keep, #{}} ->
             Chunks
     end.
 
 %% Chunk I rebuilt whole: the old bytes, or zeros, with Bytes, written at
 %% At, copied over their part of it.
+%%
+%% A chunk is built once, at exactly its size: iolist_to_binary/1 joins the
+%% parts into a new binary of their total size, where bit syntax would leave
+%% room to grow that a binary:copy/1 then copies away. A write over the
+%% whole chunk is all one part, a part of the request; ERTS returns the one
+%% binary of a list as it is, so that case copies it. Any other write keeps
+%% old bytes before or after its own, so its list joins at least two
+%% non-empty parts and the result is new.
 spliced(Old, I, At, Bytes) ->
     Base = I * ?CHUNK_BYTES,
     Lo = max(At, Base) - Base,
     Hi = min(At + byte_size(Bytes), Base + ?CHUNK_BYTES) - Base,
     New = binary_part(Bytes, Base + Lo - At, Hi - Lo),
-    binary:copy(<<(binary_part(Old, 0, Lo))/binary, New/binary,
-                  (binary_part(Old, Hi, ?CHUNK_BYTES - Hi))/binary>>).
+    case {Lo, Hi} of
+        {0, ?CHUNK_BYTES} ->
+            binary:copy(New);
+        {_, _} ->
+            iolist_to_binary([binary_part(Old, 0, Lo), New,
+                              binary_part(Old, Hi, ?CHUNK_BYTES - Hi)])
+    end.
 
 %% The bytes From..To of a file, holes as zeros; one whole stored chunk is
 %% returned as itself.

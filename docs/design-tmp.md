@@ -218,9 +218,12 @@ most `ceil(S / 4096)` chunks, each a binary of exactly 4,096 bytes; bytes
 past `S` inside the last chunk are zero. A directory's `Entries` finds a
 name, and `Order` lists them by the sequence number each received when it
 was made. Everything the tree keeps that came from a request, chunks,
-names and link texts, is a binary the tree process made with
-`binary:copy/1`, never a part of a caller's binary, so nothing the tree
-keeps holds on to a larger binary it was not charged for.
+names and link texts, is a binary the tree process made at exactly its
+size, never a part of a caller's binary, so nothing the tree keeps holds
+on to a larger binary it was not charged for. A chunk a write or a
+truncation rebuilds is joined from its parts once, by
+`iolist_to_binary/1`; a name, a link text and a chunk written whole are
+copied out of the request with `binary:copy/1`.
 
 **Charges.** A chunk costs 4,096 bytes, a node 256, a directory entry 64
 plus its name's length, and a symbolic link its text's length; `held` is
@@ -502,7 +505,11 @@ the code under test ran.
   ancestor check that compares only the immediate parent, which the
   rename-into-grandchild case catches; a write that charges every touched
   chunk, which the overwrite-costs-nothing case catches; a name stored
-  without copying, which the referenced-size check catches.
+  without copying, which the referenced-size check catches; a chunk
+  written whole and stored without copying, which the referenced-size
+  check catches in the case that builds chunks by whole, partial and
+  spanning writes and by a truncation, then reads each back to compare
+  its bytes.
 * **Sequences.** Random sequences of up to 64 operations over a few names
   and directories, with offsets and sizes drawn to include 0, chunk
   boundaries, 2^63 - 1 and negative values, and fids kept across removals,
