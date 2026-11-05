@@ -344,9 +344,19 @@ it; git history is the record of completed work.
   `libc-test/2026-11-04-tcg-4cpu`). Each failure needs a verdict against stock
   musl before M3 closes; the classes below come from each test's output and
   none has been checked.
-  * Cancellation, possibly a bug in the seam: `functional/pthread_cancel`,
+  * Cancellation of a running or blocked thread: `functional/pthread_cancel`
+    (asynchronous cancellation of a loop, which only a signal can stop) and
     `regression/pthread_cond_wait-cancel_ignored`, "did not act on
-    cancellation", although `native_musl`'s own cancel case passes.
+    cancellation", whose waiter must act on a cancel while blocked in a futex
+    wait. Both are the Phase 1 difference `docs/design-stopgap.md` states: no
+    signal interrupts a blocked call. Testing the cancel flag again after the
+    call returns does not pass the second: the wake the main thread sends later
+    is consumed, and musl's condition wait then refuses cancellation by design
+    (`pthread_cond_timedwait.c`, "a signal was consumed"); the same check would
+    let a woken `sem_wait` exit holding the only wake, stranding the other
+    waiters. Passing it needs `tkill` of `SIGCANCEL` to end the target's umtx
+    wait with `EINTR` before a wake reaches it, which liberx's umtx does not
+    offer.
   * `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
     under TCG, cause not found, so it is out of the canary set.
   * Phase 1 lacks the call: `functional/pthread_mutex_pi` and the
