@@ -12,6 +12,7 @@ require_relative '../../tools/lib/erx/runtime'
 # the runtime while the build still says it built.
 class RuntimeBuildTest < Minitest::Test
   Runtime = Erx::Runtime
+  ErlangApps = Erx::ErlangApps
 
   # Stands in for every subprocess: rsync copies, the emulator's make leaves an
   # executable, and each step's name is recorded.
@@ -61,6 +62,12 @@ class RuntimeBuildTest < Minitest::Test
        otp_only.c].each { |path| write_otp(path, 'stock') }
     write_otp(Runtime::XCOMP_FILE, 'stock')
     Runtime::LIBERX_SOURCES.each { |path| write_tree(path, 'stock') }
+    # erXos's applications, each with its resource file and no modules: the build
+    # refuses a tree without them, and the recording runner compiles nothing.
+    ErlangApps::APPLICATIONS.each do |application|
+      write_tree(File.join(ErlangApps.source(application), 'src', "#{application}.app.src"),
+                 "{application, #{application}, [{modules, []}]}.\n")
+    end
     @output = Runtime.output(root: @root)
     @runner = RecordingRunner.new(@output)
   end
