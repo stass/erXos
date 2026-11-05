@@ -86,6 +86,53 @@ class OriginTest < Minitest::Test
                  files.fetch('source.c').fetch('sha256')
   end
 
+  # A copy of an imported file keeps its upstream notices, so the rule for an added
+  # file refuses it. Its own row, the source's row plus copied_from, records it.
+  def copy_with_row(row_change: {})
+    write_file('special.c', "/* SPDX-License-Identifier: BSD-2-Clause */\nint special;\n")
+    write_origin
+    write_file('copy.c', File.binread(File.join(@directory, 'special.c')))
+    path = File.join(@directory, 'ORIGIN.md')
+    head, body = File.binread(path).split(Erx::Origin::INVENTORY_MARKER, 2)
+    payload = JSON.parse(body.delete_suffix("\n```\n"))
+    row = payload.fetch('files').fetch('special.c').merge('copied_from' => 'special.c').merge(row_change)
+    payload.fetch('files')['copy.c'] = row
+    File.binwrite(path, head + Erx::Origin::INVENTORY_MARKER + JSON.pretty_generate(payload) + "\n```\n")
+  end
+
+  def test_a_copy_without_a_row_is_refused
+    write_file('special.c', "/* SPDX-License-Identifier: BSD-2-Clause */\nint special;\n")
+    write_origin
+    write_file('copy.c', File.binread(File.join(@directory, 'special.c')))
+    error = assert_raises(Erx::Error) { @origin.check }
+    assert_match(/not plainly erXos's own: copy\.c/, error.message)
+  end
+
+  def test_an_unchanged_copy_with_its_row_passes
+    copy_with_row
+    @origin.check
+  end
+
+  def test_a_changed_copy_needs_the_change_notice
+    copy_with_row
+    write_file('copy.c', "/* SPDX-License-Identifier: BSD-2-Clause */\nint changed;\n")
+    error = assert_raises(Erx::Error) { @origin.check }
+    assert_match(/lacks its erXos change notice: copy\.c/, error.message)
+    write_file('copy.c', "/* Modified by erXos */\n/* SPDX-License-Identifier: BSD-2-Clause */\nint changed;\n")
+    @origin.check
+  end
+
+  def test_a_copys_row_must_repeat_its_sources_row
+    copy_with_row(row_change: { 'license' => 'MIT' })
+    error = assert_raises(Erx::Error) { @origin.check }
+    assert_match(/does not repeat the row/, error.message)
+  end
+
+  def test_a_copys_row_must_name_a_source
+    copy_with_row(row_change: { 'copied_from' => nil })
+    assert_raises(Erx::Error) { @origin.check }
+  end
+
   def test_deleted_imported_file_is_not_silently_accepted
     write_file('source.c', "/* upstream */\nint value;\n")
     write_origin

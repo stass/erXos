@@ -336,6 +336,7 @@ module Erx
         validate_text(exclusion.fetch('reason'))
       end
       payload.fetch('files').each { |path, entry| validate_entry(path, entry: entry) }
+      validate_copies(payload.fetch('files'), exclusions: payload.fetch('exclusions'))
       payload.fetch('changes').each do |path, change|
         validate_path(path)
         unless change.is_a?(Hash) && change.keys.sort == %w[evidence license sha256]
@@ -353,6 +354,24 @@ module Erx
       maximum ? BoundedFile.read(path, maximum: maximum) : File.binread(path)
     end
 
+    # A copy's row repeats the row of the imported file it came from, so its licence
+    # evidence and baseline are that file's and the ordinary checks apply to it.
+    def validate_copies(files, exclusions:)
+      files.each do |path, entry|
+        next unless entry.key?('copied_from')
+
+        from = entry.fetch('copied_from')
+        validate_path(from)
+        source = files[from]
+        unless source && !source.key?('copied_from') && source == entry.except('copied_from')
+          raise Error, "copied file's row does not repeat the row of an imported file: #{path}"
+        end
+        if exclusions.any? { |exclusion| path == exclusion.fetch('path') || path.start_with?(exclusion.fetch('path') + '/') }
+          raise Error, "new file restores a path its import excluded: #{path}"
+        end
+      end
+    end
+
     def validate_entry(path, entry:)
       validate_path(path)
       raise Error, 'invalid origin file entry' unless entry.is_a?(Hash)
@@ -360,6 +379,7 @@ module Erx
       case entry['kind']
       when 'file'
         expected = common + %w[non_ascii_lines]
+        expected += %w[copied_from] if entry.key?('copied_from')
         lines = entry['non_ascii_lines']
         raise Error, 'invalid original source line hashes' unless lines.is_a?(Array)
         lines.each { |hash| validate_hash(hash) }
