@@ -2211,6 +2211,33 @@ formatting functions, mallocng and `libm` stay as upstream
 C library's: `sys/erxos` owns exact string-to-double and double-to-string
 conversion, so float text never depends on which C library is linked.
 
+**Thread cancellation.** `pthread_cancel` sets the target's cancel flag. On
+Linux musl then sends the target `SIGCANCEL`; on erXos the canceller instead
+stops the target with `erx_thread_stop`, reads its program counter with
+`erx_thread_read`, and, if the target's cancel type is asynchronous or its
+program counter lies in `[__cp_begin, __cp_end)`, sets the program counter
+to `__cp_cancel` with `erx_thread_write`; it then runs the target again with
+`erx_thread_start`. This is musl's own `cancel_handler`
+(`musl/src/thread/pthread_cancel.c`) run from the canceller's side, with
+the stopped thread's registers standing in for the signal's saved context.
+The canceller holds `CONTROL` on its sibling threads, which share its space.
+A target asleep in a umtx wait is woken by the stop and the call returns
+`ERX_EINTR` ([design-kernel.md](design-kernel.md#execution-model-and-locking)),
+which musl's `__syscall_cp_c` turns into cancellation. No futex or umtx
+operation of its own is added for this: the stop already ends any blocked
+call, and it also reaches a target that spins in an asynchronous cancel
+window. A spurious `ERX_EINTR` from a wait outside a cancellation point is
+what musl already tolerates from Linux signals: `__wait` re-tests its word
+and sleeps again; `__timedwait` is retried by the mutex, read-write lock,
+condition variable and `pthread_join` loops; `sem_timedwait` and
+`aio_suspend` return `EINTR` to their caller, which POSIX allows for both.
+`__timedwait` itself turns `EINTR` into 0 until a signal handler has been
+installed. ERTS never calls `pthread_cancel`. The stopgap backend refuses
+`erx_thread_stop` and its siblings with `ERX_ENOTSUP`
+(`liberx/backend/core/refused.c`), so on Phase 1 a cancel acts at the
+target's next cancellation point, as
+[design-stopgap.md](design-stopgap.md) states.
+
 ### What ERTS imports
 
 **One list of imports, checked at both links, is what makes the two C libraries

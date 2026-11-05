@@ -345,17 +345,13 @@ it; git history is the record of completed work.
   musl before M3 closes; the classes below come from each test's output and
   none has been checked.
   * Cancellation of a running or blocked thread: `functional/pthread_cancel`
-    (asynchronous cancellation of a loop, which only a signal can stop) and
-    `regression/pthread_cond_wait-cancel_ignored`, "did not act on
-    cancellation", whose waiter must act on a cancel while blocked in a futex
-    wait. Both are the Phase 1 difference `docs/design-stopgap.md` states: no
-    signal interrupts a blocked call. Testing the cancel flag again after the
-    call returns does not pass the second: the wake the main thread sends later
-    is consumed, and musl's condition wait then refuses cancellation by design
-    (`pthread_cond_timedwait.c`, "a signal was consumed"); the same check would
-    let a woken `sem_wait` exit holding the only wake, stranding the other
-    waiters. Passing it needs `tkill` of `SIGCANCEL` to end the target's umtx
-    wait with `EINTR` before a wake reaches it, which liberx's umtx does not
+    and `regression/pthread_cond_wait-cancel_ignored` fail on Phase 1 by a
+    documented difference: no signal interrupts a blocked call, so
+    `pthread_cancel` acts at the next cancellation point
+    ([design-stopgap.md](docs/design-stopgap.md)). The Phase 2 fix is the
+    thread `CONTROL` stop mapping in
+    [design-runtime.md](docs/design-runtime.md#the-c-library-seam); no
+    futex-specific interrupt is added.
     offer.
   * `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
     under TCG, cause not found, so it is out of the canary set.
