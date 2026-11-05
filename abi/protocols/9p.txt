@@ -36,10 +36,13 @@
 # reply field R to request field Q, measured by value, bytes, length or
 # packed; "le_nonempty" also requires R at least 1 when Q is. "writes"
 # marks an operation a read-only grant refuses: "always", "any F M..." when
-# F has a bit of any mask M set, "equal F N" when F is N. A request field of
-# kind fid may end in "directory": the fid must name a directory, and the
-# generated directory_fids/1 lists it, so erx_fs answers enotdir before any
-# callback when it names a file or a link.
+# F has a bit of any mask M set, "equal F N" when F is N. Every request
+# field of kind fid ends in what its fid names, one of a closed set, and no
+# other field takes an attribute: "directory", a fid that must name a
+# directory, which the generated directory_fids/1 lists, so erx_fs answers
+# enotdir before any callback when it names a file or a link; "node", a fid
+# that may name any node; "new", a fid the request makes name a node
+# (attach's fid, walk's and xattrwalk's new_fid; walk's may be its own fid).
 
 limit p9_nofid u32 0xffffffff
 limit p9_notag u16 0xffff
@@ -164,10 +167,10 @@ protocol erx_9p
     field fsid u64
     field namelen u32
   operation statfs 8
-    request fid fid
+    request fid fid node
     reply statfs statfs
   operation lopen 12
-    request fid fid
+    request fid fid node
     request flags u32
     reply qid qid
     reply iounit u32
@@ -198,23 +201,23 @@ protocol erx_9p
     reply qid qid
     writes always
   operation readlink 22
-    request fid fid
+    request fid fid node
     reply target target
   operation getattr 24
-    request fid fid
+    request fid fid node
     request request_mask u64
     reply attr attr
   operation setattr 26
-    request fid fid
+    request fid fid node
     request attr set_attr
     writes always
   operation xattrwalk 30
-    request fid fid
-    request new_fid fid
+    request fid fid node
+    request new_fid fid new
     request name xattr_name
     reply size xattr_size
   operation xattrcreate 32
-    request fid fid
+    request fid fid node
     request name xattr_name
     request size xattr_size
     request flags u32
@@ -226,10 +229,10 @@ protocol erx_9p
     reply entries dirents
     check entries.packed le count.value
   operation fsync 50
-    request fid fid
+    request fid fid node
     request datasync u32
   operation lock 52
-    request fid fid
+    request fid fid node
     request type u8
     request flags u32
     request start u64
@@ -239,7 +242,7 @@ protocol erx_9p
     reply status u8
     writes equal type @p9_lock_wrlck
   operation getlock 54
-    request fid fid
+    request fid fid node
     request type u8
     request start u64
     request length u64
@@ -252,7 +255,7 @@ protocol erx_9p
     reply client_id string
   operation link 70
     request dfid fid directory
-    request fid fid
+    request fid fid node
     request name name
     writes always
   operation mkdir 72
@@ -286,7 +289,7 @@ protocol erx_9p
     request n_uname u32
     refused
   operation attach 104
-    request fid fid
+    request fid fid new
     request afid u32
     request uname string
     request aname string
@@ -295,19 +298,19 @@ protocol erx_9p
   operation flush 108
     request old_tag alias
   operation walk 110
-    request fid fid
-    request new_fid fid
+    request fid fid node
+    request new_fid fid new
     request names walk_names
     reply qids qids
     check qids.length le_nonempty names.length
   operation read 116
-    request fid fid
+    request fid fid node
     request offset u64
     request count io_count
     reply data data
     check data.bytes le count.value
   operation write 118
-    request fid fid
+    request fid fid node
     request offset u64
     request data data
     reply count u32
@@ -315,7 +318,7 @@ protocol erx_9p
     check count.value le data.bytes
     writes always
   operation clunk 120
-    request fid fid
+    request fid fid node
   operation remove 122
-    request fid fid
+    request fid fid node
     writes always

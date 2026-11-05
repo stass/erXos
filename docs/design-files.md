@@ -1090,7 +1090,9 @@ other client's request can come between its parts:
   one of `mkdir`, both of `renameat`, or the fid of `readdir`) names a
   node whose qid is not a directory, so no callback is handed a file or a link as a
   directory, whatever the tree checks itself. The list comes from the
-  protocol table, which marks each such field `directory`: the
+  protocol table, where every request field of kind `fid` states what
+  it names, `directory`, `node` (any node) or `new` (a fid the request
+  makes name a node), so no field is left unchecked by omission: the
   generated grammar's `directory_fids/1` answers it with one clause per
   operation and none for anything else, so an operation the table adds
   states its directory fids where it is declared. It replies only to the
@@ -1929,7 +1931,7 @@ report, so a passing run shows the code under test ran.
   answer that is not an error, which that case catches. Each operation
   whose directory fid names a file or a link is answered `enotdir` and
   the tree records no call; seeded: a protocol table that leaves
-  `renameat`'s new directory or `readdir`'s fid unmarked, or marks
+  `renameat`'s new directory or `readdir`'s fid marked `node`, or marks
   `link`'s source in place of its directory, regenerated, which that
   case catches. A tree that
   answers root, walk or `lcreate` with a malformed qid is answered `eio`

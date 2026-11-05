@@ -70,12 +70,19 @@ class Erx9pGrammarTest < Minitest::Test
     end
   end
 
-  # Operations go at the end of the table, after the kinds they name.
-  def test_malformed_directory_fields_are_refused
+  # Every request field of kind fid states what its fid names, so an operation
+  # cannot be added whose directory fid goes unchecked by omission. Operations go
+  # at the end of the table, after the kinds they name.
+  def test_malformed_fid_fields_are_refused
     {
-      "  operation odd 200\n    request name name directory" => /only a field of kind fid can be a directory, not name/,
-      "  operation odd 200\n    request fid fid\n    reply other fid directory" => /only a request field can be a directory/,
-      "  operation odd 200\n    request fid fid dir" => /unknown field attribute dir/
+      "  operation odd 200\n    request fid fid" => /field fid of kind fid states what it names: directory, node or new/,
+      "  operation odd 200\n    request fid fid dir" => /unknown field attribute dir/,
+      "  operation odd 200\n    request fid fid node directory" => /a field has at most one attribute/,
+      "  operation odd 200\n    request fid fid node\n    reply other fid node new" => /a field has at most one attribute/,
+      "  operation odd 200\n    request Bad fid node new" => /invalid identifier "Bad"/,
+      "  operation odd 200\n    request name name directory" => /only a field of kind fid takes an attribute, not name/,
+      "  operation odd 200\n    request name name node" => /only a field of kind fid takes an attribute, not name/,
+      "  operation odd 200\n    request fid fid node\n    reply other fid new" => /only a request field takes an attribute/
     }.each do |addition, message|
       error = assert_raises(Erx::Error) do
         with_table(->(text) { "#{text}#{addition}\n" }) do |root|
@@ -87,10 +94,10 @@ class Erx9pGrammarTest < Minitest::Test
   end
 
   def test_a_directory_field_is_listed_by_directory_fids
-    source = with_table(->(text) { "#{text}  operation odd 200\n    request fid fid\n    request at_fid fid directory\n" }) do |root|
+    source = with_table(->(text) { "#{text}  operation odd 200\n    request fid fid node\n    request at_fid fid directory\n    request new_fid fid new\n" }) do |root|
       Erx::ABI::ProtocolEmitter.outputs(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))).fetch(GENERATED)
     end
-    assert_includes source, "directory_fids({odd, _, AtFid}) ->\n    [AtFid]"
+    assert_includes source, "directory_fids({odd, _, AtFid, _}) ->\n    [AtFid]"
   end
 
   # directory_fids/1 answers for every operation the table declares and for nothing

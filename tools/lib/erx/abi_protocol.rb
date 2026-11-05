@@ -19,9 +19,13 @@ module Erx
       MEASURES = %w[value bytes length packed].freeze
       RELATIONS = %w[le le_nonempty].freeze
       MAX_FIELDS = 32
-      # The kind by which a request names a node: only a field of this kind can be
-      # marked "directory".
-      DIRECTORY_KIND = 'fid'
+      # The kind by which a request names a node. Each request field of this kind
+      # ends in one of FID_ATTRIBUTES, what its fid names: "directory" a directory,
+      # "node" any node, "new" a fid the request makes name a node (walk's may be
+      # its own fid). No other field takes an attribute, so an operation cannot
+      # leave a directory fid unchecked by omission.
+      FID_KIND = 'fid'
+      FID_ATTRIBUTES = %w[directory node new].freeze
       MAX_ERRORS = 64
       # Names become Erlang atoms and functions: no reserved word, no dot, and no
       # kind whose check would clash with a BIF or a helper of the generated module.
@@ -170,16 +174,20 @@ module Erx
         children.each do |child|
           keyword, *rest = child.words
           case [keyword, rest.size]
-          in ['request', 2] then request << field(rest, child, kinds)
-          in ['request', 3]
-            request << field(rest.take(2), child, kinds)
-            directories << directory_field(rest, child)
+          in ['request', 2..3]
+            field_name, kind = field(rest.take(2), child, kinds)
+            attribute = fid_attribute(rest, child)
+            request << [field_name, kind].freeze
+            directories << field_name if attribute == 'directory'
           in ['reply', 2] then reply << field(rest, child, kinds)
           in ['reply', 3]
             # A bad name, kind or attribute word is reported as such first.
             field(rest.take(2), child, kinds)
-            directory_field(rest, child)
-            child.fail!('only a request field can be a directory')
+            fid_attribute(rest, child)
+            child.fail!('only a request field takes an attribute')
+          in ['request' | 'reply', 4..]
+            field(rest.take(2), child, kinds)
+            child.fail!('a field has at most one attribute')
           in ['refused', 0] then refused = true
           in ['check', 3] then checks << rest
           in ['writes', 1..4]
@@ -203,16 +211,23 @@ module Erx
         [atom_name(words[0], line: line), known_kind(words[1], line, kinds)].freeze
       end
 
-      # NAME KIND directory: a fid that must name a directory. The generated
-      # directory_fids/1 lists it, so a server refuses a request whose fid there
-      # names anything else from the table, not from a list of its own.
-      def directory_field(words, line)
+      # NAME KIND [ATTRIBUTE]: the attribute of a field of kind fid, which it must
+      # have, or nil for a field of another kind, which must have none. A field
+      # marked "directory" is listed by the generated directory_fids/1, so a server
+      # refuses a request whose fid there names anything else from the table, not
+      # from a list of its own. An unknown word is reported before a wrong kind,
+      # so its row comes before the two that take a known attribute.
+      def fid_attribute(words, line)
         name, kind_name, attribute = words
-        line.fail!("unknown field attribute #{attribute}") unless attribute == 'directory'
-        unless kind_name == DIRECTORY_KIND
-          line.fail!("only a field of kind #{DIRECTORY_KIND} can be a directory, not #{kind_name}")
+        case [kind_name == FID_KIND, attribute]
+        in [true, nil]
+          line.fail!("field #{name} of kind #{FID_KIND} states what it names: directory, node or new")
+        in [false, nil] then nil
+        in [_, String] unless FID_ATTRIBUTES.include?(attribute)
+          line.fail!("unknown field attribute #{attribute}")
+        in [false, String] then line.fail!("only a field of kind #{FID_KIND} takes an attribute, not #{kind_name}")
+        in [true, String] then attribute
         end
-        name
       end
 
       def check(words, line, request, reply, kinds)

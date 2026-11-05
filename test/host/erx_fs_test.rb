@@ -161,15 +161,15 @@ class ErxFsTest < Minitest::Test
               to: '    case is_list(Entries) andalso lists:all(fun(Entry) -> entries([Entry]) end, Entries) of',
               caught_by: 'improper_listing_is_eio_test'),
     Fault.new(name: "a rename's new directory may be a file", file: TABLE,
-              from: "    request new_dir_fid fid directory\n", to: "    request new_dir_fid fid\n",
+              from: "    request new_dir_fid fid directory\n", to: "    request new_dir_fid fid node\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
     Fault.new(name: "a link's checked fid is its source, not its directory", file: TABLE,
-              from: "  operation link 70\n    request dfid fid directory\n    request fid fid\n",
-              to: "  operation link 70\n    request dfid fid\n    request fid fid directory\n",
+              from: "  operation link 70\n    request dfid fid directory\n    request fid fid node\n",
+              to: "  operation link 70\n    request dfid fid node\n    request fid fid directory\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test'),
     Fault.new(name: 'a file opened is listed by the tree', file: TABLE,
               from: "  operation readdir 40\n    request fid fid directory\n",
-              to: "  operation readdir 40\n    request fid fid\n",
+              to: "  operation readdir 40\n    request fid fid node\n",
               caught_by: 'directory_operations_on_a_file_or_a_link_reach_no_tree_test')
   ].freeze
 
