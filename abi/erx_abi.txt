@@ -337,6 +337,7 @@ enum fiasco_call u32
   value entropy_read 21
   value entropy_add 22
   value task_write 23
+  value log_read 24
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -377,6 +378,13 @@ layout erx_fiasco_debug_log_request 1 wire_le 8 16
 layout erx_fiasco_task_write_request 1 wire_le 8 16
   field caller u64 0
   field len u64 8
+
+# erx_log_read: the window is the root's own memory, so only the root may ask.
+layout erx_fiasco_log_read_request 1 wire_le 8 32
+  field caller u64 0
+  field cursor u64 8
+  field window u64 16
+  field size u64 24
 
 layout erx_fiasco_thread_reap_request 1 wire_le 8 16
   field caller u64 0
@@ -485,10 +493,11 @@ layout erx_fiasco_task_join_request 1 wire_le 8 16
   field caller u64 0
   field task u64 8
 
-layout erx_fiasco_reply 1 wire_le 8 24
+layout erx_fiasco_reply 1 wire_le 8 32
   field status i64 0
   field first u64 8
   field second u64 16
+  field third u64 24
 
 call debug_log 1
   waits no

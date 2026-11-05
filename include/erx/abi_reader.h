@@ -47,6 +47,8 @@ bool erx_fiasco_irq_create_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_irq_create_request_t *result);
 bool erx_fiasco_irq_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_irq_request_t *result);
+bool erx_fiasco_log_read_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_log_read_request_t *result);
 bool erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_machine_end_request_t *result);
 bool erx_fiasco_mem_contiguous_request_decode(const uint8_t *bytes, size_t length,

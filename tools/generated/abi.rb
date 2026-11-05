@@ -2375,6 +2375,76 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_fiasco_log_read_request"] = Layout.new(
+        name: "erx_fiasco_log_read_request".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 32,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cursor".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "window".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "size".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_machine_end_request"] = Layout.new(
         name: "erx_fiasco_machine_end_request".b,
         version: 1,
@@ -2716,7 +2786,7 @@ module Erx
         version: 1,
         storage: "wire_le".b,
         alignment: 8,
-        size: 24,
+        size: 32,
         fields: [
           Field.new(
             name: "status".b,
@@ -2750,6 +2820,20 @@ module Erx
             name: "second".b,
             type: types.fetch("u64"),
             offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "third".b,
+            type: types.fetch("u64"),
+            offset: 24,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -6424,6 +6508,7 @@ module Erx
           "irq_create".b => 32,
           "irq_trigger".b => 35,
           "irq_unbind".b => 37,
+          "log_read".b => 24,
           "machine_end".b => 9,
           "mem_create".b => 12,
           "mem_create_contiguous".b => 19,
@@ -9959,6 +10044,7 @@ module Erx
           "erx_fiasco_irq_bind_request".b,
           "erx_fiasco_irq_create_request".b,
           "erx_fiasco_irq_request".b,
+          "erx_fiasco_log_read_request".b,
           "erx_fiasco_machine_end_request".b,
           "erx_fiasco_mem_contiguous_request".b,
           "erx_fiasco_mem_create_request".b,
@@ -10904,6 +10990,12 @@ module Erx
           "fiasco_call_irq_unbind".b => Constant.new(
             name: "fiasco_call_irq_unbind".b,
             value: 37,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "fiasco_call_log_read".b => Constant.new(
+            name: "fiasco_call_log_read".b,
+            value: 24,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

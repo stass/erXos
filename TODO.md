@@ -284,6 +284,11 @@ it; git history is the record of completed work.
   buffers in file statics, and `tools/fuzz/dispatch_fuzz.c` a static UTCB and
   rate, so a fuzz crash can depend on earlier inputs. Make the log an object
   `erx_sys_caller_t` points to.
+* [Low] stopgap, `liberx/backend/fiasco/service_task.c`: no test shows that a failed create of the console UART leaves the debug log on the line, and the native console suite counts no `l4_vcon_write` of a log record after the handoff; only the host core test counts console writes. A boot whose first create of the console window fails, and a counter the root prints at its end, would close the "Console handoff" row of `docs/design-stopgap.md`.
+* [Medium] stopgap, `kernel/core/debug_log.c` `erx_debug_log_read`: the reader's cursor only decides whether a read is refused; every read starts at the one position of what has been taken, so a second caller of `erx_log:read/1` in the root takes records from the console for good, and `erx_console` starts at cursor 0, which on erXos's kernel (`docs/design-kernel.md`, "Console, log and panic") would replay what the early console already printed. Give the reader its first cursor at the handoff and make the cursor its own, or drop the cursor from the call.
+* [Medium] stopgap, `liberx/backend/fiasco/service.c` `service_log_read`: no test shows that a task's `log_read` is refused with `ERX_ENOTSUP`; that check alone keeps a task from having the service write log bytes at an address of the root. Add the case to `test/guest/native_task/program.c` beside `task_write`'s refusals.
+* [Low] runtime, `erx_log_nif.c` `read_nif`: a record that fails the reader's checks ends the window, and the console's line says so without saying how many records after it were dropped.
+* [Low] stopgap, `liberx/backend/fiasco/end.c`: the watchdog's end skips the debug log's parked records, as the service may be mid-write, so a missed pet after the console handoff loses the records the console had not read. At any end, lines the console has read but its driver has not yet written are lost uncounted, and the end's own drain can interleave with the driver's bytes on the UART.
 * [Low] stopgap, `tools/lib/erx/glue_imports.rb` reads what the compiler left
   out of line: a change of inlining can move a symbol such as
   `_ZN13Irq_chip_soft7sw_chipE` on or off the list and fail the build.

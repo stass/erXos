@@ -160,6 +160,28 @@ int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint6
 int	erx_entropy_read(uint32_t len) ERX_WARN_UNUSED_RESULT;
 int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * What one erx_log_read did: where the next read starts, how many records were overwritten
+ * before anyone read them, and how many bytes at the window's start are whole records.
+ */
+typedef struct erx_log_read_result {
+	uint64_t	next_cursor;
+	uint64_t	lost;
+	uint64_t	written;
+} erx_log_read_result_t;
+
+/*
+ * The kernel log's reader (docs/design-stopgap.md, "The console"): copies whole records that
+ * nobody has taken, from cursor on, into the window of size bytes, which holds at least
+ * ERX_LOG_RECORD_MAX, and counts them as taken. Every read moves the one position of what
+ * has been taken, the console's too, so a record leaves exactly once and the log has one
+ * reader, the system domain's console. The window is the caller's own memory, which the
+ * service writes in place, so natively only the root reads; a task is ERX_ENOTSUP. A short
+ * window, or a cursor past what has been taken, is ERX_EINVAL. res is ignored.
+ */
+int	erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size,
+	    erx_log_read_result_t *result) ERX_WARN_UNUSED_RESULT;
+
 /* how is ERX_END_OFF or ERX_END_RESET, and res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 

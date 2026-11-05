@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modified by erXos: adds erx_console, erx_device, erx_pl011, erx_stdio and erx_watchdog.
+# Modified by erXos: adds erx_console, erx_device, erx_log, erx_pl011, erx_stdio and erx_watchdog.
 #
 # %CopyrightEnd%
 #
@@ -95,6 +95,7 @@ MODULES = \
 	global \
 	erx_console \
 	erx_device \
+	erx_log \
 	erx_pl011 \
 	erx_stdio \
 	erx_watchdog \

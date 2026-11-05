@@ -1210,6 +1210,7 @@ NIF_OBJS = \
 	$(if $(findstring hosted,$(TARGET)),$(OBJDIR)/erx_stdio_nif.o) \
 	$(OBJDIR)/erx_watchdog_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
+	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \
 	$(OBJDIR)/prim_file_nif.o \

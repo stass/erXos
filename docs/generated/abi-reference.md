@@ -154,6 +154,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_IRQ_CREATE` | 32 |
 | `ERX_FIASCO_CALL_IRQ_TRIGGER` | 35 |
 | `ERX_FIASCO_CALL_IRQ_UNBIND` | 37 |
+| `ERX_FIASCO_CALL_LOG_READ` | 24 |
 | `ERX_FIASCO_CALL_MACHINE_END` | 9 |
 | `ERX_FIASCO_CALL_MEM_CREATE` | 12 |
 | `ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS` | 19 |
@@ -672,6 +673,17 @@ Storage: `wire_le`. Prefix size: 16. Alignment: 8.
 | `caller` | `u64` | 0 | 1 |
 | `irq` | `u64` | 8 | 1 |
 
+### `erx_fiasco_log_read_request_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `cursor` | `u64` | 8 | 1 |
+| `window` | `u64` | 16 | 1 |
+| `size` | `u64` | 24 | 1 |
+
 ### `erx_fiasco_machine_end_request_t`
 
 Storage: `wire_le`. Prefix size: 24. Alignment: 8.
@@ -728,13 +740,14 @@ Storage: `wire_le`. Prefix size: 40. Alignment: 8.
 
 ### `erx_fiasco_reply_t`
 
-Storage: `wire_le`. Prefix size: 24. Alignment: 8.
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
 | `status` | `i64` | 0 | 1 |
 | `first` | `u64` | 8 | 1 |
 | `second` | `u64` | 16 | 1 |
+| `third` | `u64` | 24 | 1 |
 
 ### `erx_fiasco_space_create_request_t`
 

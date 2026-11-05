@@ -794,7 +794,7 @@ crash record rather than in the harness's kill: the deadline counts from QEMU's 
 
 ### The end path
 
-A root fault and `erx_machine_end` reach it on the service, a missed pet on the watchdog. It is best effort and takes no lock.
+A root fault, the root's own stop and `erx_machine_end` reach it on the service, a missed pet on the watchdog. It is best effort and takes no lock.
 
 1. **One caller.** An atomic exchange of the `ending` word; the loser sleeps forever.
 2. **The log.** On the service, which alone writes the log ring, lines the reader has not taken go out through `l4_vcon_write`. On the
@@ -815,7 +815,7 @@ harness's deadline ends the run.
 
 **The sink** is a variable the service owns. `erx_debug_log` copies `len` bytes from the caller's public UTCB, escapes them, and writes to
 `l4_vcon_write` on `L4_BASE_LOG_CAP`, the kernel's polled UART output, or to a ring of `log.c` records. `erx_log_read` runs `erx_log_copy` into
-its window for the Erlang log reader. The service is the serialization `log.h` requires.
+its window for the Erlang log reader, `erx_console`, which polls it and writes each line the log core rendered, escaped, to its driver. The window is the root's own memory, which the service shares and writes in place, so a task's read is `ERX_ENOTSUP`; the reply's three words are the next cursor, the records lost and the bytes written. The log has that one reader: a read moves the one position of what has been taken, the console's too, so a record leaves exactly once, and a cursor past it is `ERX_EINVAL`. A ring that wraps while parked costs a line saying how many records were lost. The service is the serialization `log.h` requires.
 
 **A program's standard output and standard error** deliver its bytes unchanged, whoever holds the program. The root writes them
 to the console itself. A task holds no log capability, so `libc_task.c` hands them to `erx_fiasco_task_write`, one `task_write` call
@@ -992,7 +992,7 @@ the tests.
 | **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
 | **A semaphore's wake across CPUs**, `tools/lib/erx/native_semaphore_race.rb` under `make check-native-seeds`, under TCG at 4 CPUs as every seed runs, on a test kernel whose up holds itself between the dequeue and the activation until the waiter is queued again or half a second passes: at least three raced downs each, followed by an IPC wait that lasts its whole length and by a down that times out; too few raced downs fail the case | the bit's wait removed: the IPC wait ends early and the second down reports an up that never came |
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
-| **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone | the sink never switched: the counter moves |
+| **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone. On the host, `dispatch_test.rb`'s handoff and wrap cases count the core's console writes; natively, the console suite logs a tab and an escape sequence after the create and finds them escaped on the line, and a root that stops with the console suspended still shows its parked record | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
 | littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost |
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |

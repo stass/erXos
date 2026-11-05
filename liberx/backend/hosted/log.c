@@ -23,9 +23,11 @@
 #include <unistd.h>
 
 #include "erx/abi.h"
+#include "erx/core/debug_log.h"
 #include "erx/core/dispatch.h"
 #include "erx/core/effects.h"
 #include "erx/log.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/hosted/generated/calls.h"
 #include "liberx/backend/hosted/internal.h"
 #include "liberx/backend/hosted/log.h"
@@ -141,4 +143,25 @@ erx_hosted_debug_log(erx_utcb_length_t len)
 	raw_status = (uint32_t)results[0];
 	return (raw_status <= UINT32_C(2147483647) ? (int32_t)raw_status :
 	    -INT32_C(1) - (int32_t)(UINT32_C(4294967295) - raw_status));
+}
+
+/*
+ * erx_log_read: the process is one space, so the window is the caller's own and the core
+ * reads straight into it. Nothing here hands the log to a reader, so standard error takes
+ * every record as it is written and a read finds nothing.
+ */
+int
+erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log_read_result_t *result)
+{
+	erx_log_copy_result_t copied;
+
+	(void)res;
+	if (window == NULL || result == NULL)
+		return (ERX_EINVAL);
+	copied = erx_debug_log_read(cursor, window, (size_t)size);
+	if (copied.status != ERX_OK)
+		return (copied.status);
+	*result = (erx_log_read_result_t){ .next_cursor = copied.next_cursor, .lost = copied.lost,
+	    .written = copied.written };
+	return (ERX_OK);
 }

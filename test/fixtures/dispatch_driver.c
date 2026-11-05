@@ -17,11 +17,12 @@
 #include <string.h>
 
 #include "erx/abi.h"
+#include "erx/core/debug_log.h"
 #include "erx/core/dispatch.h"
 #include "erx/core/effects.h"
 #include "erx/log.h"
 
-#define CONSOLE_LINES	128
+#define CONSOLE_LINES	512
 
 static uint64_t driver_clock;
 static int driver_lock_depth;
@@ -103,6 +104,95 @@ driver_report(uint64_t number, uint64_t first, bool garbage)
 	    (int32_t)(uint32_t)results[0], results[1], results[2], driver_locks);
 	for (size_t index = 0; index < driver_console_lines; index++)
 		fputs(driver_console[index], stdout);
+	return (0);
+}
+
+/* One line of space 7, a second of the clock after the last, so no rate limit bites. */
+static void
+driver_log(const char *text)
+{
+	uint64_t args[ERX_TRAP_ARG_COUNT] = { strlen(text) };
+	uint64_t results[ERX_TRAP_RESULT_COUNT];
+
+	driver_clock += UINT64_C(1000000000);
+	driver_text(text, strlen(text));
+	driver_call(7, &driver_rate, ERX_CALL_DEBUG_LOG, args, results);
+	if (results[0] != 0)
+		abort();
+}
+
+/* A read as the console's reader makes one: "read STATUS lost N", then "reader LINE" each. */
+static void
+driver_read(uint64_t *cursor)
+{
+	static uint8_t window[2 * ERX_LOG_RECORD_MAX];
+	static char text[ERX_LOG_TEXT_MAX], line[ERX_LOG_LINE_MAX + 1];
+	const erx_log_copy_result_t copied = erx_debug_log_read(*cursor, window, sizeof(window));
+	erx_log_view_t view;
+	size_t offset = 0;
+
+	printf("read %d lost %" PRIu64 "\n", (int)copied.status, copied.lost);
+	if (copied.status != ERX_OK)
+		return;
+	*cursor = copied.next_cursor;
+	while (erx_log_next_record(window, copied.written, &offset, text, &view) == ERX_LOG_NEXT_RECORD) {
+		line[erx_log_render(&view, line, ERX_LOG_LINE_MAX)] = '\0';
+		printf("reader %s", line);
+	}
+}
+
+static void
+driver_console_dump(void)
+{
+	for (size_t index = 0; index < driver_console_lines; index++)
+		printf("console %s", driver_console[index]);
+	driver_console_lines = 0;
+}
+
+/*
+ * The handoff (docs/design-stopgap.md, "The console"): a line before it reaches the
+ * console, lines after it reach only the reader, a cursor past what was taken is refused,
+ * and taking the log back writes only what no reader had. Each step prints in order.
+ */
+static int
+driver_handoff(void)
+{
+	uint64_t cursor = 0;
+
+	driver_log("before");
+	driver_console_dump();
+	erx_debug_log_hand_to_reader();
+	driver_log("after-one");
+	driver_log("after-two");
+	driver_console_dump();
+	driver_read(&cursor);
+	driver_read(&cursor);
+	driver_log("parked");
+	cursor += 1;
+	driver_read(&cursor);
+	erx_debug_log_take_back();
+	driver_console_dump();
+	printf("taken back\n");
+	driver_log("taken-back");
+	driver_console_dump();
+	cursor = 0;
+	driver_read(&cursor);
+	return (0);
+}
+
+/* A parked ring that wraps: taking it back says how many records were lost, then the rest. */
+static int
+driver_wrap(void)
+{
+	char text[401];
+
+	memset(text, 'w', sizeof(text) - 1);
+	text[sizeof(text) - 1] = '\0';
+	erx_debug_log_hand_to_reader();
+	for (int index = 0; index < 400; index++)
+		driver_log(text);
+	erx_debug_log_take_back();
+	driver_console_dump();
 	return (0);
 }
 
@@ -194,5 +284,9 @@ main(int argc, char **argv)
 	}
 	if (strcmp(name, "two-spaces") == 0)
 		return (driver_two_spaces());
+	if (strcmp(name, "handoff") == 0)
+		return (driver_handoff());
+	if (strcmp(name, "wrap") == 0)
+		return (driver_wrap());
 	return (2);
 }

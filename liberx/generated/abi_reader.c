@@ -409,6 +409,24 @@ erx_fiasco_irq_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_log_read_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_log_read_request_t *result)
+{
+	erx_fiasco_log_read_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_LOG_READ_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.cursor = erx_abi_load_u64(bytes + 8);
+	value.window = erx_abi_load_u64(bytes + 16);
+	value.size = erx_abi_load_u64(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_machine_end_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_machine_end_request_t *result)
 {
@@ -514,6 +532,7 @@ erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
 	}
 	value.first = erx_abi_load_u64(bytes + 8);
 	value.second = erx_abi_load_u64(bytes + 16);
+	value.third = erx_abi_load_u64(bytes + 24);
 
 	*result = value;
 	return (true);

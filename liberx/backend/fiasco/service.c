@@ -82,6 +82,7 @@ static uint64_t service_cpus_online(void);
 static const char *service_thread_table_init(void);
 static int service_debug_log(uint32_t, const erx_fiasco_debug_log_request_t *);
 static int service_task_write(uint32_t, const erx_fiasco_task_write_request_t *);
+static int service_log_read(uint32_t, const erx_fiasco_log_read_request_t *, erx_fiasco_reply_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static void	service_fault(uint32_t, const erx_crash_fault_t *);
@@ -251,7 +252,8 @@ service_main(void)
 		mr->mr[0] = (l4_umword_t)reply.status;
 		mr->mr[1] = reply.first;
 		mr->mr[2] = reply.second;
-		tag = l4_ipc_reply_and_wait(utcb, l4_msgtag(0, 3, 0, 0), &label, L4_IPC_SEND_TIMEOUT_0);
+		mr->mr[3] = reply.third;
+		tag = l4_ipc_reply_and_wait(utcb, l4_msgtag(0, 4, 0, 0), &label, L4_IPC_SEND_TIMEOUT_0);
 	}
 }
 
@@ -298,6 +300,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (service_debug_log(decoded->task, words));
 	case ERX_FIASCO_CALL_TASK_WRITE:
 		return (service_task_write(decoded->task, words));
+	case ERX_FIASCO_CALL_LOG_READ:
+		return (service_log_read(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
 		return (service_thread_create(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_THREAD_START:
@@ -364,12 +368,34 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 
 		if (how != ERX_END_OFF && how != ERX_END_RESET)
 			return (ERX_EINVAL);
-		erx_debug_log_take_back();
 		erx_fiasco_end(NULL, (uint32_t)how);
 	}
 	default:
 		return (ERX_ENOTSUP);
 	}
+}
+
+/*
+ * erx_log_read (docs/design-stopgap.md, "The console"). The window is an address in the root,
+ * whose address space the service shares, so it is written in place and a task's read, whose
+ * address would name its own space, is refused.
+ */
+static int
+service_log_read(uint32_t task, const erx_fiasco_log_read_request_t *request, erx_fiasco_reply_t *reply)
+{
+	erx_log_copy_result_t copied;
+
+	if (task != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	if (request->window == 0 || request->size > UINT64_MAX - request->window)
+		return (ERX_EINVAL);
+	copied = erx_debug_log_read(request->cursor, (uint8_t *)(uintptr_t)request->window, (size_t)request->size);
+	if (copied.status != ERX_OK)
+		return (copied.status);
+	reply->first = copied.next_cursor;
+	reply->second = copied.lost;
+	reply->third = copied.written;
+	return (ERX_OK);
 }
 
 /*

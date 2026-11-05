@@ -202,6 +202,8 @@ module Erx
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
       # An output longer than any FIFO, so the driver writes it through the transmit check.
       CONSOLE_LONG_BYTES = 20_000
+      # A tab and an escape sequence in a debug log record, typed as byte values.
+      LOG_AFTER_HANDOFF = %(erx_log:debug(<<"after",9,"handoff",27,"[1m">>).\r)
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -230,6 +232,7 @@ module Erx
           prove_pet(accel, count, built) if count == cpus.first
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
           console_boot(accel, count, built)
+          parked_log_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -263,7 +266,7 @@ module Erx
       # A person at the serial console. The first line is typed at the boot's development
       # warning, before the driver starts, so the FIFO holds it when the driver takes the UART. Each answer then
       # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
-      # the mistake is a syntax error, and an output longer than any FIFO.
+      # the mistake is a syntax error, an output longer than any FIFO, and a debug log record.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
@@ -276,7 +279,10 @@ module Erx
          console_point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
          console_point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{CONSOLE_LONG_BYTES},$x)),io:nl().\r"),
          console_point('long-output', /x{#{CONSOLE_LONG_BYTES}}/n),
-         console_point('long-answer', /\Aok\r*\n\z/n)].freeze
+         console_point('long-answer', /\Aok\r*\n\z/n, type: LOG_AFTER_HANDOFF),
+         # A record logged once the driver owns the UART: the console reads it and writes it
+         # escaped, tab and escape byte as text, never as the bytes themselves.
+         console_point('log-after-handoff', /\A(?:[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, and what the person types once it is seen.
@@ -351,6 +357,19 @@ module Erx
       def console_boot(accel, count, built)
         boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.console_checkpoints,
                                   command_line: [COMMAND_LINES[accel], CONSOLE_PLAIN_WORD].compact.join(' '))
+      end
+
+      # A record the console has not read when the root stops itself: the end path writes it to
+      # the line before the machine ends, so suspending the console first loses nothing. The
+      # text is "parked", tab, "at", tab, "end", as code points, since the line holds no quote.
+      def parked_log_boot(accel, count, built)
+        expression = 'erlang:suspend_process(whereis(erx_console)),' \
+                     'erx_log:debug([112,97,114,107,101,100,9,97,116,9,101,110,100]),erlang:halt().'
+        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true,
+                                  command_line: [COMMAND_LINES[accel], "erx.arg=-eval erx.arg=#{expression}"].compact.join(' '),
+                                  points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+                                           { name: 'parked-at-end', pattern: /debug .*parked\\x09at\\x09end\r*\n\z/n,
+                                             seconds: EVAL_SECONDS }.freeze])
       end
 
       def judge_missed_pet(serial)

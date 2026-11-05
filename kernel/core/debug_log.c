@@ -26,6 +26,7 @@ _Static_assert(_Alignof(erx_log_rate_t) == ERX_LOG_RATE_STATE_ALIGN,
     "a space's opaque log rate alignment");
 
 static void erx_debug_log_drain(void);
+static size_t erx_debug_log_lost_line(uint64_t, char *, size_t);
 
 /*
  * Guarded by erx_effect_log_lock. The console's buffers live here rather than
@@ -39,6 +40,32 @@ static uint8_t erx_debug_log_window[ERX_LOG_RECORD_MAX];
 static char erx_debug_log_text[ERX_LOG_TEXT_MAX];
 static char erx_debug_log_line[ERX_LOG_LINE_MAX];
 
+/*
+ * The console's line for records the ring overwrote before anyone took them, which no
+ * record can say for itself: "erx: N log records lost" and a newline. Returns its length.
+ */
+static size_t
+erx_debug_log_lost_line(uint64_t lost, char *line, size_t capacity)
+{
+	static const char head[] = "erx: ", tail[] = " log records lost\n";
+	char digits[20];
+	size_t count = 0, length = 0;
+
+	do {
+		digits[count++] = (char)('0' + lost % 10);
+		lost /= 10;
+	} while (lost != 0);
+	if (sizeof(head) - 1 + count + sizeof(tail) - 1 > capacity)
+		return (0);
+	for (size_t index = 0; index < sizeof(head) - 1; index++)
+		line[length++] = head[index];
+	while (count > 0)
+		line[length++] = digits[--count];
+	for (size_t index = 0; index < sizeof(tail) - 1; index++)
+		line[length++] = tail[index];
+	return (length);
+}
+
 /* Writes every record the console has not yet had, one window at a time. */
 static void
 erx_debug_log_drain(void)
@@ -50,9 +77,13 @@ erx_debug_log_drain(void)
 	for (;;) {
 		copied = erx_log_copy(&erx_debug_log_ring, erx_debug_log_cursor,
 		    erx_debug_log_window, sizeof(erx_debug_log_window));
-		if (copied.status != ERX_OK || copied.records == 0)
+		if (copied.status != ERX_OK || (copied.records == 0 && copied.lost == 0))
 			return;
 		erx_debug_log_cursor = copied.next_cursor;
+		if (copied.lost != 0) {
+			length = erx_debug_log_lost_line(copied.lost, erx_debug_log_line, sizeof(erx_debug_log_line));
+			erx_effect_console_write(erx_debug_log_line, length);
+		}
 
 		offset = 0;
 		while (erx_log_next_record(erx_debug_log_window, copied.written,
@@ -106,8 +137,11 @@ erx_debug_log_read(uint64_t cursor, uint8_t *window, size_t window_size)
 	erx_log_copy_result_t copied;
 
 	erx_effect_log_lock();
-	copied = erx_log_copy(&erx_debug_log_ring, cursor < erx_debug_log_cursor ? erx_debug_log_cursor : cursor, window,
-	    window_size);
+	if (cursor > erx_debug_log_cursor) {
+		erx_effect_log_unlock();
+		return ((erx_log_copy_result_t){ .status = ERX_EINVAL, .next_cursor = cursor });
+	}
+	copied = erx_log_copy(&erx_debug_log_ring, erx_debug_log_cursor, window, window_size);
 	if (copied.status == ERX_OK)
 		erx_debug_log_cursor = copied.next_cursor;
 	erx_effect_log_unlock();

@@ -45,6 +45,7 @@ erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes, erx_
 	reply->status = (int64_t)mr->mr[0];
 	reply->first = mr->mr[1];
 	reply->second = mr->mr[2];
+	reply->third = mr->mr[3];
 	return ((int)reply->status);
 }
 
@@ -78,6 +79,21 @@ erx_debug_log(erx_utcb_length_t len)
 	erx_fiasco_reply_t reply;
 
 	return (erx_fiasco_service_call(ERX_CALL_DEBUG_LOG, &request, sizeof(request), &reply));
+}
+
+int
+erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size, erx_log_read_result_t *result)
+{
+	const erx_fiasco_log_read_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .cursor = cursor, .window = (uint64_t)(uintptr_t)window, .size = size };
+	erx_fiasco_reply_t reply;
+	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_LOG_READ, &request, sizeof(request), &reply);
+
+	(void)res;
+	if (status == ERX_OK)
+		*result = (erx_log_read_result_t){ .next_cursor = reply.first, .lost = reply.second,
+		    .written = reply.third };
+	return (status);
 }
 
 void

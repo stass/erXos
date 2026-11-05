@@ -72,6 +72,25 @@ class DispatchTest < Minitest::Test
     assert_equal ['other passes', 'flooder counted'], run_driver('two-spaces').lines.map(&:strip)
   end
 
+  HANDOFF = ['console space 7: before', 'read 0 lost 0', 'reader space 7: after-one', 'reader space 7: after-two',
+             'read 0 lost 0', 'read -1 lost 0', 'console space 7: parked', 'taken back',
+             'console space 7: taken-back',
+             'read 0 lost 0'].freeze
+
+  # Each line once and in order across the handoff, the console writing nothing while the
+  # reader holds the log, and a cursor past what was taken refused.
+  def test_the_handoff_moves_each_line_once_and_in_order
+    assert_equal HANDOFF, handoff_lines(@driver)
+  end
+
+  def test_a_wrapped_parked_ring_says_how_many_records_it_lost
+    lines = run_driver('wrap').lines.map(&:chomp)
+    lost = lines.first[/\Aconsole erx: ([0-9]+) log records lost\z/, 1]
+    refute_nil lost, lines.first
+    assert_equal 400, Integer(lost) + lines.drop(1).size
+    assert(lines.drop(1).all? { |line| line.end_with?("space 7: #{'w' * 400}") })
+  end
+
   MUTANTS = {
     'kernel/core/dispatch.c' => [
       ["results[index] = 0;", "results[index] = results[0];"],
@@ -79,7 +98,11 @@ class DispatchTest < Minitest::Test
     ],
     'kernel/core/debug_log.c' => [
       ["\t\terx_debug_log_drain();\n", "\t\t(void)erx_debug_log_drain;\n"],
-      ["caller->space,", "(uint64_t)0,"]
+      ["caller->space,", "(uint64_t)0,"],
+      ["status == ERX_OK && !erx_debug_log_for_reader", "status == ERX_OK"],
+      ["\terx_debug_log_for_reader = false;\n\terx_debug_log_drain();", "\terx_debug_log_for_reader = false;"],
+      ["if (cursor > erx_debug_log_cursor) {", "if (cursor > UINT64_MAX - 1) {"],
+      ["if (copied.lost != 0) {", "if (copied.lost == UINT64_MAX) {"]
     ]
   }.freeze
 
@@ -125,12 +148,18 @@ class DispatchTest < Minitest::Test
       console: console.map { |line| line.sub(/\A#[0-9]+ [0-9]+\.[0-9]{6} [a-z]+ /, '') } }
   end
 
+  # The handoff case's lines with each record's number, time and level taken out.
+  def handoff_lines(driver)
+    run_driver('handoff', driver: driver).lines.map { |line| line.chomp.sub(/ #[0-9]+ [0-9]+\.[0-9]{6} [a-z]+ /, ' ') }
+  end
+
   # Whether a driver's answers all still match what the tests above require.
   def survivors?(driver)
     good = run_driver('good', driver: driver)
     over = run_driver('over', driver: driver)
     word = run_driver('status-word', driver: driver)
-    good.include?('space 7: hello') && good.start_with?('status 0 r1 0 r2 0 locks 1') &&
+    handoff_lines(driver) == HANDOFF && run_driver('wrap', driver: driver).start_with?('console erx: ') &&
+      good.include?('space 7: hello') && good.start_with?('status 0 r1 0 r2 0 locks 1') &&
       over.start_with?('status -1 r1 0 r2 0 locks 0') && word.strip == format('%016x', EINVAL & 0xFFFFFFFF)
   end
 end

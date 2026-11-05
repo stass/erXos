@@ -5,9 +5,10 @@
 
 /*
  * The end path (docs/design-stopgap.md, "The end path"), and the effects the crash
- * codec asks of it. Best effort, with no lock. No thread is stopped first, and the
- * crash writer is handed no log ring: the debug log's lines went out as they were written,
- * so there is nothing to drain.
+ * codec asks of it. Best effort, with no lock. No thread is stopped first. Every end the
+ * service takes, the root's fault, its stop and erx_machine_end, first writes the debug log's
+ * records that wait for a reader to the console, so none is lost; the crash writer is handed
+ * no log ring. The watchdog's end runs off the service and writes only its frame.
  */
 
 #include <stdatomic.h>
@@ -16,6 +17,7 @@
 
 #include "erx/abi.h"
 #include "erx/core/crash.h"
+#include "erx/core/debug_log.h"
 #include "erx/core/effects.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/log.h"
@@ -55,6 +57,7 @@ erx_fiasco_end(const erx_crash_fault_t *fault, uint32_t how)
 	static const char message[] = "root task fault";
 
 	end_take();
+	erx_debug_log_take_back();
 	if (fault != NULL) {
 		const erx_crash_input_t input = { .form = ERX_CRASH_FORM_FULL, .cause = ERX_CRASH_CAUSE_FAULT,
 		    .boot_value = ERX_BOOT_VALUE_UNKNOWN, .boot_slot = ERX_BOOT_SLOT_NONE,
