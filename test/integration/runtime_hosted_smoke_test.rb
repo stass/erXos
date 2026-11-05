@@ -210,22 +210,17 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'os:version().' => /^\{0,1,0\}$/,
       'T0 = erlang:monotonic_time(millisecond), timer:sleep(20), erlang:monotonic_time(millisecond) - T0 >= 20.' => /^true$/
     }
-    Dir.mktmpdir('erx-hosted-home-') do |home|
-      spawn_shell(home) do |reader, writer, pid|
-        transcript = +''
-        deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
-        answers = expected.each_with_index.map do |(expression, _), index|
-          writer.write("#{expression}\n")
-          read_until(reader, transcript, /^#{index + 2}> /, deadline)
-          plain(transcript)[/^#{index + 1}> .*\z/m]
-        end
-        writer.write("halt().\n")
-        read_to_end(reader, transcript, deadline)
-        @reaped = true if wait_for(pid, deadline, transcript)
-        expected.values.zip(answers).each { |pattern, answer| assert_match pattern, answer }
-      end
-    end
+    assert_answers(expected)
+  end
+
+  # Stock's code server dies on a root directory in its path, with no version to split from
+  # its empty base name, and three of those stop the node. Here the working directory is "/".
+  def test_the_root_directory_on_the_code_path_leaves_the_code_server_running
+    assert_answers(
+      'code:set_path(["/" | code:get_path()]).' => /^true$/,
+      'is_pid(whereis(code_server)).' => /^true$/,
+      'code:del_path("/").' => /^true$/
+    )
   end
 
   def test_a_word_the_page_refuses_stops_the_start_with_its_reason
@@ -342,6 +337,26 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
+  # Types each expression at a prompt of one node and matches its answer, then halts.
+  def assert_answers(expected)
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home) do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        answers = expected.each_with_index.map do |(expression, _), index|
+          writer.write("#{expression}\n")
+          read_until(reader, transcript, /^#{index + 2}> /, deadline)
+          plain(transcript)[/^#{index + 1}> .*\z/m]
+        end
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        @reaped = true if wait_for(pid, deadline, transcript)
+        expected.values.zip(answers).each { |pattern, answer| assert_match pattern, answer }
+      end
+    end
+  end
+
   def spawn_shell(home, extra_environment = {})
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
       'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment

@@ -19,6 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: split_base/1 takes the empty base name of a root directory on the code path.
 -module(code_server).
 -moduledoc false.
 
@@ -665,7 +666,7 @@ split_base(BaseName) ->
 	    Vsn = lists:last(Toks),
 	    AllButLast = lists:droplast(Toks),
 	    {join(AllButLast, "-"),Vsn};
-	[_|_] ->
+	_ ->
 	    BaseName
     end.
 
