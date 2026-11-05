@@ -35,9 +35,10 @@ These shape every design and change; the rules below apply them.
    Techniques" and the BOOM project are the references
    ([research-os-ideas.md](docs/research-os-ideas.md)).
 5. **Unix look and feel.** To its users the system feels like Unix, as QNX
-   does. A POSIX-like layer that runs FreeBSD programs is a goal, but not
-   at the expense of the other principles; full POSIX compliance is not
-   the bar.
+   and Plan 9 do. A POSIX-like layer that runs FreeBSD programs, ported at
+   the source level, is a goal, but not at the expense of the other
+   principles; full POSIX compliance is not the bar. Programs brought in
+   from elsewhere come from FreeBSD or are BSD-licensed where possible.
 
 ## Collaboration
 
@@ -181,9 +182,13 @@ Third-party components are allowed when they pay for themselves.
     Thin C shims onto inherited C++ are allowed. Inherited build machinery
     stays behind erXos's top-level build, so replacing it later is a change
     behind one seam.
-  * Any other language needs a specific, stated reason. Never port working
-    code or a working script to another language just to change its
-    language.
+  * Declarative languages for specifications, rules and checks where
+    principle 4 makes them simpler than code: Datalog, awklog or relic,
+    each once I have approved it.
+  * Any other language needs a specific, stated reason, such as a category
+    of language the tree does not have yet, and my approval before its
+    first use. Never port working code or a working script to another
+    language just to change its language.
 
 Development tools are a separate question. If a build or development tool is
 missing, install it via Homebrew (`~/homebrew`) or ask me to install it. Do not

@@ -1320,6 +1320,12 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] POSIX-lite personality, FreeBSD programs: survey what FreeBSD
+  programs ported at the source level need beyond the planned layer
+  (BSD libc extensions, `sysctl`, `kqueue` and the like) and which of
+  them the layer should offer; programs brought in come from FreeBSD or
+  are BSD-licensed where possible (CLAUDE.md, principle 5;
+  [design-programs.md](docs/design-programs.md#the-posix-lite-personality)).
 * [Medium] liberx, `erx` backend, `erx_utcb_self`: the generated trap
   wrappers of calls with UTCB parameters
   (`liberx/backend/erx/arch/aarch64/generated/calls.c`) reach the calling
