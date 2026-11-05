@@ -438,8 +438,11 @@ count's, a listing page `Max` entries, and a lookup or a change of a
 name is logarithmic in the tree's nodes and the directory's entries.
 Three steps grow with what is stored: a truncation frees the chunks past
 the new size, at most `cap div 4096`, 8,192 for the default 32 MiB; a
-rename of a directory walks its new parent's chain to the root, as deep
-as the tree; and freeing a node drops its record, whose chunks ERTS
+rename walks a chain of parents toward the root, as deep as the tree,
+when it moves a directory (the new parent's, so the directory never
+lands below itself) and when its target is a directory (the source
+directory's, so a target that holds the source answers `ENOTEMPTY`, as
+Linux's does); and freeing a node drops its record, whose chunks ERTS
 frees at the tree process's next collection. None of them waits, but
 each delays the steps behind it. `check/1`, which grows with the tree,
 runs only in tests.
