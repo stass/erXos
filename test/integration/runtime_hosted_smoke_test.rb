@@ -240,6 +240,15 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # process_SUITE's spawn_request_link_parent_exit fills ETS tables to a peak of 1.6 GB on stock
+  # OTP. Rows this size come from the pool's carriers, where a single huge binary would not.
+  def test_a_workload_of_more_than_a_gigabyte_fits_the_pool
+    assert_answers(
+      'T = ets:new(t, [public]), [ets:insert(T, {I, lists:duplicate(1000, I)}) || I <- lists:seq(1, 100000)], ' \
+      'ets:info(T, size).' => /^100000$/
+    )
+  end
+
   # A library is not looked for at all: only NIFs linked into the runtime image load.
   def test_a_library_load_is_refused_without_reaching_the_host
     probe = compiled_load_nif_probe

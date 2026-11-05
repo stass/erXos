@@ -44,7 +44,7 @@
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
 #define VM_AREA_BYTES	(UINT64_C(64) * 1024 * 1024 * 1024)
-#define VM_POOL_PAGES	(UINT64_C(1024) * 1024 * 1024 / PAGE)
+#define VM_POOL_PAGES	(UINT64_C(8) * 1024 * 1024 * 1024 / PAGE)
 
 /* One byte per page of the area: its rights, and two facts the table does not hold. */
 #define PAGE_RIGHTS	UINT8_C(0x07)
