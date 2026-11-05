@@ -1,0 +1,290 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The file protocol's frame profile: 9P2000.L's operations as Erlang terms
+# (docs/design-files.md#the-file-protocol). tools/lib/erx/abi_emit_protocol.rb
+# generates erlang/apps/erx/src/generated/erx_9p_grammar.erl from it.
+#
+# Readings where docs/design-files.md states no bound:
+# * Uname, Aname, Version and a lock's ClientId are text of at most
+#   p9_string_max bytes, valid UTF-8 without NUL, as a name is.
+# * A link's text is bytes without NUL, at most p9_symlink_max; it need not
+#   be UTF-8 ("stored as given"), and an empty one decodes, so the server
+#   answers Linux's enoent for it.
+# * A walk name may be "..", which the server handles at the grant's root
+#   and below it; "." is not used in the protocol, as walk(5) says. A
+#   readdir entry may be "." or "..". An extended attribute's name may be
+#   empty, which xattrwalk uses for the list of names.
+# * A fid is any u32 but NOFID, which 9P reserves; Afid may be NOFID.
+# * readdir's Count has read's bound, p9_io_max.
+# * unlinkat's Flags are 0 or AT_REMOVEDIR, the table's own values.
+# * Every map carries all of 9P2000.L's fields of its message, as the wire
+#   does.
+# * A walk that names at least one name answers at least one qid: a
+#   failure at the first name is an error reply.
+# * lcreate always writes, whatever its flags: it may create a file, and
+#   which it does is known only at the server, so a read-only grant refuses
+#   it before any callback (F5).
+#
+# Members: "errors" lists the error atoms a reply may carry. "integer",
+# "text", "tuple", "list" and "map" declare the field kinds; an integer is
+# u8, u16, u32 or u64 with "max N", "except N", "in A B" or "or ATOM"; a
+# text has "max N", "utf8" and "refuse" of nul, slash, empty, dot (".")
+# and dotdot (".."); a list has "max N" elements and "packed N" for a
+# list of tuples ending in a text, each packing as N bytes and the text's.
+# An operation's "request" and "reply" fields are in 9P2000.L's order;
+# "refused" means it has no reply but an error. "check R.M le Q.M" holds a
+# reply field R to request field Q, measured by value, bytes, length or
+# packed; "le_nonempty" also requires R at least 1 when Q is. "writes"
+# marks an operation a read-only grant refuses: "always", "any F M..." when
+# F has a bit of any mask M set, "equal F N" when F is N.
+
+limit p9_nofid u32 0xffffffff
+limit p9_notag u16 0xffff
+limit p9_rlerror u8 7
+limit p9_maxwelem u32 16
+limit p9_string_max u32 255
+limit p9_symlink_max u32 4095
+limit p9_io_max u32 65536
+limit p9_xattr_max u32 65536
+# A readdir entry packs as qid 13, offset 8, type 1 and a name's 2-byte
+# length, then the name: p9_dirent_fixed bytes and the name's. A Count of
+# p9_io_max holds at most 65536 / 25 entries of one-byte names.
+limit p9_dirent_fixed u32 24
+limit p9_dirents_max u32 2621
+limit p9_at_removedir u32 0x200
+limit p9_o_accmode u32 3
+limit p9_o_trunc u32 0x200
+limit p9_lock_wrlck u8 1
+
+flags p9_getattr_mask u64
+  bit mode 0
+  bit nlink 1
+  bit uid 2
+  bit gid 3
+  bit rdev 4
+  bit atime 5
+  bit mtime 6
+  bit ctime 7
+  bit ino 8
+  bit size 9
+  bit blocks 10
+  bit btime 11
+  bit gen 12
+  bit data_version 13
+
+protocol erx_9p
+  errors enoent eacces eperm eexist enotdir eisdir enotempty erofs enospc efbig einval ebadf emfile enfile eio enametoolong enotsup eloop enxio exdev enomem eagain enodata erange enolck
+  integer fid u32 except @p9_nofid
+  integer io_count u32 max @p9_io_max
+  integer xattr_size u64 max @p9_xattr_max
+  integer unlink_flags u32 in 0 @p9_at_removedir
+  integer at u64 or unknown
+  text name max @name_max utf8 refuse nul slash empty dot dotdot
+  text walk_name max @name_max utf8 refuse nul slash empty dot
+  text entry_name max @name_max utf8 refuse nul slash empty
+  text xattr_name max @name_max utf8 refuse nul slash
+  text string max @p9_string_max utf8 refuse nul
+  text target max @p9_symlink_max refuse nul
+  text data max @p9_io_max
+  tuple qid u8 u32 u64
+  tuple dirent qid u64 u8 entry_name
+  list walk_names walk_name max @p9_maxwelem
+  list qids qid max @p9_maxwelem
+  list dirents dirent max @p9_dirents_max packed @p9_dirent_fixed
+  map attr
+    field valid u64
+    field qid qid
+    field mode u32
+    field uid u32
+    field gid u32
+    field nlink u64
+    field rdev u64
+    field size u64
+    field blksize u64
+    field blocks u64
+    field atime_sec u64
+    field atime_nsec u64
+    field mtime_sec u64
+    field mtime_nsec u64
+    field ctime_sec u64
+    field ctime_nsec u64
+    field btime_sec u64
+    field btime_nsec u64
+    field gen u64
+    field data_version u64
+  map set_attr
+    field valid u32
+    field mode u32
+    field uid u32
+    field gid u32
+    field size u64
+    field atime_sec u64
+    field atime_nsec u64
+    field mtime_sec u64
+    field mtime_nsec u64
+  map statfs
+    field type u32
+    field bsize u32
+    field blocks u64
+    field bfree u64
+    field bavail u64
+    field files u64
+    field ffree u64
+    field fsid u64
+    field namelen u32
+  operation statfs 8
+    request fid fid
+    reply statfs statfs
+  operation lopen 12
+    request fid fid
+    request flags u32
+    reply qid qid
+    reply iounit u32
+    writes any flags @p9_o_accmode @p9_o_trunc
+  operation lcreate 14
+    request fid fid
+    request name name
+    request flags u32
+    request mode u32
+    request gid u32
+    reply qid qid
+    reply iounit u32
+    writes always
+  operation symlink 16
+    request fid fid
+    request name name
+    request target target
+    request gid u32
+    reply qid qid
+    writes always
+  operation mknod 18
+    request dfid fid
+    request name name
+    request mode u32
+    request major u32
+    request minor u32
+    request gid u32
+    reply qid qid
+    writes always
+  operation readlink 22
+    request fid fid
+    reply target target
+  operation getattr 24
+    request fid fid
+    request request_mask u64
+    reply attr attr
+  operation setattr 26
+    request fid fid
+    request attr set_attr
+    writes always
+  operation xattrwalk 30
+    request fid fid
+    request new_fid fid
+    request name xattr_name
+    reply size xattr_size
+  operation xattrcreate 32
+    request fid fid
+    request name xattr_name
+    request size xattr_size
+    request flags u32
+    writes always
+  operation readdir 40
+    request fid fid
+    request offset u64
+    request count io_count
+    reply entries dirents
+    check entries.packed le count.value
+  operation fsync 50
+    request fid fid
+    request datasync u32
+  operation lock 52
+    request fid fid
+    request type u8
+    request flags u32
+    request start u64
+    request length u64
+    request proc_id u32
+    request client_id string
+    reply status u8
+    writes equal type @p9_lock_wrlck
+  operation getlock 54
+    request fid fid
+    request type u8
+    request start u64
+    request length u64
+    request proc_id u32
+    request client_id string
+    reply type u8
+    reply start u64
+    reply length u64
+    reply proc_id u32
+    reply client_id string
+  operation link 70
+    request dfid fid
+    request fid fid
+    request name name
+    writes always
+  operation mkdir 72
+    request dfid fid
+    request name name
+    request mode u32
+    request gid u32
+    reply qid qid
+    writes always
+  operation renameat 74
+    request old_dir_fid fid
+    request old_name name
+    request new_dir_fid fid
+    request new_name name
+    writes always
+  operation unlinkat 76
+    request dir_fid fid
+    request name name
+    request flags unlink_flags
+    writes always
+  operation version 100
+    request msize u32
+    request version string
+    reply msize u32
+    reply version string
+    check msize.value le msize.value
+  operation auth 102
+    request afid u32
+    request uname string
+    request aname string
+    request n_uname u32
+    refused
+  operation attach 104
+    request fid fid
+    request afid u32
+    request uname string
+    request aname string
+    request n_uname u32
+    reply qid qid
+  operation flush 108
+    request old_tag alias
+  operation walk 110
+    request fid fid
+    request new_fid fid
+    request names walk_names
+    reply qids qids
+    check qids.length le_nonempty names.length
+  operation read 116
+    request fid fid
+    request offset u64
+    request count io_count
+    reply data data
+    check data.bytes le count.value
+  operation write 118
+    request fid fid
+    request offset u64
+    request data data
+    reply count u32
+    reply at at
+    check count.value le data.bytes
+    writes always
+  operation clunk 120
+    request fid fid
+  operation remove 122
+    request fid fid
+    writes always

@@ -104,14 +104,14 @@ module Erx
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :inputs, keyword_init: true)
+                        :protocols, :inputs, keyword_init: true)
 
     # Resolve types before readers and calls. No emitter receives an unchecked
     # declaration, and no output depends on hash insertion or include order.
     module Model
       TOP_LEVEL = %w[abi arch trap reg limit scalar enum flags bytes layout
                      status right type kind cap call reader translation service
-                     projection].freeze
+                     projection protocol].freeze
       TYPE_KINDS = %w[scalar enum flags bytes layout].freeze
       BASE_TYPES = [1, 2, 4, 8].flat_map do |size|
         [false, true].map do |signed|
@@ -163,6 +163,7 @@ module Erx
         translations = validate_translations(by_kind.fetch('translation', []), types)
         services = validate_services(by_kind.fetch('service', []))
         projections = validate_projections(by_kind.fetch('projection', []), types)
+        protocols = validate_protocols(by_kind.fetch('protocol', []), constants)
         all_constants = constants.dup
         [type_constants(types), right_constants(rights)].each do |addition|
           addition.each do |name, value|
@@ -181,7 +182,8 @@ module Erx
                    rights: rights.freeze, objects: objects.freeze, kinds: kinds.freeze, caps: caps.freeze,
                    calls: calls.freeze, readers: readers.sort_by(&:name).freeze,
                    translations: translations.freeze, services: services.freeze,
-                   projections: projections.freeze, inputs: source.inputs).freeze
+                   projections: projections.freeze, protocols: protocols,
+                   inputs: source.inputs).freeze
         freeze_value(result)
       end
 
@@ -894,6 +896,11 @@ module Erx
       def validate_services(declarations)
         require_relative 'abi_contracts'
         Contracts.services(declarations)
+      end
+
+      def validate_protocols(declarations, constants)
+        require_relative 'abi_protocol'
+        Protocols.validate(declarations, constants)
       end
 
       def validate_projections(declarations, types)

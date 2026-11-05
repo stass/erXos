@@ -7,6 +7,7 @@ include services/console.txt
 include manifest.txt
 include formats/elf64.txt
 include kernel.txt
+include protocols/9p.txt
 
 limit page_size u32 4096
 limit copy_max u32 1048576

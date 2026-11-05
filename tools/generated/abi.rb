@@ -7714,6 +7714,28 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["p9_getattr_mask"] = EnumType.new(
+        name: "p9_getattr_mask".b,
+        base: types.fetch("u64"),
+        members: {
+          "atime".b => 32,
+          "blocks".b => 1024,
+          "btime".b => 2048,
+          "ctime".b => 128,
+          "data_version".b => 8192,
+          "gen".b => 4096,
+          "gid".b => 8,
+          "ino".b => 256,
+          "mode".b => 1,
+          "mtime".b => 64,
+          "nlink".b => 2,
+          "rdev".b => 16,
+          "size".b => 512,
+          "uid".b => 4
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
       types["pack_flags"] = EnumType.new(
         name: "pack_flags".b,
         base: types.fetch("u32"),
@@ -10127,6 +10149,7 @@ module Erx
           "mf_window_rights".b,
           "mf_window_role".b,
           "erx_mf_window".b,
+          "p9_getattr_mask".b,
           "pack_flags".b,
           "erx_boot_handoff".b,
           "erx_boot_info".b,
@@ -12090,6 +12113,174 @@ module Erx
             value: 0,
             type: types.fetch("i32"),
             description: "success".b
+          ).freeze,
+          "p9_at_removedir".b => Constant.new(
+            name: "p9_at_removedir".b,
+            value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_dirent_fixed".b => Constant.new(
+            name: "p9_dirent_fixed".b,
+            value: 24,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_dirents_max".b => Constant.new(
+            name: "p9_dirents_max".b,
+            value: 2621,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_atime".b => Constant.new(
+            name: "p9_getattr_mask_atime".b,
+            value: 32,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_blocks".b => Constant.new(
+            name: "p9_getattr_mask_blocks".b,
+            value: 1024,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_btime".b => Constant.new(
+            name: "p9_getattr_mask_btime".b,
+            value: 2048,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_ctime".b => Constant.new(
+            name: "p9_getattr_mask_ctime".b,
+            value: 128,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_data_version".b => Constant.new(
+            name: "p9_getattr_mask_data_version".b,
+            value: 8192,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_gen".b => Constant.new(
+            name: "p9_getattr_mask_gen".b,
+            value: 4096,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_gid".b => Constant.new(
+            name: "p9_getattr_mask_gid".b,
+            value: 8,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_ino".b => Constant.new(
+            name: "p9_getattr_mask_ino".b,
+            value: 256,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_mode".b => Constant.new(
+            name: "p9_getattr_mask_mode".b,
+            value: 1,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_mtime".b => Constant.new(
+            name: "p9_getattr_mask_mtime".b,
+            value: 64,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_nlink".b => Constant.new(
+            name: "p9_getattr_mask_nlink".b,
+            value: 2,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_rdev".b => Constant.new(
+            name: "p9_getattr_mask_rdev".b,
+            value: 16,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_size".b => Constant.new(
+            name: "p9_getattr_mask_size".b,
+            value: 512,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_uid".b => Constant.new(
+            name: "p9_getattr_mask_uid".b,
+            value: 4,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_io_max".b => Constant.new(
+            name: "p9_io_max".b,
+            value: 65536,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_lock_wrlck".b => Constant.new(
+            name: "p9_lock_wrlck".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "p9_maxwelem".b => Constant.new(
+            name: "p9_maxwelem".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_nofid".b => Constant.new(
+            name: "p9_nofid".b,
+            value: 4294967295,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_notag".b => Constant.new(
+            name: "p9_notag".b,
+            value: 65535,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "p9_o_accmode".b => Constant.new(
+            name: "p9_o_accmode".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_o_trunc".b => Constant.new(
+            name: "p9_o_trunc".b,
+            value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_rlerror".b => Constant.new(
+            name: "p9_rlerror".b,
+            value: 7,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "p9_string_max".b => Constant.new(
+            name: "p9_string_max".b,
+            value: 255,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_symlink_max".b => Constant.new(
+            name: "p9_symlink_max".b,
+            value: 4095,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_xattr_max".b => Constant.new(
+            name: "p9_xattr_max".b,
+            value: 65536,
+            type: types.fetch("u32"),
+            description: nil
           ).freeze,
           "pack_development".b => Constant.new(
             name: "pack_development".b,
@@ -14924,6 +15115,660 @@ module Erx
         translations: [].freeze,
         services: [].freeze,
         projections: [].freeze,
+        protocols: [
+          {
+            :name => "erx_9p".b,
+            :module => "erx_9p_grammar".b,
+            :source => "abi/protocols/9p.txt",
+            :errors => [
+              "enoent".b,
+              "eacces".b,
+              "eperm".b,
+              "eexist".b,
+              "enotdir".b,
+              "eisdir".b,
+              "enotempty".b,
+              "erofs".b,
+              "enospc".b,
+              "efbig".b,
+              "einval".b,
+              "ebadf".b,
+              "emfile".b,
+              "enfile".b,
+              "eio".b,
+              "enametoolong".b,
+              "enotsup".b,
+              "eloop".b,
+              "enxio".b,
+              "exdev".b,
+              "enomem".b,
+              "eagain".b,
+              "enodata".b,
+              "erange".b,
+              "enolck".b
+            ].freeze,
+            :kinds => {
+              "fid".b => {
+                :form => "integer",
+                :base => "u32".b,
+                :except => {
+                  :value => 4294967295,
+                  :constant => "p9_nofid".b
+                }.freeze
+              }.freeze,
+              "io_count".b => {
+                :form => "integer",
+                :base => "u32".b,
+                :max => {
+                  :value => 65536,
+                  :constant => "p9_io_max".b
+                }.freeze
+              }.freeze,
+              "xattr_size".b => {
+                :form => "integer",
+                :base => "u64".b,
+                :max => {
+                  :value => 65536,
+                  :constant => "p9_xattr_max".b
+                }.freeze
+              }.freeze,
+              "unlink_flags".b => {
+                :form => "integer",
+                :base => "u32".b,
+                :in => [
+                  {
+                    :value => 0,
+                    :constant => nil
+                  }.freeze,
+                  {
+                    :value => 512,
+                    :constant => "p9_at_removedir".b
+                  }.freeze
+                ].freeze
+              }.freeze,
+              "at".b => {
+                :form => "integer",
+                :base => "u64".b,
+                :atom => "unknown".b
+              }.freeze,
+              "name".b => {
+                :form => "text",
+                :max => {
+                  :value => 255,
+                  :constant => "name_max".b
+                }.freeze,
+                :utf8 => true,
+                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b, "dotdot".b].freeze
+              }.freeze,
+              "walk_name".b => {
+                :form => "text",
+                :max => {
+                  :value => 255,
+                  :constant => "name_max".b
+                }.freeze,
+                :utf8 => true,
+                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b].freeze
+              }.freeze,
+              "entry_name".b => {
+                :form => "text",
+                :max => {
+                  :value => 255,
+                  :constant => "name_max".b
+                }.freeze,
+                :utf8 => true,
+                :refuse => ["nul".b, "slash".b, "empty".b].freeze
+              }.freeze,
+              "xattr_name".b => {
+                :form => "text",
+                :max => {
+                  :value => 255,
+                  :constant => "name_max".b
+                }.freeze,
+                :utf8 => true,
+                :refuse => ["nul".b, "slash".b].freeze
+              }.freeze,
+              "string".b => {
+                :form => "text",
+                :max => {
+                  :value => 255,
+                  :constant => "p9_string_max".b
+                }.freeze,
+                :utf8 => true,
+                :refuse => ["nul".b].freeze
+              }.freeze,
+              "target".b => {
+                :form => "text",
+                :max => {
+                  :value => 4095,
+                  :constant => "p9_symlink_max".b
+                }.freeze,
+                :utf8 => false,
+                :refuse => ["nul".b].freeze
+              }.freeze,
+              "data".b => {
+                :form => "text",
+                :max => {
+                  :value => 65536,
+                  :constant => "p9_io_max".b
+                }.freeze,
+                :utf8 => false,
+                :refuse => [].freeze
+              }.freeze,
+              "qid".b => {
+                :form => "tuple",
+                :elements => ["u8".b, "u32".b, "u64".b].freeze
+              }.freeze,
+              "dirent".b => {
+                :form => "tuple",
+                :elements => ["qid".b, "u64".b, "u8".b, "entry_name".b].freeze
+              }.freeze,
+              "walk_names".b => {
+                :form => "list",
+                :element => "walk_name".b,
+                :max => {
+                  :value => 16,
+                  :constant => "p9_maxwelem".b
+                }.freeze
+              }.freeze,
+              "qids".b => {
+                :form => "list",
+                :element => "qid".b,
+                :max => {
+                  :value => 16,
+                  :constant => "p9_maxwelem".b
+                }.freeze
+              }.freeze,
+              "dirents".b => {
+                :form => "list",
+                :element => "dirent".b,
+                :max => {
+                  :value => 2621,
+                  :constant => "p9_dirents_max".b
+                }.freeze,
+                :packed => {
+                  :value => 24,
+                  :constant => "p9_dirent_fixed".b
+                }.freeze
+              }.freeze,
+              "attr".b => {
+                :form => "map",
+                :fields => [
+                  ["valid".b, "u64".b].freeze,
+                  ["qid".b, "qid".b].freeze,
+                  ["mode".b, "u32".b].freeze,
+                  ["uid".b, "u32".b].freeze,
+                  ["gid".b, "u32".b].freeze,
+                  ["nlink".b, "u64".b].freeze,
+                  ["rdev".b, "u64".b].freeze,
+                  ["size".b, "u64".b].freeze,
+                  ["blksize".b, "u64".b].freeze,
+                  ["blocks".b, "u64".b].freeze,
+                  ["atime_sec".b, "u64".b].freeze,
+                  ["atime_nsec".b, "u64".b].freeze,
+                  ["mtime_sec".b, "u64".b].freeze,
+                  ["mtime_nsec".b, "u64".b].freeze,
+                  ["ctime_sec".b, "u64".b].freeze,
+                  ["ctime_nsec".b, "u64".b].freeze,
+                  ["btime_sec".b, "u64".b].freeze,
+                  ["btime_nsec".b, "u64".b].freeze,
+                  ["gen".b, "u64".b].freeze,
+                  ["data_version".b, "u64".b].freeze
+                ].freeze
+              }.freeze,
+              "set_attr".b => {
+                :form => "map",
+                :fields => [
+                  ["valid".b, "u32".b].freeze,
+                  ["mode".b, "u32".b].freeze,
+                  ["uid".b, "u32".b].freeze,
+                  ["gid".b, "u32".b].freeze,
+                  ["size".b, "u64".b].freeze,
+                  ["atime_sec".b, "u64".b].freeze,
+                  ["atime_nsec".b, "u64".b].freeze,
+                  ["mtime_sec".b, "u64".b].freeze,
+                  ["mtime_nsec".b, "u64".b].freeze
+                ].freeze
+              }.freeze,
+              "statfs".b => {
+                :form => "map",
+                :fields => [
+                  ["type".b, "u32".b].freeze,
+                  ["bsize".b, "u32".b].freeze,
+                  ["blocks".b, "u64".b].freeze,
+                  ["bfree".b, "u64".b].freeze,
+                  ["bavail".b, "u64".b].freeze,
+                  ["files".b, "u64".b].freeze,
+                  ["ffree".b, "u64".b].freeze,
+                  ["fsid".b, "u64".b].freeze,
+                  ["namelen".b, "u32".b].freeze
+                ].freeze
+              }.freeze
+            }.freeze,
+            :operations => [
+              {
+                :name => "statfs".b,
+                :type => 8,
+                :request => [["fid".b, "fid".b].freeze].freeze,
+                :reply => [["statfs".b, "statfs".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "lopen".b,
+                :type => 12,
+                :request => [["fid".b, "fid".b].freeze, ["flags".b, "u32".b].freeze].freeze,
+                :reply => [["qid".b, "qid".b].freeze, ["iounit".b, "u32".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "any",
+                  :field => "flags".b,
+                  :masks => [
+                    {
+                      :value => 3,
+                      :constant => "p9_o_accmode".b
+                    }.freeze,
+                    {
+                      :value => 512,
+                      :constant => "p9_o_trunc".b
+                    }.freeze
+                  ].freeze
+                }.freeze
+              }.freeze,
+              {
+                :name => "lcreate".b,
+                :type => 14,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze,
+                  ["flags".b, "u32".b].freeze,
+                  ["mode".b, "u32".b].freeze,
+                  ["gid".b, "u32".b].freeze
+                ].freeze,
+                :reply => [["qid".b, "qid".b].freeze, ["iounit".b, "u32".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "symlink".b,
+                :type => 16,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze,
+                  ["target".b, "target".b].freeze,
+                  ["gid".b, "u32".b].freeze
+                ].freeze,
+                :reply => [["qid".b, "qid".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "mknod".b,
+                :type => 18,
+                :request => [
+                  ["dfid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze,
+                  ["mode".b, "u32".b].freeze,
+                  ["major".b, "u32".b].freeze,
+                  ["minor".b, "u32".b].freeze,
+                  ["gid".b, "u32".b].freeze
+                ].freeze,
+                :reply => [["qid".b, "qid".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "readlink".b,
+                :type => 22,
+                :request => [["fid".b, "fid".b].freeze].freeze,
+                :reply => [["target".b, "target".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "getattr".b,
+                :type => 24,
+                :request => [["fid".b, "fid".b].freeze, ["request_mask".b, "u64".b].freeze].freeze,
+                :reply => [["attr".b, "attr".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "setattr".b,
+                :type => 26,
+                :request => [["fid".b, "fid".b].freeze, ["attr".b, "set_attr".b].freeze].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "xattrwalk".b,
+                :type => 30,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["new_fid".b, "fid".b].freeze,
+                  ["name".b, "xattr_name".b].freeze
+                ].freeze,
+                :reply => [["size".b, "xattr_size".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "xattrcreate".b,
+                :type => 32,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["name".b, "xattr_name".b].freeze,
+                  ["size".b, "xattr_size".b].freeze,
+                  ["flags".b, "u32".b].freeze
+                ].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "readdir".b,
+                :type => 40,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["offset".b, "u64".b].freeze,
+                  ["count".b, "io_count".b].freeze
+                ].freeze,
+                :reply => [["entries".b, "dirents".b].freeze].freeze,
+                :checks => [
+                  {
+                    :reply => {
+                      :field => "entries".b,
+                      :measure => "packed".b,
+                      :kind => "dirents".b
+                    }.freeze,
+                    :relation => "le".b,
+                    :request => {
+                      :field => "count".b,
+                      :measure => "value".b,
+                      :kind => "io_count".b
+                    }.freeze
+                  }.freeze
+                ].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "fsync".b,
+                :type => 50,
+                :request => [["fid".b, "fid".b].freeze, ["datasync".b, "u32".b].freeze].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "lock".b,
+                :type => 52,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["type".b, "u8".b].freeze,
+                  ["flags".b, "u32".b].freeze,
+                  ["start".b, "u64".b].freeze,
+                  ["length".b, "u64".b].freeze,
+                  ["proc_id".b, "u32".b].freeze,
+                  ["client_id".b, "string".b].freeze
+                ].freeze,
+                :reply => [["status".b, "u8".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "equal",
+                  :field => "type".b,
+                  :value => {
+                    :value => 1,
+                    :constant => "p9_lock_wrlck".b
+                  }.freeze
+                }.freeze
+              }.freeze,
+              {
+                :name => "getlock".b,
+                :type => 54,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["type".b, "u8".b].freeze,
+                  ["start".b, "u64".b].freeze,
+                  ["length".b, "u64".b].freeze,
+                  ["proc_id".b, "u32".b].freeze,
+                  ["client_id".b, "string".b].freeze
+                ].freeze,
+                :reply => [
+                  ["type".b, "u8".b].freeze,
+                  ["start".b, "u64".b].freeze,
+                  ["length".b, "u64".b].freeze,
+                  ["proc_id".b, "u32".b].freeze,
+                  ["client_id".b, "string".b].freeze
+                ].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "link".b,
+                :type => 70,
+                :request => [
+                  ["dfid".b, "fid".b].freeze,
+                  ["fid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze
+                ].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "mkdir".b,
+                :type => 72,
+                :request => [
+                  ["dfid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze,
+                  ["mode".b, "u32".b].freeze,
+                  ["gid".b, "u32".b].freeze
+                ].freeze,
+                :reply => [["qid".b, "qid".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "renameat".b,
+                :type => 74,
+                :request => [
+                  ["old_dir_fid".b, "fid".b].freeze,
+                  ["old_name".b, "name".b].freeze,
+                  ["new_dir_fid".b, "fid".b].freeze,
+                  ["new_name".b, "name".b].freeze
+                ].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "unlinkat".b,
+                :type => 76,
+                :request => [
+                  ["dir_fid".b, "fid".b].freeze,
+                  ["name".b, "name".b].freeze,
+                  ["flags".b, "unlink_flags".b].freeze
+                ].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "version".b,
+                :type => 100,
+                :request => [["msize".b, "u32".b].freeze, ["version".b, "string".b].freeze].freeze,
+                :reply => [["msize".b, "u32".b].freeze, ["version".b, "string".b].freeze].freeze,
+                :checks => [
+                  {
+                    :reply => {
+                      :field => "msize".b,
+                      :measure => "value".b,
+                      :kind => "u32".b
+                    }.freeze,
+                    :relation => "le".b,
+                    :request => {
+                      :field => "msize".b,
+                      :measure => "value".b,
+                      :kind => "u32".b
+                    }.freeze
+                  }.freeze
+                ].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "auth".b,
+                :type => 102,
+                :request => [
+                  ["afid".b, "u32".b].freeze,
+                  ["uname".b, "string".b].freeze,
+                  ["aname".b, "string".b].freeze,
+                  ["n_uname".b, "u32".b].freeze
+                ].freeze,
+                :reply => nil,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "attach".b,
+                :type => 104,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["afid".b, "u32".b].freeze,
+                  ["uname".b, "string".b].freeze,
+                  ["aname".b, "string".b].freeze,
+                  ["n_uname".b, "u32".b].freeze
+                ].freeze,
+                :reply => [["qid".b, "qid".b].freeze].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "flush".b,
+                :type => 108,
+                :request => [["old_tag".b, "alias".b].freeze].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "walk".b,
+                :type => 110,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["new_fid".b, "fid".b].freeze,
+                  ["names".b, "walk_names".b].freeze
+                ].freeze,
+                :reply => [["qids".b, "qids".b].freeze].freeze,
+                :checks => [
+                  {
+                    :reply => {
+                      :field => "qids".b,
+                      :measure => "length".b,
+                      :kind => "qids".b
+                    }.freeze,
+                    :relation => "le_nonempty".b,
+                    :request => {
+                      :field => "names".b,
+                      :measure => "length".b,
+                      :kind => "walk_names".b
+                    }.freeze
+                  }.freeze
+                ].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "read".b,
+                :type => 116,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["offset".b, "u64".b].freeze,
+                  ["count".b, "io_count".b].freeze
+                ].freeze,
+                :reply => [["data".b, "data".b].freeze].freeze,
+                :checks => [
+                  {
+                    :reply => {
+                      :field => "data".b,
+                      :measure => "bytes".b,
+                      :kind => "data".b
+                    }.freeze,
+                    :relation => "le".b,
+                    :request => {
+                      :field => "count".b,
+                      :measure => "value".b,
+                      :kind => "io_count".b
+                    }.freeze
+                  }.freeze
+                ].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "write".b,
+                :type => 118,
+                :request => [
+                  ["fid".b, "fid".b].freeze,
+                  ["offset".b, "u64".b].freeze,
+                  ["data".b, "data".b].freeze
+                ].freeze,
+                :reply => [["count".b, "u32".b].freeze, ["at".b, "at".b].freeze].freeze,
+                :checks => [
+                  {
+                    :reply => {
+                      :field => "count".b,
+                      :measure => "value".b,
+                      :kind => "u32".b
+                    }.freeze,
+                    :relation => "le".b,
+                    :request => {
+                      :field => "data".b,
+                      :measure => "bytes".b,
+                      :kind => "data".b
+                    }.freeze
+                  }.freeze
+                ].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze,
+              {
+                :name => "clunk".b,
+                :type => 120,
+                :request => [["fid".b, "fid".b].freeze].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => nil
+              }.freeze,
+              {
+                :name => "remove".b,
+                :type => 122,
+                :request => [["fid".b, "fid".b].freeze].freeze,
+                :reply => [].freeze,
+                :checks => [].freeze,
+                :writes => {
+                  :rule => "always"
+                }.freeze
+              }.freeze
+            ].freeze
+          }.freeze
+        ].freeze,
         types: types.freeze,
         inputs: {}.freeze
       ))
