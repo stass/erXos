@@ -327,6 +327,14 @@ class OriginTest < Minitest::Test
     assert_raises(Erx::Error) { @origin.check }
   end
 
+def test_an_erxos_xml_file_is_an_addition_after_its_xml_declaration
+  notice = "<!--\n  Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n  SPDX-License-Identifier: BSD-2-Clause\n-->\n"
+  assert Erx::Attribution.erxos_addition?("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + notice + "<device/>\n")
+  assert Erx::Attribution.erxos_addition?(notice + "<device/>\n")
+  refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<device/>\n<!-- " + notice + " -->\n")
+  refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<?xml version=\"1.0\"?>\n" + notice)
+end
+
   def test_notice_token_in_body_string_is_not_a_header_notice
     write_file('source.c', "int value;\n")
     write_origin

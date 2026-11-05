@@ -84,7 +84,7 @@ erx_pl011_rsr_write(erx_mmio_t device, uint32_t value)
 {
 	if (device.base == NULL || device.length < 8 ||
 	    (uintptr_t)device.base % 4 != 0 ||
-	    (value & ~UINT32_C(0xf)) != 0)
+	    (value & ~UINT32_C(0x0)) != 0)
 		return (false);
 	*(volatile uint32_t *)(device.base + 4) = value;
 	return (true);
@@ -96,26 +96,10 @@ erx_pl011_rsr_fe_get(uint32_t word)
 	return ((word >> 0) & UINT32_C(0x1));
 }
 
-static inline bool
-erx_pl011_rsr_fe_clear(erx_mmio_t device, uint32_t value)
-{
-	if ((value & ~UINT32_C(0x1)) != 0)
-		return (false);
-	return (erx_pl011_rsr_write(device, value << 0));
-}
-
 static inline uint32_t
 erx_pl011_rsr_pe_get(uint32_t word)
 {
 	return ((word >> 1) & UINT32_C(0x1));
-}
-
-static inline bool
-erx_pl011_rsr_pe_clear(erx_mmio_t device, uint32_t value)
-{
-	if ((value & ~UINT32_C(0x1)) != 0)
-		return (false);
-	return (erx_pl011_rsr_write(device, value << 1));
 }
 
 static inline uint32_t
@@ -124,26 +108,10 @@ erx_pl011_rsr_be_get(uint32_t word)
 	return ((word >> 2) & UINT32_C(0x1));
 }
 
-static inline bool
-erx_pl011_rsr_be_clear(erx_mmio_t device, uint32_t value)
-{
-	if ((value & ~UINT32_C(0x1)) != 0)
-		return (false);
-	return (erx_pl011_rsr_write(device, value << 2));
-}
-
 static inline uint32_t
 erx_pl011_rsr_oe_get(uint32_t word)
 {
 	return ((word >> 3) & UINT32_C(0x1));
-}
-
-static inline bool
-erx_pl011_rsr_oe_clear(erx_mmio_t device, uint32_t value)
-{
-	if ((value & ~UINT32_C(0x1)) != 0)
-		return (false);
-	return (erx_pl011_rsr_write(device, value << 3));
 }
 
 static inline bool

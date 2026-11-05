@@ -8,10 +8,10 @@ require_relative '../../tools/lib/erx/hardware'
 class HardwareTest < Minitest::Test
   def setup
     @repository = File.expand_path('../..', __dir__)
-    @source = File.binread(File.join(@repository, 'hw/svd/pl011.svd'))
+    @source = File.binread(File.join(@repository, 'hw/svd/pl011/pl011.svd'))
     @root = Dir.mktmpdir('erx-hardware-')
-    FileUtils.mkdir_p(File.join(@root, 'hw/svd'))
-    File.binwrite(File.join(@root, 'hw/svd/pl011.svd'), @source)
+    FileUtils.mkdir_p(File.join(@root, 'hw/svd/pl011'))
+    File.binwrite(File.join(@root, 'hw/svd/pl011/pl011.svd'), @source)
   end
 
   def teardown
@@ -33,6 +33,14 @@ class HardwareTest < Minitest::Test
     refute_includes output, 'erx_pl011_icr_rtic_set'
     refute_includes output, 'erx_pl011_dr_modify'
   end
+
+def test_rsr_is_written_whole_and_its_errors_are_not_one_to_clear
+  rsr = Erx::Hardware.parse_svd(@source).registers.find { |register| register.name == 'RSR' }
+  assert_equal 'read-write', rsr.access
+  assert_equal %w[FE PE BE OE], rsr.fields.map(&:name)
+  assert rsr.fields.none?(&:clear)
+  assert rsr.fields.all? { |field| field.access == 'read-only' }
+end
 
   def test_xml_and_semantic_rejections
     malformed = [@source + '<device/>', @source.sub('<device schemaVersion="1.3">',
@@ -78,7 +86,7 @@ class HardwareTest < Minitest::Test
   end
 
   def test_a_peripheral_cannot_take_a_device_table_header_name
-    File.binwrite(File.join(@root, 'hw/svd/pl011.svd'), @source.gsub('PL011', 'DEVICE_TABLE'))
+    File.binwrite(File.join(@root, 'hw/svd/pl011/pl011.svd'), @source.gsub('PL011', 'DEVICE_TABLE'))
     assert_raises(Erx::Error) { Erx::Hardware.output_plan(root: @root) }
   end
 
@@ -103,7 +111,7 @@ class HardwareTest < Minitest::Test
 
   def test_unpublishable_name_is_rejected_before_any_output
     source = @source.sub('<name>PL011</name><baseAddress>', "<name>#{'A' * 256}</name><baseAddress>")
-    File.binwrite(File.join(@root, 'hw/svd/pl011.svd'), source)
+    File.binwrite(File.join(@root, 'hw/svd/pl011/pl011.svd'), source)
     assert_raises(Erx::Error) { Erx::Hardware.output_plan(root: @root) }
     refute File.exist?(File.join(@root, 'include/erx/mmio.h'))
   end

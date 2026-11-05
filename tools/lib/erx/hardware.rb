@@ -504,7 +504,7 @@ module Erx
     # All parsing and rendering completes before the first output is written.
     # The directory is owned by this frontend, making orphan checks explicit.
     def output_plan(root:)
-      devices = Dir.glob(File.join(root, 'hw/svd/*.svd')).sort.map do |path|
+      devices = Dir.glob(File.join(root, 'hw/svd/**/*.svd')).sort.map do |path|
         parse_svd(BoundedFile.read(path, maximum: 4 * 1024 * 1024))
       end
       raise Error, 'hardware input inventory is empty' if devices.empty?

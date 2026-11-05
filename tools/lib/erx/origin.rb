@@ -13,6 +13,8 @@ module Erx
   # licence merely because a file has no notice. Defaults require review.
   module Attribution
     ERXOS_LICENSE = 'BSD-2-Clause'
+    # An XML file opens with its declaration alone on the first line, before any comment.
+    XML_DECLARATION = /\A<\?xml[ \t][^<>]*\?>[ \t]*\r?\n?\z/n
     ERXOS_NOTICE = "SPDX-License-Identifier: #{ERXOS_LICENSE}".freeze
     ERXOS_COPYRIGHT = /Copyright \(c\) \d{4}(?:-\d{4})?, Stanislav Sedov <stas@deglitch\.com>/n
     # The comment forms attribution reads a licence from. A declaration in any
@@ -126,15 +128,21 @@ module Erx
     private_class_method :only_in?
 
     # Whether the file's opening comment lines, within the read bound, hold the
-    # notice. Any line opening with a comment leader of a language counts.
+    # notice. Any line opening with a comment leader of a language counts, and so
+    # does a first line that is an XML declaration, which must precede any comment,
+    # and every line inside an XML comment that was opened in the header.
     def header_notice?(bytes, notice:)
-      bytes.byteslice(0, 8192).lines.each do |line|
+      inside_xml_comment = false
+      bytes.byteslice(0, 8192).lines.each_with_index do |line, number|
         stripped = line.lstrip
         next if stripped.strip.empty?
-        return false unless stripped.start_with?('#', '%', ';', '//', '/*', '*', '<!--', '--')
+        next if number.zero? && line.match?(XML_DECLARATION)
+        return false unless inside_xml_comment || stripped.start_with?('#', '%', ';', '//', '/*', '*', '<!--', '--')
         # A closing `*/` alone on its line leaves no text before it.
         comment = stripped.split('*/', 2).first.split('-->', 2).first.to_s
         return true if comment.include?(notice)
+
+        inside_xml_comment = (inside_xml_comment || stripped.start_with?('<!--')) && !stripped.include?('-->')
       end
       false
     end

@@ -134,6 +134,24 @@ check_field_value(const erx_device_register_t *reg, const erx_device_field_t *fi
 	}
 }
 
+/* The pure read of a field out of a word: the register's own form of name, and a word its width holds. */
+static void
+check_field_of(const erx_device_register_t *reg, const erx_device_field_t *field)
+{
+	const erx_device_element_t right = { .indexed = reg->count > 1, .index = 0 };
+	const erx_device_element_t wrong = { .indexed = reg->count == 1, .index = 0 };
+	const erx_device_element_t beyond = { .indexed = true, .index = reg->count };
+	const bool readable = erx_device_field_read_allowed(reg, field);
+	uint64_t value = 0;
+
+	CHECK(erx_device_field_of(reg, right, field, field->mask, &value) == readable);
+	CHECK(!readable || value == field->mask >> field->shift);
+	CHECK(!erx_device_field_of(reg, wrong, field, field->mask, &value));
+	CHECK(!erx_device_field_of(reg, beyond, field, field->mask, &value));
+	if (reg->width < 64)
+		CHECK(!erx_device_field_of(reg, right, field, UINT64_C(1) << reg->width, &value));
+}
+
 /* Every register and every field of the table, at each boundary of its width. */
 static void
 check_every_entry(const erx_device_peripheral_t *peripheral)
@@ -169,6 +187,7 @@ check_every_entry(const erx_device_peripheral_t *peripheral)
 			    (reg->access != ERX_DEVICE_WRITE_ONLY && field->access != ERX_DEVICE_WRITE_ONLY));
 			for (size_t value = 0; value < sizeof(values) / sizeof(values[0]); value++)
 				check_field_value(reg, field, values[value]);
+			check_field_of(reg, field);
 		}
 		CHECK(erx_device_register_named(peripheral, "no_such_name") == peripheral->register_count);
 		CHECK(erx_device_field_named(peripheral, reg, "no_such_name") == reg->field_count);
@@ -329,6 +348,22 @@ check_peripheral(const erx_device_peripheral_t *uart, const erx_device_t *device
 	CHECK(erx_device_read_allowed(fr) && !erx_device_write_allowed(fr, 0));
 	CHECK(erx_device_field_get(field_of(uart, fr, "rxfe"), 1u << 4) == 1);
 	CHECK(erx_device_field_plan(fr, field_of(uart, fr, "rxfe"), 0).op == ERX_DEVICE_FIELD_REFUSED);
+
+/* RSR is read-write in the table, and any write to it clears all four errors, so no field of it is written alone. */
+{
+	const erx_device_register_t *const rsr = register_of(uart, "rsr");
+
+	CHECK(erx_device_read_allowed(rsr));
+	for (uint32_t at = 0; at < rsr->field_count; at++) {
+		const erx_device_field_t *const error = &uart->fields[rsr->first_field + at];
+
+		CHECK(erx_device_field_plan(rsr, error, 0).op == ERX_DEVICE_FIELD_REFUSED);
+		CHECK(erx_device_field_plan(rsr, error, 1).op == ERX_DEVICE_FIELD_REFUSED);
+		CHECK(!erx_device_write_field(device, rsr, plain, error, 0));
+		CHECK(erx_device_field_read_allowed(rsr, error));
+	}
+	CHECK(*(uint32_t *)(void *)&window_memory[0][0x4] == 0);
+}
 }
 #else
 /* What the PL011 has none of. */

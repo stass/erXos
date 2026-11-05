@@ -12,10 +12,10 @@ static const erx_device_field_t erx_device_pl011_fields[] = {
 	{ .name = "pe", .mask = UINT32_C(0x200), .shift = 9, .access = ERX_DEVICE_READ_ONLY, .clear = false },
 	{ .name = "be", .mask = UINT32_C(0x400), .shift = 10, .access = ERX_DEVICE_READ_ONLY, .clear = false },
 	{ .name = "oe", .mask = UINT32_C(0x800), .shift = 11, .access = ERX_DEVICE_READ_ONLY, .clear = false },
-	{ .name = "fe", .mask = UINT32_C(0x1), .shift = 0, .access = ERX_DEVICE_READ_WRITE, .clear = true },
-	{ .name = "pe", .mask = UINT32_C(0x2), .shift = 1, .access = ERX_DEVICE_READ_WRITE, .clear = true },
-	{ .name = "be", .mask = UINT32_C(0x4), .shift = 2, .access = ERX_DEVICE_READ_WRITE, .clear = true },
-	{ .name = "oe", .mask = UINT32_C(0x8), .shift = 3, .access = ERX_DEVICE_READ_WRITE, .clear = true },
+	{ .name = "fe", .mask = UINT32_C(0x1), .shift = 0, .access = ERX_DEVICE_READ_ONLY, .clear = false },
+	{ .name = "pe", .mask = UINT32_C(0x2), .shift = 1, .access = ERX_DEVICE_READ_ONLY, .clear = false },
+	{ .name = "be", .mask = UINT32_C(0x4), .shift = 2, .access = ERX_DEVICE_READ_ONLY, .clear = false },
+	{ .name = "oe", .mask = UINT32_C(0x8), .shift = 3, .access = ERX_DEVICE_READ_ONLY, .clear = false },
 	{ .name = "cts", .mask = UINT32_C(0x1), .shift = 0, .access = ERX_DEVICE_READ_ONLY, .clear = false },
 	{ .name = "dsr", .mask = UINT32_C(0x2), .shift = 1, .access = ERX_DEVICE_READ_ONLY, .clear = false },
 	{ .name = "dcd", .mask = UINT32_C(0x4), .shift = 2, .access = ERX_DEVICE_READ_ONLY, .clear = false },
@@ -110,7 +110,7 @@ static const erx_device_field_t erx_device_pl011_fields[] = {
 
 static const erx_device_register_t erx_device_pl011_registers[] = {
 	{ .name = "dr", .writable = UINT32_C(0xff), .offset = 0, .count = 1, .stride = 0, .first_field = 0, .field_count = 5, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = false },
-	{ .name = "rsr", .writable = UINT32_C(0xf), .offset = 4, .count = 1, .stride = 0, .first_field = 5, .field_count = 4, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = false },
+	{ .name = "rsr", .writable = UINT32_C(0x0), .offset = 4, .count = 1, .stride = 0, .first_field = 5, .field_count = 4, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },
 	{ .name = "fr", .writable = UINT32_C(0x0), .offset = 24, .count = 1, .stride = 0, .first_field = 9, .field_count = 9, .window = 0, .width = 32, .access = ERX_DEVICE_READ_ONLY, .holds_device_address = false, .plain_update = false },
 	{ .name = "ilpr", .writable = UINT32_C(0xff), .offset = 32, .count = 1, .stride = 0, .first_field = 18, .field_count = 1, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },
 	{ .name = "ibrd", .writable = UINT32_C(0xffff), .offset = 36, .count = 1, .stride = 0, .first_field = 19, .field_count = 1, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },

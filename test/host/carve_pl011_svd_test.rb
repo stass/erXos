@@ -16,7 +16,7 @@ class CarvePl011SvdTest < Minitest::Test
     end
   end
 
-  def test_register_names_lose_the_prefix_and_fields_keep_theirs
+  def test_register_names_lose_the_prefix
     assert_equal 'LCR_H', Erx::CarvePl011.strip_prefix('UARTLCR_H')
     assert_equal 'PERIPHID0', Erx::CarvePl011.strip_prefix('UARTPERIPHID0')
   end
