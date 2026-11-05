@@ -273,6 +273,17 @@ it; git history is the record of completed work.
     `math/powf` (which could also be TCG), `math/yn`,
     `regression/regex-backref-oob`, `regression/regexec-backref`.
   * `musl/pleval` does not build: clang's `-Wparentheses` on the test's source.
+* [Medium] runtime, `make check-runtime-seam`: only the name check on the hosted objects exists, with
+  `sys/erxos/imports.txt` wide, run by `make check-runtime-seam` and `make check-runtime-hosted` and not before
+  each link. The native link's check, the `__erx_syscall` number check, the comparison of the
+  two `config.h` files, the source check for `__APPLE__` and the like, and the own lists of `erx_output.c` and
+  `erx_stdio_nif.c` wait for the native configure and for `sys/erxos` to shrink
+  ([design-runtime.md](docs/design-runtime.md#what-erts-imports)).
+* [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
+  installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
+* [Low] runtime, `otp/lib/tools`, `otp/erts/etc`, `otp/erts/start_scripts`: not buildable from the imported
+  tree (`public_key.hrl`, `ei.h`, `lib/os_mon/vsn.mk`). The runtime does not need them; `lib/tools` is to ship
+  or leave the import when the release's application list is settled.
 * [Low] Lane reader, `liberx/erx_lane.c`: the record state machine
   (open, copy, close) is inline in `erx_lane_take` rather than a pure
   step the effect layer applies; `phase` and `fault` are a pair that must

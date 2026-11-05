@@ -1,3 +1,4 @@
+# Modified by erXos
 dnl Process this file with autoconf to produce a configure script. -*-Autoconf-*-
 
 dnl %CopyrightBegin%
@@ -909,6 +910,8 @@ dnl This is the os flavour, should be unix or win32
 case $host in
    win32)
       ERLANG_OSTYPE=win32 ;;
+   *-erxos*)
+      ERLANG_OSTYPE=erxos ;;
    *)
       ERLANG_OSTYPE=unix ;;
 esac
@@ -3959,7 +3962,6 @@ dnl
 dnl The ones below should be moved to their respective lib
 dnl
 AC_CONFIG_FILES([
-  ../lib/os_mon/c_src/$host/Makefile:../lib/os_mon/c_src/Makefile.in
   ../lib/runtime_tools/c_src/$host/Makefile:../lib/runtime_tools/c_src/Makefile.in
   ])
 

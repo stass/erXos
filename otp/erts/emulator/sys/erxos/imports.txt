@@ -1,0 +1,84 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# What ERTS's objects may import from outside themselves and liberx. Read by
+# make check-runtime-seam; the rule is in docs/design-runtime.md, "What ERTS
+# imports". Names are separated by white space; a section is a group that can
+# be dropped whole.
+#
+# The sections up to [libsystem] are the list the design keeps. Every [stock_*]
+# section is the stock Unix layer sys/erxos was copied from. Its comment says what
+# empties it, and that change deletes the section. The check reports a listed name
+# that nothing imports.
+
+[iso_c]
+abort atoi bsearch calloc exit free malloc memchr memcmp memcpy memmove memset
+qsort realloc snprintf sprintf sscanf strchr strcmp strcpy strerror
+strlen strncmp strncpy strstr strtod strtol
+
+[stdio]
+fflush flockfile fprintf funlockfile fwrite perror setvbuf
+
+[time_of_day]
+gmtime_r localtime_r mktime tzset
+
+[math]
+acos acosh asin asinh atan atan2 atanh ceil cos cosh erf erfc exp exp2 floor fmod
+ldexp log log10 log2 pow sin sinh sqrt tan tanh
+
+[pthreads]
+pthread_attr_destroy pthread_attr_init pthread_attr_setdetachstate
+pthread_attr_setguardsize pthread_attr_setscope pthread_attr_setstacksize
+pthread_cond_broadcast pthread_cond_destroy pthread_cond_init pthread_cond_signal
+pthread_cond_wait pthread_create pthread_detach pthread_equal pthread_exit
+pthread_getname_np pthread_getspecific pthread_join pthread_key_create
+pthread_key_delete pthread_mutex_destroy pthread_mutex_init pthread_mutex_lock
+pthread_mutex_trylock pthread_mutex_unlock pthread_self pthread_setname_np
+pthread_setspecific sched_yield
+
+# The names libSystem's headers and the compiler make of the calls above.
+[libsystem]
+_DefaultRuneLocale __assert_rtn __chkstk_darwin
+__error __maskrune __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
+__stderrp __stdoutp __strcat_chk __strcpy_chk __tolower __toupper
+__swbuf __udivti3 __vsprintf_chk bzero memset_pattern16
+
+# Emptied by erl_mmap and erl_mseg over erx_vm_*.
+[stock_memory]
+madvise mlockall mmap mprotect munmap posix_memalign sysconf
+
+# Emptied by time over erx_clock_ns and the boot information form.
+[stock_time]
+clock_getres clock_gettime daylight environ getenv gettimeofday posix2time time2posix
+
+# Emptied by erx_prim_file.c and the archive reader.
+[stock_files]
+access chdir chmod chown close closedir dirfd fclose fdopen fileno fopen
+fstat ftruncate getcwd link lseek lstat mkdir mkstemp open opendir pread pwrite
+read readdir readlink readv rename rmdir stat symlink unlink utime write writev
+
+# Emptied by the event table, which replaces the poll set and poll threads, and by
+# deleting the fd, spawn and forker ports.
+[stock_ports]
+__darwin_check_fd_set_overflow
+_exit alarm dlclose dlerror dlopen dlsym dup dup2 execle execv execve fcntl fork
+getegid geteuid getpid getrusage ioctl kevent kqueue nice pipe poll
+pthread_kill pthread_sigmask select select$DARWIN_EXTSN setsid sigaction sigprocmask
+sigwait uname waitpid
+
+# Emptied by removing the NIFs the design drops.
+[stock_sockets]
+accept bind connect endprotoent freeaddrinfo freeifaddrs getaddrinfo gethostname
+getifaddrs getnameinfo getpeername getprotoent getservbyname getservbyport
+getsockname getsockopt if_freenameindex if_indextoname if_nameindex if_nametoindex
+in6addr_any in6addr_loopback listen recv recvfrom recvmsg send sendmsg sendto
+setprotoent setsockopt shutdown socket socketpair
+
+# Emptied by erx_console, which replaces the stock terminal driver.
+[stock_terminal]
+isatty nl_langinfo setlocale tcgetattr tcsetattr ttyname wcswidth wcwidth
+
+# Stock callers not yet traced: each caller goes with its layer, or the name joins
+# the design's list with a reason.
+[stock_unsorted]
+__stdinp ctime strdup strftime strncasecmp time

@@ -10,6 +10,8 @@ require_relative 'lib/erx/output_directory'
 require_relative 'lib/erx/dependencies'
 require_relative 'lib/erx/tla'
 require_relative 'lib/erx/fiasco'
+require_relative 'lib/erx/runtime'
+require_relative 'lib/erx/runtime_seam'
 require_relative 'lib/erx/qemu'
 require_relative 'lib/erx/conformance'
 require_relative 'lib/erx/boot_image_check'
@@ -63,6 +65,8 @@ module Erx
         check_arch_terms(command_arguments, **collaborators)
       when 'build'
         build(command_arguments, **collaborators)
+      when 'check-runtime-seam'
+        check_runtime_seam(command_arguments, **collaborators)
       when 'qemu'
         qemu(command_arguments, **collaborators)
       when 'conformance'
@@ -116,9 +120,9 @@ module Erx
     end
 
     # An integration test runs in `make check` unless it is excused here: these
-    # rebuild the stopgap kernel, boot it under QEMU or need the stock OTP
-    # suites' runtime.
-    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_reporter qemu_gate_mutant].freeze
+    # rebuild the stopgap kernel, boot it under QEMU, need the stock OTP
+    # suites' runtime or need the hosted runtime built.
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_reporter qemu_gate_mutant runtime_hosted_smoke].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }
@@ -383,7 +387,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx build fiasco | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx build fiasco | build runtime | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
       0
     end
 
@@ -399,17 +403,36 @@ module Erx
       0
     end
 
+    # A runtime that is not built, or is older than the tree, fails here: nothing
+    # was read, so nothing passed.
+    def self.check_runtime_seam(arguments, **)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      Runtime.check_current(root: ROOT)
+      output = Runtime.output(root: ROOT)
+      report = RuntimeSeam.check_objects(objects: RuntimeSeam.objects(output), executable: output.beam, liberx: output.liberx,
+                                         imports_path: File.join(output.root, RuntimeSeam::IMPORTS_FILE))
+      report.violations.each { |violation| Terminal.puts("#{violation.object}: imports #{violation.name}") }
+      Terminal.puts("listed and imported by nothing: #{report.unused.join(' ')}") unless report.unused.empty?
+      report.violations.empty? ? 0 : 1
+    end
+
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      raise OptionParser::InvalidArgument, 'build currently accepts fiasco' unless component == 'fiasco'
+      unless %w[fiasco runtime].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco or runtime'
+      end
       jobs = 4
       parser = OptionParser.new do |options|
         options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
-      path = Fiasco.new(root: ROOT).build(jobs: jobs)
+      path = case component
+             when 'runtime' then Runtime.new(root: ROOT).build(jobs: jobs).beam
+             else Fiasco.new(root: ROOT).build(jobs: jobs)
+             end
       Terminal.puts("built #{path}")
       0
     end

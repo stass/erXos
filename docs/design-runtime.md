@@ -2391,6 +2391,12 @@ the same answers. `make check-runtime-seam` compares the two `config.h` and
 `ethread_header_config.h` files, and fails on a difference outside a short list,
 each entry with its reason.
 
+Cross mode means configure runs no test program, so each answer it cannot find
+by linking comes from an `erl_xcomp_` value in the cross-compile file. On the
+hosted target `otp/xcomp/erl-xcomp-aarch64-hosted-erxos.conf` names the compiler,
+the SDK as the system root and the hosted `liberx` archive in `LIBS`, and selects
+OTP's built-in zlib, so both targets build the same zlib.
+
 ### The build
 
 The top-level `Makefile` and `tools/erx` are erXos's build. They invoke
@@ -2405,7 +2411,16 @@ entry with a manifest, the BeamAsm image's alone marked `ERX_IMAGE_JIT`,
 and the hosted executables. A build check fails when the interpreter
 image links a symbol of BeamAsm, asmjit, libc++ or libc++abi. Erlang code
 is compiled with the host OTP's `erlc` of the same release, built from the
-pinned tarball ([design.md](design.md#build-and-toolchain)).
+pinned tarball ([design.md](design.md#build-and-toolchain)), which is also where
+OTP's cross build finds `yielding_c_fun`. The build runs in a private copy under
+`build/runtime`, because OTP's make writes into its source tree.
+
+It builds `erts/emulator` and each application directly, not through OTP's
+top-level `emulator`, `libs` and `start_scripts` targets. Those reach parts the
+import leaves out: every program of `erts/etc`, `erlexec` included, includes `ei.h`
+from `lib/erl_interface`, `lib/tools` includes `public_key.hrl`, and
+`erts/start_scripts` reads `lib/os_mon/vsn.mk`. The runtime is started without
+`erlexec`. On the hosted target the emulator is `bin/aarch64-hosted-erxos/beam.emu`.
 
 ## Interfaces
 

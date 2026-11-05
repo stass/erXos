@@ -1,3 +1,4 @@
+# Modified by erXos
 #
 # %CopyrightBegin%
 #
@@ -492,8 +493,12 @@ BINDIR = $(ERL_TOP)/bin/$(TARGET)
 CREATE_DIRS += $(BINDIR)
 
 ERLANG_OSTYPE = @ERLANG_OSTYPE@
+# sys/erxos replaces sys/unix. The drivers, the NIFs and etc have no copy of
+# their own and build from their stock directories, and erl_alloc.types keys its
+# Unix allocation types on this word.
+STOCK_OSTYPE = unix
 
-ENABLE_ALLOC_TYPE_VARS += @ERLANG_OSTYPE@
+ENABLE_ALLOC_TYPE_VARS += $(STOCK_OSTYPE)
 
 ifeq ($(TARGET), win32)
 FLAVOR_EXECUTABLE = beam$(TF_MARKER).dll
@@ -530,7 +535,7 @@ endif
 # ----------------------------------------------------------------------
 
 UNIX_ONLY_BUILDS =
-ifeq ($(ERLANG_OSTYPE), unix)
+ifeq ($(ERLANG_OSTYPE), erxos)
 UNIX_ONLY_BUILDS =	$(BINDIR)/$(CS_EXECUTABLE)
 endif
 
@@ -612,7 +617,7 @@ ifeq ($(RELEASE_LIBBEAM),yes)
 	$(INSTALL_DIR) "$(RELSYSDIR)/lib"
 	$(INSTALL_PROGRAM) $(BINDIR)/$(EMULATOR_LIB) "$(RELSYSDIR)/lib"
 endif
-ifeq ($(ERLANG_OSTYPE), unix)
+ifeq ($(ERLANG_OSTYPE), erxos)
 	$(INSTALL_PROGRAM) $(BINDIR)/$(CS_EXECUTABLE) "$(RELSYSDIR)/bin"
 endif
 endif
@@ -991,19 +996,19 @@ $(OBJDIR)/%.o: sys/common/%.cpp
 	$(V_CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJDIR)/%.o: drivers/common/%.c
-	$(V_CC) $(CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Idrivers/common -Idrivers/$(ERLANG_OSTYPE) -c $< -o $@
+	$(V_CC) $(CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Idrivers/common -Idrivers/$(STOCK_OSTYPE) -c $< -o $@
 
-$(OBJDIR)/%.o: drivers/$(ERLANG_OSTYPE)/%.c
-	$(V_CC) $(CFLAGS) $(INCLUDES) -Idrivers/common -Idrivers/$(ERLANG_OSTYPE) -I../etc/$(ERLANG_OSTYPE) -c $< -o $@
+$(OBJDIR)/%.o: drivers/$(STOCK_OSTYPE)/%.c
+	$(V_CC) $(CFLAGS) $(INCLUDES) -Idrivers/common -Idrivers/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
 
 $(OBJDIR)/%.o: nifs/common/%.c
-	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(ERLANG_OSTYPE) -c $< -o $@
+	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
 $(OBJDIR)/%.o: nifs/common/%.cpp
-	$(V_CXX) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(ERLANG_OSTYPE) -c $< -o $@
+	$(V_CXX) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
-$(OBJDIR)/%.o: nifs/$(ERLANG_OSTYPE)/%.c
-	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(ERLANG_OSTYPE) -I../etc/$(ERLANG_OSTYPE) -c $< -o $@
+$(OBJDIR)/%.o: nifs/$(STOCK_OSTYPE)/%.c
+	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
 
 #
 # Build the beamasm sources.
@@ -1429,7 +1434,7 @@ else
 BEAM_CPP_SRC=$(wildcard beam/*.cpp) $(wildcard beam/jit/*.cpp) $(wildcard beam/jit/$(JIT_ARCH)/*.cpp)
 endif
 DRV_COMMON_SRC=$(wildcard drivers/common/*.c)
-DRV_OSTYPE_SRC=$(wildcard drivers/$(ERLANG_OSTYPE)/*.c)
+DRV_OSTYPE_SRC=$(wildcard drivers/$(STOCK_OSTYPE)/*.c)
 ifeq ($(TARGET), win32)
 # These are *currently* only needed for non-win32,
 # since the nif-functions for socket and net are basically
@@ -1438,7 +1443,7 @@ NIF_COMMON_SRC=$(filter-out $(wildcard nifs/common/socket_*.c), $(wildcard nifs/
 else
 NIF_COMMON_SRC=$(wildcard nifs/common/*.c)
 endif
-NIF_OSTYPE_SRC=$(wildcard nifs/$(ERLANG_OSTYPE)/*.c)
+NIF_OSTYPE_SRC=$(wildcard nifs/$(STOCK_OSTYPE)/*.c)
 ALL_SYS_SRC=$(wildcard sys/$(ERLANG_OSTYPE)/*.c) $(wildcard sys/common/*.c)
 # We use $(shell find) here instead of wildcard as $(wildcard ) resolved at
 # loadtime of the makefile and at that time these files are not generated yet.
@@ -1453,8 +1458,8 @@ ifeq ($(TARGET),win32)
 DEP_CC=$(CC)
 DEP_CXX=$(CXX)
 DEP_INCLUDES=$(INCLUDES) -I../etc/win32 \
-	-Idrivers/common -Idrivers/$(ERLANG_OSTYPE) \
-	-Inifs/common -Inifs/$(ERLANG_OSTYPE)
+	-Idrivers/common -Idrivers/$(STOCK_OSTYPE) \
+	-Inifs/common -Inifs/$(STOCK_OSTYPE)
 DEP_FLAGS=-MM  $(subst $(space)-O2$(space), $(GEN_OPT_FLGS) ,$(CFLAGS)) $(INCLUDES)	
 DEP_CXXFLAGS=-MM $(subst $(space)-O2$(space), $(GEN_OPT_FLGS) ,$(CXXFLAGS)) $(DEP_INCLUDES) $(ASMJIT_FLAGS)
 
@@ -1479,8 +1484,8 @@ endif
 DEP_CC=$(CC)
 DEP_CXX=$(CXX)
 DEP_INCLUDES=$(INCLUDES) \
-	-Idrivers/common -Idrivers/$(ERLANG_OSTYPE) \
-	-Inifs/common -Inifs/$(ERLANG_OSTYPE)
+	-Idrivers/common -Idrivers/$(STOCK_OSTYPE) \
+	-Inifs/common -Inifs/$(STOCK_OSTYPE)
 DEP_FLAGS=-MM $(MG_FLAG) $(CFLAGS) $(DEP_INCLUDES)
 DEP_CXXFLAGS=-MM $(MG_FLAG) $(CXXFLAGS) $(DEP_INCLUDES) $(ASMJIT_FLAGS)
 SYS_SRC=$(ALL_SYS_SRC)
@@ -1508,12 +1513,12 @@ $(TTF_DIR)/src.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 $(TTF_DIR)/drv.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) $(DRV_COMMON_SRC) > $@.tmp
-	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I../etc/$(ERLANG_OSTYPE) $(DRV_OSTYPE_SRC) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I../etc/$(STOCK_OSTYPE) $(DRV_OSTYPE_SRC) >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(NIF_COMMON_SRC) > $@.tmp
-	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(ERLANG_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
@@ -1576,11 +1581,11 @@ compdb:
 	clang -MJ $(TTF_DIR)/drv.json \
 		$(COMPDB_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(DRV_COMMON_SRC) > /dev/null
 	clang -MJ $(TTF_DIR)/drv_$(ERLANG_OSTYPE).json \
-		$(COMPDB_CFLAGS) -I../etc/$(ERLANG_OSTYPE) $(DRV_OSTYPE_SRC) > /dev/null
+		$(COMPDB_CFLAGS) -I../etc/$(STOCK_OSTYPE) $(DRV_OSTYPE_SRC) > /dev/null
 	clang -MJ $(TTF_DIR)/nif.json \
 		$(COMPDB_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(NIF_COMMON_SRC)  > /dev/null
 	clang -MJ $(TTF_DIR)/nif_$(ERLANG_OSTYPE).json \
-		$(COMPDB_CFLAGS) -I../etc/$(ERLANG_OSTYPE) $(NIF_OSTYPE_SRC) > /dev/null
+		$(COMPDB_CFLAGS) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) > /dev/null
 	clang -MJ $(TTF_DIR)/sys.json $(COMPDB_CFLAGS) $(SYS_SRC) > /dev/null
 	clang -MJ $(TTF_DIR)/target.json $(COMPDB_CFLAGS) $(TARGET_SRC) > /dev/null
 	clang -MJ $(TTF_DIR)/zlib.json $(COMPDB_CFLAGS) $(ZLIB_SRC) > /dev/null

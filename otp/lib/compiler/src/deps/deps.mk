@@ -1,3 +1,4 @@
+# Modified by erXos
 ../ebin/beam_a.beam: beam_a.erl beam_asm.hrl beam_types.hrl
 ../ebin/beam_asm.beam: beam_asm.erl beam_opcodes.hrl beam_asm.hrl \
   beam_types.hrl
@@ -56,8 +57,8 @@
   core_parse.hrl
 ../ebin/core_lib.beam: core_lib.erl core_parse.hrl
 ../ebin/core_lint.beam: core_lint.erl core_parse.hrl
-../ebin/core_parse.beam: core_parse.erl core_parse.yrl core_parse.hrl \
-  ../../parsetools/include/yeccpre.hrl
+../ebin/core_parse.beam: core_parse.erl core_parse.yrl core_parse.hrl
+
 ../ebin/core_pp.beam: core_pp.erl core_parse.hrl
 ../ebin/core_scan.beam: core_scan.erl
 ../ebin/erl_bifs.beam: erl_bifs.erl

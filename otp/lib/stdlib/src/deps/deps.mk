@@ -1,3 +1,4 @@
+# Modified by erXos
 ../ebin/array.beam: array.erl
 ../ebin/argparse.beam: argparse.erl
 ../ebin/base64.beam: base64.erl
@@ -40,8 +41,8 @@
 ../ebin/erl_internal.beam: erl_internal.erl
 ../ebin/erl_lint.beam: erl_lint.erl \
   ../../stdlib/include/erl_bits.hrl
-../ebin/erl_parse.beam: erl_parse.erl erl_parse.yrl \
-  ../../parsetools/include/yeccpre.hrl
+../ebin/erl_parse.beam: erl_parse.erl erl_parse.yrl
+
 ../ebin/erl_posix_msg.beam: erl_posix_msg.erl
 ../ebin/erl_pp.beam: erl_pp.erl
 ../ebin/erl_scan.beam: erl_scan.erl

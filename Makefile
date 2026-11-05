@@ -13,6 +13,7 @@ DOCKER_CONTEXT ?=
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
+.PHONY: check-runtime-seam check-runtime-hosted
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
 
 all: build
@@ -60,6 +61,18 @@ check-qemu-mutant:
 # Each seeded failure of the threads and watchdog suites, seen to fail.
 check-native-seeds:
 	$(RUBY) test/integration/native_seeds_test.rb
+
+# ERTS's imports against sys/erxos/imports.txt, on the built hosted runtime. It
+# fails when the runtime is not built or is older than the tree.
+check-runtime-seam:
+	$(RUBY) tools/erx check-runtime-seam
+
+# Builds the hosted runtime and drives a terminal to `1>`. The dialogue has a budget
+# of 60 s; the build takes minutes. `make check` builds no runtime and runs neither.
+check-runtime-hosted:
+	$(RUBY) tools/erx build runtime --jobs $(JOBS)
+	$(RUBY) test/integration/runtime_hosted_smoke_test.rb
+	$(RUBY) tools/erx check-runtime-seam
 
 check-conformance:
 	$(RUBY) tools/erx conformance
