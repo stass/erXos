@@ -15,12 +15,13 @@
 #define ERX_RELEASE_PREFIX		"system/"
 #define ERX_RELEASE_PREFIX_LENGTH	(sizeof(ERX_RELEASE_PREFIX) - 1)
 
-/* Set once by erx_release_bind and only read afterwards. */
+/* Set by erx_release_bind, before any thread reads them, and only read afterwards. */
 static erx_pack_view_t	release_view;
 static uint32_t		release_first;
 static uint32_t		release_count;
 
 static bool erx_release_is_under(const uint8_t *, size_t);
+static bool erx_release_names_fit(const uint8_t *, size_t);
 
 static bool
 erx_release_is_under(const uint8_t *path, size_t length)
@@ -34,6 +35,30 @@ erx_release_is_under(const uint8_t *path, size_t length)
 	return (true);
 }
 
+/*
+ * Whether erx_ns_resolve can reach a path under the prefix: it refuses a longer
+ * name or more names, and a release file no path resolves to must not bind.
+ * erx_pack_open has refused `.`, `..` and empty names, so each name counts.
+ */
+static bool
+erx_release_names_fit(const uint8_t *path, size_t length)
+{
+	size_t name_length;
+	uint32_t names;
+
+	names = 1;
+	name_length = 0;
+	for (size_t cursor = ERX_RELEASE_PREFIX_LENGTH; cursor < length; cursor++) {
+		if (path[cursor] == '/') {
+			names++;
+			name_length = 0;
+		} else if (++name_length > ERX_NAME_MAX) {
+			return (false);
+		}
+	}
+	return (names <= ERX_NS_NAMES_MAX);
+}
+
 int
 erx_release_bind(const uint8_t *bytes, size_t length, const char **reason)
 {
@@ -45,6 +70,8 @@ erx_release_bind(const uint8_t *bytes, size_t length, const char **reason)
 	size_t path_length;
 	uint32_t first, count;
 
+	release_first = 0;
+	release_count = 0;
 	error = (erx_pack_error_t){ .reason = "archive", .entry = UINT32_MAX };
 	if (!erx_pack_open(bytes, length, &scratch, &hasher, &release_view, &error)) {
 		*reason = error.reason;
@@ -57,6 +84,11 @@ erx_release_bind(const uint8_t *bytes, size_t length, const char **reason)
 		if (!erx_pack_path_at(&release_view, index, &path, &path_length) ||
 		    !erx_release_is_under(path, path_length))
 			continue;
+		if (!erx_release_names_fit(path, path_length)) {
+			release_view = (erx_pack_view_t){ 0 };
+			*reason = "release_name";
+			return (ERX_EINVAL);
+		}
 		if (count == 0)
 			first = index;
 		count++;

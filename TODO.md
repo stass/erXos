@@ -351,10 +351,7 @@ it; git history is the record of completed work.
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:
   the resolve and the store want one hold of the write lock.
-* [Low] runtime, `liberx/release.c`: `erx_pack_open` bounds an archive's path as a whole, so an entry with a
-  name over 255 bytes or over 256 names is listed and then answers `enametoolong`; `erx_release_bind` should
-  refuse it. `erx_release_bind` and `erx_release_entry` have no fuzz target of their own: chaining them onto
-  the `pack` target's accepted views would add one, and `ERX_ERANGE` also stands for a failed decode, which
+* [Low] runtime, `liberx/release.c`: `erx_release_entry`'s `ERX_ERANGE` also stands for a failed decode, which
   the kernel's backend must tell apart.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.

@@ -5,6 +5,7 @@
 
 require 'fileutils'
 require 'minitest/autorun'
+require_relative '../fixtures/pack_fixture'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/pack_tools'
@@ -138,6 +139,15 @@ class ReleaseFsTest < Minitest::Test
     assert_equal 'root', File.binread(archive, 4, offsets.last)
   end
 
+  # A longer name, or more names, binds and lists and then answers enametoolong at every resolve.
+  def test_a_name_erx_ns_resolve_refuses_is_refused_at_bind
+    assert_equal ['refused release_name'], bound(["system/#{'z' * 256}"])
+    assert_equal ['refused release_name'], bound([(['system'] + ['z'] * 257).join('/')])
+    assert(bound(["system/#{'z' * 255}"]).any? { |line| line.start_with?("#{'z' * 255} 1 ") })
+    assert_equal 'past 1', bound([(['system'] + ['z'] * 256).join('/')]).fetch(-2)
+    assert_equal 'past 1', bound(["other/#{'z' * 256}"]).fetch(-2), 'a name outside the run is not the release'
+  end
+
   def test_a_damaged_archive_is_refused_with_its_check_named
     archive = write_archive
     bytes = File.binread(archive)
@@ -200,6 +210,12 @@ class ReleaseFsTest < Minitest::Test
       writer.write(rows: rows, root_entry: 3, build_kind: 'development', output: output, budget: 1 << 20)
     end
     archive
+  end
+
+  def bound(paths)
+    archive = File.join(@directory, 'bound.pack')
+    File.binwrite(archive, PackFixture.valid(paths: (paths + %w[system/manifest system/root]).sort))
+    release_lines(archive)
   end
 
   def release_lines(archive)
