@@ -16,6 +16,8 @@ class RuntimeDeviceTest < Minitest::Test
   OUTPUT = Erx::Runtime.output(root: ROOT)
   BUDGET_SECONDS = 60
 
+  def setup = Erx::Runtime.check_current(root: ROOT)
+
   def test_a_register_goes_by_name_and_only_as_the_table_allows
     assert_equal 'ok', evaluate(<<~'ERLANG')
       {ok, D} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => []}),
