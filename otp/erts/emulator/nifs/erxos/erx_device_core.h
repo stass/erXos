@@ -80,6 +80,13 @@ erx_device_field_read_allowed(const erx_device_register_t *reg, const erx_device
 	return (erx_device_read_allowed(reg) && field->access != ERX_DEVICE_WRITE_ONLY);
 }
 
+/* Whether a word read from outside has no bit above the register's width. */
+static inline bool
+erx_device_word_fits(const erx_device_register_t *reg, uint64_t word)
+{
+	return (reg->width >= 64 || (word >> reg->width) == 0);
+}
+
 static inline uint64_t
 erx_device_field_get(const erx_device_field_t *field, uint64_t word)
 {

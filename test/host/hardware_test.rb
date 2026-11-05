@@ -34,13 +34,16 @@ class HardwareTest < Minitest::Test
     refute_includes output, 'erx_pl011_dr_modify'
   end
 
-def test_rsr_is_written_whole_and_its_errors_are_not_one_to_clear
-  rsr = Erx::Hardware.parse_svd(@source).registers.find { |register| register.name == 'RSR' }
-  assert_equal 'read-write', rsr.access
-  assert_equal %w[FE PE BE OE], rsr.fields.map(&:name)
-  assert rsr.fields.none?(&:clear)
-  assert rsr.fields.all? { |field| field.access == 'read-only' }
-end
+  def test_rsr_is_written_whole_and_its_errors_are_not_one_to_clear
+    rsr = Erx::Hardware.parse_svd(@source).registers.find { |register| register.name == 'RSR' }
+    assert_equal 'read-write', rsr.access
+    assert_equal %w[FE PE BE OE], rsr.fields.map(&:name)
+    assert rsr.fields.none?(&:clear)
+    assert rsr.fields.all? { |field| field.access == 'read-only' }
+    assert_equal 0, Erx::Hardware.writable_mask(rsr)
+    refute Erx::Hardware.plain_update?(rsr)
+    assert_match(/\.name = "rsr", .*\.plain_update = false/, Erx::Hardware.device_table_header([Erx::Hardware.parse_svd(@source)]))
+  end
 
   def test_xml_and_semantic_rejections
     malformed = [@source + '<device/>', @source.sub('<device schemaVersion="1.3">',

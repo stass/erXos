@@ -37,8 +37,7 @@ of the carved file as it stands in the tree. The edits, all made by that script:
   nor this file.
 * The `UART` prefix is stripped from register names (`UARTDR` is `DR`,
   `UARTLCR_H` is `LCR_H`, `UARTPERIPHID0` is `PERIPHID0`). Field names stay as
-  upstream has them, so `DIVINT` and `DIVFRAC` of the earlier hand-written file
-  are `BAUD_DIVINT` and `BAUD_DIVFRAC`.
+  upstream has them (`BAUD_DIVINT`, `BAUD_DIVFRAC`).
 * `bitRange` `[high:low]` becomes `bitOffset` and `bitWidth`.
 * The upstream states access on fields only. Each register gets the weakest
   access that admits all its fields: read-only if every field is, otherwise
@@ -56,9 +55,9 @@ of the carved file as it stands in the tree. The edits, all made by that script:
 
 Not changed, and different from the manual: `RSR` stays read-write. The manual
 has a read-only `RSR` and a write-only `ECR` at the same offset; the profile has
-one access per register, so the generated table lets Erlang write `RSR` as a
-whole, which clears all four errors, as the manual says a write does. Its
-fields are read-only, so no field of it is written alone.
+one access per register, so the generated table lets Erlang write `RSR` a zero
+word, which clears all four errors, as the manual says a write does. Its
+fields are read-only, so its writable mask is 0 and no field of it is written alone.
 
 The head comment says the layout was also compared with Arm DDI 0183G r1p5,
 which is not redistributable and is not in the tree.

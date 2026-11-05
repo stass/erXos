@@ -224,7 +224,7 @@ erx_device_field_of(const erx_device_register_t *reg, erx_device_element_t eleme
 	uint64_t offset;
 
 	if (!erx_device_element_offset(reg, element.indexed, element.index, &offset) ||
-	    !erx_device_field_read_allowed(reg, field) || (reg->width < 64 && (word >> reg->width) != 0))
+	    !erx_device_field_read_allowed(reg, field) || !erx_device_word_fits(reg, word))
 		return (false);
 	*value = erx_device_field_get(field, word);
 	return (true);

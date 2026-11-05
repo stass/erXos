@@ -302,6 +302,30 @@ check_open(const char *name)
 }
 
 #ifndef ERX_DEVICE_FIXTURE
+/*
+ * RSR is read-write in the table, and any write to it clears all four errors, so no
+ * field of it is written alone. The window holds a non-zero word that must survive.
+ */
+static void
+check_rsr(const erx_device_peripheral_t *uart, const erx_device_t *device)
+{
+	const erx_device_register_t *const rsr = register_of(uart, "rsr");
+	uint32_t *const word = (uint32_t *)(void *)&window_memory[0][0x4];
+
+	*word = 0xf;
+	CHECK(erx_device_read_allowed(rsr));
+	for (uint32_t at = 0; at < rsr->field_count; at++) {
+		const erx_device_field_t *const error = &uart->fields[rsr->first_field + at];
+
+		CHECK(erx_device_field_plan(rsr, error, 0).op == ERX_DEVICE_FIELD_REFUSED);
+		CHECK(erx_device_field_plan(rsr, error, 1).op == ERX_DEVICE_FIELD_REFUSED);
+		CHECK(!erx_device_write_field(device, rsr, plain, error, 0));
+		CHECK(erx_device_field_read_allowed(rsr, error));
+	}
+	CHECK(*word == 0xf);
+	*word = 0;
+}
+
 /* The PL011's own rules, read from Arm DDI 0183G, through one window. */
 static void
 check_peripheral(const erx_device_peripheral_t *uart, const erx_device_t *device)
@@ -348,22 +372,7 @@ check_peripheral(const erx_device_peripheral_t *uart, const erx_device_t *device
 	CHECK(erx_device_read_allowed(fr) && !erx_device_write_allowed(fr, 0));
 	CHECK(erx_device_field_get(field_of(uart, fr, "rxfe"), 1u << 4) == 1);
 	CHECK(erx_device_field_plan(fr, field_of(uart, fr, "rxfe"), 0).op == ERX_DEVICE_FIELD_REFUSED);
-
-/* RSR is read-write in the table, and any write to it clears all four errors, so no field of it is written alone. */
-{
-	const erx_device_register_t *const rsr = register_of(uart, "rsr");
-
-	CHECK(erx_device_read_allowed(rsr));
-	for (uint32_t at = 0; at < rsr->field_count; at++) {
-		const erx_device_field_t *const error = &uart->fields[rsr->first_field + at];
-
-		CHECK(erx_device_field_plan(rsr, error, 0).op == ERX_DEVICE_FIELD_REFUSED);
-		CHECK(erx_device_field_plan(rsr, error, 1).op == ERX_DEVICE_FIELD_REFUSED);
-		CHECK(!erx_device_write_field(device, rsr, plain, error, 0));
-		CHECK(erx_device_field_read_allowed(rsr, error));
-	}
-	CHECK(*(uint32_t *)(void *)&window_memory[0][0x4] == 0);
-}
+	check_rsr(uart, device);
 }
 #else
 /* What the PL011 has none of. */

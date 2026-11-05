@@ -110,7 +110,7 @@ static const erx_device_field_t erx_device_pl011_fields[] = {
 
 static const erx_device_register_t erx_device_pl011_registers[] = {
 	{ .name = "dr", .writable = UINT32_C(0xff), .offset = 0, .count = 1, .stride = 0, .first_field = 0, .field_count = 5, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = false },
-	{ .name = "rsr", .writable = UINT32_C(0x0), .offset = 4, .count = 1, .stride = 0, .first_field = 5, .field_count = 4, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },
+	{ .name = "rsr", .writable = UINT32_C(0x0), .offset = 4, .count = 1, .stride = 0, .first_field = 5, .field_count = 4, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = false },
 	{ .name = "fr", .writable = UINT32_C(0x0), .offset = 24, .count = 1, .stride = 0, .first_field = 9, .field_count = 9, .window = 0, .width = 32, .access = ERX_DEVICE_READ_ONLY, .holds_device_address = false, .plain_update = false },
 	{ .name = "ilpr", .writable = UINT32_C(0xff), .offset = 32, .count = 1, .stride = 0, .first_field = 18, .field_count = 1, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },
 	{ .name = "ibrd", .writable = UINT32_C(0xffff), .offset = 36, .count = 1, .stride = 0, .first_field = 19, .field_count = 1, .window = 0, .width = 32, .access = ERX_DEVICE_READ_WRITE, .holds_device_address = false, .plain_update = true },

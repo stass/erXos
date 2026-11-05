@@ -103,9 +103,10 @@ module Erx
     def field(node, register_name)
       high, low = node.elements['bitRange'].text.match(/\A\[(\d+):(\d+)\]\z/).captures.map { |bit| Integer(bit) }
       access = field_access(node, register_name)
+      cleared = node.elements['modifiedWriteValues']&.text == 'oneToClear'
       Field.new(name: node.elements['name'].text, description: text(node, 'description'), offset: low,
                 width: high - low + 1, access: access,
-                clear: !READ_ONLY_FIELDS.include?(register_name) && node.elements['modifiedWriteValues']&.text == 'oneToClear')
+                clear: access != 'read-only' && cleared)
     end
 
     def field_access(node, register_name)

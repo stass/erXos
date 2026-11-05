@@ -388,9 +388,10 @@ module Erx
     end
 
     # Whether a field of the register may be replaced by reading the word and writing it back:
-    # the read has no side effect and no writable field means anything but replacement.
+    # the read has no side effect, and some bit is writable (a register with none takes a write
+    # that means something other than replacement, as a write to PL011's RSR clears its errors).
     def plain_update?(register)
-      register.access == 'read-write' && register.read_action.empty? &&
+      register.access == 'read-write' && register.read_action.empty? && !writable_mask(register).zero? &&
         register.fields.none? { |field| field.clear || field.access == 'write-only' }
     end
 

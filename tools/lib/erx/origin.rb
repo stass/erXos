@@ -20,7 +20,7 @@ module Erx
     # The comment forms attribution reads a licence from. A declaration in any
     # other form is not read here; erxos_addition? refuses it by counting.
     SPDX_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n
-    ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:\*\/[ \t]*)?\r?$/n
+    ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--|<!--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:(?:\*\/|-->)[ \t]*)?\r?$/n
 
     module_function
 
@@ -130,7 +130,9 @@ module Erx
     # Whether the file's opening comment lines, within the read bound, hold the
     # notice. Any line opening with a comment leader of a language counts, and so
     # does a first line that is an XML declaration, which must precede any comment,
-    # and every line inside an XML comment that was opened in the header.
+    # and every line inside an XML comment that was opened in the header. This
+    # reads XML files of an import tree, so that an erXos file added to one is
+    # attributed; a file outside every import tree never comes here.
     def header_notice?(bytes, notice:)
       inside_xml_comment = false
       bytes.byteslice(0, 8192).lines.each_with_index do |line, number|

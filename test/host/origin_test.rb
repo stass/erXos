@@ -327,13 +327,23 @@ class OriginTest < Minitest::Test
     assert_raises(Erx::Error) { @origin.check }
   end
 
-def test_an_erxos_xml_file_is_an_addition_after_its_xml_declaration
-  notice = "<!--\n  Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n  SPDX-License-Identifier: BSD-2-Clause\n-->\n"
-  assert Erx::Attribution.erxos_addition?("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + notice + "<device/>\n")
-  assert Erx::Attribution.erxos_addition?(notice + "<device/>\n")
-  refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<device/>\n<!-- " + notice + " -->\n")
-  refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<?xml version=\"1.0\"?>\n" + notice)
-end
+  def test_an_erxos_xml_file_is_an_addition_after_its_xml_declaration
+    notice = "<!--\n  Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n  SPDX-License-Identifier: BSD-2-Clause\n-->\n"
+    assert Erx::Attribution.erxos_addition?("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + notice + "<device/>\n")
+    assert Erx::Attribution.erxos_addition?(notice + "<device/>\n")
+    refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<device/>\n<!-- " + notice + " -->\n")
+    refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<?xml version=\"1.0\"?>\n" + notice)
+    one_line = "<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n     SPDX-License-Identifier: BSD-2-Clause -->\n"
+    assert Erx::Attribution.erxos_addition?(one_line + "<device/>\n")
+    assert Erx::Attribution.erxos_addition?("<!-- SPDX-License-Identifier: BSD-2-Clause -->\n<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com> -->\n<device/>\n")
+  end
+
+  # A comment ends at its `-->`: a notice in the document body, which is no comment, is not a header.
+  def test_an_xml_comment_ends_at_its_close
+    body = "Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\nSPDX-License-Identifier: BSD-2-Clause\n"
+    refute Erx::Attribution.erxos_addition?("<?xml version=\"1.0\"?>\n<!--\n x\n-->\n<device>\n" + body)
+    refute Erx::Attribution.erxos_addition?("<!-- x -->\n<device>\n" + body)
+  end
 
   def test_notice_token_in_body_string_is_not_a_header_notice
     write_file('source.c', "int value;\n")
