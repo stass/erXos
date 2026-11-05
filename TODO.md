@@ -327,10 +327,6 @@ it; git history is the record of completed work.
   `scheduler_wait` exit test (`erx_event_leave_wait_ready`) pins the call by source text, so the real crossing of a scheduler and its waker is not run.
 * [Low] `tools/fuzz/boot_build_target.rb`: the boot fuzz targets do not require that any input is accepted, so a target that
   refuses everything passes, and the script copies the limits layout by hand rather than from `abi/erx_abi.txt`.
-* [Medium] `otp/erts/emulator/Makefile.in`: the rule for lib_src's stamp, `$(ERTS_LIB)`, has no prerequisites, so a make of
-  erts/emulator alone links lib_src's old archives after an edit there. `Erx::Runtime#build_emulator` runs lib_src's make first, which
-  covers erXos's builds only. A `FORCE` prerequisite on the rule fixes every caller (GNU make 4.4.1 rereads the stamp's time after the
-  recipe, so nothing downstream rebuilds when lib_src made nothing); it costs one rebuild of each build copy.
 * [Low] `otp/erts/lib_src/Makefile.in`: `depend.mk` has no prerequisites and is made once per build copy, so a header that a lib_src source
   includes after that is no dependency of its object, and an edit to that header alone leaves the object stale. Use `-MMD -MP`.
 * [Low] `otp/erts/emulator/Makefile.in`: the preloaded beams (`erts/preloaded/ebin`) have no rule, so an edit under `erts/preloaded/src`

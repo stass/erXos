@@ -555,8 +555,16 @@ include ryu/ryu.mk
 endif
 include zstd/zstd.mk
 
-$(ERTS_LIB):
+# lib_src's stamp stands for its archives (ethread, erts_internal) and its
+# yielding_c_fun executable. FORCE has every build ask lib_src's own make, which
+# recompiles what changed there and rewrites the stamp only when one of those
+# changed; make rereads the stamp's time after the recipe, so an unchanged stamp
+# leaves its dependents alone. test/host/emulator_makefile_test.rb runs this
+# paragraph as written, so the rule keeps what it needs here.
+$(ERTS_LIB): FORCE
 	$(V_at)cd $(ERTS_LIB_DIR) && $(MAKE) $(TYPE)
+.PHONY: FORCE
+FORCE:
 
 .PHONY: clean
 clean:
