@@ -607,6 +607,12 @@ service_thread_delete(uint32_t task, uint32_t index)
 	}
 }
 
+uint64_t
+erx_fiasco_cpus_online(void)
+{
+	return (service_cpus_online());
+}
+
 #ifdef ERX_FIASCO_TEST_HOOKS
 bool
 erx_fiasco_test_thread_caps_gone(uint32_t index)

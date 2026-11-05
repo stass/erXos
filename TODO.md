@@ -192,17 +192,20 @@ it; git history is the record of completed work.
   `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
   break under its older `json`. The oracle's `probe` operation should exercise a
   duplicate-key refusal there.
-* [Low] stopgap, `liberx/backend/fiasco/root.c`: the root holds `/chosen/bootargs` in its
-  handoff view (`bootargs`, `bootargs_len`, read in source) but nothing parses them and the
-  harness passes no `-append`, so the system root's watchdog runs on
-  `erx_watchdog_config_default` in normal mode, `erx.watchdog` is parsed only by the suite's
-  guest and `erx.det=1` does not reach it. Nothing pets it either until M3's root does, so a
-  system root that outlives its 60-second boot deadline ends the machine; the production
-  image ends the machine well before that. Parsing the arguments is M3's, with the first
-  consumer that outlives the deadline.
-* [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root reads the handoff record but writes no
-  `erx_boot_info` page, for itself or a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff)
-  says it does, and it seeds no `rng.c`. No consumer exists until ERTS's port, which starts there.
+* [Low] stopgap, `liberx/backend/fiasco/root.c`: nothing pets the system root's watchdog until
+  M3's root does, so a system root that outlives its boot deadline (600 seconds under TCG, the
+  default under HVF) ends the machine.
+* [Low] tooling, `tools/lib/erx/qemu.rb`: the harness gives `erx.det=1` boots no `-icount`, and they
+  run under HVF and at any CPU count too, so `production_image`'s deterministic boot checks the
+  switch (watchdog off, the extra `erx.arg` word) and not deterministic mode's clock or transcript.
+* [Low] stopgap, `liberx/backend/fiasco/root.c`: a refused `erx.` word ends the boot with a fixed
+  reason that names no word, though `erx_boot_args_parse` gives it in `refused`. Printing it needs
+  the console's escaping function, as it is text from the boot loader.
+* [Low] tooling, `make check-reproducible`: both builds of OTP and musl run at one path, so a path
+  of theirs that reached the image would not show.
+* [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.
+* [Low] stopgap, `fiasco/l4re-core/libgcc`: the root links `libgcc.a` for `long double`'s helpers, under GPL-3.0-only WITH GCC-exception-3.1. Replace it with compiler-rt's builtins.
+* [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root writes no `erx_boot_info` page for a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff) says it does, and it seeds no `rng.c`.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
   the host link's first consumer, M3.
@@ -247,8 +250,9 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.
-* [Low] stopgap, `liberx/backend/fiasco/arch/aarch64/root_start.S`: `main` runs on 64 KiB in `.bss` with no guard page,
-  so a large frame overruns other `.bss` silently.
+* [Medium] stopgap, `liberx/backend/fiasco/runtime_stubs.c`: `erx_pthread_create_executor` fails with `ENOSYS`, so native ERTS cannot start schedulers.
+* [Medium] production image, `tools/lib/erx/production_image.rb`: the archive's `system/` holds only the root and `NOTICES`, so native ERTS binds a release with no boot script.
+* [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
   registers travel in the UTCB. One call taking the start state and the word to clear ends the order and the leak
   a failed clear-word call would leave, with the thread package's `erx_fiasco_reaper_start` as its second user.
@@ -303,13 +307,11 @@ it; git history is the record of completed work.
     `regression/regex-backref-oob`, `regression/regexec-backref`.
   * `musl/pleval` does not build: clang's `-Wparentheses` on the test's source.
 * [Low] ERTS memory, `otp/erts/emulator/sys/common/erl_mmap.h`: stock turns off physical reservation, and with it the literal mapper, under `ADDRESS_SANITIZER`, and erXos's `erl_mmap` keeps it on. No ASan flavour of ERTS has run; settle whether literals stay in the mapper's range when one first does.
-* [Low] ERTS memory, `erl_mmap.h`, `beam/erl_alloc_util.c`: `erts_madvise_discard_advice` lost its definition, and its declaration and uses stay behind `HAVE_MADVISE`, which the cross-compile file pins off. Delete them when the native cross-compile file lands with the same pin.
+* [Low] ERTS memory, `erl_mmap.h`, `beam/erl_alloc_util.c`: `erts_madvise_discard_advice` lost its definition, and its declaration and uses stay behind `HAVE_MADVISE`, which both cross-compile files pin off. Delete them.
 
-* [Medium] runtime, `make check-runtime-seam`: only the name check on the hosted objects exists, with
-  `sys/erxos/imports.txt` wide, run by `make check-runtime-seam` and `make check-runtime-hosted` and not before
-  each link. The native link's check, the `__erx_syscall` number check, the comparison of the
+* [Medium] runtime, `make check-runtime-seam`: the name checks read `sys/erxos/imports.txt`, still wide, on the hosted objects by `make check-runtime-seam` and `make check-runtime-hosted`, and on the native objects in `Erx::NativeRuntime#build`, not before each link. The `__erx_syscall` number check, the comparison of the
   two `config.h` files, the source check for `__APPLE__` and the like, and the own lists of `erx_output.c` and
-  `erx_stdio_nif.c` wait for the native configure and for `sys/erxos` to shrink
+  `erx_stdio_nif.c` wait for `sys/erxos` to shrink
   ([design-runtime.md](docs/design-runtime.md#what-erts-imports)).
 * [Medium] runtime, `tools/lib/erx/runtime.rb`: the build record covers neither the pack's own inputs (`tools/lib/erx/release.rb`, `pack*.rb`, `manifest.rb`, `config/platforms`, `config/provenance`) nor the archive's bytes, and is written before the pack runs, so a test run alone can read an older `system.pack`. Wants a release record written after the pack.
 * [Medium] tools, `tools/lib/erx/pack_provenance.rb`: a `compiled` receipt declares its sources and names no `.hrl`; nothing ties a beam to them, and a `release` pack accepts it. Derive them with `erlc -M`, and hold them under a registered import.
@@ -345,7 +347,7 @@ it; git history is the record of completed work.
   the kernel's backend must tell apart.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
-* [Medium] runtime, the native boot page: `erx_boot_info_build` and `erx_boot_args_parse` have no native caller, and `tools/lib/erx/production_image.rb`'s root writes no page. The root needs `erx_boot_info`, its page written from the manifest and `bootargs`, and `erx_runtime_main` called from `liberx/backend/fiasco/libc_start.c`. The comparison of the two entries' pages waits for it, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)). `erx_boot_args_t.refused` is text from the boot loader, so the root's refusal prints it through the console's escaping function.
+* [Medium] runtime, the native boot page: the comparison of the two entries' pages waits for a native release that boots, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)).
 * [Medium] runtime, `otp/lib/kernel/src/dist_util.erl`: `gen_challenge/0` calls `statistics(runtime)`, which fails with `notsup`, so a distribution handshake ends there. No `1>` reaches it; the first carrier does.
 * [Low] runtime, `liberx/backend/hosted/start.c`: six names of the host's environment reach the page for the stock fd, spawn and forker ports and the stock terminal driver, where the design's page holds none. They go with those layers. The forker exits when `BINDIR` is unset and runs `erl_child_setup` from that host directory, so a boot is not yet free of host files.
 * [Low] runtime, `beam/erl_time_sup.c`: edit 20 of the design is open. The stock correction runs over `erx_clock_ns`, and stays idle since system time moves with it by one offset; deleting it changes nothing a shell sees.

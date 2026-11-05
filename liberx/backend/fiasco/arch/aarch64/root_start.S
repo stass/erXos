@@ -20,6 +20,15 @@ _start:
 1:	b	1b
 	.size	_start, . - _start
 
+/* void erx_fiasco_call_on_stack(void *top, void (*entry)(void)): moves to a stack for good. */
+	.global	erx_fiasco_call_on_stack
+	.type	erx_fiasco_call_on_stack, %function
+erx_fiasco_call_on_stack:
+	mov	sp, x0
+	blr	x1
+1:	b	1b
+	.size	erx_fiasco_call_on_stack, . - erx_fiasco_call_on_stack
+
 	.bss
 	.balign	16
 	.space	65536

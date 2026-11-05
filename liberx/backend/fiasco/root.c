@@ -9,8 +9,8 @@
  * checks the archive's last entry, reads the system manifest, takes the machine's
  * memory from sigma0 into the pool and refuses the boot if that falls short of the
  * manifest's root_memory, starts the root service, reports what it saw on the
- * console, and reaches the point where ERTS starts. No ERTS exists yet, so it says
- * so and powers off through the service (docs/design-stopgap.md, "Boot handoff").
+ * console, and runs its program, ERTS, through musl's start path
+ * (docs/design-stopgap.md, "Boot handoff").
  *
  * Until erx_fiasco_root_up returns, only this one thread exists, and every page
  * it reads comes from a page fault that sigma0 answers one to one, with the
@@ -29,6 +29,7 @@
 #include "erx/pack.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/root_open.h"
+#include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/backend/fiasco/watchdog_thread.h"
@@ -52,58 +53,59 @@ void erx_fiasco_root_main(void);
 static void root_append(char *, size_t *, const char *);
 static void root_append_decimal(char *, size_t *, uint64_t);
 static void root_append_hex(char *, size_t *, const uint8_t *, size_t);
-static const char *root_boot(void);
+static const char *root_boot(erx_boot_handoff_view_t *, erx_manifest_view_t *, erx_boot_args_t *);
 static bool root_memory_fits(uint64_t, uint64_t, uint64_t);
 static _Noreturn void root_refuse(const char *);
 static void root_report(const erx_boot_handoff_view_t *, uint32_t);
 static void root_report_manifest(const erx_manifest_view_t *);
-static void root_say(const char *);
+static void root_report_watchdog(const erx_watchdog_config_t *, erx_watchdog_mode_t);
 
 void
 erx_fiasco_root_main(void)
 {
+	erx_boot_handoff_view_t handoff;
+	erx_manifest_view_t manifest;
+	erx_boot_args_t boot_args;
 	const char *reason;
 
-	reason = root_boot();
-	if (reason != NULL)
-		root_refuse(reason);
-	/* ERTS's start goes here, through musl's start path. */
-	root_say("erx: root task: ERTS starts here; this image holds no ERTS\n");
-	(void)erx_machine_end(0, ERX_END_OFF);
-	root_refuse("the service refused the machine's end");
+	reason = root_boot(&handoff, &manifest, &boot_args);
+	if (reason == NULL)
+		reason = erx_fiasco_program_start(&handoff, &manifest, &boot_args);
+	root_refuse(reason);
 }
 
 static const char *
-root_boot(void)
+root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_boot_args_t *boot_args)
 {
-	erx_boot_handoff_view_t handoff;
 	erx_pack_view_t pack;
-	erx_manifest_view_t manifest;
 	const char *reason;
 
-	reason = erx_fiasco_root_open(&handoff, &pack);
+	reason = erx_fiasco_root_open(handoff, &pack);
 	if (reason != NULL)
 		return (reason);
-	reason = erx_fiasco_root_read_manifest(&pack, &manifest);
+	reason = erx_fiasco_root_read_manifest(&pack, manifest);
 	if (reason != NULL)
 		return (reason);
-	reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start,
-	    (size_t)handoff.image.size);
+	if (!erx_boot_args_parse(handoff->bootargs, handoff->bootargs_len, boot_args))
+		return ("the kernel command line: a word of erx. that this build refuses");
+	reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff->image.start,
+	    (size_t)handoff->image.size);
 	if (reason != NULL)
 		return (reason);
 	if (!root_memory_fits(erx_fiasco_vm_free_pages(),
 	    (uint64_t)(erx_fiasco_image_end - erx_fiasco_image_start),
-	    manifest.header.root_memory))
+	    manifest->header.root_memory))
 		return ("manifest: root_memory is more than this machine gives the root");
-	{
-		const erx_watchdog_config_t config = erx_watchdog_config_default();
+	const erx_watchdog_config_t config = boot_args->have_watchdog ? boot_args->watchdog :
+	    erx_watchdog_config_default();
+	const erx_watchdog_mode_t mode = boot_args->det ? ERX_WATCHDOG_MODE_DETERMINISTIC : ERX_WATCHDOG_MODE_NORMAL;
 
-		reason = erx_fiasco_watchdog_start(&config, ERX_WATCHDOG_MODE_NORMAL);
-		if (reason != NULL)
-			return (reason);
-	}
-	root_report(&handoff, pack.header.nentries);
-	root_report_manifest(&manifest);
+	reason = erx_fiasco_watchdog_start(&config, mode);
+	if (reason != NULL)
+		return (reason);
+	root_report(handoff, pack.header.nentries);
+	root_report_manifest(manifest);
+	root_report_watchdog(&config, mode);
 	return (NULL);
 }
 
@@ -190,14 +192,25 @@ root_report_manifest(const erx_manifest_view_t *manifest)
 	erx_fiasco_console_write(line, used);
 }
 
+/* What the watchdog runs with. In deterministic mode the step machine keeps it off, whatever the numbers say. */
 static void
-root_say(const char *text)
+root_report_watchdog(const erx_watchdog_config_t *config, erx_watchdog_mode_t mode)
 {
-	size_t length = 0;
+	char line[ERX_ROOT_LINE_MAX];
+	size_t used = 0;
 
-	while (text[length] != '\0')
-		length++;
-	erx_fiasco_console_write(text, length);
+	root_append(line, &used, "erx: root task: watchdog ");
+	if (mode == ERX_WATCHDOG_MODE_DETERMINISTIC) {
+		root_append(line, &used, "off");
+	} else {
+		root_append_decimal(line, &used, config->period_s);
+		root_append(line, &used, ",");
+		root_append_decimal(line, &used, config->deadline_s);
+		root_append(line, &used, ",");
+		root_append_decimal(line, &used, config->boot_s);
+	}
+	root_append(line, &used, "\n");
+	erx_fiasco_console_write(line, used);
 }
 
 static _Noreturn void

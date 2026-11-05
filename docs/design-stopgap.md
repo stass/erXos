@@ -175,12 +175,13 @@ service's bodies directly.
 5. Builds the pool window and contiguous pools ([The pool](#the-pool)). If the pool and the root's
    image together hold less than the manifest's `root_memory`, it refuses the boot.
 6. Makes its own thread table ([Thread creation](#thread-creation)); fills the time page; seeds
-   `rng.c`; writes its boot information page, flagged `ERX_BOOT_ROOT`; creates its gate, the service
+   `rng.c`; creates its gate, the service
    thread, stopped, with the `sigma0` gate as pager, and the watchdog with its configuration and start
    event (`watchdog.c:127`).
 7. Points its own `_pager` and `_exc_handler` at its gate and runs the service and the watchdog.
    **From here the service alone touches the root's tables.**
-8. Creates its reaper and enters musl's start path, whose `main` calls `sys/erxos`'s `erx_runtime_main`.
+8. Creates its reaper, fills the boot information page (`runtime_entry.c`), moves off the image's small
+   stack and enters musl's start path, whose `main` (`runtime_main.c`) calls `sys/erxos`'s `erx_runtime_main`.
    ERTS reads the boot information page, so the one `argv` word in musl's start block goes unused.
 
 A failure in steps 1 to 6 prints its reason through `l4_vcon_write` and ends the machine, with no
@@ -237,7 +238,7 @@ whatever a file holds. erXos's kernel checks each file at its first slice.
 fuzz target, splits it on spaces and reads three kinds of word: `erx.watchdog=P,D,B`, through the
 existing `erx_watchdog_parse`; `erx.det=1`; and `erx.arg=WORD`, at most as many as fit the page's
 strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word, and an `erx.` word of no known kind, refuses the
-boot with the word's name. Bootstrap cuts the record at the last whole word, so a parser never sees half
+boot with a fixed reason. Bootstrap cuts the record at the last whole word, so a parser never sees half
 a word.
 
 ## The Phase 1 manifest check
@@ -316,12 +317,26 @@ system headers (Fiasco's and the compiler's). Fiasco's three archives that its l
 members of are registered whole, with the license of the package they come from, since
 their members have no compile record a `linked` receipt could name.
 
+**The root's program.** The root is ERTS's interpreter. `Erx::NativeRuntime` builds it with OTP's own
+configure and make from `otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf` in a private copy, over a
+sysroot of musl's headers and the root's libraries, and fails if an object imports a name
+`sys/erxos/imports.txt` does not list. OTP's own link of `beam.emu` shows that no name is missing.
+`NativeRoot` links the root again from `erl_main.o`, `libbeam.a`, OTP's other archives, `libc.a` and
+Fiasco's libraries, without debug information, because its link map is what the root's receipt reads.
+OTP's and musl's archives are registered whole in the source record, with the license of the package
+they come from, as Fiasco's are.
+
 **The boot.** The root reports the build identifier, index hash and entry count; then, as numbers
 only, `root_memory`, `system_baseline`, the unit count and the pool's free pages; then
-`erx: root task: ERTS starts here; this image holds no ERTS`, and it ends the machine with
-`ERX_END_OFF`. ERTS's port starts at that line, with the root linked as
-`NativeMusl`'s is. On a machine smaller than `root_memory` the same image ends at the
-refusal of step 5.
+`erx: root task: watchdog P,D,B` with the numbers it runs on, or `off` under `erx.det=1`; then it
+binds the archive as the release, `erx_release_bind` over the handoff's archive, whose
+files under `system/` are what `prim_file` serves, and `erx_release_manifest` and
+`erx_boot_manifest_read` give the page the manifest's `system_args`; and it enters musl's start
+path. ERTS's first line says `erx: erts: erl_start runs, N arguments`, under the native build's
+`ERX_TRACE_START`: the program's name, the node flag with its name, the manifest's words and each
+`erx.arg` word. On a machine smaller than `root_memory` the same image ends at the refusal of step 5,
+and a command line with a refused `erx.` word at the refusal of step 4. The boot suite's root, built from `NativeRoot::NO_PROGRAM`, says it holds no
+program and ends the machine with `ERX_END_OFF`.
 
 **Device paths.** Each suite run dumps QEMU's own device tree (`-machine virt,dumpdtb`) and
 checks each device path and `compatible` of [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json)
@@ -636,9 +651,11 @@ Everything else is `ENOSYS`. No signal is delivered, so `pthread_cancel` returns
 cancellation point rather than interrupting a call it is blocked in.
 
 `liberx/backend/fiasco/libc_start.c` calls `__libc_start_main` with one argument, no environment and the ELF headers,
-which `root.ld` and `task.ld` load first so that musl finds the TLS image. `libc_root.c` brings the service up first and
-ends the machine if the start comes back; `libc_task.c` is a task's `erx_task_main`, whose thread `task_start.c` has
-readied. A program's own thread handle is its index in the root and in a task alike, so the seam is one file for both.
+which `root.ld` and `task.ld` load first so that musl finds the TLS image. On a root, `libc_root_start.c` first moves off the image's
+64 KiB start stack onto 1 MiB from the pool, with a reserved page below it that nothing commits, so an overrun that touches
+that page faults instead of overwriting `.bss`, and it ends the machine if the start comes back. A test's root that has no
+archive brings the service up in `libc_root.c`, and the system's root in `root.c`. `libc_task.c` is a task's `erx_task_main`,
+whose thread `task_start.c` has readied, and it runs on the stack `task_start.c` gave it. A program's own thread handle is its index in the root and in a task alike, so the seam is one file for both.
 The program links with `libl4sys.p.a`, which defines four symbols and needs none, and with Fiasco's `libgcc.a` for
 binary128 arithmetic.
 
@@ -977,9 +994,9 @@ the tests.
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |
-| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line and ends the machine, and a 256 MiB machine ends at the root's `root_memory` refusal; `production_image_test.rb` | a wrong device path or compatible, in that test; a misread `root_memory`: the manifest line's numbers fail its transcript |
+| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line with the watchdog's numbers and the exact argument count, a boot with `erx.det=1 erx.arg=WORD` shows the watchdog off and one more argument, a boot with an unknown `erx.` word and a 256 MiB machine each end at the root's refusal; `production_image_test.rb` | a wrong device path or compatible, in that test; a misread `root_memory` or a lost `-append`: the manifest, watchdog and argument lines fail its transcript |
 | **The manifest's C reader**: `tools/fuzz/manifest_fuzz.c`, each table of an accepted manifest read back to its count and no further | a row out of a table's range would abort it |
-| `make check-reproducible`: two clean builds of the production image, in directories of different names, byte-identical in archive and bootable file | a path or time reaching an output fails it |
+| `make check-reproducible`: two builds of the production image, each clearing `build/runtime/native` first and packing into a directory of its own name, byte-identical in archive and bootable file. OTP and musl build at one path both times, so a path of theirs reaching an output does not show | a time, or a path under the two directories, reaching an output fails it |
 | **Function-API set** on both backends, refusals included | a refusal changed in one backend |
 
 ## Differences from erXos's kernel
@@ -1050,7 +1067,7 @@ The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line w
 
 **The ERTS port:**
 
-* An unmodified interpreter `beam.smp` has been linked against this backend and booted as the root under TCG. It reached `main` and stopped at `sys.c:396-398`'s `open("/dev/null")` loop, so nothing after `erts_sys_pre_init` has run natively.
+* The native interpreter boots as the root to `erl_start`'s first line under TCG and HVF, so nothing after that line has been seen to run natively.
 * `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`; `l4_scheduler_info` as a CPU count (`scheduler.h:129`); a release's first pet.
 
 **Later packages:**

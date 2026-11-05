@@ -69,5 +69,8 @@ erx_runtime_main(void)
         exit(1);
     }
     erx_boot_argv_fill(&boot_view, argv, strings);
+#ifdef ERX_TRACE_START
+    fprintf(stderr, "erx: erts: erl_start runs, %zu arguments\n", plan.argc);
+#endif
     erl_start((int) plan.argc, argv);
 }

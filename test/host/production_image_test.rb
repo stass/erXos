@@ -89,10 +89,36 @@ class ProductionImageTest < Minitest::Test
     assert_match point.fetch(:pattern), 'erx: root task refused the boot: manifest: root_memory is more than this machine gives the root'
   end
 
-  def test_the_manifest_line_must_carry_the_sources_numbers
+  def checkpoint_verifier(name, **options)
     built = Struct.new(:build_id, :index_hash).new('aa', 'bb')
-    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT)
-    verify = points.find { |point| point.fetch(:name) == 'root-manifest' }.fetch(:verify)
+    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', **options)
+    points.find { |point| point.fetch(:name) == name }.fetch(:verify)
+  end
+
+  # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.
+  def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
+    system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
+    refute_equal 0, system_args
+    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS
+    checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
+    checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
+    assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }
+  end
+
+  def test_the_watchdog_line_must_carry_what_the_command_line_says
+    verify = checkpoint_verifier('root-watchdog')
+    verify.call("erx: root task: watchdog 1,30,600\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: watchdog 10,60,60\n") }
+  end
+
+  def test_a_command_line_reaches_qemu_only_when_asked
+    plan = { accel: 'tcg', image: '/image', serial: '/serial' }
+    refute_includes Erx::QemuPlan.argv(**plan), '-append'
+    assert_equal %w[-append erx.det=1], Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1').last(2)
+  end
+
+  def test_the_manifest_line_must_carry_the_sources_numbers
+    verify = checkpoint_verifier('root-manifest')
     verify.call("erx: root task: manifest root_memory 402653184 baseline 134217728 units 3 pool pages 12\n")
     assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 134217728 units 3 pool pages 12\n") }
   end

@@ -17,6 +17,7 @@ SECTIONS {
 	. = ALIGN(4096);
 	.text : { *(.text .text.*) }
 	. = ALIGN(4096);
+	.got : { *(.got .got.*) }
 	.init_array : { KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) .init_array)) }
 	.fini_array : { KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*) .fini_array)) }
 	.tdata : { *(.tdata .tdata.*) }

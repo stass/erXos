@@ -16,6 +16,8 @@
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/task_start.h"
 
+int	main(int, char **, char **);
+
 void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {
@@ -26,6 +28,6 @@ int64_t
 erx_task_main(uint64_t argument)
 {
 	(void)argument;
-	erx_fiasco_libc_start();
+	erx_fiasco_libc_start(main);
 	return (ERX_FIASCO_TASK_STATUS_LIBC);
 }

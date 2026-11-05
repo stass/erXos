@@ -3,21 +3,19 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-/* The first thread of a root task linked with musl: the service, then the program. */
+/*
+ * The first thread of a test's root task linked with musl: bring the service up, then
+ * run the program's main. There is no archive and no boot information page.
+ */
 
 #include <stddef.h>
 
 #include "liberx/backend/fiasco/console.h"
-#include "liberx/backend/fiasco/libc_start.h"
+#include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
 
 void	erx_fiasco_root_main(void);
-
-void
-erx_fiasco_libc_write(const void *bytes, size_t length)
-{
-	erx_fiasco_console_write(bytes, length);
-}
+int	main(int, char **, char **);
 
 void
 erx_fiasco_root_main(void)
@@ -32,6 +30,5 @@ erx_fiasco_root_main(void)
 		erx_fiasco_console_write(reason, length);
 		erx_fiasco_machine_off();
 	}
-	erx_fiasco_libc_start();
-	erx_fiasco_machine_off();
+	erx_fiasco_libc_root_start(main);
 }

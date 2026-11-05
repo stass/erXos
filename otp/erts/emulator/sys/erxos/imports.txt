@@ -1,15 +1,27 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# What ERTS's objects may import from outside themselves and liberx. Read by
-# make check-runtime-seam; the rule is in docs/design-runtime.md, "What ERTS
-# imports". Names are separated by white space; a section is a group that can
-# be dropped whole.
+# What ERTS's objects may import from outside themselves. Read by
+# make check-runtime-seam and the native build; the rule is in
+# docs/design-runtime.md, "What ERTS imports". Names are separated by white space;
+# a section is a group that can be dropped whole.
 #
-# The sections up to [libsystem] are the list the design keeps. Every [stock_*]
+# The sections up to [musl] are the list the design keeps. Every [stock_*]
 # section is the stock Unix layer sys/erxos was copied from. Its comment says what
 # empties it, and that change deletes the section. The check reports a listed name
 # that nothing imports.
+
+# The calls ERTS makes into liberx. The rest of liberx, a backend's internal names
+# included, is off limits.
+[liberx]
+erx_boot_argv_fill erx_boot_argv_plan erx_boot_info erx_boot_info_read
+erx_boot_info_reason erx_clock_ns erx_executor_slot erx_executor_wake
+erx_group_info erx_group_status erx_group_take_ready erx_irq_bind erx_irq_create
+erx_irq_trigger erx_ns_resolve erx_park erx_pthread_create_executor
+erx_release_addr erx_release_entry erx_release_fs_list_next
+erx_release_fs_list_start erx_release_fs_lookup erx_space_protect
+erx_time_wall_ns erx_umtx_wait erx_umtx_wake erx_utcb_self erx_vm_commit
+erx_vm_decommit erx_vm_release erx_vm_reserve
 
 [iso_c]
 abort atoi bsearch calloc exit free malloc memchr memcmp memcpy memmove memset
@@ -30,7 +42,7 @@ ldexp log log10 log2 pow sin sinh sqrt tan tanh
 pthread_attr_destroy pthread_attr_init pthread_attr_setdetachstate
 pthread_attr_setguardsize pthread_attr_setscope pthread_attr_setstacksize
 pthread_cond_broadcast pthread_cond_destroy pthread_cond_init pthread_cond_signal
-pthread_cond_wait pthread_create pthread_detach pthread_equal pthread_exit
+pthread_cond_wait pthread_create pthread_detach pthread_exit
 pthread_getname_np pthread_getspecific pthread_join pthread_key_create
 pthread_key_delete pthread_mutex_destroy pthread_mutex_init pthread_mutex_lock
 pthread_mutex_trylock pthread_mutex_unlock pthread_self pthread_setname_np
@@ -45,7 +57,23 @@ getpagesize
 _DefaultRuneLocale __assert_rtn __chkstk_darwin
 __error __maskrune __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
 __stderrp __stdoutp __strcat_chk __strcpy_chk __tolower __toupper
-__swbuf __udivti3 bzero memset_pattern16
+__swbuf __udivti3 bzero memset_pattern16 __darwin_check_fd_set_overflow __stdinp
+pthread_equal
+
+# The names musl's headers and the compiler make of the calls above, and what the
+# native build's own libraries ask of it. zstd's trace hooks are weak and undefined.
+[musl]
+ZSTD_trace_compress_begin ZSTD_trace_compress_end ZSTD_trace_decompress_begin
+ZSTD_trace_decompress_end __assert_fail __errno_location __libc_current_sigrtmin
+__stack_chk_fail __stack_chk_guard __udivti3 fwrite_unlocked longjmp
+lround memrchr pthread_spin_destroy pthread_spin_init pthread_spin_lock
+pthread_spin_unlock putc_unlocked setjmp sigaddset sigemptyset sqrtf stderr stdin
+stdout tolower toupper
+
+# Stock code that configure turns on when it finds musl's headers. Emptied by
+# deleting the CPU topology reader on the native build.
+[stock_native]
+sched_getaffinity sched_setaffinity
 
 # erl_misc_utils's processor counts, which edits 30 and 32 replace.
 [stock_limits]
@@ -62,7 +90,6 @@ close fclose fdopen fileno open read write writev
 # the select sleeps of beam_debug, erl_bif_info and erl_misc_utils; and ethread's
 # signal masks. Each is answered at the first native boot (TODO.md).
 [stock_process]
-__darwin_check_fd_set_overflow
 _exit alarm fcntl gethostname getpid ioctl nice pipe
 pthread_kill pthread_sigmask select sigaction sigwait
 
@@ -74,4 +101,4 @@ cfmakeraw poll tcgetattr tcsetattr
 # Stock callers not yet traced: each caller goes with its layer, or the name joins
 # the design's list with a reason.
 [stock_unsorted]
-__stdinp ctime strdup strncasecmp time
+ctime strdup strncasecmp time

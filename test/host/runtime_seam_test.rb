@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'fileutils'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runtime_seam'
 
@@ -60,12 +61,71 @@ class RuntimeSeamTest < Minitest::Test
       assert system('clang', '-c', source, '-o', object), 'clang compiles the seeded object'
       assert system('clang', '-c', "#{source}.liberx.c", '-o', liberx), 'clang compiles the seeded liberx'
       imports = File.join(directory, 'imports.txt')
-      File.write(imports, "[libc]\nmalloc\n")
+      File.write(imports, "[liberx]\nerx_call\n[libc]\nmalloc\n")
       # The second object stands for a link that brought in what no listed object shows.
       report = Seam.check_objects(objects: [liberx], executable: object, liberx: liberx, imports_path: imports)
       assert_equal [Seam::Violation.new(object: object, name: 'fork')], report.violations
       report = Seam.check_objects(objects: [object], executable: liberx, liberx: liberx, imports_path: imports)
       assert_equal [Seam::Violation.new(object: object, name: 'fork')], report.violations
+    end
+  end
+
+  # A name liberx defines and the list leaves out fails the hosted check, as does a name
+  # only the native build's section lists.
+  def test_a_real_object_calling_what_only_liberx_defines_fails
+    skip 'nm reads Mach-O objects only on a macOS host' unless RUBY_PLATFORM.include?('darwin')
+
+    Dir.mktmpdir('erx-seam-') do |directory|
+      source = File.join(directory, 'calls.c')
+      File.write(source, "extern int erx_internal(void);\nextern int erx_call(void);\nextern int musl_only(void);\n" \
+                         "int f(void) { return erx_internal() + erx_call() + musl_only(); }\n")
+      object = File.join(directory, 'calls.o')
+      liberx = File.join(directory, 'liberx.o')
+      File.write("#{source}.liberx.c", "int erx_internal(void) { return 0; }\nint erx_call(void) { return 0; }\n")
+      assert system('clang', '-c', source, '-o', object), 'clang compiles the seeded object'
+      assert system('clang', '-c', "#{source}.liberx.c", '-o', liberx), 'clang compiles the seeded liberx'
+      imports = File.join(directory, 'imports.txt')
+      File.write(imports, "[liberx]\nerx_call\n[musl]\nmusl_only\n")
+      report = Seam.check_objects(objects: [object], executable: liberx, liberx: liberx, imports_path: imports)
+      assert_equal %w[erx_internal musl_only], report.violations.map(&:name).sort
+    end
+  end
+
+  # What the check reads as ERTS holds its objects and libraries, and never liberx: were it
+  # read, each of liberx's names would count as inside.
+  def test_the_objects_of_either_target_leave_liberx_out
+    Dir.mktmpdir('erx-seam-') do |directory|
+      %w[aarch64-hosted-erxos aarch64-unknown-erxos].each do |target|
+        emulator = File.join(directory, target, 'obj')
+        output = Erx::Runtime::Output.new(root: File.join(directory, target), beam: nil, objects: emulator,
+                                          liberx: File.join(directory, target, 'liberxroot.a'), archive: nil)
+        files = [*Seam.libraries(output, target: target), File.join(emulator, 'sys.o'), output.liberx]
+        files.each do |file|
+          FileUtils.mkdir_p(File.dirname(file))
+          FileUtils.touch(file)
+        end
+        assert_equal (files - [output.liberx]).sort, Seam.objects(output, target: target)
+      end
+    end
+  end
+
+  # An ERTS object calling a name the Fiasco backend defines fails the native check: nothing
+  # of liberx is read, so only the list can admit it. A listed liberx call passes, and
+  # [libsystem] admits nothing here. The hosted console's own list counts as unused nowhere here.
+  def test_a_native_object_calling_a_backend_internal_name_fails
+    compiler = ENV.fetch('ERX_CLANG', nil)
+    skip 'the native check needs ERX_CLANG and its llvm-nm' if compiler.nil? || compiler.empty?
+
+    Dir.mktmpdir('erx-seam-') do |directory|
+      source = File.join(directory, 'calls.c')
+      File.write(source, "extern int erx_fiasco_console_write(void);\nextern int erx_clock_ns(void);\n" \
+                         "int f(void) { return erx_fiasco_console_write() + erx_clock_ns(); }\n")
+      object = File.join(directory, 'calls.o')
+      assert system(compiler, '--target=aarch64-none-elf', '-c', source, '-o', object), 'clang compiles the seeded object'
+      report = Seam.check_elf_objects(objects: [object], imports_text: "[liberx]\nerx_clock_ns unused_call\n[libsystem]\nerx_fiasco_console_write\n[only_erx_stdio_nif]\nhosted_only_call\n",
+                                      nm: File.join(File.dirname(compiler), 'llvm-nm'))
+      assert_equal [Seam::Violation.new(object: object, name: 'erx_fiasco_console_write')], report.violations
+      assert_equal %w[unused_call], report.unused
     end
   end
 end

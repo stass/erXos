@@ -16,7 +16,7 @@ module Erx
     module_function
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
-             program: 'qemu-system-aarch64', initrd: nil, serial_input: nil)
+             program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       raise Error, 'CPU count must be between 1 and 8' unless cpus.is_a?(Integer) && cpus.between?(1, 8)
       unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
@@ -33,7 +33,7 @@ module Erx
        '-smp', cpus.to_s, '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
        '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
-       *(initrd ? ['-initrd', initrd] : [])].freeze
+       *(initrd ? ['-initrd', initrd] : []), *(command_line ? ['-append', command_line] : [])].freeze
     end
 
     # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
@@ -186,7 +186,7 @@ module Erx
     # until QEMU exits, and a guest still running at the deadline fails it, as
     # does one that exits before its transcript is complete. Otherwise the
     # harness ends the guest at the last checkpoint.
-    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil)
+    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil)
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
@@ -197,7 +197,7 @@ module Erx
       serial = File.join(directory, 'serial.log')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
-                           cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd)
+                           cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)

@@ -106,7 +106,7 @@ erx_group_info(uint64_t group)
 {
 	if (group != GROUP_HANDLE && group != ERX_CAP_SELF)
 		return (ERX_EINVAL);
-	erx_backend_group_report(erx_utcb_self(), erx_group_status(), &group_cpuset);
+	erx_backend_group_report(erx_utcb_self(), erx_fiasco_group_status(), &group_cpuset);
 	return (ERX_OK);
 }
 

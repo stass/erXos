@@ -4,6 +4,7 @@
 
 require_relative 'boot_image'
 require_relative 'error'
+require_relative 'hosted_sources'
 require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'qemu'
@@ -33,18 +34,8 @@ module Erx
     DEVICE_CASES = %w[physical_reads_registers physical_refusals contiguous_runs contiguous_device_writes].freeze
     HOSTED_DEVICE_CASES = %w[mem_device_refused].freeze
     LAST_CASE = 'indices_run_out'
-    GUEST = 'test/guest/function_api'
-    HOSTED_SOURCES = %W[
-      kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c kernel/core/pack.c
-      kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
-      kernel/generated/abi_decode.c kernel/generated/abi_run.c
-      liberx/generated/abi_reader.c liberx/ns.c liberx/release.c liberx/release_fs.c
-      liberx/backend/core/park_table.c liberx/backend/core/refused.c liberx/backend/core/vm_table.c
-      liberx/backend/hosted/arch/aarch64/switch_stack.S liberx/backend/hosted/generated/calls.c
-      liberx/backend/hosted/group.c liberx/backend/hosted/log.c liberx/backend/hosted/thread.c
-      liberx/backend/hosted/vm.c liberx/backend/hosted/wait.c
-      #{GUEST}/cases.c #{GUEST}/hosted.c #{GUEST}/irq_cases.c
-    ].freeze
+    GUEST = HostedSources::GUEST
+    HOSTED_SOURCES = HostedSources::ALL
     NATIVE_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'liberx/backend/core/refused.c',
                       'liberx/backend/fiasco/api_names.c', "#{GUEST}/cases.c", "#{GUEST}/guest.c", "#{GUEST}/irq_cases.c", "#{GUEST}/device_cases.c"].freeze
     # Each case's patience in the guest is 60 seconds: a stall fails its own line.

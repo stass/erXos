@@ -392,8 +392,9 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/user_drv.erl` | 46. `whereis_group/0` reads the current group from `erx_console`'s process when `user_drv` is not running |
 | `beam/break.c` | 47. the break menu prints no clear-screen sequence, so it asks no terminal whether to |
 | `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, since `stdlib` would not rebuild after a source edit with one |
+| `emulator/Makefile.in` | 49. `erl_compile_flags.h` holds `N/A` for the flags and `config.h` on erXos's targets, since they name host paths and `erlang:system_info(compile_info)` would serve them from the image |
 
-Forty-eight edits outside `sys/erxos`, in forty-seven files, the JIT's
+Forty-nine edits outside `sys/erxos`, in forty-eight files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
@@ -2196,9 +2197,11 @@ conversion, so float text never depends on which C library is linked.
 
 **One list of imports, checked at both links, is what makes the two C libraries
 interchangeable under ERTS.** The objects of ERTS, `sys/erxos` and ethread
-included, may import from outside themselves only `liberx`'s calls and the names
-in `sys/erxos/imports.txt`:
+included, may import from outside themselves only the names in
+`sys/erxos/imports.txt`:
 
+* the `liberx` calls ERTS makes, each by name, so that a backend's internal name
+  fails the check though the same library defines it;
 * ISO C's memory, string, character, conversion, `math.h`, `malloc` family, `abort`
   and `exit`; `gmtime_r`, `localtime_r`, `mktime` and `tzset`; `getpagesize`;
 * output through `stdout` and `stderr`;
@@ -2437,7 +2440,7 @@ or beside it, in a closed set of places, and anything else that differs is a bug
 
 | What differs | Where | Why it stays there |
 | --- | --- | --- |
-| Who fills the boot information page and calls `erx_runtime_main` | the entry: `liberx/backend/fiasco/libc_start.c`, `liberx/backend/hosted/start.c` | ERTS's start reads only the page ([design-stopgap.md](design-stopgap.md#boot-information)) |
+| Who fills the boot information page and calls `erx_runtime_main` | the entry: `liberx/backend/fiasco/runtime_entry.c` and `runtime_main.c`, `liberx/backend/hosted/start.c` | ERTS's start reads only the page ([design-stopgap.md](design-stopgap.md#boot-information)) |
 | The bodies of `liberx`'s calls | `liberx/backend/fiasco`, `liberx/backend/hosted` | one function API, one test set, the differences listed in [The hosted backend](design-stopgap.md#the-hosted-backend) |
 | The C library under the import list | musl, libSystem | [What ERTS imports](#what-erts-imports) checks both links against one list |
 | The console's driver process and its NIF | `erx_stdio_nif`, in the hosted image's static NIF list | [The console and standard I/O](#the-console-and-standard-io) |

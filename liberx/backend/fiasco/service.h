@@ -27,6 +27,8 @@
  * root thread ends the machine. Returns NULL, or why the boot cannot go on.
  */
 const char	*erx_fiasco_root_up(const void *archive, size_t archive_bytes);
+/* The CPUs the kernel reports online, as a mask. */
+uint64_t	 erx_fiasco_cpus_online(void);
 
 /*
  * Sends one request of bytes to the service and waits for its reply. Returns the

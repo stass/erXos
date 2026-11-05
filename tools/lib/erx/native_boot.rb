@@ -59,7 +59,7 @@ module Erx
 
       def image
         root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-                              .build_system(directory: File.join(@build, 'root'))
+                              .build_no_program(directory: File.join(@build, 'root'))
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
       end

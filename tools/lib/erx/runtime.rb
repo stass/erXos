@@ -6,7 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'open3'
 require_relative 'error'
-require_relative 'function_api'
+require_relative 'hosted_sources'
 require_relative 'oracle'
 require_relative 'output_directory'
 require_relative 'runner'
@@ -24,7 +24,7 @@ module Erx
     # while they run, and this build only reads, so it stays off that one.
     HOST_OTP_FLAVOUR = 'emu'
     # The function API's test has a main of its own, so the entry and what only it calls join here.
-    LIBERX_SOURCES = [*FunctionApi::HOSTED_SOURCES.reject { |source| source.start_with?(FunctionApi::GUEST) },
+    LIBERX_SOURCES = [*HostedSources::ALL.reject { |source| source.start_with?(HostedSources::GUEST) },
                       'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/hosted/start.c'].freeze
     # What the hosted archive is compiled from and the release's manifest, for the build record.
@@ -77,7 +77,7 @@ module Erx
     end
 
     def self.configure_stamp(otp:, sdk_root:)
-      paths = [*Dir.glob(CONFIGURE_INPUTS, base: otp), XCOMP_FILE].uniq.sort
+      paths = [*Dir.glob(CONFIGURE_INPUTS, base: otp), self::XCOMP_FILE].uniq.sort
       lines = paths.map { |path| "#{path} #{Digest::SHA256.file(File.join(otp, path)).hexdigest}" }
       Digest::SHA256.hexdigest([sdk_root, *lines].join("\n"))
     end
@@ -142,7 +142,7 @@ module Erx
     def in_copy(path) = File.join(@output.root, path)
 
     def configure
-      @runner.run(['./otp_build', 'configure', "--xcomp-conf=#{in_copy(XCOMP_FILE)}"],
+      @runner.run(['./otp_build', 'configure', "--xcomp-conf=#{in_copy(self.class::XCOMP_FILE)}"],
                   name: 'runtime-configure', deadline: DEADLINES.fetch(:configure), chdir: @output.root,
                   env: build_environment)
       FileUtils.touch(in_copy('.erx-configured'))
@@ -158,7 +158,7 @@ module Erx
       # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
       # beam.smp exists.
       FileUtils.rm_f([@output.beam, File.join(File.dirname(@output.beam), 'beam.smp')])
-      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/emulator', 'opt', 'FLAVOR=emu', "TARGET=#{TARGET}"],
+      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/emulator', 'opt', 'FLAVOR=emu', "TARGET=#{self.class::TARGET}"],
                   name: 'runtime-emulator', deadline: DEADLINES.fetch(:emulator), chdir: @output.root,
                   env: build_environment)
       raise Error, "the emulator's build left no #{@output.beam}" unless File.file?(@output.beam)

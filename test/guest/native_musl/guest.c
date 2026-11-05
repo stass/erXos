@@ -30,6 +30,7 @@
 #define BROADCAST_WAITERS	64
 #define BROADCAST_ROUNDS	20
 #define WORKERS			8
+#define MAIN_STACK_FRAME_BYTES	(512 * 1024)
 #define MUTEX_ROUNDS		20000
 #define MALLOC_ROUNDS		2000
 #define MALLOC_SLOTS		64
@@ -651,6 +652,33 @@ at_exit_ran(void)
 	printf("erx: musl: atexit ran\n");
 }
 
+/*
+ * main's stack lies outside the root's image, whose .bss has no guard page, and holds a
+ * frame far deeper than the small stack the image starts on.
+ */
+extern char erx_fiasco_image_start[];
+extern char erx_fiasco_image_end[];
+
+static __attribute__((noinline)) int
+touch_deep_frame(void)
+{
+	volatile char frame[MAIN_STACK_FRAME_BYTES];
+
+	for (size_t at = 0; at < sizeof(frame); at += 4096)
+		frame[at] = 1;
+	return (frame[0]);
+}
+
+static int
+case_main_stack(void)
+{
+	const char *const here = (const char *)__builtin_frame_address(0);
+
+	if (here >= erx_fiasco_image_start && here < erx_fiasco_image_end)
+		return (0);
+	return (touch_deep_frame() == 1);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -662,6 +690,7 @@ main(int argc, char **argv)
 		abort();
 	atexit(at_exit_ran);
 	report("constructor", constructed);
+	report("main_stack", case_main_stack());
 	report("printf_float", case_printf_float());
 	report("mmap_flags", case_mmap_flags());
 	report("tls", case_tls());

@@ -8,20 +8,18 @@ require_relative 'runtime'
 
 module Erx
   # `make check-runtime-seam`'s name check (docs/design-runtime.md, "What ERTS
-  # imports"): ERTS's objects import from outside themselves only liberx's calls
-  # and the names in sys/erxos/imports.txt.
+  # imports"): ERTS's objects import from outside themselves only the names in
+  # sys/erxos/imports.txt, whose [liberx] section holds the liberx calls ERTS makes. What
+  # else liberx defines counts as outside, so a call to a backend's internal name fails.
   module RuntimeSeam
     Violation = Data.define(:object, :name)
     Report = Data.define(:violations, :unused)
     IMPORTS_FILE = 'erts/emulator/sys/erxos/imports.txt'
+    # What one C library's headers and compiler make of the same calls: each build's
+    # check leaves out the other's.
+    HOSTED_ONLY = %w[libsystem only_erx_stdio_nif].freeze
+    NATIVE_ONLY = %w[musl stock_native].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_$.]*\z/
-    # The libraries the emulator links beside its own objects, under erts/.
-    LIBRARIES = %W[
-      emulator/pcre/obj/#{Runtime::TARGET}/opt/libepcre.a emulator/ryu/obj/#{Runtime::TARGET}/opt/libryu.a
-      emulator/zlib/obj/#{Runtime::TARGET}/opt/libz.a emulator/zstd/obj/#{Runtime::TARGET}/opt/libzstd.a
-      lib/internal/#{Runtime::TARGET}/libethread.a lib/internal/#{Runtime::TARGET}/liberts_internal_r.a
-    ].freeze
-
     OWN_LIST_PREFIX = 'only_'
 
     module_function
@@ -79,17 +77,41 @@ module Erx
     # list of objects cannot hide what the link really brought in.
     def check_objects(objects:, executable:, liberx:, imports_path:)
       undefined = objects.to_h { |object| [object, symbol_names(nm('-u', object))] }
-      imports = parse_imports(File.read(imports_path))
-      # The objects answer for an own list's names, so the executable holds them for its one object.
-      undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
-      inside = [*objects, liberx].flat_map { |object| defined_names(object) }.uniq
-      check(undefined_by_object: undefined, inside: inside, imports: imports)
+        imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY)
+        # The objects answer for an own list's names, so the executable holds them for its one object.
+        undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
+        inside = objects.flat_map { |object| defined_names(object) }.uniq
+        check(undefined_by_object: undefined, inside: inside, imports: imports)
+      end
+
+      # The native build's check: ELF objects and archives through llvm-nm, whose C names
+      # carry no prefix. OTP's own link of beam.emu has already shown that no name is missing.
+      def check_elf_objects(objects:, imports_text:, nm:)
+        names = lambda do |*arguments|
+          output, error, status = Open3.capture3(nm, '--format=just-symbols', *arguments, stdin_data: '')
+          raise Error, "llvm-nm #{arguments.join(' ')}: #{error.lines.first}" unless status.success?
+
+          output.each_line(chomp: true).reject { |line| line.empty? || line.end_with?(':') }.uniq
+        end
+        check(undefined_by_object: objects.to_h { |object| [object, names.call('--undefined-only', object)] },
+              inside: objects.flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
+              imports: parse_imports(imports_text).except(*HOSTED_ONLY))
     end
 
     def defined_names(path) = symbol_names(nm('-g', '-U', '-j', path))
 
-    def objects(output)
-      libraries = LIBRARIES.map { |library| File.join(output.root, 'erts', library) }
+    # The libraries the emulator links beside its own objects.
+    def libraries(output, target: Runtime::TARGET)
+      %W[
+        emulator/pcre/obj/#{target}/opt/libepcre.a emulator/ryu/obj/#{target}/opt/libryu.a
+        emulator/zlib/obj/#{target}/opt/libz.a emulator/zstd/obj/#{target}/opt/libzstd.a
+        lib/internal/#{target}/libethread.a lib/internal/#{target}/liberts_internal_r.a
+      ].map { |library| File.join(output.root, 'erts', library) }
+    end
+
+    # What the check reads as ERTS: never liberx, whose names count as outside.
+    def objects(output, target: Runtime::TARGET)
+      libraries = libraries(output, target: target)
       missing = libraries.reject { |library| File.file?(library) }
       raise Error, "the build left no #{missing.first}" unless missing.empty?
 

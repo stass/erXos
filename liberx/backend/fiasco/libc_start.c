@@ -42,14 +42,13 @@ typedef struct start_block {
 /* The linker's name for the ELF headers, which root.ld and task.ld load first. */
 extern const erx_elf64_ehdr_t __ehdr_start;
 
-int	main(int, char **, char **);
 int	__libc_start_main(int (*)(int, char **, char **), int, char **, void (*)(void), void (*)(void), void (*)(void));
 
 static char program_name[] = "erxos";
 static start_block_t start_block;
 
 void
-erx_fiasco_libc_start(void)
+erx_fiasco_libc_start(int (*program)(int, char **, char **))
 {
 	start_block.argv[0] = program_name;
 	start_block.aux_phdr = (aux_entry_t){ AUX_PHDR, (uintptr_t)&__ehdr_start + (uintptr_t)__ehdr_start.e_phoff };
@@ -57,5 +56,5 @@ erx_fiasco_libc_start(void)
 	start_block.aux_phnum = (aux_entry_t){ AUX_PHNUM, __ehdr_start.e_phnum };
 	start_block.aux_pagesz = (aux_entry_t){ AUX_PAGESZ, ERX_PAGE_SIZE };
 	start_block.aux_null = (aux_entry_t){ AUX_NULL, 0 };
-	(void)__libc_start_main(main, 1, start_block.argv, NULL, NULL, NULL);
+	(void)__libc_start_main(program, 1, start_block.argv, NULL, NULL, NULL);
 }

@@ -14,6 +14,7 @@ require_relative 'fiasco_provenance'
 require_relative 'json_input'
 require_relative 'manifest'
 require_relative 'native_root'
+require_relative 'native_runtime'
 require_relative 'output_directory'
 require_relative 'pack'
 require_relative 'pack_provenance'
@@ -46,12 +47,14 @@ module Erx
 
     Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :report)
 
-    def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler))
+    def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
+                   runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
       @root = File.realpath(root)
       @runner = runner
       @compiler = compiler
       @linker = linker
       @fiasco = fiasco
+      @runtime = runtime
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
     end
 
@@ -61,13 +64,15 @@ module Erx
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
+      erts = @runtime.build
+      archives = [*erts.otp_archives, erts.libc, @fiasco.user_library('libgcc.a')]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
-                            .build_system_receipted(directory: File.join(directory, 'root'))
+                            .build_system_receipted(directory: File.join(directory, 'root'), archives: archives)
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
       report = pack(entries: entries(root_task, kernel, sigma0), root_task: root_task, receipts: [kernel, sigma0],
-                    output: archive)
+                    erts: erts, output: archive)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -76,14 +81,19 @@ module Erx
                 report: report)
     end
 
-    # The same inputs give byte-identical images: two builds in clean directories of different
-    # names, so a path that reached an output shows. Fiasco's own assembly has its own
-    # test (test/integration/fiasco_reproducible_test.rb); both builds here pack its one result.
+    # The same inputs give byte-identical images: two whole builds of the runtime, each
+    # packed into a clean directory of its own name. A path under those directories that
+    # reached an output shows; OTP and musl build at one path both times, so a path of
+    # theirs does not. Fiasco's own assembly has its own test
+    # (test/integration/fiasco_reproducible_test.rb); both builds here pack its one result.
     def check_reproducible(directory:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a reproducibility check needs a clean directory' unless Dir.empty?(directory)
 
-      first, second = %w[first second].map { |name| build(directory: File.join(directory, name)) }
+      first, second = %w[first second].map do |name|
+        @runtime.clean
+        build(directory: File.join(directory, name))
+      end
       differing = %i[archive single].reject { |part| File.binread(first.public_send(part)) == File.binread(second.public_send(part)) }
       report = { 'kind' => 'production_image_reproducibility', 'byte_identical' => differing.empty?,
                  'differing' => differing.map(&:to_s), 'first' => digests(first), 'second' => digests(second),
@@ -117,6 +127,17 @@ module Erx
     # Boots the production image under each accelerator and CPU count, after checking
     # the platform record's device paths against QEMU's own device tree. Any disagreement raises.
     class Run
+      # What the harness gives each accelerator's kernel command line (docs/design-stopgap.md,
+      # "The watchdog"). HVF runs the defaults.
+      TCG_WATCHDOG = '1,30,600'
+      COMMAND_LINES = { 'tcg' => "erx.watchdog=#{TCG_WATCHDOG}" }.freeze
+      # One more word on the deterministic boot's line, which the page must carry too.
+      DETERMINISTIC_LINE = 'erx.det=1 erx.arg=deterministic'
+      # An erx. word of no known kind, which refuses the boot.
+      UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
+      # The program's name and the node flag with its name, before the page's words.
+      ARGUMENTS_ALWAYS = 3
+
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
         @root = File.expand_path(root)
@@ -132,25 +153,34 @@ module Erx
         check_device_paths
         built = image(fiasco)
         accels.product(cpus).to_h do |accel, count|
-          full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: Run.checkpoints(built, root: @root))
+          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+')
+          full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+          if count == cpus.first
+            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE,
+                                      points: Run.checkpoints(built, root: @root, watchdog: 'off', extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size))
+            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
+                                      points: Run.command_line_refusal_checkpoints)
+          end
           # This boot's transcript is its whole result: it raises if the refusal is missing.
-          boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints)
+          boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
         end
       end
 
-      # The transcript of a boot to where ERTS starts, each line in order. The manifest
+      # The transcript of a boot to ERTS's start, each line in order. The manifest
       # line carries the numbers the source says, so a root that misread it fails.
-      def self.checkpoints(built, root:)
+      def self.checkpoints(built, root:, watchdog:, extra_arguments: 0)
         source = File.read(File.join(root, MANIFEST))
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
+        arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
          point('root-identity', /\Aerx: root task: build/n, identity),
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
-         { name: 'root-erts-point', pattern: /\Aerx: root task: ERTS starts here; this image holds no ERTS/n, seconds: 30 }.freeze].freeze
+         point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
+         point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60)].freeze
       end
 
       # A machine with less RAM than root_memory: the same image boots to the root, which
@@ -160,17 +190,23 @@ module Erx
          { name: 'root-refusal', pattern: /\Aerx: root task refused the boot: manifest: root_memory is more than/n, seconds: 30 }.freeze].freeze
       end
 
-      def self.point(name, pattern, whole)
-        { name: name, pattern: pattern, seconds: 30,
+      # A kernel command line the root will not take: it says so and ends the machine.
+      def self.command_line_refusal_checkpoints
+        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+         { name: 'root-refusal', pattern: /\Aerx: root task refused the boot: the kernel command line/n, seconds: 30 }.freeze].freeze
+      end
+
+      def self.point(name, pattern, whole, seconds: 30)
+        { name: name, pattern: pattern, seconds: seconds,
           verify: ->(text) { raise Error, "the root task reports #{text.inspect}" unless whole.match?(text) } }.freeze
       end
       private_class_method :point
 
       private
 
-      def boot(accel, count, built, memory_mib:, points:)
+      def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: true)
+            .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end, command_line: command_line)
       end
 
       def image(fiasco)
@@ -210,10 +246,10 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, receipts:, output:)
+    def pack(entries:, root_task:, receipts:, erts:, output:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
-      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, receipts), external: external, runner: @runner,
+      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, receipts), external: external(erts), runner: @runner,
                                       imports: IMPORTS, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
@@ -241,16 +277,23 @@ module Erx
     end
 
     # The clang that built the root, and Fiasco's archives its link takes members of.
-    def external
+    def external(erts)
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
       installation = File.expand_path('../../..', File.read(resource.fetch('log')).strip)
       ToolchainProvenance.registry(profile: File.join(@root, 'config/provenance/llvm-23.1.3.json'), installation: installation) +
-        archives.map { |archive| external_archive(archive) }
+        archives(erts).map { |archive| external_archive(archive) }
     end
 
-    def archives
+    def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
-      [Archive.new(path: @fiasco.user_library('libl4sys.p.a'), label: 'fiasco/l4re-core libl4sys',
+      otp = erts.otp_archives.map do |path|
+        Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0', status: 'permanent', notice: 'otp/LICENSE.txt')
+      end
+      [*otp,
+       Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notice: 'musl/COPYRIGHT'),
+       Archive.new(path: @fiasco.user_library('libgcc.a'), label: 'fiasco/l4re-core libgcc',
+                   license: 'GPL-3.0-only WITH GCC-exception-3.1', status: 'stopgap', notice: spdx),
+       Archive.new(path: @fiasco.user_library('libl4sys.p.a'), label: 'fiasco/l4re-core libl4sys',
                    license: 'MIT', status: 'stopgap', notice: spdx),
        Archive.new(path: @fiasco.user_library('libsigma0.a'), label: 'fiasco/l4re-core libsigma0',
                    license: 'MIT', status: 'stopgap', notice: spdx),
@@ -260,7 +303,7 @@ module Erx
 
     def external_archive(archive)
       reference(archive.path).merge('path' => File.realpath(archive.path), 'label' => archive.label, 'license' => archive.license,
-                                    'evidence' => 'archive built by tools/lib/erx/fiasco.rb, attributed as a whole',
+                                    'evidence' => 'archive built by the tree\'s own build, attributed as a whole',
                                     'status' => archive.status, 'notices' => [reference(File.join(@root, archive.notice))])
     end
 

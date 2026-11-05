@@ -15,7 +15,7 @@
  */
 void	erx_fiasco_libc_write(const void *, size_t);
 
-/* Runs main through musl's start. exit() ends the program, so this returns only on a bug. */
-void	erx_fiasco_libc_start(void);
+/* Runs program as main through musl's start. exit() ends it, so this returns only on a bug. */
+void	erx_fiasco_libc_start(int (*program)(int, char **, char **));
 
 #endif /* ERX_FIASCO_LIBC_START_H */
