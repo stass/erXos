@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported.
+ * Modified by erXos: statistics(runtime) fails with notsup where CPU time is unsupported, kernel_poll is false and check_io is empty.
  *
  * %CopyrightEnd%
  */
@@ -50,7 +50,6 @@
 #include "erl_thr_progress.h"
 #include "erl_bif_unique.h"
 #include "erl_map.h"
-#include "erl_check_io.h"
 #define ERTS_PTAB_WANT_DEBUG_FUNCS__
 #include "erl_ptab.h"
 #include "erl_time.h"
@@ -3364,11 +3363,7 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
     } else if (ERTS_IS_ATOM_STR("context_reductions", BIF_ARG_1)) {
 	BIF_RET(make_small(CONTEXT_REDS));
     } else if (ERTS_IS_ATOM_STR("kernel_poll", BIF_ARG_1)) {
-#if ERTS_ENABLE_KERNEL_POLL
-	BIF_RET(am_true);
-#else
-	BIF_RET(am_false);
-#endif    
+	BIF_RET(am_false); /* The event table has no poll set. */
     } else if (ERTS_IS_ATOM_STR("lock_checking", BIF_ARG_1)) {
 #ifdef ERTS_ENABLE_LOCK_CHECK
 	BIF_RET(am_true);
@@ -3388,7 +3383,7 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	BIF_RET(am_false);
 #endif
     } else if (ERTS_IS_ATOM_STR("check_io", BIF_ARG_1)) {
-	BIF_RET(erts_check_io_info(BIF_P));
+	BIF_RET(NIL);
     } else if (ERTS_IS_ATOM_STR("multi_scheduling_blockers", BIF_ARG_1)) {
 	if (erts_no_schedulers == 1)
 	    BIF_RET(NIL);
@@ -4379,40 +4374,6 @@ BIF_RETTYPE erts_debug_get_internal_state_1(BIF_ALIST_1)
             Eterm* hp = HAlloc(BIF_P ,3);
 	    BIF_RET(TUPLE2(hp, make_small((Uint) words),
                            erts_ets_hash_sizeof_ext_segtab()));
-	}
-	else if (ERTS_IS_ATOM_STR("check_io_debug", BIF_ARG_1)) {
-	    /* Used by driver_SUITE (emulator) */
-	    Uint sz, *szp;
-	    Eterm res, *hp, **hpp;
-	    int no_errors;
-	    ErtsCheckIoDebugInfo ciodi = {0};
-#ifdef HAVE_ERTS_CHECK_IO_DEBUG
-	    erts_proc_unlock(BIF_P,ERTS_PROC_LOCK_MAIN);
-	    no_errors = erts_check_io_debug(&ciodi);
-	    erts_proc_lock(BIF_P,ERTS_PROC_LOCK_MAIN);
-#else
-	    no_errors = 0;
-#endif
-	    sz = 0;
-	    szp = &sz;
-	    hpp = NULL;
-	    while (1) {
-		res = erts_bld_tuple(hpp, szp, 4,
-				     erts_bld_uint(hpp, szp,
-						   (Uint) no_errors),
-				     erts_bld_uint(hpp, szp,
-						   (Uint) ciodi.no_used_fds),
-				     erts_bld_uint(hpp, szp,
-						   (Uint) ciodi.no_driver_select_structs),
-                                     erts_bld_uint(hpp, szp,
-                                                   (Uint) ciodi.no_enif_select_structs));
-		if (hpp)
-		    break;
-		hp = HAlloc(BIF_P, sz);
-		szp = NULL;
-		hpp = &hp;
-	    }
-	    BIF_RET(res);
 	}
 	else if (ERTS_IS_ATOM_STR("process_info_args", BIF_ARG_1)) {
 	    /* Used by process_SUITE (emulator) */

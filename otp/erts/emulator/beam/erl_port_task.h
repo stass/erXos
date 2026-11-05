@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the poll set's wake of a port task is removed.
+ *
  * %CopyrightEnd%
  */
 
@@ -40,7 +42,6 @@ typedef erts_atomic_t ErtsPortTaskHandle;
 #ifndef ERL_PORT_TASK_H__
 #define ERL_PORT_TASK_H__
 
-#include "erl_poll.h"
 
 #undef ERTS_INCLUDE_SCHEDULER_INTERNALS
 #if (defined(ERL_PROCESS_C__) \
@@ -140,13 +141,6 @@ ERTS_GLB_INLINE void erts_port_task_sched_unlock(ErtsPortTaskSched *ptsp);
 ERTS_GLB_INLINE int erts_port_task_sched_lock_is_locked(ErtsPortTaskSched *ptsp);
 ERTS_GLB_INLINE void erts_port_task_sched_enter_exiting_state(ErtsPortTaskSched *ptsp);
 
-#if defined(ERTS_INCLUDE_SCHEDULER_INTERNALS) && ERTS_POLL_USE_SCHEDULER_POLLING
-ERTS_GLB_INLINE int erts_port_task_have_outstanding_io_tasks(void);
-ERTS_GLB_INLINE void erts_port_task_inc_outstanding_io_tasks(void);
-ERTS_GLB_INLINE void erts_port_task_dec_outstanding_io_tasks(void);
-/* NOTE: Do not access any of the exported variables directly */
-extern erts_atomic_t erts_port_task_outstanding_io_tasks;
-#endif
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 
@@ -225,26 +219,6 @@ erts_port_task_sched_enter_exiting_state(ErtsPortTaskSched *ptsp)
     erts_atomic32_read_bor_nob(&ptsp->flags, ERTS_PTS_FLG_EXITING);
 }
 
-#if defined(ERTS_INCLUDE_SCHEDULER_INTERNALS) && ERTS_POLL_USE_SCHEDULER_POLLING
-ERTS_GLB_INLINE int
-erts_port_task_have_outstanding_io_tasks(void)
-{
-    return (erts_atomic_read_acqb(&erts_port_task_outstanding_io_tasks)
-	    != 0);
-}
-
-ERTS_GLB_INLINE void
-erts_port_task_inc_outstanding_io_tasks(void)
-{
-    erts_atomic_inc_nob(&erts_port_task_outstanding_io_tasks);
-}
-
-ERTS_GLB_INLINE void
-erts_port_task_dec_outstanding_io_tasks(void)
-{
-    erts_atomic_dec_nob(&erts_port_task_outstanding_io_tasks);
-}
-#endif
 
 #endif
 

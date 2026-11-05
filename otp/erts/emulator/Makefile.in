@@ -273,7 +273,6 @@ ARCH=@ARCH@
 ultrasparcCFLAGS=-Wa,-xarch=v8plusa
 ARCHCFLAGS=$($(ARCH)CFLAGS)
 
-ERTS_BUILD_FALLBACK_POLL=@ERTS_BUILD_FALLBACK_POLL@
 
 #
 #
@@ -508,7 +507,6 @@ FLAVOR_EXECUTABLE = beam$(TF_MARKER)
 EMULATOR_LIB = libbeam.a
 PROFILE_EXECUTABLE = beam.prof$(TF_MARKER)
 endif
-CS_EXECUTABLE = erl_child_setup$(TYPEMARKER)
 
 ifeq ($(PROFILE), generate)
 FLAVOR_EXECUTABLE = $(PROFILE_EXECUTABLE)
@@ -535,9 +533,6 @@ endif
 # ----------------------------------------------------------------------
 
 UNIX_ONLY_BUILDS =
-ifeq ($(ERLANG_OSTYPE), erxos)
-UNIX_ONLY_BUILDS =	$(BINDIR)/$(CS_EXECUTABLE)
-endif
 
 .PHONY: all
 ifdef VOID_EMULATOR
@@ -616,9 +611,6 @@ endif
 ifeq ($(RELEASE_LIBBEAM),yes)
 	$(INSTALL_DIR) "$(RELSYSDIR)/lib"
 	$(INSTALL_PROGRAM) $(BINDIR)/$(EMULATOR_LIB) "$(RELSYSDIR)/lib"
-endif
-ifeq ($(ERLANG_OSTYPE), erxos)
-	$(INSTALL_PROGRAM) $(BINDIR)/$(CS_EXECUTABLE) "$(RELSYSDIR)/bin"
 endif
 endif
 
@@ -806,11 +798,6 @@ endif
 # This list must be consistent with PRE_LOADED_MODULES in
 # erts/preloaded/src/Makefile.
 
-ESOCK_PRELOAD_BEAM = \
-	$(ERL_TOP)/erts/preloaded/ebin/socket_registry.beam \
-	$(ERL_TOP)/erts/preloaded/ebin/prim_socket.beam \
-	$(ERL_TOP)/erts/preloaded/ebin/prim_net.beam
-
 PRELOAD_BEAM =	$(ERL_TOP)/erts/preloaded/ebin/erts_code_purger.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/erl_init.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/init.beam \
@@ -819,7 +806,6 @@ PRELOAD_BEAM =	$(ERL_TOP)/erts/preloaded/ebin/erts_code_purger.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_inet.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_file.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/zlib.beam \
-		$(ESOCK_PRELOAD_BEAM) \
 		$(ERL_TOP)/erts/preloaded/ebin/prim_zip.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/erl_prim_loader.beam \
 		$(ERL_TOP)/erts/preloaded/ebin/erlang.beam \
@@ -952,20 +938,6 @@ $(OBJDIR)/%_pu.gcda: $(OBJDIR)/PROFILE
 $(OBJDIR)/default.profdata: $(OBJDIR)/PROFILE
 	$(V_LLVM_PROFDATA) merge -output $@ $(OBJDIR)/*.profraw
 
-ifeq ($(ERTS_BUILD_FALLBACK_POLL),yes)
-# Have to treat erl_poll differently as the same .c file is used
-# twice for kernel poll builds.
-$(OBJDIR)/erl_poll.o: sys/common/erl_poll.c
-	$(V_CC) -DERTS_KERNEL_POLL_VERSION $(subst $(space)-O2$(space), $(GEN_OPT_FLGS) , $(CFLAGS)) $(INCLUDES) -c $< -o $@
-
-# Do a copy in order to make debuggers less confused
-$(TTF_DIR)/erl_poll.flbk.c: sys/common/erl_poll.c
-	$(V_at) cp $< $@
-	@touch $@
-
-$(OBJDIR)/erl_poll.flbk.o: $(TTF_DIR)/erl_poll.flbk.c
-	$(V_CC) -DERTS_NO_KERNEL_POLL_VERSION $(subst $(space)-O2$(space), $(GEN_OPT_FLGS) , $(CFLAGS)) $(INCLUDES) -c $< -o $@
-endif
 
 
 # ----------------------------------------------------------------------
@@ -1075,11 +1047,6 @@ update_asmjit:
 # ----------------------------------------------------------------------
 # Specials
 #
-CS_OBJ = $(OBJDIR)/erl_child_setup.o $(OBJDIR)/sys_uds.o $(OBJDIR)/hash.o
-
-$(BINDIR)/$(CS_EXECUTABLE): $(TTF_DIR)/GENERATED $(PRELOAD_SRC) $(CS_OBJ) $(ERTS_LIB)
-	$(ld_verbose) $(LD) $(CS_LDFLAGS) -o $(BINDIR)/$(CS_EXECUTABLE) \
-               $(CS_CFLAGS) $(COMMON_INCLUDES) $(CS_OBJ) $(CS_LIBS)
 
 ifeq ($(GCC),yes)
 
@@ -1168,15 +1135,6 @@ JIT_OBJS += $(ASMJIT_OBJS)
 EMU_OBJS = \
 	$(OBJDIR)/emu_load.o
 
-ESOCK_NIF_OBJS = \
-	$(OBJDIR)/prim_socket_nif.o \
-	$(OBJDIR)/prim_net_nif.o
-
-ESOCK_RUN_OBJS = \
-	$(OBJDIR)/socket_dbg.o \
-	$(OBJDIR)/socket_tarray.o \
-	$(OBJDIR)/socket_util.o
-
 RUN_OBJS += \
 	$(OBJDIR)/erl_alloc.o \
 	$(OBJDIR)/erl_alloc_util.o	$(OBJDIR)/erl_goodfit_alloc.o \
@@ -1225,7 +1183,7 @@ RUN_OBJS += \
 	$(OBJDIR)/erl_ptab.o		$(OBJDIR)/erl_map.o \
 	$(OBJDIR)/erl_msacc.o		$(OBJDIR)/erl_lock_flags.o \
 	$(OBJDIR)/erl_io_queue.o	$(OBJDIR)/erl_db_catree.o \
-	$(ESOCK_RUN_OBJS)		$(OBJDIR)/erl_flxctr.o \
+	$(OBJDIR)/erl_flxctr.o \
 	$(OBJDIR)/erl_nfunc_sched.o \
 	$(OBJDIR)/erl_global_literals.o \
 	$(OBJDIR)/beam_file.o \
@@ -1247,8 +1205,7 @@ NIF_OBJS = \
 	$(OBJDIR)/prim_buffer_nif.o \
 	$(OBJDIR)/prim_file_nif.o \
 	$(OBJDIR)/zlib_nif.o \
-	$(OBJDIR)/zstd_nif.o \
-	$(ESOCK_NIF_OBJS)
+	$(OBJDIR)/zstd_nif.o
 
 ifeq ($(TARGET),win32)
 DRV_OBJS = \
@@ -1269,18 +1226,16 @@ OS_OBJS = \
 else
 OS_OBJS = \
 	$(OBJDIR)/sys.o \
-	$(OBJDIR)/sys_drivers.o \
+	$(OBJDIR)/erx_event.o \
+	$(OBJDIR)/erx_event_table.o \
 	$(OBJDIR)/sys_env.o \
-	$(OBJDIR)/sys_uds.o \
 	$(OBJDIR)/driver_tab.o \
 	$(OBJDIR)/erx_prim_file.o \
 	$(OBJDIR)/sys_float.o \
 	$(OBJDIR)/sys_time.o \
-	$(OBJDIR)/sys_signal_stack.o \
-	$(OBJDIR)/unix_socket_syncio.o
+	$(OBJDIR)/sys_signal_stack.o
 
 DRV_OBJS = \
-	$(OBJDIR)/inet_drv.o \
 	$(OBJDIR)/ram_file_drv.o
 endif
 
@@ -1309,18 +1264,13 @@ $(STATIC_NIF_LIBS) $(STATIC_DRIVER_LIBS):
 	echo "=== Leaving lib after making static libs"
 endif
 
-OS_OBJS +=	$(OBJDIR)/erl_poll.o \
-		$(OBJDIR)/erl_check_io.o \
-		$(OBJDIR)/erl_mseg.o \
+OS_OBJS +=	$(OBJDIR)/erl_mseg.o \
 		$(OBJDIR)/erl_mmap.o  \
 		$(OBJDIR)/erl_osenv.o \
 		$(OBJDIR)/erl_$(ERLANG_OSTYPE)_sys_ddll.o \
 		$(OBJDIR)/erl_sys_common_misc.o \
 		$(OBJDIR)/erl_os_monotonic_time_extender.o
 
-ifeq ($(ERTS_BUILD_FALLBACK_POLL),yes)
-OS_OBJS += 	$(OBJDIR)/erl_poll.flbk.o
-endif
 ifneq ($(ERTS_USE_BUILTIN_RYU),yes)
 OS_OBJS += 	$(OBJDIR)/erl_float_short.o
 endif
@@ -1410,7 +1360,6 @@ SED_REPL_O=s|^\([^:]*:\)|$$(OBJDIR)/\1|g
 SED_REPL_O_ZLIB=s|^\([^:]*:\)|$$(ZLIB_OBJDIR)/\1|g
 SED_REPL_TTF_DIR=s|$(TTF_DIR)/|$$(TTF_DIR)/|g
 SED_REPL_ERL_TOP=s|\([ 	]\)$(ERL_TOP)/|\1$$(ERL_TOP)/|g;s|^$(ERL_TOP)/|$$(ERL_TOP)/|g
-SED_REPL_POLL=s|$$(OBJDIR)/erl_poll.o|$$(OBJDIR)/erl_poll.o $$(OBJDIR)/erl_poll.flbk.o|g
 SED_REPL_TTF_COMP_FLAGS=s|\([^/]\)erl_compile_flags\.h|\1$$(TTF_DIR)/erl_compile_flags\.h|g
 SED_ASMJIT_HPP_FLAGS=s|\([^/]\)asmjit/asmjit\.hpp|\1$$(TTF_DIR)/asmjit/asmjit\.hpp|g
 
@@ -1421,11 +1370,7 @@ else
 SED_PREFIX=
 endif
 
-ifeq ($(ERTS_BUILD_FALLBACK_POLL),yes)
-SED_SUFFIX=;$(SED_REPL_POLL)
-else
 SED_SUFFIX=
-endif
 
 SED_DEPEND=sed '$(SED_PREFIX)$(SED_REPL_O);$(SED_REPL_TTF_DIR);$(SED_REPL_ERL_TOP)$(SED_SUFFIX);$(SED_REPL_TTF_COMP_FLAGS);$(SED_ASMJIT_HPP_FLAGS)'
 SED_DEPEND_ZLIB=sed '$(SED_PREFIX)$(SED_REPL_O_ZLIB)'

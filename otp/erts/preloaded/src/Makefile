@@ -17,6 +17,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# Modified by erXos: prim_socket, prim_net and socket_registry are removed.
+#
 # %CopyrightEnd%
 # 
 # Note, this makefile is not called during normal build process, it should
@@ -34,18 +36,12 @@ STATIC_EBIN=../ebin
 include $(ERL_TOP)/erts/vsn.mk
 include $(ERL_TOP)/lib/kernel/vsn.mk
 
-PRE_LOADED_ERL_ESOCK_MODULES = \
-	socket_registry \
-	prim_socket \
-	prim_net
-
 PRE_LOADED_ERL_MODULES = \
 	erl_prim_loader \
 	init \
 	prim_buffer \
 	prim_file \
 	prim_inet \
-	$(PRE_LOADED_ERL_ESOCK_MODULES) \
 	zlib \
 	prim_zip \
 	erl_init \

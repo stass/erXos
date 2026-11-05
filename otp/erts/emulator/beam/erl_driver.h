@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: driver_select is removed: a driver waits through the event table.
+ *
  * %CopyrightEnd%
  */
 
@@ -332,7 +334,6 @@ EXTERN void erl_drv_busy_msgq_limits(ErlDrvPort port,
 				     ErlDrvSizeT *low,
 				     ErlDrvSizeT *high);
 
-EXTERN int driver_select(ErlDrvPort port, ErlDrvEvent event, int mode, int on);
 
 EXTERN int driver_output(ErlDrvPort port, char *buf, ErlDrvSizeT len);
 EXTERN int driver_output2(ErlDrvPort port, char *hbuf, ErlDrvSizeT hlen,

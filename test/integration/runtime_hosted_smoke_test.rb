@@ -28,6 +28,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
   # reporting thread looking at the status page ten times a second.
   IDLE_SAMPLE_SECONDS = 3
   IDLE_CPU_PERCENT_MAX = 2.0
+  DIRTY_DISPATCH_ROUNDS = 20
   # Each makes schedulers sleep and wake in a way of its own, so a lost wake hangs one of
   # them and the budget's deadline ends the test.
   # A typed line can reach the terminal before the last prompt, so an answer need not start a line.
@@ -110,6 +111,50 @@ class RuntimeHostedSmokeTest < Minitest::Test
           read_until(reader, transcript, answer, deadline)
         end
         assert_idle(reader, transcript, pid, schedulers: schedulers, dirty: dirty, moment: 'after every wake pattern')
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        status = wait_for(pid, deadline, transcript)
+        @reaped = true
+        assert status.success?, "the runtime ended with #{status.inspect}\n#{plain(transcript)}"
+      end
+    end
+  end
+
+  # The idle check takes the highest parked count of its sample, so one executor awake for
+  # a moment passes; this seeds an executor that never parks, which must not.
+  def test_a_stuck_executor_fails_the_idle_check
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home, 'ERX_HOSTED_GROUP_REPORT' => '1') do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
+        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
+        schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
+        writer.write("spawn(fun() -> (fun Spin() -> Spin() end)() end), spinning.\n")
+        read_until(reader, transcript, /\bspinning\n/, deadline)
+        failure = assert_raises(Minitest::Assertion) do
+          assert_idle(reader, transcript, pid, schedulers: schedulers, dirty: dirty, moment: 'with an executor spinning')
+        end
+        assert_match(/Expected: #{schedulers + dirty}\n\s+Actual: #{schedulers + dirty - 1}/, failure.message)
+      end
+    end
+  end
+
+  # With every normal scheduler spinning, the parked executor a keystroke wakes is a dirty CPU
+  # scheduler, unless a normal one reaches its safe point first: either delivers the label.
+  def test_input_arrives_while_every_normal_scheduler_is_busy
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home) do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        writer.write("[spawn(fun() -> (fun Spin() -> Spin() end)() end) || _ <- lists:seq(1, erlang:system_info(schedulers))], spinning.\n")
+        read_until(reader, transcript, /\bspinning\n/, deadline)
+        DIRTY_DISPATCH_ROUNDS.times do |round|
+          writer.write("{round, #{round}}.\n")
+          read_until(reader, transcript, /\{round,#{round}\}\n/, deadline)
+        end
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
         status = wait_for(pid, deadline, transcript)
@@ -213,9 +258,20 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'file:list_dir("/").' => /"bin"/,
       'erlang:system_info(emu_flavor).' => /^emu$/,
       '[element(1, C) || C <- supervisor:which_children(kernel_sup)].' => /code_server/,
-      'erlang:port_info(hd(erlang:ports()), name).' => /forker/,
-      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, rex]].' => /^\[undefined,<[0-9.]+>,undefined,undefined,undefined\]$/,
-      '[M || {M, _} <- code:all_loaded(), lists:member(M, [socket, prim_socket, prim_net, socket_registry, gen_tcp, inet_tcp, heart, erl_epmd])].' => /\[/,
+      'erlang:ports().' => /^\[\]$/,
+      'catch open_port({spawn, "ls"}, []).' => /badarg/,
+      'catch os:cmd("ls").' => /open_port,badarg/,
+      'element(2, os:type()).' => /^erxos$/,
+      '{ok, Ram} = file:open(<<"ram">>, [ram, binary, read]), file:read(Ram, 3).' => /^\{ok,<<"ram">>\}$/,
+      'catch open_port({fd, 0, 1}, []).' => /badarg/,
+      'catch open_port({spawn_driver, "tcp_inet"}, []).' => /badarg/,
+      '[code:which(M) || M <- [prim_socket, prim_net, socket_registry]].' => /^\[non_existing,non_existing,non_existing\]$/,
+      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, rex]].' => /^\[undefined,undefined,undefined,undefined,undefined\]$/,
+      '[M || {M, _} <- code:all_loaded(), lists:member(M, [socket, prim_socket, prim_net, socket_registry, gen_tcp, inet_tcp, heart, erl_epmd])].' => /^\[heart\]$/,
+      'inet:getaddr("localhost", inet).' => /^\{ok,\{127,0,0,1\}\}$/,
+      'inet:gethostbyname("no.such.name").' => /^\{error,nxdomain\}$/,
+      'gen_tcp:listen(0, []).' => /^\{error,eprotonosupport\}$/,
+      'gen_udp:open(0, []).' => /^\{error,eprotonosupport\}$/,
       'application:which_applications().' => /kernel/
     }
     Dir.mktmpdir('erx-hosted-home-') do |home|
@@ -244,9 +300,13 @@ class RuntimeHostedSmokeTest < Minitest::Test
     drain(reader, transcript, 1)
     cpu_before = process_cpu_seconds(pid)
     assert_operator cpu_before, :>, 0, 'ps gives the CPU time a boot spent'
+    lines_before = plain(transcript).scan(GROUP_LINE).size
     drain(reader, transcript, IDLE_SAMPLE_SECONDS)
     percent = (process_cpu_seconds(pid) - cpu_before) * 100.0 / IDLE_SAMPLE_SECONDS
-    parked, executors = plain(transcript).scan(GROUP_LINE).last.map(&:to_i)
+    lines = plain(transcript).scan(GROUP_LINE).map { |line| line.map(&:to_i) }
+    sampled = lines.drop(lines_before - 1)
+    parked = sampled.map(&:first).max
+    executors = sampled.last.last
     puts format('idle %s: parked %d of %d executors (%d schedulers, %d dirty CPU), CPU %.2f%%',
                 moment, parked, executors, schedulers, dirty, percent)
     assert_equal schedulers + dirty, executors
@@ -281,11 +341,10 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   # The release's manifest holds every argument; the host names only what the page still
-  # inherits for the stock ports and terminal driver.
+  # inherits for the stock terminal driver.
   def spawn_shell(home, extra_environment = {})
-    bin = File.dirname(OUTPUT.beam)
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
-      'BINDIR' => bin, 'ROOTDIR' => '/', 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
+      'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
       'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment
     )
     PTY.spawn(environment, OUTPUT.beam, OUTPUT.archive, chdir: home) do |reader, writer, pid|
@@ -295,7 +354,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
-  # The child leads a session of its own, with erl_child_setup in its group.
+  # The child leads a session of its own.
   def end_if_running(pid)
     return if @reaped
 

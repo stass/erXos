@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: open_port opens linked-in drivers only: spawn, spawn_executable and fd are badarg.
+ *
  * %CopyrightEnd%
  */
 
@@ -1040,7 +1042,7 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 	    goto badarg;
 	}
     
-	if (*tp == am_spawn || *tp == am_spawn_driver || *tp == am_spawn_executable) {	/* A process port */
+	if (*tp == am_spawn_driver) {	/* A linked-in driver, the only port there is */
 	    int encoding;
 	    if (arity != make_arityval(2)) {
 		goto badarg;
@@ -1057,37 +1059,13 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 		goto badarg;
 	    }
 
-	    if (*tp == am_spawn_driver) {
-		opts.spawn_type = ERTS_SPAWN_DRIVER;
-	    } else if (*tp == am_spawn_executable) {
-		opts.spawn_type = ERTS_SPAWN_EXECUTABLE;
-	    }
-
-	    driver = &spawn_driver;
-	} else if (*tp == am_fd) { /* An fd port */
-	    if (arity != make_arityval(3)) {
-		goto badarg;
-	    }
-	    if (is_not_small(tp[1]) || is_not_small(tp[2])) {
-		goto badarg;
-	    }
-	    opts.ifd = unsigned_val(tp[1]);
-	    opts.ofd = unsigned_val(tp[2]);
-
-            /* Syntesize name from input and output descriptor. */
-            name_buf = erts_alloc(ERTS_ALC_T_TMP, 256);
-            erts_snprintf(name_buf, 256, "%i/%i", opts.ifd, opts.ofd);
-
-	    driver = &fd_driver;
+	    opts.spawn_type = ERTS_SPAWN_DRIVER;
+	    driver = NULL;
 	} else {
 	    goto badarg;
 	}
 
-    if ((driver != &spawn_driver && opts.argv != NULL) ||
-	(driver == &spawn_driver && 
-	 opts.spawn_type != ERTS_SPAWN_EXECUTABLE && 
-	 opts.argv != NULL)) {
-	/* Argument vector only if explicit spawn_executable */
+    if (opts.argv != NULL) {
 	goto badarg;
     }
 
@@ -1097,7 +1075,7 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 	}
     }
 
-    if (driver != &spawn_driver && opts.exit_status) {
+    if (opts.exit_status) {
 	goto badarg;
     }
     

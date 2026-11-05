@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the event table's lock replaces the poll set's in the order.
+ *
  * %CopyrightEnd%
  */
 
@@ -121,7 +123,7 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"dirty_gc_info",			        NULL},
     {"dirty_break_point_index",		        NULL},
     {"cpu_info",				NULL},
-    {"block_poll_thread",                       "index"},
+    {"erx_event",                               NULL},
     {"alcu_init_atoms",			        NULL},
     {"mseg_init_atoms",			        NULL},
     {"mmap_init_atoms",			        NULL},
@@ -134,7 +136,6 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"nif_load",                                NULL},
     {"purge_state",		                NULL},
     {"environ",				        NULL},
-    {"drv_ev_state",			        "address"},
     {"migration_info_update",		        NULL},
     {"drv_tsd",				        NULL},
     {"msacc_list_mutex",                        NULL},
@@ -145,7 +146,6 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"erl_db_catree_base_node",		        NULL},
     {"proc_btm",				"pid"},
     {"safe_hash",				"address"},
-    {"pollset",				        "address"},
     LEVEL,
     {"erl_db_catree_route_node",		"index"},
     {"proc_status",				"pid"},
@@ -166,7 +166,6 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"msacc_unmanaged_mutex",                   NULL},
     LEVEL,
 #ifdef __WIN32__
-    {"pollwaiter",				"address"},
     {"break_waiter_lock",                       NULL},
 #endif /* __WIN32__ */
     {"tracer_mtx", 				NULL},

@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the fd, spawn and forker drivers and driver_select are removed.
+ *
  * %CopyrightEnd%
  */
 
@@ -59,11 +61,6 @@
 #include "erl_global_literals.h"
 #include "erl_iolist.h"
 
-extern ErlDrvEntry fd_driver_entry;
-extern ErlDrvEntry spawn_driver_entry;
-#ifndef __WIN32__
-extern ErlDrvEntry forker_driver_entry;
-#endif
 extern ErtsStaticDriver driver_tab[]; /* table of static drivers, only used during initialization */
 
 erts_driver_t *driver_list; /* List of all drivers, static and dynamic. */
@@ -79,11 +76,6 @@ const ErlDrvTermData driver_term_nil = (ErlDrvTermData)NIL;
 
 const Port erts_invalid_port = {{ERTS_INVALID_PORT}};
 
-erts_driver_t spawn_driver;
-#ifndef __WIN32__
-erts_driver_t forker_driver;
-#endif
-erts_driver_t fd_driver;
 
 int erts_port_synchronous_ops = 0;
 int erts_port_schedule_all_ops = 0;
@@ -577,58 +569,12 @@ erts_open_driver(erts_driver_t* driver,	/* Pointer to driver. */
 	    ERTS_OPEN_DRIVER_RET(NULL, -3, BADARG);
 	}
     }
-    if (driver == &spawn_driver) {
-	char *p;
-	erts_driver_t *d;
-
-	/*
-	 * Dig out the name of the driver or port program.
-	 */
-
-	if (!(opts->spawn_type & ERTS_SPAWN_EXECUTABLE)) {
-	    /* No spawn driver default */
-	    driver = NULL;
-	} else {
-#ifdef __IOS__ 
-	    erts_rwmtx_runlock(&erts_driver_list_lock);
-	    ERTS_OPEN_DRIVER_RET(NULL, -3, BADARG);	   
-#endif
-    }
-
-
-	if (opts->spawn_type != ERTS_SPAWN_EXECUTABLE) {
-	    p = name;
-	    while(*p != '\0' && *p != ' ')
-		p++;
-	    if (*p == '\0')
-		p = NULL;
-	    else
-		*p = '\0';
-
-	    /*
-	     * Search for a driver having this name.  Defaults to spawn_driver
-	     * if not found.
-	     */
-	    
-	    for (d = driver_list; d; d = d->next) {
-		if (sys_strcmp(d->name, name) == 0 && 
-		    erts_ddll_driver_ok(d->handle)) {
-		    driver = d;
-		    break;
-		}
-	    }
-	    if (p != NULL)
-		*p = ' ';
-	}
-    }
-
-    if (driver == NULL || (driver != &spawn_driver && opts->exit_status)) {
+    if (driver == NULL || opts->exit_status) {
 	erts_rwmtx_runlock(&erts_driver_list_lock);
 	ERTS_OPEN_DRIVER_RET(NULL, -3, BADARG);
     }
 
-    if (opts->port_watermarks_set && driver != &spawn_driver
-        && driver != &fd_driver) {
+    if (opts->port_watermarks_set) {
 	erts_rwmtx_runlock(&erts_driver_list_lock);
 	ERTS_OPEN_DRIVER_RET(NULL, -3, BADARG);
     }
@@ -2254,11 +2200,6 @@ erts_port_exit(Process *c_p,
 		      | ERTS_PORT_SIG_FLG_BROKEN_LINK
 		      | ERTS_PORT_SIG_FLG_FORCE_SCHED)) == 0);
 
-#ifndef __WIN32__
-    if (prt->drv_ptr == &forker_driver)
-        return ERTS_PORT_OP_DROPPED;
-#endif
-
     if (!(flags & ERTS_PORT_SIG_FLG_FORCE_SCHED)) {
 	ErtsTryImmDrvCallState try_call_state
 	    = ERTS_INIT_TRY_IMM_DRV_CALL_STATE(c_p,
@@ -3027,12 +2968,6 @@ void erts_init_io(int port_tab_size,
 
     erts_tsd_set(driver_list_lock_status_key, (void *) 1);
     erts_rwmtx_rwlock(&erts_driver_list_lock);
-
-    init_driver(&fd_driver, &fd_driver_entry, NULL);
-    init_driver(&spawn_driver, &spawn_driver_entry, NULL);
-#ifndef __WIN32__
-    init_driver(&forker_driver, &forker_driver_entry, NULL);
-#endif
     erts_init_static_drivers();
     for (dp = driver_tab; dp->de != NULL; dp++)
 	erts_add_driver_entry(dp->de, NULL, 1, dp->taint);
@@ -3088,12 +3023,6 @@ static void lcnt_enable_port_lock_count(Port *prt, int enable)
 
 void erts_lcnt_update_driver_locks(int enable) {
     erts_driver_t *driver;
-
-    lcnt_enable_driver_lock_count(&spawn_driver, enable);
-#ifndef __WIN32__
-    lcnt_enable_driver_lock_count(&forker_driver, enable);
-#endif
-    lcnt_enable_driver_lock_count(&fd_driver, enable);
 
     erts_rwmtx_rlock(&erts_driver_list_lock);
 
@@ -5178,17 +5107,7 @@ print_port_info(Port *p, fmtfn_t to, void *arg)
     if (p->common.u.alive.reg != NULL)
 	erts_print(to, arg, "Registered as: %T\n", p->common.u.alive.reg->name);
 
-    if (p->drv_ptr == &fd_driver) {
-	erts_print(to, arg, "Port is UNIX fd not opened by emulator: %s\n", p->name);
-    } else if (p->drv_ptr == &spawn_driver) {
-	erts_print(to, arg, "Port controls external process: %s\n",p->name);
-#ifndef __WIN32__
-    } else if (p->drv_ptr == &forker_driver) {
-	erts_print(to, arg, "Port controls forker process: %s\n",p->name);
-#endif
-    } else {
-	erts_print(to, arg, "Port controls linked-in driver: %s\n",p->name);
-    }
+    erts_print(to, arg, "Port controls linked-in driver: %s\n",p->name);
     erts_print(to, arg, "Input: %beu\n", p->bytes_in);
     erts_print(to, arg, "Output: %beu\n", p->bytes_out);
     erts_print(to, arg, "Queue: %beu\n", erts_ioq_size(&p->ioq));
@@ -5417,55 +5336,6 @@ report_missing_drv_callback(Port *p, char *drv_type, char *callback)
     erts_send_error_to_logger_nogl(dsbufp);
 }
 
-void
-erts_stale_drv_select(Eterm port,
-		      ErlDrvPort drv_port,
-		      ErlDrvEvent hndl,
-		      int mode,
-		      int deselect)
-{
-    char *type;
-    ErtsPortNames *pnp;
-    erts_dsprintf_buf_t *dsbufp;
-
-    if (drv_port == ERTS_INVALID_ERL_DRV_PORT) {
-	Port *prt = erts_port_lookup_raw(port);
-	if (prt)
-	    drv_port = ERTS_Port2ErlDrvPort(prt);
-	else
-	    drv_port = ERTS_INVALID_ERL_DRV_PORT;
-    }
-
-    pnp = erts_get_port_names(port, drv_port);
-
-    switch (mode) {
-    case ERL_DRV_READ | ERL_DRV_WRITE:
-	type = "Input/Output";
-        break;
-    case ERL_DRV_WRITE:
-	type = "Output";
-        break;
-    case ERL_DRV_READ:
-	type = "Input";
-        break;
-    default:
-        type = "";
-    }
-    if (deselect) {
-        driver_select(drv_port, hndl,
-                      mode | ERL_DRV_USE_NO_CALLBACK,
-                      0);
-    }
-
-    dsbufp = erts_create_logger_dsbuf();
-    erts_dsprintf(dsbufp,
-		  "%T: %s: %s driver gone away without deselecting!\n",
-		  port,
-		  pnp->name ? pnp->name : "<unknown>",
-		  type);
-    erts_free_port_names(pnp);
-    erts_send_error_to_logger_nogl(dsbufp);
-}
 
 ErtsPortNames *
 erts_get_port_names(Eterm id, ErlDrvPort drv_port)
@@ -7518,8 +7388,6 @@ no_ready_input_callback(ErlDrvData drv_data, ErlDrvEvent event)
 {
     Port *prt = get_current_port();
     report_missing_drv_callback(prt, "Input", "ready_input()");
-    driver_select(ERTS_Port2ErlDrvPort(prt), event, 
-		  (ERL_DRV_READ | ERL_DRV_USE_NO_CALLBACK), 0);
 }
 
 static void
@@ -7527,8 +7395,6 @@ no_ready_output_callback(ErlDrvData drv_data, ErlDrvEvent event)
 {
     Port *prt = get_current_port();
     report_missing_drv_callback(prt, "Output", "ready_output()");
-    driver_select(ERTS_Port2ErlDrvPort(prt), event,
-		  (ERL_DRV_WRITE | ERL_DRV_USE_NO_CALLBACK), 0);
 }
 
 static void

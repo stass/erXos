@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: starts the event table in place of check_io, and has no +IO options.
+ *
  * %CopyrightEnd%
  */
 
@@ -44,13 +46,13 @@
 #include "packet_parser.h"
 #include "erl_cpu_topology.h"
 #include "erl_thr_progress.h"
+#include "erx_event.h"
 #include "erl_thr_queue.h"
 #include "erl_async.h"
 #include "erl_ptab.h"
 #include "erl_bif_unique.h"
 #define ERTS_WANT_TIMER_WHEEL_API
 #include "erl_time.h"
-#include "erl_check_io.h"
 #include "erl_osenv.h"
 #include "erl_proc_sig_queue.h"
 #include "beam_load.h"
@@ -266,7 +268,6 @@ erl_init(int ncpu,
     erts_init_process(ncpu, proc_tab_sz, legacy_proc_tab);
     erts_init_scheduling(no_schedulers,
 			 no_schedulers_online,
-                         erts_no_poll_threads,
 			 no_dirty_cpu_schedulers,
 			 no_dirty_cpu_schedulers_online,
 			 no_dirty_io_schedulers
@@ -585,15 +586,6 @@ __decl_noreturn void __noreturn  erts_usage(void)
     erts_fprintf(stderr, "               valid values are: off_heap | on_heap\n");
     erts_fprintf(stderr, "\n");
 
-    erts_fprintf(stderr, "-IOp number    set number of pollsets to be used to poll for I/O\n");
-    erts_fprintf(stderr, "               (this value must be equal or smaller than the\n");
-    erts_fprintf(stderr, "               number of poll threads; ignored if the current platform\n");
-    erts_fprintf(stderr, "               does not support concurrent update of pollsets)\n");
-    erts_fprintf(stderr, "-IOt number    set number of threads to be used to poll for I/O\n");
-    erts_fprintf(stderr, "-IOPp number   set number of pollsets as a percentage of the\n");
-    erts_fprintf(stderr, "               number of poll threads\n");
-    erts_fprintf(stderr, "-IOPt number   set number of threads to be used to poll for I/O\n");
-    erts_fprintf(stderr, "               as a percentage of the number of schedulers\n");
     erts_fprintf(stderr, "-i module      set the boot module (default init)\n");
     erts_fprintf(stderr, "\n");
 
@@ -1217,7 +1209,7 @@ early_init(int *argc, char **argv) /*
     /* Require allocators */
     erts_errno_init();
 
-    erts_init_check_io(argc, argv);
+    erx_event_init();
 
     /*
      * Thread progress management:
@@ -1226,7 +1218,6 @@ early_init(int *argc, char **argv) /*
      * ** Scheduler threads (see erl_process.c)
      * ** Aux threads (see erl_process.c)
      * ** Sys message dispatcher thread (see erl_trace.c)
-     * ** IO Poll threads (see erl_check_io.c)
      *
      * * Unmanaged threads that need to register:
      * ** Async threads (see erl_async.c)
@@ -1235,8 +1226,7 @@ early_init(int *argc, char **argv) /*
     erts_thr_progress_init(no_schedulers,
 			   (no_schedulers
 			    + aux_threads
-			    + 1
-			    + erts_no_poll_threads),
+			    + 1),
 			   (erts_async_max_threads
 			    + erts_no_dirty_cpu_schedulers
 			    + erts_no_dirty_io_schedulers));

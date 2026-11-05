@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: has no select data states.
+ *
  * %CopyrightEnd%
  */
 
@@ -46,9 +48,6 @@
 #include "erl_cpu_topology.h"
 #include "erl_thr_queue.h"
 #include "erl_nfunc_sched.h"
-#if defined(ERTS_ALC_T_DRV_SEL_D_STATE) || defined(ERTS_ALC_T_DRV_EV_D_STATE)
-#include "erl_check_io.h"
-#endif
 #include "erl_bif_unique.h"
 
 #define GET_ERL_GF_ALLOC_IMPL
@@ -624,10 +623,6 @@ erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
 	= sizeof(ErtsMonitorDataHeap);
     fix_type_sizes[ERTS_ALC_FIX_TYPE_IX(ERTS_ALC_T_LINK)]
 	= sizeof(ErtsILink);
-    fix_type_sizes[ERTS_ALC_FIX_TYPE_IX(ERTS_ALC_T_DRV_SEL_D_STATE)]
-	= sizeof(ErtsDrvSelectDataState);
-    fix_type_sizes[ERTS_ALC_FIX_TYPE_IX(ERTS_ALC_T_NIF_SEL_D_STATE)]
-        = sizeof(ErtsNifSelectDataState);
     fix_type_sizes[ERTS_ALC_FIX_TYPE_IX(ERTS_ALC_T_MSG_REF)]
 	= sizeof(ErtsMessageRef);
     fix_type_sizes[ERTS_ALC_FIX_TYPE_IX(ERTS_ALC_T_THR_Q_EL_SL)]

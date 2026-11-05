@@ -37,11 +37,10 @@ static _Alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 static uint64_t wall_offset_ns;
 
 /*
- * What of the host's environment reaches the page: only what the stock fd, spawn and
- * forker ports and the stock terminal driver read, since they find erl_child_setup and
- * the terminal through it.
+ * What of the host's environment reaches the page: only what the stock terminal
+ * driver reads.
  */
-static const char *const inherited[] = { "BINDIR", "ROOTDIR", "EMU", "PROGNAME", "HOME", "TERM" };
+static const char *const inherited[] = { "PROGNAME", "HOME", "TERM" };
 #define INHERITED_COUNT	(sizeof(inherited) / sizeof(inherited[0]))
 
 /*

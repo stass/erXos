@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: does not include erl_check_io.h.
+ *
  * %CopyrightEnd%
  */
 
@@ -52,7 +54,6 @@
 #include "erl_sched_spec_pre_alloc.h"
 #include "beam_bp.h"
 #include "erl_ptab.h"
-#include "erl_check_io.h"
 #include "erl_bif_unique.h"
 #include "erl_io_queue.h"
 #define ERTS_WANT_TIMER_WHEEL_API

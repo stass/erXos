@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the declarations of the deleted fd and spawn drivers are removed.
+ *
  * %CopyrightEnd%
  */
 
@@ -1296,7 +1298,6 @@ int async_ready(Port *, void*);
 ErtsPortNames *erts_get_port_names(Eterm, ErlDrvPort);
 void erts_free_port_names(ErtsPortNames *);
 Uint erts_port_ioq_size(Port *pp);
-void erts_stale_drv_select(Eterm, ErlDrvPort, ErlDrvEvent, int, int);
 
 Port *erts_get_heart_port(void);
 void erts_emergency_close_ports(void);
@@ -1650,9 +1651,6 @@ extern void erts_match_prog_foreach_offheap(Binary *b,
 #define MATCH_SET_EXCEPTION_TRACE (0x4) /* exception trace requested */
 #define MATCH_SET_RX_TRACE (MATCH_SET_RETURN_TRACE|MATCH_SET_EXCEPTION_TRACE)
 
-extern erts_driver_t spawn_driver;
-extern erts_driver_t forker_driver;
-extern erts_driver_t fd_driver;
 
 int erts_beam_jump_table(void);
 

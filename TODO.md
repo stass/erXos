@@ -144,10 +144,22 @@ it; git history is the record of completed work.
   the index's room for run pages stay untested. A restarted driver spends device window pages and contiguous runs each life, since neither comes back.
 * [Low] stopgap, `liberx/backend/hosted/vm.c`: `erx_mem_create` and `erx_vm_map` have no hosted body, which the call table's row asks for, so
   `test/guest/function_api` holds no shared object's case and its device cases stay native alone.
-* [Low] `otp/erts/emulator/sys/common/erl_check_io.c`: poll threads alone wait on the poll set, with `use_sched_poll` starting
-  false, until the event table replaces the poll set, and `+IOs true` still turns scheduler polling on; a poll thread wakes a
-  scheduler through the ordinary enqueue path. The sleep step's ready list and the safe point of `docs/design-runtime.md`,
-  "Scheduling", land with the table: nothing binds an object to the group in ERTS until then.
+* [Low] `otp/erts/emulator/beam/erl_process.c`: the safe point of `docs/design-runtime.md`, "Scheduling", handles the ready list only: its
+  capacity and urgency steps land with the adapter that publishes them.
+* [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `erl_erxos_sys_ddll.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
+  `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
+  Darwin's main thread, `nice`, `alarm`, `uname`, `dlopen` and the crash dump's descriptors (edit 34). The first native boot answers each,
+  as `ENOSYS` tracing shows it; `poll`, `tcgetattr` and the rest of `[stock_terminal]` go with `erx_console`.
+* [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
+  group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
+  The first native consumer needs the unbind defined in the interface, with its status checked.
+* [Low] `otp/erts/emulator/nifs/common/prim_tty_nif.c`: `tty_reader_start`'s failure paths leak and report a stale `errno`, its IRQ object is never
+  destroyed and a second `tty_select` on one resource stops input; `erx_console` replaces the NIF.
+* [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
+  `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
+* [Low] `otp/lib/kernel/src/inet_gethost_native.erl`: a lookup set to `native` by an inetrc halts the runtime, since its program cannot
+  run; `inet_config` sets `file`, and the network service replaces both.
+* [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.

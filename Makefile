@@ -71,6 +71,7 @@ check-runtime-seam:
 # of 60 s; the build takes minutes. `make check` builds no runtime and runs neither.
 check-runtime-hosted:
 	$(RUBY) tools/erx build runtime --jobs $(JOBS)
+	$(RUBY) test/integration/runtime_event_test.rb
 	$(RUBY) test/integration/runtime_hosted_smoke_test.rb
 	$(RUBY) test/integration/runtime_prim_file_test.rb
 	$(RUBY) test/integration/runtime_release_test.rb

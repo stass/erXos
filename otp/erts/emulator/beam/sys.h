@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: has no poll set debug info.
+ *
  * %CopyrightEnd%
  */
 
@@ -158,7 +160,7 @@
 #endif
 
 /*
- * Make sure we have a type for FD's (used by erl_check_io)
+ * Make sure we have a type for FD's
  */
 
 #ifndef ERTS_SYS_FD_TYPE
@@ -876,13 +878,6 @@ void set_break_quit(void (*)(void), void (*)(void));
 void os_flavor(char*, unsigned);
 void os_version(int*, int*, int*);
 
-#define HAVE_ERTS_CHECK_IO_DEBUG
-typedef struct {
-    int no_used_fds;
-    int no_driver_select_structs;
-    int no_enif_select_structs;
-} ErtsCheckIoDebugInfo;
-int erts_check_io_debug(ErtsCheckIoDebugInfo *ip);
 
 int erts_sys_is_area_readable(char *start, char *stop);
 

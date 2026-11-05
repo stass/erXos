@@ -297,7 +297,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | Messages inside a domain | signal queues | none | **kept** | Erlang's semantics are the system's |
 | Messages between domains | distribution: node tables, entries, controllers, control messages, lazy decode (`dist.c`, `erl_node_tables.c`, `external.c`) | lanes, the funnel, the export table | **merged**: every domain is a node `<id>@<host>` with its domain id as creation, and each connection is one stock distribution entry, its controller a port whose driver speaks the lane; the funnel validates each frame before `erts_net_message`; the export table answers authority ([Connections in ERTS](#connections-in-erts)) | ERTS already routes every remote operation through one path, keeps flow control per entry, and decodes lazily in the receiver; a node per domain keeps its node table, `net_kernel` and its tools stock |
 | References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a bounded local registry resolves aliases ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
-| Ports | ports, port tasks, linked-in drivers, spawn drivers, `fd` ports (`io.c`, `erl_port_task.c`) | sub-spaces and lanes | **kept** for two linked-in drivers, the lane driver and the program driver; spawn and `fd` ports, the forker and `erl_child_setup` dropped ([Programs as ports](#programs-as-ports)) | a port already has an owner, a link, serialised work, busy flow control and an exit status |
+| Ports | ports, port tasks, linked-in drivers, spawn drivers, `fd` ports (`io.c`, `erl_port_task.c`) | sub-spaces and lanes | **kept** for three linked-in drivers: the lane driver, the program driver and `ram_file_drv`, which `file:open(Bin, [ram])` needs and which reaches no operating system; spawn and `fd` ports, the forker and `erl_child_setup` dropped ([Programs as ports](#programs-as-ports)) | a port already has an owner, a link, serialised work, busy flow control and an exit status |
 | Device drivers | linked-in drivers | Erlang processes over the device NIF | **redone**: a driver is an Erlang process; the C under it is the device NIF, parsing nothing ([The device NIF](#the-device-nif)) | a device that lies corrupts no memory |
 | Operating-system adaptation | the Unix sys layer, Unix signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the C path for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
 | Time | the time supervisor's correction over OS clocks (`erl_time_sup.c`) | the counter and the time page | **redone**: one clock; correction for imperfect clocks deleted; Erlang's monotonic and system time semantics kept | the counter is exact |
@@ -321,7 +321,7 @@ process locks; tracing; and both execution flavours, one per image.
 Kept from OTP's Erlang code: the preloaded modules less `prim_socket`,
 `socket_registry` and `prim_net`, plus erXos's `erx_erofs`, the EROFS
 reader; `kernel`, with `os:type/0` returning `{unix, erxos}`, `os:cmd/1`
-returning an error, `heart` and `erl_boot_server` not started, and
+raising `badarg`, `heart` and `erl_boot_server` not started, and
 `net_kernel` started in every domain under the domain's node name with
 erXos's carrier, plus erXos's `erx_connections`, `erx_dist`,
 `erx_program`, `erx_device` and `erx_watchdog`; `stdlib` unchanged;
@@ -717,7 +717,9 @@ ERTS's scheduler is the second level, kept whole except at these points:
   machinery for changing them, which suspends and resumes schedulers, and
   pin the executors to the run the word names; publish this executor's
   urgency if it changed. The same runs when the scheduler has no work,
-  before it parks.
+  before it parks and as it leaves the sleep step, so no executor leaves
+  that step with a label pending. A dirty CPU scheduler dispatches in its
+  sleep step alone: a fire while its job runs wakes another executor.
 * **Urgency.** With `ERX_GROUP_HINTS`, an executor publishes the urgency of
   the most urgent work it holds: the higher of the running process's
   priority and the highest priority queued on its run queue, mapped into
@@ -774,16 +776,28 @@ adapter dispatches each label through the event table:
   doorbell and the record the gate worker deposits for a sub-space arrive
   this way, so each port's work is serialised by ERTS as every port's is.
 * **A process sink** gets a message, the term registered with the entry,
-  queued to the process with `erts_queue_message` from the dispatching
-  scheduler. The device NIF's interrupts (`{erx_irq, Device, Line}`) and
+  sent to the process with `enif_send`, with no caller, from the dispatching
+  executor. The device NIF's interrupts (`{erx_irq, Device, Line}`) and
   the pipe NIF's ends are process sinks.
 
 A label whose entry is gone, because its port closed or its process
 exited after the object fired, is dropped, as the contract allows
 ([design-scheduler.md](design-scheduler.md#the-runtime-contract)). The
 table is read on every dispatch and written when a sink registers or
-goes, under a read-write lock; a dispatch never allocates beyond the one
-message a process sink receives.
+goes, under a read-write lock; a dispatch allocates one short-lived
+environment per delivery to a process sink, on top of the message itself.
+
+**Which executor dispatches.** A trigger wakes whichever executor the
+kernel chooses, and dirty CPU schedulers are executors, so a dirty CPU
+scheduler dispatches too. A delivery therefore stays on what ERTS allows on
+a thread thread progress does not manage: `enif_send` with no caller takes
+its non-scheduler path, looking the process up with `erts_pid2proc_opt`
+and a reference rather than the scheduler's raw lookup, and
+`erts_port_task_schedule` opens with `erts_thr_progress_unmanaged_delay`
+and allocates the task from a thread-preferred pool that falls back to
+`erts_alloc`. A normal scheduler makes itself active for thread progress
+before it dispatches from its sleep step. Dirty I/O schedulers have no
+executor slot and never dispatch.
 
 **A delivery is a hint.** Every sink treats a delivery as a reason to
 look at its source, never as an event in itself: a connection's executor
@@ -2210,9 +2224,6 @@ What a read cannot settle, and what settles it:
   import check closes it by name at link, and any remaining number shows at the `default:` of `__erx_syscall`, traced during the
   first native boot. The probe's own native run ended at the spin above, so
   nothing after `erts_sys_pre_init` has been observed.
-* **Whether `kernel`'s children of [Configuration](#configuration) start without
-  sockets or ports.** The first hosted boot with those NIFs and drivers removed
-  settles it. `heart` is not among them: `init` starts it only under `-heart`.
 * **Which of OTP's suites need `statistics(runtime)`.** Of `kernel` and `stdlib`,
   `dist_util` alone calls it, and the suites are unread. A `notsup` that the oracle comparison shows to
   matter gets a body in the Fiasco backend, from `l4_thread_stats_time`.
@@ -2567,8 +2578,8 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `os:version/0` | erXos's version as `{Major, Minor, Release}` |
 | `os:getpid/0` | the domain id, as a decimal string |
 | `erlang:pid_to_list/1`, `erlang:port_to_list/1`, `erlang:ref_to_list/1`, `list_to_pid/1`, `list_to_port/1`, `list_to_ref/1`, and pids, ports and references printed by `io` and `io_lib` | `<D.N.S>`, `#Port<D.N>` and `#Ref<D.a.b.c.d>` with the owner's domain id, the creation of its node, local ones included, where stock OTP prints 0 for its own node and the node name's atom index for another; the one documented difference in a node's identity ([Connections in ERTS](#connections-in-erts), [design-domains.md](design-domains.md#domain-ids-pids-and-references)) |
-| `os:cmd/1`, `open_port({spawn, _}, _)`, `open_port({spawn_executable, _}, _)`, `open_port({fd, _, _}, _)` | `{error, enotsup}` and `badarg`: ports wrap no operating-system process or descriptor; a program is a port a session's command server opens through `erx_program` ([Programs as ports](#programs-as-ports)) |
-| `open_port({spawn_driver, Name}, _)` | only erXos's linked-in drivers, `erx_lane` and `erx_program`, which `erx_connections` and `erx_program` open; any other name is `badarg` |
+| `os:cmd/1`, `open_port({spawn, _}, _)`, `open_port({spawn_executable, _}, _)`, `open_port({fd, _, _}, _)` | `badarg`, which `os:cmd` raises with the cause `{open_port, badarg}`: ports wrap no operating-system process or descriptor; a program is a port a session's command server opens through `erx_program` ([Programs as ports](#programs-as-ports)) |
+| `open_port({spawn_driver, Name}, _)` | only the linked-in drivers: `erx_lane` and `erx_program`, which `erx_connections` and `erx_program` open, and `ram_file_drv`, which `ram_file` opens; any other name is `badarg` |
 | `os:getenv/0,1`, `os:putenv/2` | an environment per domain, initialised from the domain's specification |
 | `os:set_signal/2` | `badarg`; there are no Unix signals |
 | `erlang:system_info(emu_flavor)` | `emu` in a domain that runs the interpreter image, the system domain and command domains among them; `jit` in one that runs the BeamAsm image |
@@ -2636,7 +2647,7 @@ whose mode `0444` it refuses (`auth.erl:347-374`, `:513`).
 | Child | In erXos |
 | --- | --- |
 | `erx_watchdog` | [design-stopgap.md](design-stopgap.md) |
-| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system |
+| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system; `inet_db`'s lookup is `file`, its hosts table, with no resolver and no `inet_gethost` until the network service, and `inet_config` finding no UDP port names the host `nohost` |
 | `standard_error` | stock's I/O protocol over descriptor 2 (edit 39) |
 | `user` | `user_sup`, then `erx_console` and the group it registers |
 | `rex`, `global_name_server`, `net_sup`, `global_group` | with a carrier only: `net_sup` holds `auth` and `net_kernel` over `erx_dist`, with no `erl_epmd` |

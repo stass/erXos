@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: does not include the poll set's headers.
+ *
  * %CopyrightEnd%
  */
 
@@ -35,8 +37,6 @@
 
 #include "erl_node_tables.h"
 #include "erl_alloc_util.h"
-#include "erl_check_io.h"
-#include "erl_poll.h"
 #include "erl_db.h"
 
 #define LCNT_MAX_CARRIER_ENTRIES 255

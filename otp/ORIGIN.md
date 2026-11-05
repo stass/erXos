@@ -4887,14 +4887,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/emulator/drivers/common/inet_drv.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "243a0faef223af188278625de55ca8bf3f11be1d73b7eec90c425e8e6f080b44",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/emulator/drivers/common/ram_file_drv.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -5394,30 +5386,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/emulator/nifs/common/prim_net_nif.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "7e04c5e392362fa5700222e878f4b9e319249a220a80eaa76b29f491cb44de90",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/prim_socket_int.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "ef041a0178d197ee7f29fd257e1d61145cb0806f459a7ed3f7371b1c1df81be4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/prim_socket_nif.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "4e51a8950cade8c57f7bb3b8e879d77f6926ebe55a38c8164959d796a79d0fed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/emulator/nifs/common/prim_tty_nif.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -5428,86 +5396,6 @@ Third-party notices remain in their original files.
         "435173fb9a86bac6ee7c2fa0f491881c52c8f91a75e6f8c2487e0fba74025434",
         "606abb75506f3840171c744d52203b515044398fc94986908fd6d72507172d25"
       ]
-    },
-    "erts/emulator/nifs/common/socket_asyncio.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "0624c1ece69defb7a0b39e527547a64db6bbb6073c05b324fae842e151c74a13",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_dbg.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "7767ec2b43f0d6b6c6cdc37d323d8a64815255f309490e437ac183303056e194",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_dbg.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "04d77e89a03ea3e983a02ac93877f937bf35601e64743e62770b2190ac23cbed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_int.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "4376a3b023e732ff68d02e46bf2712978179929d32c7f5ed1c0c8d51a77e23c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_io.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "fe7b995fff7c002ec77e210dd0a12606bdf76eaaaf9d1729c5ae4cb8a029aca7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_syncio.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "dac7e10869d7894f089227987bd250c74ab3c058100aea545ad04a2edc96b59a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_tarray.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "6800255e922554c4747baeb778df0941604152def0ef14b35978a9d2c4f5fb3a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_tarray.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "dc2d7eee08bdc04dc3290aab063e1f0a376c3b9bdc667669cab5b42382a762f6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_util.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "420725b0cbe59ff9dea2d497433433149500b33b516ceddb20993914ae552f5c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/common/socket_util.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "612b823977eeed1372a3a5d44a036b5b966fd41c54b3dc5b060c21309ac4bc5d",
-      "kind": "file",
-      "non_ascii_lines": []
     },
     "erts/emulator/nifs/common/zlib_nif.c": {
       "license": "Apache-2.0",
@@ -5530,14 +5418,6 @@ Third-party notices remain in their original files.
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "41adcf50ecf8542fb251aa2175b077c736a64d40c320ea1e43595157fb3e2f67",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/nifs/unix/unix_socket_syncio.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "e2f411f20ad605eaeae9cca3d5e474c92a338a7ddd08311c992ab6e8ac202c75",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -5981,22 +5861,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/emulator/sys/common/erl_check_io.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "fe24e718e0324c305c87621a4d2f71392d5f511630b8cf5edec1806bed21da05",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/sys/common/erl_check_io.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "884779254d2f9b5efc3f18256aa088644ed5f6754fe8b8c022cff26b6411ecdc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/emulator/sys/common/erl_float_short.cpp": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -6069,30 +5933,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/emulator/sys/common/erl_poll.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "7a13b121f902a4c21fef17467c794049ce2e439d3322c54c9683d736af85c703",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/sys/common/erl_poll.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "e07752c8044ddec116af68cfe446ae525e8cbc193ded85ce0f58b36fd8adfe78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/emulator/sys/common/erl_poll_api.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "216fd9a4429163062742c83ad1195266a0b2aaa57a0925361fab334efe66256d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/emulator/sys/common/erl_sys_common_misc.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -6117,24 +5957,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [],
       "copied_from": "erts/emulator/sys/unix/driver_int.h"
-    },
-    "erts/emulator/sys/erxos/erl_child_setup.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "809a6d639f0ef326552be1971528d818391cb5efbff557d98251f76196dc8687",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/erl_child_setup.c"
-    },
-    "erts/emulator/sys/erxos/erl_child_setup.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "2965bdb4226c9009bb362051ef4129a2243f6879342017cf84f24186ae18ef09",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/erl_child_setup.h"
     },
     "erts/emulator/sys/erxos/erl_erxos_sys_ddll.c": {
       "license": "Apache-2.0",
@@ -6174,15 +5996,6 @@ Third-party notices remain in their original files.
       ],
       "copied_from": "erts/emulator/sys/unix/sys.c"
     },
-    "erts/emulator/sys/erxos/sys_drivers.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "495ac413607c8914a52834beef8ef8834fd75aa280c9e20829f7c3b6df509643",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/sys_drivers.c"
-    },
     "erts/emulator/sys/erxos/sys_env.c": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -6218,24 +6031,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [],
       "copied_from": "erts/emulator/sys/unix/sys_time.c"
-    },
-    "erts/emulator/sys/erxos/sys_uds.c": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "474a92a2f061454606f6831508fd6420a8e9b044ad3dc185bdf845e8cb07fea2",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/sys_uds.c"
-    },
-    "erts/emulator/sys/erxos/sys_uds.h": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "9718199688bc01784965b3d592724949d56eecca610d53c88b029a428ce4775a",
-      "kind": "file",
-      "non_ascii_lines": [],
-      "copied_from": "erts/emulator/sys/unix/sys_uds.h"
     },
     "erts/emulator/sys/unix/driver_int.h": {
       "license": "Apache-2.0",
@@ -13205,35 +13000,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/preloaded/ebin/prim_net.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "f93c342342278df3477dbeb91791a2a68c962dddcdce0ffd722b6cf060f55e16",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/preloaded/ebin/prim_socket.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "d04779614873d66e4bb3299fe3c103d39a6f0ef8e4f37976639fe1a3d479ec0a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/preloaded/ebin/prim_zip.beam": {
       "license": "Apache-2.0",
       "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
       "reviewed": true,
       "sha256": "30915e6dab25dba13f80163d3c7bbba97969102f8f689fa63e41c2618f6cc0af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/preloaded/ebin/socket_registry.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "7a3d6684deff0a4c5620e2a0b1e6675dadfa640243227f26bcc249bee21a5645",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -13440,35 +13211,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "erts/preloaded/src/prim_net.erl": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "b2f96e39a7c36018cd5190cdaed28a330cd88df4ff9c6237d17a6cd5f30da5a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/preloaded/src/prim_socket.erl": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "d32062a90fb74838865465b8fda566f7f9f42ba7c66df854457eacb60e35c7e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "erts/preloaded/src/prim_zip.erl": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "bbb65bfdc2aaf36f81ecfb8e59003caddf38ba02a755ddb8504642f367e06af1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "erts/preloaded/src/socket_registry.erl": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "497cea29141322b4accb5f48509d22f6fb1e387b8f7202aa10a8b4234b84a8b5",
       "kind": "file",
       "non_ascii_lines": []
     },

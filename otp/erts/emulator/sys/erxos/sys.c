@@ -80,7 +80,6 @@
 #include "global.h"
 #include "bif.h"
 
-#include "erl_check_io.h"
 #include "erl_cpu_topology.h"
 #include "erl_osenv.h"
 #include "erl_dyn_lock_check.h"
@@ -167,9 +166,7 @@ get_large_page_size(void)
 Uint
 erts_sys_misc_mem_sz(void)
 {
-    Uint res = erts_check_io_size();
-    res += erts_atomic_read_mb(&sys_misc_mem_sz);
-    return res;
+    return erts_atomic_read_mb(&sys_misc_mem_sz);
 }
 
 /*
@@ -609,7 +606,7 @@ break_requested(void)
 {
   /*
    * just set a flag - checked for and handled by
-   * scheduler threads erts_check_io() (not signal handler).
+   * scheduler threads (not signal handler).
    */
   if (ERTS_BREAK_REQUESTED)
       erts_exit(ERTS_INTR_EXIT, "");
@@ -849,16 +846,8 @@ get_number(char **str_ptr)
 }
 
 void os_flavor(char* namebuf, unsigned size) {
-    struct utsname uts;		/* Information about the system. */
-    char* s;
-
-    (void) uname(&uts);
-    for (s = uts.sysname; *s; s++) {
-	if (isupper((int) *s)) {
-	    *s = tolower((int) *s);
-	}
-    }
-    strcpy(namebuf, uts.sysname);
+    (void) size;
+    strcpy(namebuf, "erxos");
 }
 
 void os_version(int *pMajor, int *pMinor, int *pBuild) {
@@ -1237,11 +1226,16 @@ erts_sys_main_thread(void)
 }
 
 void
+erl_sys_late_init(void)
+{
+    sys_signal(SIGPIPE, SIG_IGN); /* Ignore - a write's failure is handled where it happens */
+    erts_sys_unix_later_init();
+}
+
+void
 erl_sys_args(int* argc, char** argv)
 {
     ASSERT(argc && argv);
-
-    max_files = erts_check_io_max_files();
 
     init_smp_sig_notify();
     init_smp_sig_suspend();

@@ -18,6 +18,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: input reaches the reader through an event table entry and a thread blocked in poll, in place of enif_select.
+ *
  * %CopyrightEnd%
  */
 
@@ -66,6 +68,7 @@
 #endif
 #ifdef HAVE_POLL_H
 #include <poll.h>
+#include "erx_event.h"
 #endif
 
 #if defined IOV_MAX
@@ -107,6 +110,13 @@ typedef struct {
 #else
     int ofd;       /* stdout */
     int ifd;       /* stdin */
+    /* The reader thread: armed, it waits for input and fires the IRQ object. */
+    uint64_t irq;
+    uint32_t label;
+    ErlNifMutex *reader_mutex;
+    ErlNifCond *reader_cond;
+    int reader_armed;
+    int reader_stopping;
 #endif
     ErlNifPid self;
     ErlNifPid reader;
@@ -135,6 +145,7 @@ static ERL_NIF_TERM tty_init_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 static ERL_NIF_TERM tty_is_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM setlocale_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM tty_select_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
+static void tty_arm_reader(TTYResource *tty);
 static ERL_NIF_TERM tty_write_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM tty_encoding_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM tty_read_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
@@ -657,7 +668,7 @@ static ERL_NIF_TERM tty_read_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     }
 #endif
     debug("select on %d\r\n",select_event);
-    enif_select(env, select_event, ERL_NIF_SELECT_READ, tty, NULL, argv[1]);
+    tty_arm_reader(tty);
     if (res == bin.size) {
 	res_term = enif_make_binary(env, &bin);
     } else if (res < bin.size / 2) {
@@ -1210,6 +1221,57 @@ static ERL_NIF_TERM tty_window_size_nif(ErlNifEnv* env, int argc, const ERL_NIF_
             ));
 }
 
+static void tty_arm_reader(TTYResource *tty) {
+    enif_mutex_lock(tty->reader_mutex);
+    tty->reader_armed = 1;
+    enif_cond_signal(tty->reader_cond);
+    enif_mutex_unlock(tty->reader_mutex);
+}
+
+/* Until the console replaces this NIF, a hosted terminal's input reaches the group's
+ * ready list from this one thread. One blocked in poll at the reader's exit stays until
+ * input or the end of the runtime. */
+static void *tty_reader_thread(void *arg) {
+    TTYResource *tty = arg;
+    struct pollfd fd = { .fd = tty->ifd, .events = POLLIN };
+
+    while (1) {
+        int stopping;
+
+        enif_mutex_lock(tty->reader_mutex);
+        while (!tty->reader_armed && !tty->reader_stopping)
+            enif_cond_wait(tty->reader_cond, tty->reader_mutex);
+        tty->reader_armed = 0;
+        stopping = tty->reader_stopping;
+        enif_mutex_unlock(tty->reader_mutex);
+        if (stopping)
+            break;
+        while (poll(&fd, 1, -1) < 0 && errno == EINTR)
+            ;
+        if (erx_irq_trigger(tty->irq) != ERX_OK)
+            break;
+    }
+    enif_release_resource(tty);
+    return NULL;
+}
+
+static int tty_reader_start(ErlNifEnv *env, TTYResource *tty, ERL_NIF_TERM ref) {
+    ErlNifTid tid;
+    ERL_NIF_TERM message = enif_make_tuple4(env, atom_select, enif_make_resource(env, tty), ref,
+                                            enif_make_atom(env, "ready_input"));
+
+    tty->reader_mutex = enif_mutex_create("tty_reader");
+    tty->reader_cond = enif_cond_create("tty_reader");
+    tty->reader_armed = 1;
+    if (erx_event_register_process(&tty->reader, message, &tty->label) != ERX_OK)
+        return -1;
+    if (erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &tty->irq) != ERX_OK
+        || erx_irq_bind(tty->irq, ERX_CAP_SELF, tty->label) != ERX_OK)
+        return -1;
+    enif_keep_resource(tty);
+    return enif_thread_create("tty_reader", &tid, tty_reader_thread, tty, NULL);
+}
+
 static ERL_NIF_TERM tty_select_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     TTYResource *tty;
 
@@ -1224,9 +1286,9 @@ static ERL_NIF_TERM tty_select_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     using_oldshell = 0;
 #endif
     debug("Select on %d\r\n", tty->ifd);
-    enif_select(env, tty->ifd, ERL_NIF_SELECT_READ, tty, NULL, argv[1]);
-
     enif_self(env, &tty->reader);
+    if (tty_reader_start(env, tty, argv[1]) != 0)
+        return make_errno_error(env, "tty_reader_start");
     enif_monitor_process(env, tty, &tty->reader, NULL);
 
     return atom_ok;
@@ -1240,22 +1302,19 @@ static void tty_monitor_down(ErlNifEnv* caller_env, void* obj, ErlNifPid* pid, E
     }
 #endif
     if (enif_compare_pids(pid, &tty->reader) == 0) {
-        enif_select(caller_env, tty->ifd, ERL_NIF_SELECT_STOP, tty, NULL, atom_undefined);
+        (void)erx_irq_bind(tty->irq, ERX_CAP_NULL, 0);
+        erx_event_unregister(tty->label);
+        enif_mutex_lock(tty->reader_mutex);
+        tty->reader_stopping = 1;
+        enif_cond_signal(tty->reader_cond);
+        enif_mutex_unlock(tty->reader_mutex);
     }
-}
-
-static void tty_select_stop(ErlNifEnv* caller_env, void* obj, ErlNifEvent event, int is_direct_call) {
-/* Only used to close the signal pipe on unix */
-#ifndef __WIN32__
-    if (event != 0)
-        close(event);
-#endif
 }
 
 static void init(ErlNifEnv* env, ErlNifResourceFlags rt_flags) {
     ErlNifResourceTypeInit rt = {
         NULL /* dtor */,
-        tty_select_stop,
+        NULL /* stop */,
         tty_monitor_down};
 
     tty_rt = enif_open_resource_type_x(env, "tty", &rt, rt_flags, NULL);

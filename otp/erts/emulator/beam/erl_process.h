@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say.
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed.
  *
  * %CopyrightEnd%
  */
@@ -74,9 +74,6 @@ typedef struct process Process;
 #define ERL_THR_PROGRESS_TSD_TYPE_ONLY
 #include "erl_thr_progress.h"
 #undef ERL_THR_PROGRESS_TSD_TYPE_ONLY
-
-// Included for ERTS_POLL_USE_SCHEDULER_POLLING
-#include "erl_poll.h"
 
 #define ERTS_HAVE_SCHED_UTIL_BALANCING_SUPPORT_OPT	0
 #define ERTS_HAVE_SCHED_UTIL_BALANCING_SUPPORT		0
@@ -267,7 +264,6 @@ typedef enum {
 } ErtsMigrateResult;
 
 #define ERTS_SSI_FLG_SLEEPING		(((erts_aint32_t) 1) << 0)
-#define ERTS_SSI_FLG_POLL_SLEEPING 	(((erts_aint32_t) 1) << 1)
 #define ERTS_SSI_FLG_TSE_SLEEPING 	(((erts_aint32_t) 1) << 2)
 #define ERTS_SSI_FLG_WAITING		(((erts_aint32_t) 1) << 3)
 #define ERTS_SSI_FLG_SUSPENDED	 	(((erts_aint32_t) 1) << 4)
@@ -277,7 +273,7 @@ typedef enum {
 #define ERTS_SSI_FLGS_MAX                                       7
 
 #define ERTS_SSI_FLGS_SLEEP_TYPE			\
- (ERTS_SSI_FLG_TSE_SLEEPING|ERTS_SSI_FLG_POLL_SLEEPING|ERTS_SSI_FLG_PARK_SLEEPING)
+ (ERTS_SSI_FLG_TSE_SLEEPING|ERTS_SSI_FLG_PARK_SLEEPING)
 
 #define ERTS_SSI_FLGS_SLEEP				\
  (ERTS_SSI_FLG_SLEEPING|ERTS_SSI_FLGS_SLEEP_TYPE)
@@ -369,7 +365,6 @@ struct ErtsSchedulerSleepInfo_ {
     ErtsSchedulerSleepInfo *prev;
     erts_atomic32_t flags;
     erts_tse_t *event;
-    struct erts_poll_thread *psi;
     erts_atomic32_t aux_work;
     Uint32 park_slot; /* erx_executor_slot() of the thread, which writes it before it first sleeps */
 };
@@ -728,9 +723,6 @@ struct ErtsSchedulerData_ {
 	Uint64 out;
 	Uint64 in;
     } io;
-#if ERTS_POLL_USE_SCHEDULER_POLLING
-    ErtsSysFdType nif_select_fds[5]; /* Used by check io */
-#endif
     struct {
         ErtsSignal* sig;
         Eterm to;
@@ -1890,7 +1882,7 @@ extern int erts_system_profile_ts_type;
 void erts_pre_init_process(void);
 void erts_late_init_process(void);
 void erts_early_init_scheduling(int);
-void erts_init_scheduling(int, int, int, int, int, int);
+void erts_init_scheduling(int, int, int, int, int);
 void erts_execute_dirty_system_task(Process *c_p);
 int erts_set_gc_state(Process *c_p, int enable);
 Eterm erts_sched_wall_time_request(Process *c_p, int set, int enable,

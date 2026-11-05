@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: the driver opens with spawn_driver, since a spawn port is refused.
+%%
 %% %CopyrightEnd%
 %%
 -module(ram_file).
@@ -345,7 +347,7 @@ allocate(#file_descriptor{}, _Offset, _Length) ->
 %%% Functions to communicate with the driver
 
 ll_open(Data, Mode, Opts) ->
-    try erlang:open_port({spawn, ?RAM_FILE_DRV}, Opts) of
+    try erlang:open_port({spawn_driver, ?RAM_FILE_DRV}, Opts) of
 	Port ->
 	    case call_port(Port, [<<?RAM_FILE_OPEN:8,Mode:32>>|Data]) of
 		{error, _} = Error ->

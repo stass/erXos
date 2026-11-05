@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the dirty signal handler has no select to clean up.
+ *
  * %CopyrightEnd%
  */
 
@@ -44,7 +46,6 @@
 #include "bif.h"
 #include "erl_bif_unique.h"
 #include "erl_proc_sig_queue.h"
-#include "erl_check_io.h"
 #include "erl_global_literals.h"
 #include "erl_map.h"
 #include "dtrace-wrapper.h"
@@ -836,62 +837,6 @@ enqueue_signals(int is_to_buffer, Process *rp, ErtsMessage *first,
 
     ASSERT(!!is_to_buffer == (dest_queue != &rp->sig_inq));
 
-#if defined(ERTS_PROC_SIG_HARD_DEBUG_SIGQ_MSG_LEN) && 0
-    /* verify that the signal sequence fulfills the requirements... */
-    Sint no_nmsg_sigs = 0, no_msg_sigs = 0;
-    int last_next_found = 0, last_nmsig_found = 0;
-    ErtsMessage *sig;
-    ErtsNonMsgSignal *nmsig = NULL;
-
-
-    for (sig = first; sig; sig = sig->next) {
-        if (ERTS_SIG_IS_MSG(sig)) {
-            no_msg_sigs++;
-        }
-        else {
-            if (no_nmsg_sigs++ == 0) {
-                ERTS_ASSERT(!nmsig);
-                nmsig = (ErtsNonMsgSignal *) sig;
-            }
-            else {
-                ERTS_ASSERT(((ErtsNonMsgSignal *) sig)->mlenoffs == 0);
-            }
-            ERTS_ASSERT(!last_nmsig_found);
-            ERTS_ASSERT(no_msg_sigs == 0);
-            ERTS_ASSERT(nmsig == (ErtsNonMsgSignal *) sig);
-            if (last_next && last_next == nmsig->specific.next) {
-                ERTS_ASSERT(!last_next_found);
-                last_next_found = !0;
-            }
-            else if (last_next_found) {
-                ERTS_ASSERT(last_next);
-                ERTS_ASSERT(*last_next == sig);
-                ERTS_ASSERT(!sig->next);
-                ERTS_ASSERT(!nmsig->specific.next);
-            }
-            if (!nmsig->specific.next) {
-                last_nmsig_found = !0;
-                nmsig = NULL;
-            }
-            else {
-                ERTS_ASSERT(nmsig->specific.next == &sig->next);
-                nmsig = (ErtsNonMsgSignal *) *nmsig->specific.next;
-            }
-        }
-    }
-
-    ERTS_ASSERT(!nmsig);
-    ERTS_ASSERT(no_msg_sigs == 0
-                || no_nmsg_sigs == 0
-                || no_nmsg_sigs == 1);
-    ERTS_ASSERT(no_nmsg_sigs <= 1
-                || (no_msg_sigs == 0 && last_next && last_next_found));
-    ERTS_ASSERT(no_nmsg_sigs > 1
-                || (!last_next && !last_next_found));
-    ERTS_ASSERT(no_nmsg_sigs == 0 || last_nmsig_found);
-    ERTS_ASSERT(num_msgs == no_msg_sigs);
-
-#endif /* DEBUG */
 
     if (flush_buffers) {
         erts_proc_sig_queue_flush_buffers(rp);
@@ -6945,20 +6890,6 @@ erts_proc_sig_handle_incoming(Process *c_p, erts_aint32_t *statep,
 
             break;
         }
-#if ERTS_POLL_USE_SCHEDULER_POLLING
-        case ERTS_SIG_Q_OP_NIF_SELECT: {
-
-            Eterm msg = erts_io_handle_nif_select(sig);
-
-            convert_prepared_sig_to_msg(c_p, &tracing, sig, msg, am_undefined, next_nm_sig);
-
-            cnt += 4;
-
-            erts_proc_notify_new_message(c_p, ERTS_PROC_LOCK_MAIN);
-
-            break;
-        }
-#endif
 
         default:
             ERTS_INTERNAL_ERROR("Unknown signal");

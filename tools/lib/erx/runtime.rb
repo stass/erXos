@@ -178,7 +178,6 @@ module Erx
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,
-        'ERX_SOURCE_ROOT' => @root,
         'ERX_TREE' => @root
       ).freeze
     end

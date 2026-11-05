@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: a name resolves through the hosts table alone; there is no inet_gethost to run.
+%%
 %% %CopyrightEnd%
 %%
 -module(inet_config).
@@ -149,6 +151,12 @@ erl_dist_mode() ->
 	    end
     end.
 
+%% erXos has no inet_gethost program to run and no resolver until its network
+%% service: a name is what the hosts table knows.
+do_load_resolv({unix,erxos}, _) ->
+    inet_db:add_host({127,0,0,1}, ["localhost"]),
+    inet_db:add_host({0,0,0,0,0,0,0,1}, ["localhost"]),
+    inet_db:set_lookup([file]);
 do_load_resolv({unix,Type}, longnames) ->
     %% The Etc variable enables us to run tests with other 
     %% configuration files than the normal ones 
