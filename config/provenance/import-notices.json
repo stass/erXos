@@ -38,6 +38,9 @@
     }},
     {"path": "fiasco/l4re-core/libc/musl/contrib/musl", "notices": [], "grants": {
       "MIT": [{"path": "fiasco/l4re-core/libc/musl/contrib/musl/COPYRIGHT", "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"}]
+    }},
+    {"path": "kernel/crypto/chacha20", "notices": [], "grants": {
+      "BSD-2-Clause": [{"path": "LICENSE", "sha256": "a2b42923d123f08e75819a3e5d96e55fbdf5b804a71f286f74e1d00123ade388"}]
     }}
   ]
 }

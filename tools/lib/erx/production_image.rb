@@ -35,6 +35,10 @@ module Erx
     # Below root_memory on QEMU virt, so the root must refuse the boot.
     TOO_LITTLE_MEMORY_MIB = 256
     LICENSE = 'LICENSE'
+    # The trees imported into the source tree that the root builds from: BLAKE3 for its
+    # reader of the archive and the entropy generator's mixing, ChaCha20 for that
+    # generator's stream.
+    IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent' }.freeze
 
     # One of Fiasco's archives that the root links, attributed whole under the license
     # stated here. TODO.md holds the gap: the boot cores hold BLAKE3 as well.
@@ -209,9 +213,8 @@ module Erx
     def pack(entries:, root_task:, receipts:, output:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
-      # The root's reader of the archive includes BLAKE3's header, imported into the tree.
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, receipts), external: external, runner: @runner,
-                                      imports: { 'kernel/crypto/blake3' => 'permanent' }, compiler: @compiler)
+                                      imports: IMPORTS, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),

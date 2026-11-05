@@ -937,6 +937,23 @@ it; git history is the record of completed work.
   and `PackProvenance#imported_item`): a `changes` row whose hash no longer
   matches still supplies the file's licence when the file has an erXos
   header; a stale row should be refused.
+* [Medium] build, notice check (`tools/lib/erx/pack_provenance.rb`,
+  `attribute`; `tools/lib/erx/import_notices.rb`, `select`): the check that
+  a selected import grant has a notice document looks at the whole
+  expression, so `<covered> AND <uncovered>` passes with no document for the
+  second grant. ChaCha20's `LicenseRef-DJB-public-domain` passes this way,
+  rightly, since its notice is the header `leading_notice` keeps; a
+  per-grant check must state what a file's own header counts for, and may
+  find other imports short of rows.
+* [Low] build, licence selection (`tools/lib/erx/license_expression.rb`,
+  `PERMISSIVE`, and `PackProvenance#attribute`): the entry for ChaCha20's
+  public-domain statement is global, so a file outside any import that
+  declares `LicenseRef-DJB-public-domain` passes a release pack with
+  erXos's `LICENSE` as its notice. Refuse it outside an import.
+* [Low] build, notices (`tools/lib/erx/pack_provenance.rb`,
+  `leading_notice`): `#` counts as a comment leader in every language, so a
+  C file's leading `#include` and `#define` lines, and comments after them,
+  reach `system/NOTICES`. Choose the leaders by file suffix.
 * [Medium] build, Fiasco audit of imported cores
   (`tools/lib/erx/fiasco_provenance.rb`, `erxos_source` and
   `attribute_erxos`): a file under `kernel/` or `include/` is attributed

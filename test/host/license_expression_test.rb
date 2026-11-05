@@ -32,6 +32,12 @@ class LicenseExpressionTest < Minitest::Test
                  select('GPL-3.0-or-later WITH GCC-exception-3.1', restricted: true).fetch('grants')
   end
 
+  def test_the_public_domain_dedication_is_a_permitted_grant_and_no_other_reference_is
+    assert_equal ['BSD-2-Clause', 'LicenseRef-DJB-public-domain'],
+                 select('BSD-2-Clause AND LicenseRef-DJB-public-domain').fetch('grants')
+    assert_raises(Erx::Error) { select('LicenseRef-Someone-public-domain') }
+  end
+
   def test_unknown_and_malformed_input_remains_fail_closed
     ['NOASSERTION', 'NONE', 'MIT AND Unknown-License', 'MIT XOR ISC', 'MIT OR',
      '(MIT', 'MIT)', '(MIT OR ISC) WITH exception', "MIT\nOR ISC", '('*33 + 'MIT' + ')'*33,

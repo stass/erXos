@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'minitest/autorun'
 require 'open3'
+require 'pathname'
 require 'rbconfig'
 require_relative '../../tools/lib/erx/production_image'
 
@@ -27,6 +29,34 @@ class ProductionImageTest < Minitest::Test
 
   def platform(path:, compatible: 'arm,pl011')
     { 'units' => [{ 'devices' => [{ 'path' => path, 'compatible' => compatible }] }] }
+  end
+
+  def test_every_import_the_root_links_is_registered
+    linked = Erx::NativeRoot::SERVICE.filter_map do |source|
+      Pathname(source).ascend.map(&:to_s).find { |directory| File.file?(File.join(ROOT, directory, 'ORIGIN.md')) }
+    end
+    assert_empty linked.uniq - Erx::ProductionImage::IMPORTS.keys
+  end
+
+  # The dedication in each ChaCha20 file's header is the only licence statement it holds, and
+  # attribution keeps that header as the file's notice. erXos's changes add BSD-2-Clause, whose
+  # text is erXos's own LICENSE. No source file stands in as a notice document.
+  def test_chacha20_files_carry_their_own_dedication
+    directory = 'kernel/crypto/chacha20'
+    changes = Erx::Origin.new(root: File.join(ROOT, directory)).inventory.fetch('changes')
+    profile = Erx::ImportNotices.parse(File.binread(File.join(ROOT, 'config/provenance/import-notices.json')))
+    license = { 'path' => 'LICENSE', 'sha256' => Digest::SHA256.file(File.join(ROOT, 'LICENSE')).hexdigest }
+    %w[chacha.c chacha.h].each do |name|
+      source = File.join(directory, name)
+      bytes = File.binread(File.join(ROOT, source))
+      digest = Digest::SHA256.hexdigest(bytes)
+      change = changes.fetch(name)
+      assert_equal bytes[/SPDX-License-Identifier: (.*)$/, 1], change.fetch('license')
+      assert_equal digest, change.fetch('sha256')
+      assert_match(/D\. J\. Bernstein\nPublic domain\./, bytes[/\A.*?^#/m])
+      grants = Erx::LicenseExpression.select(change.fetch('license'), allow_restricted: false).fetch('grants')
+      assert_equal [license], Erx::ImportNotices.select(profile, source: source, grants: grants)
+    end
   end
 
   def test_a_device_the_tree_holds_has_no_problem

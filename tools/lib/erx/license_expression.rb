@@ -6,8 +6,11 @@ require_relative 'origin'
 
 module Erx
   module LicenseExpression
+    # LicenseRef-DJB-public-domain is the statement "D. J. Bernstein / Public domain." in
+    # ChaCha20's own files. It states no conditions; listing it here is the judgement that
+    # such a statement permits what the licences beside it do.
     PERMISSIVE = %w[BSD-2-Clause BSD-3-Clause MIT ISC 0BSD Apache-2.0 Zlib
-                    BSL-1.0 Unicode-3.0 Unicode-DFS-2016].freeze
+                    BSL-1.0 Unicode-3.0 Unicode-DFS-2016 LicenseRef-DJB-public-domain].freeze
     PRECEDENCE = { 'OR' => 1, 'AND' => 2 }.freeze
     module_function
 

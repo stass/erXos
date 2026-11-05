@@ -25,10 +25,19 @@ final newline.
 
 Each file erXos changed says so in a `Modified by erXos` notice at its
 top, which lists the changes; the original notices stay below it.
-erXos's changes are BSD-2-Clause.
+erXos's changes are BSD-2-Clause, under the repository's `LICENSE`, which
+`config/provenance/import-notices.json` names as this tree's notice
+document for that grant.
 
-The inventory records the imported bytes and their licence evidence.
-Third-party notices remain in their original files.
+The two imported files name no licence document. The dedication in each
+file's header is the only licence statement it holds, and attribution
+keeps that header as the file's notice.
+
+In the inventory, the `files` rows record the imported bytes and their
+licence evidence, and the `changes` rows each file's licence as modified,
+as its SPDX line gives it. Tooling does not compare a `changes` row's
+`sha256` with a source file; `test/host/production_image_test.rb` does for
+these two. Third-party notices remain in their original files.
 
 ```json
 {
@@ -55,6 +64,17 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     }
   },
-  "changes": {}
+  "changes": {
+    "chacha.c": {
+      "license": "BSD-2-Clause AND LicenseRef-DJB-public-domain",
+      "evidence": "the file's own SPDX line: D. J. Bernstein's public-domain dedication stays in its header, and erXos's changes are BSD-2-Clause",
+      "sha256": "44e908f41cc7beac8f1934164ab30038eb680288093f80def81c82a0945a27a5"
+    },
+    "chacha.h": {
+      "license": "BSD-2-Clause AND LicenseRef-DJB-public-domain",
+      "evidence": "the file's own SPDX line: D. J. Bernstein's public-domain dedication stays in its header, and erXos's changes are BSD-2-Clause",
+      "sha256": "3703994279474231160acc4a7eddab22f02a3dcdbf4c9ba025648b0107f67d3e"
+    }
+  }
 }
 ```
