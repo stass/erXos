@@ -107,7 +107,6 @@ module Erx
     def erlang_value(value)
       case value
       when Hash then '#{' + value.sort.map { |key, member| "#{erlang_value(key)} => #{erlang_value(member)}" }.join(",\n      ") + '}'
-      when Array then '[' + value.map { |member| erlang_value(member) }.join(', ') + ']'
       when String then '<<' + JSON.generate(value, ascii_only: true) + '>>'
       else value.inspect
       end

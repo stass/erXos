@@ -6,8 +6,8 @@
     "otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
     "otp/lib/stdlib/uc_spec/UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
     "tools/gen_terminal.rb": "1bbc76a53235a43685d6f1286cfca08ceda3cc5b29ae60eb2f08acd655abfe76",
-    "tools/lib/erx/terminal_generation.rb": "ba731681ef6d59e5e658afaa0cc322f2b2fad655fe518f7b085d0862554cebed",
-    "tools/lib/erx/terminal_rules.rb": "feda25a797c84fb48434309f5874e0b835c71020c0c089e0726923c0414b8c26"
+    "tools/lib/erx/terminal_generation.rb": "399d8c737ac29ba8a600af2abdd2ce7cd7f7975bd426fb139c34c23599637176",
+    "tools/lib/erx/terminal_rules.rb": "0d4d3b6a1f654e75bceef652d18b01db0a9c1992c7441914282db9a9f980f8cf"
   },
   "outputs": [
     "abi/terminal_generated.json",

@@ -38,16 +38,15 @@ class TerminalGenerationTest < Minitest::Test
     end
   end
 
-  # Tab and newline are controls like the rest: no profile passes them, and
-  # nothing in the source names a renderer, a sequence or a color.
-  def test_the_line_escape_rules_have_no_allowlist
+  # The source holds only the line escape rules; the golden points below pin
+  # that tab and newline are escaped.
+  def test_the_source_declares_only_the_line_escape_rules
     model = Erx::TerminalRules.source(source)
     assert_equal %w[byte codepoint kernel], model.fetch('token').keys.sort
     assert_equal [0x200c, 0x200d, 0xfe0e, 0xfe0f], model.fetch('exceptions')
     assert_equal({ 'prefix' => '<U+', 'minimum' => 4, 'maximum' => 6,
                    'suffix' => '>', 'digits' => 'uppercase_hex' }, model.fetch('token').fetch('codepoint'))
     assert_equal %w[properties unicode_data], model.fetch('input').keys.sort
-    refute_includes model.keys, 'pass'
     assert model.frozen?
   end
 

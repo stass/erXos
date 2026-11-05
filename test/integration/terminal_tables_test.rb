@@ -23,15 +23,15 @@ class TerminalTablesTest < Minitest::Test
     FileUtils.remove_entry(@directory) if passed?
   end
 
-  def runtime_command(program, arguments, home: @directory)
-    ['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', "HOME=#{home}",
+  def runtime_command(program, arguments)
+    ['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', "HOME=#{@directory}",
      'LANG=C', program, *arguments]
   end
 
-  def erlang(expression, home: @directory)
+  def erlang(expression)
     command = runtime_command(@erl, ['-noshell', '-noinput', '-boot', 'no_dot_erlang',
-                                     '-pa', @directory, '-eval', expression], home: home)
-    record = @runner.run(command, name: 'terminal-oracle', deadline: 30, chdir: @directory)
+                                     '-pa', @directory, '-eval', expression])
+    record = @runner.run(command, name: 'terminal-tables', deadline: 30, chdir: @directory)
     Erx::JsonInput.parse(File.binread(record.fetch('log')))
   end
 

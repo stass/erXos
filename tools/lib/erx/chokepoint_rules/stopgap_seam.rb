@@ -165,7 +165,7 @@ module Erx
         ),
         # Bytes on this console reach the operator's terminal. Text attributed
         # to a source (a log record, a name) reaches it through the line
-        # escape; a program's own output goes out unchanged, as on Unix.
+        # escape or the log's ASCII class; a program's own output goes out unchanged, as on Unix.
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \

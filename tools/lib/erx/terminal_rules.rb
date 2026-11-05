@@ -222,7 +222,7 @@ module Erx
     private_class_method :interval
 
     def decimal(value, maximum:)
-      raise Error, 'invalid terminal integer' unless value.is_a?(String) && value.match?(/\A\d{1,5}\z/)
+      raise Error, 'invalid terminal integer' unless value.is_a?(String) && value.match?(/\A\d\z/)
       result = Integer(value, 10)
       raise Error, 'terminal integer exceeds bound' if result > maximum
       result
