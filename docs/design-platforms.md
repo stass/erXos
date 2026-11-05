@@ -161,7 +161,7 @@ belong to the driver table of
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **PL1.** Platforms differ only in data and in the early console's kind and address | the kernel discovers devices from the device tree and drives only the devices of `hw/kernel_devices.txt`, each by its compatible string; each platform's manifest is data the build packs; each platform's kernel build differs only in the early console's kind and address, and the boot stops unless the device tree's `/chosen/stdout-path` names that UART | a board check in generic code; a driver chosen by board name | a source check that generic code names no platform; the same conformance suite on every platform |
-| **PL2.** No driver reaches the firmware, and only the system domain reaches the operator's terminal | the kernel keeps the register pages of the devices it drives, the mailbox among them, and no other node whose registers touch a kept page enters the root resource; devices whose registers share a page form one unit, which the device service gives to one domain whole; every manifest places the console's UART unit in the system domain, and the build's manifest check fails on one that does not | a device table without the mailbox; a resource carved across a kept page; a unit split between two domains; a manifest that places the console's unit in another domain | the boot log names every node left out; a test that the left-out nodes appear in no resource; the boot test in which a manifest that splits a unit is refused for that unit; the manifest test that seeds the console's unit into the devices domain and expects the build to fail |
+| **PL2.** No driver reaches the firmware, and only the system domain holds the console's UART | the kernel keeps the register pages of the devices it drives, the mailbox among them, and no other node whose registers touch a kept page enters the root resource; devices whose registers share a page form one unit, which the device service gives to one domain whole; every manifest places the console's UART unit in the system domain, and the build's manifest check fails on one that does not | a device table without the mailbox; a resource carved across a kept page; a unit split between two domains; a manifest that places the console's unit in another domain | the boot log names every node left out; a test that the left-out nodes appear in no resource; the boot test in which a manifest that splits a unit is refused for that unit; the manifest test that seeds the console's unit into the devices domain and expects the build to fail |
 | **PL3.** Every platform ends the machine and starts CPUs through PSCI | QEMU provides PSCI; the Pi 5's firmware carries BL31; the Pi 4's boot partition adds it; the kernel stops a boot that finds no PSCI node | a platform whose firmware lacks PSCI | the boot's PSCI check; the end tests of each platform |
 | **PL4.** On a board with a hardware watchdog, a kernel that stops running resets the machine | the platform layer reloads the hardware watchdog only from the kernel's timer, for as long as the kernel runs, and never stops it, so a kernel that stops taking interrupts, or has halted after a crash record, stops reloading it | a reload from anywhere but the timer; a path that stops the watchdog; a timeout shorter than the timer's period | on each board, a kernel hung with interrupts masked resets and boots again; the chokepoint check that the watchdog's registers are written only in its driver, with a seeded second writer |
 
@@ -364,13 +364,14 @@ the UART `/chosen/stdout-path` names, so the console is always the early
 console's UART and the host link never is, however the firmware rewrites
 the `serialN` aliases ([design-system.md](design-system.md#devices)). In
 the system domain an Erlang UART driver over the device NIF feeds the
-console service, so the operator's terminal is as trustworthy as the
-system domain: no other domain can read what the operator types, a
-passphrase included, or write to the operator; the host-link service
+console service: a domain reads what the operator types only while its
+session is connected, never a passphrase typed at the login prompt, and
+writes to the operator only through a connected session's tty; the
+host-link service
 reads the host link's UART there too, on QEMU `virt` as on the Raspberry
-Pi 4 ([design-system.md](design-system.md#drivers)). The console service
-passes every untrusted text through its one escaping function before the
-driver sends it ([design-live.md](design-live.md#the-console)).
+Pi 4 ([design-system.md](design-system.md#drivers)). The console's line
+carries a tty's bytes unread
+([design-live.md](design-live.md#the-console)).
 
 ### MSI frames
 
@@ -1010,9 +1011,9 @@ resident at EL3; and MSIs through the GICv2m frame or the MIP block, which
 do not identify the writer, so a device can raise any line of the frame.
 PL2 keeps the firmware's mailbox out of every driver's reach, and with it
 the board's key, which the platform layer reads once at boot, and gives
-the operator's terminal to the system domain alone, whose console driver
-sends what the console service has escaped, so a compromised devices
-domain can neither read a passphrase nor write to the operator. The kernel
+the console's UART to the system domain alone, so a compromised devices
+domain, which has no tty, can neither read a passphrase nor write to the
+operator. The kernel
 shares the console's UART with the system domain only for its polled
 writes, which it makes during boot and, after stopping every other CPU, at
 a panic or an end; it reads nothing from the UART, so the driver can at

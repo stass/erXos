@@ -1266,8 +1266,8 @@ and never normalise, so a name is compared byte for byte. A file copied
 from a Mac keeps the decomposed form that macOS's file systems give
 accented names, and the same name typed on erXos in composed form does not
 match it; the shell's completion shows the stored bytes. Escaping for
-display is the terminal writers' alone
-([design-live.md](design-live.md#text-on-terminals)).
+display belongs to whatever displays a name under its source
+([design-live.md](design-live.md#attributed-text)).
 
 ## Interfaces
 

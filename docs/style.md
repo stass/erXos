@@ -466,8 +466,9 @@ erx_ring_has_space(const erx_ring_t *ring, size_t record_bytes)
   Watch `bcopy`'s source-first argument order. Use `memset` for nonzero fills,
   `memcmp` for ordering, and `memcpy` when its call-site types make it clearer.
 * Use the project's error interfaces in library code, and `printf(3)`-family
-  calls for formatted output. Untrusted text reaches a console, a log or the
-  host terminal only as the escaping funnel's output.
+  calls for formatted output. Text labelled with its source reaches a console,
+  a log or the host terminal only as the escaping funnel's output; a program's
+  own output is not filtered.
 * Use checked arithmetic, through the project's wrappers around
   `__builtin_add_overflow` and `__builtin_mul_overflow`, for every size,
   offset and count that comes from outside the component.

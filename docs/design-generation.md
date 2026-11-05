@@ -38,7 +38,7 @@ registers and terminal character classes retain their existing sources.
 | Checked system manifest and platform placement records | packed boot-order and configured-domain/device/facet descriptors, watchdog liveness roster, and a host-readable configuration report | [system](design-system.md#the-manifest) |
 | Release command metadata and program list | command lookup/help/required-facet catalogs, declared record-field descriptors and callback checks | [shell](design-shell.md#interfaces) |
 | SVD and system-register specifications | typed accessors, device descriptor helpers and register-field decoding tables | [hardware sources](design.md#one-source-for-the-abi-and-the-hardware) |
-| Terminal rules and OTP's pinned Unicode data | C/Erlang/Ruby escaping and terminal allowlist tables | [terminal rules](design-live.md#terminal-filter-rules) |
+| Escape rules and OTP's pinned Unicode data | C/Erlang/Ruby escaping tables | [escape rules](design-live.md#escape-rules) |
 
 Existing declarations are extended for these outputs; a generator never
 keeps another copy of a layout or operation list. Protocol-specific
@@ -123,7 +123,7 @@ Log and trace emitters accept the fields an event declares, with types,
 units, bounds and sensitivity marks. Per-build projections explicitly
 select fields: a release record cannot acquire a development-only field
 merely because its type contains one. Dynamic text goes through the
-existing log or terminal escaper. Snapshot accessors retain one-load
+existing log or line escaper. Snapshot accessors retain one-load
 semantics; generation does not make shared data trustworthy or atomic.
 
 ## Configuration and command catalogs

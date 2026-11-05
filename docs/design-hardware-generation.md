@@ -39,16 +39,16 @@ it never picks the first alternative field layout. The derived JSON keeps
 Arm's notice and exact source identity. The generator uses that checked-in
 JSON offline; the extraction check recreates it from the pinned input.
 
-## Terminal rules
+## Escape rules
 
-`abi/terminal.txt` declares the unsafe character classes and terminal
-sequence allowlist. Pinned OTP Unicode data supplies category and
-default-ignorable ranges. The generator emits C, Erlang and Ruby tables
-from one normalized interval set. Input-derived names never become atoms.
-The table consumer escapes invalid UTF-8, controls and unsafe formatting
-characters before host or target terminal output. A conservative ASCII
-host sink can escape additional printable characters without admitting
-anything the generated policy refuses.
+`abi/terminal.txt` declares the unsafe character classes. Pinned OTP Unicode
+data supplies category and default-ignorable ranges. The generator emits C,
+Erlang and Ruby tables from one normalized interval set. Input-derived names
+never become atoms. The table consumer escapes invalid UTF-8, controls and
+unsafe formatting characters in text labelled with its source before it is
+displayed on the host or the target. A conservative ASCII host sink can escape
+additional printable characters without admitting anything the generated
+policy refuses.
 
 ## Output checks
 

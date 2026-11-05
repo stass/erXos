@@ -201,7 +201,7 @@ orphaned outputs. Parsers have production-entry fuzz targets and independent
 negative fixtures.
 
 The source inventory includes the neutral ABI root, explicit fragments,
-the architecture binding, hardware register sources and terminal rules.
+the architecture binding, hardware register sources and escape rules.
 The output inventory declares each generator's owned paths and generated
 documentation regions. Generation stages all outputs before publication;
 drift checking writes to a private temporary tree and never repairs the

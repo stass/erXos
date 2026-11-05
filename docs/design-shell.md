@@ -48,8 +48,8 @@ runs are toybox's applets, each a program in a sub-space of the session
 and a port of its runtime
 ([design-programs.md](design-programs.md#a-program-is-a-port)). It sits
 in each session's domain, beside the Erlang shell in the same `Ctrl-G`
-menu, and uses the console's rendering and escaping
-([design-live.md](design-live.md#the-console)), the inspector's records
+menu, and uses the session's tty
+([design-live.md](design-live.md#the-tty)), the inspector's records
 ([design-live.md](design-live.md#inspection-records)), the session's
 namespace ([design-files.md](design-files.md)) and the spawn path
 ([design-programs.md](design-programs.md)).
@@ -89,7 +89,7 @@ processes.
 ```text
   session domain                                      programs: sub-spaces
  +--------------------------------------------------+  +--------------+
- | console group <-> terminal relay <-> /dev/tty    |  |              |
+ | console line  <-> terminal relay <-> /dev/tty    |  |              |
  |                       opens of the foreground job|  |              |
  | shell: parse -> evaluate -> stages               |  |              |
  |   Erlang stage --records--> Erlang stage --bytes-+--+-> program    |
@@ -362,7 +362,7 @@ one holder and the session knows them all
 where a stage meets something that reads bytes:
 
 * at the terminal, records render as aligned columns under a header line,
-  which the console escapes as it writes them;
+  whose values `erx_render` writes with the line escape;
 * toward a native program or a file, each record renders as one line of
   its fields in declared order, separated by tabs, each value printed by
   `erx_render` with its tabs, newlines and backslashes written as `\t`,
@@ -457,37 +457,46 @@ interrupts it, and `kill %N` ends a job, with `SIGTERM` unless a signal is
 named.
 
 **The terminal relay** is the process of the session's domain that owns
-the session's side of the terminal, the group `erx_console` drives for the
-session, and serves the session's `/dev/tty`: the opens that the
-foreground job's programs hold on it, their standard streams among them
-([design-programs.md](design-programs.md#the-terminal)). It is the only
-process that reads terminal input for programs, it takes requests only
-through the programs' handlers, which never wait on a program, and it
-never waits on one itself, so a busy or hostile program delays none of
-its work:
+the session's tty ([design-live.md](design-live.md#the-tty)) and serves
+the session's `/dev/tty`: the opens that the session's programs hold on it,
+their standard streams among them
+([design-programs.md](design-programs.md#the-terminal)). It holds the
+`termios`, runs the line discipline, drives the group of the session's shell
+and talks to the tty's master. It is the only process that reads terminal
+input for programs, it takes requests only through the programs' handlers,
+which never wait on a program, and it never waits on one itself, so a busy
+or hostile program delays none of its work:
 
-* **Input.** The relay collects a line with `edlin`'s editing and echo,
-  as the shell's prompt does, and answers the foreground job's pending
-  read with it, newline included, when the line ends. `Ctrl-D` at the
-  start of a line answers that read with no bytes, which the program
-  reads as the end of its input; its later reads go on, as on a Unix
-  terminal. Input typed after `Ctrl-C` and before the next prompt is
-  discarded. The relay handles input before output, so `Ctrl-C` and
+* **Input.** Bytes from the master go through the line discipline to the
+  tty's one reader: the group while the shell prompts, on a raw tty with
+  `edlin`'s editing and history, and otherwise the foreground job. In
+  cooked mode the line discipline collects a line and the relay answers the
+  foreground job's pending read with it, newline included, when the line
+  ends. `Ctrl-D` at the start of a line answers that read with no bytes,
+  which the program reads as the end of its input; its later reads go on, as
+  on a Unix terminal. Input typed after `Ctrl-C` and before the next prompt
+  is discarded. The relay handles input before output, so `Ctrl-C` and
   `Ctrl-Z` act however much output waits.
-* **Output.** What the foreground job's programs write to the terminal
-  goes to the console as `{put_bytes, Bytes}` requests, in the order the
-  writes arrive, so one program's output and error streams interleave as
-  it wrote them. The relay keeps at most 4 KiB of requests unanswered by
-  the console and answers a write only when it has room for it, so a
-  program that writes faster than the console waits in its write, as on
-  a Unix terminal, and nothing piles up in the session. A background
-  job's write to the terminal waits until the job is brought to the
-  foreground.
-* **Interrupts.** `Ctrl-C` and `Ctrl-Z` reach the relay as input bytes.
-  `Ctrl-C` asks the handler of every program of the foreground job to send
-  it `SIGINT`, ends the job's Erlang commands with reason
-  `interrupt`, and discards the output the relay holds at that moment, as
-  a terminal flushes its output on an interrupt; `Ctrl-Z` stops the job.
+* **Output.** What any program writes to the terminal goes through the line
+  discipline's output and to the master as `{tty_output, Bytes}`, in the
+  order the writes arrive, so one program's output and error streams
+  interleave as it wrote them and two programs' as they arrive. The relay
+  keeps at most 4 KiB unanswered by the master and answers a write only when
+  it has room for it, so a program that writes faster than the terminal, or
+  to a session that is not connected, waits in its write, as on a Unix
+  terminal, and nothing piles up in the session. A background job's write
+  goes through as well, unless `TOSTOP` is set, when it waits until the job
+  is brought to the foreground.
+* **Interrupts.** With `ISIG`, `Ctrl-C` and `Ctrl-Z` reach the relay's
+  line discipline as input. `Ctrl-C` asks the handler of every program of
+  the foreground job to send it `SIGINT`, ends the job's Erlang commands
+  with reason `interrupt`, and discards the output the relay holds at that
+  moment, as a terminal flushes its output on an interrupt; `Ctrl-Z` stops
+  the job.
+* **Modes across jobs.** The shell sets the tty back to cooked before it
+  starts a foreground job, keeps a stopped job's `termios` for its `fg`, and
+  takes its own raw setting back when the job ends or stops, as a Unix shell
+  does.
 
 **Jobs and their tags.** A job is the set of its stages and of every
 program they started, which the command server records at each spawn
@@ -585,9 +594,9 @@ program's table is built from its starter's
 `kill` ([Commands](#commands)); `rc` as a program has rc's builtins and
 `within` ([rc as a program](#rc-as-a-program)).
 
-**Interaction with other subsystems.** The console renders the shell's
-lines and escapes every program's output
-([design-live.md](design-live.md#the-console)); the command server starts
+**Interaction with other subsystems.** The console carries the bytes of
+the session's tty
+([design-live.md](design-live.md#the-tty)); the command server starts
 programs through the spawn path and keeps their handlers, and the port
 driver creates, pauses and ends their sub-spaces
 ([design-programs.md](design-programs.md),
@@ -633,8 +642,8 @@ and depth 256 a line and by its processes' heap limit, with fuzz targets
 for its parser and for `where`'s predicates. Each program it starts holds
 only the descriptors, grants and rights its starter handed it, starts only
 what `/bin` lists and only with the right to start commands, and reaches
-the terminal only as bytes the console escapes
-([design-programs.md](design-programs.md#security)). A command acts only
+the terminal only through the session's tty, which does not filter it, as
+on Unix ([design-programs.md](design-programs.md#security)). A command acts only
 through what it was handed, and one with less than the session's runs in
 a domain of its own (SH1). An Erlang command run in the session's domain is
 trusted session code: the context is its interface, not a boundary.

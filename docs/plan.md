@@ -547,8 +547,10 @@ from the system release; musl behind `liberx`; the console service and
 the console's driver, an Erlang process in the system domain over the
 device NIF, with no console NIF
 ([design-runtime.md](design-runtime.md#the-console-and-standard-io)), the
-console's only input and, once it runs, its only writer, the kernel's log
-capability serving the root before it and the crash handler after it, on
+console's only input; the console has several writers, whose writes can
+interleave: the console service, a runtime's descriptors 1 and 2 through
+the seam's console write, and the kernel's log capability serving the root
+before the driver runs and the crash handler after it, on
 the UART that the system manifest names by its device-tree path, which
 the device service checks against `/chosen/stdout-path` at boot, refusing
 a manifest whose console differs
@@ -615,9 +617,9 @@ machine's `proc` tree, and the host-tree domain, which holds QEMU's
 virtio-9p device and serves the Mac's tree at `/host`, from M5, whose
 domain service creates it
 ([design-live.md](design-live.md#files-between-the-host-and-the-machine));
-the Unicode-aware escapers with their table generated from OTP's Unicode
-data and a fuzz target each
-([design-live.md](design-live.md#text-on-terminals)); the `shell_default`
+the line escape with its table generated from OTP's Unicode data, at each
+display of labelled text, with a fuzz target
+([design-live.md](design-live.md#attributed-text)); the `shell_default`
 shortcuts and their collision test; BeamAsm in the BeamAsm image, the
 runtime image for ordinary domains, built beside the interpreter image,
 with JIT objects mapped twice in spaces allowed JIT objects, user-mode
@@ -639,8 +641,8 @@ test task's JIT object faults on an execute through its RW alias and on a
 write through its RX alias, the root's pool window, `RWX` as `sigma0` hands
 it out, being Phase 1's recorded exception until M7's page-table walk; a
 blob one bit off its hash
-never loads; every character class of the escapers has its test at each
-terminal writer; `file:read_file("/proc/processes/4.N.S/status")` in the
+never loads; every character class of the line escape has its test at each
+display; `file:read_file("/proc/processes/4.N.S/status")` in the
 system shell, where 4 is the system domain's id, returns every status the
 inspector can report; every value only the kernel could report shows
 `unsupported` with its reporter, and budget `used` shows `partial` with
@@ -828,7 +830,9 @@ file objects follow M5, on erXos's kernel:
   protocol and the startup message with their fuzz targets; `derive` in
   `erx_fs` and the session's export; the descriptor table over pipe ends
   and grants; the spawn planner, spawn and wait; the session's terminal
-  relay; the session's pipe server, `erx_pipe_srv`, which makes every ring
+  relay, which owns its tty, with the line discipline `erx_tty`, its
+  exhaustive model and its fuzz target
+  ([design-live.md](design-live.md#the-tty)); the session's pipe server, `erx_pipe_srv`, which makes every ring
   and every doorbell and installs every end, with the exploration of its
   pipe core, and the pipe NIF ([design-pipes.md](design-pipes.md)); the
   sub-space port form of littlefs, and executables run from the EROFS
@@ -852,8 +856,8 @@ read, a writer that faults included, and a program's end reaches its
 port's owner as `{exit_status, N}` after its last bytes; a pipe with a
 paused reader and sixty-four writers still spawns its sixty-fifth, which
 blocks on its write, never on its spawn; job control pauses, resumes and
-ends jobs of programs; every class of the terminal escapes reaches the
-console from a program's output escaped (V1); a narrowed program that tries
+ends jobs of programs; all 256 byte values and every control sequence a
+program writes reach the console exact (V1); a narrowed program that tries
 every command name reaches nothing outside its grants, and a program holds
 no grant's pid and reaches nothing but its channel and the memory its
 session mapped (SH1 of [design-shell.md](design-shell.md#invariants), P2
@@ -1329,8 +1333,8 @@ runs its fuzz budget clean.
 
 **Goal.** What programs that cannot be changed expect of a Unix, toward
 what QNX offers: `fork`, the `exec` family, shared libraries, mappings of
-files, pseudo-terminals with process groups and sessions, and the
-console's terminal mode for full-screen programs
+files, and pseudo-terminals with process groups and sessions, on which
+full-screen programs run
 ([design-programs.md](design-programs.md#the-second-tier)).
 
 **Demo.** In a terminal session, toybox's `sh` runs a script with
@@ -1377,10 +1381,9 @@ stores at once, and `msync` makes them durable.
   and the last `close` of the file. A second session's mapping of the
   file is its own copy, and an Erlang domain maps nothing shared
   ([design-files.md](design-files.md#shared-mappings));
-* pseudo-terminals with the line discipline as a pure state machine,
-  process groups and sessions, `SIGWINCH`, and the console's terminal mode
-  with its ECMA-48 parser and fuzz target
-  ([design-live.md](design-live.md#terminal-mode));
+* pseudo-terminals that a program holds, over the session's line
+  discipline, process groups and sessions, and `SIGWINCH`
+  ([design-programs.md](design-programs.md#the-terminal));
 * toybox's applets that need these: `sh`, `vi`, `less`, `login`, `setsid`;
 * descriptors passed with `SCM_RIGHTS` over `socketpair`.
 
@@ -1408,11 +1411,8 @@ wholly past the file's end reads zeros, where Linux raises `SIGBUS`, a
 documented difference with a test; a storage service killed under a
 shared mapping leaves `msync` and the last `close` failing with `EIO`,
 and the last `munmap` returns `EIO` on a failed write-back though the
-mapping is gone; terminal
-mode passes the allowlist and escapes every other sequence in the
-terminal-mode corpus, and the console returns to its modes when the
-program ends or leaves the foreground; the line discipline's exhaustive
-model and the terminal-mode parser's fuzz target run clean.
+mapping is gone; `vi` and `less` draw on a pseudo-terminal, and the
+shell's prompt works when they end or stop.
 
 **Gate GQ.** Measures `fork` of 10, 100 and 1,000 MiB of committed memory
 under HVF against `fork` on Linux in a guest (`tools/erx bench fork`), and

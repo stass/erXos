@@ -112,7 +112,7 @@ composes them:
   ([design-files.md](design-files.md#the-file-protocol),
   [design-files.md](design-files.md#shared-mappings));
 * the inspector ([design-live.md](design-live.md#inspection)) and the
-  console's escapers ([design-live.md](design-live.md#text-on-terminals));
+  tty ([design-live.md](design-live.md#the-tty));
 * `liberx`, musl, the session's port driver for programs, the pipe NIF
   and the command image's program mode
   ([design-runtime.md](design-runtime.md#programs-as-ports));
@@ -140,11 +140,11 @@ Functional requirements:
    the user's decision: in its first tier, descriptors over pipes, files
    and sockets, `posix_spawn`, `wait`, `poll`, pipes, POSIX's signals,
    `system` and `popen` through `rc`, anonymous and private file
-   mappings, and a line-mode `/dev/tty`
+   mappings, and the session's `/dev/tty`, with `termios`
    ([The POSIX-lite personality](#the-posix-lite-personality)).
 4. **The second tier**: `fork`, the `exec` family, shared libraries
    loaded statically and with `dlopen`, `mmap` of files, pseudo-terminals
-   with `termios`, process groups and sessions, and full-screen programs,
+   that programs hold, process groups and sessions, and full-screen programs,
    by the user's decisions ([The second tier](#the-second-tier)).
 5. **Job control**: the session stops, continues, interrupts and ends a
    program and every program it started
@@ -871,7 +871,7 @@ export, apart from the tree of each of the session's local providers,
 named by its mount, and take their qid paths from the session's counter,
 so no two files of one tree share a qid path
 ([design-files.md](design-files.md#narrowing-for-a-program)).
-`/dev/tty` is a line-mode stream to the session's terminal relay, and a
+`/dev/tty` is the session's tty, which its terminal relay owns, and a
 program's standard streams that go to the terminal are opens on it too,
 so a program's output and error streams reach the terminal in the order
 the program wrote them ([The terminal](#the-terminal)).
@@ -1295,8 +1295,8 @@ before its first thread starts, so `Ctrl-C` and `Ctrl-Z` reach the whole
 tree: the terminal relay asks each handler of the foreground job to send
 `SIGINT` or to pause its program
 ([design-shell.md](design-shell.md#job-control)). `Ctrl-Z` pauses a job
-without sending `SIGTSTP`: a first-tier program changes no terminal mode
-it would need to restore, and a second-tier program on a pseudo-terminal
+without sending `SIGTSTP`: the shell keeps the job's `termios` and restores
+it at `fg`, and a second-tier program on a pseudo-terminal
 gets its `SIGTSTP` from the terminal's line discipline instead ([The
 terminal](#the-terminal)). `kill %N` of a paused job resumes it after the
 signal, as a Unix shell continues a stopped job it signals. Programs'
@@ -1629,23 +1629,22 @@ Unix process:
 
 ### The terminal
 
-**`/dev/tty`, in the first tier.** The session's export serves `/dev/tty`
-as a line-mode terminal, a file whose reads and writes reach the
-session's terminal relay, and a program's standard streams that go to the
-terminal are opens on it, so one program's output and error streams reach
-the console in the order the program wrote them, as they do through one
-Unix terminal. A read returns the next line the relay collects while the
-program's job is in the foreground, and waits while the job is in the
-background, as on Unix; a write reaches the console through its strict
-escape, as every program's output does. A terminal's `ioctl`s are
-`{tty, Open, Request}` requests to the handler, which takes them to the
-relay ([The program protocol](#the-program-protocol)). `tcgetattr`
-reports a canonical terminal with echo, and `tcsetattr` may clear and set
-`ECHO`, which the
-relay honours for the lines it collects for that program, so a password
-prompt does not echo; any other change fails with `EINVAL`. `TIOCGWINSZ`
-answers from the console's size. A program opens `/dev/tty` through its
-namespace, so a narrowed program without the export's `/dev` has no
+**`/dev/tty`.** A session's terminal is a tty
+([design-live.md](design-live.md#the-tty)), which the session's terminal relay
+owns. The session's export serves it as `/dev/tty`, a file whose reads and
+writes reach the relay, and a program's standard streams that go to the
+terminal are opens on it, so one program's output and error streams reach the
+terminal in the order the program wrote them, as they do through one Unix
+terminal. A write reaches the terminal exact, apart from the tty's output
+flags, whichever job wrote it. A read returns what the line discipline gives
+while the program's job is in the foreground, a line when the tty is cooked,
+and waits while the job is in the background, as on Unix. A terminal's
+`ioctl`s are `{tty, Open, Request}` requests to the handler, which takes them
+to the relay ([The program protocol](#the-program-protocol)). `tcgetattr` and
+`tcsetattr` read and set the tty's `termios`, so a program can turn off `ECHO`
+for a password prompt, or go raw and draw with control sequences. `TIOCGWINSZ`
+answers from the size the master reports. A program opens `/dev/tty` through
+its namespace, so a narrowed program without the export's `/dev` has no
 terminal beyond the streams it was started with.
 
 **Reading a terminal.** A terminal read waits for input before it asks for
@@ -1667,14 +1666,13 @@ first tier, so its read waits until the job is in the foreground; in the
 second tier the line discipline sends a background group that reads its
 controlling terminal `SIGTTIN` instead.
 
-**Pseudo-terminals, in the second tier.** A **pseudo-terminal** is a pair
-the session serves: its master side, held by the terminal relay or by a
-program that runs others in it, and its slave side, a file `/dev/pts/N` of
-the session's export, which programs read and write as opens. Between
-them runs a **line discipline**, an Erlang module of the session whose
-decisions are a pure state machine over `termios`: canonical and raw
-input, echo, `VMIN` and `VTIME`, the special characters, and the
-translation of input and output. With `ISIG`, the characters for
+**Pseudo-terminals, in the second tier.** A session's own tty is a
+**pseudo-terminal** whose master is the console. In the second tier a program
+can make another: `posix_openpt` gives it the master side, and the slave side
+is a file `/dev/pts/N` of the session's export, which programs read and write
+as opens. The session's terminal relay owns it, and the same line discipline
+runs between the sides
+([design-live.md](design-live.md#the-tty)). With `ISIG`, the characters for
 interrupt, quit and suspend become `SIGINT`, `SIGQUIT` and `SIGTSTP` for
 the terminal's foreground process group, sent through the handlers as any
 signal is; a change of the window's size sends `SIGWINCH`; the master's
@@ -1740,19 +1738,9 @@ control](#job-control)). A program that never calls these keeps the first
 tier's rule: its job is one group and one session, which counts as
 orphaned, so no `SIGTSTP`, `SIGTTIN` or `SIGTTOU` of its own stops it.
 
-**The console in terminal mode.** A full-screen program such as `vi`,
-`less` or `top` draws with control sequences, which the console's strict
-escape would render visibly. A pseudo-terminal whose master is the
-terminal relay therefore writes to the console in its **terminal mode**,
-which the relay asks for when the foreground job's terminal leaves
-canonical mode ([design-live.md](design-live.md#terminal-mode)): the
-console passes only the control sequences of the terminal-mode allowlist,
-with their parameters bounded, and writes every other control escaped, and
-when the job ends, leaves the foreground or leaves terminal mode, the
-console undoes every mode the allowlist can set, and closes any sequence
-the program left incomplete. The allowlist, its parser, what closing an
-incomplete sequence means, and their tests are design-live's alone, so
-this document repeats none of them.
+**Full-screen programs.** A program such as `vi`, `less` or `top` goes raw
+and draws with control sequences, which reach the terminal as it wrote them.
+It needs nothing else from the console.
 
 ### The second tier
 
@@ -2591,9 +2579,7 @@ define it.
   and the stream relay carries a command's streams; a program has none
   ([design-domains.md](design-domains.md#connections)).
 * **The inspector**: programs listed under their session as ports
-  ([design-live.md](design-live.md#inspection)); **the console**: the
-  terminal mode of pseudo-terminals
-  ([design-live.md](design-live.md#terminal-mode)).
+  ([design-live.md](design-live.md#inspection)).
 * **File servers**: 9P2000.L's operations, with a `walk` of no names for
   each grant a program receives and an `lopen` for reading, behind the
   handler's image check, for code; the session's open-file descriptions,
@@ -2654,7 +2640,7 @@ test:
 | a shared mapping whose file's server ends keeps its bytes, and its `msync` fails with `EIO`; a session that ends before its programs' ends are handled, a crash included, loses the stores not yet written back | the object is the session's and ends with the session's budget, and only a write-back reaches the file |
 | running or mapping a file that changes twice while its file object is filled fails with `ETXTBSY` | a file object holds one version of a file ([File objects](#file-objects)) |
 | no `SIGHUP` at the end of a session | a program ends with its session (P9) |
-| in the first tier, `/dev/tty` is a line-mode terminal whose only `termios` change is `ECHO`; no `sigaltstack`, no `RUSAGE_CHILDREN` | pseudo-terminals and `termios` are the second tier's; no stack switching; no usage reports from children |
+| no `sigaltstack`, no `RUSAGE_CHILDREN` | no stack switching; no usage reports from children |
 | `PROT_EXEC` in `mmap` and `mprotect` fails with `ENOTSUP`, and a shared library with text relocations is refused | only the loader maps code, and code is never writable (P10) |
 | in the first tier, `MAP_SHARED` mappings of files fail with `ENOTSUP` | they need the session's mappers and the kernel's report of stored pages, the second tier's |
 | a shared anonymous `mmap` (`MAP_SHARED\|MAP_ANON`) is charged whole at the call, `PROT_NONE` included, and fails there with `ENOMEM`, where QNX reserves it and charges at the `mprotect`; a private anonymous `PROT_NONE` mapping is free until it is given access, as on QNX | a shared memory object's pages are charged to its budget at its creation, so that the forked children and the mappings that share it never fault for lack of memory (K6) and no mapping's commit can be refused by another's; a test maps a shared anonymous `PROT_NONE` range larger than the pool and expects `ENOMEM`, and the same range private and expects success |
@@ -2715,7 +2701,7 @@ Unix process trusts its kernel. What crosses the boundaries:
 | pipe bytes and lanes | whoever holds the pipe's other ends | every field of a ring's header and of a reader page copied once and checked before use, and a reader maps every ring read-only; the bytes are data, copied into the caller's buffer ([design-pipes.md](design-pipes.md#security)) |
 | the data area's bytes | the program, for a write; the server's reply, for a read | the generated reply check of `erx_file_remote` fails a reply that names more bytes than its request asked for with `eio`, and `liberx` copies no more than the count it asked for ([design-files.md](design-files.md#bounds)); the handler copies only within the slot the request names, checked against the area's size, and the bytes are data at both ends ([Descriptors and files](#descriptors-and-files)) |
 | a shared mapping's bytes and its requests | the file's server, read through the mapping open's own fid; the programs that map the object, for its stores; the program, for `End` | the mapper copies a reply, checked against the count it asked for, only within the object's size, takes `End` as a checked byte count within the mapping quota, and treats the stored pages as data, written only through a mapping open that allows writing ([Shared libraries and mappings of files](#shared-libraries-and-mappings-of-files)) |
-| a program's output to the console, and a pseudo-terminal's in terminal mode | the program | the console's strict escape, or in terminal mode its allowlist, each with a fuzz target ([design-live.md](design-live.md#terminal-mode)) |
+| a program's `termios`, in a `{tty, Open, Request}` | the program | `erx_tty:set/2`, which checks it whole, with a fuzz target ([design-live.md](design-live.md#the-tty)); a program's output is data, which the tty does not interpret |
 
 **Authority.** A program holds its channel, its pipe ends, its data area
 and the memory its session mapped, and nothing more (P1); its namespace,
@@ -2733,10 +2719,9 @@ code behaving. A program never executes code it can write (P10).
 
 **Residual risks accepted.** A program that holds an `rw` and an `rx`
 grant over one tree can write an executable or a library and run it, with
-its own authority. A full-screen program in terminal mode can draw
-anything within the allowlist, a fake prompt included, as on Unix; the
-console resets the modes the allowlist can set when the program leaves the
-foreground. A session's programs share the session's connections to its
+its own authority. A program on a tty can send the terminal any control
+sequence, a fake prompt included, as on Unix and over `ssh`
+([design-live.md](design-live.md#security)). A session's programs share the session's connections to its
 servers: a few hostile programs of one session can fill a connection's
 lane with requests and delay their siblings' requests there, within what
 each program's handler relays for it, until the user stops their job
@@ -3130,14 +3115,13 @@ terminal cases.
   `WUNTRACED` reports; `^C` that sends `SIGINT` to the foreground group
   only; a background group's read that gets `SIGTTIN`; a resize that sends
   `SIGWINCH`; a master's close that sends `SIGHUP`; and a recompiled `vi`
-  and `less` that draw through terminal mode, while the title, OSC 52 and
-  device-status requests they or a hostile program write are escaped.
+  and `less` that draw on a pseudo-terminal.
 * **Fuzz targets.** The startup and fork messages' decoders, in `liberx`
   and in the command image; the program protocol's, in `liberx` and in the
   handler; and `erx_elf_plan`, built from the same sources for the host
   (`make check-fuzz`); the ring and reader page checks are the pipes
   document's ([design-pipes.md](design-pipes.md#verification-and-testing)),
-  and the terminal mode's parser is the console's
+  and the line discipline's is the console's
   ([design-live.md](design-live.md#verification-and-testing)).
 
 ## Performance
@@ -3492,9 +3476,8 @@ correct, charged at the call, and simple.
 
 **Pseudo-terminals in the kernel.** The kernel could carry the line
 discipline, as Unix kernels do. It loses: the kernel holds no terminal
-policy, and the session already serves files and owns the console; a line
-discipline in the session is a pure state machine, tested on the host,
-with the session's escapers on its output.
+policy, and the session already serves files and owns its terminal; a line
+discipline in the session is a pure state machine, tested on the host.
 
 **Fixed limits per session.** Each session could keep a fixed number of
 programs and children. It loses to quotas: the right numbers depend on a
@@ -3582,7 +3565,6 @@ proves hard to adapt.
 | Recompiled programs detach: `daemon`, a double `fork`, `nohup` | medium | the detached child ends with the program that started it, and a ported service dies with its shell | the documented difference and its test; a service runs as a domain under a supervisor ([design-system.md](design-system.md#system-services)) |
 | `system`, `popen` and Erlang commands started by programs are slow, a command domain's start each first time | medium | a program that runs many commands is slow at its first | the command domain is kept for the program's image, so a second command costs a frame; a small release for the command image; `tools/erx bench system` |
 | `fork` of a large program is slow, a copy of all its memory | medium | `fork` followed by `exec` wastes the copy | `posix_spawn` stays the fast path; `tools/erx bench fork`; the copy-on-write `fork` option |
-| The terminal mode's allowlist misses a sequence a full-screen program needs, or passes one that harms the operator | medium | a program draws wrongly, or a terminal is attacked | the allowlist is one generated table with a test per sequence and a fuzz target; a missing sequence draws escaped, never raw |
 | A session's code objects hold much of its budget | low | the session runs out of memory sooner | `file_objects` and an eighth of the budget bound the table; eviction keeps live objects alive in their programs only; data objects are the program's own and end with it |
 | Write-back of shared mappings costs more than programs expect | medium | a program that maps a large file and stores widely pays a write for each run of stored pages at every `msync` and every letting-go, and an `mmap` pays up front the filling of the object from the file's start to the mapping's end, a high offset included | only stored pages are written, from the kernel's report; gate GQ measures fill and write-back with `tools/erx bench mmap` ([plan.md](plan.md#decision-gates)); filling on first touch would need a pager, which the design rejects ([Alternatives considered](#alternatives-considered)) |
 | Ported programs rely on writes from outside their session showing in a shared mapping at once, as Linux's page cache gives | low | such a program reads stale bytes through its mapping until every program of its session has let go of the file | the documented difference and its test; programs that share a mapped file run in one session, where descriptors and mappings agree at once ([Alternatives considered](#alternatives-considered)) |
@@ -3633,9 +3615,6 @@ One engineering question, with the answer the design follows:
   2026-10-30).
 * Linux man-pages 6.19, pipe(7) (2026-07-10), "Pipe capacity" and
   "PIPE_BUF", https://man7.org/linux/man-pages/man7/pipe.7.html.
-* Ecma International, ECMA-48 "Control Functions for Coded Character
-  Sets", 5th edition (1991), the grammar of control sequences that the
-  terminal mode parses.
 * Fuchsia, "Socket - Bidirectional streaming IPC transport", Zircon kernel
   objects reference, https://fuchsia.dev/fuchsia-src/reference/kernel_objects/socket
   (read 2026-10-30).

@@ -299,7 +299,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a bounded local registry resolves aliases ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
 | Ports | ports, port tasks, linked-in drivers, spawn drivers, `fd` ports (`io.c`, `erl_port_task.c`) | sub-spaces and lanes | **kept** for two linked-in drivers, the lane driver and the program driver; spawn and `fd` ports, the forker and `erl_child_setup` dropped ([Programs as ports](#programs-as-ports)) | a port already has an owner, a link, serialised work, busy flow control and an exit status |
 | Device drivers | linked-in drivers | Erlang processes over the device NIF | **redone**: a driver is an Erlang process; the C under it is the device NIF, parsing nothing ([The device NIF](#the-device-nif)) | a device that lies corrupts no memory |
-| Operating-system adaptation | the Unix sys layer, Unix signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the debug log for standard error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
+| Operating-system adaptation | the Unix sys layer, Unix signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the output ring for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
 | Time | the time supervisor's correction over OS clocks (`erl_time_sup.c`) | the counter and the time page | **redone**: one clock; correction for imperfect clocks deleted; Erlang's monotonic and system time semantics kept | the counter is exact |
 | Code from storage | `erl_prim_loader` through `prim_file` | boot-image slices mapped read-only | **kept**, with whole-file reads returning binaries over the slice's pages, without a copy, and an EROFS image's files read by the EROFS reader, preloaded Erlang, from blocks the hash-checking primitive returned; the code server checks the hash of every blob it fetches from the code service ([Code in the system domain](#code-in-the-system-domain)) | `init` and boot scripts need no change, and a slice's files are covered by the boot image's validation |
 | Executing Erlang code | the interpreter and BeamAsm, one per build | memory objects mapped writable at one address and executable at another | **both kept**, as two runtime images: the interpreter image for the system domain, the BeamAsm image for other domains ([BeamAsm](#beamasm)) | the interpreter keeps generated code, JIT objects and C++ out of the trusted base and is deterministic; BeamAsm is up to four times faster |
@@ -333,8 +333,8 @@ the network service ([plan.md](plan.md#m12-storage-networking-boards)).
 
 NIF libraries: `socket` and `net` dropped; `prim_file` kept with erXos's
 platform layer; `zlib`, `zstd`, `erl_tracer` and `prim_buffer` kept;
-`prim_tty`'s NIF dropped, since the console service renders in
-`prim_tty`'s terminal-less mode over the console's driver (edit 38); and
+`prim_tty`'s NIF dropped, since a shell's driver renders in
+`prim_tty`'s terminal-less mode over its tty (edit 38); and
 erXos's own added: the per-byte primitives, the device NIF, the pipe NIF,
 the domain library's NIFs and the watchdog NIF
 ([Per-byte primitives](#per-byte-primitives),
@@ -1601,12 +1601,11 @@ The machine's console is a device like any other, and its UART belongs
 to the system domain in every manifest: the console's driver, an Erlang
 process over the device NIF in the system domain, reads and writes the
 UART ([design-system.md](design-system.md#drivers)), and the kernel keeps
-only its early console for its own log. Every other domain's
-standard I/O goes through Erlang's I/O protocol to a group leader in the
-system domain, over the domain's system connection, so no other domain
-can write to a terminal at all. `standard_error` writes to descriptor 2
-(edit 39), which in a domain is the debug log, `erx_debug_log` with the line
-in the caller's UTCB, which the kernel escapes as a source's text.
+only its early console for its own log. A session's standard I/O goes
+through Erlang's I/O protocol to its group, in its own domain, and from
+there to its tty ([design-live.md](design-live.md#the-tty)), whose bytes
+reach the console while the session is connected. `standard_error` writes
+to descriptor 2 (edit 39).
 
 **The console service is a program with its own line editor on a raw terminal,
 as on Unix.** The device carries bytes; `edlin` and `group`, stock OTP in user
@@ -1614,8 +1613,8 @@ mode, edit the line and keep its history. `erx_console`, in the system domain,
 sits between them and the console's driver, exchanging ordinary messages with no
 connection: input bytes go to the group as `{self(), {data, Chars}}`, and each
 request from the group goes through `prim_tty:handle_request/2` to become bytes
-for the driver. What it shows of another source's text is
-[design-live.md](design-live.md#the-console)'s concern. `-user erx_console`
+for the driver. A session in another domain does the same beside its own
+tty ([design-live.md](design-live.md#the-tty)). `-user erx_console`
 ([Configuration](#configuration)) makes `user_sup` call `erx_console:start/0`,
 which starts the driver and one group, `group:start(self(), {shell, start, [init]}, Options)`,
 and registers that group as `user`.
@@ -1634,10 +1633,27 @@ counts as one column.
 **A runtime's own output is raw.** `erlang:display/1`, `erlang:display_string/2`,
 ERTS's `erts_printf` to standard output and error, and stdio deliver their bytes
 unchanged to descriptors 1 and 2, as on Unix: nothing in ERTS or `sys/erxos`
-escapes or filters them, and they do not pass through `erx_console`. Hosted, the
-descriptors are the process's own; in Phase 1 natively, the seam's console write
-([design-stopgap.md](design-stopgap.md)). A shell or session may filter what it
-displays; an output function does not touch the data.
+escapes or filters them. Hosted, the descriptors are the process's own; in Phase 1
+natively, the seam's console write ([design-stopgap.md](design-stopgap.md)), which
+reaches the UART at once and can interleave with the driver's writes at any byte.
+
+On erXos's kernel `erx_output_write` copies the bytes into a ring of 64 KiB in
+the runtime's own memory and triggers a software IRQ object bound to the runtime's
+group, as `erx_stdio`'s NIF does, whose label the event table registers to one
+process, the **output drain**. The drain writes the bytes on: in the system domain
+to the console's driver, with a tty's default output flags; in a session's domain
+to the session's tty, as any writer does; in any other domain, which has no
+terminal, as log records to its console facet under its name, which the console
+escapes ([design-live.md](design-live.md#the-console)). That last is a Unix
+daemon's rule: with no terminal, its output goes to a log under its name.
+
+An executor never waits on its own drain. On a full ring `erx_output_write` takes
+what fits and answers the count, or `EAGAIN`. `erlang:display_string/2`, which has
+a process to yield, traps and retries, so the drain runs even on a domain's one
+executor. `erts_printf` has no process to yield, so it drops the rest, and the
+drain writes how many bytes were lost. The debug log stays what it is, the kernel's
+own labelled, escaped and rate-limited log for `liberx`'s lines and the crash path:
+a record under a space's number, and no route for standard output.
 
 **`erx_stdio`, hosted mode's console driver.** `erx_console` is one program in
 every build, and the driver is the one process that differs, since a hosted
@@ -2045,7 +2061,7 @@ runtime and native program. It reaches the kernel only through `liberx`:
 | locks | umtx waits on private memory |
 | clocks | the time page |
 | entropy | `erx_entropy_read` |
-| standard output and error | the debug log; in the system domain, the console service; in a program, descriptors 1 and 2 |
+| standard output and error | descriptors 1 and 2: in a runtime, its output ring, drained to its tty, or to its log where it has none ([The console](#the-console-and-standard-io)); in a program, the opens it was started with |
 | files and descriptors (`open`, `read`, `write`, `stat`, `getdents`, `getcwd`, `chdir`, `mkdir`, `unlink`, `rename`) | in a program, the descriptor table over pipes and files, each operation a request on the channel to the handler and its bytes in the program's data area ([design-programs.md](design-programs.md#descriptors-and-files)) |
 | arguments, environment and working directory | in a runtime, the boot information page; in a program, the startup message |
 | `posix_spawn`, `wait`, `kill`, `poll`, pipes, `sigaction`, `mmap` | in a program, the POSIX-lite personality: requests to the handler over the channel, `liberx`'s pipes ([design-pipes.md](design-pipes.md)), the event executor, `liberx`'s signals over vCPU upcalls, and memory objects ([The POSIX-lite personality](design-programs.md#the-posix-lite-personality)) |
@@ -2676,8 +2692,9 @@ drain rate and batch size. A facet process is bounded by its own
 crash area only to principals that may inspect the domain
 ([design-live.md](design-live.md#inspection)). A group's status area
 shows the kernel's view of that group alone. A domain's standard I/O
-reaches a terminal only through the system domain's console service,
-which escapes it. A frame's unheld outcome is the dead-process outcome,
+reaches a terminal only through its session's tty, unfiltered
+([design-live.md](design-live.md#security)), and a domain with no terminal
+reaches none. A frame's unheld outcome is the dead-process outcome,
 so no peer learns whether an unexported process exists.
 
 **Residual risks accepted.** The system domain's runtime loads only
@@ -2926,6 +2943,7 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 | `make check-runtime-seam` passes on the hosted and the native image | a call to `open` in a `sys/erxos` file fails it, naming the object; a call to `uname` in a native-only object fails the number check; a `HAVE_` answer changed in one target's file fails the comparison; `#ifdef __APPLE__` in `sys/erxos` fails the source check; a `sysconf(_SC_NPROCESSORS_ONLN)`, and a `write` outside `erx_output.c`, fail the name check |
 | `erx_output_write` on descriptors 1 and 2 writes, and on an open descriptor 3 answers `EBADF` | the descriptor check removed: the bytes arrive on descriptor 3 |
 | `erlang:display_string/2` with all 256 byte values, to a full non-blocking pipe that is then drained, delivers exactly those bytes in order | stock's `written += res` restored: the bytes differ and AddressSanitizer reports the read; an escaping step added: the comparison fails |
+| On erXos's kernel, `erlang:display_string/2` past a full output ring in a domain with one executor delivers every byte in order, and a flood of `erts_printf` past it delivers a count of the bytes lost | the trap removed: the drain never runs and the deadline fires; the count removed: the output is short with no report |
 | A host test of `erx_runtime_main`'s vector over a read-only page: `argv[0]`, every word in order, the node name's flag, a final null, and each word writable. The hosted boot of [Configuration](#configuration)'s arguments lists `kernel_sup`'s children as its table says, and `whereis(user)` is the group | the words not copied: the write faults; `--` removed from the arguments: the boot stops in `erts_usage`, naming the flag; `-user erx_console` removed: `user_drv` fails at its load and the boot ends with `init`'s diagnostic; in a release with a carrier, `-nocookie` removed: `auth` fails on the read-only release |
 | A pty test drives the hosted image: `1> 1+1.` answers `2`, an arrow key recalls history, `halt().` ends the process with status 0 and the terminal is restored | the NIF's `erx_irq_trigger` removed: input never arrives, the test's deadline fires, and an idle sample shows every executor parked; the mode restore removed: the test sees the terminal still raw; `isprint/1` returned to its NIF stub: the first prompt raises `undef` and the deadline fires |
 | The image with empty input ends with status 0. With `1+1.` and `2+2.` immediately followed by end of file, the output holds both results and the status is 0 | `erx_stdio` halting at end of file: the results are missing; `erx_console_eof` dropped: the deadline fires; `put_chars_sync` answered before the write: a test driver that holds back `erx_console_written` sees `io:format` return |

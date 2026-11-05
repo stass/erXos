@@ -1329,9 +1329,9 @@ never by a value read from shared memory.
 **Leaks.** A ring holds only bytes written into the pipe, and memory
 objects are zero when made. A pipe's memory is never deleted under a
 party that maps it, so no party reads memory that is gone, and none
-faults. Text from a pipe reaches a terminal only through the console's
-escaper, by the terminal relay
-([design-live.md](design-live.md#the-console)).
+faults. Bytes from a pipe reach a terminal only when a reader writes them
+to a tty, which delivers them unchanged, as on Unix
+([design-live.md](design-live.md#the-tty)).
 
 **Residual risks accepted.** Co-readers trust each other with their shared
 stream; a holder that keeps an end delays the end of the stream or a

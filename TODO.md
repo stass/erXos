@@ -159,9 +159,6 @@ it; git history is the record of completed work.
 * [Medium] musl, `musl/src/internal/erxos/syscall.c`: the seam includes the Fiasco backend's headers and assumes
   the root (`erx_machine_end` for `exit_group`, a handle that is an index). A task needs the launcher's status path
   and handles with generations; the next part of the port settles it with `libc-test` in a task.
-* [Medium] musl, `musl/src/internal/erxos/syscall.c`: a program's standard output reaches the console through
-  `erx_fiasco_console_write` with no escaping. The root's one program is trusted; the strict escape for a program's
-  own output belongs here before a program prints text from another source.
 * [Low] stopgap, `liberx/backend/fiasco/arch/aarch64/root_start.S`: `main` runs on 64 KiB in `.bss` with no guard page,
   so a large frame overruns other `.bss` silently.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
@@ -655,20 +652,11 @@ it; git history is the record of completed work.
   grants, so "a program never runs what it could rewrite" holds per grant,
   not per file ([design.md](docs/design.md#trust-placement),
   [design-files.md](docs/design-files.md#invariants)).
-* [Low] shell and programs, terminal order: each program gets fresh pipes
-  to the terminal relay, one per stream, so cross-stream and cross-program
-  order at the terminal is undefined and a diagnostic on standard error
-  can print between two lines of standard output out of order. Merge a
-  job's streams at the relay in arrival order
-  ([design-shell.md](docs/design-shell.md)).
 * [Low] programs, compatibility: `daemon()`, the double fork, toybox's
   `setsid` and `nohup x &` cannot outlive their starter under "a program's
   tree ends with it", and only "no `SIGHUP`" is in the compatibility
   table. List them there as documented differences with tests
   ([design-programs.md](docs/design-programs.md#a-programs-end)).
-* [Low] programs, terminals: `isatty` is true on a `tty`-flagged pipe but
-  `tcgetattr` fails with `ENOTTY`, which `less` and `vi` call in that
-  order. Make the two agree ([design-programs.md](docs/design-programs.md)).
 * [Low] system, principals: a principal can be created but never resized
   or removed. Add both to the principal service, with what happens to its
   sessions, domains, overlays and vault files

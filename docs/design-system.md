@@ -78,8 +78,8 @@ Decisions every reader of this document needs:
   supervisor, in a domain that holds its device's capabilities; the C
   beneath it is a device shim that parses nothing. Which domain holds
   which device is the manifest's. The console is such a driver, in the
-  system domain, so the operator's terminal is as trustworthy as the
-  system domain itself.
+  system domain, so only the system domain and the session connected to
+  it read what the operator types.
 * **Services do bounded control on their own grant.** No thread ever runs
   on another group's time. A service admits requests per client, in that
   client's facet process, and what it holds for a client is bounded by
@@ -1945,12 +1945,11 @@ device-tree path in the manifest's `console` and `hostlink` fields, and
 every manifest, release and bring-up alike, gives both UARTs' units to the
 system domain itself (property 8). There the console driver, an Erlang
 process over the device NIF, feeds the console service, `erx_console`,
-which is the one writer of the console port's bytes and holds the console
-sink's chokepoint, the one escaping function through which every byte
-reaches the operator's terminal
-([design-live.md](design-live.md#the-console)). So the operator's terminal
-is as trustworthy as the system domain, and no other domain can read a
-passphrase typed there or write to the operator. On the Raspberry Pi 4 the
+which connects one session's tty to the line at a time and copies its
+bytes without reading them
+([design-live.md](design-live.md#the-console)). So no domain can read a
+passphrase typed at the login prompt, and a domain writes to the operator
+only through a connected session's tty. On the Raspberry Pi 4 the
 console's unit is the mini UART's, which shares its page with the
 auxiliary SPI controllers, and the host link's is the PL011s' unit; both
 go to the system domain, which drives neither the auxiliary SPI
@@ -2229,7 +2228,7 @@ domain, in a domain the manifest lists: the vault.
 | resource policy, `erx_policy` | the group tree, grants, capacity, budgets, lane sizes | [Resource policy](#resource-policy) |
 | device service, `erx_devices` | the device catalogue, each device given to the domain the manifest names, `/dev` | [Devices](#devices) |
 | watchdog, `erx_watchdog` | pets the kernel's watchdog every period, at priority `max`, once every service it lists has answered a liveness call | [Boot](#boot) |
-| console service, `erx_console` | the serial console over its driver in the system domain, the host-link port's bytes, the console sink, the login prompt, the system shell and shells in other domains | [Devices](#devices), [design-live.md](design-live.md#the-console) |
+| console service, `erx_console` | the serial console over its driver in the system domain, the host-link port's bytes, the menu, the login prompt, the system shell and the connection of sessions' ttys | [Devices](#devices), [design-live.md](design-live.md#the-console) |
 | inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included | [design-live.md](design-live.md#inspection) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
@@ -2261,9 +2260,9 @@ which the build runs over the system domain's applications, also reports
 code that builds an `erx_ident:t()` outside `erx_ident` wherever it can
 see the term's type, and `erx_ident`'s property test checks the rule
 against a reference regular expression. Text that is
-not an identifier, such as a file name or a log message, is UTF-8 data and
-reaches a terminal only through its sink's escaper
-([design-live.md](design-live.md#text-on-terminals)).
+not an identifier, such as a file name or a log message, is UTF-8 data, and
+whatever displays it under its source escapes it
+([design-live.md](design-live.md#attributed-text)).
 
 **A domain's name is its node name.** Every domain is an Erlang node named
 `Name@Host`: its identifier, then `@`, then the machine's host name, an
@@ -3152,7 +3151,7 @@ under test ran.
   in the system domain, restarted by its supervisor with the login prompt
   back; a manifest that gives the console's UART unit to any domain but
   the system domain, refused by the check; a check over the driver
-  applications' BEAM files that only the console service writes the
+  applications' BEAM files that only the console's driver writes the
   console UART's transmit register, with a seeded violation; the driver
   table's emptiness checked against the tree: a native driver outside a
   sub-space port, or one without a row, fails the build.

@@ -659,7 +659,8 @@ its node and peer names. NUL-separated vectors end each element with
 NUL, contain no empty environment name, and use the empty byte string
 for an empty vector. Environment entries have one name before the first
 `=`, and names are unique. Arbitrary argument bytes remain inert bytes
-until the runtime consumes them and are escaped at a terminal sink.
+until the runtime consumes them, and are escaped where they are displayed
+under their source.
 
 The domain-reference value `0xffffffff` names the system domain; other
 values index the configured-domain table. This is a manifest reference,
