@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'pty'
 require 'tmpdir'
+require 'io/wait'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
 
@@ -22,6 +23,31 @@ class RuntimeHostedSmokeTest < Minitest::Test
   # A boot to `1>` takes seconds; the budget is the whole dialogue on a loaded host.
   BUDGET_SECONDS = 60
   ESCAPE_SEQUENCE = /\e\[[0-9;?]*[A-Za-z]/n
+  GROUP_LINE = /erx: hosted: group: parked (\d+) of (\d+)\n/
+  # What an idle sample waits for, and the most an idle runtime may spend, with liberx's
+  # reporting thread looking at the status page ten times a second.
+  IDLE_SAMPLE_SECONDS = 3
+  IDLE_CPU_PERCENT_MAX = 2.0
+  # Each makes schedulers sleep and wake in a way of its own, so a lost wake hangs one of
+  # them and the budget's deadline ends the test.
+  # A typed line can reach the terminal before the last prompt, so an answer need not start a line.
+  WAKE_PATTERNS = {
+    'P = self(), [spawn(fun() -> P ! ok end) || _ <- lists:seq(1, 20000)], ' \
+    '[receive ok -> ok end || _ <- lists:seq(1, 20000)], storm_done.' => /\bstorm_done\n/,
+    '[timer:sleep(1) || _ <- lists:seq(1, 200)], sleeps_done.' => /\bsleeps_done\n/,
+    'erts_debug:dirty_cpu(scheduler, type).' => /\bdirty_cpu\n/,
+    'erts_debug:dirty_io(scheduler, type).' => /\bdirty_io\n/,
+    'S = erlang:system_info(schedulers), erlang:system_flag(schedulers_online, 1), ' \
+    'erlang:system_flag(schedulers_online, S), online_done.' => /\bonline_done\n/,
+    'erlang:system_flag(multi_scheduling, block), erlang:system_flag(multi_scheduling, unblock), ' \
+    'blocking_done.' => /\bblocking_done\n/,
+    # A timer on every scheduler ends its park during a block of thread progress, so each
+    # goes from a returned park to waiting for the block's end.
+    'erts_debug:set_internal_state(available_internal_state, true), ' \
+    '[spawn_opt(fun() -> receive after 50 -> ok end end, [{scheduler, N}]) || ' \
+    'N <- lists:seq(1, erlang:system_info(schedulers))], timer:sleep(10), ' \
+    'erts_debug:set_internal_state(block, 200), progress_done.' => /\bprogress_done\n/
+  }.freeze
   RUNS_LINE = /erx: hosted: range table: (runs (\d+) high (\d+) of (\d+) committed_pages (\d+))\n/
 
   def setup = Erx::Runtime.check_current(root: ROOT)
@@ -64,6 +90,52 @@ class RuntimeHostedSmokeTest < Minitest::Test
         @reaped = true
         assert status.success?, "the runtime ended with #{status.inspect}\n#{plain(transcript)}"
       end
+    end
+  end
+
+  # Idle means every executor parked and the CPU at rest, and each wake pattern ends with
+  # the same sample: what spins or hangs after a lost wake shows in one or the other.
+  def test_schedulers_park_at_idle_and_every_wake_arrives
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home, 'ERX_HOSTED_GROUP_REPORT' => '1') do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
+        read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
+        schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
+        assert_idle(reader, transcript, pid, schedulers: schedulers, dirty: dirty, moment: 'at the first prompt')
+        WAKE_PATTERNS.each do |expression, answer|
+          writer.write("#{expression}\n")
+          read_until(reader, transcript, answer, deadline)
+        end
+        assert_idle(reader, transcript, pid, schedulers: schedulers, dirty: dirty, moment: 'after every wake pattern')
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        status = wait_for(pid, deadline, transcript)
+        @reaped = true
+        assert status.success?, "the runtime ended with #{status.inspect}\n#{plain(transcript)}"
+      end
+    end
+  end
+
+  # The events' word protocol over umtx, on the runtime's own libethread and liberx.
+  def test_ethread_events_survive_a_storm
+    Dir.mktmpdir('erx-event-storm-') do |directory|
+      binary = File.join(directory, 'storm')
+      internal = File.join(OUTPUT.root, 'erts/lib/internal', Erx::Runtime::TARGET)
+      log, status = Open3.capture2e('clang', '-std=c17', '-D__erxos__', '-O1', '-g',
+                                    '-I', File.join(OUTPUT.root, 'erts/include/internal'),
+                                    '-I', File.join(OUTPUT.root, 'erts/include/internal', Erx::Runtime::TARGET),
+                                    '-I', File.join(OUTPUT.root, 'erts/include', Erx::Runtime::TARGET),
+                                    '-iquote', ROOT, '-iquote', File.join(ROOT, 'include'),
+                                    File.join(ROOT, 'test/fixtures/ethr_event_storm.c'),
+                                    File.join(internal, 'libethread.a'), File.join(internal, 'liberts_internal_r.a'),
+                                    OUTPUT.liberx, '-o', binary)
+      assert status.success?, log
+      output, status = Open3.capture2e('gtimeout', '-k', '5', BUDGET_SECONDS.to_s, binary, stdin_data: '')
+      assert status.success?, "the storm ended with #{status.inspect}\n#{output}"
+      assert_match(/^storm done$/, output)
     end
   end
 
@@ -118,6 +190,38 @@ class RuntimeHostedSmokeTest < Minitest::Test
 
   private
 
+  # Reads for the sample's length, then asks the status page's newest word and the process's CPU time.
+  def assert_idle(reader, transcript, pid, schedulers:, dirty:, moment:)
+    drain(reader, transcript, 1)
+    cpu_before = process_cpu_seconds(pid)
+    assert_operator cpu_before, :>, 0, 'ps gives the CPU time a boot spent'
+    drain(reader, transcript, IDLE_SAMPLE_SECONDS)
+    percent = (process_cpu_seconds(pid) - cpu_before) * 100.0 / IDLE_SAMPLE_SECONDS
+    parked, executors = plain(transcript).scan(GROUP_LINE).last.map(&:to_i)
+    puts format('idle %s: parked %d of %d executors (%d schedulers, %d dirty CPU), CPU %.2f%%',
+                moment, parked, executors, schedulers, dirty, percent)
+    assert_equal schedulers + dirty, executors
+    assert_equal executors, parked
+    assert_operator percent, :<, IDLE_CPU_PERCENT_MAX
+  end
+
+  def drain(reader, transcript, seconds)
+    finish = monotonic + seconds
+    loop do
+      left = finish - monotonic
+      break if left <= 0
+
+      ready = reader.wait_readable(left)
+      transcript << reader.read_nonblock(4096) if ready
+    end
+  end
+
+  # ps prints minutes:seconds.hundredths, with hours or days in front on a long run.
+  def process_cpu_seconds(pid)
+    text, = Open3.capture2('ps', '-o', 'time=', '-p', pid.to_s)
+    text.strip.split(':').map(&:to_f).reduce(0.0) { |total, part| (total * 60) + part }
+  end
+
   # The newest of the lines hosted liberx prints as the table changes.
   def report_runs(moment, lines)
     refute_empty lines, "no range table line #{moment}"
@@ -147,15 +251,19 @@ class RuntimeHostedSmokeTest < Minitest::Test
   def end_if_running(pid)
     return if @reaped
 
-    Process.kill('KILL', -pid)
+    begin
+      Process.kill('KILL', -pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil # A leader that already ended, with nothing left in its group.
+    end
     Process.wait(pid)
-  rescue Errno::ESRCH, Errno::ECHILD
+  rescue Errno::ECHILD
     nil
   end
 
   def read_until(reader, transcript, pattern, deadline)
-    # A range table line can land anywhere in the terminal's output.
-    until pattern.match?(plain(transcript).gsub(RUNS_LINE, ''))
+    # A line of liberx's reports can land anywhere in the terminal's output.
+    until pattern.match?(plain(transcript).gsub(RUNS_LINE, '').gsub(GROUP_LINE, ''))
       remaining = deadline - monotonic
       flunk("no #{pattern.inspect} within #{BUDGET_SECONDS} s\n#{plain(transcript)}") unless remaining.positive?
       chunk = read_chunk(reader, remaining)

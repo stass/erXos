@@ -38,6 +38,7 @@
 #include "global.h"
 
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/group_report.h"
 #include "liberx/backend/runtime_entry.h"
 
 #define NS_PER_S ((Uint64) 1000*1000*1000)
@@ -113,12 +114,19 @@ sys_gettimeofday(SysTimeval *tv)
 /*
  * A group's CPU usage: erx_group_info's, where a backend measures it. No backend does
  * (docs/design-stopgap.md, "The hosted backend"), so statistics(runtime) fails with notsup
- * rather than answer with a made-up value.
+ * rather than answer with a made-up value. The usage is one figure, all of it user time.
  */
 int
 erts_sys_cpu_time_ms(ErtsMonotonicTime *user, ErtsMonotonicTime *sys)
 {
-    (void) user;
-    (void) sys;
-    return 0;
+    erx_group_report_t report;
+
+    if (erx_group_info(ERX_CAP_SELF) != ERX_OK)
+        return 0;
+    report = erx_group_report_load(erx_utcb_self());
+    if (report.usage_known == 0)
+        return 0;
+    *user = (ErtsMonotonicTime) (report.used_ns / 1000000);
+    *sys = 0;
+    return 1;
 }

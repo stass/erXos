@@ -64,7 +64,7 @@ read readdir readlink readv rename rmdir stat symlink unlink utime write writev
 __darwin_check_fd_set_overflow
 _exit alarm dlclose dlerror dlopen dlsym dup dup2 execle execv execve fcntl fork
 getegid geteuid getpid ioctl kevent kqueue nice pipe poll
-pthread_kill pthread_sigmask select select$DARWIN_EXTSN setsid sigaction sigprocmask
+pthread_kill pthread_sigmask select setsid sigaction sigprocmask
 sigwait uname waitpid
 
 # Emptied by removing the NIFs the design drops.

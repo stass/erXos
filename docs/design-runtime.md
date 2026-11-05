@@ -670,7 +670,7 @@ the process its arguments name, travels as every later one does.
 ERTS's scheduler is the second level, kept whole except at these points:
 
 * **Executors.** Each normal scheduler and each dirty CPU scheduler is
-  created with `erx_thread_create` as an executor of the domain's group.
+  created with `erx_pthread_create_executor` as an executor of the domain's group.
   Normal schedulers are pinned with `erx_thread_set_affinity` to the CPUs
   of the group's **run**, which the capacity word names
   ([design-scheduler.md](design-scheduler.md#status-words-and-capacity)),
@@ -692,7 +692,16 @@ ERTS's scheduler is the second level, kept whole except at these points:
   ([design-scheduler.md](design-scheduler.md#park-and-wake)). Thread progress's
   `prepare_wait` and `finalize_wait` bracket the park exactly as they
   bracket ERTS's sleep, so a parked executor counts as asleep and the
-  deferred instruction barrier of code loading is issued on wake.
+  deferred instruction barrier of code loading is issued on wake. The
+  executor reads the epochs before it sets `ERTS_SSI_FLG_PARK_SLEEPING`, and a
+  waker clears the flags before it calls `erx_executor_wake`, so a wake is
+  seen in the flags or in an epoch. A dirty I/O scheduler is a worker and keeps
+  its thread event, as every scheduler does in the two waits that are not for
+  work, a suspended scheduler's and a thread blocking thread progress: an event
+  is a umtx wait, which an executor may make, and each bit of the flags a waker
+  cleared names a primitive to wake, more than one when a returned park is
+  followed by a wait for a block of thread progress. No scheduler waits on a
+  poll set.
 * **Wake.** `wake_scheduler` and the paths that notify a scheduler after an
   enqueue call `erx_executor_wake` with the target's slot when the target's
   sleep flags show it parked, instead of setting its thread event or
@@ -1366,7 +1375,7 @@ in [hosted mode](#hosted-mode) libSystem's.
 * **ethread's events are the futex variant in every build** (edit 31),
   with `ETHR_FUTEX__` over `erx_umtx_wait` and `erx_umtx_wake`. The events' word
   protocol stays stock's, and the macro keeps its answer, 0 or a positive errno
-  (`ethr_event.h:70-72`, `ethr_event.c:177-187`). A wake answers 0 for any
+  (`ethr_event_set__` and `wait__`). A wake answers 0 for any
   count, since `erx_umtx_wake` returns how many it woke. A wait with no timeout
   has the deadline `ERX_WAIT_FOREVER`; a relative one has `erx_clock_ns()` plus
   the timeout, and a sum that overflows is `ERX_WAIT_FOREVER`. `ERX_OK`, which includes a
@@ -1416,7 +1425,7 @@ creating thread, so no free slot is that call's `EAGAIN`, never a surprise in
 the new thread. `+S` and `+SDcpu` are at most 32 each and a group has 64 slots,
 so a run of ERTS meets `EAGAIN` only when another caller has spent slots;
 `ethr_thr_create` returns it and ERTS's start ends with its own diagnostic,
-`Failed to create scheduler thread` (`erl_process.c:8947`, `:8962`). A call
+`Failed to create scheduler thread` (`erts_start_schedulers`). A call
 that turns the running thread into an executor would be simpler hosted, but
 it needs a kernel call that exists for no other reason, and it would make class
 a state that changes.

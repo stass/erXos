@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say.
+ *
  * %CopyrightEnd%
  */
 
@@ -79,7 +81,8 @@ typedef struct process Process;
 #define ERTS_HAVE_SCHED_UTIL_BALANCING_SUPPORT_OPT	0
 #define ERTS_HAVE_SCHED_UTIL_BALANCING_SUPPORT		0
 
-#define ERTS_MAX_NO_OF_SCHEDULERS 1024
+/* The normal and the dirty CPU pools fill a group's 64 executor slots at most. */
+#define ERTS_MAX_NO_OF_SCHEDULERS 32
 #define ERTS_MAX_NO_OF_DIRTY_CPU_SCHEDULERS ERTS_MAX_NO_OF_SCHEDULERS
 #define ERTS_MAX_NO_OF_DIRTY_IO_SCHEDULERS ERTS_MAX_NO_OF_SCHEDULERS
 
@@ -269,11 +272,12 @@ typedef enum {
 #define ERTS_SSI_FLG_WAITING		(((erts_aint32_t) 1) << 3)
 #define ERTS_SSI_FLG_SUSPENDED	 	(((erts_aint32_t) 1) << 4)
 #define ERTS_SSI_FLG_MSB_EXEC	 	(((erts_aint32_t) 1) << 5)
+#define ERTS_SSI_FLG_PARK_SLEEPING 	(((erts_aint32_t) 1) << 6)
 
-#define ERTS_SSI_FLGS_MAX                                       6
+#define ERTS_SSI_FLGS_MAX                                       7
 
 #define ERTS_SSI_FLGS_SLEEP_TYPE			\
- (ERTS_SSI_FLG_TSE_SLEEPING|ERTS_SSI_FLG_POLL_SLEEPING)
+ (ERTS_SSI_FLG_TSE_SLEEPING|ERTS_SSI_FLG_POLL_SLEEPING|ERTS_SSI_FLG_PARK_SLEEPING)
 
 #define ERTS_SSI_FLGS_SLEEP				\
  (ERTS_SSI_FLG_SLEEPING|ERTS_SSI_FLGS_SLEEP_TYPE)
@@ -367,6 +371,7 @@ struct ErtsSchedulerSleepInfo_ {
     erts_tse_t *event;
     struct erts_poll_thread *psi;
     erts_atomic32_t aux_work;
+    Uint32 park_slot; /* erx_executor_slot() of the thread, which writes it before it first sleeps */
 };
 
 /* times to reschedule low prio process before running */

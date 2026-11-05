@@ -17,6 +17,7 @@
 #include <l4/sys/ipc.h>
 #include <l4/sys/utcb.h>
 
+#include "liberx/backend/core/group_report.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/park.h"
@@ -38,6 +39,7 @@ static uint64_t group_dispatcher;
 static erx_fiasco_lock_t group_lock;
 static bool group_record_used[ERX_BACKEND_PARK_OBJECTS_MAX];
 static uint64_t group_label[ERX_BACKEND_PARK_OBJECTS_MAX];
+static _Atomic uint64_t group_cpuset;
 
 /*
  * Every message is one IRQ object firing, whose kernel label is its record's index,
@@ -88,6 +90,23 @@ erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group)
 	group_dispatcher = thread;
 	atomic_store_explicit(&group_up, true, memory_order_release);
 	*group = GROUP_HANDLE;
+	return (ERX_OK);
+}
+
+int
+erx_group_configure(uint64_t group)
+{
+	if (group != GROUP_HANDLE && group != ERX_CAP_SELF)
+		return (ERX_EINVAL);
+	return (erx_backend_group_configure(erx_utcb_self(), &group_cpuset));
+}
+
+int
+erx_group_info(uint64_t group)
+{
+	if (group != GROUP_HANDLE && group != ERX_CAP_SELF)
+		return (ERX_EINVAL);
+	erx_backend_group_report(erx_utcb_self(), erx_group_status(), &group_cpuset);
 	return (ERX_OK);
 }
 

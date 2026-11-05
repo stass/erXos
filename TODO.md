@@ -144,6 +144,15 @@ it; git history is the record of completed work.
   the index's room for run pages stay untested. A restarted driver spends device window pages and contiguous runs each life, since neither comes back.
 * [Low] stopgap, `liberx/backend/hosted/vm.c`: `erx_mem_create` and `erx_vm_map` have no hosted body, which the call table's row asks for, so
   `test/guest/function_api` holds no shared object's case and its device cases stay native alone.
+* [Low] `otp/erts/emulator/sys/common/erl_check_io.c`: poll threads alone wait on the poll set, with `use_sched_poll` starting
+  false, until the event table replaces the poll set, and `+IOs true` still turns scheduler polling on; a poll thread wakes a
+  scheduler through the ordinary enqueue path. The sleep step's ready list and the safe point of `docs/design-runtime.md`,
+  "Scheduling", land with the table: nothing binds an object to the group in ERTS until then.
+* [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
+  `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
+  (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
+* [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: an IRQ object is never unbound or destroyed, which a restarted block driver would want. The
+  `native_irq` suite reaches the UART through a test hook until `erx_mem_create_physical` lands with the device NIF.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
   a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.

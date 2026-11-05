@@ -1544,6 +1544,38 @@ _Static_assert(offsetof(erx_frame_header_t, ctl_len) ==
 _Static_assert(offsetof(erx_frame_header_t, payload_len) ==
     ERX_FRAME_HEADER_OFF_PAYLOAD_LEN, "erx_frame_header.payload_len offset");
 
+#define ERX_GROUP_REPORT_SIZE 32
+#define ERX_GROUP_REPORT_ALIGN 8
+#define ERX_GROUP_REPORT_OFF_CPUSET 0
+#define ERX_GROUP_REPORT_OFF_USED_NS 8
+#define ERX_GROUP_REPORT_OFF_CAPACITY_MCPU 16
+#define ERX_GROUP_REPORT_OFF_PARKED 20
+#define ERX_GROUP_REPORT_OFF_READY 24
+#define ERX_GROUP_REPORT_OFF_USAGE_KNOWN 28
+typedef struct erx_group_report erx_group_report_t;
+struct erx_group_report {
+	_Alignas(8) uint64_t	cpuset;
+	uint64_t	used_ns;
+	uint32_t	capacity_mcpu;
+	uint32_t	parked;
+	uint32_t	ready;
+	uint32_t	usage_known;
+};
+_Static_assert(sizeof(erx_group_report_t) == ERX_GROUP_REPORT_SIZE, "erx_group_report size");
+_Static_assert(_Alignof(erx_group_report_t) == ERX_GROUP_REPORT_ALIGN, "erx_group_report alignment");
+_Static_assert(offsetof(erx_group_report_t, cpuset) ==
+    ERX_GROUP_REPORT_OFF_CPUSET, "erx_group_report.cpuset offset");
+_Static_assert(offsetof(erx_group_report_t, used_ns) ==
+    ERX_GROUP_REPORT_OFF_USED_NS, "erx_group_report.used_ns offset");
+_Static_assert(offsetof(erx_group_report_t, capacity_mcpu) ==
+    ERX_GROUP_REPORT_OFF_CAPACITY_MCPU, "erx_group_report.capacity_mcpu offset");
+_Static_assert(offsetof(erx_group_report_t, parked) ==
+    ERX_GROUP_REPORT_OFF_PARKED, "erx_group_report.parked offset");
+_Static_assert(offsetof(erx_group_report_t, ready) ==
+    ERX_GROUP_REPORT_OFF_READY, "erx_group_report.ready offset");
+_Static_assert(offsetof(erx_group_report_t, usage_known) ==
+    ERX_GROUP_REPORT_OFF_USAGE_KNOWN, "erx_group_report.usage_known offset");
+
 #define ERX_LANE_HDR_SIZE 16
 #define ERX_LANE_HDR_ALIGN 8
 #define ERX_LANE_HDR_OFF_WPOS 0

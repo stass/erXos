@@ -85,6 +85,8 @@ bool erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_vm_range_request_t *result);
 bool erx_frame_header_decode(const uint8_t *bytes, size_t length,
     erx_frame_header_t *result);
+bool erx_group_report_decode(const uint8_t *bytes, size_t length,
+    erx_group_report_t *result);
 bool erx_lane_rec_decode(const uint8_t *bytes, size_t length,
     erx_lane_rec_t *result);
 bool erx_mf_boot_order_decode(const uint8_t *bytes, size_t length,

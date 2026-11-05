@@ -753,6 +753,26 @@ erx_frame_header_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_group_report_decode(const uint8_t *bytes, size_t length,
+    erx_group_report_t *result)
+{
+	erx_group_report_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_GROUP_REPORT_SIZE)
+		return (false);
+
+	value.cpuset = erx_abi_load_u64(bytes + 0);
+	value.used_ns = erx_abi_load_u64(bytes + 8);
+	value.capacity_mcpu = erx_abi_load_u32(bytes + 16);
+	value.parked = erx_abi_load_u32(bytes + 20);
+	value.ready = erx_abi_load_u32(bytes + 24);
+	value.usage_known = erx_abi_load_u32(bytes + 28);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_lane_rec_decode(const uint8_t *bytes, size_t length,
     erx_lane_rec_t *result)
 {

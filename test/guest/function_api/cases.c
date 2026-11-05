@@ -18,6 +18,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/group_report.h"
 #include "test/guest/function_api/cases.h"
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
@@ -562,6 +563,30 @@ case_unsupported_refused(void)
 	return (erx_thread_stop(0) == ERX_ENOTSUP && erx_thread_read(0) == ERX_ENOTSUP &&
 	    erx_thread_write(0) == ERX_ENOTSUP && erx_thread_set_urgency(0, 1) == ERX_ENOTSUP &&
 	    erx_irq_route(0, 0) == ERX_ENOTSUP);
+}
+
+/* A grant keeps its CPU set and a report gives it back as capacity, with usage not measured. */
+static bool
+case_group_info_and_configure(void)
+{
+	const uint64_t group = function_api_group();
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const erx_share_t grant = { .cpuset = UINT64_C(0x5) };
+	const erx_share_t empty = { .cpuset = 0 };
+	erx_group_report_t report;
+	bool ok = erx_group_info(ERX_CAP_NULL) == ERX_EINVAL && erx_group_configure(ERX_CAP_NULL) == ERX_EINVAL &&
+	    erx_group_info(UINT64_C(42)) == ERX_EINVAL && erx_group_configure(UINT64_C(42)) == ERX_EINVAL;
+
+	erx_group_grant_store(utcb, &grant);
+	ok = ok && erx_group_configure(group) == ERX_OK && erx_group_info(group) == ERX_OK;
+	report = erx_group_report_load(utcb);
+	ok = ok && report.cpuset == UINT64_C(0x5) && report.capacity_mcpu == 2000 && report.usage_known == 0 &&
+	    report.used_ns == 0;
+	/* An empty set changes nothing. */
+	erx_group_grant_store(utcb, &empty);
+	ok = ok && erx_group_configure(group) == ERX_EINVAL && erx_group_info(group) == ERX_OK;
+	report = erx_group_report_load(utcb);
+	return (ok && report.cpuset == UINT64_C(0x5));
 }
 
 static bool
@@ -1116,6 +1141,7 @@ static const function_api_case_t shared_cases[] = {
 	{ "double_start_refused", case_double_start_refused },
 	{ "bad_handle_refused", case_bad_handle_refused },
 	{ "unsupported_refused", case_unsupported_refused },
+	{ "group_info_and_configure", case_group_info_and_configure },
 	{ "umtx_word_differs", case_umtx_word_differs },
 	{ "umtx_past_deadline", case_umtx_past_deadline },
 	{ "umtx_timeout_not_early", case_umtx_timeout_not_early },

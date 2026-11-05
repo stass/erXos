@@ -14,14 +14,20 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/group_report.h"
 #include "liberx/backend/core/park_table.h"
 #include "liberx/backend/hosted/internal.h"
 
 /* An object's handle: never one of a thread's, so neither names the other. */
 #define IRQ_HANDLE_BASE	UINT64_C(0x20000)
+/* How often ERX_HOSTED_GROUP_REPORT looks at the status page. */
+#define GROUP_REPORT_US	100000u
 
 _Static_assert(ERX_NO_EXECUTOR_SLOT == ERX_BACKEND_PARK_NO_SLOT, "what erx_executor_slot answers on a worker");
 
@@ -44,6 +50,7 @@ static erx_backend_park_group_t group = { .status = &group_status };
 static pthread_mutex_t group_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* A slot's semaphore holds 0 whenever its executor enters a park, and an exit leaves it there. */
 static _Atomic uint32_t group_semaphores[ERX_GROUP_EXECUTORS_MAX];
+static _Atomic uint64_t group_cpuset;
 
 static pthread_mutex_t irq_mutex = PTHREAD_MUTEX_INITIALIZER;
 static irq_object_t irq_objects[ERX_BACKEND_PARK_OBJECTS_MAX];
@@ -83,9 +90,58 @@ group_up(void *context, uint32_t slot)
 	erx_hosted_semaphore_up(&group_semaphores[slot]);
 }
 
+/*
+ * With ERX_HOSTED_GROUP_REPORT set, the console gets a line each time the count of
+ * parked executors or of executors changes, which is how a test outside the runtime
+ * reads the status page. The thread only reads and sleeps, and the process's exit ends it.
+ */
+static void *
+group_report_main(void *unused)
+{
+	uint32_t last_parked = UINT32_MAX;
+	uint32_t last_executors = UINT32_MAX;
+
+	(void)unused;
+	for (;;) {
+		const uint32_t parked = atomic_load_explicit(&group_status.parked, memory_order_relaxed);
+		uint32_t executors = 0;
+
+		for (uint32_t slot = 0; slot < ERX_GROUP_EXECUTORS_MAX; slot++) {
+			if (atomic_load_explicit(&group_status.exec[slot].state, memory_order_relaxed) != ERX_EXEC_STATE_NONE)
+				executors++;
+		}
+		if (parked != last_parked || executors != last_executors) {
+			char line[64];
+
+			(void)snprintf(line, sizeof(line), "erx: hosted: group: parked %u of %u\n", parked, executors);
+			erx_hosted_note(line);
+			last_parked = parked;
+			last_executors = executors;
+		}
+		(void)usleep(GROUP_REPORT_US);
+	}
+}
+
+static void
+group_report_start(void)
+{
+	pthread_attr_t attr;
+	pthread_t thread;
+
+	if (getenv("ERX_HOSTED_GROUP_REPORT") == NULL)
+		return;
+	if (pthread_attr_init(&attr) != 0 || pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0 ||
+	    pthread_create(&thread, &attr, group_report_main, NULL) != 0)
+		erx_hosted_fatal("erx: hosted: the host refused the group's report thread\n");
+	(void)pthread_attr_destroy(&attr);
+}
+
 uint32_t
 erx_hosted_executor_claim(void)
 {
+	static pthread_once_t report_once = PTHREAD_ONCE_INIT;
+
+	(void)pthread_once(&report_once, group_report_start);
 	return (erx_backend_park_claim(&group, &group_effects, NULL));
 }
 
@@ -200,6 +256,23 @@ erx_irq_ack(uint64_t irq)
 	object = irq_find(irq);
 	(void)pthread_mutex_unlock(&irq_mutex);
 	return (object != NULL ? ERX_OK : ERX_EINVAL);
+}
+
+int
+erx_group_configure(uint64_t group_handle)
+{
+	if (group_handle != ERX_CAP_SELF)
+		return (ERX_EINVAL);
+	return (erx_backend_group_configure(erx_utcb_self(), &group_cpuset));
+}
+
+int
+erx_group_info(uint64_t group_handle)
+{
+	if (group_handle != ERX_CAP_SELF)
+		return (ERX_EINVAL);
+	erx_backend_group_report(erx_utcb_self(), &group_status, &group_cpuset);
+	return (ERX_OK);
 }
 
 int

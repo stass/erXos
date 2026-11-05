@@ -3593,6 +3593,104 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_group_report"] = Layout.new(
+        name: "erx_group_report".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 32,
+        fields: [
+          Field.new(
+            name: "cpuset".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "used_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "capacity_mcpu".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "parked".b,
+            type: types.fetch("u32"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ready".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "usage_known".b,
+            type: types.fetch("u32"),
+            offset: 28,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_lane_hdr"] = Layout.new(
         name: "erx_lane_hdr".b,
         version: 1,
@@ -9837,6 +9935,7 @@ module Erx
           "erx_fiasco_vm_map_request".b,
           "erx_fiasco_vm_range_request".b,
           "erx_frame_header".b,
+          "erx_group_report".b,
           "erx_lane_hdr".b,
           "erx_lane_rec".b,
           "erx_lane_rpage".b,

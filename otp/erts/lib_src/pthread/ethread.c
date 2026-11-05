@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: the monotonic clock is erx_clock_ns, and the host's version is not asked for.
+ * Modified by erXos: the monotonic clock is erx_clock_ns, and the host's version is not asked for;
+ * a thread whose options say executor is made by erx_pthread_create_executor.
  *
  * %CopyrightEnd%
  */
@@ -56,6 +57,7 @@
 #undef ETHR_INCLUDE_MONOTONIC_CLOCK__
 #define ETHR_INCLUDE_MONOTONIC_CLOCK__
 #include "ethr_internal.h"
+#include "liberx/pthread_executor.h"
 
 #ifndef ETHR_HAVE_ETHREAD_DEFINES
 #error Missing configure defines
@@ -396,7 +398,10 @@ ethr_thr_create(ethr_tid *tid, void * (*func)(void *), void *arg,
     else
 	twd.prep_func_res = NULL;
 
-    res = pthread_create((pthread_t *) tid, &attr, thr_wrapper, (void*) &twd);
+    if (opts && opts->executor)
+	res = erx_pthread_create_executor((pthread_t *) tid, &attr, thr_wrapper, (void*) &twd);
+    else
+	res = pthread_create((pthread_t *) tid, &attr, thr_wrapper, (void*) &twd);
 
     if (res == 0) {
 	int spin_count = child_wait_spin_count;

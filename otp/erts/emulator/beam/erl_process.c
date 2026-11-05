@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: schedulers are executors, created by erts_start_schedulers, that sleep in erx_park and wake with erx_executor_wake.
+ *
  * %CopyrightEnd%
  */
 
@@ -30,6 +32,7 @@
 
 #include <stddef.h> /* offsetof() */
 #include "sys.h"
+#include "liberx/backend/api.h"
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_process.h"
@@ -1576,27 +1579,18 @@ void
 erts_sched_finish_poke(ErtsSchedulerSleepInfo *ssi,
                        erts_aint32_t flags)
 {
-    switch (flags & ERTS_SSI_FLGS_SLEEP_TYPE) {
-    case ERTS_SSI_FLG_POLL_SLEEPING:
-	erts_check_io_interrupt(ssi->psi, 1);
-	break;
-    case ERTS_SSI_FLG_POLL_SLEEPING|ERTS_SSI_FLG_TSE_SLEEPING:
-	/*
-	 * Thread progress blocking while poll sleeping; need
-	 * to signal on both...
-	 */
-	erts_check_io_interrupt(ssi->psi, 1);
-	ERTS_FALLTHROUGH();
-    case ERTS_SSI_FLG_TSE_SLEEPING:
-	erts_tse_set(ssi->event);
-	break;
-    case 0:
-	break;
-    default:
-	erts_exit(ERTS_ABORT_EXIT, "%s:%d: Internal error\n",
-		 __FILE__, __LINE__);
-	break;
-    }
+    /*
+     * Each bit names a primitive the thread may be blocked in, and more than one can be
+     * set: a thread that waits for a block of thread progress adds TSE to what its poll
+     * or its returned park left, so each is woken on its own.
+     */
+    if (flags & ERTS_SSI_FLG_POLL_SLEEPING)
+        erts_check_io_interrupt(ssi->psi, 1);
+    if (flags & ERTS_SSI_FLG_TSE_SLEEPING)
+        erts_tse_set(ssi->event);
+    if ((flags & ERTS_SSI_FLG_PARK_SLEEPING)
+        && erx_executor_wake(ssi->park_slot) != ERX_OK)
+        erts_exit(ERTS_ABORT_EXIT, "%s:%d: Internal error\n", __FILE__, __LINE__);
 }
 
 
@@ -3083,6 +3077,46 @@ sched_spin_wait(ErtsSchedulerSleepInfo *ssi, int spincount)
     return flgs;
 }
 
+/*
+ * The two epochs erx_park compares. A sleeping executor reads them before it sets
+ * ERTS_SSI_FLG_PARK_SLEEPING, and a waker clears the flags before it calls
+ * erx_executor_wake, so no wake is lost: a waker that came before the flag was set
+ * leaves flags that say so and the park never happens; one that came after moves the
+ * slot's epoch, which the park sees, or finds the executor on the parked list.
+ */
+typedef struct {
+    Uint64 group;
+    Uint64 slot;
+} ErtsParkEpochs;
+
+static ERTS_INLINE ErtsParkEpochs
+sched_read_park_epochs(ErtsSchedulerSleepInfo *ssi)
+{
+    const erx_group_stat_t *status = erx_group_status();
+    ErtsParkEpochs epochs;
+
+    epochs.group = atomic_load_explicit(&status->epoch, memory_order_acquire);
+    epochs.slot = atomic_load_explicit(&status->exec[ssi->park_slot].epoch, memory_order_acquire);
+    return epochs;
+}
+
+/* Answers as erts_tse_twait does: 0 at a wake, which may be spurious, or ETIMEDOUT. */
+static int
+sched_park(ErtsParkEpochs epochs, Sint64 timeout)
+{
+    const uint64_t deadline = timeout < 0 ? ERX_WAIT_FOREVER : erx_deadline_after((uint64_t) timeout);
+
+    switch (erx_park(epochs.group, epochs.slot, deadline)) {
+    case ERX_OK:
+        return 0;
+    case ERX_ETIMEDOUT:
+        return ETIMEDOUT;
+    default:
+        erts_exit(ERTS_ABORT_EXIT, "%s:%d: Internal error\n", __FILE__, __LINE__);
+        return 0;
+    }
+}
+
 static erts_aint32_t
 sched_set_sleeptype(ErtsSchedulerSleepInfo *ssi, erts_aint32_t sleep_type)
 {
@@ -3094,9 +3128,11 @@ sched_set_sleeptype(ErtsSchedulerSleepInfo *ssi, erts_aint32_t sleep_type)
         erts_tse_use(ssi->event);
 	erts_tse_reset(ssi->event);
     }
-    else {
-	ASSERT(sleep_type == ERTS_SSI_FLG_POLL_SLEEPING);
+    else if (sleep_type == ERTS_SSI_FLG_POLL_SLEEPING) {
         erts_check_io_interrupt(ssi->psi, 0);
+    }
+    else {
+	ASSERT(sleep_type == ERTS_SSI_FLG_PARK_SLEEPING);
     }
 
     while (1) {
@@ -3110,6 +3146,38 @@ sched_set_sleeptype(ErtsSchedulerSleepInfo *ssi, erts_aint32_t sleep_type)
 	xflgs = oflgs;
 	nflgs |= oflgs & (ERTS_SSI_FLG_SUSPENDED|ERTS_SSI_FLG_MSB_EXEC);
     }
+}
+
+/*
+ * scheduler_wait's sleep, in three steps. A thread with an executor slot parks, and a
+ * dirty I/O scheduler, a worker, waits on its event. This covers waiting for work only:
+ * a suspended scheduler and a thread blocking thread progress wait on the event in
+ * every class, since an event is a umtx wait, which an executor may make.
+ */
+static ERTS_INLINE erts_aint32_t
+sched_prepare_sleep(ErtsSchedulerSleepInfo *ssi, ErtsParkEpochs *epochs)
+{
+    if (ssi->park_slot == ERX_NO_EXECUTOR_SLOT) {
+        epochs->group = epochs->slot = 0;
+        return sched_set_sleeptype(ssi, ERTS_SSI_FLG_TSE_SLEEPING);
+    }
+    *epochs = sched_read_park_epochs(ssi);
+    return sched_set_sleeptype(ssi, ERTS_SSI_FLG_PARK_SLEEPING);
+}
+
+static ERTS_INLINE int
+sched_sleep_wait(ErtsSchedulerSleepInfo *ssi, ErtsParkEpochs epochs, Sint64 timeout)
+{
+    return (ssi->park_slot == ERX_NO_EXECUTOR_SLOT
+            ? erts_tse_twait(ssi->event, timeout)
+            : sched_park(epochs, timeout));
+}
+
+static ERTS_INLINE void
+sched_finish_sleep(ErtsSchedulerSleepInfo *ssi)
+{
+    if (ssi->park_slot == ERX_NO_EXECUTOR_SLOT)
+        erts_tse_return(ssi->event);
 }
 
 #define ERTS_SCHED_WAIT_WOKEN(FLGS)				\
@@ -3580,11 +3648,11 @@ scheduler_wait(int *fcalls, ErtsSchedulerData *esdp, ErtsRunQueue *rq)
                 }
                 flgs = sched_spin_wait(ssi, spincount);
                 if (flgs & ERTS_SSI_FLG_SLEEPING) {
+                    ErtsParkEpochs epochs;
                     ASSERT(flgs & ERTS_SSI_FLG_WAITING);
-                    flgs = sched_set_sleeptype(ssi, ERTS_SSI_FLG_TSE_SLEEPING);
+                    flgs = sched_prepare_sleep(ssi, &epochs);
                     if (flgs & ERTS_SSI_FLG_SLEEPING) {
                         int res;
-                        ASSERT(flgs & ERTS_SSI_FLG_TSE_SLEEPING);
                         ASSERT(flgs & ERTS_SSI_FLG_WAITING);
                         current_time = ERTS_SCHEDULER_IS_DIRTY(esdp) ? 0 :
                             erts_get_monotonic_time(esdp);
@@ -3599,13 +3667,13 @@ scheduler_wait(int *fcalls, ErtsSchedulerData *esdp, ErtsRunQueue *rq)
                             } else
                                 timeout = -1;
                             ERTS_MSACC_SET_STATE_CACHED(ERTS_MSACC_STATE_SLEEP);
-                            res = erts_tse_twait(ssi->event, timeout);
+                            res = sched_sleep_wait(ssi, epochs, timeout);
                             ERTS_MSACC_POP_STATE();
                             current_time = ERTS_SCHEDULER_IS_DIRTY(esdp) ? 0 :
                                 erts_get_monotonic_time(esdp);
                         } while (res == EINTR);
                     }
-                    erts_tse_return(ssi->event);
+                    sched_finish_sleep(ssi);
                 }
                 if (!ERTS_SCHEDULER_IS_DIRTY(esdp))
                     erts_thr_progress_finalize_wait(erts_thr_prgr_data(esdp));
@@ -8752,6 +8820,7 @@ sched_thread_func(void *vesdp)
     tse = erts_tse_fetch();
     erts_tse_prepare_timed(tse);
     ERTS_SCHED_SLEEP_INFO_IX(no - 1)->event = tse;
+    esdp->ssi->park_slot = erx_executor_slot();
     erts_tse_return(tse);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8818,6 +8887,7 @@ sched_dirty_cpu_thread_func(void *vesdp)
 
     ASSERT(no != 0);
     ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(no-1)->event = erts_tse_fetch();
+    esdp->ssi->park_slot = erx_executor_slot();
     erts_tse_return(ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(no-1)->event);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8868,6 +8938,7 @@ sched_dirty_io_thread_func(void *vesdp)
 
     ASSERT(no != 0);
     ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(no-1)->event = erts_tse_fetch();
+    esdp->ssi->park_slot = erx_executor_slot();
     erts_tse_return(ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(no-1)->event);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8938,6 +9009,8 @@ erts_start_schedulers(void)
 
     ASSERT(erts_no_schedulers > 0 && erts_no_schedulers <= ERTS_MAX_NO_OF_SCHEDULERS);
 
+    opts.executor = 1;
+
     for (ix = 0; ix < erts_no_schedulers; ix++) {
 	ErtsSchedulerData *esdp = ERTS_SCHEDULER_IX(ix);
 	ASSERT(ix == esdp->no - 1);
@@ -8961,6 +9034,7 @@ erts_start_schedulers(void)
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty cpu scheduler thread %d, error = %d\n", ix, res);
 	}
+	opts.executor = 0;
 	for (ix = 0; ix < erts_no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
 	    erts_snprintf(opts.name, sizeof(name), "erts_dios_%d", ix + 1);
@@ -15039,6 +15113,8 @@ erts_print_scheduler_info(fmtfn_t to, void *to_arg, ErtsSchedulerData *esdp)
                 erts_print(to, to_arg, "POLL_SLEEPING"); break;
             case ERTS_SSI_FLG_TSE_SLEEPING:
                 erts_print(to, to_arg, "TSE_SLEEPING"); break;
+            case ERTS_SSI_FLG_PARK_SLEEPING:
+                erts_print(to, to_arg, "PARK_SLEEPING"); break;
             case ERTS_SSI_FLG_WAITING:
                 erts_print(to, to_arg, "WAITING"); break;
             case ERTS_SSI_FLG_SUSPENDED:

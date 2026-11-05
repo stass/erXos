@@ -868,6 +868,19 @@ Storage: `wire_le`. Prefix size: 8. Alignment: 4.
 | `ctl_len` | `u32` | 0 | 1 |
 | `payload_len` | `u32` | 4 | 1 |
 
+### `erx_group_report_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `cpuset` | `u64` | 0 | 1 |
+| `used_ns` | `u64` | 8 | 1 |
+| `capacity_mcpu` | `u32` | 16 | 1 |
+| `parked` | `u32` | 20 | 1 |
+| `ready` | `u32` | 24 | 1 |
+| `usage_known` | `u32` | 28 | 1 |
+
 ### `erx_lane_hdr_t`
 
 Storage: `shared`. Prefix size: 16. Alignment: 8.

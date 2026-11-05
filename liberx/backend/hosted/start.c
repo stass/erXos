@@ -37,9 +37,16 @@ static uint64_t wall_offset_ns;
 static const char *const inherited[] = { "BINDIR", "ROOTDIR", "EMU", "PROGNAME", "HOME", "TERM" };
 #define INHERITED_COUNT	(sizeof(inherited) / sizeof(inherited[0]))
 
-/* libSystem's own environment: its local time reads TZ, and nothing of the host's stays. */
+/*
+ * What liberx's own reports look for (vm.c, group.c). They stay beside TZ in libSystem's
+ * environment, which only liberx reads: ERTS's environment is the page's.
+ */
+static const char *const report_words[] = { "ERX_HOSTED_VM_RUNS", "ERX_HOSTED_GROUP_REPORT" };
+#define REPORT_WORDS_COUNT	(sizeof(report_words) / sizeof(report_words[0]))
+
+/* libSystem's own environment: its local time reads TZ, and nothing else of the host's stays. */
 static char zone_word[] = "TZ=UTC";
-static char *hosted_environ[] = { zone_word, NULL };
+static char *hosted_environ[1 + REPORT_WORDS_COUNT + 1] = { zone_word };
 
 _Noreturn static void
 fail(const char *reason)
@@ -91,6 +98,21 @@ inherited_words(erx_boot_words_t *words)
 	return (count);
 }
 
+static void
+keep_report_words(void)
+{
+	size_t count = 1;
+
+	for (char **entry = environ; *entry != NULL; entry++) {
+		for (size_t at = 0; at < REPORT_WORDS_COUNT; at++) {
+			const size_t key = strlen(report_words[at]);
+
+			if (count < 1 + REPORT_WORDS_COUNT && strncmp(*entry, report_words[at], key) == 0 && (*entry)[key] == '=')
+				hosted_environ[count++] = *entry;
+		}
+	}
+}
+
 /* The host's online CPUs, which the interpreter's schedulers take as the group's set. */
 static uint32_t
 host_cpus(void)
@@ -138,6 +160,7 @@ main(int argc, char **argv)
 	if (status != ERX_BOOT_INFO_OK)
 		fail(erx_boot_info_reason(status));
 	free(args);
+	keep_report_words();
 	environ = hosted_environ;
 	erx_runtime_main();
 	return (0);

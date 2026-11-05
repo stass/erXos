@@ -12,6 +12,7 @@
  * field here, since the host owns the register.
  */
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -23,6 +24,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/hosted/internal.h"
+#include "liberx/pthread_executor.h"
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -55,6 +57,8 @@ typedef struct hosted_thread {
 	uint64_t	release_size;
 	uint64_t	host_sp;	/* the way back to the pthread's stack */
 	void		*asan_fake_stack;	/* the pthread stack's, while on the caller's */
+	void		*(*pthread_start)(void *);	/* erx_pthread_create_executor's thread: it never changes stack */
+	void		*pthread_arg;
 } hosted_thread_t;
 
 static pthread_mutex_t thread_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -132,6 +136,11 @@ thread_leave(uint64_t base, uint64_t size)
 
 	if (self == NULL)
 		pthread_exit(NULL);
+	if (self->pthread_start != NULL) {
+		if (size != 0 && erx_vm_release(base, size) != ERX_OK)
+			erx_hosted_fatal("erx: hosted: a thread's stack would not release\n");
+		pthread_exit(NULL);
+	}
 	self->release_base = base;
 	self->release_size = size;
 	sanitizer_before_switch(NULL, self->host_sp);
@@ -212,6 +221,74 @@ erx_thread_start(uint64_t thread)
 	}
 	(void)pthread_mutex_unlock(&thread_lock);
 	return (status);
+}
+
+static void
+executor_give_back(hosted_thread_t *self)
+{
+	erx_hosted_executor_release(self->slot);
+	(void)pthread_mutex_lock(&thread_lock);
+	*self = (hosted_thread_t){ .state = THREAD_FREE };
+	(void)pthread_mutex_unlock(&thread_lock);
+}
+
+/* Runs when the thread returns and when it calls pthread_exit, so neither can keep the slot. */
+static void
+executor_cleanup(void *arg)
+{
+	hosted_thread_t *const self = arg;
+
+	executor_give_back(self);
+	thread_self = NULL;
+}
+
+static void *
+executor_main(void *arg)
+{
+	hosted_thread_t *const self = arg;
+	void *result;
+
+	thread_self = self;
+	pthread_cleanup_push(executor_cleanup, self);
+	result = self->pthread_start(self->pthread_arg);
+	pthread_cleanup_pop(1);
+	return (result);
+}
+
+/* The record and the slot, both or neither. NULL when either has run out. */
+static hosted_thread_t *
+executor_claim(void *(*start)(void *), void *arg)
+{
+	hosted_thread_t *self = NULL;
+
+	(void)pthread_mutex_lock(&thread_lock);
+	for (uint32_t index = 0; index < THREADS_MAX && self == NULL; index++) {
+		if (threads[index].state == THREAD_FREE) {
+			const uint32_t slot = erx_hosted_executor_claim();
+
+			if (slot == ERX_NO_EXECUTOR_SLOT)
+				break;
+			self = &threads[index];
+			*self = (hosted_thread_t){ .state = THREAD_STARTED, .slot = slot, .pthread_start = start,
+			    .pthread_arg = arg };
+		}
+	}
+	(void)pthread_mutex_unlock(&thread_lock);
+	return (self);
+}
+
+int
+erx_pthread_create_executor(pthread_t *thread, const pthread_attr_t *attr, void *(*start)(void *), void *arg)
+{
+	hosted_thread_t *const self = executor_claim(start, arg);
+	int result;
+
+	if (self == NULL)
+		return (EAGAIN);
+	result = pthread_create(thread, attr, executor_main, self);
+	if (result != 0)
+		executor_give_back(self);
+	return (result);
 }
 
 /*

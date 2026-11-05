@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: no scheduler polls by default: poll threads alone wait on the poll set.
+ *
  * %CopyrightEnd%
  */
 
@@ -2528,7 +2530,7 @@ void
 erts_init_check_io(int *argc, char **argv)
 {
     int j, concurrent_waiters, no_poll_threads;
-    int use_sched_poll = ERTS_POLL_USE_SCHEDULER_POLLING;
+    int use_sched_poll = 0;
 
     ERTS_CT_ASSERT((INT_MIN & (ERL_NIF_SELECT_STOP_CALLED |
                                ERL_NIF_SELECT_STOP_SCHEDULED |

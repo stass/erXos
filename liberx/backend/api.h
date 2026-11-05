@@ -77,6 +77,15 @@ int	erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline);
 int	erx_umtx_wake(uint64_t addr, uint32_t count);
 uint64_t	erx_clock_ns(void);
 
+/* The deadline ns from now. One too far to add to the clock is no deadline. */
+static inline uint64_t
+erx_deadline_after(uint64_t ns)
+{
+	uint64_t deadline;
+
+	return (__builtin_add_overflow(erx_clock_ns(), ns, &deadline) ? ERX_WAIT_FOREVER : deadline);
+}
+
 /*
  * The space's one group of executors. Read the epochs from the status page before
  * the empty check. A worker's park is ERX_ETYPE; ERX_OK when woken or an epoch
@@ -86,6 +95,14 @@ int	erx_park(uint64_t group_epoch, uint64_t slot_epoch, uint64_t deadline) ERX_W
 /* An empty slot is ERX_EINVAL. */
 int	erx_executor_wake(uint32_t slot) ERX_WARN_UNUSED_RESULT;
 const erx_group_stat_t *erx_group_status(void);
+/*
+ * The group's grant, an erx_share_t in the caller's UTCB, of which only the CPU set is
+ * kept: an empty one is ERX_EINVAL. The group is ERX_CAP_SELF or what erx_group_create
+ * returned, and anything else is ERX_EINVAL.
+ */
+int	erx_group_configure(uint64_t group) ERX_WARN_UNUSED_RESULT;
+/* Writes an erx_group_report_t to the caller's UTCB. usage_known 0 means used_ns is not measured. */
+int	erx_group_info(uint64_t group) ERX_WARN_UNUSED_RESULT;
 /* The caller's slot in the group, or ERX_NO_EXECUTOR_SLOT. */
 uint32_t	erx_executor_slot(void);
 /* What an object's delivery runs: the epoch advances and the longest parked wakes. */

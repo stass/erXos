@@ -20,7 +20,7 @@ module Erx
       decommit_recommit_reads_zeros released_pages_read_zeros no_access_and_back_keeps_contents
       read_only_raises_to_read_write stack_through_no_access refused_protect_changes_nothing
       write_and_execute_refused refusals fixed_reserve_replaces every_protection_change many_pages_between_write_and_execute whole_pool_commits
-      pool_count_steady tls_and_arg utcb_is_each_threads double_start_refused bad_handle_refused unsupported_refused
+      pool_count_steady tls_and_arg utcb_is_each_threads double_start_refused bad_handle_refused unsupported_refused group_info_and_configure
       umtx_word_differs umtx_past_deadline umtx_timeout_not_early umtx_wake_counts umtx_ping_pong
       umtx_timeout_races_wake memory_from_threads affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake many_threads machine_end_refused

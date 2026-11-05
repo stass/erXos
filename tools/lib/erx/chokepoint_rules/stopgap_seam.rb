@@ -56,6 +56,7 @@ module Erx
         liberx/backend/fiasco/page_pool.h
         liberx/backend/fiasco/park.c
         liberx/backend/fiasco/park.h
+        liberx/backend/core/group_report.h
         liberx/backend/core/park_table.c
         liberx/backend/core/park_table.h
         liberx/backend/fiasco/libc_start.c
@@ -101,6 +102,7 @@ module Erx
         liberx/backend/core/boot_info.h
         liberx/backend/hosted/start.c
         liberx/backend/runtime_entry.h
+        liberx/pthread_executor.h
         liberx/backend/fiasco/boot_args.c
         liberx/backend/fiasco/boot_args.h
         liberx/backend/hosted/generated/calls.c
@@ -263,6 +265,29 @@ module Erx
           design: "#{STOPGAP}#verification-and-testing",
           awaits: ['fiasco/erx_boot_allocators.txt', 'fiasco/kernel/src/erx/budget.cpp'],
           reason: "reads the linked kernel's call graph"
+        ),
+        # A thread's class is fixed at creation, so what a runtime can make an executor of
+        # is decided in two places: the one call that makes one, and the one option that asks.
+        Chokepoints::Forbidden.new(
+          name: 'executor-create-caller',
+          rule: 'only ethr_thr_create calls erx_pthread_create_executor',
+          design: 'docs/design-runtime.md#threads-and-synchronisation',
+          scope: Chokepoints::Scope.new(own: true, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
+          pattern: /\berx_pthread_create_executor\b/,
+          sites: [Chokepoints::Site.new(glob: 'otp/erts/lib_src/pthread/ethread.c'),
+                  Chokepoints::Site.new(glob: 'liberx/pthread_executor.h'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/hosted/thread.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/hosted_executor_driver.c')],
+          seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_pthread_create_executor(0, 0, 0, 0); }\n" }
+        ),
+        Chokepoints::Forbidden.new(
+          name: 'executor-option-setter',
+          rule: "only erl_process.c, in erts_start_schedulers, sets ethr_thr_opts's executor by name",
+          design: 'docs/design-runtime.md#threads-and-synchronisation',
+          scope: Chokepoints::Scope.new(own: false, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
+          pattern: /(?:\.|->)executor\s*=(?!=)/,
+          sites: [Chokepoints::Site.new(glob: 'otp/erts/emulator/beam/erl_process.c')],
+          seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(ethr_thr_opts *o) { o->executor = 1; }\n" }
         ),
         Chokepoints::Pending.new(
           name: 'pmem-converter-sites', rule: 'Mem_layout::pmem_to_phys, Mem_layout::phys_to_pmem and ' \

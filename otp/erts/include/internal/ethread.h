@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: ethr_thr_opts takes executor.
+ *
  * %CopyrightEnd%
  */
 
@@ -509,9 +511,10 @@ typedef struct {
     int detached;			/* boolean (default false) */
     int suggested_stack_size;		/* kilo words (default sys dependent) */
     char *name;                         /* max 15 char long (default no-name) */
+    int executor;                       /* boolean: erts_start_schedulers alone sets it (default false) */
 } ethr_thr_opts;
 
-#define ETHR_THR_OPTS_DEFAULT_INITER {0, -1, NULL}
+#define ETHR_THR_OPTS_DEFAULT_INITER {0, -1, NULL, 0}
 #define ETHR_THR_NAME_MAX 15
 
 #if !defined(ETHR_TRY_INLINE_FUNCS) || defined(ETHR_AUX_IMPL__)
