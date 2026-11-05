@@ -1,4 +1,7 @@
-/* Modified by erXos: an attribute field and a clone flag for an executor. */
+/*
+ * Modified by erXos: an attribute field and a clone flag for an executor, and
+ * the robust list head the seam keeps for set_robust_list.
+ */
 #ifndef _PTHREAD_IMPL_H
 #define _PTHREAD_IMPL_H
 
@@ -59,6 +62,9 @@ struct pthread {
 	volatile int killlock[1];
 	char *dlerror_buf;
 	void *stdio_locks;
+	/* The list head set_robust_list last registered, which get_robust_list
+	 * reads back (src/internal/erxos/syscall.c). Only its own thread uses it. */
+	void *robust_registered;
 
 	/* Part 3 -- the positions of these fields relative to
 	 * the end of the structure is external and internal ABI. */

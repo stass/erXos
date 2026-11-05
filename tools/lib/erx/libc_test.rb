@@ -31,9 +31,10 @@ module Erx
     # The boot image's 16 MiB budget (test/fixtures/structural_pack.rb), less room for its kernel and root.
     BATCH_BYTES = 12 * 1024 * 1024
     TASK_SECONDS = 60
-    # What the QEMU gate holds to passing: threads, TLS, stdio and malloc. Every other test
-    # is check-libc-test's report, not a verdict.
+    # What the QEMU gate holds to passing: threads and robust mutexes, TLS, stdio and
+    # malloc. Every other test is check-libc-test's report, not a verdict.
     CANARY = %w[functional/pthread_cond functional/pthread_mutex functional/pthread_tsd regression/pthread_once-deadlock
+                regression/pthread-robust-detach
                 functional/tls_init functional/tls_local_exec functional/tls_align
                 functional/snprintf functional/sscanf
                 regression/malloc-0].freeze

@@ -252,12 +252,25 @@ clock_nanosleep_call(clockid_t clock, int flags, const struct timespec *wait)
 
 /* A thread's identifier is its index plus one, and a program's own handle is the index. */
 static long
+tid_of(uint32_t index)
+{
+	return ((long)index + 1);
+}
+
+/* Thread 0 names the caller. In 64 bits, no identifier wraps onto a thread's index. */
+static uint64_t
+index_of(long tid)
+{
+	return (tid == 0 ? erx_fiasco_thread_self()->index : (uint64_t)tid - 1);
+}
+
+static long
 tid_set_address(uint64_t word)
 {
 	const uint32_t index = erx_fiasco_thread_self()->index;
 	const int status = erx_fiasco_thread_set_clear_word(index, word);
 
-	return (status == ERX_OK ? (long)index + 1 : errno_of(status));
+	return (status == ERX_OK ? tid_of(index) : errno_of(status));
 }
 
 static long
@@ -265,7 +278,7 @@ set_affinity(long tid, size_t size, const unsigned long *mask)
 {
 	if (size < sizeof(unsigned long))
 		return (-EINVAL);
-	return (errno_of(erx_thread_set_affinity(tid == 0 ? erx_fiasco_thread_self()->index : (uint64_t)tid - 1, mask[0])));
+	return (errno_of(erx_thread_set_affinity(index_of(tid), mask[0])));
 }
 
 /*
@@ -277,6 +290,35 @@ static long
 tkill_call(int signal)
 {
 	return (signal == SIGCANCEL ? 0 : -ENOSYS);
+}
+
+/*
+ * A thread's robust list, as Linux registers it. musl walks the list itself at
+ * thread exit, so nothing here ever reads it; only a task's death would need a
+ * kernel's help. musl's pthread_mutexattr_setrobust probes for robust mutexes by
+ * get_robust_list succeeding; the registration is kept so that what it reads back
+ * is what set_robust_list left. Linux's struct robust_list_head is three words.
+ */
+#define ROBUST_HEAD_SIZE	(3 * sizeof(long))
+
+static long
+robust_list_set(void *head, size_t size)
+{
+	if (size != ROBUST_HEAD_SIZE)
+		return (-EINVAL);
+	__pthread_self()->robust_registered = head;
+	return (0);
+}
+
+/* Only the caller's own list is offered. */
+static long
+robust_list_get(long tid, void **head, size_t *size)
+{
+	if (index_of(tid) != erx_fiasco_thread_self()->index)
+		return (-ENOSYS);
+	*head = __pthread_self()->robust_registered;
+	*size = ROBUST_HEAD_SIZE;
+	return (0);
 }
 
 /* No signal is ever delivered, so every mask reads as empty. */
@@ -329,7 +371,7 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_set_tid_address:
 		return (tid_set_address((uint64_t)a));
 	case SYS_gettid:
-		return ((long)erx_fiasco_thread_self()->index + 1);
+		return (tid_of(erx_fiasco_thread_self()->index));
 	case SYS_getpid:
 		return (ROOT_PID);
 	case SYS_getppid:
@@ -354,8 +396,9 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_rt_sigprocmask:
 		return (sigprocmask_call((sigset_t *)c, (size_t)d));
 	case SYS_set_robust_list:
-		/* musl walks the list itself at thread exit; only a task's death needs a kernel's help. */
-		return (0);
+		return (robust_list_set((void *)a, (size_t)b));
+	case SYS_get_robust_list:
+		return (robust_list_get(a, (void **)b, (size_t *)c));
 	default:
 		return (-ENOSYS);
 	}

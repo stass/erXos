@@ -349,9 +349,10 @@ it; git history is the record of completed work.
     cancellation", although `native_musl`'s own cancel case passes.
   * `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
     under TCG, cause not found, so it is out of the canary set.
-  * Phase 1 lacks the call: `functional/pthread_mutex_pi`,
-    `functional/pthread_robust`, `regression/pthread-robust-detach`,
-    `regression/malloc-oom`, `regression/statvfs`, and, inferred because they
+  * Phase 1 lacks the call: `functional/pthread_mutex_pi` and the
+    priority-inheritance half of `functional/pthread_robust` (its
+    `FUTEX_LOCK_PI` probe reads `ENOSYS`), `regression/malloc-oom`,
+    `regression/statvfs`, and, inferred because they
     print nothing, `regression/pthread_create-oom`, `regression/setenv-oom`.
   * Likely musl or arithmetic: `functional/strptime`, `functional/strtold`,
     `math/powf` (which could also be TCG), `math/yn`,
