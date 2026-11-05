@@ -254,6 +254,25 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `libc-test` on native Fiasco, `tools/lib/erx/libc_test.rb`: the
+  first run through `tools/erx check-libc-test` under TCG at 4 CPUs passed 286,
+  failed 12, timed out 4 and did not run 42 (`~/erxos-history` `5ab1582`,
+  `libc-test/2026-11-04-tcg-4cpu`). Each failure needs a verdict against stock
+  musl before M3 closes; the classes below come from each test's output and
+  none has been checked.
+  * Cancellation, possibly a bug in the seam: `functional/pthread_cancel`,
+    `regression/pthread_cond_wait-cancel_ignored`, "did not act on
+    cancellation", although `native_musl`'s own cancel case passes.
+  * `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
+    under TCG, cause not found, so it is out of the canary set.
+  * Phase 1 lacks the call: `functional/pthread_mutex_pi`,
+    `functional/pthread_robust`, `regression/pthread-robust-detach`,
+    `regression/malloc-oom`, `regression/statvfs`, and, inferred because they
+    print nothing, `regression/pthread_create-oom`, `regression/setenv-oom`.
+  * Likely musl or arithmetic: `functional/strptime`, `functional/strtold`,
+    `math/powf` (which could also be TCG), `math/yn`,
+    `regression/regex-backref-oob`, `regression/regexec-backref`.
+  * `musl/pleval` does not build: clang's `-Wparentheses` on the test's source.
 * [Low] Lane reader, `liberx/erx_lane.c`: the record state machine
   (open, copy, close) is inline in `erx_lane_take` rather than a pure
   step the effect layer applies; `phase` and `fault` are a pair that must
