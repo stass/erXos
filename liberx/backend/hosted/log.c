@@ -8,8 +8,9 @@
  * is one space, runs the kernel's own dispatch and log cores and provides
  * their effects. Standard error is its console, and every record goes there
  * as it is written, as during a real kernel's boot. erx_hosted_log_sink is the
- * one writer of log bytes in this backend (the hosted-log-sink check), and it
- * only ever receives lines erx_log_render made.
+ * one writer of log bytes in this backend (the hosted-log-sink check). It receives
+ * the lines erx_log_render made and text this backend built itself, never bytes a
+ * caller of the function API supplied.
  */
 
 #include <errno.h>
@@ -82,14 +83,20 @@ erx_hosted_log_sink(const char *line, size_t length)
 	}
 }
 
-_Noreturn void
-erx_hosted_fatal(const char *why)
+void
+erx_hosted_note(const char *line)
 {
 	size_t length = 0;
 
-	while (why[length] != '\0')
+	while (line[length] != '\0')
 		length++;
-	erx_hosted_log_sink(why, length);
+	erx_hosted_log_sink(line, length);
+}
+
+_Noreturn void
+erx_hosted_fatal(const char *why)
+{
+	erx_hosted_note(why);
 	abort();
 }
 

@@ -17,6 +17,11 @@
  * given back. A take cleans a dirty page; a host page none of whose pages is
  * committed goes back to the host as a fresh mapping, which cleans all of them.
  * Everything here runs under vm_lock.
+ *
+ * With ERX_HOSTED_VM_RUNS set, the console gets a line each time a call changes the
+ * count of the table's runs or of committed pages, which tells make
+ * check-runtime-hosted how close a runtime comes to the limit it shares with the
+ * native backend.
  */
 
 #include <errno.h>
@@ -24,6 +29,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/random.h>
@@ -38,7 +45,6 @@
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
 #define VM_AREA_BYTES	(UINT64_C(64) * 1024 * 1024 * 1024)
 #define VM_POOL_PAGES	(UINT64_C(1024) * 1024 * 1024 / PAGE)
-#define VM_RANGES_MAX	4096u
 
 /* One byte per page of the area: its rights, and two facts the table does not hold. */
 #define PAGE_RIGHTS	UINT8_C(0x07)
@@ -57,7 +63,7 @@ static const erx_backend_vm_effects_t vm_effects = { .map = vm_map, .unmap = vm_
 
 static pthread_once_t vm_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t vm_lock = PTHREAD_MUTEX_INITIALIZER;
-static erx_backend_vm_range_t vm_ranges[VM_RANGES_MAX];
+static erx_backend_vm_range_t vm_ranges[ERX_BACKEND_VM_RANGES_MAX];
 static erx_backend_vm_table_t vm_table;
 static uint64_t vm_free;
 static uint64_t vm_area;
@@ -66,6 +72,10 @@ static uint8_t *vm_page_bytes;	/* one per ABI page of the area */
 static uint8_t *vm_host_rights;	/* one per host page of the area: what the host holds now */
 static uint64_t vm_touched_low;	/* the pages this call's effects changed, as a range */
 static uint64_t vm_touched_high;
+static bool vm_runs_reported;
+static size_t vm_runs_last;
+static size_t vm_runs_high;
+static uint64_t vm_committed_last;
 
 static void *
 vm_map_host(uint64_t bytes, int prot)
@@ -88,10 +98,28 @@ vm_init(void)
 	vm_page_bytes = vm_map_host(VM_AREA_BYTES / PAGE, PROT_READ | PROT_WRITE);
 	vm_host_rights = vm_map_host(VM_AREA_BYTES / vm_host_page, PROT_READ | PROT_WRITE);
 	erx_backend_vm_index_init(index, (size_t)layout.index_slots);
-	erx_backend_vm_table_init(&vm_table, 0, vm_ranges, VM_RANGES_MAX, index, (size_t)layout.index_slots, vm_area,
+	erx_backend_vm_table_init(&vm_table, 0, vm_ranges, ERX_BACKEND_VM_RANGES_MAX, index, (size_t)layout.index_slots, vm_area,
 	    vm_area + VM_AREA_BYTES);
 	vm_table.placement = vm_host_page;
 	vm_free = VM_POOL_PAGES;
+	vm_runs_reported = getenv("ERX_HOSTED_VM_RUNS") != NULL;
+}
+
+static void
+vm_runs_note(void)
+{
+	const uint64_t committed = VM_POOL_PAGES - vm_free;
+	char line[128];
+
+	if (!vm_runs_reported || (vm_table.nranges == vm_runs_last && committed == vm_committed_last))
+		return;
+	vm_runs_last = vm_table.nranges;
+	vm_committed_last = committed;
+	if (vm_runs_last > vm_runs_high)
+		vm_runs_high = vm_runs_last;
+	(void)snprintf(line, sizeof(line), "erx: hosted: range table: runs %zu high %zu of %u committed_pages %llu\n",
+	    vm_runs_last, vm_runs_high, ERX_BACKEND_VM_RANGES_MAX, (unsigned long long)committed);
+	erx_hosted_note(line);
 }
 
 static uint64_t
@@ -226,6 +254,7 @@ vm_call(erx_backend_vm_op_t op, uint64_t addr, uint64_t size, uint32_t flags, ui
 	(void)pthread_once(&vm_once, vm_init);
 	(void)pthread_mutex_lock(&vm_lock);
 	status = erx_backend_vm_call(&vm_table, &vm_effects, &request, reserved);
+	vm_runs_note();
 	if (vm_touched_high != 0)
 		for (uint64_t host = vm_touched_low & ~(vm_host_page - 1); host < vm_touched_high; host += vm_host_page)
 			host_refresh(host);

@@ -146,12 +146,15 @@ module Erx
     # from lib/erl_interface, which the import excludes. The runtime is started
     # without them.
     def build_emulator(jobs:)
-      # The archive comes in through LIBS, which is no make dependency: without
-      # this a change to liberx would not reach the executable.
-      FileUtils.rm_f(@output.beam)
+      # The archive comes in through LIBS, which is no make dependency, so each build
+      # links again. Both executables go: beam.smp is copied from beam.emu, and the
+      # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
+      # beam.smp exists.
+      FileUtils.rm_f([@output.beam, File.join(File.dirname(@output.beam), 'beam.smp')])
       @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/emulator', 'opt', 'FLAVOR=emu', "TARGET=#{TARGET}"],
                   name: 'runtime-emulator', deadline: DEADLINES.fetch(:emulator), chdir: @output.root,
                   env: build_environment)
+      raise Error, "the emulator's build left no #{@output.beam}" unless File.file?(@output.beam)
     end
 
     def build_application(application, jobs:)
@@ -164,6 +167,7 @@ module Erx
       Oracle::CLEAN_ERLANG_ENV.merge(
         'ERL_TOP' => @output.root,
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
+        'ERX_ROOT' => @root,
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root
       ).freeze

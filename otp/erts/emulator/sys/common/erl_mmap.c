@@ -1,4 +1,6 @@
 /*
+ * Modified by erXos
+ *
  * %CopyrightBegin%
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -30,54 +32,22 @@
 #include "erl_mmap.h"
 #include <stddef.h>
 
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif
-
-#if defined(HAVE_MADVISE) && defined(MADV_FREE)
-/* Note that we don't default to MADV_DONTNEED since it promises that
- * the given region will be zeroed on access, which turned out to be
- * too much of a performance hit. */
-int erts_madvise_discard_advice = MADV_FREE;
-#endif
+#include "liberx/backend/api.h"
 
 int erts_mem_guard(void *p, UWord size, int readable, int writable) {
-
-#if defined(WIN32)
-    DWORD oldProtect;
-    DWORD newProtect = PAGE_NOACCESS;
-    BOOL success;
-
-    if (readable && writable) {
-        newProtect = PAGE_READWRITE;
-    } else if (readable) {
-        newProtect = PAGE_READONLY;
-    } else {
-        ERTS_INTERNAL_ERROR(!"mem_guard invalid page permissions");
-    }
-    success = VirtualProtect((LPVOID*)p,
-                             size,
-                             newProtect,
-                             &oldProtect);
-
-    return success ? 0 : -1;
-#elif defined(HAVE_SYS_MMAN_H)
-    int flags = 0;
+    uint32_t prot = ERX_PROT_NONE;
 
     /* Check that the ptr is aligned at page boundary */
     ASSERT((Uint)p % sys_page_size == 0);
-    
+
     if (writable) {
-        flags |= PROT_WRITE;
+        prot = ERX_PROT_RW;
+    } else if (readable) {
+        prot = ERX_PROT_R;
     }
-    if (readable) {
-        flags |= PROT_READ;
-    }
-    return mprotect(p, size, flags);
-#else
-    errno = ENOTSUP;
-    return -1;
-#endif
+    /* As mprotect does, up to a whole page: the call takes page multiples alone. */
+    size = (size + sys_page_size - 1) & ~(sys_page_size - 1);
+    return erx_space_protect((uint64_t) (UWord) p, size, prot) == ERX_OK ? 0 : -1;
 }
 
 #if HAVE_ERTS_MMAP
@@ -368,15 +338,11 @@ struct ErtsMemMapper_ {
 	char *bot;
 	ErtsFreeSegMap map;
     } sa;
-#if HAVE_MMAP && (!defined(MAP_ANON) && !defined(MAP_ANONYMOUS))
-    int mmap_fd;
-#endif
     erts_mtx_t mtx;
     struct {
 	char *free_list;
 	char *unused_start;
 	char *unused_end;
-	char *new_area_hint;
         Uint reserved;
     } desc;
     struct {
@@ -1284,220 +1250,101 @@ Eterm build_free_seg_list(Process* p, ErtsFreeSegMap* map)
 }
 
 #if ERTS_HAVE_OS_MMAP
-/* Implementation of os_mmap()/os_munmap()/os_mremap()... */
-
-#if HAVE_MMAP
-#  define ERTS_MMAP_PROT		(PROT_READ|PROT_WRITE)
-#  if defined(MAP_ANONYMOUS)
-#    define ERTS_MMAP_FLAGS		(MAP_ANON|MAP_PRIVATE)
-#    define ERTS_MMAP_FD		(-1)
-#  elif defined(MAP_ANON)
-#    define ERTS_MMAP_FLAGS		(MAP_ANON|MAP_PRIVATE)
-#    define ERTS_MMAP_FD		(-1)
-#  else
-#    define ERTS_MMAP_FLAGS		(MAP_PRIVATE)
-#    define ERTS_MMAP_FD		mm->mmap_fd
-#  endif
-#endif
-
-static ERTS_INLINE void *
-os_mmap(void *hint_ptr, UWord size)
-{
-#if HAVE_MMAP
-    void *res;
-
-    res = mmap((void *) hint_ptr, size, ERTS_MMAP_PROT,
-	       ERTS_MMAP_FLAGS, ERTS_MMAP_FD, 0);
-    if (res == MAP_FAILED)
-	return NULL;
-    return res;
-#elif HAVE_VIRTUALALLOC
-    return (void *) VirtualAlloc(NULL, (SIZE_T) size,
-				 MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
-#else
-#  error "missing mmap() or similar"
-#endif
-}
-
-static ERTS_INLINE void
-os_munmap(void *ptr, UWord size)
-{
-#if HAVE_MMAP
-#ifdef ERTS_MMAP_DEBUG
-    int res =
-#endif
-	munmap(ptr, size);
-    ERTS_MMAP_ASSERT(res == 0);
-#elif HAVE_VIRTUALALLOC
-#ifdef DEBUG
-    BOOL res =
-#endif
-	VirtualFree((LPVOID) ptr, (SIZE_T) 0, MEM_RELEASE);
-    ERTS_MMAP_ASSERT(res != 0);
-#else
-#  error "missing munmap() or similar"
-#endif
-}
-
-#define ALIGN_UP(x, a) ((void*)((((UWord)(x)) + ((a) - 1)) & ~((a) - 1)))
-#define IS_ALIGNED(x, a) ((((UWord)(x)) & ((a) - 1)) == 0)
-
 /*
- * Just like os_mmap, but ensures that mapping is a multiple of the
- * specified alignment.  Alignment must be a power-of-2 multiple of
- * the page size in bytes.
+ * The OS primitives are liberx's memory calls (docs/design-runtime.md, "Memory"):
+ * reserving addresses, committing zeroed read-write pages to them, decommitting
+ * those pages and releasing the addresses. A refused call changes nothing.
  */
-static ERTS_INLINE void *
-os_mmap_aligned(UWord size, UWord alignment)
+
+static char *
+os_mmap_virtual(UWord size)
 {
-    char *result;
-#ifdef MAP_ALIGN
+    uint64_t addr;
 
-    /*
-     * On an operating systems that support MAP_ALIGN (SunOS >=5.9) we
-     * can directly ask mmap(2) to align the virtual memory mapping.
-     */
-    result = mmap((void *) alignment, size, ERTS_MMAP_PROT,
-                  ERTS_MMAP_FLAGS|MAP_ALIGN, ERTS_MMAP_FD, 0);
-    if (result == MAP_FAILED) {
-        return NULL;
-    }
-#else
-    UWord diff;
-
-    ASSERT((size % sys_page_size) == 0);
-    ASSERT((alignment % sys_page_size) == 0);
-
-    /*
-     * Allocate and test for alignment.  It is possible 1) the
-     * operating aligned the allocation based its length or 2) the
-     * previous allocation aligned the next available address.
-     */
-    if ((result = os_mmap(NULL, size)) == NULL) {
-        return NULL;
-    }
-
-    if (IS_ALIGNED(result, alignment)) {
-        return result;
-    }
-
-    /*
-     * The virtual memory allocation was not aligned, clean-up the
-     * mapping so we can try a different strategy.
-     */
-    os_munmap(result, size);
-
-    /*
-     * Retry the virtual memory allocation adding padding to ensure
-     * the requested alignment.
-     */
-    if ((result = os_mmap(NULL, size + alignment)) == NULL) {
-        return NULL;
-    }
-
-    diff = (char *)ALIGN_UP(result, alignment) - result;
-
-    /*
-     * Unmap any extra pages at the beginning of the allocation.  If
-     * the allocation ended up being aligned, there will be nothing to
-     * unmap.
-     */
-    if (diff != 0) {
-        os_munmap(result, diff);
-        result += diff;
-    }
-
-    /*
-     * Unmap extra pages at the end of the allocation.  There must
-     * always be at least one.
-     */
-    os_munmap(result + size, alignment - diff);
-#endif
-
-    return result;
-}
-
-#ifdef ERTS_HAVE_OS_MREMAP
-#  if HAVE_MREMAP
-#    if defined(__NetBSD__)
-#      define ERTS_MREMAP_FLAGS  (0)
-#    else
-#      define ERTS_MREMAP_FLAGS  (MREMAP_MAYMOVE)
-#    endif
-#  endif
-static ERTS_INLINE void *
-os_mremap(void *ptr, UWord old_size, UWord new_size)
-{
-    void *new_seg;
-#if HAVE_MREMAP
-    new_seg = mremap(ptr, (size_t) old_size,
-#  if defined(__NetBSD__)
-		     NULL,
-#  endif
-		     (size_t) new_size, ERTS_MREMAP_FLAGS);
-    if (new_seg == (void *) MAP_FAILED)
+    if (erx_vm_reserve(0, size, 0, &addr) != ERX_OK)
 	return NULL;
-    return new_seg;
-#else
-#  error "missing mremap() or similar"
-#endif
+    return (char *) (UWord) addr;
 }
-#endif
-
-#ifdef ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION
-#if HAVE_MMAP
-
-#define ERTS_MMAP_RESERVE_PROT		(ERTS_MMAP_PROT)
-#define ERTS_MMAP_RESERVE_FLAGS		(ERTS_MMAP_FLAGS|MAP_FIXED)
-#define ERTS_MMAP_UNRESERVE_PROT	(PROT_NONE)
-#if defined(__FreeBSD__)
-#define ERTS_MMAP_UNRESERVE_FLAGS	(ERTS_MMAP_FLAGS|MAP_FIXED)
-#else
-#define ERTS_MMAP_UNRESERVE_FLAGS	(ERTS_MMAP_FLAGS|MAP_NORESERVE|MAP_FIXED)
-#endif /* __FreeBSD__ */
-#define ERTS_MMAP_VIRTUAL_PROT		(PROT_NONE)
-#if defined(__FreeBSD__)
-#define ERTS_MMAP_VIRTUAL_FLAGS		(ERTS_MMAP_FLAGS)
-#else
-#define ERTS_MMAP_VIRTUAL_FLAGS		(ERTS_MMAP_FLAGS|MAP_NORESERVE)
-#endif /* __FreeBSD__ */
 
 static int
 os_reserve_physical(char *ptr, UWord size)
 {
-    void *res = mmap((void *) ptr, (size_t) size, ERTS_MMAP_RESERVE_PROT,
-		     ERTS_MMAP_RESERVE_FLAGS, ERTS_MMAP_FD, 0);
-    if (res == (void *) MAP_FAILED)
-	return 0;
-    return 1;
+    return erx_vm_commit((uint64_t) (UWord) ptr, size) == ERX_OK;
 }
 
 static void
 os_unreserve_physical(char *ptr, UWord size)
 {
-    void *res = mmap((void *) ptr, (size_t) size, ERTS_MMAP_UNRESERVE_PROT,
-		     ERTS_MMAP_UNRESERVE_FLAGS, ERTS_MMAP_FD, 0);
-    if (res == (void *) MAP_FAILED)
+    if (erx_vm_decommit((uint64_t) (UWord) ptr, size) != ERX_OK)
 	erts_exit(ERTS_ABORT_EXIT, "Failed to unreserve memory");
 }
 
-static void *
-os_mmap_virtual(char *ptr, UWord size)
+/*
+ * A release in the middle of a run needs a free run in the range table, and that
+ * is the one way ERX_ENOMEM answers it. With none, the pages still go back and the
+ * addresses stay reserved for the life of the process, which costs address space.
+ */
+static void
+os_munmap(void *ptr, UWord size)
 {
-    int flags = ERTS_MMAP_VIRTUAL_FLAGS;
-    void* res;
+    const int status = erx_vm_release((uint64_t) (UWord) ptr, size);
 
-    res = mmap((void *) ptr, (size_t) size, ERTS_MMAP_VIRTUAL_PROT,
-               flags, ERTS_MMAP_FD, 0);
-    if (res == (void *) MAP_FAILED)
-	return NULL;
-    return res;
+    if (status == ERX_ENOMEM)
+	os_unreserve_physical((char *) ptr, size);
+    else if (status != ERX_OK)
+	erts_exit(ERTS_ABORT_EXIT, "Failed to release memory");
 }
 
-#else
-#error "Missing reserve/unreserve physical memory implementation"
-#endif
-#endif /* ERTS_HAVE_OS_RESERVE_PHYSICAL_MEMORY */
+static void *
+os_mmap(UWord size)
+{
+    char *ptr = os_mmap_virtual(size);
+
+    if (ptr && !os_reserve_physical(ptr, size)) {
+	os_munmap(ptr, size);
+	return NULL;
+    }
+    return ptr;
+}
+
+#define ALIGN_UP(x, a) ((void*)((((UWord)(x)) + ((a) - 1)) & ~((a) - 1)))
+
+/*
+ * Just like os_mmap, but ensures that mapping is a multiple of the
+ * specified alignment.  Alignment must be a power-of-2 multiple of
+ * the page size in bytes.  A reserve takes no alignment, so this reserves
+ * enough to hold an aligned range and gives back what lies around it; what
+ * lies around it was never committed, so a trim os_munmap could not make leaves
+ * spare reserved addresses and the result stands.
+ */
+static void *
+os_mmap_aligned(UWord size, UWord alignment)
+{
+    char *reserved, *result;
+    UWord head, tail;
+
+    ASSERT((size % sys_page_size) == 0);
+    ASSERT((alignment % sys_page_size) == 0);
+
+    if (size + alignment < size)
+	return NULL;
+    reserved = os_mmap_virtual(size + alignment);
+    if (!reserved)
+	return NULL;
+
+    result = ALIGN_UP(reserved, alignment);
+    head = result - reserved;
+    tail = alignment - head;	/* never empty, since head < alignment */
+    if (head != 0)
+	os_munmap(reserved, head);
+    os_munmap(result + size, tail);
+
+    if (!os_reserve_physical(result, size)) {
+	os_munmap(result, size);
+	return NULL;
+    }
+    return result;
+}
 
 #endif /* ERTS_HAVE_OS_MMAP */
 
@@ -1544,9 +1391,8 @@ alloc_desc_insert_free_seg(ErtsMemMapper* mm,
 
 #if ERTS_HAVE_OS_MMAP
     if (!mm->no_os_mmap) {
-        ptr = os_mmap(mm->desc.new_area_hint, ERTS_PAGEALIGNED_SIZE);
+        ptr = os_mmap(ERTS_PAGEALIGNED_SIZE);
         if (ptr) {
-            mm->desc.new_area_hint = ptr+ERTS_PAGEALIGNED_SIZE;
             ERTS_MMAP_SIZE_OS_INC(ERTS_PAGEALIGNED_SIZE);
             add_free_desc_area(mm, ptr, ptr+ERTS_PAGEALIGNED_SIZE);
             desc = alloc_desc(mm);
@@ -1752,7 +1598,7 @@ erts_mmap(ErtsMemMapper* mm, Uint32 flags, UWord *sizep)
     /* Map using OS primitives */
     if (!(ERTS_MMAPFLG_SUPERCARRIER_ONLY & flags) && !mm->no_os_mmap) {
 	if (!(ERTS_MMAPFLG_SUPERALIGNED & flags)) {
-	    seg = os_mmap(NULL, asize);
+	    seg = os_mmap(asize);
 	    if (!seg)
 		goto failure;
 	}
@@ -1942,7 +1788,7 @@ erts_mremap(ErtsMemMapper* mm,
 	    return NULL;
 	}
 
-#if defined(ERTS_HAVE_OS_MREMAP) || defined(ERTS_HAVE_GENUINE_OS_MMAP)
+#ifdef ERTS_HAVE_GENUINE_OS_MMAP
 	superaligned = (ERTS_MMAPFLG_SUPERALIGNED & flags);
 
 	if (superaligned) {
@@ -1975,22 +1821,6 @@ erts_mremap(ErtsMemMapper* mm,
 	    ERTS_MREMAP_OP_LCK(ptr, ptr, old_size, *sizep, asize);
 	    *sizep = asize;
 	    return ptr;
-	}
-#endif
-#ifdef ERTS_HAVE_OS_MREMAP
-	if (superaligned) {
-	    return remap_move(mm, flags, ptr, old_size, sizep);
-	} else {
-	    new_ptr = os_mremap(ptr, old_size, asize);
-	    if (!new_ptr)
-		return NULL;
-	    if (asize > old_size)
-		ERTS_MMAP_SIZE_OS_INC(asize - old_size);
-	    else
-		ERTS_MMAP_SIZE_OS_DEC(old_size - asize);
-	    ERTS_MREMAP_OP_LCK(new_ptr, ptr, old_size, *sizep, asize);
-	    *sizep = asize;
-	    return new_ptr;
 	}
 #endif
 #endif
@@ -2257,12 +2087,6 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
     mm->reserve_physical = reserve_noop;
     mm->unreserve_physical = unreserve_noop;
 
-#if HAVE_MMAP && !defined(MAP_ANON)
-    mm->mmap_fd = open("/dev/zero", O_RDWR);
-    if (mm->mmap_fd < 0)
-	erts_exit(1, "erts_mmap: Failed to open /dev/zero\n");
-#endif
-
     erts_mtx_init(&mm->mtx, "erts_mmap", NIL,
         ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     if (is_first_call) {
@@ -2270,31 +2094,11 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
             ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     }
 
-#ifdef ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION
-    if (init->virtual_range.start) {
-	char *ptr;
-	UWord sz;
-	ptr = (char *) ERTS_PAGEALIGNED_CEILING(init->virtual_range.start);
-	end = (char *) ERTS_PAGEALIGNED_FLOOR(init->virtual_range.end);
-	sz = end - ptr;
-	start = os_mmap_virtual(ptr, sz);
-	if (!start || start > ptr || start >= end)
-	    erts_exit(1,
-		     "erts_mmap: Failed to create virtual range for super carrier\n");
-	sz = start - ptr;
-	if (sz)
-	    os_munmap(end, sz);
-	mm->reserve_physical = os_reserve_physical;
-	mm->unreserve_physical = os_unreserve_physical;
-	virtual_map = 1;
-    }
-    else
-#endif
-	if (init->predefined_area.start) {
-	    start = init->predefined_area.start;
-	    end = init->predefined_area.end;
-	    if (end != (void *) 0 && end < start)
-		end = start;
+    if (init->predefined_area.start) {
+	start = init->predefined_area.start;
+	end = init->predefined_area.end;
+	if (end != (void *) 0 && end < start)
+	    end = start;
     }
 #if ERTS_HAVE_OS_MMAP
     else if (init->scs) {
@@ -2302,7 +2106,7 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
 	sz = ERTS_PAGEALIGNED_CEILING(init->scs);
 #ifdef ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION
 	if (!init->scrpm) {
-	    start = os_mmap_virtual(NULL, sz);
+	    start = os_mmap_virtual(sz);
 	    mm->reserve_physical = os_reserve_physical;
 	    mm->unreserve_physical = os_unreserve_physical;
 	    virtual_map = 1;
@@ -2327,17 +2131,6 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
 		     "erts_mmap: Failed to create super carrier of size %bpu MB\n",
 		     init->scs/1024/1024);
 	end = start + sz;
-#ifdef HAVE_LINUX_THP
-	if (init->lp) {
-	    /*
-	     * Enable the Transparent Huge Pages for the virtual
-	     * memory reservation.
-	     */
-	    if (madvise(start, sz, MADV_HUGEPAGE) != 0) {
-		erts_exit(1, "erts_mmap: Failed to enable THP for the super carrier: %s\n", strerror(errno));
-	    }
-	}
-#endif
 #ifdef ERTS_MMAP_DEBUG_FILL_AREAS
 	if (!virtual_map) {
 	    Uint32 *uip;
@@ -2358,8 +2151,6 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
     mm->size.supercarrier.used.sa = 0;
     mm->size.supercarrier.used.sua = 0;
     mm->size.os.used = 0;
-
-    mm->desc.new_area_hint = NULL;
 
     if (!start) {
 	mm->sa.bot = NULL;
@@ -2430,8 +2221,6 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
 	init_free_seg_map(&mm->sua.map, SZ_REVERSE_ADDR_ORDER);
 
 	mm->supercarrier = 1;
-
-	mm->desc.new_area_hint = end;
 
     }
 

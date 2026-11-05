@@ -12,6 +12,9 @@
 
 /* What the hosted backend's files share (docs/design-stopgap.md, "The hosted backend"). */
 
+/* Puts one line this backend built, its newline included, on the console, unescaped. */
+void	erx_hosted_note(const char *line);
+
 /* Says why on the console and ends the process, as a fault ends the machine natively. */
 _Noreturn void	erx_hosted_fatal(const char *why);
 

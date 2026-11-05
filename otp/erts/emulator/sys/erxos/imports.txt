@@ -36,6 +36,10 @@ pthread_key_delete pthread_mutex_destroy pthread_mutex_init pthread_mutex_lock
 pthread_mutex_trylock pthread_mutex_unlock pthread_self pthread_setname_np
 pthread_setspecific sched_yield
 
+# The page size, which takes no argument (edit 40).
+[page_size]
+getpagesize
+
 # The names libSystem's headers and the compiler make of the calls above.
 [libsystem]
 _DefaultRuneLocale __assert_rtn __chkstk_darwin
@@ -43,9 +47,10 @@ __error __maskrune __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
 __stderrp __stdoutp __strcat_chk __strcpy_chk __tolower __toupper
 __swbuf __udivti3 __vsprintf_chk bzero memset_pattern16
 
-# Emptied by erl_mmap and erl_mseg over erx_vm_*.
-[stock_memory]
-madvise mlockall mmap mprotect munmap posix_memalign sysconf
+# Emptied by edits 30 and 32, by time over erx_clock_ns, by the deleted erl_poll.c
+# and by removing the NIFs and drivers the design drops.
+[stock_limits]
+sysconf
 
 # Emptied by time over erx_clock_ns and the boot information form.
 [stock_time]

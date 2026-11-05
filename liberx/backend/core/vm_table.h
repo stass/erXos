@@ -41,6 +41,9 @@
  * for the host; its caller runs one call at a time.
  */
 
+/* How many separate reserved runs a task may hold; more is ERX_ENOMEM. */
+#define ERX_BACKEND_VM_RANGES_MAX	4096u
+
 /* A reserved run of addresses, page-aligned; end is exclusive. */
 typedef struct erx_backend_vm_range {
 	uint64_t	start;

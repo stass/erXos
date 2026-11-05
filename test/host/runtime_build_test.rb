@@ -16,10 +16,10 @@ class RuntimeBuildTest < Minitest::Test
   # Stands in for every subprocess: rsync copies, the emulator's make leaves an
   # executable, and each step's name is recorded.
   class RecordingRunner
-    attr_reader :steps, :beam_present_at_link
+    attr_reader :steps, :relinked
 
     def initialize(output) = (@output = output; @steps = [])
-    attr_accessor :fail_step
+    attr_accessor :fail_step, :link_leaves_nothing
 
     def run(argv, name:, **)
       @steps << name
@@ -27,11 +27,23 @@ class RuntimeBuildTest < Minitest::Test
 
       case name
       when 'runtime-copy' then FileUtils.cp_r("#{argv[-2]}.", argv[-1])
-      when 'runtime-emulator'
-        @beam_present_at_link = File.exist?(@output.beam)
-        FileUtils.mkdir_p(File.dirname(@output.beam))
-        File.write(@output.beam, '')
+      when 'runtime-emulator' then make_emulator
       end
+    end
+
+    private
+
+    # As the emulator's makefile behaves: beam.smp is copied from beam.emu when beam.emu
+    # exists, and an empty .SECONDARY makes a missing beam.emu no reason to link while
+    # beam.smp exists. So only with both gone does a link happen.
+    def make_emulator
+      primary = File.join(File.dirname(@output.beam), 'beam.smp')
+      @relinked = !File.exist?(@output.beam) && !File.exist?(primary)
+      return if link_leaves_nothing
+
+      FileUtils.mkdir_p(File.dirname(@output.beam))
+      File.write(@output.beam, '') if @relinked
+      FileUtils.cp(@output.beam, primary) unless File.exist?(primary)
     end
   end
 
@@ -120,7 +132,17 @@ class RuntimeBuildTest < Minitest::Test
     build
     assert_path_exists @output.beam
     build
-    refute @runner.beam_present_at_link, 'the old executable would have satisfied make'
+    assert_includes @runner.steps, 'runtime-emulator'
+    assert @runner.relinked, 'the old executables would have satisfied make'
+    assert_path_exists @output.beam
+  end
+
+  def test_a_link_that_leaves_no_executable_is_a_failed_build
+    build
+    @runner.link_leaves_nothing = true
+    error = assert_raises(Erx::Error) { build }
+    assert_match(/no #{Regexp.escape(@output.beam)}/, error.message)
+    refute_path_exists Runtime.record_path(@output)
   end
 
   def test_a_copy_removed_by_hand_configures_again

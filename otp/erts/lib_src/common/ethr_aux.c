@@ -1,4 +1,6 @@
 /*
+ * Modified by erXos
+ *
  * %CopyrightBegin%
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -204,13 +206,7 @@ ethr_init_common__(ethr_init_data *id)
     if (!ethr_cpu_info__)
 	return ENOMEM;
 
-#ifdef _SC_PAGESIZE
-    ethr_pagesize__ = (size_t) sysconf(_SC_PAGESIZE);
-#elif defined(HAVE_GETPAGESIZE)
     ethr_pagesize__ = (size_t) getpagesize();
-#else
-    ethr_pagesize__ = (size_t) 4*1024; /* Guess 4 KB */
-#endif
 
     /* User needs at least 4 KB */
     ethr_min_stack_size__ = 4*1024;

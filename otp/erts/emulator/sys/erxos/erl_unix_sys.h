@@ -1,4 +1,6 @@
 /*
+ * Modified by erXos
+ *
  * %CopyrightBegin%
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -67,14 +69,6 @@
 #   include <unistd.h>
 #endif
 
-#ifndef HAVE_MMAP
-#   define HAVE_MMAP 0
-#endif
-
-#if HAVE_MMAP
-#   include <sys/mman.h>
-#endif
-
 #include <time.h>
 #if HAVE_SYS_TIME_H
 #   include <sys/time.h>
@@ -103,10 +97,6 @@
 
 #ifdef HAVE_MACH_ABSOLUTE_TIME
 #include <mach/mach_time.h>
-#endif
-
-#ifdef HAVE_POSIX_MEMALIGN
-#  define ERTS_HAVE_ERTS_SYS_ALIGNED_ALLOC 1
 #endif
 
 #ifndef RETSIGTYPE

@@ -1,4 +1,6 @@
 /*
+ * Modified by erXos
+ *
  * %CopyrightBegin%
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -33,55 +35,19 @@
 /* Affects hard limits for sbct and lmbcs documented in erts_alloc.xml */
 #endif
 
-#ifndef HAVE_MMAP
-#  define HAVE_MMAP 0
-#endif
-#ifndef HAVE_MREMAP
-#  define HAVE_MREMAP 0
-#endif
-#if HAVE_MMAP
-#  define ERTS_HAVE_OS_MMAP 1
-#  define ERTS_HAVE_GENUINE_OS_MMAP 1
-#  if HAVE_MREMAP
-#    define ERTS_HAVE_OS_MREMAP 1
-#  endif
 /*
- * MAP_NORESERVE is undefined in FreeBSD 10.x and later.
- * This is to enable 64bit HiPE experimentally on FreeBSD.
- * Note that on FreeBSD MAP_NORESERVE was "never implemented"
- * even before 11.x (and the flag does not exist in /usr/src/sys/vm/mmap.c
- * of 10.3-STABLE r301478 either), and HiPE was working on OTP 18.3.3,
- * so mandating MAP_NORESERVE on FreeBSD might not be needed.
- * See the following message on how MAP_NORESERVE was treated on FreeBSD:
- * <http://lists.llvm.org/pipermail/cfe-commits/Week-of-Mon-20150202/122958.html>
+ * The OS primitives of erl_mmap.c are liberx's memory calls, so on every target
+ * ERTS can reserve addresses and commit pages to them separately.
  */
-#  if (defined(MAP_FIXED) && (defined(MAP_NORESERVE) || defined(__FreeBSD__)) \
-       && !defined(ADDRESS_SANITIZER))
-#    define ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION 1
-#  endif
-#endif
-
-#ifndef HAVE_VIRTUALALLOC
-#  define HAVE_VIRTUALALLOC 0
-#endif
-#if HAVE_VIRTUALALLOC
-#  define ERTS_HAVE_OS_MMAP 1
-#endif
-
-#ifdef ERTS_HAVE_GENUINE_OS_MMAP
-#  define HAVE_ERTS_MMAP 1
-#else
-#  define HAVE_ERTS_MMAP 0
-#endif
+#define ERTS_HAVE_OS_MMAP 1
+#define ERTS_HAVE_GENUINE_OS_MMAP 1
+#define ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION 1
+#define HAVE_ERTS_MMAP 1
 
 
 extern UWord erts_page_inv_mask;
 
 typedef struct {
-    struct {
-	char *start;
-	char *end;
-    } virtual_range;
     struct {
 	char *start;
 	char *end;
@@ -94,12 +60,12 @@ typedef struct {
 }ErtsMMapInit;
 
 #define ERTS_MMAP_INIT_DEFAULT_INITER \
-    {{NULL, NULL}, {NULL, NULL}, 0, 1, (1 << 16), 1, 0}
+    {{NULL, NULL}, 0, 1, (1 << 16), 1, 0}
 
 #define ERTS_LITERAL_VIRTUAL_AREA_SIZE (UWORD_CONSTANT(1)*1024*1024*1024)
 
 #define ERTS_MMAP_INIT_LITERAL_INITER \
-    {{NULL, NULL}, {NULL, NULL}, ERTS_LITERAL_VIRTUAL_AREA_SIZE, 1, (1 << 10), 0, 0}
+    {{NULL, NULL}, ERTS_LITERAL_VIRTUAL_AREA_SIZE, 1, (1 << 10), 0, 0}
 
 
 #define ERTS_SUPERALIGNED_SIZE \

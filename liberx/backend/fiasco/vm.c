@@ -53,8 +53,6 @@
 #define VM_CONTIG_BASE	(VM_WINDOW_BASE - (UINT64_C(1) << VM_SUPERPAGE_ORDER))
 /* The window's two grains: sigma0 gives 2 MiB until refused, then 4 KiB until refused. */
 #define VM_SUPERPAGE_ORDER	21u
-/* How many separate reserved runs a task may hold; more is ERX_ENOMEM. */
-#define VM_RANGES_MAX	4096u
 /* How many shared objects a task may create; more is ERX_ENOMEM. */
 #define VM_OBJECTS_MAX	16u
 /* An object's offsets, as addresses of its own table: page zero stays an empty key. */
@@ -84,7 +82,7 @@ typedef struct vm_object {
 
 typedef struct vm_task {
 	erx_backend_vm_table_t	table;
-	erx_backend_vm_range_t	ranges[VM_RANGES_MAX];
+	erx_backend_vm_range_t	ranges[ERX_BACKEND_VM_RANGES_MAX];
 	vm_object_t		objects[VM_OBJECTS_MAX];
 } vm_task_t;
 
@@ -171,7 +169,7 @@ erx_fiasco_vm_free_pages(void)
 void
 erx_fiasco_vm_task_open(uint32_t task)
 {
-	erx_backend_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, VM_RANGES_MAX, vm_index,
+	erx_backend_vm_table_init(&vm_tasks[task].table, task, vm_tasks[task].ranges, ERX_BACKEND_VM_RANGES_MAX, vm_index,
 	    vm_index_slots, ERX_FIASCO_AREA_START, VM_AREA_END);
 }
 

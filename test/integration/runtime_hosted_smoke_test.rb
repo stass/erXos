@@ -21,6 +21,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
   # A boot to `1>` takes seconds; the budget is the whole dialogue on a loaded host.
   BUDGET_SECONDS = 60
   ESCAPE_SEQUENCE = /\e\[[0-9;?]*[A-Za-z]/n
+  RUNS_LINE = /erx: hosted: range table: (runs (\d+) high (\d+) of (\d+) committed_pages (\d+))\n/
 
   def setup = Erx::Runtime.check_current(root: ROOT)
 
@@ -32,6 +33,30 @@ class RuntimeHostedSmokeTest < Minitest::Test
         read_until(reader, transcript, /^1> /, deadline)
         writer.write("1+1.\n")
         read_until(reader, transcript, /^2\n.*^2> /m, deadline)
+        writer.write("halt().\n")
+        read_to_end(reader, transcript, deadline)
+        status = wait_for(pid, deadline, transcript)
+        @reaped = true
+        assert status.success?, "the runtime ended with #{status.inspect}\n#{plain(transcript)}"
+      end
+    end
+  end
+
+  # ERTS's objects import no other way to get pages, as the seam check below holds
+  # them to, and a list that needs more of them commits more on the range table.
+  def test_memory_comes_from_the_range_table_and_its_runs_are_reported
+    Dir.mktmpdir('erx-hosted-home-') do |home|
+      spawn_shell(home, 'ERX_HOSTED_VM_RUNS' => '1') do |reader, writer, pid|
+        transcript = +''
+        deadline = monotonic + BUDGET_SECONDS
+        read_until(reader, transcript, /^1> /, deadline)
+        at_prompt = plain(transcript).scan(RUNS_LINE)
+        report_runs('at 1>', at_prompt)
+        writer.write("length(lists:seq(1, 4000000)).\n")
+        read_until(reader, transcript, /^4000000\n.*^2> /m, deadline)
+        since_prompt = plain(transcript).scan(RUNS_LINE).drop(at_prompt.size)
+        report_runs('after a list of 4000000', since_prompt)
+        assert_operator since_prompt.map { |line| line.last.to_i }.max, :>, at_prompt.last.last.to_i
         writer.write("halt().\n")
         read_to_end(reader, transcript, deadline)
         status = wait_for(pid, deadline, transcript)
@@ -53,10 +78,20 @@ class RuntimeHostedSmokeTest < Minitest::Test
 
   private
 
-  def spawn_shell(home)
+  # The newest of the lines hosted liberx prints as the table changes.
+  def report_runs(moment, lines)
+    refute_empty lines, "no range table line #{moment}"
+    summary, runs, high, limit = lines.last
+    puts "range table #{moment}: #{summary}"
+    assert_operator runs.to_i, :>, 0
+    assert_operator high.to_i, :<, limit.to_i
+  end
+
+  def spawn_shell(home, extra_environment = {})
     bin = File.dirname(OUTPUT.beam)
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
-      'BINDIR' => bin, 'ROOTDIR' => OUTPUT.root, 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm'
+      'BINDIR' => bin, 'ROOTDIR' => OUTPUT.root, 'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => home, 'TERM' => 'xterm',
+      **extra_environment
     )
     arguments = ['--', '-root', OUTPUT.root, '-bindir', bin, '-progname', 'erl', '--', '-home', home, '--',
                  '-boot', File.join(OUTPUT.root, 'bootstrap/bin/start')]
@@ -78,7 +113,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   def read_until(reader, transcript, pattern, deadline)
-    until pattern.match?(plain(transcript))
+    # A range table line can land anywhere in the terminal's output.
+    until pattern.match?(plain(transcript).gsub(RUNS_LINE, ''))
       remaining = deadline - monotonic
       flunk("no #{pattern.inspect} within #{BUDGET_SECONDS} s\n#{plain(transcript)}") unless remaining.positive?
       chunk = read_chunk(reader, remaining)

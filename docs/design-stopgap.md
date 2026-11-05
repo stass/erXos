@@ -987,6 +987,7 @@ These differ from the native backend, and a caller must not depend on either sid
 
 * **The host's page is larger.** Apple Silicon's page is 16 KiB and the ABI's is 4 KiB. A host page's protection is the union of its pages', so a touch that must fault natively may succeed hosted when a neighbour in the same host page allows it, and a stray write to an uncommitted page beside a committed one survives its commit. A call's pages change together when it is whole, and a reserve without `ERX_VM_FIXED` starts on a host page, so unrelated ranges share none. A writable and an executable page that end one call in one host page cannot be represented, and end the process with a diagnostic. A decommitted page's bytes stay readable while a neighbour keeps its host page, and are cleaned before the page is next taken, under a brief write right on the whole host page, during which a neighbour's code cannot run.
 * **The pool is a count**, of 1 GiB, over a 64 GiB area. Nothing is touched until written.
+* **A report of runs.** With `ERX_HOSTED_VM_RUNS` set, the console gets a line each time a call changes the count of the range table's runs or of committed pages: the count, its high mark, the limit and the committed pages. `make check-runtime-hosted` prints it at `1>`.
 * **A thread's stack switches at its start.** The pthread starts on its own stack and moves to the one the start record names, and back to end, in `arch/aarch64/switch_stack.S`, and `thread.c` tells the address sanitizer of each move. The thread pointer is a field read through `erx_thread_pointer`, since the host owns the register. The first thread is a worker with no thread pointer, and its `erx_thread_exit_release` releases nothing.
 * **Affinity is checked, not applied.** macOS cannot hold a thread to a CPU.
 * **The wake order is the host's.** Natively the oldest waiter wakes first; `os_sync_wake_by_address_any` promises no order, so that case stays with the native guest. A wake's count is of the host's wakes, so a waiter that waits again at once on the same word may count twice.
@@ -1041,7 +1042,6 @@ The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line w
 
 * An unmodified interpreter `beam.smp` has been linked against this backend and booted as the root under TCG. It reached `main` and stopped at `sys.c:396-398`'s `open("/dev/null")` loop, so nothing after `erts_sys_pre_init` has run natively.
 * `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`; `l4_scheduler_info` as a CPU count (`scheduler.h:129`); a release's first pet.
-* Configure's `aarch64-hosted-erxos` target, and whether its cross-compile file can pin `ac_cv_func_madvise` and `ac_cv_func_mlockall` as written.
 
 **Later packages:**
 

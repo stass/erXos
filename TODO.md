@@ -273,6 +273,9 @@ it; git history is the record of completed work.
     `math/powf` (which could also be TCG), `math/yn`,
     `regression/regex-backref-oob`, `regression/regexec-backref`.
   * `musl/pleval` does not build: clang's `-Wparentheses` on the test's source.
+* [Low] ERTS memory, `otp/erts/emulator/sys/common/erl_mmap.h`: stock turns off physical reservation, and with it the literal mapper, under `ADDRESS_SANITIZER`, and erXos's `erl_mmap` keeps it on. No ASan flavour of ERTS has run; settle whether literals stay in the mapper's range when one first does.
+* [Low] ERTS memory, `erl_mmap.h`, `beam/erl_alloc_util.c`: `erts_madvise_discard_advice` lost its definition, and its declaration and uses stay behind `HAVE_MADVISE`, which the cross-compile file pins off. Delete them when the native cross-compile file lands with the same pin.
+
 * [Medium] runtime, `make check-runtime-seam`: only the name check on the hosted objects exists, with
   `sys/erxos/imports.txt` wide, run by `make check-runtime-seam` and `make check-runtime-hosted` and not before
   each link. The native link's check, the `__erx_syscall` number check, the comparison of the
