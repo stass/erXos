@@ -45,7 +45,8 @@ uint32_t	erx_release_fs_list_start(const erx_release_fs_t *, const uint8_t *,
 	    size_t);
 /*
  * The directory's next name, each once, in the index's order; false at the end.
- * The name points into the table.
+ * The cursor starts from erx_release_fs_list_start, each call repeats the same
+ * names, and the name returned points into the table.
  */
 bool		erx_release_fs_list_next(const erx_release_fs_t *, const uint8_t *,
 	    size_t, uint32_t *, const uint8_t **, size_t *);

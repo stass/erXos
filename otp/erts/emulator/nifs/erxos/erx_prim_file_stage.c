@@ -4,11 +4,11 @@
  */
 
 /*
- * The staged swap of prim_file's platform layer. Stock's unix_prim_file.c stays
- * linked until a release boots from its archive; a run that names an archive with
- * ERX_RELEASE_ARCHIVE gets erx_prim_file.c instead, chosen once when the NIF loads.
- * The makefile builds the two with their efile_ names renamed to stock_efile_ and
- * release_efile_. Booting from the archive deletes this file and those renames.
+ * The staged swap of prim_file's platform layer. Stock's unix_prim_file.c is linked
+ * beside erx_prim_file.c, and a run that names an archive with ERX_RELEASE_ARCHIVE
+ * gets the latter, chosen once when the NIF loads. The makefile builds the two with
+ * their efile_ names renamed to stock_efile_ and release_efile_. TODO.md says what
+ * removes this file.
  */
 
 #ifdef HAVE_CONFIG_H

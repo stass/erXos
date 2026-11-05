@@ -8,6 +8,7 @@
 # directory beside a name that sorts around it.
 long_name = 'n' * 256
 many_names = (['n'] * 257).join('/')
+long = ->(total) { ("/#{'n' * 200}" * ((total / 201) + 1)).byteslice(0, total) }
 Erx::PackFuzz.declare_target(
   sources: ['liberx/ns.c', 'liberx/release_fs.c'],
   seeds: Erx::PackFuzz.indexed_seeds([
@@ -23,6 +24,10 @@ Erx::PackFuzz.declare_target(
     "\x01/data\n/data/x\ndata/x",
     "\x02/data\n/data/logs\n/\nf",
     "\x09/data\n/data/x\nunder/x",
-    "\x04\nf"
+    "\x04\nf",
+    "\x04#{long.call(4095)}\nf",
+    "\x04#{long.call(4096)}\nf",
+    "\x04#{long.call(4097)}\nf",
+    "\x0d/a\n/a#{long.call(4091)}\nf"
   ].map(&:b))
 )

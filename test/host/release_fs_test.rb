@@ -31,6 +31,9 @@ class ReleaseFsTest < Minitest::Test
   TREE = %w[d-x d/e/i d/g d/h d0 dd/j f].freeze
   ALPHABET = ['', '.', '..', 'd', 'd-x', 'e', 'f', 'g', 'zz'].freeze
   DEPTH = 4
+  # The rest of the tree's names, over shorter paths, so every file is reached.
+  WIDE_ALPHABET = (ALPHABET + %w[d0 dd h i j]).freeze
+  WIDE_DEPTH = 3
   WORKING_DIRECTORIES = %w[/ /d /d/e].freeze
 
   Answer = Data.define(:status, :mount, :nnames, :names, :path, :kind, :file, :listing)
@@ -71,6 +74,10 @@ class ReleaseFsTest < Minitest::Test
     # Relative, the join to the working directory counts too.
     assert_equal NS_OK, ask([long.call(3995).delete_prefix('/')], cwd: "/#{'c' * 98}").first.status
     assert_equal NS_ENAMETOOLONG, ask([long.call(4095).delete_prefix('/')], cwd: "/#{'c' * 98}").first.status
+    # A mount's root counts too: this fits as a path and not under /under.
+    mounts = [['/a', '/under']]
+    assert_equal NS_ENAMETOOLONG, ask(["/a#{long.call(4091)}"], mounts: mounts).first.status
+    assert_equal NS_OK, ask(["/a#{long.call(4080)}"], mounts: mounts).first.status
   end
 
   def test_a_narrowed_namespace_reaches_only_its_mounts
@@ -115,7 +122,7 @@ class ReleaseFsTest < Minitest::Test
   def test_limit_mutants_fail
     { 'the name length unchecked' => ['count > ERX_NAME_MAX || ', ''] }.each do |label, (from, to)|
       driver = build_mutant('liberx/ns.c', from, to, name: label.tr(' ', '_'))
-      assert_equal NS_OK, ask(["#{'n' * 256}"], driver: driver).first.status, "#{label} still refused"
+      assert_equal NS_OK, ask(['n' * 256], driver: driver).first.status, "#{label} still refused"
     end
   end
 
@@ -128,7 +135,7 @@ class ReleaseFsTest < Minitest::Test
     assert_equal [2, 9, 4], sizes
     offsets = lines.first(3).map { |line| Integer(line.split[2]) }
     assert_equal 'g!', File.binread(archive, 2, offsets.first)
-    assert_equal 'rootrootroot'[0, 4], File.binread(archive, 4, offsets.last)
+    assert_equal 'root', File.binread(archive, 4, offsets.last)
   end
 
   def test_a_damaged_archive_is_refused_with_its_check_named
@@ -139,6 +146,14 @@ class ReleaseFsTest < Minitest::Test
     assert_equal ['refused index_hash'], release_lines(archive)
     File.binwrite(archive, 'not an archive')
     assert_match(/\Arefused /, release_lines(archive).first)
+  end
+
+  # The walk's array overruns, which only a sanitizer run reports.
+  def test_the_count_check_removed_is_reported_by_the_address_sanitizer
+    skip 'needs ERX_SANITIZERS=address' unless ENV.fetch('ERX_SANITIZERS', '').include?('address')
+
+    driver = build_mutant('liberx/ns.c', ' || walk->count == ERX_NS_NAMES_MAX', '', name: 'the_count_unchecked')
+    assert_raises(Erx::Error) { ask([(['n'] * 257).join('/')], driver: driver) }
   end
 
   private
@@ -255,13 +270,14 @@ class ReleaseFsTest < Minitest::Test
 
   def model_listing(names)
     prefix = names.empty? ? '' : "#{names}/"
-    TREE.select { |file| file.start_with?(prefix) }.map { |file| file.delete_prefix(prefix).split('/').first }.uniq.sort
+    TREE.select { |file| file.start_with?(prefix) }.map { |file| file.delete_prefix(prefix).split('/').first }.uniq
   end
 
   def all_paths
-    (1..DEPTH).flat_map do |depth|
-      ALPHABET.repeated_permutation(depth).map { |names| names.join('/') }
-    end.uniq.reject(&:empty?).flat_map { |path| [path, "/#{path}"] }
+    paths = [[ALPHABET, DEPTH], [WIDE_ALPHABET, WIDE_DEPTH]].flat_map do |alphabet, deepest|
+      (1..deepest).flat_map { |depth| alphabet.repeated_permutation(depth).map { |names| names.join('/') } }
+    end
+    paths.uniq.reject(&:empty?).flat_map { |path| [path, "/#{path}"] }
   end
 
   def exploration_differences(driver)
@@ -269,10 +285,10 @@ class ReleaseFsTest < Minitest::Test
     WORKING_DIRECTORIES.flat_map do |cwd|
       paths.zip(ask(paths, cwd: cwd, driver: driver)).filter_map do |path, answer|
         names, normal, kind, file, listing = model(path, cwd: cwd)
-        got = [answer&.status, answer&.names, answer&.path, answer&.kind, answer&.file, answer&.listing&.sort]
-        want = [NS_OK, names, normal, kind, file, listing]
-        repeated = answer&.listing && answer.listing.uniq.size != answer.listing.size
-        "#{cwd} #{path}: #{got} != #{want}" if got != want || repeated
+        got = [answer&.status, answer&.mount, answer&.nnames, answer&.names, answer&.path, answer&.kind, answer&.file,
+               answer&.listing]
+        want = [NS_OK, 0, names.split('/').size, names, normal, kind, file, listing]
+        "#{cwd} #{path}: #{got} != #{want}" if got != want
       end
     end
   end

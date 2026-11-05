@@ -92,21 +92,21 @@ driver_answer(const uint8_t *path, size_t length)
 		return;
 	}
 	printf("%d ", (int)status);
-	if (out.mount == NULL)
+	if (out.res_mount == NULL)
 		fputs("- ", stdout);
 	else
-		printf("%d ", (int)(out.mount - ns.mounts));
-	printf("%u ", out.nnames);
-	driver_put_hex(out.names, out.names_length);
+		printf("%d ", (int)(out.res_mount - ns.mounts));
+	printf("%u ", out.res_nnames);
+	driver_put_hex(out.res_names, out.res_names_length);
 	putchar(' ');
-	driver_put_hex(out.path, out.path_length);
+	driver_put_hex(out.res_path, out.res_path_length);
 	file = UINT32_MAX;
-	kind = erx_release_fs_lookup(&fs, (const uint8_t *)out.names, out.names_length, &file);
+	kind = erx_release_fs_lookup(&fs, (const uint8_t *)out.res_names, out.res_names_length, &file);
 	printf(" %d %d ", (int)kind, kind == ERX_RELEASE_FS_FILE ? (int)file : -1);
 	first = true;
 	if (kind == ERX_RELEASE_FS_DIRECTORY) {
-		cursor = erx_release_fs_list_start(&fs, (const uint8_t *)out.names, out.names_length);
-		while (erx_release_fs_list_next(&fs, (const uint8_t *)out.names, out.names_length,
+		cursor = erx_release_fs_list_start(&fs, (const uint8_t *)out.res_names, out.res_names_length);
+		while (erx_release_fs_list_next(&fs, (const uint8_t *)out.res_names, out.res_names_length,
 		    &cursor, &name, &name_length)) {
 			if (!first)
 				putchar(',');

@@ -1007,8 +1007,8 @@ $(OBJDIR)/%.o: nifs/common/%.c
 $(OBJDIR)/%.o: nifs/common/%.cpp
 	$(V_CXX) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
-# prim_file's platform layer: the release file system beside stock, until a release
-# boots from its archive. erx_prim_file_stage.c holds the same list of names.
+# prim_file's platform layer: the release file system beside stock's.
+# erx_prim_file_stage.c holds the same list of names.
 EFILE_LAYER = marshal_path get_handle dup_handle readv writev preadv pwritev seek sync \
 	advise allocate truncate open from_fd close read_info read_handle_info set_time \
 	set_permissions set_owner read_link list_dir rename make_hard_link make_soft_link \

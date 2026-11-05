@@ -31,17 +31,18 @@ class RuntimePrimFileTest < Minitest::Test
   # A leak of one small resource per call, over 10,000 calls, grows past this.
   RESOURCE_GROWTH_BYTES = 256 * 1024
 
-  # What lexical `.` and `..` make of a path stock's stat refuses. `release` is the
-  # answer's first word on this provider; the operations each path differs on all
-  # follow from it. Each is a stated difference of the design.
-  ENOTDIR_THEN_FILE = %w[a.txt/. a.txt/ a.txt/../sub/b.txt].freeze
-  ENOENT_THEN_FILE = %w[missing/../a.txt missing/../sub/b.txt].freeze
-  # A name over the limit is refused before the walk finds `missing`, and macOS's
-  # own path limit is 1,024 bytes where the design's is 4,096.
-  LIMITS = {
-    "missing/#{'n' * 256}" => [:enoent, :enametoolong],
-    "#{'nnnnnnnnnn/' * 100}x" => [:enametoolong, :enoent]
-  }.freeze
+  OPERATIONS = %w[read_file file_info link_info read_link list_dir handle set_cwd].freeze
+  # Lexical `.` and `..`: each path answers, on every operation, as the path beside it,
+  # where stock's stat refuses it with enotdir or enoent.
+  LEXICAL = { 'a.txt/.' => 'a.txt', 'a.txt/' => 'a.txt', 'a.txt/../sub/b.txt' => 'sub/b.txt',
+              'missing/../a.txt' => 'a.txt', 'missing/../sub/b.txt' => 'sub/b.txt' }.freeze
+  # A name over the limit is refused before the walk finds `missing`, and macOS's own
+  # path limit is 1,024 bytes where the design's is 4,096.
+  Refused = Data.define(:stock, :release)
+  LIMITS = { "missing/#{'n' * 256}" => Refused.new(stock: 'enoent', release: 'enametoolong'),
+             "#{'nnnnnnnnnn/' * 100}x" => Refused.new(stock: 'enametoolong', release: 'enoent') }.freeze
+  # Not UTF-8: refused here, and left to the host's file system by stock.
+  NOT_UTF8 = "\xFF\xFE".b.freeze
 
   class << self
     attr_accessor :fixture
@@ -80,21 +81,34 @@ class RuntimePrimFileTest < Minitest::Test
     assert_empty differences, differences.join("\n")
   end
 
-  # Both pins hold the design's sentence: `f/.` is `f`, where stock's stat answers enotdir.
+  # The design's sentence: `f/.` is `f`, where stock's stat answers enotdir.
   def test_the_lexical_differences_are_pinned
     release = table(@fixture.release)
     stock = table(@fixture.stock)
+    LEXICAL.each do |path, same_as|
+      OPERATIONS.each do |operation|
+        assert_equal release.fetch(line_key(operation, same_as)), release.fetch(line_key(operation, path)),
+                     "#{operation} #{path}"
+      end
+    end
     assert_match(/\A\{ok,regular,6,read,/, release.fetch(line_key('file_info', 'a.txt/.')))
     assert_equal '{error,enotdir}', stock.fetch(line_key('file_info', 'a.txt/.'))
-    assert_match(/\A\{ok,regular,6,read,/, release.fetch(line_key('file_info', 'a.txt/')))
     assert_equal '{error,enotdir}', stock.fetch(line_key('file_info', 'a.txt/'))
-    assert_match(/\A\{ok,regular,6,read,/, release.fetch(line_key('file_info', 'missing/../a.txt')))
     assert_equal '{error,enoent}', stock.fetch(line_key('file_info', 'missing/../a.txt'))
-    assert_equal release.fetch(line_key('read_file', 'a.txt')), release.fetch(line_key('read_file', 'missing/../a.txt'))
-    LIMITS.each do |path, (from_stock, from_release)|
-      assert_equal "{error,#{from_stock}}", stock.fetch(line_key('file_info', path)), path
-      assert_equal "{error,#{from_release}}", release.fetch(line_key('file_info', path)), path
+  end
+
+  def test_the_limits_and_refusals_are_pinned
+    release = table(@fixture.release)
+    stock = table(@fixture.stock)
+    LIMITS.each do |path, refused|
+      assert_refused(release, path, refused.release)
+      assert_refused(stock, path, refused.stock)
     end
+    (OPERATIONS - ['set_cwd']).each do |operation|
+      assert_equal '{error,einval}', release.fetch(line_key(operation, NOT_UTF8)), operation
+    end
+    # prim_file's Erlang side refuses this one before the NIF, as on stock.
+    assert_equal stock.fetch(line_key('set_cwd', NOT_UTF8)), release.fetch(line_key('set_cwd', NOT_UTF8))
   end
 
   def test_the_provider_holds_its_fixed_answers
@@ -104,6 +118,7 @@ class RuntimePrimFileTest < Minitest::Test
     assert_equal '{error,enotsup}', release.fetch('pin advise')
     assert_equal '{error,enotsup}', release.fetch('pin allocate')
     assert_equal 'ok', release.fetch('pin sync')
+    assert_equal '{error,erofs}', release.fetch('pin write')
     %w[open_write open_new open_append make_dir delete del_dir rename make_link make_symlink
        write_file_info].each { |name| assert_equal '{error,erofs}', release.fetch("pin #{name}"), name }
     assert_equal '{error,enotsup}', release.fetch('pin open_directory')
@@ -146,10 +161,18 @@ class RuntimePrimFileTest < Minitest::Test
     "#{operation} #{(bytes.bytesize > 64 ? Digest::MD5.digest(bytes) : bytes).unpack1('H*')}"
   end
 
-  # stock passes bytes that are not UTF-8 to the host, whose file system misses them.
+  def assert_refused(transcript, path, reason)
+    OPERATIONS.each do |operation|
+      answer = transcript.fetch(line_key(operation, path))
+      want = operation == 'set_cwd' ? "{{error,#{reason}},<<\"ROOT/corpus\">>}" : "{error,#{reason}}"
+      assert_equal want, answer, "#{operation} #{path.inspect}"
+    end
+  end
+
+  # What the pins above answer for; every other line must agree with stock.
   def named?(key)
     _operation, hexadecimal = key.split(' ', 2)
-    named = ENOTDIR_THEN_FILE + ENOENT_THEN_FILE + LIMITS.keys + ["\xFF\xFE".b]
+    named = LEXICAL.keys + LIMITS.keys + [NOT_UTF8]
     named.any? { |path| line_key('', path).strip == hexadecimal }
   end
 
@@ -172,7 +195,11 @@ class RuntimePrimFileTest < Minitest::Test
     compile_driver(tree)
     archive = File.join(directory, 'release.pack')
     pack(tree, archive, directory)
-    FileUtils.chmod_R('a-w', tree)
+    # Whatever the umask: what the release's fixed modes are compared with.
+    Dir.glob('**/*', base: tree).sort.reverse_each do |path|
+      File.chmod(File.directory?(File.join(tree, path)) ? 0o555 : 0o444, File.join(tree, path))
+    end
+    File.chmod(0o555, tree)
     release, release_status = run_beam(archive, '/', 'release', boot: '/bin/start')
     stock, stock_status = run_beam(nil, tree, 'stock', boot: "#{tree}/bin/start")
     Fixture.new(directory: directory, tree: tree, archive: archive, release: release, stock: stock,

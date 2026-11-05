@@ -63,6 +63,7 @@ static void erx_fill_info(erx_release_fs_kind_t, uint64_t, efile_fileinfo_t *);
 static int
 erx_build_table(void)
 {
+	/* An entry holds a whole path, large for a stack, and the one call owns it. */
 	static erx_release_entry_t entry;
 	erx_release_fs_file_t *files;
 	uint8_t *strings;
@@ -151,10 +152,10 @@ erx_find(const efile_path_t *path, erx_ns_result_t *out,
 	error = erx_resolve(path, out);
 	if (error != 0)
 		return (error);
-	if (out->mount == NULL || out->mount->kind != ERX_NS_RELEASE)
+	if (out->res_mount == NULL || out->res_mount->kind != ERX_NS_RELEASE)
 		return (ENOTSUP);
-	*kind = erx_release_fs_lookup(&release_fs, (const uint8_t *)out->names,
-	    out->names_length, file);
+	*kind = erx_release_fs_lookup(&release_fs, (const uint8_t *)out->res_names,
+	    out->res_names_length, file);
 	return (0);
 }
 
@@ -179,7 +180,7 @@ erx_find_existing(const efile_path_t *path, erx_ns_result_t *out,
 	return (ENOENT);
 }
 
-/* A path over the limits answers as ever; a well-formed one meets a read-only tree. */
+/* A path's own error comes first; any other path meets a read-only tree. */
 static posix_errno_t
 erx_read_only(const efile_path_t *path)
 {
@@ -484,10 +485,10 @@ efile_list_dir(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *result)
 	if (kind == ERX_RELEASE_FS_FILE)
 		return (ENOTDIR);
 	list = enif_make_list(env, 0);
-	cursor = erx_release_fs_list_start(&release_fs, (const uint8_t *)out.names,
-	    out.names_length);
-	while (erx_release_fs_list_next(&release_fs, (const uint8_t *)out.names,
-	    out.names_length, &cursor, &name, &name_length)) {
+	cursor = erx_release_fs_list_start(&release_fs, (const uint8_t *)out.res_names,
+	    out.res_names_length);
+	while (erx_release_fs_list_next(&release_fs, (const uint8_t *)out.res_names,
+	    out.res_names_length, &cursor, &name, &name_length)) {
 		memcpy(enif_make_new_binary(env, name_length, &term), name, name_length);
 		list = enif_make_list_cell(env, term, list);
 	}
@@ -567,7 +568,7 @@ efile_set_cwd(const efile_path_t *path)
 	if (kind == ERX_RELEASE_FS_FILE)
 		return (ENOTDIR);
 	enif_rwlock_rwlock(cwd_lock);
-	memcpy(name_space.cwd, out.path, out.path_length + 1);
+	memcpy(name_space.cwd, out.res_path, out.res_path_length + 1);
 	enif_rwlock_rwunlock(cwd_lock);
 	return (0);
 }

@@ -138,15 +138,15 @@ erx_ns_normalise(const erx_ns_walk_t *walk, erx_ns_result_t *out)
 	size_t used;
 
 	used = 0;
-	if (walk->count == 0 && !erx_ns_append(out->path, &used, "/", 1))
+	if (walk->count == 0 && !erx_ns_append(out->res_path, &used, "/", 1))
 		return (false);
 	for (uint32_t index = 0; index < walk->count; index++) {
-		if (!erx_ns_append(out->path, &used, "/", 1) ||
-		    !erx_ns_append(out->path, &used, walk->names[index].bytes,
+		if (!erx_ns_append(out->res_path, &used, "/", 1) ||
+		    !erx_ns_append(out->res_path, &used, walk->names[index].bytes,
 		    walk->names[index].length))
 			return (false);
 	}
-	out->path_length = used;
+	out->res_path_length = used;
 	return (true);
 }
 
@@ -176,7 +176,7 @@ erx_ns_longest_mount(const erx_ns_t *ns, const erx_ns_result_t *out)
 	best = 0;
 	for (uint32_t index = 0; index < ns->count; index++) {
 		length = erx_ns_field_length(ns->mounts[index].point);
-		if (length > best && erx_ns_is_under(out->path, out->path_length,
+		if (length > best && erx_ns_is_under(out->res_path, out->res_path_length,
 		    ns->mounts[index].point, length)) {
 			longest = &ns->mounts[index];
 			best = length;
@@ -190,8 +190,8 @@ erx_ns_above_a_mount(const erx_ns_t *ns, const erx_ns_result_t *out)
 {
 	for (uint32_t index = 0; index < ns->count; index++) {
 		if (erx_ns_is_under(ns->mounts[index].point,
-		    erx_ns_field_length(ns->mounts[index].point), out->path,
-		    out->path_length))
+		    erx_ns_field_length(ns->mounts[index].point), out->res_path,
+		    out->res_path_length))
 			return (true);
 	}
 	return (false);
@@ -205,34 +205,34 @@ erx_ns_place_names(const erx_ns_mount_t *mount, erx_ns_result_t *out)
 	size_t root_length, point_length, rest_length, used;
 
 	used = 0;
-	out->names[0] = '\0';
-	rest = out->path + 1;
-	rest_length = out->path_length - 1;
+	out->res_names[0] = '\0';
+	rest = out->res_path + 1;
+	rest_length = out->res_path_length - 1;
 	if (mount != NULL) {
 		point_length = erx_ns_field_length(mount->point);
 		if (point_length > 1) {
-			rest = out->path + point_length;
-			rest_length = out->path_length - point_length;
+			rest = out->res_path + point_length;
+			rest_length = out->res_path_length - point_length;
 			if (rest_length > 0) {
 				rest++;
 				rest_length--;
 			}
 		}
 		root_length = erx_ns_field_length(mount->root);
-		if (root_length > 1 && (!erx_ns_append(out->names, &used,
+		if (root_length > 1 && (!erx_ns_append(out->res_names, &used,
 		    mount->root + 1, root_length - 1) || (rest_length > 0 &&
-		    !erx_ns_append(out->names, &used, "/", 1))))
+		    !erx_ns_append(out->res_names, &used, "/", 1))))
 			return (ERX_NS_ENAMETOOLONG);
 	}
-	if (!erx_ns_append(out->names, &used, rest, rest_length))
+	if (!erx_ns_append(out->res_names, &used, rest, rest_length))
 		return (ERX_NS_ENAMETOOLONG);
-	out->names_length = used;
-	out->nnames = used > 0 ? 1 : 0;
+	out->res_names_length = used;
+	out->res_nnames = used > 0 ? 1 : 0;
 	for (size_t index = 0; index < used; index++) {
-		if (out->names[index] == '/')
-			out->nnames++;
+		if (out->res_names[index] == '/')
+			out->res_nnames++;
 	}
-	return (out->nnames > ERX_NS_NAMES_MAX ? ERX_NS_ENAMETOOLONG : ERX_NS_OK);
+	return (out->res_nnames > ERX_NS_NAMES_MAX ? ERX_NS_ENAMETOOLONG : ERX_NS_OK);
 }
 
 erx_ns_status_t
@@ -243,10 +243,10 @@ erx_ns_resolve(const erx_ns_t *ns, const uint8_t *path, size_t length,
 	const erx_ns_mount_t *mount;
 	erx_ns_status_t status;
 
-	out->mount = NULL;
-	out->nnames = 0;
-	out->names_length = 0;
-	out->path_length = 0;
+	out->res_mount = NULL;
+	out->res_nnames = 0;
+	out->res_names_length = 0;
+	out->res_path_length = 0;
 	if (length > ERX_PATH_MAX)
 		return (ERX_NS_ENAMETOOLONG);
 	if (length == 0)
@@ -269,16 +269,16 @@ erx_ns_resolve(const erx_ns_t *ns, const uint8_t *path, size_t length,
 
 	mount = erx_ns_longest_mount(ns, out);
 	if (mount == NULL && !erx_ns_above_a_mount(ns, out)) {
-		out->path_length = 0;
+		out->res_path_length = 0;
 		return (ERX_NS_ENOENT);
 	}
 	status = erx_ns_place_names(mount, out);
 	if (status != ERX_NS_OK) {
-		out->nnames = 0;
-		out->names_length = 0;
-		out->path_length = 0;
+		out->res_nnames = 0;
+		out->res_names_length = 0;
+		out->res_path_length = 0;
 		return (status);
 	}
-	out->mount = mount;
+	out->res_mount = mount;
 	return (ERX_NS_OK);
 }

@@ -47,23 +47,24 @@ typedef struct erx_ns {
 } erx_ns_t;
 
 /*
- * What a path resolved to. mount is NULL for the empty root, a read-only
- * directory above the mount points of a narrowed namespace. names is the names
+ * What a path resolved to; a source check lets only erx_ns_resolve write these
+ * fields. res_mount is NULL for the empty root, a read-only
+ * directory above the mount points of a narrowed namespace. res_names is the names
  * after the mount's point, under its root, joined by `/` with no leading `/`,
- * and empty at the top. path is the whole path, normalised and absolute, which
+ * and empty at the top. res_path is the whole path, normalised and absolute, which
  * is what a working directory stores. Both are NUL-terminated, and neither
  * holds `.`, `..` or an empty name.
  */
 typedef struct erx_ns_result {
-	const erx_ns_mount_t *mount;
-	uint32_t	nnames;
-	size_t		names_length;
-	size_t		path_length;
-	char		names[ERX_PATH_MAX];
-	char		path[ERX_PATH_MAX];
+	const erx_ns_mount_t *res_mount;
+	uint32_t	res_nnames;
+	size_t		res_names_length;
+	size_t		res_path_length;
+	char		res_names[ERX_PATH_MAX];
+	char		res_path[ERX_PATH_MAX];
 } erx_ns_result_t;
 
-/* Anything but ERX_NS_OK leaves mount NULL and every count zero. */
+/* Anything but ERX_NS_OK leaves res_mount NULL and every count zero. */
 erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 	    erx_ns_result_t *);
 

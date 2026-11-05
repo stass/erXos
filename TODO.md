@@ -299,6 +299,18 @@ it; git history is the record of completed work.
 * [Low] runtime, `erx_prim_file.c`: EROFS, `/tmp` and file servers have no provider yet, so a path on them
   cannot arise: the namespace holds the one row `/`. Their rows' fields of `erx_ns_mount_t`
   ([design-files.md](docs/design-files.md#namespaces)) arrive with them.
+* [Medium] runtime, `otp/erts/emulator/Makefile.in`: `nifs/erxos/*.c` is in no depend file, so a change to
+  `erx_ns_result_t`, `erx_release_entry_t` or an ABI limit recompiles liberx and leaves `erx_prim_file.o` with the
+  old layout: an incremental build can then write past a stack buffer. Remove `build/runtime` after such a change.
+* [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
+  empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
+  in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:
+  the resolve and the store want one hold of the write lock.
+* [Low] runtime, `liberx/release.c`: `erx_pack_open` bounds an archive's path as a whole, so an entry with a
+  name over 255 bytes or over 256 names is listed and then answers `enametoolong`; `erx_release_bind` should
+  refuse it. `erx_release_bind` and `erx_release_entry` have no fuzz target of their own: chaining them onto
+  the `pack` target's accepted views would add one, and `ERX_ERANGE` also stands for a failed decode, which
+  the kernel's backend must tell apart.
 * [Low] runtime, `otp/erts/configure`: edited by hand, because the tree holds autoconf 2.72's output and the
   installed autoconf is 2.73, whose output differs throughout. Each edit is also in `configure.ac`.
 * [Medium] runtime, the native boot page: `erx_boot_info_build` and `erx_boot_args_parse` have no native caller, and `tools/lib/erx/production_image.rb`'s root writes no page. The root needs `erx_boot_info`, its page written from the manifest and `bootargs`, and `erx_runtime_main` called from `liberx/backend/fiasco/libc_start.c`. The comparison of the two entries' pages waits for it, and so does the range check on `limits`, of which `erx_boot_info_build` and `erx_boot_info_read` check only the reserved word ([design-stopgap.md](docs/design-stopgap.md#boot-information)). `erx_boot_args_t.refused` is text from the boot loader, so the root's refusal prints it through the console's escaping function.

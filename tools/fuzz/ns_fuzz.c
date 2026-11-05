@@ -5,7 +5,8 @@
 
 /*
  * erx_ns_resolve and the release file system's core. The input is lines: the
- * first byte's low bits say how many of them are mount points, the next is the
+ * first byte's low bits say how many of them are mount points and which root and
+ * working directory they have, the next is the
  * path, and the rest are the release's file paths. Whatever the path holds, a
  * resolved result keeps design-files.md's properties; a lookup and a listing
  * agree with a plain scan of the table.
@@ -32,6 +33,7 @@ static void fuzz_check_result(const erx_ns_t *, const erx_ns_result_t *);
 static void fuzz_check_lookup(const erx_release_fs_t *, const uint8_t *, size_t);
 static void fuzz_check_listing(const erx_release_fs_t *, const uint8_t *, size_t);
 static bool fuzz_below(const erx_release_fs_file_t *, const uint8_t *, size_t);
+static bool fuzz_under(const char *, const char *);
 
 static bool
 fuzz_next_line(const uint8_t *bytes, size_t length, size_t *cursor,
@@ -86,6 +88,19 @@ fuzz_compare(const void *left, const void *right)
 	return (a->length < b->length ? -1 : a->length > b->length);
 }
 
+/* Whether the path is the point or lies below it, by whole names. */
+static bool
+fuzz_under(const char *path, const char *point)
+{
+	size_t length;
+
+	length = strlen(point);
+	if (length == 1)
+		return (true);
+	return (strncmp(path, point, length) == 0 &&
+	    (path[length] == '\0' || path[length] == '/'));
+}
+
 static void
 fuzz_check_result(const erx_ns_t *ns, const erx_ns_result_t *out)
 {
@@ -93,32 +108,40 @@ fuzz_check_result(const erx_ns_t *ns, const erx_ns_result_t *out)
 	size_t start;
 	uint32_t count;
 
-	if (out->path_length == 0 || out->path_length >= ERX_PATH_MAX ||
-	    out->path[0] != '/' || strlen(out->path) != out->path_length ||
-	    strlen(out->names) != out->names_length ||
-	    out->nnames > ERX_NS_NAMES_MAX)
+	if (out->res_path_length == 0 || out->res_path_length >= ERX_PATH_MAX ||
+	    out->res_path[0] != '/' || strlen(out->res_path) != out->res_path_length ||
+	    strlen(out->res_names) != out->res_names_length ||
+	    out->res_nnames > ERX_NS_NAMES_MAX)
 		abort();
 	/* The names hold no `.`, `..`, empty or over-long name. */
 	count = 0;
 	start = 0;
-	for (size_t index = 0; index <= out->names_length && out->names_length > 0; index++) {
-		if (index < out->names_length && out->names[index] != '/')
+	for (size_t index = 0; index <= out->res_names_length && out->res_names_length > 0; index++) {
+		if (index < out->res_names_length && out->res_names[index] != '/')
 			continue;
 		if (index == start || index - start > ERX_NAME_MAX ||
-		    (index - start == 1 && out->names[start] == '.') ||
-		    (index - start == 2 && out->names[start] == '.' &&
-		    out->names[start + 1] == '.'))
+		    (index - start == 1 && out->res_names[start] == '.') ||
+		    (index - start == 2 && out->res_names[start] == '.' &&
+		    out->res_names[start + 1] == '.'))
 			abort();
 		start = index + 1;
 		count++;
 	}
-	if (count != out->nnames)
+	if (count != out->res_nnames)
 		abort();
+	/* The result is a prefix match, and the longest one. */
+	if (out->res_mount != NULL && !fuzz_under(out->res_path, out->res_mount->point))
+		abort();
+	for (uint32_t index = 0; index < ns->count; index++) {
+		if (fuzz_under(out->res_path, ns->mounts[index].point) && (out->res_mount == NULL ||
+		    strlen(ns->mounts[index].point) > strlen(out->res_mount->point)))
+			abort();
+	}
 	/* Resolving a normalised path again gives the same result. */
-	if (erx_ns_resolve(ns, (const uint8_t *)out->path, out->path_length, &again) !=
-	    ERX_NS_OK || again.mount != out->mount ||
-	    again.path_length != out->path_length ||
-	    strcmp(again.path, out->path) != 0 || strcmp(again.names, out->names) != 0)
+	if (erx_ns_resolve(ns, (const uint8_t *)out->res_path, out->res_path_length, &again) !=
+	    ERX_NS_OK || again.res_mount != out->res_mount ||
+	    again.res_path_length != out->res_path_length ||
+	    strcmp(again.res_path, out->res_path) != 0 || strcmp(again.res_names, out->res_names) != 0)
 		abort();
 }
 
@@ -162,7 +185,7 @@ fuzz_check_listing(const erx_release_fs_t *fs, const uint8_t *names, size_t leng
 {
 	const uint8_t *seen[FUZZ_LIST_MAX], *name;
 	size_t seen_length[FUZZ_LIST_MAX], name_length;
-	uint32_t cursor, count, below;
+	uint32_t cursor, count;
 
 	count = 0;
 	cursor = erx_release_fs_list_start(fs, names, length);
@@ -178,14 +201,39 @@ fuzz_check_listing(const erx_release_fs_t *fs, const uint8_t *names, size_t leng
 		seen_length[count] = name_length;
 		count++;
 	}
-	below = 0;
-	for (uint32_t index = 0; index < fs->count; index++) {
-		if (fuzz_below(&fs->files[index], names, length))
-			below++;
+/* Every file below lies under a listed name, and every listed name has one. */
+for (uint32_t index = 0; index < count; index++) {
+	bool has_file = false;
+
+	for (uint32_t other = 0; other < fs->count && !has_file; other++) {
+		const erx_release_fs_file_t *entry = &fs->files[other];
+		size_t start = length > 0 ? length + 1 : 0;
+
+		has_file = fuzz_below(entry, names, length) &&
+		    entry->length >= start + seen_length[index] &&
+		    memcmp(entry->path + start, seen[index], seen_length[index]) == 0 &&
+		    (entry->length == start + seen_length[index] ||
+		    entry->path[start + seen_length[index]] == '/');
 	}
-	/* Every file below is under a listed name, and a listed name has a file. */
-	if ((below == 0) != (count == 0) || count > below)
+	if (!has_file)
 		abort();
+}
+for (uint32_t other = 0; other < fs->count; other++) {
+	const erx_release_fs_file_t *entry = &fs->files[other];
+	size_t start = length > 0 ? length + 1 : 0;
+	bool listed = false;
+
+	if (!fuzz_below(entry, names, length))
+		continue;
+	for (uint32_t index = 0; index < count && !listed; index++) {
+		listed = entry->length >= start + seen_length[index] &&
+		    memcmp(entry->path + start, seen[index], seen_length[index]) == 0 &&
+		    (entry->length == start + seen_length[index] ||
+		    entry->path[start + seen_length[index]] == '/');
+	}
+	if (!listed)
+		abort();
+}
 }
 
 int
@@ -204,7 +252,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	cursor = 1;
 	mounts = bytes[0] & 3;
 	ns.count = 0;
-	strcpy(ns.cwd, "/");
+	strcpy(ns.cwd, (bytes[0] & 16) != 0 ? "/c/wd/deep" : "/");
 	if ((bytes[0] & 4) != 0) {
 		ns.count = 1;
 		strcpy(ns.mounts[0].point, "/");
@@ -226,8 +274,8 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		return (0);
 	if (erx_ns_resolve(&ns, line, line_length, &out) == ERX_NS_OK)
 		fuzz_check_result(&ns, &out);
-	else if (out.mount != NULL || out.nnames != 0 || out.names_length != 0 ||
-	    out.path_length != 0)
+	else if (out.res_mount != NULL || out.res_nnames != 0 || out.res_names_length != 0 ||
+	    out.res_path_length != 0)
 		abort();
 
 	count = 0;
@@ -257,9 +305,9 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 			kept[nkept++] = files[index];
 	}
 	fs = (erx_release_fs_t){ .files = kept, .count = nkept };
-	if (out.path_length > 0) {
-		fuzz_check_lookup(&fs, (const uint8_t *)out.names, out.names_length);
-		fuzz_check_listing(&fs, (const uint8_t *)out.names, out.names_length);
+	if (out.res_path_length > 0) {
+		fuzz_check_lookup(&fs, (const uint8_t *)out.res_names, out.res_names_length);
+		fuzz_check_listing(&fs, (const uint8_t *)out.res_names, out.res_names_length);
 	}
 	for (uint32_t index = 0; index < nkept; index++) {
 		fuzz_check_lookup(&fs, kept[index].path, kept[index].length);
