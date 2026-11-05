@@ -213,6 +213,23 @@ class RuntimeHostedSmokeTest < Minitest::Test
     assert_answers(expected)
   end
 
+  # Stock OTP gives each of these answers on a name its resolver does not know, except that
+  # it knows localhost. The node must live through all of them: a stopped runtime is the machine.
+  def test_a_native_lookup_answers_as_stock_does_for_an_unknown_name
+    assert_answers(
+      'inet_gethost_native:gethostbyname("nosuch.invalid").' => /^\{error,notfound\}$/,
+      'inet_gethost_native:gethostbyname("nosuch.invalid", inet6).' => /^\{error,notfound\}$/,
+      'inet_gethost_native:gethostbyaddr("192.0.2.1").' => /^\{error,notfound\}$/,
+      'inet_gethost_native:gethostbyaddr("x").' => /^\{error,formerr\}$/,
+      'inet_gethost_native:gethostbyname(1, inet).' => /^\{error,formerr\}$/,
+      'inet_gethost_native:control(soft_restart).' => /^ok$/,
+      'inet_gethost_native:control(foo).' => /^\{error,formerr\}$/,
+      'inet_db:set_lookup([native]), inet:gethostbyname("nosuch.invalid").' => /^\{error,nxdomain\}$/,
+      'inet:getaddr("nosuch.invalid", inet).' => /^\{error,nxdomain\}$/,
+      'inet:gethostbyaddr({192,0,2,1}).' => /^\{error,nxdomain\}$/
+    )
+  end
+
   # Stock's code server dies on a root directory in its path, with no version to split from
   # its empty base name, and three of those stop the node. Here the working directory is "/".
   def test_the_root_directory_on_the_code_path_leaves_the_code_server_running

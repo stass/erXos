@@ -2685,7 +2685,7 @@ whose mode `0444` it refuses (`auth.erl:347-374`, `:513`).
 | Child | In erXos |
 | --- | --- |
 | `erx_watchdog` | [design-stopgap.md](design-stopgap.md) |
-| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system; `inet_db`'s lookup is `file`, its hosts table, with no resolver and no `inet_gethost` until the network service, and `inet_config` finding no UDP port names the host `nohost` |
+| `code_server`, `file_server_2`, `on_load`, `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: the first two over `erl_prim_loader` and the release file system; `inet_db`'s lookup is `file`, its hosts table, with no resolver and no `inet_gethost` until the network service, `inet_gethost_native` answering what stock answers for a name its resolver does not know, `{error, notfound}`, which also means `localhost` when asked directly, and `inet_config` finding no UDP port names the host `nohost` |
 | `standard_error` | stock's I/O protocol over descriptor 2 (edit 39) |
 | `user` | `user_sup`, then `erx_console` and the group it registers |
 | `rex`, `global_name_server`, `net_sup`, `global_group` | with a carrier only: `net_sup` holds `auth` and `net_kernel` over `erx_dist`, with no `erl_epmd` |

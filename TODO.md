@@ -155,8 +155,6 @@ it; git history is the record of completed work.
   The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
-* [Low] `otp/lib/kernel/src/inet_gethost_native.erl`: a lookup set to `native` by an inetrc halts the runtime, since its program cannot
-  run; `inet_config` sets `file`, and the network service replaces both.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
