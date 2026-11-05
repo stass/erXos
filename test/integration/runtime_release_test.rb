@@ -6,6 +6,7 @@ require 'fileutils'
 require 'json'
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/native_runtime'
+require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/release'
 
 # The release as tools/erx build runtime packed it (docs/design-stopgap.md, "The archive
@@ -60,11 +61,10 @@ class RuntimeReleaseTest < Minitest::Test
   # What the native boot runs is what the hosted suites ran. The native build lives in
   # another gate, so an image of other sources says nothing and the run says so.
   def test_the_production_image_holds_the_same_release
-    native = Erx::NativeRuntime.output(root: ROOT)
     image = File.join(ROOT, 'build/production-image/boot/image.erxpack')
-    record = Erx::NativeRuntime.record_path(native)
+    sources = Erx::ProductionImage.sources_path(image)
     skip 'no production image of these sources: build one with the production_image suite' unless
-      File.file?(image) && File.file?(record) && File.read(record) == File.read(Erx::Runtime.record_path(OUTPUT))
+      File.file?(image) && File.file?(sources) && File.read(sources) == File.read(Erx::Runtime.record_path(OUTPUT))
 
     assert_empty Erx::Release.differences(@table, Erx::Release.file_table(archive: image, codec: @codec))
   end

@@ -113,11 +113,26 @@ class ProductionImageTest < Minitest::Test
     assert_raises(Erx::Error) { verify.call("erx: erts: 4 schedulers and 1 dirty CPU schedulers hold executor slots\n") }
   end
 
-  # The boot's last line is init's own refusal, and no other way of ending counts.
-  def test_the_last_line_must_be_inits_refusal_of_the_missing_boot_script
-    verify = checkpoint_verifier('erts-init-runs')
-    verify.call("Runtime terminating during boot ({'cannot get bootfile','/bin/start.boot'})\n")
-    assert_raises(Erx::Error) { verify.call("Runtime terminating during boot ({badmatch,1})\n") }
+  # The narrow manifest puts the system share on two CPUs, so a machine of four runs two schedulers:
+  # a count taken from the online CPUs alone says four and fails.
+  def test_the_narrow_image_counts_schedulers_from_the_share_and_the_online_cpus
+    run = Erx::ProductionImage::Run.allocate.tap { |instance| instance.instance_variable_set(:@root, ROOT) }
+    narrow = run.send(:narrow_manifest)
+    assert_match(/^share system\n(?:  .*\n)*?  cpuset 3$/, narrow)
+    assert_match(/^share users\n(?:  .*\n)*?  cpuset 15$/, narrow)
+    verify = checkpoint_verifier("erts-executors", manifest_source: narrow)
+    verify.call("erx: erts: 2 schedulers and 2 dirty CPU schedulers hold executor slots\n")
+    assert_raises(Erx::Error) { verify.call("erx: erts: 4 schedulers and 4 dirty CPU schedulers hold executor slots\n") }
+  end
+
+  # A stopped pet ends the machine about the pet deadline later: at once or much later is a fault.
+  def test_a_stopped_pet_must_end_the_machine_about_the_pet_deadline_later
+    run = Erx::ProductionImage::Run.allocate
+    proof = Erx::ProductionImage::Run::PET_PROOF.fetch("tcg")
+    at = ->(stopped, fired) { [{ 'name' => 'pet-stopped', 'elapsed_seconds' => stopped }, { 'name' => 'watchdog-fired', 'elapsed_seconds' => fired }] }
+    assert_nil run.send(:judge_missed_pet_time, at.call(100.0, 130.5), proof)
+    assert_raises(Erx::Error) { run.send(:judge_missed_pet_time, at.call(100.0, 101.0), proof) }
+    assert_raises(Erx::Error) { run.send(:judge_missed_pet_time, at.call(100.0, 160.0), proof) }
   end
 
   def test_the_watchdog_line_must_carry_what_the_command_line_says

@@ -244,7 +244,7 @@ it; git history is the record of completed work.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.
 * [Medium] console, `liberx/backend/fiasco/runtime_entry.c`: the native boot names `erx_debug_console`, which writes through the debug log and reads nothing, until the PL011's driver and `-erx console_driver` replace it.
-* [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does, and any object of ERTS may call it, though only `erx_watchdog`'s NIF should: no build check holds that.
+* [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
 * [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
@@ -260,7 +260,7 @@ it; git history is the record of completed work.
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
   can supply its 16 bytes at program start.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted
-  driver's cases (no attribute, no free slot, the slot given back at exit), `sysconf(_SC_NPROCESSORS_ONLN)` and `pthread_setname_np`.
+  driver's cases (no attribute, no free slot, the slot given back at exit).
 * [Low] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_process.c`, `beam/erl_driver.h`: what signals' deletion leaves unused: the break flag and `erts_do_break_handling`, `thr_create_sigmask`,
   the Darwin steal declarations, and the `ERTS_SYS_SUSPEND_SIGNAL` and `ERTS_HAVE_TRY_CATCH` blocks.
 * [Low] `otp/erts/emulator/sys/erxos/sys.c`: on hosted a write to a closed pipe now ends the process with `SIGPIPE`, and a crash dump has no time limit; a dump says it could not read a process's stack, where it did not try.

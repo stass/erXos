@@ -97,10 +97,16 @@ class ManifestSystemOnlyTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'service', source)
   end
 
-  def test_admitted_services_and_liveness_reach_the_encoded_manifest
-    view = @codec.open('manifest', admit(@source + SERVICE + "liveness @service.log\n").bytes)
+  def test_admitted_services_reach_the_encoded_manifest
+    view = @codec.open('manifest', admit(@source + SERVICE).bytes)
     assert_equal 1, view.count('services')
-    assert_equal 1, view.count('liveness')
+    assert_equal 0, view.count('liveness')
+  end
+
+  # The watchdog pets whether or not a service lives, so a record that says it watches one is refused.
+  def test_a_liveness_record_is_refused_because_nothing_reads_it
+    refused(Erx::Manifest::Unsupported, 'unsupported', 'liveness', @source + SERVICE + "liveness @service.log\n",
+            message: /watchdog/)
   end
 
   def test_the_structural_fixture_rules_do_not_change
@@ -139,10 +145,6 @@ class ManifestSystemOnlyTest < Minitest::Test
     facet = "facet f\n  grantee system\n  service @service.log\n  operations none\n  max_request 1\n" \
             "  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
     refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', @source + SERVICE + facet, message: /M5/)
-  end
-
-  def test_liveness_naming_no_service_is_refused
-    refused(Erx::Manifest::Invalid, 2, 'liveness', @source + "liveness @service.absent\n")
   end
 
   def test_an_introduction_is_refused_naming_its_milestone
@@ -300,13 +302,12 @@ class ManifestSystemOnlyTest < Minitest::Test
     assert_equal admit.bytes, admit(@source.sub('window data', 'window zzz')).bytes
   end
 
-  def test_services_sort_by_encoded_name_and_liveness_follows_them
+  def test_services_sort_by_encoded_name
     services = "service zeta\n  name \"alpha\"\n  server system\n  interface 1\n" \
-               "service alpha\n  name \"zeta\"\n  server system\n  interface 2\n" \
-               "liveness @service.zeta\n"
+               "service alpha\n  name \"zeta\"\n  server system\n  interface 2\n"
     view = @codec.open('manifest', admit(@source + services).bytes)
     assert_equal 1, view.fetch('services', 0).fetch('interface')
-    assert_equal 0, view.fetch('liveness', 0).fetch('service')
+    assert_equal 2, view.fetch('services', 1).fetch('interface')
   end
 
   def test_a_pci_function_is_refused

@@ -41,6 +41,16 @@ class RuntimeSeamTest < Minitest::Test
     assert_equal %w[poll], other.violations.map(&:name)
   end
 
+  # Only the NIF of erx_watchdog may pet: the real list names the pet in that object's own section.
+  def test_only_the_watchdog_nif_may_pet
+    imports = Seam.parse_imports(File.read(File.expand_path("../../otp/#{Seam::IMPORTS_FILE}", __dir__)))
+    pet = %w[erx_watchdog_pet]
+    allowed = Seam.check(undefined_by_object: { "x/erx_watchdog_nif.o" => pet }, inside: [], imports: imports)
+    assert_empty allowed.violations
+    other = Seam.check(undefined_by_object: { "x/erx_stdio_nif.o" => pet, "x/sys.o" => pet }, inside: [], imports: imports)
+    assert_equal %w[x/erx_stdio_nif.o x/sys.o], other.violations.map(&:object)
+  end
+
   def test_a_listed_name_nobody_imports_is_reported_so_the_list_can_shrink
     report = Seam.check(undefined_by_object: { 'sys.o' => %w[malloc] }, inside: [],
                         imports: { 'libc' => %w[malloc free] })

@@ -250,7 +250,7 @@ every `domain`, `partial_boot`, `window`, `service`, `facet`, `introduce`,
 `image` and `liveness` record. **`SystemOnly`** sits beside `EmptyNative` and
 shares its readers: a development manifest, full or partial boot, with the
 system domain alone. It accepts the records the system release's services need
-and refuses `domain`, `partial_boot`, `introduce` and `image` records with a
+and refuses `domain`, `partial_boot`, `introduce`, `image` and `liveness` records with a
 diagnostic naming the milestone that brings them; an `image` record and a
 `verified_image` window wait for M6's hash tree sizing. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
@@ -373,7 +373,7 @@ backend gives the same rows and refusals ([The hosted backend](#the-hosted-backe
 | the time page, `erx_time_set_wall` | ERTS's time, deadlines | service fills a page mapped read-only into every task: the scale of the architecture's user-readable counter, the wall offset; reading is local | correct layout | none |
 | `erx_entropy_read`, `erx_entropy_add` | ERTS's `crypto` seed, the host link | service: `rng.c`, from the counter and the manifest's seed; each reply holds 16 bytes and each request 32, so the stubs loop | `erx: entropy: quality: low, from the counter alone` in the banner; at most 256 bytes a call; `ERX_ENTROPY_CREDIT` `ERX_ENOTSUP`, since no source is trusted | in the kernel |
 | `erx_debug_log`, `erx_log_read` | `liberx`, ERTS's crash path, test tasks; the Erlang log reader | service: [The console](#the-console) | correct | in the kernel |
-| `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, `ERX_ENOTSUP` in a task, and hosted `ERX_OK` with no effect. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
+| `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, which alone links it (a task's ERTS fails to link, so no task can call it), and hosted `ERX_OK` with no effect. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
 | a thread's fault | a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | crash record, thread `unknown`; ends the task, or the machine for the root | to the fault gate, with the thread's identity |
 | IPC gates, messages, lanes, `erx_mem_copy`, `erx_mem_child`, paged objects, `erx_vcpu_*` | none | none | `ERX_ENOTSUP` | supported |
 
@@ -783,8 +783,8 @@ In deterministic mode the step is off and the machine page says so. A missed pet
 
 Its numbers and mode come from [the command line](#the-command-line), with the design's defaults of 1, 5 and 60 seconds. **The pet is the design's
 own**: `erx_watchdog`, a process at priority `max` of the release's `kernel`, started among `kernel`'s first children, right after `on_load` lets a module with a NIF load, calling the watchdog NIF from a
-normal scheduler every half second, shorter than any `P` or `D` the command line can set, since those count in seconds. Its liveness list is the manifest's `liveness` records, which may be empty, so nothing is special about a release with
-no services: the first pet follows the first period. Until then the boot races `B` alone, from the watchdog thread's start, which covers ERTS's start,
+normal scheduler every half second, shorter than any `P` or `D` the command line can set, since those count in seconds. It pets unconditionally and reads no `liveness` record, which `SystemOnly` refuses until it does, so a pet says only
+that schedulers run and timers fire, and a release with no services is no special case: the first pet follows the first period. Until then the boot races `B` alone, from the watchdog thread's start, which covers ERTS's start,
 `init` and `kernel`'s start up to that process. A hang in any of them ends the machine with a crash record at `B`, as it should.
 
 The root itself never pets on ERTS's behalf: a pet must mean that schedulers run and timers fire. The harness gives QEMU `-append` from one table: TCG

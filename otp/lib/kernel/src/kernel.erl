@@ -17,9 +17,10 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: kernel_sup starts erx_watchdog right after on_load.
+%%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: kernel_sup starts erx_watchdog right after on_load.
 
 -module(kernel).
 -moduledoc false.

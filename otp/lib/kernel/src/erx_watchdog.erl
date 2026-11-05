@@ -6,6 +6,11 @@
 %% a pet says that schedulers run and timers fire. The root never pets on its behalf.
 
 -module(erx_watchdog).
+-moduledoc """
+Pets the machine's watchdog every half second from a normal scheduler, so a pet
+says that schedulers run and timers fire. The process is registered as
+`erx_watchdog` and ignores every message sent to it.
+""".
 
 -export([start_link/0]).
 -export([init/0]).
@@ -16,6 +21,9 @@
 %% Shorter than any period the kernel command line can set, which counts in seconds.
 -define(PET_MILLISECONDS, 500).
 
+-doc """
+Start the watchdog process, registered as `erx_watchdog`, and return once it runs.
+""".
 -spec start_link() -> {ok, pid()}.
 start_link() ->
     proc_lib:start_link(?MODULE, init, []).
@@ -24,6 +32,7 @@ start_link() ->
 on_load() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
 
+-doc false.
 -spec init() -> no_return().
 init() ->
     process_flag(priority, max),
@@ -33,8 +42,15 @@ init() ->
 
 loop() ->
     ok = pet_nif(),
+    wait_until(erlang:monotonic_time(millisecond) + ?PET_MILLISECONDS).
+
+%% A message to the registered name is discarded, so a stray sender cannot grow the
+%% mailbox of a process that never otherwise reads it, and cannot bring a pet earlier.
+wait_until(Deadline) ->
+    Remaining = max(0, Deadline - erlang:monotonic_time(millisecond)),
     receive
-    after ?PET_MILLISECONDS -> loop()
+        _Stray -> wait_until(Deadline)
+    after Remaining -> loop()
     end.
 
 pet_nif() ->

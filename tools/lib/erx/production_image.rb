@@ -60,12 +60,17 @@ module Erx
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
     end
 
+    # Beside an image, the digest of the sources it was built from: what a test compares
+    # to know the image is of the tree it checks, whatever else rebuilt the runtime since.
+    def self.sources_path(archive) = "#{archive}.sources"
+
     # Packs the image from Fiasco's last build into a directory that must be clean, so a
     # stale file cannot stand in for this build's.
-    def build(directory:)
+    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
+      sources = Runtime.source_digest(root: @root)
       erts = @runtime.build
       archives = [*erts.otp_archives, erts.libc, @fiasco.user_library('libgcc.a')]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
@@ -73,9 +78,10 @@ module Erx
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
+      File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
-      report = pack(entries: [*entries(root_task, kernel, sigma0), *release], root_task: root_task,
-                    receipts: [kernel, sigma0, *ReleaseFiles.inputs_of(release)], erts: erts, output: archive)
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release], root_task: root_task, manifest_source: manifest_source,
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release)], erts: erts, output: archive)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -140,8 +146,14 @@ module Erx
       # The watchdog's numbers for each accelerator's proof boot: a boot deadline it beats, and
       # a pet deadline. TCG's working line gives 600 seconds, which no test waits out.
       PET_PROOF = { 'tcg' => { period: 1, pet: 30, boot: 120 }, 'hvf' => { period: 1, pet: 5, boot: 60 } }.freeze
-      # How far past the boot deadline the proof boot stays up.
+      # How far past the boot deadline the proof boot stays up, and how long past the pet
+      # deadline and the period the stopped pet's crash record may take to appear.
       PET_MARGIN_SECONDS = 5
+      # The crash record may come this much before the pet deadline D: the last pet is up to a
+      # pet interval older than the suspension, and the harness reads the serial log on a poll.
+      PET_EARLY_SECONDS = 2
+      # The system share's cpuset in the narrow image: CPUs 0 and 1.
+      NARROW_CPUSET = 3
       # erx_console's first line, which only a release that started `kernel` writes.
       SLOGAN = { name: 'release-slogan', pattern: %r{\AErlang/OTP 29 }n, seconds: 240 }.freeze
       # kernel_sup's children at a boot with no carrier, in which_children's order: the last
@@ -151,7 +163,7 @@ module Erx
       # From the banner to -eval's first output, which loads the evaluator: long under TCG.
       EVAL_SECONDS = 120
       # An expression for init's -eval: one word, since the kernel command line splits on spaces.
-      CHILDREN = 'erlang:display([element(1,C)||C<-supervisor:which_children(kernel_sup)])'
+      CHILDREN_EXPRESSION = 'erlang:display([element(1,C)||C<-supervisor:which_children(kernel_sup)])'
       # The suspender must outlive the suspension, which ends when it does.
       STOP_PET = 'erlang:suspend_process(whereis(erx_watchdog)),erlang:display(pet_stopped),timer:sleep(infinity).'
 
@@ -175,6 +187,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         check_device_paths
         built = image(fiasco)
+        narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: narrow_manifest) : nil
         accels.product(cpus).to_h do |accel, count|
           points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
           full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
@@ -185,6 +198,7 @@ module Erx
                                       points: Run.command_line_refusal_checkpoints)
           end
           prove_pet(accel, count, built) if count == cpus.first
+          boot_narrow(accel, count, narrow) if narrow && count == cpus.max
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -196,8 +210,8 @@ module Erx
       # one per CPU of the system's share on this machine. Erlang's init then boots the
       # release, `kernel` starts, and erx_console's two banners, written through its stand-in
       # driver, prove the release ran that far. The prompt ends no line, so no point names it.
-      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0)
-        source = File.read(File.join(root, MANIFEST))
+      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)))
+        source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
         arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
@@ -253,13 +267,29 @@ module Erx
         proof = PET_PROOF.fetch(accel)
         seconds = proof.fetch(:boot) + PET_MARGIN_SECONDS
         line = "erx.watchdog=#{proof.values_at(:period, :pet, :boot).join(',')} erx.arg=-eval"
-        expression = "#{CHILDREN},timer:sleep(#{seconds * 1000}),erlang:display(past_the_deadlines)."
+        expression = "#{CHILDREN_EXPRESSION},timer:sleep(#{seconds * 1000}),erlang:display(past_the_deadlines)."
         boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.survival_checkpoints(seconds: seconds),
                                   command_line: "#{line} erx.arg=#{expression}")
+        window = proof.fetch(:pet) + proof.fetch(:period) + PET_MARGIN_SECONDS
         stopped = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
                                             points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
-                                                     { name: 'pet-stopped', pattern: /\A(?:1> )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze])
+                                                     { name: 'pet-stopped', pattern: /\A(?:1> )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
+                                                     { name: 'watchdog-fired', pattern: /#{Regexp.escape(CrashFrame::BEGIN_MARKER)}/n, seconds: window }.freeze])
         judge_missed_pet(File.binread(stopped.fetch('serial_log')))
+        judge_missed_pet_time(stopped.fetch('checkpoints'), proof)
+      end
+
+      # The record comes about the pet deadline D after the suspension, not at once and not
+      # long after: the first would mean a watchdog that is not waiting for pets, the second
+      # one that needs the machine's help to end it.
+      def judge_missed_pet_time(checkpoints, proof)
+        at = ->(name) { checkpoints.find { |point| point.fetch('name') == name }.fetch('elapsed_seconds') }
+        waited = at.call('watchdog-fired') - at.call('pet-stopped')
+        earliest = proof.fetch(:pet) - PET_EARLY_SECONDS
+        latest = proof.fetch(:pet) + proof.fetch(:period) + PET_MARGIN_SECONDS
+        return if waited.between?(earliest, latest)
+
+        raise Error, "a stopped pet ended the machine #{waited.round(1)} seconds after it stopped, not within #{earliest} to #{latest}"
       end
 
       def judge_missed_pet(serial)
@@ -275,10 +305,25 @@ module Erx
             .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end, command_line: command_line)
       end
 
-      def image(fiasco)
-        directory = File.join(@root, 'build/production-image/boot')
+      def image(fiasco, directory: 'build/production-image/boot', manifest_source: nil)
+        directory = File.join(@root, directory)
         FileUtils.remove_entry(directory) if File.exist?(directory)
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco).build(directory: directory)
+        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+                       .build(directory: directory, **{ manifest_source: manifest_source }.compact)
+      end
+
+      # The manifest with the system share on the machine's first two CPUs only. A boot of it
+      # on a larger machine tells a scheduler count taken from the share and the online CPUs
+      # together from one taken from the online CPUs alone, which the manifest's own cpuset,
+      # every CPU the runs have, cannot.
+      def narrow_manifest
+        File.read(File.join(@root, MANIFEST)).sub(/^(share system\n(?:  .*\n)*?  cpuset )\d+$/) { "#{Regexp.last_match(1)}#{NARROW_CPUSET}" }
+      end
+
+      def boot_narrow(accel, count, built)
+        points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count,
+                                        manifest_source: narrow_manifest)
+        boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
       end
 
       # QEMU writes its own device tree and exits; two serial ports, since the second
@@ -312,10 +357,10 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, receipts:, erts:, output:)
+    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
-      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, receipts), external: external(erts), runner: @runner,
+      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
                                       imports: IMPORTS, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
@@ -323,13 +368,13 @@ module Erx
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
                  artifacts: { 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } },
-                 manifest_source: File.binread(File.join(@root, MANIFEST)), output: output)
+                 manifest_source: manifest_source, output: output)
     end
 
-    def catalog(root_task, receipts)
+    def catalog(root_task, inputs)
       fiasco = [@fiasco.kernel_path, @fiasco.sigma0_path, @fiasco.image_path, File.join(@root, 'build/fiasco/receipt.json'),
                 File.join(@root, 'build/fiasco/provenance.json'), File.join(@root, 'tools/lib/erx/fiasco.rb')]
-      BuildInputs.pack(root: @root, paths: [*root_task.fetch(:inputs), *receipts, *fiasco])
+      BuildInputs.pack(root: @root, paths: [*root_task.fetch(:inputs), *inputs, *fiasco])
     end
 
     # A receipt that says the kernel or sigma0 comes from Fiasco's audited build.

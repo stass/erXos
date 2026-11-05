@@ -757,7 +757,8 @@ module Erx
         'domain' => 'configured domains arrive at M5',
         'partial_boot' => 'child domains of a partial boot arrive at M5',
         'introduce' => 'introductions connect configured domains, which arrive at M5',
-        'image' => 'a verified image needs the hash tree sizing that M6 brings'
+        'image' => 'a verified image needs the hash tree sizing that M6 brings',
+        'liveness' => 'the system domain\'s watchdog pets without reading liveness records, which a later milestone brings'
       }.freeze
 
       private
