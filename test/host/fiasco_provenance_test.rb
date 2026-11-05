@@ -361,6 +361,42 @@ class FiascoProvenanceTest < Minitest::Test
     end
   end
 
+  # One audit asks an archive for all its members, and listing it once is enough; the
+  # listing still refuses a member it does not hold or holds twice, and other bytes are
+  # listed again.
+  def test_an_audit_lists_each_archive_once
+    Dir.mktmpdir do |root|
+      root = File.realpath(root)
+      build = File.join(root, 'build/fiasco')
+      FileUtils.mkdir_p(build)
+      archive = File.join(build, 'lib.a')
+      File.binwrite(archive, "!<arch>\nfixture")
+      listing = File.join(build, 'list.log')
+      File.write(listing, "one.o\ntwo.o\ntwo.o\n")
+      member = File.join(build, 'member.log')
+      File.write(member, 'member bytes')
+      commands = []
+      runner = Object.new
+      runner.define_singleton_method(:run) do |argv, **_options|
+        commands << argv[1]
+        { 'log' => argv[1] == 't' ? listing : member }
+      end
+      auditor = Erx::FiascoProvenance.new(root: root, runner: runner)
+      auditor.instance_variable_set(:@archive_program, 'ar')
+      hash = ->(name) { auditor.send(:archive_member_hash, archive, member: name) }
+      assert_equal Digest::SHA256.hexdigest('member bytes'), hash.call('one.o')
+      hash.call('one.o')
+      assert_equal %w[t p p], commands
+      assert_raises(Erx::Error) { hash.call('absent.o') }
+      assert_raises(Erx::Error) { hash.call('two.o') }
+      assert_equal %w[t p p], commands
+      File.binwrite(archive, "!<arch>\nother bytes")
+      auditor.instance_variable_set(:@bytes, {})
+      hash.call('one.o')
+      assert_equal %w[t p p t p], commands
+    end
+  end
+
   def command_record(dependencies)
     "savedcmd_src/root.o := gcc -c root.c -o src/root.o\n" \
       "source_src/root.o := /source/root.c\n" \

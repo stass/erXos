@@ -17,11 +17,17 @@ module Erx
         raise Error, 'invalid bounded file read'
       end
       File.open(path, File::RDONLY | File::NONBLOCK) do |input|
-        unless input.stat.file? && input.size <= maximum
+        stat = input.stat
+        unless stat.file? && stat.size <= maximum
           raise Error, "input is not a bounded regular file: #{path}"
         end
         input.binmode
-        bytes = input.read(maximum + 1) || ''.b
+        # A read allocates what it asks for, so it asks for what the file held when checked
+        # and one byte more, not for the bound: 20,000 small files would each cost a 64 MiB
+        # allocation. Getting that extra byte means the file grew, so read on to the bound.
+        past_size = stat.size + 1
+        bytes = input.read(past_size) || ''.b
+        bytes += input.read(maximum + 1 - past_size).to_s if bytes.bytesize == past_size
         raise Error, "input exceeds its byte bound: #{path}" if bytes.bytesize > maximum
         bytes.freeze
       end

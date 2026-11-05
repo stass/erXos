@@ -15,7 +15,9 @@ module Erx
     MAX_BYTES = 64 * 1024 * 1024
     module_function
 
-    def sha256(bytes:, member:, runner:, program:, owner_root:, directory:, name:, environment: nil)
+    # listings keeps member names by program and archive bytes, which decide them, for a
+    # caller that asks for many members of one archive.
+    def sha256(bytes:, member:, runner:, program:, owner_root:, directory:, name:, environment: nil, listings: {})
       unless bytes.is_a?(String) && bytes.bytesize <= MAX_BYTES && bytes.start_with?("!<arch>\n".b)
         raise Error, 'source checking requires a self-contained normal archive'
       end
@@ -29,11 +31,13 @@ module Erx
       Dir.mktmpdir('.archive-member-', directory) do |temporary|
         snapshot = File.join(temporary, 'input.a')
         File.binwrite(snapshot, bytes)
-        listing = runner.run([program, 't', '--', snapshot], name: name + '-list', deadline: 30,
-          env: environment, output_limit: MAX_BYTES)
-        # Reaching the hard cap is a refusal even if a tool ignores a failed
-        # write and exits successfully; a partial listing cannot prove uniqueness.
-        names = BoundedFile.read(listing.fetch('log'), maximum: MAX_BYTES - 1).lines.map(&:chomp)
+        names = listings[[program, bytes]] ||= begin
+          listing = runner.run([program, 't', '--', snapshot], name: name + '-list', deadline: 30,
+            env: environment, output_limit: MAX_BYTES)
+          # Reaching the hard cap is a refusal even if a tool ignores a failed
+          # write and exits successfully; a partial listing cannot prove uniqueness.
+          BoundedFile.read(listing.fetch('log'), maximum: MAX_BYTES - 1).lines.map(&:chomp)
+        end
         count = names.count(member)
         raise Error, "ambiguous archive member name: #{member}" if count > 1
         raise Error, "archive member is absent: #{member}" if count.zero?

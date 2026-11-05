@@ -178,14 +178,16 @@ module Erx
     def terminate_group(pid)
       signal_group('TERM', pid)
       # Reap only our direct child. Descendants are killed by their group id.
-      # A bounded grace period lets log writers flush before SIGKILL.
+      # A bounded grace period lets log writers flush before SIGKILL, and it ends
+      # as soon as no member is left to flush.
       stop_at = monotonic + 0.25
-      until monotonic >= stop_at
+      loop do
         begin
           Process.waitpid(pid, Process::WNOHANG)
         rescue Errno::ECHILD
           # The main loop may already have reaped it.
         end
+        break if group_gone?(pid) || monotonic >= stop_at
         sleep(POLL_SECONDS)
       end
       signal_group('KILL', pid)
@@ -204,6 +206,15 @@ module Erx
       Process.kill(signal, -pid)
     rescue Errno::ESRCH, Errno::EPERM
       nil
+    end
+
+    # Whether no member can still flush or be signalled, by signal_group's reading of
+    # the errors. Linux counts an unreaped child as a member, so the caller reaps first.
+    def group_gone?(pid)
+      Process.kill(0, -pid)
+      false
+    rescue Errno::ESRCH, Errno::EPERM
+      true
     end
   end
 end

@@ -155,4 +155,76 @@ class MetadataFilesTest < Minitest::Test
     end
     assert_raises(Erx::Error) { Erx::BoundedFile.read("bad\0path", maximum: 3) }
   end
+
+  # Records what a file read asks for, and runs a test's action before each read and
+  # after each stat.
+  module ReadWatch
+    class << self
+      attr_accessor :lengths, :before_read, :after_stat
+    end
+
+    def read(*arguments)
+      ReadWatch.lengths&.push(arguments.first)
+      ReadWatch.before_read&.call
+      super
+    end
+
+    def stat
+      super.tap { ReadWatch.after_stat&.call }
+    end
+  end
+  File.prepend(ReadWatch)
+
+  def watching_reads(before_read: nil, after_stat: nil)
+    ReadWatch.lengths = []
+    ReadWatch.before_read = before_read
+    ReadWatch.after_stat = after_stat
+    yield
+  ensure
+    ReadWatch.lengths = nil
+    ReadWatch.before_read = nil
+    ReadWatch.after_stat = nil
+  end
+
+  # Ruby allocates what a read asks for before reading, so asking for the bound would
+  # make every small file cost a 64 MiB allocation.
+  def test_bounded_read_asks_for_what_the_file_holds_and_not_its_bound
+    path = File.join(@root, 'small')
+    File.binwrite(path, 'small')
+    watching_reads do
+      assert_equal 'small', Erx::BoundedFile.read(path, maximum: 64 * 1024 * 1024)
+      assert_equal [6], ReadWatch.lengths
+    end
+  end
+
+  # A file's size is taken once: a file that grows far past the bound after that check
+  # changes neither what the read asks for nor the typed refusal.
+  def test_bounded_read_asks_for_the_size_it_checked
+    path = File.join(@root, 'huge')
+    File.binwrite(path, 'ab')
+    grow = lambda do
+      ReadWatch.after_stat = nil
+      File.binwrite(path, 'x' * 1000, mode: 'ab')
+    end
+    watching_reads(after_stat: grow) do
+      assert_raises(Erx::Error) { Erx::BoundedFile.read(path, maximum: 6) }
+      assert_equal [3, 4], ReadWatch.lengths
+    end
+  end
+
+  def test_bounded_read_follows_a_file_that_grows_and_still_enforces_the_bound
+    path = File.join(@root, 'growing')
+    File.binwrite(path, 'ab')
+    grow = lambda do
+      ReadWatch.before_read = nil
+      File.binwrite(path, 'cdef', mode: 'ab')
+    end
+    watching_reads(before_read: grow) { assert_equal 'abcdef', Erx::BoundedFile.read(path, maximum: 6) }
+    File.binwrite(path, 'ab')
+    grow = lambda do
+      ReadWatch.before_read = nil
+      File.binwrite(path, 'cdefg', mode: 'ab')
+    end
+    watching_reads(before_read: grow) { assert_raises(Erx::Error) { Erx::BoundedFile.read(path, maximum: 6) } }
+  end
 end

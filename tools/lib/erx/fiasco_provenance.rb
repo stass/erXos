@@ -45,6 +45,7 @@ module Erx
       @import_scopes = {}
       @hashes = {}
       @bytes = {}
+      @archive_listings = {}
       @snapshot_bytes = 0
       @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
     end
@@ -58,6 +59,7 @@ module Erx
       @import_scopes = {}
       @hashes = {}
       @bytes = {}
+      @archive_listings = {}
       @snapshot_bytes = 0
       @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
       load_build_inputs
@@ -81,7 +83,7 @@ module Erx
         @image_perl = programs.fetch('perl')
         image = audit_image(executables)
         @bytes.each do |path, snapshot|
-          unless Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA)) == Digest::SHA256.hexdigest(snapshot)
+          unless BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA) == snapshot
             raise Error, "Fiasco audit input changed: #{label(path)}"
           end
         end
@@ -447,7 +449,8 @@ module Erx
 
     def archive_member_hash(path, member:)
       ArchiveMember.sha256(bytes: read(path), member: member, runner: @runner, program: @archive_program,
-        owner_root: @root, directory: @build, name: 'fiasco-audit-member', environment: command_environment)
+        owner_root: @root, directory: @build, name: 'fiasco-audit-member', environment: command_environment,
+        listings: @archive_listings)
     end
 
     def audit_object(path, ancestry: [])

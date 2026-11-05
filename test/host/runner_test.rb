@@ -133,6 +133,52 @@ class RunnerTest < Minitest::Test
     Process.wait(pid) if pid
   end
 
+  # Counts the runner's waits, and performs each one.
+  def counting_waits(runner)
+    waits = []
+    runner.define_singleton_method(:sleep) do |seconds|
+      waits << seconds
+      Kernel.sleep(seconds)
+    end
+    waits
+  end
+
+  # Every command ends here, and a finished one has nothing left to flush: waiting out
+  # the grace period would cost each short child 0.25 s.
+  def test_a_finished_command_does_not_wait_out_the_grace_period
+    waits = counting_waits(@runner)
+    pid = Process.spawn(RbConfig.ruby, '-e', 'exit!', pgroup: true)
+    Process.wait(pid)
+    @runner.send(:terminate_group, pid)
+    assert_empty waits
+  end
+
+  def test_a_member_that_ignores_term_gets_the_grace_period_and_then_a_kill
+    waits = counting_waits(@runner)
+    Dir.mktmpdir do |directory|
+      ready = File.join(directory, 'ready')
+      script = %(trap "" TERM; : > "$0"; while :; do /bin/sleep 1; done)
+      pid = Process.spawn('/bin/sh', '-c', script, ready, pgroup: true)
+      begin
+        wait_until('the member to start') { File.exist?(ready) }
+        @runner.send(:terminate_group, pid)
+        refute_empty waits
+        # terminate_group reaps only its child, so a killed grandchild ends a moment later.
+        wait_until('the group to end') { @runner.send(:group_gone?, pid) }
+      ensure
+        @runner.send(:signal_group, 'KILL', pid)
+      end
+    end
+  end
+
+  def wait_until(what)
+    stop_at = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+    until yield
+      flunk("timed out waiting for #{what}") if Process.clock_gettime(Process::CLOCK_MONOTONIC) > stop_at
+      Kernel.sleep(0.01)
+    end
+  end
+
   def test_callback_failure_cleans_up
     assert_raises(RuntimeError) do
       ruby('sleep 20', success: ->(_path) { raise 'fixture failure' })
