@@ -213,7 +213,7 @@ system shell, a process of the system domain; in a release build, into
 the shell of a session that runs in their own domain after a login, from
 which the inspector is reached through the session's inspect facet. The
 command shell runs in the session's domain beside its terminal relay and
-command server, and serves the session's programs their `/bin`, `/tmp`
+command server, and serves the session's programs their `/bin`
 and other local files through the session's export; `erx_procfs` and
 `erx_code`, with each principal's hot store, sit in the system domain
 beside the inspector. `erx:i([processes, Pid])` asks `erx_inspector`, which

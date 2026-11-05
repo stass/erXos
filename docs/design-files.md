@@ -24,8 +24,9 @@ host's side of 9P2000.L in [design-live.md](design-live.md).
 Decisions every reader of this document needs:
 
 * **A namespace is per domain and private.** It maps mount points to
-  local providers (the release file system, EROFS images, a RAM file
-  system) and to grants at file servers, named by pid. The domain service
+  local providers (the release file system and EROFS images, both
+  read-only) and to grants at file servers, named by pid, the domain's
+  own RAM file server at `/tmp` among them. The domain service
   builds it at creation from the domain's grants; the domain may bind,
   mount a server it holds and unmount, none of which adds authority. A
   native program's namespace is a table its handler keeps for it, of fids
@@ -96,9 +97,10 @@ Decisions every reader of this document needs:
 
 ## Context
 
-A runtime serves three local file systems through `prim_file` (its
-release slice, EROFS images and a RAM file system) and reaches storage as
-a service like any other ([design-runtime.md](design-runtime.md#files)).
+A runtime serves two read-only local file systems through `prim_file`
+(its release slice and EROFS images), runs its own RAM file server for
+`/tmp` ([design-tmp.md](design-tmp.md)), and reaches storage as a
+service like any other ([design-runtime.md](design-runtime.md#files)).
 Three needs go beyond that: native programs, toybox's applets among them,
 need POSIX files over storage and over a session's own files
 ([design-programs.md](design-programs.md)); the live machine's state
@@ -206,8 +208,9 @@ Non-goals:
   |   erx_file_remote: walk, lopen,    |   terms to    | /proc grant for D        |     (Erlang,
   |     read, clunk, each to an alias  |<--------------|  (erx_fs over the        |      erx_fs)
   |                                    |  replies to   |   inspector, D's scope)  |
-  | local mounts: /, /tmp in the NIF;  |  the alias    +--------------------------+
-  |   EROFS in erx_erofs (Erlang)      |
+  | local mounts: / in the NIF, EROFS  |  the alias    +--------------------------+
+  |   in erx_erofs; /tmp a grant of D's|
+  |   own erx_ramfs server (design-tmp)|
   +------------------------------------+
 
   session domain (ERTS)                                 storage service
@@ -234,8 +237,8 @@ A path's journey:
 2. `erx_ns_resolve` finds the longest mount point that prefixes it,
    component by component, and returns the mount and the remaining names.
 3. A local provider serves the names at once, in the calling process: the
-   release file system and the RAM file system in `prim_file`'s NIF, an
-   EROFS image in the EROFS reader, in Erlang.
+   release file system in `prim_file`'s NIF, an EROFS image in the EROFS
+   reader, in Erlang.
 4. For a grant, the client walks the names from a fid on the grant's root
    in walks of at most 16 names, opens the result with `lopen`, and reads
    or writes it; each request is a frame on the client's connection to the
@@ -278,7 +281,6 @@ clients](#native-clients-liberxs-file-client)).
 typedef enum erx_ns_kind {
 	ERX_NS_RELEASE,		/* the domain's release slice, read-only */
 	ERX_NS_EROFS,		/* an EROFS image the domain holds a window on */
-	ERX_NS_RAM,		/* the domain's RAM file system */
 	ERX_NS_SERVER		/* a grant at a file server, by pid */
 } erx_ns_kind_t;
 
@@ -740,8 +742,8 @@ never learns another's mounts.
 ### Building, binding and mounting
 
 **Building.** The domain service builds a domain's namespace from its
-specification: `/` is the release slice, `/tmp` the RAM file system, an
-EROFS image mounts where its release names it, and each entry of the
+specification: `/` is the release slice, an EROFS image mounts where its
+release names it, and each entry of the
 specification's `files` map mounts a facet the domain is granted, such as
 `/data` (its principal's directory on the data partition, read-write),
 `/proc` (the inspector's tree in the domain's inspect scope) or `/dev`
@@ -750,7 +752,9 @@ entries follow from the release, and the facets arrive with the domain's
 other facets, each a grant the server made for the domain when the system
 domain introduced the two
 ([design-system.md](design-system.md#creating-a-domain)); the runtime
-mounts them before its release's applications start. A facet that serves
+mounts them before its release's applications start. `/tmp` is the grant
+of the domain's own RAM file server, which the runtime starts and mounts
+itself ([design-tmp.md](design-tmp.md#starting-and-mounting)). A facet that serves
 a tree carries its tree's name and its grant's rights, `ro`, `rw` or
 `rx`, so a tree whose programs a domain may run, such as a principal's
 directory of executables, comes only from a facet granted with `rx`, and
@@ -1126,7 +1130,7 @@ object ([design-programs.md](design-programs.md#file-objects)).
 ### Erlang clients: `prim_file` and `erx_file_remote`
 
 `prim_file`'s NIF resolves every path with `erx_ns_resolve`. The release
-file system and the RAM file system are served in the NIF. For an EROFS
+file system is served in the NIF. For an EROFS
 mount the NIF returns `{erofs, Image, Names}`, and the operation runs in
 the calling process through `erx_erofs`, the EROFS reader, which returns
 OTP's file descriptor record with itself as the module for an open file
@@ -1157,6 +1161,18 @@ calling process through `erx_file_remote`:
 
 A rename between two mounts returns `{error, exdev}`, as between two Unix
 file systems, without asking either server.
+
+`erx_file_remote` answers as stock `prim_file` answers on a Unix host,
+whose platform layer adjusts some of the system's errors
+(`unix_prim_file.c`): `del_dir` and `rename` turn a server's `ENOTEMPTY`
+into `eexist`; `delete` turns `EISDIR` into `eperm`; `del_dir` of the
+working directory answers `einval` without asking, which is also how
+`del_dir(".")` answers, since `.` is resolved on the text; `del_dir`,
+`delete` and `rename` of a mount point answer `ebusy` without asking, as
+Linux answers for one, since no parent fid exists to send them to; and
+opening a directory without `[directory]` answers `eisdir`. A server
+therefore answers with Linux's own errors, as any 9P2000.L server does,
+and the one translation lives here.
 
 A session's handler is an Erlang client like any other: it resolves its
 program's path through the program's namespace with the NIF and acts
@@ -1316,7 +1332,7 @@ Interaction with other subsystems:
 | Domains | requests are frames on the connection between client and server, to a grant pid the server exported to the client, each to a fresh alias; servers in the system domain stand behind facets ([design-domains.md](design-domains.md#facets)) |
 | System | the domain service builds namespaces and the facets they mount ([design-system.md](design-system.md#creating-a-domain)) |
 | Kernel | a session's shared object for a mapped file is an ordinary shared memory object of the session's budget, which the session grows, fills, maps into its programs' images and writes back from the pages `erx_mem_dirty` reports; its faults resolve from its own pages ([design-kernel.md](design-kernel.md#virtual-memory)) |
-| Runtime | `prim_file` resolves through the namespace; the release and RAM providers stay in the NIF, and the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)) |
+| Runtime | `prim_file` resolves through the namespace; the release provider stays in the NIF, the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)), and each domain runs its own RAM file server for `/tmp` ([design-tmp.md](design-tmp.md)) |
 | Programs | a handler keeps each program's namespace, fids and descriptions, relays its requests and moves bytes through the data area; the session's mappers serve its programs' shared mappings ([design-programs.md](design-programs.md#the-handler)) |
 | Live machine | `/proc` and the session's export are `erx_fs` servers ([design-live.md](design-live.md#the-proc-tree)); the host link's bridge and the host-tree domain carry 9P2000.L to and from the host ([design-live.md](design-live.md#files-between-the-host-and-the-machine)) |
 | Storage | the storage services and the FAT server, in Erlang, serve the data partition's and FAT partitions' files through `erx_fs`, behind each principal's facet ([design-storage.md](design-storage.md)) |

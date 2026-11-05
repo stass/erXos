@@ -173,6 +173,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * [Low] `otp/erts/emulator/sys/erxos/erx_event.c`: `deliver` allocates one short-lived environment per delivery to a process
   sink, on top of the message. Settled by the same bench at an interrupt rate a driver sees, with and without one environment
   kept per entry.
+* **`/tmp`'s hops per operation** (`erx_ramfs`, [design-tmp.md](design-tmp.md#where-tmp-runs)): every
+  `/tmp` operation is the NIF's resolve plus about two to four local message round trips (the grant, the file's
+  owner and a read helper, then the tree process), where a C provider in the NIF would cost one move to a dirty
+  scheduler; a Common Test run writes its logs a line at a time. Measure: a `tools/erx bench` workload of
+  10,000 line-sized `file:write/2` calls and 1,000 `file:read_file/1` calls of 4 KiB files on `/tmp`, under TCG
+  and HVF, against the same calls on stock OTP 29.1.2 on the host. Fixes on the table, cheapest first: reads
+  without a helper for a module that declares them immediate; the grant calling the tree directly for a file
+  with one open; shape (b) of the design, the same core reached by one round trip.
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 
 * **The production image's `NOTICES`** (`tools/lib/erx/production_image.rb`, Phase 1 stopgap): `NOTICES` is 12.6 MiB of a 13.6 MiB image, never released and touched page by page at boot. Measure: the root's boot time with and without those pages.

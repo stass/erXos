@@ -1541,9 +1541,11 @@ a nanosecond value.
 through the domain's namespace with `erx_ns_resolve`; a path on a file
 server goes to `prim_file`'s Erlang side, which speaks the file
 protocol, 9P2000.L's operations carried as Erlang terms, in the calling
-process over the domain's connection to the server
+process over the domain's connection to the server, or by local messages
+to a server in the domain itself
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)).
-It has three local providers:
+It has two local providers, both read-only, and every domain runs one file
+server of its own:
 
 * **the release file system**, read-only: the files of the domain's release
   slice, listed by the boot image's index and mounted at `/`. Reading a
@@ -1559,12 +1561,15 @@ It has three local providers:
   image's dm-verity tree, whose root the boot image carries, and returns
   only blocks that matched; the reader parses no block the primitive did
   not return ([design-storage.md](design-storage.md#data-model));
-* **a RAM file system** per domain at `/tmp`, in the domain's memory and
+* **a RAM file system** per domain at `/tmp`, an `erx_fs` server,
+  `erx_ramfs`, that runs in the domain and is mounted as a grant like any
+  other ([design-tmp.md](design-tmp.md)): in the domain's memory and
   charged to its budget, with a cap of its own, the spec's `tmp` (an
   eighth of `memory` by default), beyond which a write fails with
-  `{error, enospc}`, so filling it, through the session's export or
+  `{error, enospc}`, so filling it, by the session's programs or
   directly, never drives the runtime into a fatal allocation failure. A
-  session's programs reach its `/tmp` through the session's export, and
+  session's programs reach its `/tmp` through fids on the session's grant
+  of it, as they reach any grant, and
   their shared mappings of its files are the session's, as of any file:
   the session keeps one memory object per file its programs map shared,
   fills it with ordinary reads and writes it back with ordinary writes
@@ -1573,7 +1578,7 @@ It has three local providers:
 Opening, reading, positioned reads, seeking, file information, directory
 listing and the working directory work on all three; writing, renaming,
 deleting and creating directories work on the RAM file system and return
-`{error, erofs}` on the read-only ones; anything else returns
+`{error, erofs}` on the read-only local providers; anything else returns
 `{error, enotsup}`. Paths are UTF-8 with POSIX syntax, at most 4,096 bytes,
 resolved component by component with `.` and `..` handled lexically:
 `f/.` and `f/` are `f` even where `f` is a file, and `missing/../x` is `x`, where
@@ -1623,8 +1628,8 @@ and two opens that race hash twice.
 
 Two seams keep the rest of the system out of this. New kinds of file are new
 rows of the namespace, and every path already passes `erx_ns_resolve`: a
-domain's namespace may have the single row `/`, and `/tmp`, an EROFS image or a
-file server add rows without moving a caller of `prim_file`. How the index is
+domain's namespace may have the single row `/`, and an EROFS image or a
+file server, `/tmp`'s among them, add rows without moving a caller of `prim_file`. How the index is
 read is `erx_release_entry`, a `liberx` call: over `erx_pack_entry_at` and
 `erx_pack_path_at` on Phase 1's backends, hosted included
 ([design-stopgap.md](design-stopgap.md#boot-information)), and over
@@ -2794,7 +2799,7 @@ across them is the conformance suite.
 | An encoding error in the translator | the repaired error path | the translation discarded | the loader | `{error, badfile}`; a log line naming the module |
 | A write to the release file system or an EROFS image | `erx_prim_file` | nothing | none needed | `{error, erofs}` |
 | An EROFS block fails its hash check | the hash-checking primitive under the EROFS reader | the mount, read-only | none needed | `{error, eio}` for the read, and a log line naming the image and the block |
-| The RAM file system reaches its cap, or its budget is exhausted | the cap's check; a commit that fails | the file as far as written | none needed | `{error, enospc}`, and `ENOSPC` in a program writing through the session's export or at the write-back of its shared mapping |
+| The RAM file system reaches its cap | the cap's check in `erx_ramfs`, which refuses the whole write ([design-tmp.md](design-tmp.md#failure-handling)) | the file as before the refused write | none needed | `{error, enospc}`, and `ENOSPC` in a program writing through the session's export or at the write-back of its shared mapping |
 | The crash dump exceeds the crash area | the dump writer's bound | the dump cut at the area's end, with its stored length and `ERX_CRASH_TRUNCATED` in the header | none needed | the inspector marks the dump truncated |
 | The console's driver has no free transmit buffer | `{error, empty}` from its pool | the unwritten bytes in the console service | the console service, once the driver reports room | output delayed, never reordered or dropped |
 

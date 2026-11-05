@@ -160,6 +160,7 @@ evidence, not additional design contracts.
 | [design-domains.md](design-domains.md) | domains, the pid space, connections and lanes, exports, the funnel at the receiver, frames, flow control, facets, links and exits across domains, ERTS's integration |
 | [design-system.md](design-system.md) | the root task and boot, the system manifest, the domain library, domain creation and ending, authority, resource policy, devices and drivers with the driver table, the system services, identifiers, the vault |
 | [design-files.md](design-files.md) | namespaces, the file protocol (9P2000.L), file servers, and shared mappings served by the session |
+| [design-tmp.md](design-tmp.md) | the RAM file system at `/tmp`: an `erx_fs` server in each domain over one tree process, its charges against the `tmp` cap, and its POSIX semantics |
 | [design-storage.md](design-storage.md) | partitions, the boot image, EROFS images and their Erlang reader, the data partition and the vault's partition, read-write storage in Erlang, FAT for removable media and exchange, system updates with A/B slots and trials |
 | this document, [Networking](#networking) | the network service: erXos's own TCP/IP stack, in Erlang, with lwIP as its stopgap |
 | [design-live.md](design-live.md) | the live machine: console and ttys, attributed text, inspector and `/proc`, tracing, code from the host and the code store, the host link |
