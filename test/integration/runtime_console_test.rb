@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'io/console'
 require 'minitest/autorun'
 require 'open3'
@@ -433,25 +432,6 @@ class RuntimeConsoleTest < Minitest::Test
     run_on_owned_terminal("erlang:halt(\"boom\").\r") do |status, slave|
       refute_equal 0, status.exitstatus
       assert slave.echo?
-    end
-  end
-
-  # The fuzz target of erx_console:input/2, the one parser of input bytes here: random bytes
-  # in random chunks, on stock's emulator, which loads the module as the build left it.
-  def test_input_bytes_in_any_chunks_keep_their_meaning
-    Erx::Oracle.new(root: ROOT).with_runtime('emu') do |tools|
-      Dir.mktmpdir('erx-console-fuzz') do |work|
-        source = File.join(ROOT, 'test/erlang/erx_console_input_fuzz.erl')
-        output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, tools.fetch('erlc'), '-o', work, source)
-        assert status.success?, output
-        # Alone, so stock's own terminal driver still starts under -noshell.
-        FileUtils.cp(File.join(OUTPUT.root, 'lib/kernel/ebin/erx_console.beam'), work)
-        output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
-                                         tools.fetch('erl'), '-noshell', '-pa', work, '-s',
-                                         'erx_console_input_fuzz', 'run', '-s', 'init', 'stop')
-        assert status.success?, output
-        assert_match(/^fuzz: 20000 rounds ok$/, output)
-      end
     end
   end
 end

@@ -278,6 +278,8 @@ module Erx
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/abi_erlang_test.rb'),
                     '--name', 'test_production_fuzz_entry_refuses_mutations_without_vm_exception'],
                    name: 'fuzz-erlang-manifest', deadline: 180, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_console_input.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-console-input', deadline: 300, chdir: ROOT, env: environment)
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')
