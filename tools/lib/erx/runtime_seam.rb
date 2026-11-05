@@ -77,25 +77,25 @@ module Erx
     # list of objects cannot hide what the link really brought in.
     def check_objects(objects:, executable:, liberx:, imports_path:)
       undefined = objects.to_h { |object| [object, symbol_names(nm('-u', object))] }
-        imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY)
-        # The objects answer for an own list's names, so the executable holds them for its one object.
-        undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
-        inside = objects.flat_map { |object| defined_names(object) }.uniq
-        check(undefined_by_object: undefined, inside: inside, imports: imports)
+      imports = parse_imports(File.read(imports_path)).except(*NATIVE_ONLY)
+      # The objects answer for an own list's names, so the executable holds them for its one object.
+      undefined[executable] = symbol_names(nm('-u', executable)) - symbol_names(nm('-u', liberx)) - own_names(imports)
+      inside = objects.flat_map { |object| defined_names(object) }.uniq
+      check(undefined_by_object: undefined, inside: inside, imports: imports)
+    end
+
+    # The native build's check: ELF objects and archives through llvm-nm, whose C names
+    # carry no prefix. OTP's own link of beam.emu has already shown that no name is missing.
+    def check_elf_objects(objects:, imports_text:, nm:)
+      names = lambda do |*arguments|
+        output, error, status = Open3.capture3(nm, '--format=just-symbols', *arguments, stdin_data: '')
+        raise Error, "llvm-nm #{arguments.join(' ')}: #{error.lines.first}" unless status.success?
+
+        output.each_line(chomp: true).reject { |line| line.empty? || line.end_with?(':') }.uniq
       end
-
-      # The native build's check: ELF objects and archives through llvm-nm, whose C names
-      # carry no prefix. OTP's own link of beam.emu has already shown that no name is missing.
-      def check_elf_objects(objects:, imports_text:, nm:)
-        names = lambda do |*arguments|
-          output, error, status = Open3.capture3(nm, '--format=just-symbols', *arguments, stdin_data: '')
-          raise Error, "llvm-nm #{arguments.join(' ')}: #{error.lines.first}" unless status.success?
-
-          output.each_line(chomp: true).reject { |line| line.empty? || line.end_with?(':') }.uniq
-        end
-        check(undefined_by_object: objects.to_h { |object| [object, names.call('--undefined-only', object)] },
-              inside: objects.flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
-              imports: parse_imports(imports_text).except(*HOSTED_ONLY))
+      check(undefined_by_object: objects.to_h { |object| [object, names.call('--undefined-only', object)] },
+            inside: objects.flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
+            imports: parse_imports(imports_text).except(*HOSTED_ONLY))
     end
 
     def defined_names(path) = symbol_names(nm('-g', '-U', '-j', path))

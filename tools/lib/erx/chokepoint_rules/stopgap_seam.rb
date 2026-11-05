@@ -62,6 +62,7 @@ module Erx
         liberx/backend/fiasco/libc_root.c
         liberx/backend/fiasco/libc_start.c
         liberx/backend/fiasco/libc_root_start.c
+        liberx/backend/fiasco/libc_root_write.c
         liberx/backend/fiasco/libc_start.h
         liberx/backend/fiasco/libc_task.c
         liberx/backend/fiasco/root.c
@@ -196,6 +197,7 @@ module Erx
           sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/console.[ch]'),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root_start.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root_write.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root_no_program.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/runtime_stubs.c', permits: /\Aerx_fiasco_console_write\z/),

@@ -55,9 +55,9 @@ getpagesize
 # The names libSystem's headers and the compiler make of the calls above.
 [libsystem]
 _DefaultRuneLocale __assert_rtn __chkstk_darwin
-__error __maskrune __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
+__error __memcpy_chk __memmove_chk __stack_chk_fail __stack_chk_guard
 __stderrp __stdoutp __strcat_chk __strcpy_chk __tolower __toupper
-__swbuf __udivti3 bzero memset_pattern16 __darwin_check_fd_set_overflow __stdinp
+__swbuf __udivti3 bzero memset_pattern16 __darwin_check_fd_set_overflow
 pthread_equal
 
 # The names musl's headers and the compiler make of the calls above, and what the
@@ -67,7 +67,7 @@ ZSTD_trace_compress_begin ZSTD_trace_compress_end ZSTD_trace_decompress_begin
 ZSTD_trace_decompress_end __assert_fail __errno_location __libc_current_sigrtmin
 __stack_chk_fail __stack_chk_guard __udivti3 fwrite_unlocked longjmp
 lround memrchr pthread_spin_destroy pthread_spin_init pthread_spin_lock
-pthread_spin_unlock putc_unlocked setjmp sigaddset sigemptyset sqrtf stderr stdin
+pthread_spin_unlock putc_unlocked setjmp sigaddset sigemptyset sqrtf stderr
 stdout tolower toupper
 
 # Stock code that configure turns on when it finds musl's headers. Emptied by
@@ -83,7 +83,7 @@ sysconf
 # stderr and the wake pipes of sys.c, erl_printf's stdio, and ethread's waits. Each
 # goes with the first native boot, or for prim_tty's with the console.
 [stock_descriptors]
-close fclose fdopen fileno open read write writev
+close fclose fdopen fileno open read write
 
 # What sys.c keeps of a Unix process: the signal dispatcher and its pipes on Darwin's
 # main thread, nice, alarm, and the node id's host name and pid;

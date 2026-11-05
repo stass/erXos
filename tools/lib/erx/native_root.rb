@@ -52,7 +52,7 @@ module Erx
     # the memcpy and the rest of what root_mem.c gives a freestanding root.
     SYSTEM = [*(RUNTIME - ["#{BACKEND}/root_mem.c"]), *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c",
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
-              "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/runtime_entry.c",
+              "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
               "#{BACKEND}/runtime_main.c", "#{BACKEND}/runtime_stubs.c", 'liberx/release.c', 'liberx/release_fs.c', 'liberx/ns.c'].freeze
     # The sources of SYSTEM that read musl's headers, which NativeRuntime's sysroot holds.
     LIBC_SOURCES = %W[liberx/backend/core/boot_info.c #{BACKEND}/runtime_stubs.c].freeze

@@ -5,7 +5,7 @@
 
 /*
  * musl's start path on a root task: move off the small stack the image starts on, then run
- * the program. A root writes its standard output and standard error to the console itself.
+ * the program.
  */
 
 #include <stddef.h>
@@ -29,12 +29,6 @@ static void	root_enter(void);
 static uint64_t	main_stack_top(void);
 
 static int (*root_program)(int, char **, char **);
-
-void
-erx_fiasco_libc_write(const void *bytes, size_t length)
-{
-	erx_fiasco_console_write(bytes, length);
-}
 
 void
 erx_fiasco_libc_root_start(int (*program)(int, char **, char **))
