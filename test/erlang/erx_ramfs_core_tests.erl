@@ -152,7 +152,7 @@ getattr_reports_links_size_and_blocks_test() ->
 
 getattr_of_a_node_gone_is_enoent_test() ->
     {File, Tree1} = file(?ROOT, <<"f">>, <<>>, tree()),
-    {ok, Tree2} = ok_step({unlink, ?ROOT, <<"f">>, any}, Tree1),
+    {ok, Tree2} = ok_step({unlink, ?ROOT, <<"f">>, {node, File}}, Tree1),
     refused(enoent, {getattr, File}, Tree2).
 
 %% ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ make_directory_links_its_dotdot_to_the_parent_test() ->
 make_directory_refusals_test() ->
     {Gone, Tree1} = mkdir(?ROOT, <<"gone">>, tree()),
     {_Handle, Tree2} = open(Gone, {read, []}, Tree1),
-    {ok, Tree3} = ok_step({unlink, ?ROOT, <<"gone">>, any}, Tree2),
+    {ok, Tree3} = ok_step({unlink, ?ROOT, <<"gone">>, {node, Gone}}, Tree2),
     {Shut, Tree4} = mkdir(?ROOT, <<"shut">>, 8#500, Tree3),
     refused(eexist, {make, ?ROOT, <<"shut">>, {directory, 8#755}}, Tree4),
     refused(enoent, {make, Gone, <<"x">>, {directory, 8#755}}, Tree4),
@@ -529,13 +529,28 @@ unlink_refusals_test() ->
     {Shut, Tree4} = mkdir(?ROOT, <<"shut">>, Tree3),
     {_, Tree5} = mkdir(Shut, <<"x">>, Tree4),
     {ok, Tree6} = ok_step({setattr, {node, Shut}, #{mode => 8#500}}, Tree5),
-    refused(enoent, {unlink, ?ROOT, <<"missing">>, any}, Tree6),
+    refused(enoent, {unlink, ?ROOT, <<"missing">>, file}, Tree6),
     refused(enotdir, {unlink, ?ROOT, <<"f">>, directory}, Tree6),
     refused(eisdir, {unlink, ?ROOT, <<"d">>, file}, Tree6),
     refused(enotempty, {unlink, ?ROOT, <<"d">>, directory}, Tree6),
-    refused(enotempty, {unlink, ?ROOT, <<"d">>, any}, Tree6),
-    refused(eacces, {unlink, Shut, <<"x">>, any}, Tree6),
-    refused(einval, {unlink, ?ROOT, <<"f">>, sideways}, Tree6).
+    refused(enotempty, {unlink, ?ROOT, <<"d">>, {node, Dir}}, Tree6),
+    refused(eacces, {unlink, Shut, <<"x">>, directory}, Tree6),
+    refused(einval, {unlink, ?ROOT, <<"f">>, sideways}, Tree6),
+    refused(einval, {unlink, ?ROOT, <<"f">>, any}, Tree6),
+    refused(einval, {unlink, ?ROOT, <<"f">>, {node, none}}, Tree6).
+
+%% remove names the node its fid stands at: a name that has come to name
+%% another node since is left alone (enoent), and the step changes nothing.
+unlink_of_a_node_removes_the_name_only_while_it_names_that_node_test() ->
+    {Old, Tree1} = file(?ROOT, <<"a">>, <<"old">>, tree()),
+    {ok, Tree2} = ok_step({rename, ?ROOT, <<"a">>, ?ROOT, <<"b">>}, Tree1),
+    {New, Tree3} = file(?ROOT, <<"a">>, <<"new">>, Tree2),
+    refused(enoent, {unlink, ?ROOT, <<"a">>, {node, Old}}, Tree3),
+    {ok, Tree4} = ok_step({unlink, ?ROOT, <<"b">>, {node, Old}}, Tree3),
+    refused(enoent, {getattr, Old}, Tree4),
+    ?assertEqual(New, walk(?ROOT, <<"a">>, Tree4)),
+    {ok, Tree5} = ok_step({unlink, ?ROOT, <<"a">>, {node, New}}, Tree4),
+    ?assertEqual([], names(?ROOT, Tree5)).
 
 %% ---------------------------------------------------------------------------
 %% Open after unlink, and clunk
@@ -553,6 +568,19 @@ an_unlinked_open_file_lives_until_its_last_clunk_test() ->
     ?assertEqual(held(Tree1), held(Tree5)),
     refused(enoent, {getattr, File}, Tree5),
     ?assertEqual({ok, Tree5}, step({clunk, Handle}, Tree5)).
+
+%% An open of a node no name reaches opens nothing, as an open after the
+%% unlink would not find it; the open made before the unlink still works.
+open_of_a_node_with_no_name_is_enoent_test() ->
+    {File, Handle, Tree1} = create(?ROOT, <<"f">>, tree()),
+    Tree2 = write(Handle, 0, <<"kept">>, Tree1),
+    {ok, Tree3} = ok_step({unlink, ?ROOT, <<"f">>, file}, Tree2),
+    refused(enoent, {open, File, {read, []}}, Tree3),
+    ?assertEqual(<<"kept">>, read(Handle, 0, 100, Tree3)),
+    {Dir, Tree4} = mkdir(?ROOT, <<"d">>, Tree3),
+    {_DirHandle, Tree5} = open(Dir, {read, []}, Tree4),
+    {ok, Tree6} = ok_step({unlink, ?ROOT, <<"d">>, directory}, Tree5),
+    refused(enoent, {open, Dir, {read, []}}, Tree6).
 
 an_unlinked_open_directory_lists_empty_until_closed_test() ->
     {Dir, Tree1} = mkdir(?ROOT, <<"d">>, tree()),

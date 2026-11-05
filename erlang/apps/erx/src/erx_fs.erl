@@ -18,11 +18,25 @@ The grant is a plain `proc_lib` process, not a `gen_server`: whoever holds a
 grant's pid, a process of another domain included, can send it any term, and
 a `gen_server` would act on a `system` message (`sys:replace_state/2`,
 `sys:suspend/1`) or a call from it. This loop has one receive, and everything
-it receives but its owners' `DOWN`s is a frame for the funnel.
+it receives but its owners' `DOWN`s and its open files' answers is a frame
+for the funnel.
+
+Each open file has a **file process**, the file's owner of
+docs/design-files.md, which the grant starts at the file's first open through
+it and which ends after its last clunk: it runs the requests of the file's
+opened fids (reads, writes, listings, size changes through an open, syncs
+and clunks) one at a time, in the order the grant sent them, and answers
+each to the grant. Requests on the node itself (opens, truncation through an
+unopened fid, `getattr`, `remove`) run in the grant; that every request is
+atomic against every other is the tree's to keep. A file process calls the callbacks with
+the `State` the grant held when it started, so a tree that has owners keeps
+its nodes and data behind that `State`, in a process or on a medium, where
+the grant and every owner reach the same tree; what a callback returns as
+`State1` replaces only its caller's copy.
 """.
 
 -export([start_link/3, start_link/4]).
--export([init/2, loop/1]).
+-export([init/2, loop/1, file_loop/4]).
 
 -export_type([qid/0, attr/0, statfs/0, dirent/0, what/0]).
 
@@ -70,7 +84,8 @@ it receives but its owners' `DOWN`s is a frame for the funnel.
 -callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
                   Changes :: map(), State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
--callback unlink(Dir :: term(), Name :: binary(), Kind :: file | directory | any,
+-callback unlink(Dir :: term(), Name :: binary(),
+                 Kind :: file | directory | {node, Node :: term()},
                  State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
@@ -83,8 +98,10 @@ it receives but its owners' `DOWN`s is a frame for the funnel.
 -optional_callbacks([read_mode/0, readlink/2, write/4, make/4, setattr/3,
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
-%% What a grant's process may hold for its client: its fids and their paths,
-%% its owners and the requests in flight, binaries included, in words.
+%% What a grant's process may hold for its client, its fids and their paths,
+%% its owners and the requests in flight, binaries included, in words; and
+%% what each file process may hold, the jobs the grant sent it, of which at
+%% most 64 carry data.
 -define(MAX_HEAP_WORDS, 4194304).
 
 -doc "Serves one grant of `Module`'s tree to the server's own domain.".
@@ -126,6 +143,8 @@ loop(Grant) ->
     receive
         {'DOWN', Ref, process, Owner, _} when is_reference(Ref), is_pid(Owner) ->
             ?MODULE:loop(perform(erx_fs_grant:owner_down(Ref, Owner, Grant)));
+        {erx_fs_file, Tag, Alias, Reply} when is_reference(Tag), is_reference(Alias) ->
+            ?MODULE:loop(perform(erx_fs_grant:file_answer(Tag, Alias, Reply, Grant)));
         Frame ->
             ?MODULE:loop(perform(erx_fs_grant:handle_frame(Frame, Grant)))
     end.
@@ -140,4 +159,36 @@ perform_effect({monitor, Owner}, Grant) ->
     erx_fs_grant:monitored(Owner, erlang:monitor(process, Owner), Grant);
 perform_effect({demonitor, Ref}, Grant) ->
     erlang:demonitor(Ref, [flush]),
+    Grant;
+perform_effect({start_file, Node, Module, Tree}, Grant) ->
+    Tag = make_ref(),
+    Heap = #{size => ?MAX_HEAP_WORDS, kill => true, include_shared_binaries => true},
+    Process = proc_lib:spawn_opt(?MODULE, file_loop, [self(), Tag, Module, Tree],
+                                 [link, {max_heap_size, Heap}]),
+    erx_fs_grant:file_started(Node, Process, Tag, Grant);
+perform_effect({run, Process, Tag, Job}, Grant) ->
+    erlang:send(Process, {Tag, Job}),
     Grant.
+
+%% A file process: it runs its file's jobs one at a time, in the order the
+%% grant sent them, answers each request to the grant, and ends after the last
+%% clunk. It is linked to its grant, so a callback that crashes in it ends the
+%% grant, and the grant's end ends it. A message without its tag is dropped, so
+%% nothing but the grant's jobs reaches the tree through it.
+-doc false.
+-spec file_loop(pid(), reference(), module(), term()) -> ok.
+file_loop(Grant, Tag, Module, Tree) ->
+    receive
+        {Tag, Job} ->
+            case erx_fs_grant:run_job(Job, Module, Tree) of
+                {answer, Alias, Reply, Tree1} ->
+                    erlang:send(Grant, {erx_fs_file, Tag, Alias, Reply}),
+                    ?MODULE:file_loop(Grant, Tag, Module, Tree1);
+                {continue, Tree1} ->
+                    ?MODULE:file_loop(Grant, Tag, Module, Tree1);
+                {stop, _} ->
+                    ok
+            end;
+        _ ->
+            ?MODULE:file_loop(Grant, Tag, Module, Tree)
+    end.

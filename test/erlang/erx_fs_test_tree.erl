@@ -3,7 +3,7 @@
 
 -module(erx_fs_test_tree).
 -moduledoc """
-A small `erx_fs` tree held in the grant's state, for erx_fs_tests.
+A small `erx_fs` tree, for erx_fs_tests.
 
 It starts as
 
@@ -15,10 +15,23 @@ It starts as
     /f       file, inode 6
 
 and keeps directories, files and links, made, removed and renamed through
-`make`, `unlink` and `rename`. It opens nothing. With `{observer, Pid}` in its
-arguments, every callback first sends `{tree_call, Callback}` to `Pid`, so a
-test can show a request never reached the tree. A walk of ".." crashes the
-grant: erx_fs must answer ".." itself.
+`make`, `unlink` and `rename`, and opens, reads and writes files and lists
+directories. As an `erx_fs` tree with open files must, it keeps its nodes
+where the grant and every file owner reach them: in a process of its own,
+linked to the one that ran `init/1`, which applies each callback whole, so
+every callback is atomic. The callbacks' `State` is that process and the
+observer, and never changes.
+
+A node lives while a name or an open holds it; an open of a node with no
+name left is `enoent`. A handle is `{Ino, Access, Append}`: a read through
+one opened only for writing, a write through one opened only for reading
+and a size change through one not opened for writing are refused, and a
+write through an append handle lands at the file's end and answers there.
+Flags are Linux's, as 9P2000.L carries them. The tree has no `fsync`.
+
+With `{observer, Pid}` in its arguments, every callback first sends
+`{tree_call, Callback}` to `Pid`, so a test can show a request never reached
+the tree. A walk of ".." crashes the grant: erx_fs must answer ".." itself.
 """.
 
 -behaviour(erx_fs).
@@ -31,65 +44,204 @@ grant: erx_fs must answer ".." itself.
 -define(QTSYMLINK, 16#02).
 -define(QTFILE, 0).
 -define(ROOT, 1).
+-define(O_ACCMODE, 3).
+-define(O_EXCL, 8#200).
+-define(O_TRUNC, 8#1000).
+-define(O_APPEND, 8#2000).
+-define(ATTR_MODE, 1).
+-define(ATTR_SIZE, 8).
+-define(DT_DIR, 4).
+-define(DT_REG, 8).
+-define(DT_LNK, 10).
 
--doc "The tree above; `Args` may hold `{observer, Pid}`.".
+-doc "The tree above, in a process linked to the caller; `Args` may hold `{observer, Pid}`.".
 init(Args) ->
     Nodes = #{1 => directory(#{<<"a">> => 2, <<"l">> => 5, <<"f">> => 6}),
               2 => directory(#{<<"b">> => 3, <<"f">> => 4}),
               3 => directory(#{}),
-              4 => #{kind => file, mode => 8#644},
-              5 => #{kind => symlink, mode => 8#777, target => <<"a">>},
-              6 => #{kind => file, mode => 8#644}},
-    {ok, #{nodes => Nodes, next => 7,
-           observer => proplists:get_value(observer, Args, none)}}.
+              4 => file(8#644),
+              5 => #{kind => symlink, mode => 8#777, target => <<"a">>, links => 1, opens => 0},
+              6 => file(8#644)},
+    Tree = spawn_link(fun() -> serve(#{nodes => Nodes, next => 7}) end),
+    {ok, #{tree => Tree, observer => proplists:get_value(observer, Args, none)}}.
 
 directory(Entries) ->
-    #{kind => directory, mode => 8#755, entries => Entries}.
+    #{kind => directory, mode => 8#755, entries => Entries, links => 1, opens => 0}.
+
+file(Mode) ->
+    #{kind => file, mode => Mode, data => <<>>, links => 1, opens => 0}.
+
+%% The tree's process: each request is a function of the tree, applied whole.
+serve(Tree) ->
+    receive
+        {Caller, Ref, Step} ->
+            {Reply, Tree1} = Step(Tree),
+            Caller ! {Ref, Reply},
+            serve(Tree1)
+    end.
+
+%% Applies Step to the tree and returns its reply. A Step's {Reply, Tree1}
+%% replaces the tree; one that answers an error keeps it.
+apply_step(#{tree := Tree}, Step) ->
+    Ref = monitor(process, Tree),
+    Tree ! {self(), Ref, Step},
+    receive
+        {Ref, Reply} -> demonitor(Ref, [flush]), Reply;
+        {'DOWN', Ref, process, Tree, Why} -> exit({tree_ended, Why})
+    end.
 
 -doc "The tree is named `test`.".
 root(State) ->
     seen(root, State),
-    {ok, <<"test">>, ?ROOT, qid(?ROOT, State)}.
+    apply_step(State, fun(T) -> {{ok, <<"test">>, ?ROOT, qid(?ROOT, T)}, T} end).
 
 -doc "One plain name in a directory.".
 walk(_, <<"..">>, _) ->
     erlang:error(dotdot_reached_the_tree);
 walk(Dir, Name, State) ->
     seen(walk, State),
-    case node(Dir, State) of
-        #{kind := directory, entries := #{Name := Ino}} -> {ok, Ino, qid(Ino, State)};
-        #{kind := directory} -> {error, enoent};
-        #{} -> {error, enotdir}
-    end.
+    read_only(State, fun(T) ->
+                             case node(Dir, T) of
+                                 #{kind := directory, entries := #{Name := Ino}} -> {ok, Ino, qid(Ino, T)};
+                                 #{kind := directory} -> {error, enoent};
+                                 #{} -> {error, enotdir};
+                                 gone -> {error, enoent}
+                             end
+                     end).
 
 -doc "The 9P2000.L attributes of a node.".
 getattr(Ino, State) ->
     seen(getattr, State),
-    #{kind := Kind, mode := Mode} = node(Ino, State),
-    Zero = maps:from_keys([uid, gid, rdev, size, blocks, atime_sec, atime_nsec,
-                           mtime_sec, mtime_nsec, ctime_sec, ctime_nsec, btime_sec,
-                           btime_nsec, gen, data_version], 0),
-    {ok, Zero#{valid => 16#7ff, qid => qid(Ino, State), mode => type_bits(Kind) bor Mode,
-               nlink => 1, blksize => 4096}}.
+    read_only(State, fun(T) ->
+                             case node(Ino, T) of
+                                 gone -> {error, enoent};
+                                 #{kind := Kind, mode := Mode, links := Links} = Node ->
+                                     Zero = maps:from_keys(
+                                              [uid, gid, rdev, blocks, atime_sec, atime_nsec,
+                                               mtime_sec, mtime_nsec, ctime_sec, ctime_nsec,
+                                               btime_sec, btime_nsec, gen, data_version], 0),
+                                     {ok, Zero#{valid => 16#7ff, qid => qid(Ino, T),
+                                                mode => type_bits(Kind) bor Mode, nlink => Links,
+                                                size => byte_size(maps:get(data, Node, <<>>)),
+                                                blksize => 4096}}
+                             end
+                     end).
 
--doc "Nothing is opened.".
-open(_, _, State) -> seen(open, State), {error, enotsup}.
--doc "Nothing is open.".
-read(_, _, _, State) -> seen(read, State), {error, ebadf}.
--doc "Nothing is open.".
-readdir(_, _, _, State) -> seen(readdir, State), {error, ebadf}.
--doc "Nothing is open.".
-clunk(_, State) -> seen(clunk, State), {ok, State}.
--doc "Nothing is open; present so that the tree counts as one that writes.".
-write(_, _, _, State) -> seen(write, State), {error, ebadf}.
+-doc "Opens a node that still has a name: a file, or a directory for reading.".
+open(Ino, Flags, State) ->
+    seen(open, State),
+    change(State, fun(T) ->
+                          case node(Ino, T) of
+                              gone -> {error, enoent};
+                              #{links := 0} -> {error, enoent};
+                              Node -> opened(Ino, Node, Flags, T)
+                          end
+                  end).
+
+opened(_, #{kind := symlink}, _, _) ->
+    {error, eloop};
+opened(Ino, #{kind := directory} = Node, Flags, T) when Flags band (?O_ACCMODE bor ?O_TRUNC) =:= 0 ->
+    {ok, handle(Ino, Flags), put_node(Ino, Node#{opens := maps:get(opens, Node) + 1}, T)};
+opened(_, #{kind := directory}, _, _) ->
+    {error, eisdir};
+opened(Ino, #{kind := file, data := Data, opens := Opens} = Node, Flags, T) ->
+    Kept = case Flags band ?O_TRUNC of
+               0 -> Data;
+               _ -> <<>>
+           end,
+    {ok, handle(Ino, Flags), put_node(Ino, Node#{data := Kept, opens := Opens + 1}, T)}.
+
+handle(Ino, Flags) ->
+    Access = case Flags band ?O_ACCMODE of
+                 0 -> read;
+                 1 -> write;
+                 _ -> read_write
+             end,
+    {Ino, Access, Flags band ?O_APPEND =/= 0}.
+
+-doc "Bytes of a file, through a handle opened for reading.".
+read({_, write, _}, _, _, State) ->
+    seen(read, State),
+    {error, ebadf};
+read({Ino, _, _}, Offset, Count, State) ->
+    seen(read, State),
+    with_state(State, read_only(State, fun(T) ->
+                             case node(Ino, T) of
+                                 #{kind := file, data := Data} when Offset >= byte_size(Data) ->
+                                     {ok, <<>>};
+                                 #{kind := file, data := Data} ->
+                                     {ok, binary:part(Data, Offset, min(Count, byte_size(Data) - Offset))};
+                                 #{} ->
+                                     {error, eisdir}
+                             end
+                     end)).
+
+-doc """
+Writes through a handle opened for writing: at `Offset`, filling a gap with
+zeros, or at the end through an append handle; answers where it wrote.
+""".
+write({_, read, _}, _, _, State) ->
+    seen(write, State),
+    {error, ebadf};
+write({Ino, _, Append}, Offset, Bytes, State) ->
+    seen(write, State),
+    change_with(State, fun(T) ->
+                               #{data := Data} = Node = node(Ino, T),
+                               At = case Append of
+                                        true -> byte_size(Data);
+                                        false -> Offset
+                                    end,
+                               Data1 = spliced(Data, At, Bytes),
+                               {{ok, byte_size(Bytes), At}, put_node(Ino, Node#{data := Data1}, T)}
+                       end).
+
+spliced(Data, At, Bytes) when At >= byte_size(Data) ->
+    <<Data/binary, 0:((At - byte_size(Data)) * 8), Bytes/binary>>;
+spliced(Data, At, Bytes) ->
+    End = At + byte_size(Bytes),
+    Tail = case End < byte_size(Data) of
+               true -> binary:part(Data, End, byte_size(Data) - End);
+               false -> <<>>
+           end,
+    <<(binary:part(Data, 0, At))/binary, Bytes/binary, Tail/binary>>.
+
+-doc """
+The entries of an open directory in name order, entry I at offset I, from
+just past `Offset`.
+""".
+readdir({Ino, _, _}, Offset, Max, State) ->
+    seen(readdir, State),
+    with_state(State, read_only(State, fun(T) ->
+                             case node(Ino, T) of
+                                 #{kind := directory, entries := Entries} ->
+                                     Sorted = lists:sort(maps:to_list(Entries)),
+                                     Listed = lists:zip(lists:seq(1, length(Sorted)), Sorted),
+                                     After = lists:nthtail(min(Offset, length(Listed)), Listed),
+                                     {ok, [{qid(Child, T), Index, dirent_type(Child, T), Name}
+                                           || {Index, {Name, Child}} <- lists:sublist(After, Max)]};
+                                 #{} ->
+                                     {error, enotdir}
+                             end
+                     end)).
+
+-doc "Drops an open; a node with no name and no open is gone.".
+clunk({Ino, _, _}, State) ->
+    seen(clunk, State),
+    apply_step(State, fun(T) ->
+                              #{opens := Opens} = Node = node(Ino, T),
+                              {ok, kept(Ino, Node#{opens := Opens - 1}, T)}
+                      end),
+    {ok, State}.
 
 -doc "A link's text.".
 readlink(Ino, State) ->
     seen(readlink, State),
-    case node(Ino, State) of
-        #{kind := symlink, target := Target} -> {ok, Target};
-        #{} -> {error, einval}
-    end.
+    read_only(State, fun(T) ->
+                             case node(Ino, T) of
+                                 #{kind := symlink, target := Target} -> {ok, Target};
+                                 _ -> {error, einval}
+                             end
+                     end).
 
 -doc "Fixed numbers.".
 statfs(State) ->
@@ -97,81 +249,190 @@ statfs(State) ->
     {ok, #{type => 16#01021994, bsize => 4096, blocks => 16, bfree => 8, bavail => 8,
            files => 64, ffree => 58, fsid => 0, namelen => 255}}.
 
--doc "A directory, a link or another name for a node; nothing else.".
+-doc """
+A directory, a link, another name for a node, or a file: created and opened,
+or without `O_EXCL` the regular file the name already names, opened.
+""".
 make(Dir, Name, What, State) ->
     seen(make, State),
-    case node(Dir, State) of
-        #{kind := directory, entries := #{Name := _}} -> {error, eexist};
-        #{kind := directory} -> made(Dir, Name, What, State);
-        #{} -> {error, enotdir}
+    Made = apply_step(State, fun(T) ->
+                              case node(Dir, T) of
+                                  #{kind := directory, entries := #{Name := Ino}} -> answer(existing(Ino, What, T), T);
+                                  #{kind := directory, links := 0} -> {{error, enoent}, T};
+                                  #{kind := directory} -> answer(made(Dir, Name, What, T), T);
+                                  #{} -> {{error, enotdir}, T};
+                                  gone -> {{error, enoent}, T}
+                              end
+                      end),
+    case Made of
+        {ok, Ino, Qid, Handle} -> {ok, Ino, Qid, Handle, State};
+        {ok, Ino, Qid} -> {ok, Ino, Qid, State};
+        {error, _} = Error -> Error
     end.
 
-made(Dir, Name, {link, Ino}, State) ->
-    case node(Ino, State) of
-        #{kind := directory} -> {error, eperm};
-        #{} -> {ok, Ino, qid(Ino, State), enter(Dir, Name, Ino, State)}
+existing(Ino, {file, _, Flags}, T) when Flags band ?O_EXCL =:= 0 ->
+    case node(Ino, T) of
+        #{kind := file} = Node ->
+            {ok, Handle, T1} = opened(Ino, Node, Flags, T),
+            {ok, Ino, qid(Ino, T1), Handle, T1};
+        #{kind := directory} -> {error, eisdir};
+        #{kind := symlink} -> {error, eloop}
     end;
-made(Dir, Name, What, #{nodes := Nodes, next := Ino} = State) ->
+existing(_, _, _) ->
+    {error, eexist}.
+
+made(Dir, Name, {link, Ino}, T) ->
+    case node(Ino, T) of
+        #{kind := directory} -> {error, eperm};
+        #{links := Links} = Node ->
+            T1 = put_node(Ino, Node#{links := Links + 1}, T),
+            {ok, Ino, qid(Ino, T1), enter(Dir, Name, Ino, T1)}
+    end;
+made(Dir, Name, {file, Mode, Flags}, #{next := Ino} = T) ->
+    T1 = put_node(Ino, (file(Mode))#{opens := 1}, T#{next := Ino + 1}),
+    {ok, Ino, qid(Ino, T1), handle(Ino, Flags), enter(Dir, Name, Ino, T1)};
+made(Dir, Name, What, #{next := Ino} = T) ->
     case new_node(What) of
         {ok, Node} ->
-            State1 = State#{nodes := Nodes#{Ino => Node}, next := Ino + 1},
-            {ok, Ino, qid(Ino, State1), enter(Dir, Name, Ino, State1)};
+            T1 = put_node(Ino, Node, T#{next := Ino + 1}),
+            {ok, Ino, qid(Ino, T1), enter(Dir, Name, Ino, T1)};
         {error, _} = Error ->
             Error
     end.
 
 new_node({directory, Mode}) -> {ok, (directory(#{}))#{mode := Mode}};
-new_node({symlink, Target}) -> {ok, #{kind => symlink, mode => 8#777, target => Target}};
+new_node({symlink, Target}) -> {ok, #{kind => symlink, mode => 8#777, target => Target,
+                                      links => 1, opens => 0}};
 new_node(_) -> {error, eperm}.
 
--doc "Changes the mode of a node when `valid` asks for it.".
-setattr({node, Ino}, #{valid := Valid, mode := Mode}, #{nodes := Nodes} = State) ->
+-doc """
+Changes a node's mode and a file's size when `valid` asks for them. A size
+change through a handle needs one opened for writing (`einval`).
+""".
+setattr({open, {_, read, _}}, #{valid := Valid}, State) when Valid band ?ATTR_SIZE =/= 0 ->
     seen(setattr, State),
-    Node = node(Ino, State),
-    case Valid band 1 of
-        0 -> {ok, State};
-        1 -> {ok, State#{nodes := Nodes#{Ino := Node#{mode := Mode band 8#7777}}}}
-    end.
+    {error, einval};
+setattr({open, {Ino, _, _}}, Attr, State) ->
+    setattr({node, Ino}, Attr, State);
+setattr({node, Ino}, #{valid := Valid, mode := Mode, size := Size}, State) ->
+    seen(setattr, State),
+    change(State, fun(T) ->
+                          case node(Ino, T) of
+                              gone -> {error, enoent};
+                              Node ->
+                                  Node1 = case Valid band ?ATTR_MODE of
+                                              0 -> Node;
+                                              _ -> Node#{mode := Mode band 8#7777}
+                                          end,
+                                  {ok, put_node(Ino, sized(Valid band ?ATTR_SIZE, Size, Node1), T)}
+                          end
+                  end).
 
--doc "Removes a name, refusing a kind that does not match.".
+sized(0, _, Node) -> Node;
+sized(_, Size, #{data := Data} = Node) when Size =< byte_size(Data) ->
+    Node#{data := binary:part(Data, 0, Size)};
+sized(_, Size, #{data := Data} = Node) ->
+    Node#{data := <<Data/binary, 0:((Size - byte_size(Data)) * 8)>>}.
+
+-doc """
+Removes a name, refusing a kind that does not match: `file` and `directory`
+from `unlinkat`, and `{node, Ino}` from `remove`, which removes the name only
+while it still names that node.
+""".
 unlink(Dir, Name, Kind, State) ->
     seen(unlink, State),
-    case node(Dir, State) of
-        #{kind := directory, entries := #{Name := Ino}} ->
-            case {Kind, node(Ino, State)} of
-                {directory, #{kind := Other}} when Other =/= directory -> {error, enotdir};
-                {file, #{kind := directory}} -> {error, eisdir};
-                {_, #{kind := directory, entries := Entries}} when map_size(Entries) > 0 ->
-                    {error, enotempty};
-                _ -> {ok, leave(Dir, Name, State)}
-            end;
-        #{kind := directory} -> {error, enoent};
-        #{} -> {error, enotdir}
+    change(State, fun(T) ->
+                          case node(Dir, T) of
+                              #{kind := directory, entries := #{Name := Ino}} -> unlinked(Dir, Name, Ino, Kind, T);
+                              #{kind := directory} -> {error, enoent};
+                              #{} -> {error, enotdir};
+                              gone -> {error, enoent}
+                          end
+                  end).
+
+unlinked(_, _, Ino, {node, Other}, _) when Other =/= Ino ->
+    {error, enoent};
+unlinked(Dir, Name, Ino, Kind, T) ->
+    case {Kind, node(Ino, T)} of
+        {directory, #{kind := Other}} when Other =/= directory -> {error, enotdir};
+        {file, #{kind := directory}} -> {error, eisdir};
+        {_, #{kind := directory, entries := Entries}} when map_size(Entries) > 0 -> {error, enotempty};
+        {_, #{links := Links} = Node} -> {ok, kept(Ino, Node#{links := Links - 1}, leave(Dir, Name, T))}
     end.
 
 -doc "Moves a name, replacing what the new name named.".
 rename(Dir, Name, NewDir, NewName, State) ->
     seen(rename, State),
-    case node(Dir, State) of
-        #{kind := directory, entries := #{Name := Ino}} ->
-            {ok, enter(NewDir, NewName, Ino, leave(Dir, Name, State))};
-        #{} ->
-            {error, enoent}
+    change(State, fun(T) ->
+                          case node(Dir, T) of
+                              #{kind := directory, entries := #{Name := Ino}} ->
+                                  T1 = leave(Dir, Name, T),
+                                  T2 = case node(NewDir, T1) of
+                                           #{entries := #{NewName := Replaced}} ->
+                                               #{links := Links} = Old = node(Replaced, T1),
+                                               kept(Replaced, Old#{links := Links - 1}, leave(NewDir, NewName, T1));
+                                           #{} ->
+                                               T1
+                                       end,
+                                  {ok, enter(NewDir, NewName, Ino, T2)};
+                              _ ->
+                                  {error, enoent}
+                          end
+                  end).
+
+%% A step whose reply is the callback's answer and which changes nothing.
+read_only(State, Read) ->
+    apply_step(State, fun(T) -> {Read(T), T} end).
+
+%% A step answering {ok, T1} or {error, Posix}; the callback answers
+%% {ok, State} for the first, since the tree lives in its process.
+change(State, Step) ->
+    case apply_step(State, fun(T) -> answer(Step(T), T) end) of
+        ok -> {ok, State};
+        {ok, Handle} -> {ok, Handle, State};
+        {error, _} = Error -> Error
     end.
 
-enter(Dir, Name, Ino, #{nodes := Nodes} = State) ->
-    #{Dir := #{entries := Entries} = Node} = Nodes,
-    State#{nodes := Nodes#{Dir := Node#{entries := Entries#{Name => Ino}}}}.
+%% A read's answer, with the unchanged State the callback returns.
+with_state(State, {ok, Value}) -> {ok, Value, State};
+with_state(_, {error, _} = Error) -> Error.
 
-leave(Dir, Name, #{nodes := Nodes} = State) ->
-    #{Dir := #{entries := Entries} = Node} = Nodes,
-    State#{nodes := Nodes#{Dir := Node#{entries := maps:remove(Name, Entries)}}}.
+%% A step answering {Reply, T1}, the callback answering Reply with State added.
+change_with(State, Step) ->
+    case apply_step(State, Step) of
+        {ok, Count, At} -> {ok, Count, At, State}
+    end.
+
+%% A tree step's answer, split into the reply and the next tree; {ok, T1} is
+%% the reply ok with the tree T1.
+answer({ok, T1}, _) -> {ok, T1};
+answer({ok, Handle, T1}, _) -> {{ok, Handle}, T1};
+answer({ok, Ino, Qid, T1}, _) -> {{ok, Ino, Qid}, T1};
+answer({ok, Ino, Qid, Handle, T1}, _) -> {{ok, Ino, Qid, Handle}, T1};
+answer({error, _} = Error, T) -> {Error, T}.
+
+enter(Dir, Name, Ino, T) ->
+    #{entries := Entries} = Node = node(Dir, T),
+    put_node(Dir, Node#{entries := Entries#{Name => Ino}}, T).
+
+leave(Dir, Name, T) ->
+    #{entries := Entries} = Node = node(Dir, T),
+    put_node(Dir, Node#{entries := maps:remove(Name, Entries)}, T).
+
+%% A node with no name and no open is gone.
+kept(Ino, #{links := 0, opens := 0}, #{nodes := Nodes} = T) ->
+    T#{nodes := maps:remove(Ino, Nodes)};
+kept(Ino, Node, T) ->
+    put_node(Ino, Node, T).
+
+put_node(Ino, Node, #{nodes := Nodes} = T) ->
+    T#{nodes := Nodes#{Ino => Node}}.
 
 node(Ino, #{nodes := Nodes}) ->
-    maps:get(Ino, Nodes).
+    maps:get(Ino, Nodes, gone).
 
-qid(Ino, State) ->
-    #{kind := Kind} = node(Ino, State),
+qid(Ino, T) ->
+    #{kind := Kind} = node(Ino, T),
     {qid_type(Kind), 0, Ino}.
 
 qid_type(directory) -> ?QTDIR;
@@ -181,6 +442,13 @@ qid_type(file) -> ?QTFILE.
 type_bits(directory) -> 8#040000;
 type_bits(symlink) -> 8#120000;
 type_bits(file) -> 8#100000.
+
+dirent_type(Ino, T) ->
+    case node(Ino, T) of
+        #{kind := directory} -> ?DT_DIR;
+        #{kind := symlink} -> ?DT_LNK;
+        #{kind := file} -> ?DT_REG
+    end.
 
 seen(Callback, #{observer := Observer}) when is_pid(Observer) ->
     Observer ! {tree_call, Callback},

@@ -44,7 +44,15 @@ class ErxRamfsCoreTest < Minitest::Test
     Seed.new(fault: 'a rename that leaves the new directory times and version',
              anchor: 'fun(T) -> update(NewDir, fun(P) -> changed(P, Stamp, Now) end, T) end]',
              replacement: 'fun(T) -> T end]',
-             catching_case: 'rename_changes_both_directories_and_the_nodes_test')
+             catching_case: 'rename_changes_both_directories_and_the_nodes_test'),
+    Seed.new(fault: 'a remove that takes whatever the name names now',
+             anchor: 'still_names({node, Ino}, Found) when Ino =/= Found -> {error, enoent};',
+             replacement: 'still_names({node, Ino}, Found) when Ino =/= Found, Ino < 0 -> {error, enoent};',
+             catching_case: 'unlink_of_a_node_removes_the_name_only_while_it_names_that_node_test'),
+    Seed.new(fault: 'an open of a node with no name left',
+             anchor: 'has_a_name(#node{links = 0}) -> {error, enoent};',
+             replacement: 'has_a_name(#node{links = -1}) -> {error, enoent};',
+             catching_case: 'open_of_a_node_with_no_name_is_enoent_test')
   ].freeze
 
   def test_core_cases_pass_under_eunit

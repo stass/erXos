@@ -88,7 +88,7 @@ anything else.
                  | {readdir, handle(), Offset :: integer(), Max :: integer()}
                  | {readlink, ino()}
                  | {setattr, {open, handle()} | {node, ino()}, changes()}
-                 | {unlink, Dir :: ino(), name(), file | directory | any}
+                 | {unlink, Dir :: ino(), name(), file | directory | {node, ino()}}
                  | {rename, Dir :: ino(), name(), NewDir :: ino(), name()}
                  | {fsync, handle()}
                  | {clunk, handle()}
@@ -256,6 +256,7 @@ open(Ino, Flags, Stamp, Now, Tree) ->
     maybe
         {ok, Access, Options} ?= open_flags(Flags),
         {ok, N} ?= node(Ino, Tree),
+        ok ?= has_a_name(N),
         ok ?= openable(N, Access, Options),
         {done, {ok, handle(Ino, Access, Options)},
          opened(Ino, N, Options, Stamp, Now, Tree)}
@@ -426,11 +427,12 @@ setattr(Target, Changes, Stamp, Now, Tree) ->
 
 unlink(Dir, Name, Kind, Stamp, Now, Tree) ->
     maybe
-        true ?= lists:member(Kind, [file, directory, any]) orelse {error, einval},
+        ok ?= valid_kind(Kind),
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
         ok ?= permitted(D, ?X),
         {ok, Ino} ?= lookup(D, Name),
+        ok ?= still_names(Kind, Ino),
         ok ?= permitted(D, ?W bor ?X),
         Victim = fetch(Ino, Tree),
         ok ?= removable_kind(Kind, Victim),
@@ -712,8 +714,24 @@ removable_kind(file, Victim) ->
         directory -> {error, eisdir};
         _ -> ok
     end;
-removable_kind(any, _Victim) ->
+removable_kind({node, _Ino}, _Victim) ->
     ok.
+
+valid_kind(file) -> ok;
+valid_kind(directory) -> ok;
+valid_kind({node, Ino}) when is_integer(Ino) -> ok;
+valid_kind(_) -> {error, einval}.
+
+%% remove names the node its fid stands at: the entry is removed only while
+%% it still names that node, so a remove never takes a name that a rename or
+%% a create gave another node since the fid was walked.
+still_names({node, Ino}, Found) when Ino =/= Found -> {error, enoent};
+still_names(_Kind, _Found) -> ok.
+
+%% A node no name reaches opens nothing, as an open after its unlink would
+%% not find it; an open made before the unlink keeps working.
+has_a_name(#node{links = 0}) -> {error, enoent};
+has_a_name(#node{}) -> ok.
 
 empty_if_directory(#node{data = {directory, _, Entries, _, _}})
   when map_size(Entries) > 0 ->

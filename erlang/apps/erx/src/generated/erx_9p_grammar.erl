@@ -14,20 +14,20 @@
 
 -export([decode_request/1, decode_request_frame/1, decode_reply/2, writes/1,
          operations/0, message_type/1]).
--export([statfs_request/1, lopen_request/2, lcreate_request/5, symlink_request/4,
-         mknod_request/6, readlink_request/1, getattr_request/2, setattr_request/2,
-         xattrwalk_request/3, xattrcreate_request/4, readdir_request/3, fsync_request/2,
-         lock_request/7, getlock_request/6, link_request/3, mkdir_request/4,
-         renameat_request/4, unlinkat_request/3, version_request/2, auth_request/4,
-         attach_request/5, flush_request/1, walk_request/3, read_request/3,
-         write_request/3, clunk_request/1, remove_request/1, statfs_reply/1,
-         lopen_reply/2, lcreate_reply/2, symlink_reply/1, mknod_reply/1,
-         readlink_reply/1, getattr_reply/1, setattr_reply/0, xattrwalk_reply/1,
-         xattrcreate_reply/0, readdir_reply/1, fsync_reply/0, lock_reply/1,
-         getlock_reply/5, link_reply/0, mkdir_reply/1, renameat_reply/0,
-         unlinkat_reply/0, version_reply/2, attach_reply/1, flush_reply/0,
-         walk_reply/1, read_reply/1, write_reply/2, clunk_reply/0,
-         remove_reply/0, error_reply/1]).
+-export([packed_dirents/1, statfs_request/1, lopen_request/2, lcreate_request/5,
+         symlink_request/4, mknod_request/6, readlink_request/1, getattr_request/2,
+         setattr_request/2, xattrwalk_request/3, xattrcreate_request/4, readdir_request/3,
+         fsync_request/2, lock_request/7, getlock_request/6, link_request/3,
+         mkdir_request/4, renameat_request/4, unlinkat_request/3, version_request/2,
+         auth_request/4, attach_request/5, flush_request/1, walk_request/3,
+         read_request/3, write_request/3, clunk_request/1, remove_request/1,
+         statfs_reply/1, lopen_reply/2, lcreate_reply/2, symlink_reply/1,
+         mknod_reply/1, readlink_reply/1, getattr_reply/1, setattr_reply/0,
+         xattrwalk_reply/1, xattrcreate_reply/0, readdir_reply/1, fsync_reply/0,
+         lock_reply/1, getlock_reply/5, link_reply/0, mkdir_reply/1,
+         renameat_reply/0, unlinkat_reply/0, version_reply/2, attach_reply/1,
+         flush_reply/0, walk_reply/1, read_reply/1, write_reply/2,
+         clunk_reply/0, remove_reply/0, error_reply/1]).
 
 -define(NAME_MAX, 255).
 -define(P9_AT_REMOVEDIR, 512).

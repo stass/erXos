@@ -66,9 +66,11 @@ module Erx
                    @operations.select { |operation| operation.fetch(:reply) }
                               .map { |operation| "#{operation.fetch(:name)}_reply/#{operation.fetch(:reply).size}" } +
                    ['error_reply/1']
+        # A server fitting a reply to a request's byte count sizes it as the wire would.
+        packed = @kinds.select { |_, kind| kind[:packed] }.map { |kind_name, _| "packed_#{kind_name}/1" }
         ["-export([decode_request/1, decode_request_frame/1, decode_reply/2, writes/1,\n" \
          '         operations/0, message_type/1]).',
-         export_list(builders)].join("\n")
+         export_list(packed + builders)].join("\n")
       end
 
       def export_list(functions)

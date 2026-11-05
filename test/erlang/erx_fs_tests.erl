@@ -7,8 +7,12 @@ EUnit and property tests of an `erx_fs` grant's fids and owners
 (docs/design-files.md#verification-and-testing): fids refused while in use,
 ".." held at the root, walks that stop at a link, owners outside the domain,
 fid floods against the pool, short-lived and ended owners and their monitors,
-the in-flight bound, the read-only refusals of F5, pipelined requests, and an
-exhaustive model of the fid table. The grants serve erx_fs_test_tree.
+the in-flight bound, the read-only refusals of F5, pipelined requests, an
+exhaustive model of the fid table, and open files: create-or-open, exclusive
+creates, writes answering where they landed under two appenders, truncation
+decided by the open, the clunks of an ended owner, listings, remove after a
+rename, opens of a node with no name, ".." after renames and removals, aliases
+in flight and the owner's tag. The grants serve erx_fs_test_tree.
 test/host/erx_fs_test.rb runs these on stock OTP and seeds a fault for each.
 """.
 
@@ -433,7 +437,7 @@ make_unlink_rename_setattr_test() ->
     ok = call(Grant, {renameat, 3, <<"s">>, 2, <<"s2">>}),
     {ok, [{2, 0, _}]} = walk(Grant, 2, 5, [<<"s2">>]),
     ?assertEqual({ok, <<"../f">>}, call(Grant, {readlink, 5})),
-    %% remove passes any and clunks its fid.
+    %% remove passes the node its fid stands at, and clunks the fid.
     ok = call(Grant, {remove, 5}),
     ?assertEqual(ebadf, qid_of(Grant, 5)),
     ?assertEqual({error, enoent}, walk(Grant, 2, 5, [<<"s2">>])),
@@ -583,3 +587,292 @@ check(#{core := Core, model := Model, monitors := Monitors}, Owners, Trace) ->
         {true, true} -> ok;
         _ -> erlang:error({model_mismatch, lists:reverse(Trace), Expected, Actual})
     end.
+
+%% Open files ------------------------------------------------------------
+
+-define(O_RDONLY, 0).
+-define(O_RDWR, 2).
+-define(O_EXCL, 8#200).
+-define(O_APPEND, 8#2000).
+-define(ATTR_SIZE, 8).
+
+%% Sends one request to a fresh alias and returns the alias, for requests
+%% pipelined before their replies are read.
+send(Grant, Owner, Request) ->
+    Alias = alias([reply]),
+    Grant ! {erx_9p, Alias, Owner, Request},
+    Alias.
+
+answer(Alias) ->
+    receive
+        {erx_9p, Alias, Reply} -> Reply
+    after 2000 ->
+        erlang:error(no_reply)
+    end.
+
+lcreate(Grant, Fid, Name, Flags) ->
+    call(Grant, {lcreate, Fid, Name, Flags, 8#644, 0}).
+
+set_attr(Changes) ->
+    maps:merge(maps:from_keys([valid, mode, uid, gid, size, atime_sec, atime_nsec,
+                               mtime_sec, mtime_nsec], 0), Changes).
+
+size_of(Grant, Fid) ->
+    #{size := Size} = getattr(Grant, Fid),
+    Size.
+
+%% The grant's links: its tree's process and one owner per open file.
+links(Grant) ->
+    {links, Links} = process_info(Grant, links),
+    length(Links).
+
+wait_for_links(Grant, Count) ->
+    wait_for_links(Grant, Count, 500).
+
+wait_for_links(Grant, Count, 0) ->
+    ?assertEqual(Count, links(Grant));
+wait_for_links(Grant, Count, Tries) ->
+    case links(Grant) of
+        Count -> ok;
+        _ -> timer:sleep(10), wait_for_links(Grant, Count, Tries - 1)
+    end.
+
+%% Two lcreates of one new name, sent before either is answered, both open
+%% the one file it names: the first makes it, the second opens it.
+two_openers_of_one_new_name_both_succeed_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    {ok, []} = walk(Grant, 1, 3, []),
+    First = send(Grant, self(), {lcreate, 2, <<"new">>, ?O_RDWR, 8#644, 0}),
+    Second = send(Grant, self(), {lcreate, 3, <<"new">>, ?O_RDWR, 8#644, 0}),
+    {ok, Qid, 0} = answer(First),
+    ?assertMatch({ok, Qid, 0}, answer(Second)),
+    ?assertEqual({ok, 3, 0}, call(Grant, {write, 2, 0, <<"one">>})),
+    ?assertEqual({ok, <<"one">>}, call(Grant, {read, 3, 0, 100})),
+    %% One owner for the file, beside the tree's process.
+    ?assertEqual(2, links(Grant)),
+    stop(Grant).
+
+lcreate_with_exclusive_answers_eexist_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    ?assertEqual({error, eexist}, lcreate(Grant, 2, <<"f">>, ?O_RDWR bor ?O_EXCL)),
+    %% The refused lcreate left the fid unopened, at the directory.
+    ?assertEqual({error, ebadf}, call(Grant, {read, 2, 0, 1})),
+    ?assertMatch({ok, [_]}, walk(Grant, 2, 3, [<<"f">>])),
+    ?assertMatch({ok, _, 0}, lcreate(Grant, 2, <<"g">>, ?O_RDWR bor ?O_EXCL)),
+    stop(Grant).
+
+%% Each write answers where its bytes landed; the bytes are there.
+write_answers_where_it_wrote_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    {ok, _, 0} = lcreate(Grant, 2, <<"w">>, ?O_RDWR),
+    ?assertEqual({ok, 3, 5}, call(Grant, {write, 2, 5, <<"abc">>})),
+    ?assertEqual({ok, <<0, 0, 0, 0, 0, "abc">>}, call(Grant, {read, 2, 0, 100})),
+    ?assertEqual(8, size_of(Grant, 2)),
+    %% A write through a read-only open is refused by the tree, through the owner.
+    {ok, [_]} = walk(Grant, 1, 3, [<<"w">>]),
+    {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDONLY}),
+    ?assertEqual({error, ebadf}, call(Grant, {write, 3, 0, <<"x">>})),
+    %% An unopened fid has no handle to read or write through.
+    {ok, [_]} = walk(Grant, 1, 4, [<<"w">>]),
+    ?assertEqual({error, ebadf}, call(Grant, {write, 4, 0, <<"x">>})),
+    ?assertEqual({error, ebadf}, call(Grant, {fsync, 4, 0})),
+    %% A tree without fsync syncs nothing and answers ok.
+    ?assertEqual(ok, call(Grant, {fsync, 2, 0})),
+    stop(Grant).
+
+%% Two clients append through their own fids, each with its writes pipelined.
+%% Every write answers where it landed: the answers tile the file from 0 with
+%% no gap or overlap, and each write's bytes are where its answer says.
+append_answers_order_two_appenders_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    {ok, _, 0} = lcreate(Grant, 2, <<"log">>, ?O_RDWR bor ?O_APPEND),
+    Parent = self(),
+    Appender = fun(Fid, Byte) ->
+                       fun() ->
+                               {ok, [_]} = walk(Grant, 1, Fid, [<<"log">>]),
+                               {ok, _, 0} = call(Grant, {lopen, Fid, 1 bor ?O_APPEND}),
+                               Writes = [binary:copy(<<Byte>>, N) || N <- lists:seq(1, 20)],
+                               Aliases = [send(Grant, self(), {write, Fid, 0, W}) || W <- Writes],
+                               Parent ! {appended, [{W, answer(A)} || {W, A} <- lists:zip(Writes, Aliases)]}
+                       end
+               end,
+    spawn_link(Appender(3, $a)),
+    spawn_link(Appender(4, $b)),
+    Results = lists:append([receive {appended, R} -> R after 5000 -> erlang:error(no_appends) end
+                            || _ <- [1, 2]]),
+    Landed = lists:sort([{At, Data} || {Data, {ok, Count, At}} <- Results, Count =:= byte_size(Data)]),
+    ?assertEqual(40, length(Landed)),
+    {ok, Contents} = call(Grant, {read, 2, 0, 65536}),
+    End = lists:foldl(fun({At, Data}, Expected) ->
+                              ?assertEqual(Expected, At),
+                              ?assertEqual(Data, binary:part(Contents, At, byte_size(Data))),
+                              At + byte_size(Data)
+                      end, 0, Landed),
+    ?assertEqual(End, byte_size(Contents)),
+    stop(Grant).
+
+%% A size change through an opened fid is decided by that open's access: a
+%% read-only open truncates nothing. Through an unopened fid the node decides.
+truncate_through_a_read_only_open_is_refused_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    {ok, _, 0} = lcreate(Grant, 2, <<"t">>, ?O_RDWR),
+    {ok, 5, 0} = call(Grant, {write, 2, 0, <<"hello">>}),
+    {ok, [_]} = walk(Grant, 1, 3, [<<"t">>]),
+    {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDONLY}),
+    Truncate = set_attr(#{valid => ?ATTR_SIZE, size => 0}),
+    ?assertEqual({error, einval}, call(Grant, {setattr, 3, Truncate})),
+    ?assertEqual({ok, <<"hello">>}, call(Grant, {read, 2, 0, 100})),
+    ok = call(Grant, {setattr, 2, set_attr(#{valid => ?ATTR_SIZE, size => 4})}),
+    {ok, [_]} = walk(Grant, 1, 4, [<<"t">>]),
+    ok = call(Grant, {setattr, 4, set_attr(#{valid => ?ATTR_SIZE, size => 2})}),
+    ?assertEqual({ok, <<"he">>}, call(Grant, {read, 3, 0, 100})),
+    stop(Grant).
+
+%% A process that ends with files open has its opened fids clunked, so each
+%% file's owner ends and the tree hears each clunk.
+owner_end_clunks_its_open_fids_test() ->
+    Grant = grant(rw),
+    Parent = self(),
+    {Client, Ref} = spawn_monitor(
+                      fun() ->
+                              {ok, _} = attach(Grant, 1),
+                              {ok, []} = walk(Grant, 1, 2, []),
+                              {ok, _, 0} = lcreate(Grant, 2, <<"o">>, ?O_RDWR),
+                              {ok, [_]} = walk(Grant, 1, 3, [<<"o">>]),
+                              {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDONLY}),
+                              {ok, [_]} = walk(Grant, 1, 4, [<<"a">>]),
+                              {ok, _, 0} = call(Grant, {lopen, 4, ?O_RDONLY}),
+                              Parent ! opened,
+                              receive stop -> ok end
+                      end),
+    receive opened -> ok after 2000 -> erlang:error(not_opened) end,
+    %% Two open files, one owner each, beside the tree's process.
+    ?assertEqual(3, links(Grant)),
+    flush_tree_calls(),
+    Client ! stop,
+    receive {'DOWN', Ref, process, Client, _} -> ok end,
+    wait_for_links(Grant, 1),
+    wait_for_monitors(Grant, 0),
+    ?assertEqual([clunk, clunk, clunk], [C || C <- tree_calls(), C =:= clunk]),
+    stop(Grant).
+
+%% readdir needs an opened directory fid and fits its entries to the count.
+readdir_over_an_open_directory_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    ?assertEqual({error, ebadf}, call(Grant, {readdir, 2, 0, 8192})),
+    {ok, ?ROOT_QID, 0} = call(Grant, {lopen, 2, ?O_RDONLY}),
+    ?assertMatch({ok, [{?A_QID, 1, 4, <<"a">>}, {_, 2, 8, <<"f">>}, {?LINK_QID, 3, 10, <<"l">>}]},
+                 call(Grant, {readdir, 2, 0, 8192})),
+    ?assertMatch({ok, [{?LINK_QID, 3, 10, <<"l">>}]}, call(Grant, {readdir, 2, 2, 8192})),
+    ?assertEqual({ok, []}, call(Grant, {readdir, 2, 3, 8192})),
+    %% 25 bytes hold one entry of a one-byte name; 24 hold none.
+    ?assertMatch({ok, [{?A_QID, 1, 4, <<"a">>}]}, call(Grant, {readdir, 2, 0, 25})),
+    ?assertEqual({error, einval}, call(Grant, {readdir, 2, 0, 24})),
+    %% A file opened is no directory to list.
+    {ok, [_]} = walk(Grant, 1, 3, [<<"f">>]),
+    {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDONLY}),
+    ?assertEqual({error, enotdir}, call(Grant, {readdir, 3, 0, 8192})),
+    %% No walk starts from an opened fid.
+    ?assertEqual({error, einval}, walk(Grant, 2, 4, [<<"a">>])),
+    stop(Grant).
+
+%% remove acts on the fid's node, not on whatever its name names now: after
+%% the name moved and a new file took it, remove leaves the new file alone.
+remove_after_a_rename_leaves_the_new_name_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, [{0, 0, 6}]} = walk(Grant, 1, 2, [<<"f">>]),
+    ok = call(Grant, {renameat, 1, <<"f">>, 1, <<"g">>}),
+    {ok, []} = walk(Grant, 1, 3, []),
+    {ok, {0, 0, New}, 0} = lcreate(Grant, 3, <<"f">>, ?O_RDWR),
+    ?assertEqual({error, enoent}, call(Grant, {remove, 2})),
+    ?assertEqual(ebadf, qid_of(Grant, 2)),
+    ?assertEqual({ok, [{0, 0, New}]}, walk(Grant, 1, 4, [<<"f">>])),
+    ?assertEqual({ok, [{0, 0, 6}]}, walk(Grant, 1, 5, [<<"g">>])),
+    %% Renamed away and back, the name names the fid's node again.
+    ok = call(Grant, {renameat, 1, <<"g">>, 1, <<"h">>}),
+    ok = call(Grant, {renameat, 1, <<"h">>, 1, <<"g">>}),
+    ?assertEqual(ok, call(Grant, {remove, 5})),
+    ?assertEqual({error, enoent}, walk(Grant, 1, 5, [<<"g">>])),
+    stop(Grant).
+
+%% An open through a fid whose node lost its last name opens nothing; an open
+%% made before the unlink keeps working.
+lopen_of_a_node_with_no_name_is_enoent_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, [_]} = walk(Grant, 1, 2, [<<"f">>]),
+    {ok, [_]} = walk(Grant, 1, 3, [<<"f">>]),
+    {ok, _, 0} = call(Grant, {lopen, 3, ?O_RDWR}),
+    {ok, 4, 0} = call(Grant, {write, 3, 0, <<"kept">>}),
+    ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
+    ?assertEqual({error, enoent}, call(Grant, {lopen, 2, ?O_RDONLY})),
+    ?assertEqual({ok, <<"kept">>}, call(Grant, {read, 3, 0, 100})),
+    stop(Grant).
+
+%% ".." returns to the directory a fid was walked through, whatever was
+%% renamed or removed since; the removed directory itself answers enoent.
+dotdot_returns_through_renames_and_removals_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, [?A_QID, _]} = walk(Grant, 1, 2, [<<"a">>, <<"b">>]),
+    ok = call(Grant, {renameat, 1, <<"a">>, 1, <<"c">>}),
+    ?assertEqual({ok, [?A_QID]}, walk(Grant, 2, 3, [<<"..">>])),
+    ok = call(Grant, {unlinkat, 3, <<"b">>, 16#200}),
+    ?assertEqual(enoent, qid_of(Grant, 2)),
+    ?assertEqual({ok, [?A_QID, ?ROOT_QID]}, walk(Grant, 2, 4, [<<"..">>, <<"..">>])),
+    stop(Grant).
+
+%% A request sent to an alias another request still holds is refused, and the
+%% grant serves on.
+an_alias_in_flight_takes_no_second_request_test() ->
+    Grant = quiet_grant(),
+    {ok, _} = attach(Grant, 1),
+    {ok, []} = walk(Grant, 1, 2, []),
+    {ok, _, 0} = lcreate(Grant, 2, <<"d">>, ?O_RDWR),
+    Alias = alias([explicit_unalias]),
+    Grant ! {erx_9p, Alias, self(), {write, 2, 0, <<"x">>}},
+    Grant ! {erx_9p, Alias, self(), {write, 2, 0, <<"y">>}},
+    Replies = lists:sort([answer(Alias), answer(Alias)]),
+    unalias(Alias),
+    ?assertMatch([{error, einval}, {ok, 1, 0}], Replies),
+    ?assertMatch({ok, <<_>>}, call(Grant, {read, 2, 0, 10})),
+    stop(Grant).
+
+%% The core's side of an open file's owner: a request on an open file goes to
+%% the owner, a flush waits for its answer, and only the owner's tag answers.
+file_owner_answers_through_its_tag_test() ->
+    Core = core(rw),
+    {_, Core1} = core_frame(Core, {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
+    {[{start_file, Node, erx_fs_test_tree, _}, {reply, _, {ok, _, 0}}], Core2} =
+        core_frame(Core1, {lcreate, 1, <<"n">>, ?O_RDWR, 8#644, 0}),
+    Tag = make_ref(),
+    Owner = self(),
+    Core3 = erx_fs_grant:file_started(Node, Owner, Tag, Core2),
+    Write = make_ref(),
+    {[{run, Owner, Tag, {answer, Write, {write, _, 0, <<"z">>}}}], Core4} =
+        erx_fs_grant:handle_frame({erx_9p, Write, self(), {write, 1, 0, <<"z">>}}, Core3),
+    Flush = make_ref(),
+    {[], Core5} = erx_fs_grant:handle_frame({erx_9p, Flush, self(), {flush, Write}}, Core4),
+    ?assertMatch(#{in_flight := 2, files := 1}, erx_fs_grant:info(Core5)),
+    {[], Core6} = erx_fs_grant:file_answer(make_ref(), Write, {ok, 1, 0}, Core5),
+    ?assertMatch(#{in_flight := 2, refused := 1}, erx_fs_grant:info(Core6)),
+    {Answered, Core7} = erx_fs_grant:file_answer(Tag, Write, {ok, 1, 0}, Core6),
+    ?assertEqual([{reply, Write, {ok, 1, 0}}, {reply, Flush, ok}], Answered),
+    ?assertMatch(#{in_flight := 0}, erx_fs_grant:info(Core7)),
+    %% The clunk of the file's last opened fid ends its owner.
+    {Clunked, Core8} = core_frame(Core7, {clunk, 1}),
+    ?assertMatch([{run, Owner, Tag, {last_clunk, _}} | _], Clunked),
+    ?assertMatch(#{files := 0, fids := 0}, erx_fs_grant:info(Core8)).

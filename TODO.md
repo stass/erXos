@@ -300,14 +300,27 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a fid keeps the path it was walked by, so after a `renameat`
-  its `remove` unlinks whatever the old name names now (another node, if one was made there) and its `..` returns to
-  the old parent. 9P's `remove` acts on the fid's file, and QEMU re-paths fids on rename. Decide in
-  `docs/design-files.md` whether `unlink` receives the fid's node, refusing with `enoent` when the name no longer
-  names it, and whether `renameat` re-paths the grant's live fids; then test both against the test tree.
+* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: an open file's owner process is one per grant, keyed by the node,
+  where `docs/design-files.md` starts one per open file on any grant; a file open through two grants of one tree has
+  two owners, so its requests are ordered against each other only by the tree. /tmp serves one grant per tree. Add
+  a per-tree registry of owners before a tree is served on more than one grant.
+* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: no read helper exists, so an open file's owner calls `read` itself
+  whatever the module's `read_mode/0` says, and a read that waits for a medium holds up the file's other requests.
+  Build the helper of `docs/design-files.md` (state-stamped results the owner's core accepts or retries) with the
+  first tree that answers `helper`.
+* [Medium] `erlang/apps/erx/src/erx_fs.erl`: a grant and each file process call the tree's callbacks with their own
+  copy of its `State`, so a module that keeps its tree as a plain value compiles and silently diverges; correctness
+  rests on the convention in `docs/design-files.md` that such a tree lives behind its `State`. Decide whether the
+  behaviour drops `State1` from the callbacks (an `init/1` handle that never changes), so a diverging copy cannot be
+  written.
+* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a clunk of an opened fid is answered at once and its file process
+  leaves `files` when its last clunk is queued, so a tree whose `clunk` is slow can gather file processes still
+  draining clunks, beyond the pool and outside the in-flight bound, and two processes of one file can run at once.
+  /tmp's clunk is one in-memory step. Defer the clunk's answer to the file process (counted in flight), or keep the
+  file in a closing state that new opens join, before a tree with a slow `clunk` is served.
 * [Low] `erlang/apps/erx/src/erx_fs_grant.erl`: `add_fid` and `end_fid` push effects into the grant's state, which
   every exported step must drain, and an owner's monitor is `pending` until the shell hands its reference back with
-  `monitored/3`. Thread the effects through the step's return instead, so a step that both makes and ends one
+  `monitored/3`, as an open file's owner is until `file_started/4`. Thread the effects through the step's return instead, so a step that both makes and ends one
   owner's fid can never emit `{demonitor, pending}`.
 
 * [Medium] `abi/manifest.txt`: the `devices[].selector` choice does not make `base`, `size` and `line` inactive for
@@ -1245,6 +1258,12 @@ it; git history is the record of completed work.
   credential files whose directory is not on the list.
 
 ## Security residuals
+
+* [Low] `erlang/apps/erx/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
+  owner's `DOWN` by matching Erlang references, which a process that can guess one can forge (`list_to_ref/1` on the
+  server's node, a crafted external term from a client node). A forged answer can only answer the client's own request
+  in flight early, and a forged `DOWN` clunk a fid early. Bind both to the sender when erXos's kernel carries a
+  sender with each message.
 
 * [Low] scheduler and budgets, a group's charge
   ([per-CPU records](docs/design-scheduler.md#ownership-and-lifetime)): a group

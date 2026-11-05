@@ -114,7 +114,7 @@ request(Run) ->
         11 -> {readdir, handle(Run), pick([0, 1, 2, 5, -1]), pick([1, 2, 256, 0])};
         12 -> {readlink, ino(Run)};
         13 -> {setattr, target(Run), changes()};
-        14 -> {unlink, ino(Run), name(), pick([file, directory, any])};
+        14 -> {unlink, ino(Run), name(), pick([file, directory, {node, ino(Run)}])};
         15 -> {rename, ino(Run), name(), ino(Run), name()};
         16 -> {rename, ino(Run), name(), ino(Run), name()};
         17 -> clunk_request(Run);

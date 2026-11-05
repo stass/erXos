@@ -738,7 +738,9 @@ lets a server reorder, so a client may send a walk, an `lopen` and a first
 read on the new fid together, one round trip for all three. A client of a
 server from outside erXos, as the host-tree domain's bridge is of QEMU's,
 which runs each request on its own, waits for a reply before it sends a
-request that depends on it. A walk that stops before its last name makes
+request that depends on it. An alias names one request: a request sent
+to an alias whose earlier request the grant still waits to answer is
+refused with `einval`. A walk that stops before its last name makes
 no new fid, as 9P2000.L says, so a request sent with it on that fid fails
 with `ebadf`; a walk in place that stops leaves its fid where it was, so
 a client sends a request with a walk only on the walk's new fid, and
@@ -976,7 +978,8 @@ tree:
 -callback setattr(Target :: {open, Handle :: term()} | {node, Node :: term()},
                   Changes :: map(), State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
--callback unlink(Dir :: term(), Name :: binary(), Kind :: file | directory | any,
+-callback unlink(Dir :: term(), Name :: binary(),
+                 Kind :: file | directory | {node, Node :: term()},
                  State :: term()) ->
               {ok, State1 :: term()} | {error, file:posix()}.
 -callback rename(Dir :: term(), Name :: binary(), NewDir :: term(),
@@ -1012,7 +1015,13 @@ other client's request can come between its parts:
 * `unlink` receives the request's `Kind`: `unlinkat` passes `directory`
   with `AT_REMOVEDIR` and `file` without, so the module answers `rmdir` of
   a file with `enotdir` and `unlink` of a directory with `eisdir`, and
-  `remove` passes `any`.
+  `remove` passes `{node, Node}`, the node its fid stands at: the module
+  removes `Name` from `Dir` only if that entry still names `Node`, and
+  otherwise answers `enoent`, deciding both in the one step. So a
+  `remove` acts on its fid's file, as 9P's `remove` does, and never on
+  a file a `rename` or a create has put under the name since the fid
+  was walked; once the name names the fid's node again, the same
+  `remove` succeeds.
 * `setattr` receives `{open, Handle}` for an opened fid and `{node, Node}`
   for an unopened one, so a size change checks the open's access through
   an opened fid and the file's permission otherwise, as `setattr`'s row
@@ -1042,7 +1051,19 @@ other client's request can come between its parts:
   itself, in turn with the file's other operations, and starts no helper,
   since a helper would only add a process to every read. `erx_fs` reads
   the answer once, when the grant starts; a module without the callback
-  gets helpers.
+  gets helpers. The owner calls the callbacks with the `State` its grant
+  held when it started it, so a module whose files have owners keeps its
+  tree behind that `State`, in a process of its own as `/tmp` does
+  ([design-tmp.md](design-tmp.md#concurrency)) or on its medium, where
+  the grant and every owner reach the same tree; the `State1` a
+  callback returns replaces only its caller's copy. An owner is linked
+  to its grant, so a callback that crashes in it ends the grant, and the
+  grant's end ends its owners. The grant sends an owner its file's
+  requests and the clunks of its opened fids in order and takes back
+  only the answers that carry the owner's tag; a clunk therefore runs
+  after every request sent before it, and the owner ends once it has
+  run the file's last clunk, so every live owner is one of a file still
+  open through the grant or one finishing the clunks it was sent.
 * **Checks before callbacks.** Every message a grant receives, but its
   owners' `DOWN`s, passes one decoding funnel, which takes the frame and
   the grant's rights and admits a request only if the protocol's grammar
@@ -1076,7 +1097,23 @@ other client's request can come between its parts:
   to the parent the grant's process recorded on the way down, so the
   callback is never asked for it either. A walk from a fid whose qid is a
   `symlink` fails, and an `lopen` of one fails with `eloop`, so no request
-  sent along with a walk acts on a link the client has not yet seen.
+  sent along with a walk acts on a link the client has not yet seen. A
+  walk, an `lopen` or an `lcreate` from an opened fid fails with
+  `einval`, as 9P2000.L walks and opens only unopened fids, so an opened
+  fid stays on the node it opened.
+* **What a fid denotes.** A fid stands for three things the grant
+  records as it walks: the node it was walked to, the entry it was
+  walked by (the directory it was walked from and its name there), and
+  the chain of directories back to the grant's root. Operations on the
+  node (`getattr`, `lopen`, `setattr`, `readlink`, and a directory fid's
+  `walk`, `mkdir`, `lcreate` and the rest) use the node, whatever it is
+  named now; `remove` uses the entry, with the node as its check; `..`
+  uses the chain. So `..` returns to the directory the fid was walked
+  through whatever renames have happened since, and never leaves the
+  grant's subtree, since the chain ends at its root. After the fid's
+  node is removed, the requests that reach it answer what the module
+  answers for a node that is gone, `enoent` for `/tmp`, while `..` still
+  walks to the recorded parent.
 * **Held bytes.** What a grant holds for its client beyond its fids, such
   as the snapshot behind an open `/proc` file, is bounded by the server's
   per-fid bound and its pool; a server whose per-fid state is large sets a
