@@ -111,6 +111,16 @@ erx_event_sleep_prepare(const erx_group_stat_t *status, uint32_t slot, bool (*se
 	read_epochs(status, slot, epochs);
 	ERX_EVENT_TEST_GAP(2);
 	return (set_flag(arg) && empty);
+#elif defined(ERX_EVENT_SEED_EPOCHS_AFTER_FLAG)
+	/* The seeded lost wake: a waker between the flag and the epochs leaves nothing to see. */
+	ERX_EVENT_TEST_GAP(1);
+	if (!set_flag(arg))
+		return (false);
+	read_epochs(status, slot, epochs);
+	ERX_EVENT_TEST_GAP(2);
+	empty = atomic_load_explicit(&status->ready, memory_order_acquire) == 0;
+	ERX_EVENT_TEST_GAP(3);
+	return (empty);
 #else
 	read_epochs(status, slot, epochs);
 	ERX_EVENT_TEST_GAP(1);

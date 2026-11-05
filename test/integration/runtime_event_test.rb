@@ -36,6 +36,12 @@ class RuntimeEventTest < Minitest::Test
     assert_match(/^LOST WAKE: fire at gap 1: /, output)
   end
 
+  def test_the_epochs_read_after_the_flag_lose_a_waker
+    output, status = run_harness('-DERX_EVENT_SEED_EPOCHS_AFTER_FLAG')
+    refute status.success?, output
+    assert_match(/^LOST WAKE: waker at point 4: /, output)
+  end
+
   def test_the_seeded_exit_leaves_with_a_label
     output, status = run_harness('-DERX_EVENT_SEED_LEAVE_WITHOUT_TAKING')
     refute status.success?, output

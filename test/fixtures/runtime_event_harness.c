@@ -6,7 +6,9 @@
  * of an executor's sleep step and checks that no fire is lost, then has dispatchers and
  * firers race under ThreadSanitizer. Built with ERX_EVENT_SEED_LOOK_BEFORE_EPOCHS it must
  * report the lost wake, which proves the first check sees one, and built with
- * ERX_EVENT_SEED_LEAVE_WITHOUT_TAKING it must report the label a leaver left behind.
+ * ERX_EVENT_SEED_LEAVE_WITHOUT_TAKING it must report the label a leaver left behind, and
+ * built with ERX_EVENT_SEED_EPOCHS_AFTER_FLAG it must report the wake a waker's crossing
+ * loses when the epochs are read after the flag.
  */
 
 #include <pthread.h>
@@ -37,11 +39,50 @@ model_fire(uint32_t index)
 	atomic_fetch_add(&model_status.epoch, 1);
 }
 
+/*
+ * The flags a scheduler's sleep step shares with its waker, as in erl_process.c: the
+ * scheduler asks to sleep, then its flag step records a park if the flags still ask. A
+ * waker clears them all, and moves the slot's epoch only for a park it found recorded.
+ */
+#define MODEL_ASKED	1u
+#define MODEL_PARKED	2u
+/* After the gaps: inside the flag step, once the park is recorded. */
+#define WAKER_IN_FLAG_STEP	4
+
+static atomic_uint model_flags;
+static int waker_at = -1;
+static bool waker_ran;
+
+static void
+model_waker(void)
+{
+	if ((atomic_exchange(&model_flags, 0) & MODEL_PARKED) != 0)
+		atomic_fetch_add(&model_status.exec[0].epoch, 1);
+	waker_ran = true;
+}
+
 void
 erx_event_test_gap(int gap)
 {
 	if (gap == fire_at_gap)
 		model_fire(0);
+	if (gap == waker_at)
+		model_waker();
+}
+
+/* sched_set_park_flag: it answers whether the flags still ask for sleep. */
+static bool
+model_set_park_flag(void *arg)
+{
+	bool asked;
+
+	(void)arg;
+	asked = (atomic_load(&model_flags) & MODEL_ASKED) != 0;
+	if (asked)
+		atomic_fetch_or(&model_flags, MODEL_PARKED);
+	if (waker_at == WAKER_IN_FLAG_STEP)
+		model_waker();
+	return (asked);
 }
 
 static bool
@@ -76,6 +117,26 @@ check_every_gap_of_the_sleep_step(void)
 		}
 	}
 	fire_at_gap = -1;
+}
+
+/* A waker at each point of the step: either the park is called off or its epoch has moved. */
+static void
+check_a_waker_at_every_point_of_the_sleep_step(void)
+{
+	for (waker_at = 0; waker_at <= WAKER_IN_FLAG_STEP; waker_at++) {
+		erx_event_epochs_t epochs;
+		bool park;
+
+		memset(&model_status, 0, sizeof(model_status));
+		atomic_store(&model_flags, MODEL_ASKED);
+		waker_ran = false;
+		park = erx_event_sleep_prepare(&model_status, 0, model_set_park_flag, NULL, &epochs);
+		if (park && waker_ran && !model_park_returns(&epochs)) {
+			printf("LOST WAKE: waker at point %d: the park sleeps with the flags cleared\n", waker_at);
+			exit(1);
+		}
+	}
+	waker_at = -1;
 }
 
 static void
@@ -310,6 +371,7 @@ int
 main(void)
 {
 	check_every_gap_of_the_sleep_step();
+	check_a_waker_at_every_point_of_the_sleep_step();
 	check_a_cleared_flag_stops_the_sleep();
 	check_no_executor_leaves_with_a_label();
 	check_the_table();

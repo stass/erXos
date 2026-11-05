@@ -290,8 +290,8 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/runtime_seam.rb`: `check_elf_objects` reads only the emulator's objects and six named libraries, unlike the hosted
   check, which reads the executable, so a library added only to the native link can import an unlisted name. Derive the list from the root's link map.
 * [Low] `tools/lib/erx/fiasco.rb`: `Fiasco#build` records the audit report again before pack audits it, so a build output edited after the build, which `make` leaves alone, is recorded as built rather than refused. (From reading the code; not run.)
-* [Low] `test/fixtures/runtime_event_harness.c`: the `scheduler_wait` exit test (`erx_event_leave_wait_ready`) is single-threaded and pins the
-  call by source text, so the real crossing of a scheduler and its waker is not run.
+* [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's waker is a single-threaded model of `sched_set_park_flag` and the wake in `erl_process.c`, at fixed points, and the
+  `scheduler_wait` exit test (`erx_event_leave_wait_ready`) pins the call by source text, so the real crossing of a scheduler and its waker is not run.
 * [Low] `tools/fuzz/boot_build_target.rb`: the boot fuzz targets do not require that any input is accepted, so a target that
   refuses everything passes, and the script copies the limits layout by hand rather than from `abi/erx_abi.txt`.
 * [Low] `otp/erts/emulator/Makefile.in`: `erlang:system_info(compile_info)` answers `N/A` on erXos (edit 49 of
@@ -328,6 +328,7 @@ it; git history is the record of completed work.
 * [Medium] tools, `tools/lib/erx/release.rb`: `boot_file` puts paths into an Erlang expression, so a checkout path holding `"` or `\` breaks or changes it. Pass them with `-extra`.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
 * [Medium] runtime, `tools/fuzz/boot_manifest_fuzz.c`: the target compares the page with the reader's own result, so a swapped limit or a wrong host byte in `erx_boot_manifest_read` passes. Compare with `erx_manifest_open` and `erx_manifest_runtime_limits_at` called directly, field by field.
+* [Low] runtime, `liberx/backend/fiasco/runtime_entry.c`: an `erx.arg` word of the kernel command line reaches ERTS's flag diagnostics unchecked, where the reader in `boot_manifest.c` holds `system_args` to printable ASCII. The command line is the operator's own.
 * [Medium] runtime, `erx_prim_file.c`: a release file is served with no check of its hash, where `docs/design-kernel.md` says every file passes `erx_pack_file_check` before its first use. Hosted checks the manifest alone.
 * [Medium] runtime, `otp/lib/kernel/src/erx_console.erl`: `Ctrl-G` rings the bell, where `docs/design-live.md` gives it a menu of sessions; the menu comes with the sessions. `erx:console_size/2` waits with it.
 * [Low] runtime, `otp/lib/kernel/src/prim_tty.erl`: `init_term/1`, the reader and the writer stay as stubs for `user_drv`'s stock paths, which `load/0` keeps unreachable; they go when `user_drv` itself leaves the release.
