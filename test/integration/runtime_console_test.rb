@@ -124,15 +124,27 @@ class RuntimeConsoleTest < Minitest::Test
   class Session
     attr_reader :screen, :status
 
-    def initialize(reader, writer, pid, columns:)
+    def initialize(reader, writer, pid, columns:, budget: BUDGET_SECONDS)
       @reader = reader
       @writer = writer
       @pid = pid
       @screen = Screen.new(columns: columns)
-      @deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + BUDGET_SECONDS
+      @deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
     end
 
     def type(keys) = @writer.write(keys)
+
+    # The program's status once it exits. An exit that hangs fails the test at the session's
+    # deadline, where a blocking wait would hold the gate forever; the caller's cleanup ends it.
+    def reap
+      loop do
+        waited = Process.waitpid2(@pid, Process::WNOHANG)
+        return waited.last if waited
+        raise Minitest::Assertion, "did not exit:\n#{@screen}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= @deadline
+
+        IO.select(nil, nil, nil, 0.05)
+      end
+    end
 
     # The rendered screen as it stands, with the line the cursor is on last.
     def wait_for(pattern)
@@ -159,7 +171,7 @@ class RuntimeConsoleTest < Minitest::Test
         read_once(left)
       end
     rescue EOFError, Errno::EIO
-      _, @status = Process.wait2(@pid)
+      @status = reap
     end
 
     private
@@ -378,8 +390,7 @@ class RuntimeConsoleTest < Minitest::Test
         session.wait_for(/^1> \z/)
         refute slave.echo?, 'raw while the shell runs'
         session.type(line)
-        _, status = Process.wait2(pid)
-        yield status, slave
+        yield session.reap, slave
       ensure
         end_if_running(pid)
       end
@@ -433,5 +444,22 @@ class RuntimeConsoleTest < Minitest::Test
       refute_equal 0, status.exitstatus
       assert slave.echo?
     end
+  end
+end
+
+# Reaping needs no runtime, so it stands outside RuntimeConsoleTest's setup.
+class RuntimeConsoleReapTest < Minitest::Test
+  def test_a_program_that_does_not_exit_fails_at_the_deadline
+    pid = Process.spawn('sleep', '60')
+    session = RuntimeConsoleTest::Session.new(nil, nil, pid, columns: 80, budget: 0.2)
+    assert_raises(Minitest::Assertion) { session.reap }
+  ensure
+    Process.kill('KILL', pid)
+    Process.wait(pid)
+  end
+
+  def test_a_program_that_exits_gives_its_status
+    pid = Process.spawn('sh', '-c', 'exit 3')
+    assert_equal 3, RuntimeConsoleTest::Session.new(nil, nil, pid, columns: 80).reap.exitstatus
   end
 end
