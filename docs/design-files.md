@@ -1085,7 +1085,15 @@ other client's request can come between its parts:
   its fid. `erx_fs` then checks the bounds, maps fids to nodes, and
   replies only to the request's alias, holding each reply to its
   request with the grammar's reply check, so a callback's malformed
-  answer reaches the client as `eio`. A request that fails is answered
+  answer reaches the client as `eio`. Each operation builds the grant it
+  would leave before anything is kept, and only a reply the check
+  accepts keeps it; a rejected reply is answered `eio` and, like a
+  refusal, keeps only a `remove`'s clunk. Every qid the grant records
+  (attach, walk, `lcreate`) travels in the reply that records it, so a
+  malformed qid leaves no fid, open or file process behind. `lcreate`
+  checks its reply before it records the open, and clunks at once a
+  handle the tree opened for a reply the check rejects, since no fid
+  holds it. A request that fails is answered
   with an error and counted; it never reaches a callback.
 * **Bounded work on the server's grant.** A grant process runs on its
   server's own group, as every process of the server does; no client's
@@ -1856,7 +1864,17 @@ report, so a passing run shows the code under test ran.
   an owner, is answered `eio` at the client and the grant goes on
   serving; seeded: a grant that takes a directory's `make` answering
   `{ok, Node, Qid, State1}` for a file's, and one that crashes on an
-  answer that is not an error, which that case catches. The
+  answer that is not an error, which that case catches. A tree that
+  answers root, walk or `lcreate` with a malformed qid is answered `eio`
+  and the grant records no fid, opens nothing, starts no file process
+  and clunks the handle the tree opened; a `remove` whose tree answers
+  an error 9P2000.L does not carry is answered `eio` and still clunks
+  its fid; and a listing whose tail is not a list is answered `eio` by
+  the file process; seeded: a grant that keeps what an operation built
+  when the reply check rejects its reply, one that undoes a remove's
+  clunk then, one that leaves a rejected `lcreate`'s handle open, and a
+  listing check that crashes on an improper tail, which those cases
+  catch. The
   fid counter's property test, over a space a test hook shrinks to 256
   numbers, draws from many processes at once, keeps some fids alive past
   a wrap and ends others with their owners, and finds no number drawn

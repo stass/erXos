@@ -308,10 +308,6 @@ it; git history is the record of completed work.
   whatever the module's `read_mode/0` says, and a read that waits for a medium holds up the file's other requests.
   Build the helper of `docs/design-files.md` (state-stamped results the owner's core accepts or retries) with the
   first tree that answers `helper`.
-* [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a qid a callback answers is checked only by the grammar's
-  reply check, after the grant applied it: an attach, a walk or an `lcreate` whose tree answers a malformed qid
-  records the fid (opened, for `lcreate`) while the client is told `eio`. Check the qid at the callback (export
-  the grammar's `is_qid/1`) or validate the whole reply before applying it.
 * [Medium] `erlang/apps/erx/src/erx_fs_grant.erl`: a clunk of an opened fid is answered at once and its file process
   leaves `files` when its last clunk is queued, so a tree whose `clunk` is slow can gather file processes still
   draining clunks, beyond the pool and outside the in-flight bound, and two processes of one file can run at once.

@@ -138,7 +138,24 @@ class ErxFsTest < Minitest::Test
     Fault.new(name: 'a malformed answer crashes the grant', file: GRANT,
               from: 'failed(_) -> {error, eio}.',
               to: 'failed(Other) when element(1, Other) =:= error -> {error, eio}.',
-              caught_by: 'answers_with_a_state_are_eio_in_the_grant_test')
+              caught_by: 'answers_with_a_state_are_eio_in_the_grant_test'),
+    Fault.new(name: 'a reply the grammar rejects keeps the grant its operation built', file: GRANT,
+              from: 'false -> {{error, eio}, refused_remove(Request, Before)}',
+              to: 'false -> {{error, eio}, refused_remove(Request, element(1, {Built, Before}))}',
+              caught_by: 'malformed_qids_change_nothing_test'),
+    Fault.new(name: "a rejected reply undoes a remove's clunk", file: GRANT,
+              from: 'false -> {{error, eio}, refused_remove(Request, Before)}',
+              to: 'false -> {{error, eio}, element(2, {fun refused_remove/2, Before})}',
+              caught_by: 'rejected_remove_still_clunks_its_fid_test'),
+    Fault.new(name: "a rejected lcreate leaves the tree's handle open", file: GRANT,
+              from: "                            _ = Module:clunk(Handle, Fs),\n" \
+                    '                            {{error, eio}, Grant}',
+              to: '                            {{error, eio}, element(2, {Handle, Grant})}',
+              caught_by: 'malformed_qids_leave_the_grant_serving_test'),
+    Fault.new(name: 'a listing with an improper tail crashes the file process', file: GRANT,
+              from: '    case entries(Entries) of',
+              to: '    case is_list(Entries) andalso lists:all(fun(Entry) -> entries([Entry]) end, Entries) of',
+              caught_by: 'improper_listing_is_eio_test')
   ].freeze
 
   def test_the_cases_pass

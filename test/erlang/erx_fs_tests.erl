@@ -928,3 +928,91 @@ answers_with_a_state_are_eio_in_a_file_process_test() ->
     ?assertMatch({ok, [_]}, walk(Grant, 1, 4, [<<"a">>])),
     ?assert(is_process_alive(Grant)),
     stop(Grant).
+
+%% root and walk answering with a next state are eio too, and record no fid.
+stale_root_and_walk_are_eio_test() ->
+    Root = stale_grant([root]),
+    ?assertEqual({error, eio}, attach(Root, 1)),
+    ?assertEqual(ebadf, qid_of(Root, 1)),
+    ?assert(is_process_alive(Root)),
+    stop(Root),
+    Walk = stale_grant([walk]),
+    {ok, _} = attach(Walk, 1),
+    ?assertEqual({error, eio}, walk(Walk, 1, 2, [<<"f">>])),
+    ?assertEqual(ebadf, qid_of(Walk, 2)),
+    ?assert(is_process_alive(Walk)),
+    stop(Walk).
+
+%% A grant, and a core, on erx_fs_stale_tree, whose callbacks named in
+%% Malformed answer in their own shape with a value the grammar refuses.
+malformed_grant(Malformed) ->
+    {ok, Grant} = erx_fs:start_link(erx_fs_stale_tree, [{malformed, Malformed}, {observer, self()}], rw),
+    unlink(Grant),
+    Grant.
+
+malformed_core(Malformed) ->
+    {module, _} = code:ensure_loaded(erx_fs_stale_tree),
+    {ok, Fs} = erx_fs_stale_tree:init([{malformed, Malformed}]),
+    erx_fs_grant:new(#{module => erx_fs_stale_tree, fs => Fs, rights => rw,
+                       client => node()}).
+
+%% A malformed qid is answered eio and the grant keeps nothing of the answer:
+%% an attach records no fid and monitors no owner, a walk names no new fid,
+%% and an lcreate neither opens its fid nor starts a file process.
+malformed_qids_change_nothing_test() ->
+    {Attached, Root} = core_frame(malformed_core([root]), {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
+    ?assertMatch([{reply, _, {error, eio}}], Attached),
+    ?assertMatch(#{fids := 0, owners := 0}, erx_fs_grant:info(Root)),
+    {_, Core1} = core_frame(malformed_core([walk, make]), {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
+    {Walked, Core2} = core_frame(Core1, {walk, 1, 2, [<<"f">>]}),
+    ?assertMatch([{reply, _, {error, eio}}], Walked),
+    ?assertMatch(#{fids := 1}, erx_fs_grant:info(Core2)),
+    {_, Core3} = core_frame(Core2, {walk, 1, 3, []}),
+    {Created, Core4} = core_frame(Core3, {lcreate, 3, <<"n">>, ?O_RDWR, 8#644, 0}),
+    ?assertMatch([{reply, _, {error, eio}}], Created),
+    ?assertMatch(#{fids := 2, files := 0}, erx_fs_grant:info(Core4)),
+    %% Fid 3 was not opened: it opens now.
+    {Opened, _} = core_frame(Core4, {lopen, 3, 0}),
+    ?assertMatch({reply, _, {ok, _, _}}, lists:last(Opened)).
+
+%% The same through a running grant, which goes on serving; the handle the
+%% tree opened for the rejected lcreate is clunked, since no fid holds it.
+malformed_qids_leave_the_grant_serving_test() ->
+    Grant = malformed_grant([walk, make]),
+    {ok, _} = attach(Grant, 1),
+    ?assertEqual({error, eio}, walk(Grant, 1, 2, [<<"f">>])),
+    ?assertEqual(ebadf, qid_of(Grant, 2)),
+    {ok, _} = walk(Grant, 1, 3, []),
+    ?assertEqual({error, eio}, call(Grant, {lcreate, 3, <<"n">>, ?O_RDWR, 8#644, 0})),
+    receive
+        {tree_call, clunk} -> ok
+    after 0 ->
+        erlang:error(handle_not_clunked)
+    end,
+    ?assertMatch({ok, _, _}, call(Grant, {lopen, 3, 0})),
+    ?assert(is_process_alive(Grant)),
+    stop(Grant).
+
+%% A listing whose tail is not a list is answered eio by the file process,
+%% and the grant goes on serving.
+improper_listing_is_eio_test() ->
+    Grant = malformed_grant([readdir]),
+    {ok, _} = attach(Grant, 1),
+    {ok, _} = walk(Grant, 1, 2, []),
+    {ok, _, _} = call(Grant, {lopen, 2, 0}),
+    ?assertEqual({error, eio}, call(Grant, {readdir, 2, 0, 4096})),
+    ok = call(Grant, {clunk, 2}),
+    ?assertMatch({ok, [_]}, walk(Grant, 1, 3, [<<"a">>])),
+    ?assert(is_process_alive(Grant)),
+    stop(Grant).
+
+%% A remove whose tree answers an error 9P2000.L does not carry is answered
+%% eio and still clunks its fid.
+rejected_remove_still_clunks_its_fid_test() ->
+    Grant = malformed_grant([unlink]),
+    {ok, _} = attach(Grant, 1),
+    {ok, _} = walk(Grant, 1, 2, [<<"f">>]),
+    ?assertEqual({error, eio}, call(Grant, {remove, 2})),
+    ?assertEqual(ebadf, qid_of(Grant, 2)),
+    ?assert(is_process_alive(Grant)),
+    stop(Grant).

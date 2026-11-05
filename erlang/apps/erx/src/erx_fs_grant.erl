@@ -30,7 +30,7 @@ reads no other state and sends nothing. Every callback receives the tree's
 handle `Fs`, which `init/1` answered and which never changes, and answers only
 its result, never a next state, so the grant and its file processes call one
 tree; an answer that is none of its callback's shapes reaches the client as
-`eio`, through `failed/1` or the grammar's reply check in `finish/4`.
+`eio`, through `failed/1` or the grammar's reply check in `finish/5`.
 
 Every frame passes one funnel, `decode/2`, which takes the grant's rights:
 dispatch receives only requests the funnel admitted, so a writing request on a
@@ -370,7 +370,7 @@ admit(Alias, _, {flush, OldTag}, #grant{pending = Pending, in_flight = InFlight}
 admit(Alias, Owner, Request, Grant) ->
     case dispatch(Owner, Request, Grant) of
         {{to_file, Node, Call}, Grant1} -> drain(to_file(Alias, Request, Node, Call, Grant1));
-        {Reply, Grant1} -> finish(Alias, Request, Reply, Grant1)
+        {Reply, Grant1} -> finish(Alias, Request, Reply, Grant1, Grant)
     end.
 
 %% A request on an open file goes to the file process, in flight until its
@@ -380,13 +380,24 @@ to_file(Alias, Request, Node, Call, #grant{files = Files} = Grant) ->
     #grant{effects = Effects} = Grant1 = defer(Alias, Request, Tag, Grant),
     Grant1#grant{effects = [{run, Process, Tag, {answer, Alias, Call}} | Effects]}.
 
-%% Every answer leaves through here: held to its request by the grammar's
-%% reply check, so a callback's malformed answer reaches the client as eio.
+%% Every answer leaves through here, held to its request by the grammar's
+%% reply check. An operation is built whole before it is kept: dispatch/3
+%% answers its reply with the grant it would leave (Built), and only a reply
+%% the check accepts keeps it. A reply the check rejects reaches the client
+%% as eio and keeps the grant as it was before the request (Before), its
+%% effects included, as a refusal does: a remove still clunks its fid.
+%% Every qid the grant records travels in the reply that records it (attach,
+%% walk, lcreate), so a callback's malformed answer, a qid included, leaves
+%% no fid, open or file process behind. Callers of finish/4 have nothing to
+%% undo: a refusal, or an answer from a file process.
 finish(Alias, Request, Reply, Grant) ->
-    Checked = case Request of
-                  none -> Reply;
-                  _ -> checked_reply(Request, Reply)
-              end,
+    finish(Alias, Request, Reply, Grant, Grant).
+
+finish(Alias, Request, Reply, Built, Before) ->
+    {Checked, Grant} = case accepted(Request, Reply) of
+                           true -> {Reply, Built};
+                           false -> {{error, eio}, refused_remove(Request, Before)}
+                       end,
     Grant1 = case Checked of
                  {error, _} -> count_refusal(Grant);
                  _ -> Grant
@@ -394,10 +405,14 @@ finish(Alias, Request, Reply, Grant) ->
     {Effects, Grant2} = drain(Grant1),
     {Effects ++ [{reply, Alias, Checked}], Grant2}.
 
-checked_reply(Request, Reply) ->
+%% A refusal of a frame the grammar did not decode (Request none) is the
+%% grant's own {error, Posix}; every other reply is checked against its request.
+accepted(none, _) ->
+    true;
+accepted(Request, Reply) ->
     case erx_9p_grammar:decode_reply(Request, Reply) of
-        {ok, _} -> Reply;
-        {error, eio} -> {error, eio}
+        {ok, _} -> true;
+        {error, eio} -> false
     end.
 
 count_refusal(#grant{refused = Refused} = Grant) ->
@@ -430,8 +445,8 @@ dispatch(_, {clunk, Fid}, Grant) ->
     end;
 dispatch(_, {lopen, Fid, Flags}, Grant) ->
     lopen(Fid, Flags, Grant);
-dispatch(_, {lcreate, Fid, Name, Flags, Mode, _Gid}, Grant) ->
-    lcreate(Fid, Name, Flags, Mode, Grant);
+dispatch(_, {lcreate, _, _, _, _, _} = Request, Grant) ->
+    lcreate(Request, Grant);
 dispatch(_, {read, Fid, Offset, Count}, Grant) ->
     on_open(Fid, Grant, fun(Handle) -> {read, Handle, Offset, Count} end);
 dispatch(_, {write, Fid, Offset, Data}, Grant) ->
@@ -572,8 +587,13 @@ lopen(Fid, Flags, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
 
 %% lcreate turns a directory's unopened fid into the opened fid of the file
 %% Name names: one make of {file, Mode, Flags} creates it, or without O_EXCL
-%% opens the regular file already there, and either way counts the open.
-lcreate(Fid, Name, Flags, Mode, #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
+%% opens the regular file already there, and either way counts the open. Its
+%% reply is checked here, before the open is recorded: a handle the tree
+%% opened for a reply the check rejects is held by no fid, so it is clunked
+%% at once, since dropping the grant this operation built cannot release
+%% what the tree acquired.
+lcreate({lcreate, Fid, Name, Flags, Mode, _} = Request,
+        #grant{fids = Fids, module = Module, fs = Fs} = Grant) ->
     case Fids of
         #{Fid := #fid{open = {open, _, _}}} ->
             {{error, einval}, Grant};
@@ -581,8 +601,15 @@ lcreate(Fid, Name, Flags, Mode, #grant{fids = Fids, module = Module, fs = Fs} = 
             What = {file, Mode band 8#7777, Flags},
             case optional(Module, make, [Dir, Name, What, Fs], {error, eperm}) of
                 {ok, Node, Qid, Handle} ->
-                    Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Grant),
-                    {{ok, Qid, ?IOUNIT}, opened(Fid, Node, Handle, Grant1)};
+                    Reply = {ok, Qid, ?IOUNIT},
+                    case accepted(Request, Reply) of
+                        true ->
+                            Grant1 = set_path(Fid, [{Node, Qid, Name} | Path], Grant),
+                            {Reply, opened(Fid, Node, Handle, Grant1)};
+                        false ->
+                            _ = Module:clunk(Handle, Fs),
+                            {{error, eio}, Grant}
+                    end;
                 Other ->
                     {failed(Other), Grant}
             end;
