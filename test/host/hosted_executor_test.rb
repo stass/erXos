@@ -18,8 +18,9 @@ class HostedExecutorTest < Minitest::Test
   DRIVER = 'test/fixtures/hosted_executor_driver.c'
   THREAD_SOURCE = 'liberx/backend/hosted/thread.c'
   FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
-             -I include -I kernel/generated -I kernel/core -I .].freeze
-  CASES = ['an executor has a slot and parks to its deadline', 'a plain pthread has no slot and may not park',
+             -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
+  CASES = ['the clock is the uptime clock',
+           'an executor has a slot and parks to its deadline', 'a plain pthread has no slot and may not park',
            "the creator's attributes are the thread's", 'slots return after a return',
            'slots return after a pthread_exit', 'slots return after erx_thread_exit', 'the group still fills'].freeze
   BUDGET_SECONDS = 60

@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
@@ -105,6 +106,17 @@ report(const char *name, bool ok)
 	printf("%s: %s\n", name, ok ? "ok" : "FAILED");
 }
 
+/* erx_clock_ns is the clock stock OTP reads on this host: one read of it falls between two of that. */
+static bool
+clock_is_the_uptime_clock(void)
+{
+	const uint64_t before = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+	const uint64_t clock = erx_clock_ns();
+	const uint64_t after = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+
+	return (before <= clock && clock <= after);
+}
+
 int
 main(void)
 {
@@ -114,6 +126,7 @@ main(void)
 
 	/* Line by line: a seeded driver may hang after a case, and what it printed still counts. */
 	(void)setvbuf(stdout, NULL, _IOLBF, 0);
+	report("the clock is the uptime clock", clock_is_the_uptime_clock());
 	report("an executor has a slot and parks to its deadline",
 	    erx_pthread_create_executor(&thread, NULL, park_once, &answer) == 0 && pthread_join(thread, NULL) == 0 &&
 	    answer.slot != ERX_NO_EXECUTOR_SLOT && answer.status == ERX_ETIMEDOUT);

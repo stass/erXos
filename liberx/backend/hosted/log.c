@@ -106,16 +106,14 @@ erx_effect_console_write(const char *line, size_t length)
 	erx_hosted_log_sink(line, length);
 }
 
-/* The kernel clock's stand-in; a clock that fails reads as time zero. */
+/*
+ * The kernel clock's stand-in, and the clock stock OTP takes on macOS: the raw counter.
+ * CLOCK_MONOTONIC would not do: macOS derives it from the wall clock, so it can step back.
+ */
 uint64_t
 erx_effect_clock_ns(void)
 {
-	struct timespec now;
-
-	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-		return (0);
-	return ((uint64_t)now.tv_sec * UINT64_C(1000000000) +
-	    (uint64_t)now.tv_nsec);
+	return (clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
 }
 
 void
