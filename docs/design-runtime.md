@@ -1773,8 +1773,10 @@ difference, and E-S10 counts where OTP's own NIFs meet it.
 
 A driver is an Erlang process under a supervisor, in a domain that holds
 its device's capabilities ([design-system.md](design-system.md#drivers)).
-The C under it is `erx_device`, one NIF module that exposes `liberx`'s
-DMA envelope and parses nothing a device wrote. A device's record reaches
+The C under it is `erx_device`, one module that exposes `liberx`'s
+DMA envelope and parses nothing a device wrote. Its register accesses are
+BIFs in ERTS, because a driver makes them one at a time and a BIF costs
+less than a NIF's entry and exit; the rest of the module is a NIF. A device's record reaches
 the driver from the device service over the system connection: the slots
 of its register windows, IRQ objects and DMA window or contiguous memory,
 its peripheral's name in the CMSIS-SVD source, whether it is
@@ -1794,7 +1796,7 @@ after the kernel has unbound it from the device's window.
 
 **Registers by name.** `erx_device:read(Dev, Reg)` and
 `erx_device:write(Dev, Reg, Value)`, with `erx_device:read_field/3` and
-`erx_device:write_field/4` for a field of a register, take a register's
+`erx_device:write_field/4` for a field of a register, all four BIFs, take a register's
 name, an atom, or `{Name, Index}` for a register array, and nothing else:
 the generated accessor table for the peripheral, produced from the SVD
 file by the one generator that produces every register accessor, maps the
@@ -1901,7 +1903,7 @@ decides batching per device class
 
 **Chokepoints.** Only `erx_device` calls `erx_dma_map`, `erx_mem_dma_addr`
 and the user-mode cache maintenance in a runtime; only its generated
-accessors touch a register window; only its one address function writes
+accessors, called only by its BIFs and its NIF, touch a register window; only its one address function writes
 a marked register or a descriptor's address fields and addressing flags;
 and the NIF holds no parser: a source check fails the build on a loop
 over device-written bytes in the NIF, whose copy at completion is one

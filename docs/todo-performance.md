@@ -15,16 +15,16 @@ residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
 * **[Low] drivers, the cost of a register access from Erlang.** `erx_device:read/2`
-  and `write/3` are NIF calls, each resolving a register's name and checking it in
+  and `write/3` are BIFs, each resolving a register's name and checking it in
   the generated table. Nothing has measured that against the access itself, a
   VM exit under HVF and an uncached load on hardware, or against the wake from an
   interrupt to the driver's process. Measure: a `tools/erx bench` workload of register
   reads, on HVF and then on a Raspberry Pi, split into the call, the name lookup, the
   access and the wake. Fixes on the table, cheapest first, all behind the same
   `erx_device` interface: a call that takes a batch of accesses in one crossing;
-  resolving the name at the driver's start so an access takes an index; a BIF in
-  ERTS instead of a NIF; a loader-specialised instruction in the interpreter
-  and the BeamAsm image that performs the access inline.
+  resolving the name at the driver's start so an access takes an index; a
+  loader-specialised instruction in the interpreter and the BeamAsm image that
+  performs the access inline.
 * **[Low] Fiasco backend, the cost of a commit in the root.** Each committed
   page zeroes through `root_mem.c`'s word loop and makes one `l4_task_map` call.
   Settled by a `tools/erx bench` workload of committing and touching a large
