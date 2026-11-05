@@ -17,7 +17,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modified by erXos: prim_socket, prim_net and socket_registry are removed.
+# Modified by erXos: prim_socket, prim_net and socket_registry are removed;
+# erx_file_remote is added, and the erXos ABI's Erlang header is on the include path.
 #
 # %CopyrightEnd%
 # 
@@ -41,6 +42,7 @@ PRE_LOADED_ERL_MODULES = \
 	init \
 	prim_buffer \
 	prim_file \
+	erx_file_remote \
 	prim_inet \
 	zlib \
 	prim_zip \
@@ -82,7 +84,9 @@ KERNEL_SRC=$(ERL_TOP)/lib/kernel/src
 KERNEL_INCLUDE=$(ERL_TOP)/lib/kernel/include
 STDLIB_INCLUDE=$(ERL_TOP)/lib/stdlib/include
 
-ERL_COMPILE_FLAGS += -I$(KERNEL_SRC) -I$(KERNEL_INCLUDE) +nowarn_deprecated_catch
+ERX_INCLUDE=$(ERL_TOP)/../erlang/apps/erx/include
+
+ERL_COMPILE_FLAGS += -I$(KERNEL_SRC) -I$(KERNEL_INCLUDE) -I$(ERX_INCLUDE) +nowarn_deprecated_catch
 
 ifeq ($(ERL_DETERMINISTIC),yes)
 	ERL_COMPILE_FLAGS += +deterministic

@@ -55,6 +55,28 @@ limit p9_at_removedir u32 0x200
 limit p9_o_accmode u32 3
 limit p9_o_trunc u32 0x200
 limit p9_lock_wrlck u8 1
+# A qid's type bits, and a mode's file type bits as Linux's st_mode carries
+# them (S_IFMT and its kinds), which getattr's mode includes.
+limit p9_qtdir u8 0x80
+limit p9_qtsymlink u8 0x02
+limit p9_s_ifmt u32 0xf000
+limit p9_s_ifdir u32 0x4000
+limit p9_s_ifreg u32 0x8000
+limit p9_s_iflnk u32 0xa000
+limit p9_s_ifchr u32 0x2000
+limit p9_s_ifblk u32 0x6000
+
+# setattr's valid: which of its fields the request sets.
+flags p9_setattr_valid u32
+  bit mode 0
+  bit uid 1
+  bit gid 2
+  bit size 3
+  bit atime 4
+  bit mtime 5
+  bit ctime 6
+  bit atime_set 7
+  bit mtime_set 8
 
 flags p9_getattr_mask u64
   bit mode 0

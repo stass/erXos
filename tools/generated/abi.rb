@@ -7736,6 +7736,23 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["p9_setattr_valid"] = EnumType.new(
+        name: "p9_setattr_valid".b,
+        base: types.fetch("u32"),
+        members: {
+          "atime".b => 16,
+          "atime_set".b => 128,
+          "ctime".b => 64,
+          "gid".b => 4,
+          "mode".b => 1,
+          "mtime".b => 32,
+          "mtime_set".b => 256,
+          "size".b => 8,
+          "uid".b => 2
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
       types["pack_flags"] = EnumType.new(
         name: "pack_flags".b,
         base: types.fetch("u32"),
@@ -10150,6 +10167,7 @@ module Erx
           "mf_window_role".b,
           "erx_mf_window".b,
           "p9_getattr_mask".b,
+          "p9_setattr_valid".b,
           "pack_flags".b,
           "erx_boot_handoff".b,
           "erx_boot_info".b,
@@ -12258,10 +12276,112 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "p9_qtdir".b => Constant.new(
+            name: "p9_qtdir".b,
+            value: 128,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "p9_qtsymlink".b => Constant.new(
+            name: "p9_qtsymlink".b,
+            value: 2,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
           "p9_rlerror".b => Constant.new(
             name: "p9_rlerror".b,
             value: 7,
             type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "p9_s_ifblk".b => Constant.new(
+            name: "p9_s_ifblk".b,
+            value: 24576,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_s_ifchr".b => Constant.new(
+            name: "p9_s_ifchr".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_s_ifdir".b => Constant.new(
+            name: "p9_s_ifdir".b,
+            value: 16384,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_s_iflnk".b => Constant.new(
+            name: "p9_s_iflnk".b,
+            value: 40960,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_s_ifmt".b => Constant.new(
+            name: "p9_s_ifmt".b,
+            value: 61440,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_s_ifreg".b => Constant.new(
+            name: "p9_s_ifreg".b,
+            value: 32768,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_atime".b => Constant.new(
+            name: "p9_setattr_valid_atime".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_atime_set".b => Constant.new(
+            name: "p9_setattr_valid_atime_set".b,
+            value: 128,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_ctime".b => Constant.new(
+            name: "p9_setattr_valid_ctime".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_gid".b => Constant.new(
+            name: "p9_setattr_valid_gid".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_mode".b => Constant.new(
+            name: "p9_setattr_valid_mode".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_mtime".b => Constant.new(
+            name: "p9_setattr_valid_mtime".b,
+            value: 32,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_mtime_set".b => Constant.new(
+            name: "p9_setattr_valid_mtime_set".b,
+            value: 256,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_size".b => Constant.new(
+            name: "p9_setattr_valid_size".b,
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "p9_setattr_valid_uid".b => Constant.new(
+            name: "p9_setattr_valid_uid".b,
+            value: 2,
+            type: types.fetch("u32"),
             description: nil
           ).freeze,
           "p9_string_max".b => Constant.new(

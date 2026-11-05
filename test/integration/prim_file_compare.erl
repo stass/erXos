@@ -11,6 +11,9 @@
 
 -include_lib("kernel/include/file.hrl").
 
+main([_, "seeded"]) ->
+    seeded(),
+    erlang:halt(0);
 main([PrefixText, Mode]) ->
     Prefix = case PrefixText of
                  "/" -> <<>>;
@@ -22,6 +25,7 @@ main([PrefixText, Mode]) ->
     loader(Prefix),
     pins(Mode),
     namespace(Mode),
+    remote(Mode),
     resources(),
     io:format("end\tok~n"),
     erlang:halt(0).
@@ -161,20 +165,20 @@ loader(Prefix) ->
     io:format("loader_cwd\t~0tp~n", [named_cwd(Prefix, Cwd)]),
     io:format("loader_missing\t~0tp~n", [erl_prim_loader:get_file(Missing)]).
 
-%% Only the release has erx_ns. A grant's paths reach erx_file_remote, here its stub,
-%% and leave with the entry; a grant whose process ended answers eio; fids are drawn
+%% Only the release has erx_ns. A grant's paths reach erx_file_remote, over a grant of
+%% erx_fs_test_tree, and leave with the entry; a grant whose process ended answers eio; fids are drawn
 %% one after another.
 namespace("stock") -> ok;
 namespace("release") ->
     Show = fun(Step, Result) -> io:format("ns ~s\t~0tp~n", [Step, Result]) end,
     Show("before", prim_file:read_file_info(<<"/tmp/a">>)),
-    Show("mount", erx_ns:mount(self(), <<"/tmp">>, [{tree, <<"tmp">>}, rw])),
-    Show("info", prim_file:read_file_info(<<"/tmp/a">>)),
+    Show("mount", erx_ns:mount(test_grant(), <<"/tmp">>, [{tree, <<"test">>}, rw])),
+    Show("info", info(prim_file:read_file_info(<<"/tmp/a">>))),
     Show("read", prim_file:read_file(<<"/tmp/a">>)),
     Show("again", erx_ns:mount(self(), <<"/tmp/">>, [{tree, <<"tmp">>}])),
     Show("bad tree", erx_ns:mount(self(), <<"/x">>, [{tree, <<"a/b">>}])),
     Show("bind", erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro])),
-    Show("bound", prim_file:read_file_info(<<"/b/c">>)),
+    Show("bound", info(prim_file:read_file_info(<<"/b/f">>))),
     Show("unmount", erx_ns:unmount(<<"/tmp">>)),
     Show("after", prim_file:read_file_info(<<"/tmp/a">>)),
     Show("root", erx_ns:unmount(<<"/">>)),
@@ -195,11 +199,11 @@ namespace("release") ->
 %% erx_file_remote is traced, so each step shows what reached it, or none.
 two_paths(Show) ->
     Reached = fun(Call) -> reached(Call) end,
-    ok = erx_ns:mount(self(), <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
-    ok = erx_ns:mount(self(), <<"/u">>, [{tree, <<"u">>}, rw]),
+    ok = erx_ns:mount(test_grant(), <<"/tmp">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:mount(test_grant(), <<"/u">>, [{tree, <<"u">>}, rw]),
     ok = erx_ns:bind(<<"/tmp/a">>, <<"/ro">>, [ro]),
     {module, erx_file_remote} = code:ensure_loaded(erx_file_remote),
-    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, true, [local]),
+    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, true, []),
     Show("ro bind", Reached(fun() -> prim_file:read_file_info(<<"/ro/c">>) end)),
     Show("rw mount", Reached(fun() -> prim_file:make_dir(<<"/tmp/c">>) end)),
     Show("rename one", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/tmp/a/y">>) end)),
@@ -208,7 +212,7 @@ two_paths(Show) ->
     Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/lib/y">>) end)),
     Show("link one", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/u/y">>) end)),
     Show("link two", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/tmp/y">>) end)),
-    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, false, [local]),
+    _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, false, []),
     [ok = erx_ns:unmount(Point) || Point <- [<<"/ro">>, <<"/u">>, <<"/tmp">>]],
     ok.
 
@@ -299,3 +303,173 @@ loop(0, _Fun) -> ok;
 loop(Count, Fun) ->
     Fun(),
     loop(Count - 1, Fun).
+
+%% A grant of erx_fs_test_tree, which test/integration/runtime_prim_file_test.rb compiles
+%% into test/ebin with erx_fs: / holds a/ (with b/ and f), the link l -> "a" and f.
+test_grant() ->
+    {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [], rw),
+    unlink(Grant),
+    Grant.
+
+%% erx_file_remote's path operations through prim_file, on a grant mounted at /t and
+%% bound read-only at /r (design-files.md, Erlang clients): each operation's success, the
+%% error steps, the #file_info{} mapping, the refusals of a read-only entry and replies a
+%% hostile server sends. Each line is `remote <case>`; the Ruby test names the answers.
+remote("stock") -> ok;
+remote("release") ->
+    Grant = test_grant(),
+    ok = erx_ns:mount(Grant, <<"/t">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:bind(<<"/t">>, <<"/r">>, [ro]),
+    Show = fun(Case, Result) -> io:format("remote ~s\t~0tp~n", [Case, Result]) end,
+    Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
+    Show("info dir", Info(<<"/t/a">>)),
+    Show("info file", Info(<<"/t/f">>)),
+    Show("info root", Info(<<"/t">>)),
+    Show("info missing", Info(<<"/t/missing">>)),
+    Show("info past a file", Info(<<"/t/f/x">>)),
+    Show("info link", info(prim_file:read_link_info(<<"/t/l">>))),
+    Show("info through a link", Info(<<"/t/l">>)),
+    Show("info fields", fields(prim_file:read_file_info(<<"/t/a/f">>, [{time, posix}]))),
+    Show("info same device", same_device(<<"/t/a">>, <<"/r/f">>)),
+    Show("read link", prim_file:read_link(<<"/t/l">>)),
+    Show("read link of a file", prim_file:read_link(<<"/t/f">>)),
+    Show("list", sorted(prim_file:list_dir(<<"/t">>))),
+    Show("list a file", prim_file:list_dir(<<"/t/f">>)),
+    Show("list missing", prim_file:list_dir(<<"/t/missing">>)),
+    Show("make dir", prim_file:make_dir(<<"/t/new">>)),
+    Show("made dir", Info(<<"/t/new">>)),
+    Show("make dir again", prim_file:make_dir(<<"/t/new">>)),
+    Show("make dir in missing", prim_file:make_dir(<<"/t/missing/x">>)),
+    Show("make dir dot", prim_file:make_dir(<<"/t/new/.">>)),
+    Show("make dir missing dotdot", prim_file:make_dir(<<"/t/missing/..">>)),
+    Show("make dir root", prim_file:make_dir(<<"/t">>)),
+    Show("del dir full", prim_file:del_dir(<<"/t/a">>)),
+    Show("del dir dot", prim_file:del_dir(<<"/t/new/.">>)),
+    Show("del dir missing dot", prim_file:del_dir(<<"/t/missing/.">>)),
+    Show("del dir file dot", prim_file:del_dir(<<"/t/f/.">>)),
+    Show("del dir dotdot", prim_file:del_dir(<<"/t/a/b/..">>)),
+    Show("del dir root", prim_file:del_dir(<<"/t">>)),
+    Show("del dir file", prim_file:del_dir(<<"/t/f">>)),
+    Show("del dir", prim_file:del_dir(<<"/t/new">>)),
+    Show("del dir gone", Info(<<"/t/new">>)),
+    Show("delete file dot", prim_file:delete(<<"/t/f/.">>)),
+    Show("delete dir dot", prim_file:delete(<<"/t/a/.">>)),
+    Show("delete dir", prim_file:delete(<<"/t/a">>)),
+    Show("delete root", prim_file:delete(<<"/t">>)),
+    Show("symlink", prim_file:make_symlink(<<"f">>, <<"/t/victim">>)),
+    Show("symlink made", prim_file:read_link(<<"/t/victim">>)),
+    Show("delete victim", prim_file:delete(<<"/t/missing/victim">>)),
+    Show("victim kept", prim_file:read_link(<<"/t/victim">>)),
+    Show("delete link", prim_file:delete(<<"/t/victim">>)),
+    Show("link deleted", prim_file:read_link_info(<<"/t/victim">>)),
+    Show("symlink dot", prim_file:make_symlink(<<"t">>, <<"/t/a/.">>)),
+    Show("symlink missing dotdot", prim_file:make_symlink(<<"t">>, <<"/t/missing/..">>)),
+    Show("symlink root", prim_file:make_symlink(<<"t">>, <<"/t">>)),
+    Show("rename", prim_file:rename(<<"/t/a/b">>, <<"/t/c">>)),
+    Show("renamed", {Info(<<"/t/a/b">>), Info(<<"/t/c">>)}),
+    Show("rename missing", prim_file:rename(<<"/t/missing">>, <<"/t/d">>)),
+    Show("rename from dot", prim_file:rename(<<"/t/c/.">>, <<"/t/d">>)),
+    Show("rename to dot", prim_file:rename(<<"/t/missing">>, <<"/t/a/.">>)),
+    Show("rename missing dot", prim_file:rename(<<"/t/missing/.">>, <<"/t/d">>)),
+    Show("rename root", prim_file:rename(<<"/t">>, <<"/t/d">>)),
+    Show("link", prim_file:make_link(<<"/t/f">>, <<"/t/f2">>)),
+    Show("linked", {Info(<<"/t/f2">>), Info(<<"/t/f">>)}),
+    Show("link dot", prim_file:make_link(<<"/t/f">>, <<"/t/a/.">>)),
+    Show("link missing to dot", prim_file:make_link(<<"/t/missing">>, <<"/t/a/.">>)),
+    Show("link missing", prim_file:make_link(<<"/t/missing">>, <<"/t/g">>)),
+    Show("link a directory", prim_file:make_link(<<"/t/a">>, <<"/t/g">>)),
+    Show("link root", prim_file:make_link(<<"/t/f">>, <<"/t">>)),
+    {ok, Read} = prim_file:read_file_info(<<"/t/f">>),
+    Show("write info read", prim_file:write_file_info(<<"/t/f">>, Read)),
+    Show("write mode", prim_file:write_file_info(<<"/t/f">>, #file_info{mode = 8#104600})),
+    Show("written mode", Info(<<"/t/f">>)),
+    Show("write bad mode", prim_file:write_file_info(<<"/t/f">>, #file_info{mode = x})),
+    Show("write missing", prim_file:write_file_info(<<"/t/missing">>, #file_info{mode = 8#600})),
+    Show("ro info", Info(<<"/r/f">>)),
+    Show("ro make dir", prim_file:make_dir(<<"/r/x">>)),
+    Show("ro del dir", prim_file:del_dir(<<"/r/a">>)),
+    Show("ro delete", prim_file:delete(<<"/r/f">>)),
+    Show("ro rename", prim_file:rename(<<"/r/f">>, <<"/r/g">>)),
+    Show("ro link", prim_file:make_link(<<"/r/f">>, <<"/r/g">>)),
+    Show("ro symlink", prim_file:make_symlink(<<"f">>, <<"/r/g">>)),
+    Show("ro write info", prim_file:write_file_info(<<"/r/f">>, #file_info{mode = 8#600})),
+    Show("ro kept", {Info(<<"/t/f">>), Info(<<"/t/a">>)}),
+    Show("exdev rename", prim_file:rename(<<"/t/f">>, <<"/r/g">>)),
+    Show("exdev link", prim_file:make_link(<<"/t/f">>, <<"/r/g">>)),
+    Show("fids held", fids_held(Grant)),
+    hostile(Show),
+    [ok = erx_ns:unmount(Point) || Point <- [<<"/r">>, <<"/t">>]],
+    ok.
+
+%% Every fid an operation made is clunked by its end: the grant monitors no owner.
+fids_held(Grant) ->
+    {monitors, Monitors} = process_info(Grant, monitors),
+    length(Monitors).
+
+fields({ok, #file_info{size = Size, links = Links, inode = Inode, uid = Uid, gid = Gid,
+                       minor_device = Minor, atime = ATime, mtime = MTime}}) ->
+    {Size, Links, Inode, Uid, Gid, Minor, is_integer(ATime), is_integer(MTime)};
+fields(Other) ->
+    Other.
+
+same_device(One, Other) ->
+    case {prim_file:read_file_info(One), prim_file:read_file_info(Other)} of
+        {{ok, #file_info{major_device = A}}, {ok, #file_info{major_device = B}}} -> A =:= B;
+        Answers -> Answers
+    end.
+
+sorted({ok, Names}) -> {ok, lists:sort(Names)};
+sorted(Other) -> Other.
+
+%% A server's replies are untrusted: whatever it answers, the caller gets an error and
+%% goes on.
+hostile(Show) ->
+    Server = fun(Reply) ->
+                     spawn(fun Loop() ->
+                                   receive
+                                       {erx_9p, Alias, _, Request} ->
+                                           Alias ! {erx_9p, Alias, Reply(Request)},
+                                           Loop()
+                                   end
+                           end)
+             end,
+    Cases = [{"junk", fun(_) -> junk end},
+             {"bad qid", fun({attach, _, _, _, _, _}) -> {ok, {0, 0, -1}}; (_) -> ok end},
+             {"improper qids", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                                  ({walk, _, _, _}) -> {ok, [{16#80, 0, 2} | x]};
+                                  (_) -> ok end},
+             {"long walk", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                              ({walk, _, _, _}) -> {ok, lists:duplicate(20, {16#80, 0, 2})};
+                              (_) -> ok end},
+             {"attr", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                         ({walk, _, _, Names}) -> {ok, [{16#80, 0, 2} || _ <- Names]};
+                         ({getattr, _, _}) -> {ok, #{mode => -1}};
+                         (_) -> ok end}],
+    [begin
+         ok = erx_ns:mount(Server(Reply), <<"/h">>, [{tree, <<"h">>}, rw]),
+         Show("hostile " ++ Name, prim_file:read_file_info(<<"/h/x">>)),
+         ok = erx_ns:unmount(<<"/h">>)
+     end || {Name, Reply} <- Cases],
+    Escaping = Server(fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                         ({walk, _, _, Names}) -> {ok, [{16#80, 0, 2} || _ <- Names]};
+                         ({lopen, _, _}) -> {ok, {16#80, 0, 2}, 0};
+                         ({readdir, _, 0, _}) -> {ok, [{{0, 0, 3}, 1, 0, <<"../../x">>}]};
+                         (_) -> ok end),
+    ok = erx_ns:mount(Escaping, <<"/h">>, [{tree, <<"h">>}, rw]),
+    Show("hostile listing", prim_file:list_dir(<<"/h/d">>)),
+    ok = erx_ns:unmount(<<"/h">>),
+    Dying = spawn(fun() -> receive {erx_9p, _, _, _} -> exit(gone) end end),
+    ok = erx_ns:mount(Dying, <<"/h">>, [{tree, <<"h">>}, rw]),
+    Show("hostile dies", prim_file:make_dir(<<"/h/x">>)),
+    ok = erx_ns:unmount(<<"/h">>).
+
+%% A client whose walks act in place, loaded over the preloaded one: the delete of
+%% /t/missing/victim then removes /t/victim, which the seeded run must show.
+seeded() ->
+    {ok, Beam} = prim_file:read_file(<<"/test/seeded/erx_file_remote.beam">>),
+    _ = code:unstick_mod(erx_file_remote),
+    {module, erx_file_remote} = code:load_binary(erx_file_remote, "seeded", Beam),
+    ok = erx_ns:mount(test_grant(), <<"/t">>, [{tree, <<"test">>}, rw]),
+    ok = prim_file:make_symlink(<<"f">>, <<"/t/victim">>),
+    io:format("seeded delete\t~0tp~n", [prim_file:delete(<<"/t/missing/victim">>)]),
+    io:format("seeded victim\t~0tp~n", [prim_file:read_link(<<"/t/victim">>)]).

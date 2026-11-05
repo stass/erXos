@@ -367,7 +367,24 @@ struct erx_rights {
 #define ERX_P9_NOTAG UINT16_C(65535)
 #define ERX_P9_O_ACCMODE UINT32_C(3)
 #define ERX_P9_O_TRUNC UINT32_C(512)
+#define ERX_P9_QTDIR UINT8_C(128)
+#define ERX_P9_QTSYMLINK UINT8_C(2)
 #define ERX_P9_RLERROR UINT8_C(7)
+#define ERX_P9_S_IFBLK UINT32_C(24576)
+#define ERX_P9_S_IFCHR UINT32_C(8192)
+#define ERX_P9_S_IFDIR UINT32_C(16384)
+#define ERX_P9_S_IFLNK UINT32_C(40960)
+#define ERX_P9_S_IFMT UINT32_C(61440)
+#define ERX_P9_S_IFREG UINT32_C(32768)
+#define ERX_P9_SETATTR_VALID_ATIME UINT32_C(16)
+#define ERX_P9_SETATTR_VALID_ATIME_SET UINT32_C(128)
+#define ERX_P9_SETATTR_VALID_CTIME UINT32_C(64)
+#define ERX_P9_SETATTR_VALID_GID UINT32_C(4)
+#define ERX_P9_SETATTR_VALID_MODE UINT32_C(1)
+#define ERX_P9_SETATTR_VALID_MTIME UINT32_C(32)
+#define ERX_P9_SETATTR_VALID_MTIME_SET UINT32_C(256)
+#define ERX_P9_SETATTR_VALID_SIZE UINT32_C(8)
+#define ERX_P9_SETATTR_VALID_UID UINT32_C(2)
 #define ERX_P9_STRING_MAX UINT32_C(255)
 #define ERX_P9_SYMLINK_MAX UINT32_C(4095)
 #define ERX_P9_XATTR_MAX UINT32_C(65536)
@@ -2811,6 +2828,8 @@ _Static_assert(offsetof(erx_mf_window_t, reserved) ==
     ERX_MF_WINDOW_OFF_RESERVED, "erx_mf_window.reserved offset");
 
 typedef uint64_t erx_p9_getattr_mask_t;
+
+typedef uint32_t erx_p9_setattr_valid_t;
 
 typedef uint32_t erx_pack_flags_t;
 

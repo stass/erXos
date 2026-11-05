@@ -412,9 +412,46 @@ it; git history is the record of completed work.
   until then.
 * [Low] runtime, `erx_prim_file.c`: EROFS has no provider yet, so a path on it cannot arise; its row's
   `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
-* [Medium] runtime, `otp/lib/kernel/src/erx_file_remote.erl`: the client of a file server's grant is a stub
-  that answers every operation `{error, enotsup}`; the path and open-file operations of
-  [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace it, preloaded.
+* [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: the client serves the path operations, but
+  `open`, `read_file` and `set_cwd` on a grant still answer `{error, enotsup}`; the open files of
+  [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace them, and with
+  `set_cwd` comes error step 5, `del_dir` of the working directory answering `einval`, which cannot arise
+  while no working directory lies on a grant.
+* [Medium] runtime, `erx_file_remote`: a path that meets a symbolic link on a grant (a link before its last
+  name, or its last name for an operation that follows it) answers `{error, enotsup}`; the client follows
+  links as [Resolving a path](docs/design-files.md#resolving-a-path) states, which needs the link's
+  directory as a namespace path, so the NIF has to hand the client the entry's point or resolve the joined
+  text for it. `read_link_info` of a link reports `access` as `undefined` until then.
+* [Low] runtime, `erx_file_remote`: `list_dir` of a directory on a grant lists only the server's entries,
+  not the mount points directly below it ([Resolving a path](docs/design-files.md#resolving-a-path),
+  listings across mounts), which needs the namespace's table from the NIF.
+* [Low] runtime, `erx_file_remote`: `#file_info.major_device` is a hash of the grant's pid and tree where the
+  design has a number the namespace gives each mounted tree; two trees can collide.
+* [Low] runtime, `erx_file_remote`: `del_dir`, `delete` and `rename` of a mount point answer `ebusy` only
+  when the point is the tree's root; a bind of a directory below the root is removed or renamed through the
+  bind where Linux answers `ebusy`, since the remote answer does not say that a path is an entry's point.
+* [Medium] runtime, `erx_file_remote`: a trailing `/` on a path that changes something is dropped, so
+  `delete("/t/f/")` removes the file where Linux answers `enotdir`; the design has to say whether step 2
+  also treats a last name written with a trailing `/` as one that must be a directory.
+* [Medium] runtime, `erx_file_remote`: on a read-only entry `erofs` is answered before the path is resolved,
+  where Linux answers `enoent`, `enotdir` or `eexist` first (`make_dir` of an existing name on a read-only
+  bind answers `erofs`, stock `eexist`); reaching the names first, which sends nothing that writes, agrees.
+* [Medium] runtime, `erx_file_remote`: its reply checks are hand-written beside the generated
+  `erx_9p_grammar:decode_reply/2`, which is not preloaded (error atoms are not limited to the protocol's
+  list, and a getattr map is not held to its key set); generating the checks into a preloaded module
+  removes the copy. The rights refusal likewise lives in each operation rather than in `exchange/2`, where
+  the grammar's `writes/1` would refuse every writing request by construction.
+* [Medium] runtime, `erx_file_remote`: the server's replies, the client's untrusted input, have hand-written
+  hostile cases in `test/integration/prim_file_compare.erl` but no fuzz target; the fuzz target covers the
+  caller's path text only.
+* [Low] runtime, `erx_file_remote`: a chained walk (over 16 names) whose last qid is a link answers the next
+  walk's `enotdir`; `list_dir` opens without `O_DIRECTORY`; a partial walk answers `enoent` for any refusal;
+  negative times answer `einval`; an empty symlink target is sent; a listing may hold up to 2^20 names of
+  255 bytes; the xref check exempts every call through a variable.
+* [Low] build, `otp/erts/preloaded/ebin`: the preloaded beams erXos changes (`prim_file`,
+  `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
+  `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
+  remove the hand step and the hashes to keep.
 * [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
   a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
   link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers
@@ -427,7 +464,7 @@ it; git history is the record of completed work.
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
 * [Low] runtime, `erx_ns`: `which/1`, `list/0` and `tmp_limit/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written; `set_cwd` into a grant answers through
-  `erx_file_remote`, which cannot yet set the working directory.
+  `erx_file_remote`, which cannot yet set the working directory (see the open-files item above).
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
   ([design-tmp.md](docs/design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
   on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which

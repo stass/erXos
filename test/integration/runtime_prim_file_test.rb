@@ -97,7 +97,7 @@ class RuntimePrimFileTest < Minitest::Test
     stock = table(@fixture.stock)
     assert_operator stock.size, :>, 200, 'the comparison ran its corpus'
     differences = (stock.keys | release.keys).filter_map do |key|
-      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'resources')
+      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'remote ', 'resources')
       next if named?(key)
 
       "#{describe(key)}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
@@ -150,24 +150,84 @@ class RuntimePrimFileTest < Minitest::Test
   end
 
   # erx_ns changes the namespace for the whole runtime: a grant's paths reach
-  # erx_file_remote's stub, unmounting gives them back to the release, and a grant
-  # whose process ended answers eio until it is unmounted.
+  # erx_file_remote, unmounting gives them back to the release, and a grant whose
+  # process ended answers eio until it is unmounted. A path reaches erx_file_remote as
+  # prim_file encodes it, with the NUL its NIF hands to C.
   def test_a_mount_routes_its_paths_to_erx_file_remote
     release = table(@fixture.release)
-    { 'ns before' => '{error,enoent}', 'ns mount' => 'ok', 'ns info' => '{error,enotsup}',
+    { 'ns before' => '{error,enoent}', 'ns mount' => 'ok', 'ns info' => "{ok,directory,read_write,#{0o40755}}",
       'ns read' => '{error,enotsup}', 'ns again' => '{error,eexist}', 'ns bad tree' => '{error,einval}',
-      'ns bind' => 'ok', 'ns bound' => '{error,enotsup}', 'ns unmount' => 'ok', 'ns after' => '{error,enoent}',
-      'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok', 'ns gone' => '{error,eio}',
-      'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
-      'ns ro bind' => '{{error,enotsup},read_file_info,<<"tmp">>,ro,[<<"a/c">>,1,local]}',
-      'ns rw mount' => '{{error,enotsup},make_dir,<<"tmp">>,rw,[<<"c">>]}',
-      'ns rename one' => '{{error,enotsup},rename,<<"tmp">>,rw,[<<"x">>,<<"a/y">>,<<"/tmp/x">>,<<"/tmp/a/y">>]}',
+      'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
+      'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
+      'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
+      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[<<"a/c">>,1]}',
+      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[<<"c">>,<<47,116,109,112,47,99,0>>]}',
+      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[<<"x">>,<<"a/y">>,<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
       'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
       'ns rename local' => '{{error,exdev},none}',
-      'ns link one' => '{{error,enotsup},make_link,<<"u">>,rw,[<<"x">>,<<"y">>,<<"/u/x">>,<<"/u/y">>]}',
+      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[<<"x">>,<<"y">>,<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
       'ns link two' => '{{error,exdev},none}' }.each do |step, want|
       assert_equal want, release.fetch(step), step
     end
+  end
+
+  DIRECTORY = "{ok,directory,read_write,#{0o40755}}"
+  FILE = "{ok,regular,0,read_write,#{0o100644}}"
+  CHANGED = "{ok,regular,0,read_write,#{0o104600}}"
+  # erx_file_remote's answers over erx_fs_test_tree (design-files.md, Erlang clients,
+  # and the cases of design-tmp.md's verification that need no stock OTP): each path
+  # operation, the error steps in order, the #file_info{} fields, a read-only entry's
+  # erofs before anything is sent, exdev, no fid left behind, and hostile replies.
+  REMOTE = {
+    'info dir' => DIRECTORY, 'info file' => FILE, 'info root' => DIRECTORY,
+    'info missing' => '{error,enoent}', 'info past a file' => '{error,enotdir}',
+    'info link' => "{ok,symlink,undefined,#{0o120777}}", 'info through a link' => '{error,enotsup}',
+    'info fields' => '{0,1,4,0,0,0,true,true}', 'info same device' => 'true',
+    'read link' => '{ok,"a"}', 'read link of a file' => '{error,einval}',
+    'list' => '{ok,["a","f","l"]}', 'list a file' => '{error,enotdir}', 'list missing' => '{error,enoent}',
+    'make dir' => 'ok', 'made dir' => DIRECTORY, 'make dir again' => '{error,eexist}',
+    'make dir in missing' => '{error,enoent}', 'make dir dot' => '{error,eexist}',
+    'make dir missing dotdot' => '{error,enoent}', 'make dir root' => '{error,eexist}',
+    'del dir full' => '{error,eexist}', 'del dir dot' => '{error,einval}',
+    'del dir missing dot' => '{error,enoent}', 'del dir file dot' => '{error,enotdir}',
+    'del dir dotdot' => '{error,eexist}', 'del dir root' => '{error,ebusy}', 'del dir file' => '{error,enotdir}',
+    'del dir' => 'ok', 'del dir gone' => '{error,enoent}',
+    'delete file dot' => '{error,enotdir}', 'delete dir dot' => '{error,eperm}', 'delete dir' => '{error,eperm}',
+    'delete root' => '{error,ebusy}', 'symlink' => 'ok', 'symlink made' => '{ok,"f"}',
+    'delete victim' => '{error,enoent}', 'victim kept' => '{ok,"f"}', 'delete link' => 'ok',
+    'link deleted' => '{error,enoent}', 'symlink dot' => '{error,eexist}',
+    'symlink missing dotdot' => '{error,enoent}', 'symlink root' => '{error,eexist}',
+    'rename' => 'ok', 'renamed' => "{{error,enoent},#{DIRECTORY}}", 'rename missing' => '{error,enoent}',
+    'rename from dot' => '{error,ebusy}', 'rename to dot' => '{error,ebusy}',
+    'rename missing dot' => '{error,enoent}', 'rename root' => '{error,ebusy}',
+    'link' => 'ok', 'linked' => "{#{FILE},#{FILE}}", 'link dot' => '{error,eexist}',
+    'link missing to dot' => '{error,enoent}', 'link missing' => '{error,enoent}',
+    'link a directory' => '{error,eperm}', 'link root' => '{error,eexist}',
+    'write info read' => 'ok', 'write mode' => 'ok', 'written mode' => CHANGED,
+    'write bad mode' => '{error,badarg}', 'write missing' => '{error,enoent}',
+    'ro info' => CHANGED, 'ro make dir' => '{error,erofs}', 'ro del dir' => '{error,erofs}',
+    'ro delete' => '{error,erofs}', 'ro rename' => '{error,erofs}', 'ro link' => '{error,erofs}',
+    'ro symlink' => '{error,erofs}', 'ro write info' => '{error,erofs}', 'ro kept' => "{#{CHANGED},#{DIRECTORY}}",
+    'exdev rename' => '{error,exdev}', 'exdev link' => '{error,exdev}', 'fids held' => '0',
+    'hostile junk' => '{error,eio}', 'hostile bad qid' => '{error,eio}', 'hostile improper qids' => '{error,eio}',
+    'hostile long walk' => '{error,eio}', 'hostile attr' => '{error,eio}', 'hostile dies' => '{error,eio}', 'hostile listing' => '{error,eio}'
+  }.freeze
+
+  def test_erx_file_remote_answers_as_the_design_states
+    release = table(@fixture.release)
+    wrong = REMOTE.filter_map do |step, want|
+      got = release.fetch("remote #{step}", 'missing')
+      "#{step}: want #{want}, got #{got}" unless got == want
+    end
+    assert_empty wrong, wrong.join("\n")
+  end
+
+  # Seeded: a client whose walks act on their fid in place deletes /t/victim for
+  # /t/missing/victim, which the victim case must catch.
+  def test_seeded_walk_in_place_removes_the_victim
+    lines, = run_beam(@fixture.archive, '/', 'seeded', boot: '/bin/start')
+    seeded = table(lines)
+    assert_equal '{error,enoent}', seeded.fetch('seeded victim', 'missing'), lines.last(20).join("\n")
   end
 
   def test_modules_load_from_the_archive_through_erl_prim_loader
@@ -305,12 +365,37 @@ class RuntimePrimFileTest < Minitest::Test
     Dir.glob(File.join(install, '{lib/erlang/,}erts-*/bin/beam.smp')).first or flunk("no stock beam under #{install}")
   end
 
+  # The driver, a grant over erx_fs_test_tree for erx_file_remote's cases, and, for the
+  # seeded run, a client whose walks act in place.
+  GRANT_SOURCES = %w[erlang/apps/erx/src/erx_fs.erl erlang/apps/erx/src/erx_fs_grant.erl
+                     erlang/apps/erx/src/erx_fs_version.erl erlang/apps/erx/src/generated/erx_9p_grammar.erl
+                     test/erlang/erx_fs_test_tree.erl].freeze
+  CLIENT = 'otp/erts/preloaded/src/erx_file_remote.erl'
+  WALK_INTO_NEW = "    {[{walk, From, New, NameList}], New};\n"
+  WALK_IN_PLACE = "    _ = New,\n    {[{walk, From, From, NameList}], From};\n"
+
   def compile_driver(tree)
+    client = File.read(File.join(ROOT, CLIENT))
+    assert_equal 1, client.scan(WALK_INTO_NEW).size, 'the seeded passage is in the client once'
+    seeded = File.join(tree, 'test/seeded')
+    FileUtils.mkdir_p(seeded)
+    File.write(File.join(seeded, 'erx_file_remote.erl'), client.sub(WALK_INTO_NEW, WALK_IN_PLACE))
+    includes = [File.join(ROOT, 'otp/lib/kernel/include'), File.join(ROOT, 'erlang/apps/erx/include')]
+    erlc(GRANT_SOURCES.map { |source| File.join(ROOT, source) }, "#{tree}/test/ebin", includes)
+    erlc([File.join(seeded, 'erx_file_remote.erl')], seeded, includes)
+    File.delete(File.join(seeded, 'erx_file_remote.erl'))
     source = File.expand_path('prim_file_compare.erl', __dir__)
     expression = "{ok,_}=compile:file(\"#{source}\",[{outdir,\"#{tree}/test/ebin\"},{i,\"#{OUTPUT.root}/lib\"}]),halt()."
     output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', RUN_SECONDS.to_s,
                                      Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR),
                                      '-noshell', '-eval', expression, stdin_data: '')
+    assert status.success?, output
+  end
+
+  def erlc(sources, outdir, includes)
+    erlc = File.join(File.dirname(Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR)), 'erlc')
+    output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, erlc, *includes.flat_map { |dir| ['-I', dir] },
+                                     '-o', outdir, *sources, stdin_data: '')
     assert status.success?, output
   end
 
