@@ -499,8 +499,11 @@ the code under test ran.
   the listed differences; every other difference fails the test. Cases
   added for the client's rules: `rename("/", "x")`, `del_dir(".")`,
   `del_dir("missing/.")`, `del_dir("child/..")` from the directory
-  holding `child`, `delete("file/.")`, the removal of an empty working
-  directory and of a non-empty one, `delete("missing/victim")` while
+  holding `child`, `delete("file/.")`, `rename("child/..", "x")`,
+  `rename("x", "child/.")`, `make_dir("child/.")`,
+  `make_dir("missing/..")`, `make_symlink("t", "child/..")`,
+  `make_link("file", "child/.")`, `make_link("child/.", "new")`, the
+  removal of an empty working directory and of a non-empty one, `delete("missing/victim")` while
   `victim` exists, a truncate through a read-only descriptor and through
   a writable one after `chmod 0444`, and `write_file_info` of a record
   read with `read_file_info`. Seeded: the client without its

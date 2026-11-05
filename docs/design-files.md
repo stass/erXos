@@ -1316,11 +1316,19 @@ applied in this order:
    a last name. The client resolves the path without that last name to a
    directory, as it resolves any last name's directory, and a failure
    there is the answer: `enoent` for a missing directory, `enotdir` for a
-   file. Past it, the answer is Linux's for a last name that is not a
-   plain name: `rmdir`'s `einval` for `.` and `enotempty` for `..`,
-   `unlink`'s `eisdir`, `rename`'s `ebusy`, and `eexist` for the
-   operations that make a name. Steps 4 and 5 then apply to it as to a
-   server's answer. The client keeps the last name apart because
+   file. Past it, the answer is the one Linux's `fs/namei.c` gives for a
+   last name that is not a plain name, before it looks at anything else
+   about that name: `rmdir` answers `einval` for `.` and `enotempty` for
+   `..`; `unlink` answers `eisdir` for either; `rename` answers `ebusy`
+   when the last name of either side is `.` or `..`, after its `exdev`
+   for two paths in two mounts; and `mkdir`, `symlink` and `link`'s new
+   name answer `eexist` for either. `make_link` resolves its existing
+   path first, as Linux's `linkat` looks it up before the new name, and
+   a failure there is the answer; `make_symlink`'s target is text and is
+   never resolved. Steps 4 and 5 then apply to the answer as to a
+   server's. The oracle cases of [/tmp's
+   verification](design-tmp.md#verification) check each of these against
+   Linux. The client keeps the last name apart because
    resolving `.` and `..` on the text would turn the path into another
    one and act on that.
 3. `del_dir`, `delete` and `rename` of a mount point answer `ebusy`
@@ -1412,9 +1420,11 @@ description's offset, and `pread` and `pwrite` explicit ones, at most 64
 KiB per request, looping for larger counts; `lseek` moves the
 description's offset; a description opened with `O_APPEND` opens its fid
 with 9P2000.L's append flag; every write sets the description's offset by
-the rule of [Open files and offsets](#open-files-and-offsets), to the
-reply's `At` plus its count from erXos's servers, and only a reply
-without `At` from a server outside erXos costs a `getattr`; `fcntl`'s
+the rule of [Open files and offsets](#open-files-and-offsets): the
+reply's `At` plus its count from erXos's servers, and for a reply
+without `At` from a server outside erXos the offset the write was sent
+at plus its count, except through an append fid, where the rule's one
+`getattr` reads the file's size; `fcntl`'s
 `F_SETFL` of `O_APPEND` moves the
 description's writes to an opened fid with the new flag, which the first
 change opens from the unopened fid ([Open files and
