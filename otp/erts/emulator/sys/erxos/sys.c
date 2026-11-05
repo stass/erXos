@@ -37,7 +37,6 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <ctype.h>
-#include <sys/utsname.h>
 #include <sys/select.h>
 
 #ifdef ISC32
@@ -806,46 +805,16 @@ int sys_max_files(void)
 
 char os_type[] = "unix";
 
-static int
-get_number(char **str_ptr)
-{
-    char* s = *str_ptr;		/* Pointer to beginning of string. */
-    char* dot;			/* Pointer to dot in string or NULL. */
-
-    if (!isdigit((int) *s))
-	return 0;
-    if ((dot = strchr(s, '.')) == NULL) {
-	*str_ptr = s+strlen(s);
-	return atoi(s);
-    } else {
-	*dot = '\0';
-	*str_ptr = dot+1;
-	return atoi(s);
-    }
-}
-
 void os_flavor(char* namebuf, unsigned size) {
     (void) size;
     strcpy(namebuf, "erxos");
 }
 
+/* erXos's version, never the host's; nothing else in the tree names one yet. */
 void os_version(int *pMajor, int *pMinor, int *pBuild) {
-    struct utsname uts;		/* Information about the system. */
-    char* release;		/* Pointer to the release string:
-				 * X.Y or X.Y.Z.  */
-
-    (void) uname(&uts);
-#ifdef _AIX
-    /* AIX stores the major in version and minor in release */
-    *pMajor = atoi(uts.version);
-    *pMinor = atoi(uts.release);
-    *pBuild = 0; /* XXX: get oslevel for AIX or TR on i */
-#else
-    release = uts.release;
-    *pMajor = get_number(&release); /* Pointer to major version. */
-    *pMinor = get_number(&release); /* Pointer to minor version. */
-    *pBuild = get_number(&release); /* Pointer to build number. */
-#endif
+    *pMajor = 0;
+    *pMinor = 1;
+    *pBuild = 0;
 }
 
 void erts_do_break_handling(void)

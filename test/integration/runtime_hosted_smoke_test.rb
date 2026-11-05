@@ -207,6 +207,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'init:get_argument(sname).' => /^\{ok,\[\["system@erxos"\]\]\}$/,
       "abs(os:system_time(second) - #{Time.now.to_i}) < 300." => /^true$/,
       'file:native_name_encoding().' => /^utf8$/,
+      'os:version().' => /^\{0,1,0\}$/,
       'T0 = erlang:monotonic_time(millisecond), timer:sleep(20), erlang:monotonic_time(millisecond) - T0 >= 20.' => /^true$/
     }
     Dir.mktmpdir('erx-hosted-home-') do |home|

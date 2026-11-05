@@ -58,13 +58,13 @@ sysconf
 close fclose fdopen fileno open read write writev
 
 # What sys.c keeps of a Unix process: the signal dispatcher and its pipes on Darwin's
-# main thread, nice, alarm, the node id's host name and pid, and uname; ddll's dlopen;
+# main thread, nice, alarm, and the node id's host name and pid; ddll's dlopen;
 # the select sleeps of beam_debug, erl_bif_info and erl_misc_utils; and ethread's
 # signal masks. Each is answered at the first native boot (TODO.md).
 [stock_process]
 __darwin_check_fd_set_overflow
 _exit alarm dlclose dlerror dlopen dlsym fcntl gethostname getpid ioctl nice pipe
-pthread_kill pthread_sigmask select sigaction sigwait uname
+pthread_kill pthread_sigmask select sigaction sigwait
 
 # erx_stdio_nif.c alone, hosted mode's console device: the only object of the runtime
 # that may use these for a host terminal.
