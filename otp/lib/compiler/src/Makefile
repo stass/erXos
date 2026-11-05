@@ -1,3 +1,4 @@
+# Modified by erXos
 #
 # %CopyrightBegin%
 #
@@ -143,9 +144,12 @@ ERL_COMPILE_FLAGS += -Werror +warn_deprecated_catch +warn_obsolete_bool_op
 ERL_COMPILE_FLAGS += +inline +warn_unused_import \
  -I../../stdlib/include -I$(EGEN) -W +warn_missing_spec
 
+# core_parse.erl is pre-generated with a -file line naming OTP's own
+# build root, so it never feeds dependency generation.
+DEP_SKIP_FILES = core_parse.erl
+
 ifeq ($(ERL_DETERMINISTIC),yes)
 	DETERMINISM_FLAG = +deterministic
-	DEP_SKIP_FILES = core_parse.erl
 else
 	DETERMINISM_FLAG =
 endif
