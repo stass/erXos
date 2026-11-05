@@ -297,6 +297,10 @@ it; git history is the record of completed work.
   needs lines that start with `erx-test:`, and a program's only output here
   is a log record with the kernel's prefix. `debug_log.statuses` stays `pending` in the
   roster until the conformance guest can report.
+* [Medium] display, LVGL renderer: replace LVGL on panels with the Erlang
+  renderer once the parity test passes and the Erlang renderer's frame
+  times match LVGL's on a 240x240 panel
+  ([design-display.md](docs/design-display.md#dependencies)).
 
 ## Bugs by subsystem
 
@@ -1395,6 +1399,18 @@ Every other risk the design accepts is stated in its
 document's "residual risks accepted" paragraph.
 
 ## Planned features
+
+* [Medium] display, design-live's console: The console section of
+  [design-live.md](docs/design-live.md#the-console) describes one line, the
+  UART. [design-display.md](docs/design-display.md) offers terminal windows
+  as further lines through `offer_line`; rewrite the section for several
+  live lines, each connecting one session, and add `offer_line` to
+  `abi/services/console.txt` with its implementation.
+* [Low] display, plan9port compatibility: check against plan9port's source
+  that acme and sam allocate no screens and reach the screen image only
+  through `libdraw`'s `getwindow`, as
+  [design-display.md](docs/design-display.md#compatibility-and-migration)
+  assumes.
 
 * [Low] POSIX-lite personality, FreeBSD programs: survey what FreeBSD
   programs ported at the source level need beyond the planned layer

@@ -189,3 +189,31 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **The production image's `NOTICES`** (`tools/lib/erx/production_image.rb`, Phase 1 stopgap): `NOTICES` is 12.6 MiB of a 13.6 MiB image, never released and touched page by page at boot. Measure: the root's boot time with and without those pages.
 
 * **The PL011 console driver sends a byte at a time** (`erlang/apps/erx_uart/src/erx_pl011.erl`, `send`): each byte costs two register BIF calls, a read of `FR.TXFF` and a write of `DR`, and a full transmit FIFO waits a whole millisecond before it looks again. Settled by timing the console transcript's 20,000-byte output under HVF against a send that waits for `FR.TXFE` and then writes a whole FIFO's worth without reading `FR` between bytes.
+
+* **[Medium] display, a full-screen pixel load across domains**
+  ([design-display.md](design-display.md#performance)): a `y` load crosses
+  the lane, the funnel, the file server and `erx_memdraw`. Settled by
+  MB/s on HVF at 1920x1080; the fix on the table is a pixel object made by
+  the system domain and installed in both domains, as shared mappings are.
+* **[Low] display, the copy from the screen image to the framebuffer pool**
+  per dirty rectangle (`erx_device:fill/3`). Settled by frame times on a
+  full-screen redraw; the fix on the table is an `erx_memdraw` image over
+  the pool buffer.
+* **[Low] display, the dirty-scheduler threshold for draw operations**
+  (64 KiB of destination pixels proposed). Settled by latency of small and
+  large draws on and off dirty schedulers.
+* **[Medium] display, the Erlang renderer's frame on a 240x240 panel**
+  (diff, layout and draw) against LVGL's. This is LVGL's retirement gate.
+* **[Low] display, the terminal emulator's redraw per changed cell line.**
+  Settled by scrolling throughput of a large output.
+* **[Low] display, virtio-gpu transfer and flush latency per rectangle**
+  under TCG, and how `erx_screen` gathers waiting flushes into one push. Settled by flushes per
+  second and latency per rectangle size.
+* **[Low] display, the display domain's own clients go through `erx_winfs`**
+  ([design-display.md](design-display.md#performance)): the terminal
+  emulator and the Erlang renderer send every draw batch through the file
+  server. Settled by terminal scroll and renderer frame times against a
+  direct hand-off.
+* **[Low] display, composes run one at a time in `erx_screen`**, and a
+  window waits in its flush call. Settled by several animating windows and
+  a kiosk's flush latency.
