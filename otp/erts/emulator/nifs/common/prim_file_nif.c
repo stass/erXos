@@ -97,6 +97,8 @@ static ERL_NIF_TERM rename_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
 static ERL_NIF_TERM make_dir_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM del_file_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM del_dir_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+/* erXos: where one or two paths lie, for erx_file_remote's link following. */
+static ERL_NIF_TERM erx_resolve_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM get_device_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM get_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
@@ -223,6 +225,8 @@ static ErlNifFunc nif_funcs[] = {
     {"erx_ns_bind_nif", 3, efile_ns_bind_nif},
     {"erx_ns_unmount_nif", 1, efile_ns_unmount_nif},
     {"erx_fid_nif", 0, efile_fid_nif},
+    {"erx_resolve_nif", 1, erx_resolve_nif},
+    {"erx_resolve_nif", 2, erx_resolve_nif},
 };
 
 ERL_NIF_INIT(prim_file, nif_funcs, load, NULL, upgrade, unload)
@@ -1182,6 +1186,27 @@ static ERL_NIF_TERM rename_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
     }
 
     return am_ok;
+}
+
+/* erXos: where a path lies, or the two paths of a rename or a link, resolved
+ * as their operations resolve them and acting on nothing, for erx_file_remote
+ * when it follows a symbolic link (design-files.md, Resolving a path): the
+ * remote term on a grant, local on the NIF's own providers, or the refusal. */
+static ERL_NIF_TERM erx_resolve_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    posix_errno_t posix_errno;
+
+    efile_path_t first_path, second_path;
+
+    if(argc == 1) {
+        posix_errno = efile_marshal_path(env, argv[0], &first_path);
+    } else {
+        posix_errno = efile_marshal_paths(env, argv[0], argv[1], &first_path, &second_path);
+    }
+    if(posix_errno) {
+        return marshal_error_to_term(env, &first_path, posix_errno);
+    }
+
+    return enif_make_atom(env, "local");
 }
 
 static ERL_NIF_TERM make_hard_link_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {

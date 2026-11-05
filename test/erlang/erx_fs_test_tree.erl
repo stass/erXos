@@ -358,8 +358,10 @@ unlinked(Dir, Name, Ino, Kind, T) ->
 rename(Dir, Name, NewDir, NewName, Fs) ->
     seen(rename, Fs),
     change(Fs, fun(T) ->
-                          case node(Dir, T) of
-                              #{kind := directory, entries := #{Name := Ino}} ->
+                          case {node(Dir, T), node(NewDir, T)} of
+                              {_, #{kind := NewKind}} when NewKind =/= directory ->
+                                  {error, enotdir};
+                              {#{kind := directory, entries := #{Name := Ino}}, _} ->
                                   T1 = leave(Dir, Name, T),
                                   T2 = case node(NewDir, T1) of
                                            #{entries := #{NewName := Replaced}} ->

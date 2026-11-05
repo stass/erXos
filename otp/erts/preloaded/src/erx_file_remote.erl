@@ -3,10 +3,12 @@
 
 %% prim_file's operations on a path below a file server's grant (design-files.md, Erlang
 %% clients). prim_file's NIF answers such a path with its mount entry's grant, {Pid, Tree,
-%% Rights}, and the names from that tree's root, the entry's root included, and prim_file
-%% calls the operation here, in the calling process. Rights are the entry's, so a read-only
-%% bind of a writable grant arrives read-only, and a request that writes is refused with
-%% erofs here, before anything is sent.
+%% Rights}, and its place, {Point, Root, Names}: the entry's point in the namespace, the
+%% entry's root in the tree, and the path's names from the tree's root, the entry's root
+%% included. prim_file calls the operation here, in the calling process, with the path as
+%% the caller wrote it. Rights are the entry's, so a read-only bind of a writable grant
+%% arrives read-only, and a request that writes is refused with erofs here, before
+%% anything is sent.
 %%
 %% Each path operation attaches a fid of its own, walks from it into new fids, acts on the
 %% fid the walks reached and clunks every fid it made, all sent together. A request names
@@ -14,6 +16,15 @@
 %% that stops early the request fails with ebadf and changes nothing, and the answer is the
 %% walk's. Every fid is drawn from prim_file:erx_fid/0 and owned by the calling process, so
 %% the grant clunks it if the process ends first.
+%%
+%% A walk that stops at a symbolic link, or ends on one the operation follows, sends the
+%% client through the link (design-files.md, Resolving a path): it reads the link, puts its
+%% text in place of the names up to the link, a relative text joined to the link's
+%% directory as a namespace path, and resolves the result again through prim_file's NIF,
+%% so a link leads only where the caller's own namespace leads, with the rights of the
+%% entry it reaches. At most 40 links are followed for one operation. A path written with
+%% a trailing "/" names a directory: its last name is followed, and a last name that is
+%% not a directory answers enotdir, as Linux's path resolution answers.
 %%
 %% The answers are stock prim_file's on a Unix host, by design-files.md's error steps, and
 %% the results have the shapes prim_file's NIF returns for a local path (a #file_info{}
@@ -24,13 +35,13 @@
 %% This module is preloaded and calls only BIFs and preloaded modules (T6 of
 %% design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
 %%
-%% Not yet done here (TODO.md): following a symbolic link the path meets, which answers
-%% enotsup; a listing's entries for the mount points below a directory; open files,
-%% read_file and set_cwd, and with set_cwd the working-directory step of del_dir.
+%% Not yet done here (TODO.md): a listing's entries for the mount points below a
+%% directory; open files, read_file and set_cwd, and with set_cwd the working-directory
+%% step of del_dir.
 
 -module(erx_file_remote).
 
--export([read_file_info/3, read_link/2, list_dir/2, write_file_info/3, make_dir/3,
+-export([read_file_info/4, read_link/3, list_dir/3, write_file_info/4, make_dir/3,
          del_dir/3, delete/3, rename/5, make_link/5, make_symlink/4]).
 -export([open/3, read_file/2, set_cwd/2]).
 -export([last_name/1, names/1]).
@@ -41,9 +52,19 @@
 -type grant() :: {pid(), Tree :: binary(), Rights :: ro | rw | rx}.
 %% A path's names from the tree's root, joined by "/": <<>> is the root.
 -type names() :: binary().
+%% Where a path lies on its grant: the entry maps the namespace path Point to the tree's
+%% names Root, and Names begins with Root.
+-type place() :: {Point :: binary(), Root :: names(), Names :: names()}.
 %% A path as the caller wrote it, encoded as prim_file encodes it for its NIF, NUL-terminated.
 -type path() :: binary().
+%% A path's text: a path() without its NUL.
+-type text() :: binary().
 -type posix() :: atom().
+%% How a walk treats a symbolic link as its last name: follow it, act on the link itself,
+%% or follow it and require a directory, for a path written with a trailing "/".
+-type mode() :: follow | nofollow | directory.
+%% A walk of the Which'th path of an operation met a link at its At'th name, from 0.
+-type link() :: {link, Which :: 1 | 2, At :: non_neg_integer()}.
 
 %% The domain's umask, which a host's kernel would take off stock's modes.
 -define(UMASK, 8#022).
@@ -58,34 +79,97 @@
 %% so a server that never ends a listing cannot fill the caller's heap.
 -define(READDIR_COUNT, 8192).
 -define(LISTING_MAX, 1048576).
+%% The most links one operation follows, Linux's MAXSYMLINKS; the next answers eloop.
+-define(LINKS_MAX, 40).
 
 %% Reading -----------------------------------------------------------------
 
 %% read_file_info (FollowLinks 1) and read_link_info (0): the #file_info{} of a stat, its
-%% times POSIX seconds, for prim_file to convert.
--spec read_file_info(grant(), names(), 0 | 1) -> #file_info{} | {error, posix()}.
-read_file_info(Grant, Names, FollowLinks) ->
-    Follow = case FollowLinks of
-                 1 -> follow;
-                 _ -> nofollow
-             end,
-    case act(Grant, [{names(Names), Follow}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
-        {ok, Attr} -> file_info(Grant, Attr);
-        {error, _} = Error -> Error
-    end.
+%% times POSIX seconds, for prim_file to convert. A link's own record carries the access
+%% of the file it leads to, as stock's access(2) follows links.
+-spec read_file_info(grant(), place(), 0 | 1, path()) -> #file_info{} | {error, posix()}.
+read_file_info(Grant, Place, FollowLinks, Path) ->
+    one(Grant, Place, Path,
+        fun(OnGrant, NameList, Text) ->
+                Mode = case {FollowLinks, slashed(Text)} of
+                           {_, true} -> directory;
+                           {1, false} -> follow;
+                           {_, false} -> nofollow
+                       end,
+                case {act(OnGrant, [{NameList, Mode}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end), Mode} of
+                    {{ok, Attr}, nofollow} -> with_access(file_info(OnGrant, Attr), Text);
+                    {{ok, Attr}, _} -> followed_info(file_info(OnGrant, Attr));
+                    {Other, _} -> Other
+                end
+        end,
+        fun(Text) ->
+                Options = [{time, posix}],
+                Local = case FollowLinks of
+                            1 -> prim_file:read_file_info(Text, Options);
+                            _ -> prim_file:read_link_info(Text, Options)
+                        end,
+                case Local of
+                    {ok, Info} -> Info;
+                    {error, _} = Error -> Error
+                end
+        end).
 
--spec read_link(grant(), names()) -> {ok, binary()} | {error, posix()}.
-read_link(Grant, Names) ->
-    act(Grant, [{names(Names), nofollow}], fun([Fid]) -> {readlink, Fid} end).
+%% A walk that followed every link ends on a file that is not one; a server that says
+%% otherwise answers eio, so with_access/2 never meets a link it would follow again.
+followed_info(#file_info{type = symlink}) -> {error, eio};
+followed_info(Info) -> Info.
+
+with_access(#file_info{type = symlink} = Info, Text) ->
+    Access = case prim_file:read_file_info(Text) of
+                 {ok, #file_info{type = symlink}} -> none;
+                 {ok, #file_info{access = Followed}} -> Followed;
+                 {error, _} -> none
+             end,
+    Info#file_info{access = Access};
+with_access(Info, _) ->
+    Info.
+
+%% A path written with a trailing "/" names a directory, which is not a link: einval, as
+%% readlink answers for any file that is not a link, once the path reaches a directory.
+-spec read_link(grant(), place(), path()) -> {ok, binary()} | {error, posix()}.
+read_link(Grant, Place, Path) ->
+    one(Grant, Place, Path,
+        fun(OnGrant, NameList, Text) ->
+                case slashed(Text) of
+                    false ->
+                        act(OnGrant, [{NameList, nofollow}], fun([Fid]) -> {readlink, Fid} end);
+                    true ->
+                        case act(OnGrant, [{NameList, directory}],
+                                 fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
+                            {ok, _} -> {error, einval};
+                            Other -> Other
+                        end
+                end
+        end,
+        fun(Text) ->
+                case prim_file:read_link_all(Text) of
+                    {ok, Name} -> {ok, raw(Name)};
+                    {error, _} = Error -> Error
+                end
+        end).
 
 %% The names of a directory's entries, "." and ".." left out, as raw names.
--spec list_dir(grant(), names()) -> {ok, [binary()]} | {error, posix()}.
-list_dir({Pid, _, _} = Grant, Names) ->
-    session(Grant, [{names(Names), follow}],
-            fun([Fid]) -> [{lopen, Fid, 0}] end,
-            fun([Fid], [{ok, _Qid, _Iounit}]) -> listing(Pid, Fid, 0, 0, []);
-               (_, [{error, _} = Error]) -> Error
-            end).
+-spec list_dir(grant(), place(), path()) -> {ok, [binary()]} | {error, posix()}.
+list_dir(Grant, Place, Path) ->
+    one(Grant, Place, Path,
+        fun({Pid, _, _} = OnGrant, NameList, Text) ->
+                session(OnGrant, [{NameList, followed(Text)}],
+                        fun([Fid]) -> [{lopen, Fid, 0}] end,
+                        fun([Fid], [{ok, _Qid, _Iounit}]) -> listing(Pid, Fid, 0, 0, []);
+                           (_, [{error, _} = Error]) -> Error
+                        end)
+        end,
+        fun(Text) ->
+                case prim_file:list_dir_all(Text) of
+                    {ok, Names} -> {ok, [raw(Name) || Name <- Names]};
+                    {error, _} = Error -> Error
+                end
+        end).
 
 %% A page at a time, each from the offset the last entry of the one before gave, until
 %% an empty page.
@@ -107,18 +191,28 @@ listing(Pid, Fid, Offset, Count, Pages) ->
 
 %% Stock's write_file_info_1 in its order: the owner if either id is given, then the mode,
 %% then the times, which prim_file has worked out as POSIX seconds. A failed step stops the
-%% rest, except enotsup, which stock passes over.
--spec write_file_info(grant(), names(), #file_info{}) -> ok | {error, posix()}.
-write_file_info({Pid, _, _} = Grant, Names, Info) ->
-    case {writable(Grant), set_attrs(Info)} of
-        {false, _} ->
-            {error, erofs};
-        {true, {error, _} = Error} ->
-            Error;
-        {true, {ok, Steps}} ->
-            session(Grant, [{names(Names), follow}], fun(_) -> [] end,
-                    fun([Fid], []) -> set_each(Pid, Fid, Steps) end)
-    end.
+%% rest, except enotsup, which stock passes over. The last name's link is followed, so on
+%% a read-only entry the path is walked first: a link may lead to a writable one, and only
+%% a path that ends on this entry answers erofs.
+-spec write_file_info(grant(), place(), #file_info{}, path()) -> ok | {error, posix()}.
+write_file_info(Grant, Place, Info, Path) ->
+    one(Grant, Place, Path,
+        fun({Pid, _, _} = OnGrant, NameList, Text) ->
+                Walk = [{NameList, followed(Text)}],
+                case {writable(OnGrant), set_attrs(Info)} of
+                    {_, {error, _} = Error} ->
+                        Error;
+                    {false, _} ->
+                        case act(OnGrant, Walk, fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
+                            {ok, _} -> {error, erofs};
+                            Other -> Other
+                        end;
+                    {true, {ok, Steps}} ->
+                        session(OnGrant, Walk, fun(_) -> [] end,
+                                fun([Fid], []) -> set_each(Pid, Fid, Steps) end)
+                end
+        end,
+        fun(Text) -> prim_file:write_file_info(Text, Info, [{time, posix}]) end).
 
 set_each(_, _, []) ->
     ok;
@@ -181,46 +275,101 @@ unset() ->
     #{valid => 0, mode => 0, uid => 0, gid => 0, size => 0,
       atime_sec => 0, atime_nsec => 0, mtime_sec => 0, mtime_nsec => 0}.
 
--spec make_dir(grant(), names(), path()) -> ok | {error, posix()}.
-make_dir(Grant, Names, Path) ->
-    make(Grant, names(Names), Path,
-         fun(DirFid, Name) -> {mkdir, DirFid, Name, 8#777 band bnot ?UMASK, 0} end).
 
--spec make_symlink(grant(), names(), Target :: binary(), path()) -> ok | {error, posix()}.
-make_symlink(Grant, Names, EncodedTarget, Path) ->
+-spec make_dir(grant(), place(), path()) -> ok | {error, posix()}.
+make_dir(Grant, Place, Path) ->
+    one(Grant, Place, Path,
+        fun(OnGrant, NameList, Text) ->
+                make(OnGrant, NameList, Text,
+                     fun(Names) ->
+                             in_directory(OnGrant, Names,
+                                          fun(DirFid, Name) ->
+                                                  {mkdir, DirFid, Name, 8#777 band bnot ?UMASK, 0}
+                                          end)
+                     end)
+        end,
+        fun(Text) -> prim_file:make_dir(Text) end).
+
+%% A new name written with a trailing "/" names a directory, which a link is not: nothing
+%% is made, and the answer is eexist for a name that exists, else the walk's, as Linux's
+%% symlink answers.
+-spec make_symlink(grant(), place(), Target :: binary(), path()) -> ok | {error, posix()}.
+make_symlink(Grant, Place, EncodedTarget, Path) ->
     case text(EncodedTarget) of
         Target when byte_size(Target) > ?ERX_P9_SYMLINK_MAX ->
             {error, enametoolong};
         Target ->
-            make(Grant, names(Names), Path,
-                 fun(DirFid, Name) -> {symlink, DirFid, Name, Target, 0} end)
+            one(Grant, Place, Path,
+                fun(OnGrant, NameList, Text) ->
+                        make(OnGrant, NameList, Text,
+                             fun(Names) ->
+                                     case slashed(Text) of
+                                         false ->
+                                             in_directory(OnGrant, Names,
+                                                          fun(DirFid, Name) ->
+                                                                  {symlink, DirFid, Name, Target, 0}
+                                                          end);
+                                         true ->
+                                             looked(OnGrant, Names, fun exists/1)
+                                     end
+                             end)
+                end,
+                fun(Text) -> prim_file:make_symlink(EncodedTarget, Text) end)
     end.
 
 %% An operation that makes a name: a last "." or ".." answers eexist once the rest of the
-%% path is a directory (step 2), as does the tree's root, which always exists.
-make(Grant, NameList, Path, Request) ->
-    case last_name_step(Path, fun(_) -> {error, eexist} end) of
+%% path is a directory (step 2), as does the tree's root, which always exists; else Make
+%% runs on the names, unless the rights refuse a write.
+make(Grant, NameList, Text, Make) ->
+    case last_name_step(Text, fun(_) -> {error, eexist} end) of
         plain when NameList =:= [] -> {error, eexist};
-        plain -> in_directory(Grant, NameList, Request);
+        plain -> if_writable(Grant, [{dir_of(NameList), follow}], fun() -> Make(NameList) end);
         {error, _} = Error -> Error
     end.
 
--spec del_dir(grant(), names(), path()) -> ok | {error, posix()}.
-del_dir(Grant, Names, Path) ->
-    Answer = remove(Grant, names(Names), Path,
-                    fun(<<".">>) -> {error, einval};
-                       (<<"..">>) -> {error, enotempty}
-                    end,
-                    fun(DirFid, Name) -> {unlinkat, DirFid, Name, ?ERX_P9_AT_REMOVEDIR} end),
+%% A trailing "/" changes nothing here: rmdir acts only on a directory, and a link, which
+%% the last name is never followed through, answers enotdir from the server.
+-spec del_dir(grant(), place(), path()) -> ok | {error, posix()}.
+del_dir(Grant, Place, Path) ->
+    Answer = one(Grant, Place, Path,
+                 fun(OnGrant, NameList, Text) ->
+                         remove(OnGrant, NameList, Text,
+                                fun(<<".">>) -> {error, einval};
+                                   (<<"..">>) -> {error, enotempty}
+                                end,
+                                fun(Names) ->
+                                        in_directory(OnGrant, Names,
+                                                     fun(DirFid, Name) ->
+                                                             {unlinkat, DirFid, Name, ?ERX_P9_AT_REMOVEDIR}
+                                                     end)
+                                end)
+                 end,
+                 fun(Text) -> prim_file:del_dir(Text) end),
     case Answer of
         {error, enotempty} -> {error, eexist};
         _ -> Answer
     end.
 
--spec delete(grant(), names(), path()) -> ok | {error, posix()}.
-delete(Grant, Names, Path) ->
-    Answer = remove(Grant, names(Names), Path, fun(_) -> {error, eisdir} end,
-                    fun(DirFid, Name) -> {unlinkat, DirFid, Name, 0} end),
+%% A last name written with a trailing "/" is not followed and removes nothing: eisdir
+%% for a directory, enotdir for anything else, a link included, as Linux's unlink answers.
+-spec delete(grant(), place(), path()) -> ok | {error, posix()}.
+delete(Grant, Place, Path) ->
+    Answer = one(Grant, Place, Path,
+                 fun(OnGrant, NameList, Text) ->
+                         remove(OnGrant, NameList, Text, fun(_) -> {error, eisdir} end,
+                                fun(Names) ->
+                                        case slashed(Text) of
+                                            false ->
+                                                in_directory(OnGrant, Names,
+                                                             fun(DirFid, Name) ->
+                                                                     {unlinkat, DirFid, Name, 0}
+                                                             end);
+                                            true ->
+                                                looked(OnGrant, Names, fun not_a_directory/1)
+                                        end
+                                end)
+                 end,
+                 fun(Text) -> prim_file:delete(Text) end),
     case Answer of
         {error, eisdir} -> {error, eperm};
         _ -> Answer
@@ -228,166 +377,239 @@ delete(Grant, Names, Path) ->
 
 %% An operation that removes a name: a last "." or ".." answers Special's error once the
 %% rest of the path is a directory (step 2), and the tree's root, a mount point, ebusy
-%% (step 3).
-remove(Grant, NameList, Path, Special, Request) ->
-    case last_name_step(Path, Special) of
+%% (step 3); else Remove runs on the names, unless the rights refuse a write.
+remove(Grant, NameList, Text, Special, Remove) ->
+    case last_name_step(Text, Special) of
         plain when NameList =:= [] -> {error, ebusy};
-        plain -> in_directory(Grant, NameList, Request);
+        plain -> if_writable(Grant, [{dir_of(NameList), follow}], fun() -> Remove(NameList) end);
         {error, _} = Error -> Error
     end.
 
--spec rename(grant(), names(), names(), path(), path()) -> ok | {error, posix()}.
-rename(Grant, Names, OtherNames, Source, Destination) ->
-    {From, To} = {names(Names), names(OtherNames)},
-    Answer =
-        case {text(Source), special(Source) orelse special(Destination)} of
-            {<<"/">>, _} ->
-                %% Step 1: stock's own answer for a failed rename of "/".
-                {error, einval};
-            {_, true} ->
-                %% Both paths' directories first, the source's before, as Linux finds them
-                %% before it looks at either last name.
-                case directory(rest(Source)) of
-                    ok -> on_ok(directory(rest(Destination)), {error, ebusy});
-                    Error -> Error
-                end;
-            {_, false} when From =:= []; To =:= [] ->
-                {error, ebusy};
-            {_, false} ->
-                renamed(Grant, From, To)
-        end,
+%% A source that is not a directory, written with a trailing "/" on either side, answers
+%% enotdir, as Linux's rename answers once it has found the source.
+-spec rename(grant(), place(), place(), path(), path()) -> ok | {error, posix()}.
+rename(Grant, Place, OtherPlace, Source, Destination) ->
+    Answer = with_links(Grant, [Place, OtherPlace], [text(Source), text(Destination)],
+                        fun renamed/3,
+                        fun([From, To]) -> prim_file:rename(From, To) end),
     case Answer of
         {error, enotempty} -> {error, eexist};
         _ -> Answer
     end.
 
-renamed(Grant, From, To) ->
-    case writable(Grant) of
-        true ->
-            {FromDir, FromName} = split_last(From),
-            {ToDir, ToName} = split_last(To),
-            ok_of(act(Grant, [{FromDir, follow}, {ToDir, follow}],
-                      fun([FromFid, ToFid]) -> {renameat, FromFid, FromName, ToFid, ToName} end));
-        false ->
-            {error, erofs}
+renamed(Grant, [{_, _, Names}, {_, _, OtherNames}], [Source, Destination]) ->
+    {From, To} = {names(Names), names(OtherNames)},
+    case {Source, special(Source) orelse special(Destination)} of
+        {<<"/">>, _} ->
+            %% Step 1: stock's own answer for a failed rename of "/".
+            {error, einval};
+        {_, true} ->
+            %% Both paths' directories first, the source's before, as Linux finds them
+            %% before it looks at either last name.
+            case directory(rest(Source)) of
+                ok -> on_ok(directory(rest(Destination)), {error, ebusy});
+                Error -> Error
+            end;
+        {_, false} when From =:= []; To =:= [] ->
+            {error, ebusy};
+        {_, false} ->
+            if_writable(Grant, [{dir_of(From), follow}, {dir_of(To), follow}],
+                        fun() -> moved(Grant, From, To, slashed(Source) orelse slashed(Destination)) end)
+    end.
+
+moved(Grant, From, To, false) ->
+    {FromDir, FromName} = split_last(From),
+    {ToDir, ToName} = split_last(To),
+    ok_of(act(Grant, [{FromDir, follow}, {ToDir, follow}],
+              fun([FromFid, ToFid]) -> {renameat, FromFid, FromName, ToFid, ToName} end));
+moved(Grant, From, To, true) ->
+    {ToDir, _} = split_last(To),
+    case act(Grant, [{From, nofollow}, {ToDir, follow}], fun([Fid, _]) -> {getattr, Fid, ?INFO_MASK} end) of
+        {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =:= ?ERX_P9_S_IFDIR -> moved(Grant, From, To, false);
+        {ok, _} -> {error, enotdir};
+        Other -> Other
     end.
 
 %% A hard link: the existing path is reached first and not followed, as Linux's linkat
 %% looks it up before the new name, so its failure is the answer; the new name is made as
-%% make_dir makes one.
--spec make_link(grant(), names(), names(), path(), path()) -> ok | {error, posix()}.
-make_link(Grant, Names, OtherNames, _Existing, New) ->
+%% make_symlink makes one. An existing path written with a trailing "/" is followed and
+%% must be a directory, which is never linked: once the new name's directory is found and
+%% the name is free, eperm, as Linux's link answers, and nothing is sent that links.
+-spec make_link(grant(), place(), place(), path(), path()) -> ok | {error, posix()}.
+make_link(Grant, Place, OtherPlace, Existing, New) ->
+    with_links(Grant, [Place, OtherPlace], [text(Existing), text(New)], fun linked/3,
+               fun([From, To]) -> prim_file:make_link(From, To) end).
+
+linked(Grant, [{_, _, Names}, {_, _, OtherNames}], [ExistingText, NewText]) ->
     {Existing, Made} = {names(Names), names(OtherNames)},
-    case special(New) orelse Made =:= [] of
+    Walk = {Existing, case slashed(ExistingText) of
+                           true -> directory;
+                           false -> nofollow
+                       end},
+    case special(NewText) orelse Made =:= [] of
         true ->
             %% The new name is "." or "..", or the tree's root: once the existing path
             %% is reached, the answer is step 2's or the root's eexist.
-            case act(Grant, [{Existing, nofollow}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
-                {ok, _} -> existing_name(New);
-                {error, _} = Error -> Error
+            case act(Grant, [Walk], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
+                {ok, _} -> special_new_name(NewText);
+                Other -> Other
             end;
         false ->
-            linked(Grant, Existing, Made)
+            if_writable(Grant, [Walk, {dir_of(Made), follow}],
+                        fun() -> link_made(Grant, Walk, Made, slashed(NewText)) end)
     end.
 
-existing_name(New) ->
+%% The answer for a new name that is ".", ".." or the tree's root.
+special_new_name(New) ->
     case last_name_step(New, fun(_) -> {error, eexist} end) of
         plain -> {error, eexist};
         Error -> Error
     end.
 
-linked(Grant, Existing, Made) ->
-    case writable(Grant) of
-        true ->
-            {Dir, Name} = split_last(Made),
-            ok_of(act(Grant, [{Existing, nofollow}, {Dir, follow}],
-                      fun([Fid, DirFid]) -> {link, DirFid, Fid, Name} end));
-        false ->
-            {error, erofs}
+%% A new name written with a trailing "/" is never made: eexist for a name that exists,
+%% else the walk's answer. An existing directory is never linked: once the new name's
+%% directory is found and the name is free, eperm.
+link_made(Grant, Walk, Made, Slashed) ->
+    {Dir, Name} = split_last(Made),
+    Named = fun() ->
+                    exists(act(Grant, [Walk, {Made, nofollow}],
+                               fun([_, Fid]) -> {getattr, Fid, ?INFO_MASK} end))
+            end,
+    case {Walk, Slashed} of
+        {_, true} ->
+            Named();
+        {{_, directory}, false} ->
+            case act(Grant, [Walk, {Dir, directory}], fun([_, DirFid]) -> {getattr, DirFid, ?INFO_MASK} end) of
+                {ok, _} -> on_ok(free(Named()), {error, eperm});
+                Other -> Other
+            end;
+        {_, false} ->
+            ok_of(act(Grant, [Walk, {Dir, follow}], fun([Fid, DirFid]) -> {link, DirFid, Fid, Name} end))
     end.
 
 %% Not yet served here: open files, read_file and a working directory on a grant.
--spec open(grant(), names(), list()) -> {error, enotsup}.
-open(_Grant, _Names, _Modes) -> {error, enotsup}.
+-spec open(grant(), place(), list()) -> {error, enotsup}.
+open(_Grant, _Place, _Modes) -> {error, enotsup}.
 
--spec read_file(grant(), names()) -> {error, enotsup}.
-read_file(_Grant, _Names) -> {error, enotsup}.
+-spec read_file(grant(), place()) -> {error, enotsup}.
+read_file(_Grant, _Place) -> {error, enotsup}.
 
--spec set_cwd(grant(), names()) -> {error, enotsup}.
-set_cwd(_Grant, _Names) -> {error, enotsup}.
+-spec set_cwd(grant(), place()) -> {error, enotsup}.
+set_cwd(_Grant, _Place) -> {error, enotsup}.
 
 %% The error steps -----------------------------------------------------------
 
 %% Step 2: a path whose last name, as the caller wrote it, is "." or ".." changes nothing;
 %% the rest of the path must be a directory, and Special gives the answer past it. A plain
 %% last name answers plain.
-last_name_step(Path, Special) ->
-    {Rest, Last} = last_name(Path),
+last_name_step(Text, Special) ->
+    {Rest, Last, _} = last_name(Text),
     case special_name(Last) of
         true -> on_ok(directory(Rest), Special(Last));
         false -> plain
     end.
 
-%% Request on the directory of NameList's last name and that name, unless the rights
-%% refuse a write.
+%% Request on the directory of NameList's last name and that name.
 in_directory(Grant, NameList, Request) ->
-    case writable(Grant) of
-        true ->
-            {Dir, Name} = split_last(NameList),
-            ok_of(act(Grant, [{Dir, follow}], fun([DirFid]) -> Request(DirFid, Name) end));
-        false ->
-            {error, erofs}
+    {Dir, Name} = split_last(NameList),
+    ok_of(act(Grant, [{Dir, follow}], fun([DirFid]) -> Request(DirFid, Name) end)).
+
+%% What a last name that is not followed is, for an operation written with a trailing
+%% "/" that does nothing: Meaning reads the getattr answer.
+looked(Grant, NameList, Meaning) ->
+    Meaning(act(Grant, [{NameList, nofollow}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end)).
+
+exists({ok, _}) -> {error, eexist};
+exists(Other) -> Other.
+
+%% ok for a name exists/1 found missing.
+free({error, enoent}) -> ok;
+free(Other) -> Other.
+
+not_a_directory({ok, #{mode := Mode}}) when Mode band ?ERX_P9_S_IFMT =:= ?ERX_P9_S_IFDIR -> {error, eisdir};
+not_a_directory({ok, _}) -> {error, enotdir};
+not_a_directory(Other) -> Other.
+
+%% Then, on an entry that allows writes. On any other the walks run first, sending
+%% nothing that writes, so a link among them leads the operation to the entry it
+%% reaches, and a missing directory answers before erofs, as on Linux.
+if_writable({_, _, rw}, _, Then) ->
+    Then();
+if_writable(Grant, Walks, _) ->
+    case act(Grant, Walks, fun([Fid | _]) -> {getattr, Fid, ?INFO_MASK} end) of
+        {ok, _} -> {error, erofs};
+        Other -> Other
     end.
+
+%% The names of a non-empty name list's directory.
+dir_of(NameList) ->
+    {Dir, _} = split_last(NameList),
+    Dir.
 
 writable({_, _, rw}) -> true;
 writable({_, _, _}) -> false.
 
 %% ok for a directory the path reaches after its links, as Linux finds a last name's
 %% directory; the path goes through prim_file, so it may lie on any provider.
-directory(Path) ->
-    case prim_file:read_file_info(Path) of
+directory(Text) ->
+    case prim_file:read_file_info(Text) of
         {ok, #file_info{type = directory}} -> ok;
         {ok, #file_info{}} -> {error, enotdir};
         {error, _} = Error -> Error
     end.
 
-special(Path) ->
-    {_, Last} = last_name(Path),
+special(Text) ->
+    {_, Last, _} = last_name(Text),
     special_name(Last).
 
 special_name(<<".">>) -> true;
 special_name(<<"..">>) -> true;
 special_name(_) -> false.
 
-rest(Path) ->
-    {Rest, _} = last_name(Path),
+rest(Text) ->
+    {Rest, _, _} = last_name(Text),
     Rest.
 
+%% A path written with a "/" after its last name names a directory.
+slashed(Text) ->
+    {_, _, Slashed} = last_name(Text),
+    Slashed.
+
+%% How a walk that follows its last link treats it: a path written with a trailing "/"
+%% must end on a directory.
+followed(Text) ->
+    case slashed(Text) of
+        true -> directory;
+        false -> follow
+    end.
+
 on_ok(ok, Then) -> Then;
-on_ok({error, _} = Error, _) -> Error.
+on_ok(Other, _) -> Other.
 
 ok_of({ok, _}) -> ok;
 ok_of(Answer) -> Answer.
 
 %% Paths ---------------------------------------------------------------------
 
-%% A path's last name as the caller wrote it, past any trailing "/", and the rest of the
-%% path, which names the last name's directory: up to and including the "/" before the
-%% last name, or "." for a path of one name. A path of only "/" has no last name (<<>>)
-%% and is its own rest, as is the empty path, which the NIF refuses before this is asked.
--spec last_name(path()) -> {Rest :: binary(), Last :: binary()}.
+%% A path's last name as the caller wrote it, past any trailing "/", the rest of the path,
+%% which names the last name's directory: up to and including the "/" before the last
+%% name, or "." for a path of one name, and whether a "/" follows the last name. A path of
+%% only "/" has no last name (<<>>) and is its own rest, as is the empty path, which the
+%% NIF refuses before this is asked.
+-spec last_name(path() | text()) -> {Rest :: binary(), Last :: binary(), Slashed :: boolean()}.
 last_name(Encoded) when is_binary(Encoded) ->
     Path = text(Encoded),
     Trimmed = trim_slashes(Path, byte_size(Path)),
+    Slashed = byte_size(Trimmed) < byte_size(Path),
     case binary:matches(Trimmed, <<"/">>) of
         _ when Trimmed =:= <<>> ->
-            {Path, <<>>};
+            {Path, <<>>, false};
         [] ->
-            {<<".">>, Trimmed};
+            {<<".">>, Trimmed, Slashed};
         Slashes ->
             {At, 1} = last(Slashes),
             {binary:part(Trimmed, 0, At + 1),
-             binary:part(Trimmed, At + 1, byte_size(Trimmed) - At - 1)}
+             binary:part(Trimmed, At + 1, byte_size(Trimmed) - At - 1), Slashed}
     end.
 
 trim_slashes(Path, Size) when Size > 0, binary_part(Path, Size - 1, 1) =:= <<"/">> ->
@@ -401,6 +623,10 @@ text(Encoded) when byte_size(Encoded) > 0, binary_part(Encoded, byte_size(Encode
 text(Path) ->
     Path.
 
+%% A name prim_file gives back for a local path, as the raw name this module answers.
+raw(Name) when is_binary(Name) -> Name;
+raw(Name) -> text(prim_file:internal_name2native(Name)).
+
 %% The NIF's names as a list: <<>> is the tree's root.
 -spec names(names()) -> [binary()].
 names(<<>>) -> [];
@@ -411,11 +637,111 @@ split_last(NameList) ->
     {Dir, [Name]} = split_at(length(NameList) - 1, NameList),
     {Dir, Name}.
 
+%% Following links ------------------------------------------------------------
+
+%% One path's operation: Try runs on the grant the path lies on, its name list and its
+%% text, Local on the text of a path that a link led to the NIF's own providers.
+one(Grant, Place, Path, Try, Local) ->
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [{_, _, Names}], [Text]) -> Try(OnGrant, names(Names), Text) end,
+               fun([Text]) -> Local(Text) end).
+
+%% Runs Try on the grant and the places its paths lie on, and gives its answer, unless a
+%% walk met a symbolic link it must follow (link()). The link's path is then rewritten
+%% through the link and every path of the operation resolved again by prim_file's NIF:
+%% Try runs again where they lie now, or Local runs on their texts when no grant holds
+%% them. Each link counts towards one limit for the operation, the links met while
+%% reading a link included, so following ends after ?LINKS_MAX links with eloop.
+-spec with_links(grant(), [place()], [text()], Try, Local) -> term() when
+      Try :: fun((grant(), [place()], [text()]) -> term() | link()),
+      Local :: fun(([text()]) -> term()).
+with_links(Grant, Places, Texts, Try, Local) ->
+    with_links(Grant, Places, Texts, Try, Local, [0 || _ <- Places]).
+
+with_links(Grant, Places, Texts, Try, Local, Followed) ->
+    case Try(Grant, Places, Texts) of
+        {link, Which, At} -> through(Grant, Places, Texts, Try, Local, Followed, Which, At);
+        Answer -> Answer
+    end.
+
+through(Grant, Places, Texts, Try, Local, Followed, Which, At) ->
+    case nth(Which, Followed) of
+        ?LINKS_MAX -> {error, eloop};
+        Count -> follow(Grant, Places, Texts, Try, Local, replaced(Which, Followed, Count + 1), Which, At)
+    end.
+
+follow(Grant, Places, Texts, Try, Local, Followed, Which, At) ->
+    case link_path(Grant, nth(Which, Places), At, slashed(nth(Which, Texts))) of
+        {ok, Next} ->
+            Nexts = replaced(Which, Texts, Next),
+            case prim_file:erx_resolve(Nexts) of
+                {remote, NextGrant, NextPlace} ->
+                    with_links(NextGrant, [NextPlace], Nexts, Try, Local, Followed);
+                {remote, NextGrant, NextPlace, OtherPlace} ->
+                    with_links(NextGrant, [NextPlace, OtherPlace], Nexts, Try, Local, Followed);
+                local ->
+                    Local(Nexts);
+                {error, _} = Error ->
+                    Error
+            end;
+        {link, _, Before} ->
+            through(Grant, Places, Texts, Try, Local, Followed, Which, Before);
+        {error, _} = Error ->
+            Error
+    end.
+
+%% The path the link at a place's At'th name leads to: the link's text, joined to the
+%% link's directory as a namespace path when it is relative, then the names after the
+%% link, and a "/" when the path was written with one. The link's directory is the
+%% entry's point and the names between the entry's root and the link; a link among the
+%% root's own names has no such directory, and a relative one answers enoent. A link that
+%% is empty answers enoent, as on Linux. Reading the link may meet an earlier one, which
+%% is answered as a link() for the caller to follow.
+link_path(Grant, {Point, Root, Names}, At, Slashed) ->
+    {Through, After} = split_at(At + 1, names(Names)),
+    case act(Grant, [{Through, nofollow}], fun([Fid]) -> {readlink, Fid} end) of
+        {ok, <<>>} ->
+            {error, enoent};
+        {ok, <<"/", _/binary>> = Target} ->
+            {ok, joined([Target | After], Slashed)};
+        {ok, Target} ->
+            RootCount = length(names(Root)),
+            case length(Through) - 1 of
+                Count when Count < RootCount ->
+                    {error, enoent};
+                Count ->
+                    {Dir, _} = split_at(Count, Through),
+                    {_, Below} = split_at(RootCount, Dir),
+                    {ok, joined([Point | Below] ++ [Target | After], Slashed)}
+            end;
+        Other ->
+            Other
+    end.
+
+%% The Which'th of the one or two paths of an operation, and their texts with it replaced.
+nth(1, [First | _]) -> First;
+nth(2, [_, Second]) -> Second.
+
+replaced(1, [_ | Rest], New) -> [New | Rest];
+replaced(2, [First, _], New) -> [First, New].
+
+%% Pieces joined by "/", and a "/" after the last when Slashed. Doubled slashes are
+%% harmless: the NIF drops empty names.
+joined(Pieces, Slashed) ->
+    iolist_to_binary([separated(Pieces) | case Slashed of
+                                              true -> [<<"/">>];
+                                              false -> []
+                                          end]).
+
+separated([Piece]) -> [Piece];
+separated([Piece | Pieces]) -> [Piece, <<"/">> | separated(Pieces)].
+
 %% The exchange ---------------------------------------------------------------
 
 %% Reaches each path from one new attach, sends Act on the fids the paths reached, then
-%% clunks every fid made, all together. The answer is the first path's failure, in order,
-%% else Act's reply.
+%% clunks every fid made, all together. The answer is the first path's failure or link,
+%% in order, else Act's reply.
+-spec act(grant(), [{[binary()], mode()}], fun(([non_neg_integer()]) -> tuple())) -> term().
 act({Pid, Tree, _}, Paths, Act) ->
     {Root, Reaches, Walks} = reaches(Paths),
     Made = [Root | [New || {walk, _, New, _} <- Walks]],
@@ -435,7 +761,7 @@ session({Pid, Tree, _}, Paths, First, Then) ->
     {Walked, Opened} = split_at(length(Walks), Replies),
     Answer = case reached(Attached, Reaches, Walked) of
                  ok -> Then(Fids, Opened);
-                 {error, _} = Error -> Error
+                 Other -> Other
              end,
     _ = exchange(Pid, [{clunk, Fid} || Fid <- Made]),
     Answer.
@@ -448,12 +774,12 @@ attach(Fid, Tree) ->
 %% acts on a fid its own walk made.
 reaches(Paths) ->
     Root = fid(),
-    Reaches = [reach(Root, NameList, Follow) || {NameList, Follow} <- Paths],
+    Reaches = [reach(Root, NameList, Mode) || {NameList, Mode} <- Paths],
     {Root, Reaches, [Walk || {Walks, _, _} <- Reaches, Walk <- Walks]}.
 
-reach(From, NameList, Follow) ->
+reach(From, NameList, Mode) ->
     {Walks, Last} = walks(From, NameList),
-    {Walks, Last, Follow}.
+    {Walks, Last, Mode}.
 
 walks(From, NameList) when length(NameList) =< ?ERX_P9_MAXWELEM ->
     New = fid(),
@@ -467,50 +793,55 @@ walks(From, NameList) ->
 fid() ->
     prim_file:erx_fid().
 
-%% ok when the attach and every walk reached their ends, else the first failure. A path
-%% marked follow that ends on a symbolic link, and any whose walk stops at one, would need
-%% the link followed.
+%% ok when the attach and every walk reached their ends as their modes ask, else the
+%% first failure, or the first link a path must follow, as a link() naming the path by
+%% its place in Paths.
 reached({ok, RootQid}, Reaches, Walked) ->
-    reached_paths(Reaches, Walked, RootQid);
+    reached_paths(Reaches, Walked, RootQid, 1);
 reached({error, _} = Error, _, _) ->
     Error.
 
-reached_paths([], _, _) ->
+reached_paths([], _, _, _) ->
     ok;
-reached_paths([{Walks, _, Follow} | Reaches], Walked, RootQid) ->
+reached_paths([{Walks, _, Mode} | Reaches], Walked, RootQid, Which) ->
     {Mine, Others} = split_at(length(Walks), Walked),
-    case walked(Walks, Mine, RootQid) of
-        {ok, {Type, _, _}} when Type band ?ERX_P9_QTSYMLINK =/= 0, Follow =:= follow ->
-            unfollowed();
-        {ok, _} ->
-            reached_paths(Reaches, Others, RootQid);
-        link ->
-            unfollowed();
+    case walked(Walks, Mine, RootQid, 0) of
+        {ok, {Type, _, _}, Count} when Type band ?ERX_P9_QTSYMLINK =/= 0, Mode =/= nofollow ->
+            {link, Which, Count - 1};
+        {ok, {Type, _, _}, _} when Type band ?ERX_P9_QTDIR =:= 0, Mode =:= directory ->
+            {error, enotdir};
+        {ok, _, _} ->
+            reached_paths(Reaches, Others, RootQid, Which + 1);
+        {link, At} ->
+            {link, Which, At};
         {error, _} = Error ->
             Error
     end.
 
-%% The qid a chain of walks ends on, or why it stopped. A walk that lists fewer qids than
-%% names stopped at the name after its last qid: at a link, or at a name missing from a
-%% directory, or because its last qid is not a directory.
-walked([], [], Qid) ->
-    {ok, Qid};
-walked([{walk, _, _, NameList} | Walks], [{ok, Qids} | Replies], Qid) ->
+%% The qid a chain of walks ends on and the names walked, or why it stopped. A walk that
+%% lists fewer qids than names stopped at the name after its last qid: at a link, whose
+%% name is the last one walked, or at a name missing from a directory, or because its
+%% last qid is not a directory.
+walked([], [], Qid, Count) ->
+    {ok, Qid, Count};
+walked([{walk, _, _, NameList} | Walks], [{ok, Qids} | Replies], Qid, Count) ->
     case {length(Qids) =:= length(NameList), Qids} of
-        {true, []} -> walked(Walks, Replies, Qid);
-        {true, _} -> walked(Walks, Replies, last(Qids));
-        {false, _} -> stopped(last(Qids))
+        {true, []} -> walked(Walks, Replies, Qid, Count);
+        {true, _} when Walks =/= [] -> chunk_end(last(Qids), Walks, Replies, Count + length(Qids));
+        {true, _} -> walked(Walks, Replies, last(Qids), Count + length(Qids));
+        {false, _} -> stopped(last(Qids), Count + length(Qids) - 1)
     end;
-walked([_ | _], [{error, _} = Error | _], _) ->
+walked([_ | _], [{error, _} = Error | _], _, _) ->
     Error.
 
-stopped({Type, _, _}) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> link;
-stopped({Type, _, _}) when Type band ?ERX_P9_QTDIR =/= 0 -> {error, enoent};
-stopped(_) -> {error, enotdir}.
+%% A walk of ?ERX_P9_MAXWELEM names that ends on a link stops there: the next walk would
+%% start from the link's fid.
+chunk_end({Type, _, _}, _, _, Count) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> {link, Count - 1};
+chunk_end(Qid, Walks, Replies, Count) -> walked(Walks, Replies, Qid, Count).
 
-%% A path that meets a symbolic link: the client does not yet follow links (TODO.md).
-unfollowed() ->
-    {error, enotsup}.
+stopped({Type, _, _}, At) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> {link, At};
+stopped({Type, _, _}, _) when Type band ?ERX_P9_QTDIR =/= 0 -> {error, enoent};
+stopped(_, _) -> {error, enotdir}.
 
 %% Sends each request to an alias of its own, all at once, and answers their replies in
 %% order, each checked against its request. Once the grant's process has ended, a request
@@ -637,7 +968,7 @@ file_type(Mode) ->
     end.
 
 %% The owner's read and write bits, as stock's check_access reads them. A link's own
-%% record would carry its target's access, which needs the link followed: unknown.
+%% record takes the access of the file it leads to, from with_access/2.
 access(symlink, _) -> undefined;
 access(_, Mode) ->
     case {Mode band 8#400, Mode band 8#200} of

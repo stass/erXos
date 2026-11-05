@@ -9,8 +9,9 @@ require 'tmpdir'
 # The fuzz target of erx_file_remote's path handling: random paths through last_name/1 and
 # name lists through names/1 against a model (test/erlang/erx_file_remote_fuzz.erl),
 # compiled from source and run on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's).
-# It runs the client as it is, then a copy that keeps a path's trailing slashes, which the
-# model must catch: that shows the paths reach the trimming and the model checks it.
+# It runs the client as it is, then a copy that keeps a path's trailing slashes and one
+# that forgets them, which the model must each catch: that shows the paths reach the
+# trimming and the model checks both.
 module ErxFileRemoteFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'otp/erts/preloaded/src/erx_file_remote.erl')
@@ -18,6 +19,8 @@ module ErxFileRemoteFuzz
   INCLUDES = %w[otp/lib/kernel/include erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
   TRIMMED = 'Trimmed = trim_slashes(Path, byte_size(Path)),'
   UNTRIMMED = 'Trimmed = Path,'
+  SLASHED = 'Slashed = byte_size(Trimmed) < byte_size(Path),'
+  UNSLASHED = 'Slashed = false,'
   DEADLINE_SECONDS = '240'
 
   module_function
@@ -25,12 +28,16 @@ module ErxFileRemoteFuzz
   def run(seed:)
     source = File.binread(MODULE_SOURCE)
     raise "no trimming in #{MODULE_SOURCE}" unless source.scan(TRIMMED).size == 1
+    raise "no slash in #{MODULE_SOURCE}" unless source.scan(SLASHED).size == 1
 
     output, status = fuzz(source, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ paths ok$/)
     output, status = fuzz(source.sub(TRIMMED, UNTRIMMED), seed: seed)
     abort("a client keeping trailing slashes passed:\n#{output}") if status.success? || !output.include?('last_name')
-    puts 'erx_file_remote splits every path as the model does, and a client keeping trailing slashes does not'
+    output, status = fuzz(source.sub(SLASHED, UNSLASHED), seed: seed)
+    abort("a client forgetting trailing slashes passed:\n#{output}") if status.success? || !output.include?('last_name')
+    puts 'erx_file_remote splits every path as the model does, and clients keeping or forgetting trailing ' \
+         'slashes do not'
   end
 
   # In a directory of its own, which also takes the crash dump of a failed run.

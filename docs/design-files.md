@@ -1353,15 +1353,20 @@ mount the NIF returns `{erofs, Image, Names}`, and the operation runs in
 the calling process through `erx_erofs`, the EROFS reader, which returns
 OTP's file descriptor record with itself as the module for an open file
 ([design-storage.md](design-storage.md#reading-erofs-images)). For a grant
-the NIF returns `{remote, {Pid, Tree, Rights}, Names}`, and the operation
-runs in the calling process through `erx_file_remote`. The middle element
-is the grant as the path's mount entry reaches it, copied out under the
-namespace's lock with the names: `Tree` is the tree the client attaches
-to, so two entries of one grant on two trees reach two trees, and
-`Rights` is the entry's `ro`, `rw` or `rx`, so a read-only bind of an
+the NIF returns `{remote, {Pid, Tree, Rights}, {Point, Root, Names}}`,
+and the operation runs in the calling process through `erx_file_remote`,
+which prim_file also hands the path as the caller wrote it. The second
+element is the grant as the path's mount entry reaches it, copied out
+under the namespace's lock with the rest: `Tree` is the tree the client
+attaches to, so two entries of one grant on two trees reach two trees,
+and `Rights` is the entry's `ro`, `rw` or `rx`, so a read-only bind of an
 `rw` grant reaches its client read-only and the client never sends a
-request that writes through it. `Names` are the path's names from the
-tree's root, the entry's root included. `erx_file_remote` is preloaded,
+request that writes through it. The third is where the path lies:
+`Point` is the entry's point, a namespace path such as `<<"/tmp">>`,
+`Root` the entry's root as names (`<<>>` for the tree's root), and
+`Names` the path's names from the tree's root, `Root`'s first. `Point`
+and `Root` let the client name any directory the walk passes as a
+namespace path, which a relative link's text is joined to. `erx_file_remote` is preloaded,
 as `prim_file` and the EROFS reader are, and calls only BIFs and preloaded
 modules: whatever process calls `file` or `erl_prim_loader` on a server's
 path runs it, the code server included when a server's directory is on
@@ -1425,12 +1430,53 @@ A rename or a `make_link` resolves its two paths in one call,
 `erx_ns_resolve_two`, under one hold of the namespace's lock, so a
 mount, bind or unmount cannot fall between them. Two paths on one
 grant's tree through one set of rights, whatever entries they pass,
-return `{remote, {Pid, Tree, Rights}, Names, OtherNames}`, and
+return `{remote, {Pid, Tree, Rights}, Place, OtherPlace}`, each place
+`{Point, Root, Names}` of its own entry, and
 `erx_file_remote` sends the one request that takes both. A path on a
 grant paired with a path on another grant, another tree, other rights
 or a provider of the NIF returns `{error, exdev}`, as between two Unix
 file systems, without asking either server. Two paths neither on a
 grant are the NIF's own providers', which are read-only.
+
+**Links and a trailing `/`.** The client follows links as [Resolving a
+path](#resolving-a-path) states. A walk that ends on a link the
+operation follows, or stops at one, answers the link's position; the
+client reads the link on a fid of its own, puts the link's text in
+place of the names up to it, joins a relative text to the link's
+directory, `Point` and the names between `Root` and the link, and asks
+prim_file's NIF where the new path lies (`prim_file:erx_resolve/1`,
+which resolves one path, or a rename's or a link's two together, and
+acts on nothing). The operation then runs again from there: on the
+grant and with the rights of the entry the new path reaches, or through
+prim_file on the NIF's own providers, so a link on a read-only bind that
+leads to a writable entry writes there, as a link between Linux mounts
+does, and leads nowhere the caller's namespace does not. A rename or a
+link whose two paths then lie apart answers `exdev`. A relative link
+among `Root`'s own names, which a bind fixed as names, has no namespace
+directory and answers `enoent`; an empty link answers `enoent`, as on
+Linux. On a read-only entry an operation walks its paths, sending
+nothing that writes, before it answers `erofs`, so a link among them
+leads it to the entry it reaches and a missing directory answers first. An operation sent with a walk acts on the
+link's own fid when the walk ends on a link it would follow; a server
+answers `enotdir` for an operation that needs a directory there, and the
+client follows the link and sends it again.
+
+A path written with a trailing `/` names a directory, as Linux's
+path_resolution(7) has it: its last name is followed, and one that is
+not a directory answers `enotdir`. So `read_file_info`, `read_link_info`,
+`list_dir`, `write_file_info` and `read_link` (`einval` once the path
+reaches a directory, which is not a link) follow the last name and
+require a directory. `make_dir` and `del_dir` act as they do without
+the `/`, since they act only on directories, and `del_dir` of a link
+answers `enotdir`. The rest never follow the last name and act on
+nothing that is not a directory: `delete` answers `eperm` for a
+directory and `enotdir` for anything else, a link included; `rename`
+answers `enotdir` when its source is not a directory and either side
+has the `/`; `make_symlink` and `make_link`'s new name answer `eexist`
+for a name that exists and `enoent` otherwise, making nothing; and
+`make_link`'s existing path with the `/` is followed, must be a
+directory, and so answers `eperm` once the new name is free. These
+checks look before anything is sent that changes the tree.
 
 **Modes.** A file that `open` creates is sent with stock's mode `8#666`
 and a directory that `make_dir` makes with `8#777`, the modes stock's
@@ -1505,7 +1551,7 @@ code then converts as it converts a local file's, its times under
 | `major_device` | a number the namespace gives each mounted tree, the same for every path into that tree while it is mounted, standing for `st_dev` |
 | `minor_device` | `rdev`, 0 for anything but a device |
 | `atime`, `mtime`, `ctime` | the `_sec` fields; the nanoseconds are dropped, as stock reads `st_atime` |
-| `access` | `read_write`, `read`, `write` or `none` from the owner's read and write bits, as stock's `check_access` reads them for the file's owner; for a path, from the file the path reaches after its links, as stock's `access(2)` follows them, so `read_link_info` of a link reports its target's access and `none` for a link that resolves to nothing |
+| `access` | `read_write`, `read`, `write` or `none` from the owner's read and write bits, as stock's `check_access` reads them for the file's owner; for a path, from the file the path reaches after its links, as stock's `access(2)` follows them, so `read_link_info` of a link reports its target's access, read with `read_file_info` of the same path, and `none` for a link that resolves to nothing |
 
 `write_file_info` sends what stock's `write_file_info_1` would set, in its
 order and with its defaults: an owner and group if either is given, then

@@ -421,11 +421,6 @@ it; git history is the record of completed work.
   [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote) replace them, and with
   `set_cwd` comes error step 5, `del_dir` of the working directory answering `einval`, which cannot arise
   while no working directory lies on a grant.
-* [Medium] runtime, `erx_file_remote`: a path that meets a symbolic link on a grant (a link before its last
-  name, or its last name for an operation that follows it) answers `{error, enotsup}`; the client follows
-  links as [Resolving a path](docs/design-files.md#resolving-a-path) states, which needs the link's
-  directory as a namespace path, so the NIF has to hand the client the entry's point or resolve the joined
-  text for it. `read_link_info` of a link reports `access` as `undefined` until then.
 * [Low] runtime, `erx_file_remote`: `list_dir` of a directory on a grant lists only the server's entries,
   not the mount points directly below it ([Resolving a path](docs/design-files.md#resolving-a-path),
   listings across mounts), which needs the namespace's table from the NIF.
@@ -433,13 +428,20 @@ it; git history is the record of completed work.
   design has a number the namespace gives each mounted tree; two trees can collide.
 * [Low] runtime, `erx_file_remote`: `del_dir`, `delete` and `rename` of a mount point answer `ebusy` only
   when the point is the tree's root; a bind of a directory below the root is removed or renamed through the
-  bind where Linux answers `ebusy`, since the remote answer does not say that a path is an entry's point.
-* [Medium] runtime, `erx_file_remote`: a trailing `/` on a path that changes something is dropped, so
-  `delete("/t/f/")` removes the file where Linux answers `enotdir`; the design has to say whether step 2
-  also treats a last name written with a trailing `/` as one that must be a directory.
-* [Medium] runtime, `erx_file_remote`: on a read-only entry `erofs` is answered before the path is resolved,
-  where Linux answers `enoent`, `enotdir` or `eexist` first (`make_dir` of an existing name on a read-only
-  bind answers `erofs`, stock `eexist`); reaching the names first, which sends nothing that writes, agrees.
+  bind where Linux answers `ebusy`; the remote answer's place says so (`Names =:= Root`), so the check is one
+  comparison in `remove`, `renamed` and `make` once `Try` receives the place.
+* [Medium] runtime, `erlang/apps/erx_files/src/erx_fs.erl`: an operation that names a directory fid
+  (`mkdir`, `symlink`, `link`, `unlinkat`, `renameat`, `lcreate`) on a fid that is not a directory reaches
+  the module, which must answer `enotdir` itself; `erx_fs_test_tree`'s `rename` moved the name into a link's
+  node and crashed without that check. `erx_file_remote` sends such an operation together with a walk that
+  may end on a link it then follows ([Erlang clients](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote)),
+  so `erx_fs` should refuse it from the fid's qid type before any module sees it.
+* [Low] runtime, `erx_file_remote`: a relative symbolic link among a bind's root names (a bind made
+  through a link) answers `enoent`, since the bind fixed its root as names and the link's directory lies
+  above the entry's point; resolving `From`'s links when `erx_ns:bind` binds would remove the case.
+* [Medium] runtime, `erx_file_remote`: on a read-only entry `erofs` is answered once the last name's directory is
+  reached, before the last name is looked at, where Linux answers `eexist` or `enotdir` for the last name
+  first (`make_dir` of an existing name on a read-only bind answers `erofs`, stock `eexist`).
 * [Medium] runtime, `erx_file_remote`: its reply checks are hand-written beside the generated
   `erx_9p_grammar:decode_reply/2`, which is not preloaded (error atoms are not limited to the protocol's
   list, and a getattr map is not held to its key set); generating the checks into a preloaded module

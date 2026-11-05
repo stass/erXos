@@ -135,14 +135,17 @@ typedef struct {
     uint64_t server;           /* ERX_NS_SERVER: the entry's grant pid, 0 once it ended */
     char tree[ERX_NAME_MAX + 1];       /* ERX_NS_SERVER: the entry's tree */
     erx_ns_rights_t rights;    /* ERX_NS_SERVER: the entry's rights */
+    ERL_NIF_TERM point;        /* ERX_NS_SERVER: the entry's point, a namespace path */
+    ERL_NIF_TERM root;         /* ERX_NS_SERVER: the entry's root, as names */
     ERL_NIF_TERM remote;       /* the answer, when marshalling answered EFILE_EREMOTE */
     erx_ns_result_t result;
 } efile_path_t;
 
 /** @brief erXos: what marshalling answers for a path on a file server's grant.
- * The NIF then answers the first path's `remote` term, {remote, Grant, Names},
- * or {remote, Grant, Names, OtherNames} for two paths, Grant being {Pid, Tree,
- * Rights}, and prim_file runs the operation through erx_file_remote
+ * The NIF then answers the first path's `remote` term, {remote, Grant, Place},
+ * or {remote, Grant, Place, OtherPlace} for two paths, Grant being {Pid, Tree,
+ * Rights} and a Place {Point, Root, Names}, and prim_file runs the operation
+ * through erx_file_remote
  * (design-files.md, Erlang clients). */
 #define EFILE_EREMOTE (-1)
 

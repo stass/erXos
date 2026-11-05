@@ -397,9 +397,126 @@ remote("release") ->
     Show("exdev rename", prim_file:rename(<<"/t/f">>, <<"/r/g">>)),
     Show("exdev link", prim_file:make_link(<<"/t/f">>, <<"/r/g">>)),
     Show("fids held", fids_held(Grant)),
+    slashes(Show),
+    links(Show),
     hostile(Show),
     [ok = erx_ns:unmount(Point) || Point <- [<<"/r">>, <<"/t">>]],
     ok.
+
+%% A path written with a trailing "/" on a grant names a directory, as Linux's path
+%% resolution has it, on a fresh tree mounted at /s: a last name that is not a directory
+%% answers enotdir, a link before the "/" is followed, and make_dir and del_dir act as
+%% they do without it.
+slashes(Show) ->
+    Grant = test_grant(),
+    ok = erx_ns:mount(Grant, <<"/s">>, [{tree, <<"test">>}, rw]),
+    Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
+    Show("slash info file", Info(<<"/s/f/">>)),
+    Show("slash info dir", Info(<<"/s/a/">>)),
+    Show("slash link info", info(prim_file:read_link_info(<<"/s/l/">>))),
+    Show("slash link info of a file", info(prim_file:read_link_info(<<"/s/f/">>))),
+    Show("slash read link", prim_file:read_link(<<"/s/l/">>)),
+    Show("slash list file", prim_file:list_dir(<<"/s/f/">>)),
+    Show("slash write info", prim_file:write_file_info(<<"/s/f/">>, #file_info{mode = 8#600})),
+    Show("slash delete file", prim_file:delete(<<"/s/f/">>)),
+    Show("slash delete missing", prim_file:delete(<<"/s/missing/">>)),
+    Show("slash delete dir", prim_file:delete(<<"/s/a/">>)),
+    Show("slash delete link", prim_file:delete(<<"/s/l/">>)),
+    Show("slash kept", {Info(<<"/s/f">>), info(prim_file:read_link_info(<<"/s/l">>))}),
+    Show("slash make dir", prim_file:make_dir(<<"/s/d/">>)),
+    Show("slash made dir", Info(<<"/s/d">>)),
+    Show("slash del dir file", prim_file:del_dir(<<"/s/f/">>)),
+    Show("slash del dir link", prim_file:del_dir(<<"/s/l/">>)),
+    Show("slash rename file", prim_file:rename(<<"/s/f/">>, <<"/s/g">>)),
+    Show("slash rename to", prim_file:rename(<<"/s/f">>, <<"/s/g/">>)),
+    Show("slash rename missing", prim_file:rename(<<"/s/missing/">>, <<"/s/g">>)),
+    Show("slash rename dir", prim_file:rename(<<"/s/d/">>, <<"/s/e/">>)),
+    Show("slash renamed dir", {Info(<<"/s/d">>), Info(<<"/s/e">>)}),
+    Show("slash del dir", prim_file:del_dir(<<"/s/e/">>)),
+    Show("slash symlink new", prim_file:make_symlink(<<"f">>, <<"/s/n/">>)),
+    Show("slash symlink existing", prim_file:make_symlink(<<"f">>, <<"/s/f/">>)),
+    Show("slash hard link new", prim_file:make_link(<<"/s/f">>, <<"/s/h/">>)),
+    Show("slash hard link existing", prim_file:make_link(<<"/s/f/">>, <<"/s/h">>)),
+    Show("slash nothing made", {Info(<<"/s/n">>), Info(<<"/s/h">>)}),
+    Show("slash fids held", fids_held(Grant)),
+    ok = erx_ns:unmount(<<"/s">>).
+
+%% Symbolic links on a grant (design-files.md, Resolving a path), on a fresh tree mounted
+%% at /s, its directory a bound at /ba and the whole tree bound read-only at /sr: a
+%% relative link resolves against its directory as a namespace path, an absolute one from
+%% the namespace's root, into the same grant or out of it to the release, with the rights
+%% of the entry it reaches; 40 links are followed and the 41st answers eloop; operations
+%% that do not follow a last link act on the link.
+links(Show) ->
+    Grant = test_grant(),
+    ok = erx_ns:mount(Grant, <<"/s">>, [{tree, <<"test">>}, rw]),
+    ok = erx_ns:bind(<<"/s/a">>, <<"/ba">>, []),
+    ok = erx_ns:bind(<<"/s">>, <<"/sr">>, [ro]),
+    Info = fun(Path) -> info(prim_file:read_file_info(Path)) end,
+    Show("link relative", Info(<<"/s/l">>)),
+    Show("link relative through", Info(<<"/s/l/f">>)),
+    Show("link relative list", sorted(prim_file:list_dir(<<"/s/l">>))),
+    ok = prim_file:make_symlink(<<"/s/a/f">>, <<"/s/abs">>),
+    Show("link absolute", Info(<<"/s/abs">>)),
+    Show("link absolute read", prim_file:read_link(<<"/s/abs">>)),
+    Show("link info", info(prim_file:read_link_info(<<"/s/abs">>))),
+    ok = prim_file:make_symlink(<<"f">>, <<"/s/a/rf">>),
+    Show("link in a bind", Info(<<"/ba/rf">>)),
+    ok = prim_file:make_symlink(<<"../f">>, <<"/s/a/up">>),
+    Show("link above a bind", {Info(<<"/s/a/up">>), Info(<<"/ba/up">>)}),
+    ok = prim_file:make_symlink(<<"/lib">>, <<"/s/rel">>),
+    Show("link to the release", same(<<"/s/rel">>, <<"/lib">>)),
+    Show("link to the release list", same_listing(<<"/s/rel">>, <<"/lib">>)),
+    Show("link out exdev", prim_file:rename(<<"/s/rel/x">>, <<"/s/y">>)),
+    ok = prim_file:make_symlink(<<"missing">>, <<"/s/dangling">>),
+    Show("link dangling", {Info(<<"/s/dangling">>), info(prim_file:read_link_info(<<"/s/dangling">>))}),
+    ok = prim_file:make_symlink(<<"">>, <<"/s/empty">>),
+    Show("link empty", Info(<<"/s/empty">>)),
+    ok = prim_file:make_symlink(<<"loop">>, <<"/s/loop">>),
+    Show("link loop", {Info(<<"/s/loop">>), Info(<<"/s/loop/x">>), prim_file:make_dir(<<"/s/loop/x">>)}),
+    [ok = prim_file:make_symlink(<<"c", (integer_to_binary(N + 1))/binary>>,
+                                 <<"/s/c", (integer_to_binary(N))/binary>>) || N <- lists:seq(0, 39)],
+    ok = prim_file:make_symlink(<<"f">>, <<"/s/c40">>),
+    Show("link forty", Info(<<"/s/c1">>)),
+    Show("link forty one", Info(<<"/s/c0">>)),
+    Show("link make dir through", {prim_file:make_dir(<<"/s/l/via">>), Info(<<"/s/a/via">>)}),
+    Show("link rename through", {prim_file:rename(<<"/s/l/via">>, <<"/s/l/moved">>), Info(<<"/s/a/moved">>)}),
+    Show("link del dir through", prim_file:del_dir(<<"/s/l/moved">>)),
+    Show("link delete through", {prim_file:make_symlink(<<"f">>, <<"/s/a/x">>), prim_file:delete(<<"/s/l/x">>),
+                                 prim_file:read_link_info(<<"/s/a/x">>)}),
+    Show("link delete not followed", {prim_file:make_symlink(<<"f">>, <<"/s/a/y">>), prim_file:delete(<<"/s/a/y">>),
+                                      Info(<<"/s/f">>)}),
+    Show("link hard link not followed", {prim_file:make_link(<<"/s/l">>, <<"/s/l2">>),
+                                         prim_file:read_link(<<"/s/l2">>)}),
+    Show("link ro relative", prim_file:write_file_info(<<"/sr/l/f">>, #file_info{mode = 8#600})),
+    Show("link ro absolute", prim_file:write_file_info(<<"/sr/abs">>, #file_info{mode = 8#600})),
+    Show("link ro absolute written", Info(<<"/s/a/f">>)),
+    Show("link ro delete", prim_file:delete(<<"/sr/l/f">>)),
+    ok = prim_file:make_symlink(<<"/s/a">>, <<"/s/wa">>),
+    Show("link ro to writable", {prim_file:make_dir(<<"/sr/wa/new">>), Info(<<"/s/a/new">>),
+                                 prim_file:del_dir(<<"/sr/wa/new">>), prim_file:make_dir(<<"/sr/missing/x">>)}),
+    Deep = lists:foldl(fun(N, Dir) ->
+                               Next = <<Dir/binary, "/d", (integer_to_binary(N))/binary>>,
+                               ok = prim_file:make_dir(Next),
+                               Next
+                       end, <<"/s">>, lists:seq(1, 15)),
+    ok = prim_file:make_symlink(<<"/s/a">>, <<Deep/binary, "/lk">>),
+    Show("link sixteenth name", Info(<<Deep/binary, "/lk/f">>)),
+    Show("link fids held", fids_held(Grant)),
+    [ok = erx_ns:unmount(Point) || Point <- [<<"/sr">>, <<"/ba">>, <<"/s">>]],
+    ok.
+
+same(One, Other) ->
+    case {prim_file:read_file_info(One), prim_file:read_file_info(Other)} of
+        {{ok, Info}, {ok, Info}} -> true;
+        Answers -> Answers
+    end.
+
+same_listing(One, Other) ->
+    case {sorted(prim_file:list_dir(One)), sorted(prim_file:list_dir(Other))} of
+        {{ok, Names}, {ok, Names}} when Names =/= [] -> true;
+        Answers -> Answers
+    end.
 
 %% Every fid an operation made is clunked by its end: the grant monitors no owner.
 fids_held(Grant) ->
@@ -444,7 +561,19 @@ hostile(Show) ->
              {"attr", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
                          ({walk, _, _, Names}) -> {ok, [{16#80, 0, 2} || _ <- Names]};
                          ({getattr, _, _}) -> {ok, #{mode => -1}};
-                         (_) -> ok end}],
+                         (_) -> ok end},
+             {"endless links", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                                  ({walk, _, _, Names}) -> {ok, [{2, 0, 2} || _ <- Names]};
+                                  ({readlink, _}) -> {ok, <<"x">>};
+                                  (_) -> ok end},
+             {"link attr", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                              ({walk, _, _, Names}) -> {ok, [{0, 0, 2} || _ <- Names]};
+                              ({getattr, _, _}) -> {ok, link_attr()};
+                              (_) -> ok end},
+             {"bad link", fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                             ({walk, _, _, Names}) -> {ok, [{2, 0, 2} || _ <- Names]};
+                             ({readlink, _}) -> {ok, <<"a", 0, "b">>};
+                             (_) -> ok end}],
     [begin
          ok = erx_ns:mount(Server(Reply), <<"/h">>, [{tree, <<"h">>}, rw]),
          Show("hostile " ++ Name, prim_file:read_file_info(<<"/h/x">>)),
@@ -455,6 +584,13 @@ hostile(Show) ->
                          ({lopen, _, _}) -> {ok, {16#80, 0, 2}, 0};
                          ({readdir, _, 0, _}) -> {ok, [{{0, 0, 3}, 1, 0, <<"../../x">>}]};
                          (_) -> ok end),
+    LinkAttr = Server(fun({attach, _, _, _, _, _}) -> {ok, {16#80, 0, 1}};
+                         ({walk, _, _, Names}) -> {ok, [{0, 0, 2} || _ <- Names]};
+                         ({getattr, _, _}) -> {ok, link_attr()};
+                         (_) -> ok end),
+    ok = erx_ns:mount(LinkAttr, <<"/h">>, [{tree, <<"h">>}, rw]),
+    Show("hostile link attr info", info(prim_file:read_link_info(<<"/h/x">>))),
+    ok = erx_ns:unmount(<<"/h">>),
     ok = erx_ns:mount(Escaping, <<"/h">>, [{tree, <<"h">>}, rw]),
     Show("hostile listing", prim_file:list_dir(<<"/h/d">>)),
     ok = erx_ns:unmount(<<"/h">>),
@@ -462,6 +598,11 @@ hostile(Show) ->
     ok = erx_ns:mount(Dying, <<"/h">>, [{tree, <<"h">>}, rw]),
     Show("hostile dies", prim_file:make_dir(<<"/h/x">>)),
     ok = erx_ns:unmount(<<"/h">>).
+
+%% A getattr reply that calls a file a link which the walk did not find as one.
+link_attr() ->
+    #{qid => {0, 0, 2}, mode => 8#120644, uid => 0, gid => 0, nlink => 1, rdev => 0, size => 0,
+      atime_sec => 0, mtime_sec => 0, ctime_sec => 0}.
 
 %% A client whose walks act in place, loaded over the preloaded one: the delete of
 %% /t/missing/victim then removes /t/victim, which the seeded run must show.

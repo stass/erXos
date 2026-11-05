@@ -6,8 +6,9 @@
 %% "/" and bytes that are not names, some ending in the NUL prim_file's encoding adds, go
 %% through last_name/1, and random name lists through names/1. last_name/1 must not raise
 %% and must agree with a model that splits the text on "/" and keeps its non-empty
-%% pieces: the last name is the last piece, and the rest is the text up to and including
-%% the "/" before it, or "." for a path of one name. names/1 must give back the list its
+%% pieces: the last name is the last piece, the rest is the text up to and including
+%% the "/" before it, or "." for a path of one name, and the path is slashed when a "/"
+%% follows its last name. names/1 must give back the list its
 %% joined text came from. The seed comes from make check-fuzz.
 
 -module(erx_file_remote_fuzz).
@@ -45,10 +46,10 @@ check_last_name(Text, Encoded) ->
 model(Text) ->
     case [Piece || Piece <- binary:split(Text, <<"/">>, [global]), Piece =/= <<>>] of
         [] ->
-            {Text, <<>>};
+            {Text, <<>>, false};
         Pieces ->
             Last = lists:last(Pieces),
-            {rest(Text, Last), Last}
+            {rest(Text, Last), Last, binary:last(Text) =:= $/}
     end.
 
 %% The text up to and including the "/" before the last occurrence of Last that is

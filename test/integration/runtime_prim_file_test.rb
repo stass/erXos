@@ -162,12 +162,12 @@ class RuntimePrimFileTest < Minitest::Test
       'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
       'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
       'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
-      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[<<"a/c">>,1]}',
-      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[<<"c">>,<<47,116,109,112,47,99,0>>]}',
-      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[<<"x">>,<<"a/y">>,<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
+      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{<<"/ro">>,<<"a">>,<<"a/c">>},1,<<47,114,111,47,99,0>>]}',
+      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"c">>},<<47,116,109,112,47,99,0>>]}',
+      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"x">>},{<<"/tmp">>,<<>>,<<"a/y">>},<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
       'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
       'ns rename local' => '{{error,exdev},none}',
-      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[<<"x">>,<<"y">>,<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
+      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[{<<"/u">>,<<>>,<<"x">>},{<<"/u">>,<<>>,<<"y">>},<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
       'ns link two' => '{{error,exdev},none}' }.each do |step, want|
       assert_equal want, release.fetch(step), step
     end
@@ -176,14 +176,17 @@ class RuntimePrimFileTest < Minitest::Test
   DIRECTORY = "{ok,directory,read_write,#{0o40755}}"
   FILE = "{ok,regular,0,read_write,#{0o100644}}"
   CHANGED = "{ok,regular,0,read_write,#{0o104600}}"
+  LINK = "{ok,symlink,read_write,#{0o120777}}"
   # erx_file_remote's answers over erx_fs_test_tree (design-files.md, Erlang clients,
   # and the cases of design-tmp.md's verification that need no stock OTP): each path
   # operation, the error steps in order, the #file_info{} fields, a read-only entry's
-  # erofs before anything is sent, exdev, no fid left behind, and hostile replies.
+  # erofs before anything is sent, exdev, no fid left behind, hostile replies, paths
+  # written with a trailing "/" (Linux's answers) and symbolic links followed within the
+  # grant and out of it, to 40 links.
   REMOTE = {
     'info dir' => DIRECTORY, 'info file' => FILE, 'info root' => DIRECTORY,
     'info missing' => '{error,enoent}', 'info past a file' => '{error,enotdir}',
-    'info link' => "{ok,symlink,undefined,#{0o120777}}", 'info through a link' => '{error,enotsup}',
+    'info link' => "{ok,symlink,read_write,#{0o120777}}", 'info through a link' => DIRECTORY,
     'info fields' => '{0,1,4,0,0,0,true,true}', 'info same device' => 'true',
     'read link' => '{ok,"a"}', 'read link of a file' => '{error,einval}',
     'list' => '{ok,["a","f","l"]}', 'list a file' => '{error,enotdir}', 'list missing' => '{error,enoent}',
@@ -211,8 +214,36 @@ class RuntimePrimFileTest < Minitest::Test
     'ro delete' => '{error,erofs}', 'ro rename' => '{error,erofs}', 'ro link' => '{error,erofs}',
     'ro symlink' => '{error,erofs}', 'ro write info' => '{error,erofs}', 'ro kept' => "{#{CHANGED},#{DIRECTORY}}",
     'exdev rename' => '{error,exdev}', 'exdev link' => '{error,exdev}', 'fids held' => '0',
+'slash info file' => '{error,enotdir}', 'slash info dir' => DIRECTORY, 'slash link info' => DIRECTORY,
+'slash link info of a file' => '{error,enotdir}', 'slash read link' => '{error,einval}',
+'slash list file' => '{error,enotdir}', 'slash write info' => '{error,enotdir}',
+'slash delete file' => '{error,enotdir}', 'slash delete missing' => '{error,enoent}',
+'slash delete dir' => '{error,eperm}', 'slash delete link' => '{error,enotdir}',
+'slash kept' => "{#{FILE},#{LINK}}", 'slash make dir' => 'ok', 'slash made dir' => DIRECTORY,
+'slash del dir file' => '{error,enotdir}', 'slash del dir link' => '{error,enotdir}',
+'slash rename file' => '{error,enotdir}', 'slash rename to' => '{error,enotdir}',
+'slash rename missing' => '{error,enoent}', 'slash rename dir' => 'ok',
+'slash renamed dir' => "{{error,enoent},#{DIRECTORY}}", 'slash del dir' => 'ok',
+'slash symlink new' => '{error,enoent}', 'slash symlink existing' => '{error,eexist}',
+'slash hard link new' => '{error,enoent}', 'slash hard link existing' => '{error,enotdir}',
+'slash nothing made' => '{{error,enoent},{error,enoent}}', 'slash fids held' => '0',
+'link relative' => DIRECTORY, 'link relative through' => FILE, 'link relative list' => '{ok,["b","f"]}',
+'link absolute' => FILE, 'link absolute read' => '{ok,"/s/a/f"}', 'link info' => LINK,
+'link in a bind' => FILE, 'link above a bind' => "{#{FILE},{error,enoent}}",
+'link to the release' => 'true', 'link to the release list' => 'true', 'link out exdev' => '{error,exdev}',
+'link dangling' => "{{error,enoent},{ok,symlink,none,#{0o120777}}}", 'link empty' => '{error,enoent}',
+'link loop' => '{{error,eloop},{error,eloop},{error,eloop}}', 'link forty' => FILE,
+'link forty one' => '{error,eloop}', 'link make dir through' => "{ok,#{DIRECTORY}}",
+'link rename through' => "{ok,#{DIRECTORY}}", 'link del dir through' => 'ok',
+'link delete through' => '{ok,ok,{error,enoent}}', 'link delete not followed' => "{ok,ok,#{FILE}}",
+'link hard link not followed' => '{ok,{ok,"a"}}', 'link ro relative' => '{error,erofs}',
+'link ro absolute' => 'ok', 'link ro absolute written' => "{ok,regular,0,read_write,#{0o100600}}",
+'link ro delete' => '{error,erofs}', 'link fids held' => '0',
+    'link ro to writable' => "{ok,#{DIRECTORY},ok,{error,enoent}}", 'link sixteenth name' => "{ok,regular,0,read_write,#{0o100600}}",
     'hostile junk' => '{error,eio}', 'hostile bad qid' => '{error,eio}', 'hostile improper qids' => '{error,eio}',
-    'hostile long walk' => '{error,eio}', 'hostile attr' => '{error,eio}', 'hostile dies' => '{error,eio}', 'hostile listing' => '{error,eio}'
+    'hostile long walk' => '{error,eio}', 'hostile attr' => '{error,eio}', 'hostile dies' => '{error,eio}', 'hostile listing' => '{error,eio}',
+    'hostile endless links' => '{error,eloop}', 'hostile bad link' => '{error,eio}',
+    'hostile link attr' => '{error,eio}', 'hostile link attr info' => "{ok,symlink,none,#{0o120644}}"
   }.freeze
 
   def test_erx_file_remote_answers_as_the_design_states
