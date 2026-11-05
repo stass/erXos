@@ -75,8 +75,8 @@ stdout tolower toupper
 sysconf
 
 # The crash dump (edit 34), erlang:display and halt's output in bif.c, the terminal's
-# stderr and the wake pipes of sys.c, erl_printf's stdio, and ethread's waits. Each
-# goes with the first native boot, or for prim_tty's with the console.
+# stderr, erl_printf's stdio, and ethread's waits. Each is answered as ENOSYS tracing
+# shows it, or for prim_tty's with the console.
 [stock_descriptors]
 close fclose fdopen fileno open read write
 

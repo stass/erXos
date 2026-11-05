@@ -99,7 +99,6 @@ static erts_atomic32_t have_prepared_crash_dump;
 
 erts_atomic_t sys_misc_mem_sz;
 
-static void smp_sig_notify(int signum);
 static int max_files = -1;
 
 /* 
@@ -503,11 +502,11 @@ void sys_get_pid(char *buffer, size_t buffer_size){
 
 int sys_get_hostname(char *buf, size_t size)
 {
-/* The name inet_config takes on erXos, which has no resolver to ask. */
-if (size < sizeof("nohost"))
-    return -1;
-strcpy(buf, "nohost");
-return 0;
+/* erXos has no host name to read; this one seeds the local node id, with the time and the pid. */
+    if (size < sizeof("nohost"))
+        return -1;
+    strcpy(buf, "nohost");
+    return 0;
 }
 
 void sys_init_io(void) { }

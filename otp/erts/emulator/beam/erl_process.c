@@ -8632,8 +8632,9 @@ static erts_atomic32_t executors_said;
 static void
 count_executor(Uint32 slot)
 {
-    if (slot != ERX_NO_EXECUTOR_SLOT)
-        erts_atomic32_inc_nob(&executors_running);
+    if (slot == ERX_NO_EXECUTOR_SLOT)
+        erts_exit(ERTS_ABORT_EXIT, "a scheduler has no executor slot\n");
+    erts_atomic32_inc_nob(&executors_running);
 }
 #else
 #define count_executor(slot) ((void) (slot))
@@ -8666,6 +8667,7 @@ sched_thread_func(void *vesdp)
     esdp->ssi->park_slot = erx_executor_slot();
     count_executor(esdp->ssi->park_slot);
 #ifdef ERX_TRACE_START
+    /* Only a normal scheduler can run Erlang code, which must follow the line. */
     while (erts_atomic32_read_acqb(&executors_said) == 0)
         (void) erts_milli_sleep(1);
 #endif
@@ -8910,7 +8912,7 @@ erts_start_schedulers(void)
     }
 
 #ifdef ERX_TRACE_START
-    /* Says what ran, not what was asked for: a thread with no slot leaves the count short and the boot stops here. */
+    /* Says what ran, not what was asked for. */
     while (erts_atomic32_read_nob(&executors_running)
            != (erts_aint32_t) (erts_no_schedulers + erts_no_dirty_cpu_schedulers))
         (void) erts_milli_sleep(1);

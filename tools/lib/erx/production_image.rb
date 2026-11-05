@@ -169,8 +169,8 @@ module Erx
 
       # The transcript of a boot as far as ERTS gets, each line in order. The manifest line
       # carries the numbers the source says, so a root that misread it fails. Schedulers are
-      # one per CPU. Erlang's init then runs on them and asks for the boot script, which no
-      # archive holds yet, so that refusal is the boot's last line and proves code ran.
+      # one per CPU. Erlang's init then runs on them and asks for the boot script, which the
+      # archive does not hold, so that refusal is the boot's last line and proves code ran.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0)
         source = File.read(File.join(root, MANIFEST))
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }

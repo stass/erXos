@@ -338,6 +338,8 @@ path. ERTS's first line says `erx: erts: erl_start runs, N arguments`, under the
 and a command line with a refused `erx.` word at the refusal of step 4. The boot suite's root, built from `NativeRoot::NO_PROGRAM`, says it holds no
 program and ends the machine with `ERX_END_OFF`.
 
+The same flag makes `erts_start_schedulers` wait for every normal and dirty CPU scheduler to hold its slot and say `erx: erts: N schedulers and M dirty CPU schedulers hold executor slots`, before any scheduler runs Erlang code, so the line's place in the transcript is fixed.
+
 **Device paths.** Each suite run dumps QEMU's own device tree (`-machine virt,dumpdtb`) and
 checks each device path and `compatible` of [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json)
 against it. `/pl011@9040000` exists only when QEMU is given a second `-serial`, which the

@@ -258,6 +258,16 @@ it; git history is the record of completed work.
   the personality has replaced what they name.
 * [Low] musl, `tools/lib/erx/native_musl.rb`: binary128 arithmetic comes from Fiasco's `libgcc.a`, built by GCC.
   Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
+* [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
+  can supply its 16 bytes at program start.
+* [Medium] runtime, `otp/erts/lib_src/common/erl_misc_utils.c`: `erts_cpu_info_update` counts through `sysconf` and the `sched_getaffinity` row, the machine's
+  online CPUs, instead of the boot page's `cpuset` (`docs/design-runtime.md`, edit 32), so a manifest share smaller than the machine starts more schedulers than
+  its capacity. Edit 32 deletes that row and `task_start.c`'s `erx_fiasco_cpus_online`.
+* [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted
+  driver's cases (no attribute, no free slot, the slot given back at exit), `sysconf(_SC_NPROCESSORS_ONLN)` and `pthread_setname_np`.
+* [Low] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_process.c`, `beam/erl_driver.h`: what signals' deletion leaves unused: the break flag and `erts_do_break_handling`, `thr_create_sigmask`,
+  the Darwin steal declarations, and the `ERTS_SYS_SUSPEND_SIGNAL` and `ERTS_HAVE_TRY_CATCH` blocks.
+* [Low] `otp/erts/emulator/sys/erxos/sys.c`: on hosted a write to a closed pipe now ends the process with `SIGPIPE`, and a crash dump has no time limit; a dump says it could not read a process's stack, where it did not try.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.
