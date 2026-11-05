@@ -506,12 +506,12 @@ erl_crash_dump_v(char *file, int line, const char* fmt, va_list args)
         dumpname = &dumpnamebuf[0];
     }
 
-    erts_fprintf(stderr,"\nCrash dump is being written to: %s...", dumpname);
-
     fd = open(dumpname,O_WRONLY | O_CREAT | O_TRUNC,0640);
     if (fd < 0) {
-        return; /* Can't create the crash dump, skip it */
+        erts_fprintf(stderr,"\nNo crash dump: %s cannot be created\n", dumpname);
+        return;
     }
+    erts_fprintf(stderr,"\nCrash dump is being written to: %s...", dumpname);
 
 #ifdef ENCRYPTED_CRASH_DUMPS
     /* The encryption header must be written verbatim without any other

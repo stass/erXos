@@ -50,7 +50,8 @@ __clone(int (*func)(void *), void *stack, int flags, void *arg, ...)
 	start.tls = (uint64_t)(uintptr_t)tls;
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
 		atomic_store_explicit(&utcb->mr[word], words[word], memory_order_relaxed);
-	status = erx_thread_create(0, 0, 0, ERX_THREAD_CLASS_WORKER, &thread);
+	status = erx_thread_create(0, 0, 0, (flags & ERX_CLONE_EXECUTOR) ? ERX_THREAD_CLASS_EXECUTOR : ERX_THREAD_CLASS_WORKER,
+	    &thread);
 	if (status != ERX_OK)
 		return (-EAGAIN);
 	status = erx_fiasco_thread_set_clear_word(thread, (uint64_t)(uintptr_t)clear_word);

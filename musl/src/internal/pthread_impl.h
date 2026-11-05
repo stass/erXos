@@ -83,6 +83,8 @@ enum {
 #define _a_sched __u.__i[3*__SU+1]
 #define _a_policy __u.__i[3*__SU+2]
 #define _a_prio __u.__i[3*__SU+3]
+/* Set only by erx_pthread_create_executor, on its own copy of the attribute. */
+#define _a_executor __u.__i[3*__SU+4]
 #define _m_type __u.__i[0]
 #define _m_lock __u.__vi[1]
 #define _m_waiters __u.__vi[2]
@@ -157,6 +159,8 @@ extern hidden volatile size_t __pthread_tsd_size;
 extern hidden void *__pthread_tsd_main[];
 extern hidden volatile int __eintr_valid_flag;
 
+/* In __clone's flags: the new thread is an executor. Linux's exit signal byte, which pthread_create never sets. */
+#define ERX_CLONE_EXECUTOR 0x01
 hidden int __clone(int (*)(void *), void *, int, void *, ...);
 hidden int __set_thread_area(void *);
 hidden int __libc_sigaction(int, const struct sigaction *, struct sigaction *);

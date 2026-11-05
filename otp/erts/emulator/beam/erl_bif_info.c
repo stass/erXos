@@ -4982,12 +4982,7 @@ proc_sig_block(Process *c_p, void *arg, int *redsp, ErlHeapFragment **bpp)
 #else
         {
             ErtsMonotonicTime to = ERTS_MONOTONIC_TO_USEC(timeout);
-            struct timeval tv;
-
-            tv.tv_sec = (long) to / (1000*1000);
-            tv.tv_usec = (long) to % (1000*1000);
-
-            select(0, NULL, NULL, NULL, &tv);
+            (void) erts_milli_sleep((long) (to / 1000));
         }
 #endif
 

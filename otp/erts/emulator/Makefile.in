@@ -1235,8 +1235,7 @@ OS_OBJS = \
 	$(OBJDIR)/driver_tab.o \
 	$(OBJDIR)/erx_prim_file.o \
 	$(OBJDIR)/sys_float.o \
-	$(OBJDIR)/sys_time.o \
-	$(OBJDIR)/sys_signal_stack.o
+	$(OBJDIR)/sys_time.o
 
 DRV_OBJS = \
 	$(OBJDIR)/ram_file_drv.o

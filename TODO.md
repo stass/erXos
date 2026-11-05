@@ -146,10 +146,9 @@ it; git history is the record of completed work.
   `test/guest/function_api` holds no shared object's case and its device cases stay native alone.
 * [Low] `otp/erts/emulator/beam/erl_process.c`: the safe point of `docs/design-runtime.md`, "Scheduling", handles the ready list only: its
   capacity and urgency steps land with the adapter that publishes them.
-* [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
-  `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
-  Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
-  as `ENOSYS` tracing shows it;
+* [Medium] `otp/erts/emulator/beam/erl_crash_dump.c`, `beam/bif.c`, `sys/erxos/sys.c`: what `imports.txt` lists as `[stock_descriptors]`
+  and the rest of `[stock_process]`: the crash dump's file, which `open` refuses with `ENOSYS` until the crash area replaces it (edit 34),
+  `erlang:display` and `halt`'s output, the terminal's `sys_get_key` and `ethread`'s signal masks. Each is answered as `ENOSYS` tracing shows it.
 * [Medium] `liberx/backend/fiasco/group.c`, `liberx/backend/hosted/group.c`: `erx_irq_bind` differs between the backends: Fiasco's refuses every
   group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
   The first native consumer needs the unbind defined in the interface, with its status checked.
@@ -247,7 +246,6 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/irq.c`: a task's IRQ call is `ERX_ENOTSUP`, since no task has a consumer.
   ERTS in a task needs the dispatcher named by `erx_fiasco_task_thread_cap(task, thread)`, an owner on each object,
   and the task's objects released at its end.
-* [Medium] stopgap, `liberx/backend/fiasco/runtime_stubs.c`: `erx_pthread_create_executor` fails with `ENOSYS`, so native ERTS cannot start schedulers.
 * [Medium] production image, `tools/lib/erx/production_image.rb`: the archive's `system/` holds only the root and `NOTICES`, so native ERTS binds a release with no boot script.
 * [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
@@ -260,9 +258,6 @@ it; git history is the record of completed work.
   the personality has replaced what they name.
 * [Low] musl, `tools/lib/erx/native_musl.rb`: binary128 arithmetic comes from Fiasco's `libgcc.a`, built by GCC.
   Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
-* [Low] musl, `musl/src/internal/erxos/syscall.c`: `sched_getaffinity` is refused, so
-  `sysconf(_SC_NPROCESSORS_ONLN)` does not count CPUs; `native_musl` counts them by the refused pin. `AT_RANDOM`
-  is absent, so mallocng's secret comes from an address alone; `erx_entropy_read` can supply its 16 bytes at program start.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.

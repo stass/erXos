@@ -319,6 +319,7 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	new->self = new;
 	new->tsd = (void *)tsd;
 	new->locale = &libc.global_locale;
+	if (attr._a_executor) flags |= ERX_CLONE_EXECUTOR;
 	if (attr._a_detach) {
 		new->detach_state = DT_DETACHED;
 	} else {

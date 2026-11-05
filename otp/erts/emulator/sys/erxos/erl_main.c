@@ -53,9 +53,6 @@ erx_runtime_main(void)
     char **argv;
     char *strings;
 
-    /* Must be done before we have a chance to spawn any scheduler threads. */
-    sys_init_signal_stack();
-
     status = erx_boot_info_read(erx_boot_info(), ERX_PAGE_SIZE, &boot_view);
     if (status != ERX_BOOT_INFO_OK) {
         fprintf(stderr, "erx: the boot information page: %s\n", erx_boot_info_reason(status));

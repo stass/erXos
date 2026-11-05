@@ -263,17 +263,6 @@ ERTS_GLB_INLINE struct tm *sys_localtime_r(time_t *the_clock, struct tm *buff) {
 
 #endif /* ERTS_GLB_INLINE_INCL_FUNC_DEF */
 
-/* These are defined in sys.c */
-typedef void (*SIGFUNC)(int);
-extern SIGFUNC sys_signal(int, SIGFUNC);
-extern void sys_sigrelease(int);
-extern void sys_sigblock(int);
-extern void sys_init_suspend_handler(void);
-extern void erts_sys_unix_later_init(void);
-
-/* These are defined in sys_signal_stack.c */
-extern void sys_init_signal_stack(void);
-extern void sys_thread_init_signal_stack(void);
 
 /*
  * Handling of floating point exceptions.
@@ -321,28 +310,5 @@ extern int exit_async(void);
 
 #define ERTS_EXIT_AFTER_DUMP _exit
 
-#if !defined(__APPLE__) && !defined(__MACH__)
-/* Some OS X versions do not allow (ab)using signal handlers like this */
-#define ERTS_HAVE_TRY_CATCH 1
-
-/* We try to simulate a try catch in C with the help of signal handlers.
- * Only use this as a very last resort, as it is not very portable and
- * quite unstable. It is also not thread safe, so make sure that only
- * one thread can call this at a time!
- */
-extern void erts_sys_sigsegv_handler(int);
-extern jmp_buf erts_sys_sigsegv_jmp;
-#define ERTS_SYS_TRY_CATCH(EXPR,CATCH)                                  \
-    do {                                                                \
-        SIGFUNC prev_handler = sys_signal(SIGSEGV,                      \
-                                          erts_sys_sigsegv_handler);    \
-        if (!setjmp(erts_sys_sigsegv_jmp)) {                            \
-            EXPR;                                                       \
-        } else {                                                        \
-            CATCH;                                                      \
-        }                                                               \
-        sys_signal(SIGSEGV,prev_handler);                               \
-    } while(0)
-#endif
 
 #endif /* #ifndef _ERL_UNIX_SYS_H */

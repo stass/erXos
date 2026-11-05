@@ -2269,8 +2269,7 @@ What a read cannot settle, and what settles it:
 
 * **A call through a function pointer** is invisible to the disassembly above. The
   import check closes it by name at link, and any remaining number shows at the `default:` of `__erx_syscall`, traced during the
-  first native boot. The probe's own native run ended at the spin above, so
-  nothing after `erts_sys_pre_init` has been observed.
+  first native boot, up to `init`'s request for the boot script.
 * **Which of OTP's suites need `statistics(runtime)`.** Of `kernel` and `stdlib`,
   `dist_util` alone calls it, and the suites are unread. A `notsup` that the oracle comparison shows to
   matter gets a body in the Fiasco backend, from `l4_thread_stats_time`.

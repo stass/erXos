@@ -8620,6 +8620,21 @@ erts_multi_scheduling_blockers(Process *p, int normal)
     return res;
 }
 
+/*
+ * The schedulers that run holding an executor slot, which erts_start_schedulers counts and
+ * says, and whether it has said so. Normal schedulers wait for that, so the line comes before
+ * anything Erlang code does.
+ */
+static erts_atomic32_t executors_running;
+static erts_atomic32_t executors_said;
+
+static void
+count_executor(Uint32 slot)
+{
+    if (slot != ERX_NO_EXECUTOR_SLOT)
+        erts_atomic32_inc_nob(&executors_running);
+}
+
 static void *
 sched_thread_func(void *vesdp)
 {
@@ -8645,6 +8660,9 @@ sched_thread_func(void *vesdp)
     erts_tse_prepare_timed(tse);
     ERTS_SCHED_SLEEP_INFO_IX(no - 1)->event = tse;
     esdp->ssi->park_slot = erx_executor_slot();
+    count_executor(esdp->ssi->park_slot);
+    while (erts_atomic32_read_acqb(&executors_said) == 0)
+        (void) erts_milli_sleep(1);
     erts_tse_return(tse);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8709,6 +8727,7 @@ sched_dirty_cpu_thread_func(void *vesdp)
     ASSERT(no != 0);
     ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(no-1)->event = erts_tse_fetch();
     esdp->ssi->park_slot = erx_executor_slot();
+    count_executor(esdp->ssi->park_slot);
     erts_tse_return(ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(no-1)->event);
     callbacks.arg = (void *) esdp->ssi;
     callbacks.wakeup = thr_prgr_wakeup;
@@ -8830,6 +8849,8 @@ erts_start_schedulers(void)
 
     ASSERT(erts_no_schedulers > 0 && erts_no_schedulers <= ERTS_MAX_NO_OF_SCHEDULERS);
 
+    erts_atomic32_init_nob(&executors_running, 0);
+    erts_atomic32_init_nob(&executors_said, 0);
     opts.executor = 1;
 
     for (ix = 0; ix < erts_no_schedulers; ix++) {
@@ -8880,6 +8901,13 @@ erts_start_schedulers(void)
 	    ix++;
     }
 
+    /* Says what ran, not what was asked for: a thread with no slot leaves the count short and the boot stops here. */
+    while (erts_atomic32_read_nob(&executors_running)
+           != (erts_aint32_t) (erts_no_schedulers + erts_no_dirty_cpu_schedulers))
+        (void) erts_milli_sleep(1);
+    erts_fprintf(stderr, "erx: erts: %d schedulers and %d dirty CPU schedulers hold executor slots\n",
+                 (int) erts_no_schedulers, (int) erts_no_dirty_cpu_schedulers);
+    erts_atomic32_set_relb(&executors_said, 1);
 }
 
 BIF_RETTYPE

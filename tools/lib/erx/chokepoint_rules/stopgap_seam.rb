@@ -70,7 +70,6 @@ module Erx
         liberx/backend/fiasco/runtime_entry.c
         liberx/backend/fiasco/runtime_entry.h
         liberx/backend/fiasco/runtime_main.c
-        liberx/backend/fiasco/runtime_stubs.c
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_open.c
         liberx/backend/fiasco/root_open.h
@@ -200,7 +199,6 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root_write.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root_no_program.c', permits: /\Aerx_fiasco_console_write\z/),
-                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/runtime_stubs.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/end.c', permits: /\Aerx_fiasco_console_write\z/),
@@ -287,7 +285,7 @@ module Erx
           design: 'docs/design-runtime.md#threads-and-synchronisation',
           scope: Chokepoints::Scope.new(own: true, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_pthread_create_executor\b/,
-          sites: [Chokepoints::Site.new(glob: 'liberx/backend/fiasco/runtime_stubs.c'), Chokepoints::Site.new(glob: 'otp/erts/lib_src/pthread/ethread.c'),
+          sites: [Chokepoints::Site.new(glob: 'musl/src/thread/erxos/pthread_create_executor.c'), Chokepoints::Site.new(glob: 'otp/erts/lib_src/pthread/ethread.c'),
                   Chokepoints::Site.new(glob: 'liberx/pthread_executor.h'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/thread.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/hosted_executor_driver.c')],

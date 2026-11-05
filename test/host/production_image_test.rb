@@ -91,7 +91,7 @@ class ProductionImageTest < Minitest::Test
 
   def checkpoint_verifier(name, **options)
     built = Struct.new(:build_id, :index_hash).new('aa', 'bb')
-    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', **options)
+    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 4, **options)
     points.find { |point| point.fetch(:name) == name }.fetch(:verify)
   end
 
@@ -103,6 +103,21 @@ class ProductionImageTest < Minitest::Test
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }
+  end
+
+  # A scheduler short of a CPU, or started as a worker, leaves the count wrong or the line unsaid.
+  def test_the_executors_line_must_count_a_scheduler_per_cpu
+    verify = checkpoint_verifier('erts-executors')
+    verify.call("erx: erts: 4 schedulers and 4 dirty CPU schedulers hold executor slots\n")
+    assert_raises(Erx::Error) { verify.call("erx: erts: 1 schedulers and 4 dirty CPU schedulers hold executor slots\n") }
+    assert_raises(Erx::Error) { verify.call("erx: erts: 4 schedulers and 1 dirty CPU schedulers hold executor slots\n") }
+  end
+
+  # The boot's last line is init's own refusal, and no other way of ending counts.
+  def test_the_last_line_must_be_inits_refusal_of_the_missing_boot_script
+    verify = checkpoint_verifier('erts-init-runs')
+    verify.call("Runtime terminating during boot ({'cannot get bootfile','/bin/start.boot'})\n")
+    assert_raises(Erx::Error) { verify.call("Runtime terminating during boot ({badmatch,1})\n") }
   end
 
   def test_the_watchdog_line_must_carry_what_the_command_line_says

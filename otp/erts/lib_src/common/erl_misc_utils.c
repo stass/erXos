@@ -28,6 +28,13 @@
 #  include <windows.h>
 #endif
 
+#include <stdint.h>
+
+#include "liberx/backend/api.h"
+
+/* A program of erXos has no CPU topology to read and no affinity mask but its group's. */
+#undef HAVE_SCHED_xETAFFINITY
+
 #include "ethread_inline.h"
 #include "erl_misc_utils.h"
 
@@ -164,11 +171,10 @@ erts_milli_sleep(long ms)
 #ifdef __WIN32__
 	Sleep((DWORD) ms);
 #else
-	struct timeval tv;
-	tv.tv_sec = ms / 1000;
-	tv.tv_usec = (ms % 1000) * 1000;
-	if (select(0, NULL, NULL, NULL, &tv) < 0)
-	    return errno == EINTR ? 1 : -1;
+	/* Nothing wakes this word, so the wait runs to its deadline. */
+	uint32_t word = 0;
+	if (erx_umtx_wait((uint64_t) (uintptr_t) &word, 0, erx_deadline_after((uint64_t) ms * UINT64_C(1000000))) == ERX_EINTR)
+	    return 1;
 #endif
     }
     return 0;

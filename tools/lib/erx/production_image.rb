@@ -153,11 +153,11 @@ module Erx
         check_device_paths
         built = image(fiasco)
         accels.product(cpus).to_h do |accel, count|
-          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+')
+          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
           full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
           if count == cpus.first
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE,
-                                      points: Run.checkpoints(built, root: @root, watchdog: 'off', extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size))
+                                      points: Run.checkpoints(built, root: @root, watchdog: 'off', cpus: count, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size))
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
                                       points: Run.command_line_refusal_checkpoints)
           end
@@ -167,9 +167,11 @@ module Erx
         end
       end
 
-      # The transcript of a boot to ERTS's start, each line in order. The manifest
-      # line carries the numbers the source says, so a root that misread it fails.
-      def self.checkpoints(built, root:, watchdog:, extra_arguments: 0)
+      # The transcript of a boot as far as ERTS gets, each line in order. The manifest line
+      # carries the numbers the source says, so a root that misread it fails. Schedulers are
+      # one per CPU. Erlang's init then runs on them and asks for the boot script, which no
+      # archive holds yet, so that refusal is the boot's last line and proves code ran.
+      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0)
         source = File.read(File.join(root, MANIFEST))
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
@@ -180,7 +182,9 @@ module Erx
          point('root-identity', /\Aerx: root task: build/n, identity),
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
          point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
-         point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60)].freeze
+         point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60),
+         point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{cpus} schedulers and #{cpus} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
+         point('erts-init-runs', /\ARuntime terminating during boot/n, /\ARuntime terminating during boot \(\{'cannot get bootfile','\/bin\/start\.boot'\}\)\r*\n\z/n, seconds: 60)].freeze
       end
 
       # A machine with less RAM than root_memory: the same image boots to the root, which
