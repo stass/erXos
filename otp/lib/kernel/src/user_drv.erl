@@ -17,7 +17,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: whereis_group/0 answers for erx_console, which has one group.
+%% Modified by erXos: whereis_group/0 answers for erx_console too.
 %%
 %% %CopyrightEnd%
 %%

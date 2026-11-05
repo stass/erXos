@@ -387,8 +387,13 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load |
 | `beam/bif.c` | 42. while another process holds `erx_tty_owner`, `halt_2` with `{flush, true}` traps to `erx_output:halt/2`, which drains the tty before it halts ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
+| `lib/stdlib/src/shell.erl` | 44. `prompt_width/1` asks no group when `erx_console` calls it, as when `user_drv` does |
+| `lib/kernel/src/user_sup.erl` | 45. `get_user/1` answers `{erx_console, start, []}` when the flags hold `-user erx_console`, whatever `-noshell`, `-noinput` and their kin say, since `erx_console` reads those itself and no flag reaches `user_drv`, whose NIF is gone |
+| `lib/kernel/src/user_drv.erl` | 46. `whereis_group/0` reads the current group from `erx_console`'s process when `user_drv` is not running |
+| `beam/break.c` | 47. the break menu prints no clear-screen sequence, so it asks no terminal whether to |
+| `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, which stopped `stdlib` from rebuilding after a source edit |
 
-Forty-three edits outside `sys/erxos`, in forty-two files, the JIT's
+Forty-eight edits outside `sys/erxos`, in forty-seven files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
