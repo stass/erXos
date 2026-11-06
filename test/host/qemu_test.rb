@@ -85,6 +85,43 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'a,b', serial_input: 'keys') }
   end
 
+  DISK = Erx::QemuPlan::Disk
+
+  def test_a_plan_without_disks_renders_the_arguments_it_always_did
+    plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
+    assert_equal plain, Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [])
+    assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 512 -display none
+                    -monitor none -nic none -no-reboot -serial file:serial -kernel image], plain
+  end
+
+  def test_a_disk_is_a_raw_drive_with_a_virtio_blk_device_on_a_non_legacy_transport
+    argv = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [DISK.new(path: '/run/a.img')])
+    plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
+    assert_equal plain, argv - ['-global', 'virtio-mmio.force-legacy=false', '-drive', 'file=/run/a.img,format=raw,if=none,id=disk0',
+                                '-device', 'virtio-blk-device,drive=disk0']
+    assert_includes argv.each_cons(2).to_a, ['-global', 'virtio-mmio.force-legacy=false']
+    assert_includes argv.each_cons(2).to_a, ['-drive', 'file=/run/a.img,format=raw,if=none,id=disk0']
+    assert_includes argv.each_cons(2).to_a, ['-device', 'virtio-blk-device,drive=disk0']
+    assert_equal 1, argv.count('-global')
+  end
+
+  def test_several_disks_are_numbered_in_order
+    argv = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: [DISK.new(path: '/a'), DISK.new(path: '/b')])
+    assert_equal %w[file=/a,format=raw,if=none,id=disk0 file=/b,format=raw,if=none,id=disk1],
+                 argv.each_cons(2).select { |flag, _| flag == '-drive' }.map(&:last)
+    assert_equal 1, argv.count('-global')
+  end
+
+  def test_a_disk_path_that_could_change_what_qemu_opens_is_refused
+    ['relative.img', 'nbd:host:1', '/a,b', "/a\0b", '', nil, 5].each do |path|
+      assert_raises(Erx::Error, path.inspect) { DISK.new(path: path) }
+    end
+    too_many = Array.new(Erx::QemuPlan::MAX_DISKS + 1) { |index| DISK.new(path: "/d#{index}") }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: too_many) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: ['/a']) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: nil) }
+  end
+
   def test_a_checkpoint_types_once_its_line_has_come
     matcher = Erx::Transcript.new(checkpoints: [{ name: 'prompt', pattern: /^prompt\r?\n/n, seconds: 2, type: 'a' },
                                                 { name: 'second', pattern: /^second\r?\n/n, seconds: 2 }])

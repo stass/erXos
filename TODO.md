@@ -1907,3 +1907,6 @@ document's "residual risks accepted" paragraph.
   `tools/erx bench`. Decide whether ERTS's `perf` support and
   `erlang:statistics` use it. Replaces the stopgap's direct user access
   (Stopgap replacements above).
+* [Medium] storage, `block_device` QEMU suite (`tools/lib/erx/qemu_suites/block_device.rb`): the suite reports its cell
+  pending until the block driver prints the lines `tools/lib/erx/block_device.rb` defines; the driver's landing sets
+  `Erx::BlockDevice::DRIVER_LANDED` and checks that its first HVF run passes.

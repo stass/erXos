@@ -29,17 +29,41 @@ module Erx
     # random seeds.
     DETERMINISTIC_WORD = 'erx.det=1'
     DETERMINISTIC_ARGUMENTS = %w[-icount shift=0,sleep=off -rtc base=2026-01-01,clock=vm].freeze
+    # The most disks a plan attaches; QEMU virt has 32 virtio-mmio slots and the
+    # tests need a handful.
+    MAX_DISKS = 4
+    # QEMU's virtio-mmio transport offers the legacy interface (version 1) unless
+    # told otherwise; the guest's driver supports version 2 only.
+    DISK_TRANSPORT_ARGUMENTS = %w[-global virtio-mmio.force-legacy=false].freeze
+
+    # A raw disk image the guest sees as a virtio-blk device on the virtio-mmio
+    # bus. Its path is absolute, so QEMU reads it as a file and never as a
+    # protocol prefix such as `nbd:`, and holds no comma, which QEMU reads as
+    # the end of an option, and no NUL.
+    Disk = Data.define(:path) do
+      def initialize(path:)
+        unless path.is_a?(String) && path.start_with?('/') && !path.match?(/[\0,]/)
+          raise Error, 'a disk image path is absolute and holds no comma'
+        end
+
+        super(path: path.dup.freeze)
+      end
+    end
 
     module_function
 
     def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
-             program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil)
+             program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
+             disks: [])
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
       end
       unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
         raise Error, 'guest memory must be between 128 and 4096 MiB'
+      end
+      unless disks.is_a?(Array) && disks.size <= MAX_DISKS && disks.all?(Disk)
+        raise Error, "disks are up to #{MAX_DISKS} QemuPlan::Disk values"
       end
       deterministic = command_line.to_s.split(/ /).include?(DETERMINISTIC_WORD)
       if deterministic && (accel != 'tcg' || cpus != 1)
@@ -58,9 +82,22 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
+       *disk_arguments(disks), '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(command_line ? ['-append', command_line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
+    end
+
+    # Each disk is a drive with no front end of its own and the virtio-blk
+    # device that serves it, in the order given. Without a disk, nothing, so
+    # the transport options reach only plans that have a device to use them.
+    def disk_arguments(disks)
+      return [] if disks.empty?
+
+      drives = disks.each_with_index.flat_map do |disk, index|
+        ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}",
+         '-device', "virtio-blk-device,drive=disk#{index}"]
+      end
+      DISK_TRANSPORT_ARGUMENTS + drives
     end
 
     # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
@@ -225,7 +262,7 @@ module Erx
     # does one that exits before its transcript is complete. Otherwise the
     # harness ends the guest at the last checkpoint.
     def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil)
+            dtb: nil, disks: [])
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
       raise Error, "guest image does not exist: #{image}" unless File.file?(image)
@@ -237,7 +274,7 @@ module Erx
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       argv = QemuPlan.argv(accel: accel, image: image, serial: serial, serial_input: keyboard,
                            cpus: cpus, memory_mib: memory_mib, program: @program, initrd: initrd, command_line: command_line,
-                           dtb: dtb)
+                           dtb: dtb, disks: disks)
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
