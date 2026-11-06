@@ -110,7 +110,7 @@ class RuntimePrimFileTest < Minitest::Test
     stock = table(@fixture.stock)
     assert_operator stock.size, :>, 200, 'the comparison ran its corpus'
     differences = (stock.keys | release.keys).filter_map do |key|
-      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'remote ', 'resources', 'tmp')
+      next if release[key] == stock[key] || key.start_with?('pin ', 'ns ', 'remote ', 'resources', 'tmp', 'open ')
       next if named?(key)
 
       "#{describe(key)}\n  stock:   #{stock[key]}\n  release: #{release[key]}"
@@ -247,6 +247,26 @@ class RuntimePrimFileTest < Minitest::Test
     release = table(@fixture.release)
     stock = table(@fixture.stock)
     TMP_HANDLES.each do |step, want|
+      assert_equal want, stock[step], "stock #{step}"
+      assert_equal want, release[step], step
+    end
+  end
+
+  # Opens on the read-only release, as open(2) orders its checks: a directory opened to
+  # write is eisdir, an exclusive open of a name that exists eexist, and a missing
+  # directory or a file on the way enoent or enotdir, each before the read-only file
+  # system's erofs.
+  RELEASE_OPENS = {
+    'open dir write' => '{error,eisdir}', 'open dir/ write' => '{error,eisdir}',
+    'open dir read_write' => '{error,eisdir}', 'open dir append' => '{error,eisdir}',
+    'open dir exclusive' => '{error,eexist}', 'open file exclusive' => '{error,eexist}',
+    'open under missing' => '{error,enoent}', 'open under file' => '{error,enotdir}'
+  }.freeze
+
+  def test_release_opens
+    release = table(@fixture.release)
+    stock = table(@fixture.stock)
+    RELEASE_OPENS.each do |step, want|
       assert_equal want, stock[step], "stock #{step}"
       assert_equal want, release[step], step
     end

@@ -113,6 +113,7 @@ static posix_errno_t erx_find(const efile_path_t *, erx_release_fs_kind_t *,
     uint32_t *);
 static posix_errno_t erx_find_existing(const efile_path_t *,
     erx_release_fs_kind_t *, uint32_t *);
+static posix_errno_t erx_write_refusal(const efile_path_t *, enum efile_modes_t);
 static Sint64 erx_copy_out(uint32_t, Sint64, SysIOVec *, int);
 static posix_errno_t erx_check_file(uint32_t);
 static void erx_fill_info(erx_release_fs_kind_t, uint64_t, efile_fileinfo_t *);
@@ -698,6 +699,48 @@ erx_check_file(uint32_t file)
 	return (0);
 }
 
+/*
+ * The refusal of an open that writes, in the order of open(2) with O_CREAT: the walk
+ * to the last name first (ENOENT, ENOTDIR), then an exclusive open of a name that
+ * exists (EEXIST), then a directory (EISDIR), and only then the read-only file system
+ * (EROFS), for a file or for a missing name whose directory exists.
+ */
+static posix_errno_t
+erx_write_refusal(const efile_path_t *path, enum efile_modes_t modes)
+{
+	erx_release_fs_kind_t kind;
+	posix_errno_t error;
+	size_t parent_length;
+	uint32_t file;
+
+	error = erx_find(path, &kind, &file);
+	if (error != 0)
+		return (error);
+	switch (kind) {
+	case ERX_RELEASE_FS_FILE:
+	case ERX_RELEASE_FS_DIRECTORY:
+		if ((modes & EFILE_MODE_EXCLUSIVE) != 0)
+			return (EEXIST);
+		return (kind == ERX_RELEASE_FS_DIRECTORY ? EISDIR : EROFS);
+	case ERX_RELEASE_FS_NOT_DIRECTORY:
+		return (ENOTDIR);
+	case ERX_RELEASE_FS_MISSING:
+		break;
+	}
+	/*
+	 * The missing name's directory: the names before its last "/", or the top, which
+	 * is always a directory. A file on the way would have answered NOT_DIRECTORY.
+	 */
+	parent_length = path->result.res_names_length;
+	while (parent_length > 0 && path->result.res_names[parent_length - 1] != '/')
+		parent_length--;
+	if (parent_length > 0)
+		parent_length--;	/* the "/" itself */
+	kind = erx_release_fs_lookup(&release_fs, (const uint8_t *)path->result.res_names,
+	    parent_length, &file);
+	return (kind == ERX_RELEASE_FS_DIRECTORY ? EROFS : ENOENT);
+}
+
 posix_errno_t
 efile_open(const efile_path_t *path, enum efile_modes_t modes,
     ErlNifResourceType *nif_type, efile_data_t **d)
@@ -709,7 +752,7 @@ efile_open(const efile_path_t *path, enum efile_modes_t modes,
 
 	*d = NULL;
 	if ((modes & (EFILE_MODE_WRITE | EFILE_MODE_APPEND | EFILE_MODE_EXCLUSIVE)) != 0)
-		return (EROFS);
+		return (erx_write_refusal(path, modes));
 	error = erx_find_existing(path, &kind, &file);
 	if (error != 0)
 		return (error);

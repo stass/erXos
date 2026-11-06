@@ -1622,7 +1622,8 @@ directory cannot exist, and nothing can disagree with the index.
 | `read_file_info`, `read_link_info`, `read_handle_info` | the same for all three: `read_handle_info`, which `read_file` asks first, answers for the handle's entry; `regular` mode `0444` or `directory` mode `0555`, carrying the type's bits as stock's `st_mode` does, `read` access, size, 0 for a directory, one link, owner, group and times 0, since an archive records none and a build is reproducible |
 | `read_link` | `einval`, as stock for a path that is not a link: the provider has no links |
 | `get_cwd`, `set_cwd` | starts at `/`; set takes a directory that exists, under the NIF's lock |
-| any write mode, `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
+| `open` in any write mode | in the order of `open(2)` with `O_CREAT`: `enoent` or `enotdir` on the way to the last name, `eexist` for an exclusive open of a name that exists, `eisdir` for a directory, and `erofs` for a file or a missing name whose directory exists |
+| `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
 | `advise` | `ok` once `prim_file_nif.c` has checked its arguments, as stock's `efile_advise` answers without `posix_fadvise` |
 | `efile_from_fd`, `efile_dup_handle`, `allocate`, `altname` and anything else | `enotsup` |
 | a path over the limits, or not UTF-8 | as [design-files.md](design-files.md#resolving-a-path) says: `enametoolong`, `einval` |

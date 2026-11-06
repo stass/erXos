@@ -41,6 +41,7 @@ main([PrefixText, Mode]) ->
     [call(Prefix, Op, Path) || Path <- paths(Prefix), Op <- operations()],
     cwd(Prefix),
     loader(Prefix),
+    release_opens(Prefix),
     pins(Mode),
     tmp(Prefix, Mode),
     namespace(Mode),
@@ -1084,6 +1085,20 @@ tmp_advise(At, Show) ->
     ok = file:close(Fd),
     Show("advise closed", file:advise(Fd, 0, 0, normal)),
     Show("advise delete", file:delete(Name)).
+
+%% Opens on the read-only release that open(2) refuses before it would meet the read-only
+%% file system: a directory opened to write answers eisdir, an exclusive open of a name
+%% that exists eexist, a name under a missing directory enoent, under a file enotdir.
+release_opens(Prefix) ->
+    At = fun(Name) -> <<Prefix/binary, "/corpus/", Name/binary>> end,
+    Show = fun(Step, Result) -> io:format("open ~s\t~0tp~n", [Step, Result]) end,
+    Steps = [{"dir write", <<"sub">>, [write]}, {"dir/ write", <<"sub/">>, [write]},
+             {"dir read_write", <<"sub">>, [read, write]}, {"dir append", <<"sub">>, [append]},
+             {"dir exclusive", <<"sub">>, [write, exclusive]},
+             {"file exclusive", <<"a.txt">>, [write, exclusive]},
+             {"under missing", <<"missing/x">>, [write]},
+             {"under file", <<"a.txt/x">>, [write]}],
+    [Show(Step, closed(file:open(At(Name), Modes))) || {Step, Name, Modes} <- Steps].
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the
