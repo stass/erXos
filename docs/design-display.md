@@ -737,30 +737,26 @@ it.
 
 **New windows and their tokens.** Which session a window serves is the
 console's choice, never the display's
-([Windows without a login](design-live.md#the-console)). When a session
-asks for a new terminal window, from its line's menu or through its
-console facet, the console mints a single-use **window token**, 128
-random bits bound to that session and to this display, and sends it to
-the display domain, whose new `erx_term` makes its window and presents
-the token with `offer_line`. The console consumes the token at its first
-presentation, and it dies unused when its session ends or 60 s after it
-was minted. A valid token connects at the new line a tty with a shell of
-the session that asked, with no login, as rio's new window runs a shell
-in its opener's namespace, and binds the line to that session alone:
-its menu reaches no other session until a login there, and its lock
-names that session's principal. An offer with no token, or with one that is
-unknown, used, expired or another display's, gets a login and never a
+([Window tokens](design-live.md#window-tokens)). When a session asks
+for a new terminal window, the console mints a single-use **window
+token** bound to that session and to this display and sends it to the
+display domain, whose new `erx_term` makes its window and presents the
+token with `offer_line`. A valid token connects at the new line a tty
+with a shell of the session that asked, with no login, as rio's new
+window runs a shell in its opener's namespace, and the line then has
+that session's principal, as any Unix terminal carries its user's
+authority. An offer without a valid token gets a login and never a
 shell. So the display's first window, which it offers alone before any
 session is introduced to it, shows a login, and so does the single
-policy's service terminal, in every build. The overlapping policy's menu item "new
-terminal window" is a request from the line of the window that has the
-keyboard: the display names that line, and the console mints a token
-for the session connected there, or the new window shows a login when no
-session is connected there. A display can name only its own lines, whose
-sessions it can already type into, so neither path lets it choose a
-session it does not already reach. A session that logs in at a terminal
-window is introduced by the system domain to that display, so programs
-it starts get windows beside their terminal.
+policy's service terminal, in every build. The overlapping policy's
+menu item "new terminal window" is the line's own menu action at the
+line of the window that has the keyboard, so there is one path to a
+token: it gives the session connected there a new window, or a window
+that shows a login when no session is connected there, and it does
+nothing the display could not do by typing `Ctrl-G` and that item into
+the window. A session that logs in at a terminal window is introduced
+by the system domain to that display, so programs it starts get
+windows beside their terminal.
 
 **Presentations in a terminal.** `erx_vt` parses the OSC 8 sequence
 above as one of its control sequences, with a bound of 4 KiB on the
@@ -1103,16 +1099,25 @@ position of the fault.
   ([Trust placement](design.md#trust-placement)); in a development build
   that holds one, the display domain is in the trusted base. With that,
   a compromised display domain can show a false screen, record
-  keystrokes and inject input into the windows it serves, and cannot
-  read a domain's memory, message a process it was not introduced to, or
-  act on a session's behalf elsewhere: what it injects runs with the
-  authority of the sessions connected at its windows and no more. It
-  cannot reach the system shell: the system-shell facet belongs to a
-  login at a secure line and never to a session, and in a release build
-  no window is a secure line, since the manifest check refuses a release
+  keystrokes and inject input into the windows it serves, with the
+  authority of the shells in its windows, as an X11 or Wayland server
+  has: through them it reaches what their principals reach, their
+  other sessions included, and a lock at the UART leaves the windows
+  opened from it running, as on Unix. It also routes the input of the
+  sessions introduced to it, reads and writes its display's clipboard
+  where `snarf` is on, and records the
+  passphrase of whoever logs in at its windows. It has nothing beyond:
+  it cannot read a domain's memory, message a process it was not
+  introduced to, or reach anything of a principal that neither uses the
+  display nor types at it
+  ([Window tokens](design-live.md#window-tokens)). It
+  cannot reach the system shell in a release build, nor at a window
+  opened without a login in any build: the system-shell facet belongs to
+  a login at a secure line and never to a session, and no window is a
+  secure line in a release build, since the manifest check refuses a release
   manifest that marks a display's windows `secure`. It cannot choose the
   session a window without a login serves: only a window token the
-  console minted for a session's request opens one, and an offer without
+  console minted for a session's own request opens one, and an offer without
   a valid token gets a login. Its windows' logins are never presence at
   the machine, cannot enrol a principal, and count against a name in
   their own class, so its wrong passphrases cannot lock that name out at
@@ -1400,8 +1405,8 @@ Decisions taken with the owner:
    so the system shell, which only a login at a secure line opens, is
    never connected there; a development manifest may mark windows
    secure, its display domain being in the trusted base. A window
-   without a login serves only the session whose window token it
-   presents.
+   without a login shows the shell of the session whose window token it
+   presents, with that session's principal's authority.
 6. **The clipboard** is shared per display, as X does; the `snarf`
    parameter withholds it from a grant, and Security states who shares
    it.

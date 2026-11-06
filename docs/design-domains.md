@@ -2160,9 +2160,14 @@ service. It has:
   system domain's atom table; and for each domain the defaults and
   ceilings of its limits.
 
-A **session** is a principal's login on the console or on the host link; it
-holds facets and a default domain, created at login, in which the
-principal's shell runs and whose sub-spaces are the principal's programs.
+A **session** is what a principal starts by a login at a console line
+(the UART, the host link or a terminal window,
+[design-live.md](design-live.md#the-console)), by a login through the web
+front end ([design-web.md](design-web.md)), or from the menu of a line
+that has the principal: its facets and its session domain, created when
+it starts, in which the principal's shells run, at its own line and at
+every window opened from it, and whose sub-spaces are the principal's
+programs.
 Every domain belongs to one principal, and its budgets are children of
 that principal's budget. A requested domain's CPU group is a child of
 its principal's group under `users`; a configured service domain's group
@@ -2210,7 +2215,7 @@ pipe server keeps and the objects of the files its programs map shared
 charged to the session's budget. Development builds have one principal,
 `root`, whose session at the UART holds every facet a session can hold;
 the system-shell facet, which no session holds, belongs to `root`'s
-login there. Policy is Erlang in the
+login there and at the host link's `console` line. Policy is Erlang in the
 system domain; the kernel supplies budgets, groups and capabilities, and
 each runtime the limits above.
 

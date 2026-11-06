@@ -430,7 +430,8 @@ violation fails the build with the property, the record and the field:
    passes, with the display domain reported in the trusted base. No
    `offer_line` facet, whatever domain holds it, has a `console_line`
    that marks its terminal windows `secure`, so
-   the system shell opens only at a login at the UART or the host link
+   the system shell opens only at a login at the UART or the host link,
+   where the manifest marks them secure, as it does by default
    ([design-live.md](design-live.md#the-console)). The manifest has no
    partial boot.
    The packer sets the boot image's `ERX_PACK_UNCONFINED_DMA` exactly
@@ -770,8 +771,9 @@ and 6 give way to the partial boot below.
 4. **The console** serves its lines: the UART, the host link where the
    machine has one, and each terminal window a display domain offers
    with `offer_line`. Each line starts with a login in release builds;
-   in development builds the console logs `root` in at the UART, a
-   secure line, so the UART shows the system shell
+   in development builds the console logs `root` in at the UART and,
+   when the host opens it, at the host link's `console` line, both
+   secure lines, so each shows the system shell
    ([design-live.md](design-live.md#the-console)).
 
 **A reset loop ends in rescue.** The **reset count** counts the

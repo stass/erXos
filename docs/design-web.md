@@ -468,9 +468,14 @@ and `erx_web_conn` encodes them. Every query runs on the session's own
 facets within their shares, so the inspector's cost of a browser is the
 principal's, as at a console (W8).
 
-`/proc/kernel/log` and `/proc/domains/N/crash` are paths like any other,
-with the inspector's rule that they answer only the system shell, which
-no session and so no browser has. The kernel's trace ring is read only by a trace view,
+`/proc/kernel/log` and `/proc/kernel/crash` are paths like any other,
+under the inspector's rules
+([design-live.md](design-live.md#paths)): every `[kernel, ...]` path
+answers only an inspect facet of scope `all`, and `[kernel, crash]`, the
+machine's crash record, only a call that presents the system-shell
+facet, which no session and so no browser holds. A domain's own crash
+dump, `/proc/domains/N/crash`, answers a facet whose scope covers that
+domain. The kernel's trace ring is read only by a trace view,
 never as a path, since only a tracer drains it.
 
 ### UIs: the browser renderer
@@ -828,9 +833,10 @@ own view; no counter or log line carries a message's contents.
   through a login or, in a development build while the host's `web` facet
   is open, `root`'s. Views are fetched in the principal's session with
   that session's facets, so the inspector's scope rules and the trace
-  facet's scope apply unchanged, and the kernel log and the crash record,
-  which only the system shell reads, never reach a browser: no session
-  holds the system-shell facet. A presentation link grants nothing: the client
+  facet's scope apply unchanged: the kernel log answers only a session
+  whose inspect facet has scope `all`, as at its console, and the
+  machine's crash record, which only the system shell reads, never
+  reaches a browser, since no session holds the system-shell facet. A presentation link grants nothing: the client
   turns it into a path, answered through the session's facet.
 * **The machine toward the browser** (W2, W3). The machine sends data of a
   closed grammar. Every text in it is `MachineText` and reaches the DOM as
@@ -930,7 +936,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | host tool HTTP and WebSocket fuzz target (Ruby) | random and mutated requests and frames; no exception escapes; every answer is a file, a refusal or a relay | a deframer without the length check before reading fails on a declared 2^40-byte frame |
 | W4 refusals | no cookie, wrong `Host`, foreign `Origin`, wrong token, a path outside the inventory: each refused or answered with `index.html`; the token in no response; a WebSocket open past 10 s | the server with that check removed upgrades or answers a host file; a server that sets the token as the cookie fails |
 | W5 parity | a scripted client through the host tool and through cowboy receives byte-identical messages | a front end that answers `hello` itself fails |
-| W1 over the host link | in a development build, every view `tools/erx web` opens through the host link's `web` facet (records, `/proc`, a trace, and the kernel log, which both refuse) equals what `root`'s session reads through its own facets at the same moment, compared view by view against the same reads made from that session's console line; a view of a domain `root`'s session cannot see is `ended scope` in both | a `web` facet bound to the system domain's authority instead of `root`'s session shows a record the session cannot read and fails |
+| W1 over the host link | in a development build, every view `tools/erx web` opens through the host link's `web` facet (records, `/proc`, a trace, the kernel log, which both answer alike, and the machine's crash record, which both refuse) equals what `root`'s session reads through its own facets at the same moment, compared view by view against the same reads made from that session's console line; a view of a domain `root`'s session cannot see is `ended scope` in both | a `web` facet bound to the system domain's authority instead of `root`'s session shows a record the session cannot read and fails |
 | W1 scope | two principals through the network front end, each view equal to its principal's `/proc` snapshot, the other's domains `ended scope`; a scoped principal's kernel-events trace `ended scope`; a `logout` of another login's line refused | a cookie bound to the wrong line fails |
 | logins | two logins of one principal are two sessions, and a logout of one leaves the other's views and UIs running; an unenrolled name answers `no_match` | a logout that ends every session of the principal fails |
 | W6 | loading every URL form, and reconnecting with a trace page open, starts no trace and delivers no event | a route, or a reconnect, that opens `trace` fails |

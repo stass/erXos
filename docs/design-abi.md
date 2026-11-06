@@ -995,7 +995,8 @@ fixed lines carry it in the header's flags:
 `ERX_MANIFEST_CONSOLE_SECURE`, bit 2, for the UART that `console` names,
 and `ERX_MANIFEST_HOSTLINK_SECURE`, bit 3, for the host link, which is
 set only when `hostlink` names a path; the source names them as the
-`machine` flags `console_secure` and `hostlink_secure`. A display
+`machine` flags `console_secure` and `hostlink_secure`, which a
+manifest's source sets by default and may clear. A display
 domain's terminal windows carry theirs in its `console_line`, which
 packs as an ordinary facet record: a facet of the console service
 granted to the display domain, whose operation set holds `offer_line`

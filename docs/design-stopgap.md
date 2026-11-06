@@ -923,7 +923,7 @@ Every guarantee of `design-kernel.md` (K1 to K33), `design-domains.md` (D1 to D1
 | SH1, P2, command authority, pipe-end ownership, end of stream by holders | Track S's programs |
 | devices: confined DMA, IOMMU windows, MSI, device-buffer lifetime, the device secret | M9; M11 (refused unless configured); M12 (the secret) |
 | service CPU admission (facets, lanes, grants), inspection and crash-data authority | M5, M8 (admission); M10 and M11 (authority) |
-| the host link holding every facet | M10, M11 |
+| the host link holding every facet but the system-shell facet | M10, M11 |
 | entropy in the kernel; the kernel trace ring; deterministic mode at the kernel's level; one route from user mode; every kernel chokepoint; the kernel stack proof | Track K |
 | the hostile suites and the security closure | Track K's first part (the call-level hostile domains); M2, M5, M9, M11 |
 | the startup proof: `erx_root_plan` run by the packer and the kernel, and its charge evidence ([the root startup rule](#the-phase-1-manifest-check) until then) | Track K's first part, before GK3 |

@@ -1364,6 +1364,14 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
+* [Low] console and display, the line cap
+  ([Window tokens](docs/design-live.md#window-tokens)): a display holds at most
+  the lines its `console_line` parameter allows, 16 by default, and every
+  principal whose sessions use that display shares them, so one principal's
+  window requests, each with a valid token, can fill the display's lines and
+  leave another principal's requests refused. Give each principal's sessions a
+  share of the cap, or state that a shared display is one principal's.
+
 * [Low] `erlang/apps/erx_files/src/erx_fs.erl`: a grant takes an open file's answer `{erx_fs_file, Tag, Alias, Reply}` and an
   owner's `DOWN` by matching Erlang references, which a process that can guess one can forge (`list_to_ref/1` on the
   server's node, a crafted external term from a client node). A forged answer can only answer the client's own request

@@ -1179,9 +1179,9 @@ fails the manifest check (design-display's confinement test), and a
 release manifest that marks a display's terminal windows `secure` fails
 it too; a principal named for the system shell who logs in at a terminal
 window that is not secure gets no system shell, and `erx:attach` of the
-UART login's session from a window, and a window opened from it, give
-that session's own shell (V6 of
-[design-live.md](design-live.md#invariants)); a display's offers with no
+UART login's session from a window opened from it gives the principal's
+session without the system-shell facet
+([Window tokens](design-live.md#window-tokens)); a display's offers with no
 window token, a forged, used, expired or another display's one each get
 a login (V7), and, once M11's vault checks passphrases, a login at a
 window cannot enrol a principal;
@@ -2053,7 +2053,7 @@ interpreter, within a frame's cost across a connection).
 | Fiasco's fixed priorities with no quota, grant or group enforcement | the scheduler core, `erx_group_configure` recording its grant | M7 (the scheduler), M2 (groups and quotas) |
 | The Phase 1 manifest check and root startup rule | the packer's `Admitted` value and the manifest's properties | track K (`erx_root_plan`); M5, M9 and M11 (the properties, as [design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check) lists them) |
 | Virtio-mmio devices with ordinary interrupts and unconfined DMA, driven by the same Erlang drivers | DMA profiles; IRQ objects; the device NIF | M9 (virtio-pci with MSIs and the IOMMU), M11 (refused unless configured) |
-| A host link holding every facet | session facet tables | M10, M11 |
+| A host link holding every facet but the system-shell facet | session facet tables | M10, M11 |
 | littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from track S's programs | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, through an installation that creates both partitions afresh |
 | lwIP, the network stack, a NIF in the network domain | the network service's interface | M14, by erXos's network stack, in Erlang, at G14 |
 | LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured with track D's part 6 |
