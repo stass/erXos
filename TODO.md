@@ -463,7 +463,9 @@ it; git history is the record of completed work.
   fill is real use: kernel's `file_SUITE` bench group writes a 256 MiB scratch file (`large_writes`, deleted only in
   `end_per_group`) and `sendfile_SUITE`'s `init_per_suite` writes one file in 51 writes of 10 MiB (510 MiB) without checking the results.
   Fix: put the reporter's output outside the suites' file system, or make the reporter survive `enospc` and report the
-  loss. Until then the kernel group's erXos side runs one runtime per suite, and those two suites cannot finish within the cap.
+  loss. Until then the kernel group's erXos side runs one runtime per suite, and those two suites cannot finish within the
+  cap: the erXos run never reaches sendfile_SUITE's last 7 cases (`t_sendfile_recvafter_remoteclose` to `end_per_suite`),
+  which the kernel table therefore cannot classify.
 * [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
   for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
   `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its
@@ -471,12 +473,37 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/oracle_comparison.rb` (`skipped_group_function`): a group function that erXos never
   recorded shows as `auto_skip`, inferred from the skipped cases under its group, and the report prints it like
   a status Common Test recorded. Give the inferred status its own name in the report and the table.
-* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
-  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
-  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
-  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
-  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
-  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
+* [Medium] `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the oracle's release boots OTP's tracked
+  `bootstrap/bin/start.boot`, whose application specifications carry the bootstrap's versions (kernel 11.0.3, stdlib
+  8.0.4) where the shipped `.app` files say 11.0.4 and 8.1.1. So `application:which_applications()` reports versions
+  the release does not hold, and `systools:make_script` on a release file built from them answers `error`
+  (`no_valid_version`): application_SUITE `script_start`, `distr_changed_tc1` and `distr_changed_tc2` and global_SUITE
+  `global_groups_change` fail there (kernel.txt), before they reach their peers. Boot the tree from a boot script made
+  from the tree's own `.app` files, as `ReleaseFiles#boot_file` makes the system's (not the system's own, which starts
+  erXos's services), and rerun every group, since all of them boot through it; those four cases then fail at their
+  peers, and their rows take the peer reason.
+* [Medium] `/tmp` (`erx_file_remote`, `erx_ramfs`): a `prim_file:read_file` racing a `prim_file:rename` that replaces
+  its name answered `enoent` at the 1,848th of up to 4,999 reads (prim_file_SUITE `read_file_rename_race`, kernel.txt). A rename
+  replaces its target atomically, so a reader sees the old file or the new one. Find whether the client's walk and
+  open or the server's release of the replaced node opens the window, and pin it in
+  `test/integration/prim_file_compare.erl`.
+* [Medium] `otp/erts/preloaded/src/prim_file.erl` (`?ERX_FILE`), `erx_erofs_file`: prim_file forwards each open-file
+  operation on a descriptor of `erx_file_remote` or `erx_erofs_file` to that module, but only the `/tmp` half is tested
+  (`tmp_prim_file_handle` in `test/integration/prim_file_compare.erl`); add the same steps on an image file (`/img/big`).
+  `erx_erofs_file` has no `ipread_s32bu_p32bu/3` and no `copy/3`, so `prim_file:` and `file:ipread_s32bu_p32bu` and
+  `file:copy` on an image descriptor raise `undef` (DETS lookups through `dets_utils` on an image); `prim_file:copy/3`, `get_handle/1` and
+  `internal_get_nif_resource/1` do not forward. Make the two lists (the modules `open/2` returns, the operations that
+  forward) one source, with a host check that each module exports every forwarded function.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: kernel results that change with the run are unexplained. file_SUITE bench
+  `tiny_writes` failed on stock and passed on erXos in the group run (stock's failure, not rerun). logger_std_h_SUITE
+  `rotate_on_start_compressed`, whose row names a peer, failed on both sides of a rerun of selected suites with `undef`
+  in file_SUITE's helpers, which that selection did not compile; its row's os_mon reason is read from the source.
+  logger_disk_log_h_SUITE `sync`, `disk_log_full`, `disk_log_wrap`, `disk_log_events` and `op_switch_to_sync` failed on
+  erXos in the group run and agree with stock when run with fewer suites; inet_res_SUITE's 8 lookup cases failed on
+  erXos in the group run and auto_skip on both sides with fewer suites (their rows were deleted); gen_tcp_misc_SUITE
+  `bidirectional_traffic` failed on stock in the group run and skips on both sides with fewer suites. A result that
+  depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group once the boot script
+  above is fixed and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

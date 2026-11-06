@@ -176,7 +176,6 @@ gen_tcp_misc_SUITE           inet_backend_default zombie_sockets               u
 gen_tcp_misc_SUITE           inet_backend_default otp_7816                     user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default otp_8102                     user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default otp_9389                     user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-gen_tcp_misc_SUITE           inet_backend_default bidirectional_traffic        user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default/socket_monitor socket_monitor1              user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default/socket_monitor socket_monitor1_manys        user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default/socket_monitor socket_monitor1_manyc        user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
@@ -227,12 +226,12 @@ gen_udp_SUITE                inet_backend_default/sockaddr t_simple_local_sockad
 gen_udp_SUITE                inet_backend_default/tickets otp_19357_open_with_ipv6_option user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                inet_backend_default/tickets otp_20102                    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                s_misc/t_module t_module_open                user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-gen_udp_SUITE                inet_backend_default/local local_basic                  auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-gen_udp_SUITE                inet_backend_default/local local_basic_binary           auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-gen_udp_SUITE                inet_backend_default/local local_unbound                auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-gen_udp_SUITE                inet_backend_default/local local_fdopen                 auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-gen_udp_SUITE                inet_backend_default/local local_fdopen_unbound         auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-gen_udp_SUITE                inet_backend_default/local local_abstract               auto_skip  cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
+gen_udp_SUITE                inet_backend_default/local local_basic                  auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local local_basic_binary           auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local local_unbound                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local local_fdopen                 auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local local_fdopen_unbound         auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local local_abstract               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 global_SUITE                 -        name_exit                    failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 global_group_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 heart_SUITE                  *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
@@ -244,14 +243,6 @@ inet_res_SUITE               -        intermediate_error           failed     ca
 inet_res_SUITE               -        servfail_retry_timeout_default failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 inet_res_SUITE               -        servfail_retry_timeout_1000  failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 inet_res_SUITE               -        tsig_baderror                failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-inet_res_SUITE               -        gethostbyaddr                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        gethostbyaddr_v6             failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        gethostbyname                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        gethostbyname_v6             failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        getaddr                      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        getaddr_v6                   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        ipv4_to_ipv6                 failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-inet_res_SUITE               -        host_and_addr                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 inet_sockopt_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 init_SUITE                   -        many_restarts                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 init_SUITE                   -        restart_with_mode            failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
@@ -272,7 +263,7 @@ logger_SUITE                 *        *                            failed     ca
 logger_env_var_SUITE         *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_simple_h_SUITE        -        start_debug                  failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_simple_h_SUITE        -        start_crash                  failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-logger_std_h_SUITE           -        rotate_on_start_compressed   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+logger_std_h_SUITE           -        rotate_on_start_compressed   failed     cannot run: os_mon, whose disksup file_SUITE:disc_free reads, is not in the release (design-runtime.md)
 net_SUITE                    *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 net_SUITE                    *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 net_SUITE                    *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
@@ -301,3 +292,63 @@ socket_traffic_SUITE         *        end_per_group                auto_skip  ca
 socket_ttest_SUITE           *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 socket_ttest_SUITE           *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 socket_ttest_SUITE           *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+
+# The hosted runtime is the interpreter image (design-runtime.md), which, as
+# stock's interpreter, has no coverage support.
+code_coverage_SUITE          -        *                            user_skip  the interpreter image has no coverage support: code:coverage_support() is false, so the suite skips
+
+# No distribution in Phase 1 (design.md).
+disk_log_SUITE               close    close_deadlock               failed     cannot run: no distribution; the case asserts is_alive()
+error_logger_SUITE           -        emulator                     failed     the case expects the error report of a distributed node, "Error in process ~p on node ~p"; ERTS leaves out "on node" on a node that is not alive (beam_common.c), and erXos runs no distribution in Phase 1
+logger_SUITE                 -        emulator                     failed     the case expects the error report of a distributed node, "Error in process ~p on node ~p"; ERTS leaves out "on node" on a node that is not alive (beam_common.c), and erXos runs no distribution in Phase 1
+error_logger_warn_SUITE      -        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+logger_std_h_SUITE           -        crash_std_h_to_file          failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+logger_std_h_SUITE           -        crash_std_h_to_disk_log      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+
+# Each makes a boot script with systools before it starts its peers.
+application_SUITE            -        script_start                 failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
+application_SUITE            distr_changed distr_changed_tc1            failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
+application_SUITE            distr_changed distr_changed_tc2            failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
+global_SUITE                 -        global_groups_change         failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
+
+# No network stack in Phase 1: cases that skip where their suite's other
+# cases fail, and group functions.
+gen_udp_SUITE                inet_backend_default/local init_per_group               failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/local end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/sockaddr init_per_group               user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/sockaddr end_per_group                user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_udp_SUITE                inet_backend_default/tickets/otp18323 otp_18323_open               user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+prim_net_SUITE               *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+prim_net_SUITE               misc     init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+prim_net_SUITE               misc     end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_api_SUITE            inet_backend_default/t_misc t_accept_inet6_tclass        user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_api_SUITE            inet_backend_default/t_misc/sockaddr init_per_group               user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_api_SUITE            inet_backend_default/t_misc/sockaddr end_per_group                user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default iter_max_socks               user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+gen_tcp_misc_SUITE           inet_backend_default/accept accept_timeouts_in_order6    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_basic_wo_autoclose user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_basic_w_autoclose user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_check_length    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_para_wo_autoclose user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_para_w_autoclose user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default/send_timeout send_timeout_resume          user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+gen_tcp_misc_SUITE           inet_backend_default otp_20257                    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           tickets/otp_19560 otp_19560_inet               user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+inet_SUITE                   -        gethostnative_parallell      user_skip  cannot run: spawn port; inet_gethost_native, the native resolver's port program, is not running
+inet_sockopt_SUITE           inet_backend_default ipv6_v6only_udp              user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+inet_sockopt_SUITE           inet_backend_default ipv6_v6only_tcp              user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+inet_sockopt_SUITE           inet_backend_default use_ipv6_v6only_udp          user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+
+# Programs: erXos spawns no ports in Phase 1, and the release has no programs.
+inet_res_SUITE               -        tsig_server                  user_skip  cannot run: spawn port; the case needs a dig or drill program, and erXos spawns no ports in Phase 1
+os_SUITE                     -        null_in_command              failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
+os_SUITE                     -        find_executable              failed     os:find_executable("erl") answers false: no erl program on the runtime's path, so the case stops before its other checks
+zlib_SUITE                   func     gz_usage2                    user_skip  cannot run: spawn port; the case needs a gzip program, and erXos spawns no ports in Phase 1
+
+# Applications outside the shipped set (design-runtime.md).
+logger_SUITE                 -        set_application_level        user_skip  cannot run: mnesia is not in the release (design-runtime.md), so the case skips
+prim_file_SUITE              files    large_write                  auto_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md); init_per_testcase starts it
+
+# /tmp (erx_file_remote and its server).
+prim_file_SUITE              files/file_info file_write_file_info_opts    failed     /tmp answers einval for a time before 1970, which 9P2000.L's setattr cannot carry (TODO.md, erx_file_remote)
+prim_file_SUITE              files/open read_file_rename_race        failed     a read_file racing a rename over its name answers enoent on /tmp (TODO.md)
