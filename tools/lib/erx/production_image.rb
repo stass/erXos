@@ -50,6 +50,12 @@ module Erx
 
     Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :report)
 
+    # What a test image adds to the system release (OracleQemu): entries for Pack#build,
+    # each with its receipt, the files those receipts name, and the imported trees their
+    # sources come from, each with its status. A production image adds nothing.
+    Added = Data.define(:entries, :inputs, :imports)
+    NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
       @root = File.realpath(root)
@@ -79,7 +85,7 @@ module Erx
 
     # Packs the image from Fiasco's last build into a directory that must be clean, so a
     # stale file cannot stand in for this build's.
-    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
+    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)), added: NOTHING_ADDED)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
@@ -93,8 +99,9 @@ module Erx
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
-      report = pack(entries: [*entries(root_task, kernel, sigma0), *release], root_task: root_task, manifest_source: manifest_source,
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root)], erts: erts, output: archive)
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task,
+                    manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs])
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -531,11 +538,11 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:)
+    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:, imports:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
-                                      imports: IMPORTS, compiler: @compiler)
+                                      imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),

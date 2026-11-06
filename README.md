@@ -365,9 +365,13 @@ tools/erx status
 
 For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
-failures, skips and incomplete results. `make check-oracle` reports
-erXos parity as unsupported until the target ERTS and libc-test domains
-exist. Native benchmarks carry their own label, apart from Linux suite
+failures, skips and incomplete results. `make check-oracle` runs
+`tools/erx oracle qemu`: `file_SUITE` and `filelib_SUITE` under Common
+Test in the system domain under QEMU, with TCG and, where the host offers
+it, HVF, compared case by case with stock OTP on the host against the
+hosted run's table of known differences. It says it is partial: OTP's
+`emulator`, `kernel`, `stdlib` and `compiler` groups and libc-test do not
+run there yet. Native benchmarks carry their own label, apart from Linux suite
 results. Interpreter benchmarks need a separate native bootstrap, built
 with `tools/erx oracle build --backend native --flavour emu`.
 

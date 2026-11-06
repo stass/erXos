@@ -210,6 +210,12 @@ it; git history is the record of completed work.
 * [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.
 * [Low] stopgap, `fiasco/l4re-core/libgcc`: the root links `libgcc.a` for `long double`'s helpers, under GPL-3.0-only WITH GCC-exception-3.1. Replace it with compiler-rt's builtins.
 * [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root writes no `erx_boot_info` page for a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff) says it does, and it seeds no `rng.c`.
+* [Medium] tooling, `tools/lib/erx/oracle_qemu.rb`: the suites' events reach the host on the
+  console's serial line, which the kernel, the root and ERTS's C output (`erx_output_write`)
+  also write, at any byte. Console writers never split an event line, as `erx_console` writes
+  each `display_string` whole, but a C writer can; the line's length and CRC-32 then reject
+  it, and the run reports itself incomplete rather than read it. Move the events to the host
+  link (`/pl011@9040000`, M4), which only the host link's own sink writes.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
   the host link's first consumer, M4.

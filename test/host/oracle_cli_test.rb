@@ -17,11 +17,86 @@ class OracleCliTest < Minitest::Test
     [status, output]
   end
 
-  def test_target_parity_is_explicitly_unsupported
-    status, output = run_cli('check-oracle')
-    assert_equal 1, status
-    assert_includes output, 'unsupported'
-    assert_includes output, 'target ERTS and libc-test'
+  # Stands in for OracleQemu: records each run and passes or fails as told.
+  class FakeQemu
+    attr_reader :calls
+
+    def initialize(directory, passing:)
+      @directory = directory
+      @passing = passing
+      @calls = []
+    end
+
+    def new(**options)
+      @calls << options
+      self
+    end
+
+    def run(suites, **options)
+      @calls << [suites, options]
+      report = File.join(@directory, "report-#{@calls.size}.txt")
+      File.write(report, "result: #{@passing ? 'PASS' : 'FAIL'}\n")
+      Erx::OracleQemu::Outcome.new(result: Struct.new(:passed?).new(@passing), report: report, seconds: 12.4)
+    end
+  end
+
+  def test_check_oracle_runs_each_offered_accelerator_and_says_what_it_leaves_out
+    Dir.mktmpdir do |directory|
+      qemu = FakeQemu.new(directory, passing: true)
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
+      assert_equal 0, status
+      assert_includes output, 'oracle qemu hvf: not_run'
+      assert_includes output, 'oracle qemu tcg: passed'
+      assert_includes output, 'partial: the system domain runs file_SUITE and filelib_SUITE'
+      assert_equal [[%w[file_SUITE filelib_SUITE], { accel: 'tcg', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
+    end
+  end
+
+  def test_check_oracle_fails_when_a_run_fails
+    Dir.mktmpdir do |directory|
+      status, output = run_cli('check-oracle', qemu_class: FakeQemu.new(directory, passing: false), accelerators: %w[tcg hvf])
+      assert_equal 1, status
+      assert_includes output, 'oracle qemu tcg: failed'
+      assert_includes output, 'oracle qemu hvf: failed'
+    end
+  end
+
+  def test_qemu_refuses_an_unknown_suite_before_running
+    qemu = FakeQemu.new('unused', passing: true)
+    status, output = run_cli('oracle', 'qemu', 'kernel_SUITE', qemu_class: qemu)
+    assert_equal 2, status
+    assert_includes output, 'unknown suites: kernel_SUITE'
+    assert_empty qemu.calls
+  end
+
+  def test_qemu_passes_its_options_and_prints_the_report
+    Dir.mktmpdir do |directory|
+      qemu = FakeQemu.new(directory, passing: false)
+      status, output = run_cli('oracle', 'qemu', '--out', directory, '--accel', 'hvf', '--cpus', '4', 'file_SUITE',
+                               qemu_class: qemu)
+      assert_equal 1, status
+      assert_includes output, 'result: FAIL'
+      assert_includes output, 'guest hvf 4 CPU, 12 s'
+      assert_equal [['file_SUITE'], { accel: 'hvf', cpus: 4, jobs: 4 }], qemu.calls.last
+      assert_equal directory, qemu.calls.first.fetch(:out)
+    end
+  end
+
+  def test_qemu_command_line_hands_erts_the_reporter_one_word_per_argument
+    line = Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'tcg')
+    words = line.split(' ')
+    assert_equal "erx.watchdog=#{Erx::ProductionImage::Run::TCG_WATCHDOG}", words.first
+    assert_equal %w[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /test/ct/reporter -run erx_ct_oracle main
+                    /test/ct/suites /tmp/ct file_SUITE], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
+    assert words.drop(1).all? { |word| word.start_with?('erx.arg=') }
+    refute_includes Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'hvf'), 'erx.watchdog'
+    assert_raises(Erx::Error) { Erx::OracleQemu.command_line(['a SUITE'], accel: 'tcg') }
+  end
+
+  # The system shell redraws its prompt before the reporter's io:format line.
+  def test_qemu_result_line_is_found_after_the_shell_prompt
+    assert_match Erx::OracleQemu::RESULT, "1> \b\b\b\e[Jerx-oracle-result {ok,{81,4,{6,0}}}\r\n".b
+    refute_match Erx::OracleQemu::RESULT, "erx-oracle-event 10 00000000 {}\r\n".b
   end
 
   def test_native_suite_cannot_bypass_container
