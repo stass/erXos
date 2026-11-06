@@ -139,7 +139,7 @@ answer it gives is one POSIX allows ([Fids and nodes](#fids-and-nodes)).
   domain D (ERTS)
   +--------------------------------------------------------------------+
   | file:write_file("/tmp/a", Bin)                                     |
-  |   prim_file NIF: erx_ns_resolve -> mount /tmp, grant G, "a"        |
+  |   prim_file NIF: erx_ns_step -> mount /tmp, grant G, "a"           |
   |   erx_file_remote: attach, walk, lcreate, write (64 KiB a          |
   |     request), clunk; the caller owns the fid                       |
   |         | local messages, to aliases                               |
@@ -154,9 +154,11 @@ answer it gives is one POSIX allows ([Fids and nodes](#fids-and-nodes)).
      a session domain also holds fids on its own G for its programs
 ```
 
-1. The caller's path is resolved by `erx_ns_resolve` in the NIF; `/tmp`'s
+1. The caller's path is resolved by `erx_ns_step` in the NIF; `/tmp`'s
    row is an ordinary `ERX_NS_SERVER` row whose pid is the domain's own
-   grant, so the NIF answers `{remote, {G, Tree, rw}, Names}`.
+   grant, so the NIF answers `{remote, {G, Tree, rw}, Place, Next,
+   Cursor}` whose action `Next` is `{parent, <<"a">>}`: a walk to
+   `/tmp`'s top, on which the `lcreate` of `a` is sent.
 2. `erx_file_remote`, in the calling process, sends the protocol's
    requests to `G` as local messages, as it sends them across a
    connection to a grant in another domain, each naming the caller as the
@@ -376,10 +378,11 @@ dies with a removed file open frees the file's charge
 answers on a UNIX host, by rules it applies to every server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)):
 its error steps (`rename` of `"/"` answers `einval`; the resolution's
-own answers are FreeBSD's, `einval` for a removal or rename whose last
-name is `.` or `..` among them; `/tmp` itself, the top of its mount,
-answers `ebusy` to `del_dir`, `eperm` to `delete`, `exdev` to `rename`
-and `eexist` to an operation that makes it; `enotempty` becomes `eexist`
+own answers are FreeBSD's, among them `einval` for a `del_dir` or
+`rename` whose last name is `.` or `..`, and `eperm` for such a
+`delete`; `/tmp` itself, the top of its mount, answers `ebusy` to
+`del_dir` and to `rename`, `eperm` to `delete` and `eexist` to an
+operation that makes it; `enotempty` becomes `eexist`
 and `eisdir` from `delete` becomes `eperm`; a failed `del_dir` of the working directory answers
 `einval`, while an empty one is removed), its mapping of `getattr` to
 `#file_info{}`, and its offsets: a write moves an open file's offset to
@@ -532,8 +535,15 @@ the code under test ran.
   `get_cwd()`, `make_link("link", "new")`, `rename("child/..", "x")`,
   `rename("x", "child/.")`, `make_dir("child/.")`,
   `make_dir("missing/..")`, `make_symlink("t", "child/..")`,
-  `make_link("file", "child/.")`, `make_link("child/.", "new")`, the
-  removal of an empty working directory and of a non-empty one, `delete("missing/victim")` while
+  `make_link("file", "child/.")`, `make_link("child/.", "new")`,
+  `del_dir("file/.")`, `rename("file/.", "x")`, with `dlnk` a link to
+  a directory and `flnk` to a file `delete("dlnk/")`, `delete("flnk/")`,
+  `rename("dlnk/", "z")` and `del_dir("dlnk/")`, `make_dir("file/")`,
+  `make_dir("dangle/")` with `dangle` a dangling link, `make_dir("/")`,
+  `del_dir("r/")` with `r` a link to `/`, `read_file_info("l1")` with
+  `l1` a link to `l2/` and `l2` a link to a file, the removal of an
+  empty working directory, then `set_cwd("..")`, and of a non-empty one,
+  `delete("missing/victim")` while
   `victim` exists, a truncate through a read-only descriptor and through
   a writable one after `chmod 0444`, and `write_file_info` of a record
   read with `read_file_info`. Seeded: the client without its
@@ -548,8 +558,8 @@ the code under test ran.
   node's mode for an open handle, which the `chmod 0444` case catches.
   `/tmp`'s own cases, which stock has no counterpart for: the top of the
   mount, where `del_dir("/tmp")` answers `ebusy`, `delete("/tmp")`
-  `eperm`, `rename("/tmp", "/x")` `exdev` and `make_dir("/tmp")`
-  `eexist`, and `/tmp/..` reaches `/`, none of them asking the tree.
+  `eperm`, `rename("/tmp", "/x")` and `rename("/x", "/tmp")` `ebusy`
+  and `make_dir("/tmp")` `eexist`, and `/tmp/..` reaches `/`, none of them asking the tree.
   Seeded: a machine that treats a top as an ordinary last name, whose
   `del_dir("/tmp")` then goes to the release's `/` and answers `erofs`.
 * **Fids and nodes.** A fid walked to a file, the file removed, then an
@@ -614,7 +624,7 @@ the code under test ran.
 
 The tree parses no bytes: names and payloads reach it only through
 `erx_fs`'s grammar, whose fuzz target feeds both local messages and
-frames, and paths only through `erx_ns_resolve`, which has its own. The
+frames, and paths only through `erx_ns_step`, which has its own. The
 sequence test is the tree's fuzz target, run by `make check-fuzz` for
 its budget.
 

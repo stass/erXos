@@ -670,7 +670,7 @@ inspector can report; every value only the kernel could report shows
 `unsupported` with its reporter, and budget `used` shows `partial` with
 reporter `liberx pool`, each with a test; a file read through
 `tools/erx files` equals its
-source on the machine; the fuzz targets of the deframer, `erx_ns_resolve`,
+source on the machine; the fuzz targets of the deframer, `erx_ns_step`,
 the 9P2000.L codec and each escaper run their budgets clean; the oracle's
 suites meet M3's standard on the interpreter image in the system domain, with
 the cases that need what M4 brings moved out of "cannot run".

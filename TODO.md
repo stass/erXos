@@ -493,13 +493,13 @@ it; git history is the record of completed work.
   `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
   `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
   remove the hand step and the hashes to keep.
-* [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
-  a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
-  link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers
-  `ebusy`, `rename("/tmp/x", "/tmp")` reaches the grant with an empty name where Linux answers `exdev`, and
-  `rename("/tmp/missing/x", "/u/y")` answers `exdev` where Linux first finds the missing directory (`enoent`).
-  Two entries of one grant, tree and rights also take a rename together where Linux answers `exdev` between
-  two bind mounts. The /tmp oracle cases settle which rules the design states.
+* [Medium] runtime, `liberx/ns.c`, `erx_prim_file.c` and `erx_file_remote`: paths resolve on their text
+  through `erx_ns_resolve` and `erx_ns_resolve_two`, so `..` after a link names the link's own parent, a rename
+  or a link places each path by its whole resolved path, and a last `.` or `..` answers Linux's errors.
+  [Resolving a path](docs/design-files.md#resolving-a-path) resolves them physically, one name at a time,
+  through `erx_ns_start`, `erx_ns_step` and `erx_ns_pair`, with FreeBSD's answers; the chokepoint rule
+  `tools/lib/erx/chokepoint_rules/ns.rb`, the fuzz target `tools/fuzz/ns_fuzz.c` and
+  `test/fixtures/release_fs_driver.c` move with it, and `prim_file:erx_resolve/1` goes.
 * [Low] runtime, `prim_file_nif.h`: `efile_path_t` keeps an `erx_ns_result_t` whose `res_mount` still points
   into the namespace's table after the lock is released; nothing reads it, but holding only copied values
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.

@@ -1548,7 +1548,7 @@ a nanosecond value.
 
 `prim_file`'s Erlang interface and NIF stay; its platform layer, the
 `efile_*` functions, is erXos's `erx_prim_file.c`. It resolves every path
-through the domain's namespace with `erx_ns_resolve`; a path on a file
+through the domain's namespace with `erx_ns_step`; a path on a file
 server goes to `prim_file`'s Erlang side, which speaks the file
 protocol, 9P2000.L's operations carried as Erlang terms, in the calling
 process over the domain's connection to the server, or by local messages
@@ -1594,9 +1594,10 @@ listing and the working directory work on all three; writing, renaming,
 deleting and creating directories work on the RAM file system and return
 `{error, erofs}` on the read-only local providers; anything else returns
 `{error, enotsup}`. Paths are UTF-8 with POSIX syntax, at most 4,096 bytes,
-resolved component by component with `.` and `..` handled lexically:
-`f/.` and `f/` are `f` even where `f` is a file, and `missing/../x` is `x`, where
-stock's `stat` answers `enotdir` and `enoent`. A name over the limit is refused
+resolved one name at a time by the machine of
+[design-files.md](design-files.md#resolving-a-path), with `.` and `..` taken
+physically, so `f/.` answers `enotdir` and `missing/../x` `enoent`, as stock's
+`stat` does. A name over the limit is refused
 before any walk, so `missing/` and a 256-byte name is `enametoolong` where stock
 answers `enoent`, and macOS's own limit of 1,024 bytes on a path does not apply.
 `erl_prim_loader` reads code through `prim_file` unchanged. Persistent
@@ -1609,7 +1610,7 @@ form one run, and a file's path in the namespace is its entry's path without
 that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
 of another path, so a directory needs no record of its own: `d` is a directory
 exactly when some path starts `d/`, and `/` always is. The provider's core
-is pure and builds for the host: given the names `erx_ns_resolve` returned, a
+is pure and builds for the host: given the names `erx_ns_step`'s action holds, a
 binary search answers file, directory, not found, or a file used as a directory,
 and listing a directory walks its range and yields each next name once. An empty
 directory cannot exist, and nothing can disagree with the index.
@@ -1644,7 +1645,7 @@ flag per file beside the table, guarding no data, spares later opens the hash,
 and two opens that race hash twice.
 
 Two seams keep the rest of the system out of this. New kinds of file are new
-rows of the namespace, and every path already passes `erx_ns_resolve`: a
+rows of the namespace, and every path already passes `erx_ns_step`: a
 domain's namespace may have the single row `/`, and an EROFS image or a
 file server, `/tmp`'s among them, add rows without moving a caller of `prim_file`. How the index is
 read is `erx_release_entry`, a `liberx` call: over `erx_pack_entry_at` and
@@ -2684,7 +2685,7 @@ runs on erXos. Its interface:
   ([design-system.md](design-system.md#the-domain-library)).
 * **Programs**: the POSIX-lite personality under musl, the channel client,
   the loader, the event executor and the signal machine
-  ([Native programs](design-programs.md)), and `erx_ns_resolve` and the
+  ([Native programs](design-programs.md)), and `erx_ns_step` and the
   descriptor table's file objects ([design-files.md](design-files.md)).
 
 ### Erlang-visible behaviour
@@ -2866,7 +2867,7 @@ cannot corrupt the kernel; a fault in it ends the machine by `erx.panic`.
 | exit and fault records | the kernel, through the fault gate | a fixed layout, copied once and checked by `liberx` |
 | console input (system domain only) | the UART, through the console's driver in the system domain | bytes the driver copied out at completion, parsed by the console service's Erlang code |
 | another domain's crash area (system domain only) | that domain | the header rules of [Data model](#data-model) |
-| `prim_file` paths | the domain's own code | `erx_ns_resolve`, with its fuzz target ([design-files.md](design-files.md#resolving-a-path)) |
+| `prim_file` paths | the domain's own code | `erx_ns_step`, with its fuzz target ([design-files.md](design-files.md#resolving-a-path)) |
 | file protocol replies | file servers, over connections | the funnel's grammar, then the protocol's ([design-files.md](design-files.md#the-file-protocol)) |
 | pipe rings and pages | whoever holds the pipe's other ends | every field copied once through `erx_shm_copy` and checked before use; the bytes are data ([design-pipes.md](design-pipes.md#security)) |
 | a device's completion entries and buffers | the device | fixed fields read once through generated accessors and bounds-checked in the NIF; the bytes copied once out of the pool into a fresh binary at completion and parsed in Erlang in the driver's own process ([The device NIF](#the-device-nif)) |
@@ -3124,7 +3125,7 @@ own domain, so a runtime that lies harms only itself.
   a slogan without a NUL. A system domain that crashes ends the machine;
   in a development build its slogan is in the crash record, and in a
   release build the record holds no text.
-* **Fuzz targets.** `prim_file`'s path resolution (`erx_ns_resolve`), the
+* **Fuzz targets.** `prim_file`'s path resolution (`erx_ns_step`), the
   file protocol's decoder, the crash header's reader, `liberx`'s
   validation of the boot information page, the funnel in both modes, the
   lane's position checks, the device NIF's completion reader with a
@@ -3162,9 +3163,9 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 | An executor made by `erx_pthread_create_executor`, hosted and in the `native_musl` suite: its slot is not `ERX_NO_EXECUTOR_SLOT`, `erx_park` with a deadline gives `ERX_ETIMEDOUT`, and a plain `pthread_create` thread gives `ERX_ETYPE` | the call delegating to plain `pthread_create`: the park gives `ERX_ETYPE` |
 | 64 executors succeed and the next gets `EAGAIN` in its creator; slots return after both a return and a `pthread_exit`, so 64 more succeed | the cleanup handler removed: the second round gets `EAGAIN` |
 | `ethr_event` timed waits and wakes in a storm, hosted and native, each with a deadline | `ETHR_FUTEX__`'s wake dropped: the storm's deadline fires; its wake returning the woken count: the first wake of a waiter ends the runtime; `ERX_ETIMEDOUT` passed through untranslated: the first timed wait ends it |
-| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree. The lexical differences, `f/.` and `f/` where `f` is a file and `missing/../x`, and a path over a limit, are named in the comparison and pinned | a binary search off by one, and a listing that yields a name twice, each fail the comparison; a resolver that looks up `.` and `..` fails the pins |
+| The release file system answers like stock `prim_file`: a corpus of paths (nested, `.`, `..`, missing, a file used as a directory, a directory opened, long names) gets the same results and bytes hosted over an archive as stock OTP over the unpacked tree, `f/.` and `f/` where `f` is a file and `missing/../x` included. A path over a limit is named in the comparison and pinned | a binary search off by one, and a listing that yields a name twice, each fail the comparison; a resolver that folds `.` and `..` on the text fails the `missing/../x` case |
 | 10,000 `read_file` calls and as many `open` and `close` pairs leave the NIF's resource count where it began, and `read_handle_info` on an open handle answers its entry's type and size | `close` answering `enotsup`: the pair's `close` fails; the release removed: the count grows; `read_handle_info` answering size 0: the comparison fails |
-| The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_resolve` and the core under `make check-fuzz` | the name-length check removed: the fuzz target's seed of a 256-byte name fails its property that no name is over the limit; the count check removed: AddressSanitizer reports the walk's overrun from the seed of 257 names |
+| The pure core, exhaustive over all paths of a small tree on the host; `erx_ns_step` and the core under `make check-fuzz` | the name-length check removed: the fuzz target's seed of a 256-byte name fails its property that no name is over the limit; the count check removed: AddressSanitizer reports the walk's overrun from the seed of 257 names |
 | A hosted boot reaches `init` through `erl_prim_loader` from the archive alone, with `HOME` and the working directory unset and no other file readable to it | `start.boot` removed from the archive: `init` ends with its own diagnostic, with no spin; a flipped index byte: the hosted entry refuses the archive, naming the check |
 
 ## Performance
