@@ -38,6 +38,12 @@ module Erx
           test: 'test/host/device_posters_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'erofs-reads', rule: 'the EROFS reader reaches an image only through erx_verity:read/3, and only erx_verity ' \
+                                     'reaches the window behind it',
+          design: 'docs/design-storage.md#reading-erofs-images', check: 'ErofsReads, in Checks',
+          test: 'test/host/erofs_reads_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'test-image-builder', rule: "only the oracle's QEMU run and the block device suite's harness call the " \
                                             "production image's test entry point, and no other tools source passes a " \
                                             "literal true for the packer's test keyword",

@@ -58,6 +58,26 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_elf64_phdr_decode(bytes, length, &value);
 	}
 	{
+		erx_erofs_dirent_t value;
+		(void)erx_erofs_dirent_decode(bytes, length, &value);
+	}
+	{
+		erx_erofs_inode_compact_t value;
+		(void)erx_erofs_inode_compact_decode(bytes, length, &value);
+	}
+	{
+		erx_erofs_inode_extended_t value;
+		(void)erx_erofs_inode_extended_decode(bytes, length, &value);
+	}
+	{
+		erx_erofs_super_block_t value;
+		(void)erx_erofs_super_block_decode(bytes, length, &value);
+	}
+	{
+		erx_erofs_xattr_ibody_header_t value;
+		(void)erx_erofs_xattr_ibody_header_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_debug_log_request_t value;
 		(void)erx_fiasco_debug_log_request_decode(bytes, length, &value);
 	}

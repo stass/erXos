@@ -133,6 +133,28 @@ struct erx_rights {
 #define ERX_ENTRY_SYSTEM UINT8_C(1)
 #define ERX_ERANGE (-INT32_C(5))
 #define ERX_ERIGHTS (-INT32_C(4))
+#define ERX_EROFS_BLOCK_BITS UINT32_C(12)
+#define ERX_EROFS_BLOCK_SIZE UINT32_C(4096)
+#define ERX_EROFS_COMPAT_MTIME UINT32_C(2)
+#define ERX_EROFS_COMPAT_SB_CHKSUM UINT32_C(1)
+#define ERX_EROFS_I_ALL UINT16_C(31)
+#define ERX_EROFS_I_DATALAYOUT_MASK UINT16_C(7)
+#define ERX_EROFS_I_DATALAYOUT_SHIFT UINT16_C(1)
+#define ERX_EROFS_I_NLINK_1 UINT16_C(16)
+#define ERX_EROFS_I_VERSION_MASK UINT16_C(1)
+#define ERX_EROFS_INODE_FLAT_INLINE UINT16_C(2)
+#define ERX_EROFS_INODE_FLAT_PLAIN UINT16_C(0)
+#define ERX_EROFS_INODE_LAYOUT_COMPACT UINT16_C(0)
+#define ERX_EROFS_INODE_LAYOUT_EXTENDED UINT16_C(1)
+#define ERX_EROFS_INODE_SLOT_BITS UINT32_C(5)
+#define ERX_EROFS_MAGIC UINT32_C(3774210530)
+#define ERX_EROFS_NAME_MAX UINT32_C(255)
+#define ERX_EROFS_S_IFDIR UINT16_C(16384)
+#define ERX_EROFS_S_IFLNK UINT16_C(40960)
+#define ERX_EROFS_S_IFMT UINT16_C(61440)
+#define ERX_EROFS_S_IFREG UINT16_C(32768)
+#define ERX_EROFS_SUPER_OFFSET UINT32_C(1024)
+#define ERX_EROFS_XATTR_ENTRY_SIZE UINT32_C(4)
 #define ERX_ESTALE (-INT32_C(2))
 #define ERX_ETIMEDOUT (-INT32_C(9))
 #define ERX_ETYPE (-INT32_C(3))
@@ -481,6 +503,7 @@ struct erx_rights {
 #define ERX_USER_BASE_MIN UINT64_C(65536)
 #define ERX_UTCB_BRS UINT32_C(58)
 #define ERX_UTCB_BYTES_MAX UINT32_C(504)
+#define ERX_VERITY_READ_BLOCKS_MAX UINT32_C(16)
 #define ERX_VIRTIO_BLK_CONFIG_CAPACITY_HIGH UINT32_C(1)
 #define ERX_VIRTIO_BLK_CONFIG_CAPACITY_LOW UINT32_C(0)
 #define ERX_VIRTIO_BLK_S_IOERR UINT8_C(1)
@@ -1017,6 +1040,264 @@ _Static_assert(offsetof(erx_elf64_phdr_t, p_memsz) ==
     ERX_ELF64_PHDR_OFF_P_MEMSZ, "erx_elf64_phdr.p_memsz offset");
 _Static_assert(offsetof(erx_elf64_phdr_t, p_align) ==
     ERX_ELF64_PHDR_OFF_P_ALIGN, "erx_elf64_phdr.p_align offset");
+
+#define ERX_EROFS_DIRENT_SIZE 12
+#define ERX_EROFS_DIRENT_ALIGN 4
+#define ERX_EROFS_DIRENT_OFF_NID_LO 0
+#define ERX_EROFS_DIRENT_OFF_NID_HI 4
+#define ERX_EROFS_DIRENT_OFF_NAMEOFF 8
+#define ERX_EROFS_DIRENT_OFF_FILE_TYPE 10
+typedef struct erx_erofs_dirent erx_erofs_dirent_t;
+struct erx_erofs_dirent {
+	_Alignas(4) uint32_t	nid_lo;
+	uint32_t	nid_hi;
+	uint16_t	nameoff;
+	uint8_t	file_type;
+	uint8_t	padding_0[1];
+};
+_Static_assert(sizeof(erx_erofs_dirent_t) == ERX_EROFS_DIRENT_SIZE, "erx_erofs_dirent size");
+_Static_assert(_Alignof(erx_erofs_dirent_t) == ERX_EROFS_DIRENT_ALIGN, "erx_erofs_dirent alignment");
+_Static_assert(offsetof(erx_erofs_dirent_t, nid_lo) ==
+    ERX_EROFS_DIRENT_OFF_NID_LO, "erx_erofs_dirent.nid_lo offset");
+_Static_assert(offsetof(erx_erofs_dirent_t, nid_hi) ==
+    ERX_EROFS_DIRENT_OFF_NID_HI, "erx_erofs_dirent.nid_hi offset");
+_Static_assert(offsetof(erx_erofs_dirent_t, nameoff) ==
+    ERX_EROFS_DIRENT_OFF_NAMEOFF, "erx_erofs_dirent.nameoff offset");
+_Static_assert(offsetof(erx_erofs_dirent_t, file_type) ==
+    ERX_EROFS_DIRENT_OFF_FILE_TYPE, "erx_erofs_dirent.file_type offset");
+
+#define ERX_EROFS_INODE_COMPACT_SIZE 32
+#define ERX_EROFS_INODE_COMPACT_ALIGN 4
+#define ERX_EROFS_INODE_COMPACT_OFF_I_FORMAT 0
+#define ERX_EROFS_INODE_COMPACT_OFF_I_XATTR_ICOUNT 2
+#define ERX_EROFS_INODE_COMPACT_OFF_I_MODE 4
+#define ERX_EROFS_INODE_COMPACT_OFF_I_NLINK 6
+#define ERX_EROFS_INODE_COMPACT_OFF_I_SIZE 8
+#define ERX_EROFS_INODE_COMPACT_OFF_I_MTIME 12
+#define ERX_EROFS_INODE_COMPACT_OFF_I_U 16
+#define ERX_EROFS_INODE_COMPACT_OFF_I_INO 20
+#define ERX_EROFS_INODE_COMPACT_OFF_I_UID 24
+#define ERX_EROFS_INODE_COMPACT_OFF_I_GID 26
+typedef struct erx_erofs_inode_compact erx_erofs_inode_compact_t;
+struct erx_erofs_inode_compact {
+	_Alignas(4) uint16_t	i_format;
+	uint16_t	i_xattr_icount;
+	uint16_t	i_mode;
+	uint16_t	i_nlink;
+	uint32_t	i_size;
+	uint32_t	i_mtime;
+	uint32_t	i_u;
+	uint32_t	i_ino;
+	uint16_t	i_uid;
+	uint16_t	i_gid;
+	uint8_t	padding_0[4];
+};
+_Static_assert(sizeof(erx_erofs_inode_compact_t) == ERX_EROFS_INODE_COMPACT_SIZE, "erx_erofs_inode_compact size");
+_Static_assert(_Alignof(erx_erofs_inode_compact_t) == ERX_EROFS_INODE_COMPACT_ALIGN, "erx_erofs_inode_compact alignment");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_format) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_FORMAT, "erx_erofs_inode_compact.i_format offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_xattr_icount) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_XATTR_ICOUNT, "erx_erofs_inode_compact.i_xattr_icount offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_mode) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_MODE, "erx_erofs_inode_compact.i_mode offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_nlink) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_NLINK, "erx_erofs_inode_compact.i_nlink offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_size) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_SIZE, "erx_erofs_inode_compact.i_size offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_mtime) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_MTIME, "erx_erofs_inode_compact.i_mtime offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_u) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_U, "erx_erofs_inode_compact.i_u offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_ino) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_INO, "erx_erofs_inode_compact.i_ino offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_uid) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_UID, "erx_erofs_inode_compact.i_uid offset");
+_Static_assert(offsetof(erx_erofs_inode_compact_t, i_gid) ==
+    ERX_EROFS_INODE_COMPACT_OFF_I_GID, "erx_erofs_inode_compact.i_gid offset");
+
+#define ERX_EROFS_INODE_EXTENDED_SIZE 64
+#define ERX_EROFS_INODE_EXTENDED_ALIGN 8
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_FORMAT 0
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_XATTR_ICOUNT 2
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_MODE 4
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_NB 6
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_SIZE 8
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_U 16
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_INO 20
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_UID 24
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_GID 28
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_MTIME 32
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_MTIME_NSEC 40
+#define ERX_EROFS_INODE_EXTENDED_OFF_I_NLINK 44
+typedef struct erx_erofs_inode_extended erx_erofs_inode_extended_t;
+struct erx_erofs_inode_extended {
+	_Alignas(8) uint16_t	i_format;
+	uint16_t	i_xattr_icount;
+	uint16_t	i_mode;
+	uint16_t	i_nb;
+	uint64_t	i_size;
+	uint32_t	i_u;
+	uint32_t	i_ino;
+	uint32_t	i_uid;
+	uint32_t	i_gid;
+	uint64_t	i_mtime;
+	uint32_t	i_mtime_nsec;
+	uint32_t	i_nlink;
+	uint8_t	padding_0[16];
+};
+_Static_assert(sizeof(erx_erofs_inode_extended_t) == ERX_EROFS_INODE_EXTENDED_SIZE, "erx_erofs_inode_extended size");
+_Static_assert(_Alignof(erx_erofs_inode_extended_t) == ERX_EROFS_INODE_EXTENDED_ALIGN, "erx_erofs_inode_extended alignment");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_format) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_FORMAT, "erx_erofs_inode_extended.i_format offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_xattr_icount) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_XATTR_ICOUNT, "erx_erofs_inode_extended.i_xattr_icount offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_mode) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_MODE, "erx_erofs_inode_extended.i_mode offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_nb) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_NB, "erx_erofs_inode_extended.i_nb offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_size) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_SIZE, "erx_erofs_inode_extended.i_size offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_u) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_U, "erx_erofs_inode_extended.i_u offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_ino) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_INO, "erx_erofs_inode_extended.i_ino offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_uid) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_UID, "erx_erofs_inode_extended.i_uid offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_gid) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_GID, "erx_erofs_inode_extended.i_gid offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_mtime) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_MTIME, "erx_erofs_inode_extended.i_mtime offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_mtime_nsec) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_MTIME_NSEC, "erx_erofs_inode_extended.i_mtime_nsec offset");
+_Static_assert(offsetof(erx_erofs_inode_extended_t, i_nlink) ==
+    ERX_EROFS_INODE_EXTENDED_OFF_I_NLINK, "erx_erofs_inode_extended.i_nlink offset");
+
+#define ERX_EROFS_SUPER_BLOCK_SIZE 128
+#define ERX_EROFS_SUPER_BLOCK_ALIGN 8
+#define ERX_EROFS_SUPER_BLOCK_OFF_MAGIC 0
+#define ERX_EROFS_SUPER_BLOCK_OFF_CHECKSUM 4
+#define ERX_EROFS_SUPER_BLOCK_OFF_FEATURE_COMPAT 8
+#define ERX_EROFS_SUPER_BLOCK_OFF_BLKSZBITS 12
+#define ERX_EROFS_SUPER_BLOCK_OFF_SB_EXTSLOTS 13
+#define ERX_EROFS_SUPER_BLOCK_OFF_ROOT_NID 14
+#define ERX_EROFS_SUPER_BLOCK_OFF_INOS 16
+#define ERX_EROFS_SUPER_BLOCK_OFF_EPOCH 24
+#define ERX_EROFS_SUPER_BLOCK_OFF_FIXED_NSEC 32
+#define ERX_EROFS_SUPER_BLOCK_OFF_BLOCKS 36
+#define ERX_EROFS_SUPER_BLOCK_OFF_META_BLKADDR 40
+#define ERX_EROFS_SUPER_BLOCK_OFF_XATTR_BLKADDR 44
+#define ERX_EROFS_SUPER_BLOCK_OFF_UUID 48
+#define ERX_EROFS_SUPER_BLOCK_OFF_VOLUME_NAME 64
+#define ERX_EROFS_SUPER_BLOCK_OFF_FEATURE_INCOMPAT 80
+#define ERX_EROFS_SUPER_BLOCK_OFF_AVAILABLE_COMPR_ALGS 84
+#define ERX_EROFS_SUPER_BLOCK_OFF_EXTRA_DEVICES 86
+#define ERX_EROFS_SUPER_BLOCK_OFF_DEVT_SLOTOFF 88
+#define ERX_EROFS_SUPER_BLOCK_OFF_DIRBLKBITS 90
+#define ERX_EROFS_SUPER_BLOCK_OFF_XATTR_PREFIX_COUNT 91
+#define ERX_EROFS_SUPER_BLOCK_OFF_XATTR_PREFIX_START 92
+#define ERX_EROFS_SUPER_BLOCK_OFF_PACKED_NID 96
+#define ERX_EROFS_SUPER_BLOCK_OFF_XATTR_FILTER_RESERVED 104
+#define ERX_EROFS_SUPER_BLOCK_OFF_BUILD_TIME 108
+#define ERX_EROFS_SUPER_BLOCK_OFF_ROOT_NID_8B 112
+typedef struct erx_erofs_super_block erx_erofs_super_block_t;
+struct erx_erofs_super_block {
+	_Alignas(8) uint32_t	magic;
+	uint32_t	checksum;
+	uint32_t	feature_compat;
+	uint8_t	blkszbits;
+	uint8_t	sb_extslots;
+	uint16_t	root_nid;
+	uint64_t	inos;
+	uint64_t	epoch;
+	uint32_t	fixed_nsec;
+	uint32_t	blocks;
+	uint32_t	meta_blkaddr;
+	uint32_t	xattr_blkaddr;
+	uint8_t	uuid[16];
+	uint8_t	volume_name[16];
+	uint32_t	feature_incompat;
+	uint16_t	available_compr_algs;
+	uint16_t	extra_devices;
+	uint16_t	devt_slotoff;
+	uint8_t	dirblkbits;
+	uint8_t	xattr_prefix_count;
+	uint32_t	xattr_prefix_start;
+	uint64_t	packed_nid;
+	uint8_t	xattr_filter_reserved;
+	uint8_t	padding_0[3];
+	uint32_t	build_time;
+	uint64_t	root_nid_8b;
+	uint8_t	padding_1[8];
+};
+_Static_assert(sizeof(erx_erofs_super_block_t) == ERX_EROFS_SUPER_BLOCK_SIZE, "erx_erofs_super_block size");
+_Static_assert(_Alignof(erx_erofs_super_block_t) == ERX_EROFS_SUPER_BLOCK_ALIGN, "erx_erofs_super_block alignment");
+_Static_assert(offsetof(erx_erofs_super_block_t, magic) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_MAGIC, "erx_erofs_super_block.magic offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, checksum) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_CHECKSUM, "erx_erofs_super_block.checksum offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, feature_compat) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_FEATURE_COMPAT, "erx_erofs_super_block.feature_compat offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, blkszbits) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_BLKSZBITS, "erx_erofs_super_block.blkszbits offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, sb_extslots) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_SB_EXTSLOTS, "erx_erofs_super_block.sb_extslots offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, root_nid) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_ROOT_NID, "erx_erofs_super_block.root_nid offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, inos) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_INOS, "erx_erofs_super_block.inos offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, epoch) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_EPOCH, "erx_erofs_super_block.epoch offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, fixed_nsec) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_FIXED_NSEC, "erx_erofs_super_block.fixed_nsec offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, blocks) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_BLOCKS, "erx_erofs_super_block.blocks offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, meta_blkaddr) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_META_BLKADDR, "erx_erofs_super_block.meta_blkaddr offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, xattr_blkaddr) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_XATTR_BLKADDR, "erx_erofs_super_block.xattr_blkaddr offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, uuid) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_UUID, "erx_erofs_super_block.uuid offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, volume_name) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_VOLUME_NAME, "erx_erofs_super_block.volume_name offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, feature_incompat) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_FEATURE_INCOMPAT, "erx_erofs_super_block.feature_incompat offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, available_compr_algs) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_AVAILABLE_COMPR_ALGS, "erx_erofs_super_block.available_compr_algs offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, extra_devices) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_EXTRA_DEVICES, "erx_erofs_super_block.extra_devices offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, devt_slotoff) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_DEVT_SLOTOFF, "erx_erofs_super_block.devt_slotoff offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, dirblkbits) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_DIRBLKBITS, "erx_erofs_super_block.dirblkbits offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, xattr_prefix_count) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_XATTR_PREFIX_COUNT, "erx_erofs_super_block.xattr_prefix_count offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, xattr_prefix_start) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_XATTR_PREFIX_START, "erx_erofs_super_block.xattr_prefix_start offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, packed_nid) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_PACKED_NID, "erx_erofs_super_block.packed_nid offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, xattr_filter_reserved) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_XATTR_FILTER_RESERVED, "erx_erofs_super_block.xattr_filter_reserved offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, build_time) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_BUILD_TIME, "erx_erofs_super_block.build_time offset");
+_Static_assert(offsetof(erx_erofs_super_block_t, root_nid_8b) ==
+    ERX_EROFS_SUPER_BLOCK_OFF_ROOT_NID_8B, "erx_erofs_super_block.root_nid_8b offset");
+
+#define ERX_EROFS_XATTR_IBODY_HEADER_SIZE 12
+#define ERX_EROFS_XATTR_IBODY_HEADER_ALIGN 4
+#define ERX_EROFS_XATTR_IBODY_HEADER_OFF_H_NAME_FILTER 0
+#define ERX_EROFS_XATTR_IBODY_HEADER_OFF_H_SHARED_COUNT 4
+typedef struct erx_erofs_xattr_ibody_header erx_erofs_xattr_ibody_header_t;
+struct erx_erofs_xattr_ibody_header {
+	_Alignas(4) uint32_t	h_name_filter;
+	uint8_t	h_shared_count;
+	uint8_t	padding_0[7];
+};
+_Static_assert(sizeof(erx_erofs_xattr_ibody_header_t) == ERX_EROFS_XATTR_IBODY_HEADER_SIZE, "erx_erofs_xattr_ibody_header size");
+_Static_assert(_Alignof(erx_erofs_xattr_ibody_header_t) == ERX_EROFS_XATTR_IBODY_HEADER_ALIGN, "erx_erofs_xattr_ibody_header alignment");
+_Static_assert(offsetof(erx_erofs_xattr_ibody_header_t, h_name_filter) ==
+    ERX_EROFS_XATTR_IBODY_HEADER_OFF_H_NAME_FILTER, "erx_erofs_xattr_ibody_header.h_name_filter offset");
+_Static_assert(offsetof(erx_erofs_xattr_ibody_header_t, h_shared_count) ==
+    ERX_EROFS_XATTR_IBODY_HEADER_OFF_H_SHARED_COUNT, "erx_erofs_xattr_ibody_header.h_shared_count offset");
 
 #define ERX_EXEC_STAT_SIZE 128
 #define ERX_EXEC_STAT_ALIGN 8

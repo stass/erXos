@@ -43231,6 +43231,11 @@ Third-party notices remain in their original files.
       "license": "BSD-2-Clause",
       "sha256": "6fe467a57db4eaa31825d21ea16fdb3d72dd4e5c4e6d4bb46ff23221df8c2940"
     },
+    "erts/preloaded/ebin/erx_erofs.beam": {
+      "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_erofs.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
+      "license": "BSD-2-Clause",
+      "sha256": "03eefd6e4dab650826006d12991a489445b26a77fda1c53627bf2ca889d92e97"
+    },
     "erts/preloaded/ebin/erx_file_remote.beam": {
       "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_file_remote.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
       "license": "BSD-2-Clause",
@@ -43240,6 +43245,11 @@ Third-party notices remain in their original files.
       "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_path.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
       "license": "BSD-2-Clause",
       "sha256": "f193856feee73f429956421b379458b023875b361a6e5e24c736241e63b6e216"
+    },
+    "erts/preloaded/ebin/erx_verity.beam": {
+      "evidence": "compiled from the erXos-authored erts/preloaded/src/erx_verity.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",
+      "license": "BSD-2-Clause",
+      "sha256": "bbc4708bf28acfead41fffd9e60a712fa4d86cd96ebbe735f767917f44115db4"
     },
     "erts/preloaded/ebin/prim_file.beam": {
       "evidence": "compiled from the modified erts/preloaded/src/prim_file.erl by the host oracle OTP 29.1.2 erlc with the preloaded Makefile flags (-I lib/kernel/src -I lib/kernel/include -I ../erlang/apps/erx/include +nowarn_deprecated_catch +deterministic)",

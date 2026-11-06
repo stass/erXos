@@ -289,6 +289,133 @@ erx_elf64_phdr_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_erofs_dirent_decode(const uint8_t *bytes, size_t length,
+    erx_erofs_dirent_t *result)
+{
+	erx_erofs_dirent_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_EROFS_DIRENT_SIZE)
+		return (false);
+
+	value.nid_lo = erx_abi_load_u32(bytes + 0);
+	value.nid_hi = erx_abi_load_u32(bytes + 4);
+	value.nameoff = erx_abi_load_u16(bytes + 8);
+	value.file_type = bytes[10];
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_erofs_inode_compact_decode(const uint8_t *bytes, size_t length,
+    erx_erofs_inode_compact_t *result)
+{
+	erx_erofs_inode_compact_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_EROFS_INODE_COMPACT_SIZE)
+		return (false);
+
+	value.i_format = erx_abi_load_u16(bytes + 0);
+	value.i_xattr_icount = erx_abi_load_u16(bytes + 2);
+	value.i_mode = erx_abi_load_u16(bytes + 4);
+	value.i_nlink = erx_abi_load_u16(bytes + 6);
+	value.i_size = erx_abi_load_u32(bytes + 8);
+	value.i_mtime = erx_abi_load_u32(bytes + 12);
+	value.i_u = erx_abi_load_u32(bytes + 16);
+	value.i_ino = erx_abi_load_u32(bytes + 20);
+	value.i_uid = erx_abi_load_u16(bytes + 24);
+	value.i_gid = erx_abi_load_u16(bytes + 26);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_erofs_inode_extended_decode(const uint8_t *bytes, size_t length,
+    erx_erofs_inode_extended_t *result)
+{
+	erx_erofs_inode_extended_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_EROFS_INODE_EXTENDED_SIZE)
+		return (false);
+
+	value.i_format = erx_abi_load_u16(bytes + 0);
+	value.i_xattr_icount = erx_abi_load_u16(bytes + 2);
+	value.i_mode = erx_abi_load_u16(bytes + 4);
+	value.i_nb = erx_abi_load_u16(bytes + 6);
+	value.i_size = erx_abi_load_u64(bytes + 8);
+	value.i_u = erx_abi_load_u32(bytes + 16);
+	value.i_ino = erx_abi_load_u32(bytes + 20);
+	value.i_uid = erx_abi_load_u32(bytes + 24);
+	value.i_gid = erx_abi_load_u32(bytes + 28);
+	value.i_mtime = erx_abi_load_u64(bytes + 32);
+	value.i_mtime_nsec = erx_abi_load_u32(bytes + 40);
+	value.i_nlink = erx_abi_load_u32(bytes + 44);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_erofs_super_block_decode(const uint8_t *bytes, size_t length,
+    erx_erofs_super_block_t *result)
+{
+	erx_erofs_super_block_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_EROFS_SUPER_BLOCK_SIZE)
+		return (false);
+
+	value.magic = erx_abi_load_u32(bytes + 0);
+	value.checksum = erx_abi_load_u32(bytes + 4);
+	value.feature_compat = erx_abi_load_u32(bytes + 8);
+	value.blkszbits = bytes[12];
+	value.sb_extslots = bytes[13];
+	value.root_nid = erx_abi_load_u16(bytes + 14);
+	value.inos = erx_abi_load_u64(bytes + 16);
+	value.epoch = erx_abi_load_u64(bytes + 24);
+	value.fixed_nsec = erx_abi_load_u32(bytes + 32);
+	value.blocks = erx_abi_load_u32(bytes + 36);
+	value.meta_blkaddr = erx_abi_load_u32(bytes + 40);
+	value.xattr_blkaddr = erx_abi_load_u32(bytes + 44);
+	for (size_t index = 0; index < 16; index++) {
+		value.uuid[index] = bytes[48 + index * 1];
+	}
+	for (size_t index = 0; index < 16; index++) {
+		value.volume_name[index] = bytes[64 + index * 1];
+	}
+	value.feature_incompat = erx_abi_load_u32(bytes + 80);
+	value.available_compr_algs = erx_abi_load_u16(bytes + 84);
+	value.extra_devices = erx_abi_load_u16(bytes + 86);
+	value.devt_slotoff = erx_abi_load_u16(bytes + 88);
+	value.dirblkbits = bytes[90];
+	value.xattr_prefix_count = bytes[91];
+	value.xattr_prefix_start = erx_abi_load_u32(bytes + 92);
+	value.packed_nid = erx_abi_load_u64(bytes + 96);
+	value.xattr_filter_reserved = bytes[104];
+	value.build_time = erx_abi_load_u32(bytes + 108);
+	value.root_nid_8b = erx_abi_load_u64(bytes + 112);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_erofs_xattr_ibody_header_decode(const uint8_t *bytes, size_t length,
+    erx_erofs_xattr_ibody_header_t *result)
+{
+	erx_erofs_xattr_ibody_header_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_EROFS_XATTR_IBODY_HEADER_SIZE)
+		return (false);
+
+	value.h_name_filter = erx_abi_load_u32(bytes + 0);
+	value.h_shared_count = bytes[4];
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_debug_log_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_debug_log_request_t *result)
 {

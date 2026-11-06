@@ -298,7 +298,10 @@ exchange:
   The packer writes each image with upstream's `mkfs.erofs`, a host tool
   fetched at a pinned release and hash, built out of tree and run as a
   subprocess, with a fixed timestamp (`-T` with `--all-time`), a fixed
-  UUID (`-U`), every file owned by root (`--all-root`) and no compression,
+  UUID (`-U`), every file owned by root (`--all-root`), 4 KiB blocks
+  (`-b 4096`, since `mkfs.erofs` otherwise takes the host's page size, 16 KiB
+  on Apple Silicon), no extended attributes (`-x -1`, so a host's own
+  attributes never reach an image or make two builds differ) and no compression,
   and then computes the image's hash tree itself and writes it after the
   image; `make check-reproducible` compares the images' bytes across two
   builds. `mkfs.erofs` is never linked and never part of an image, so the
@@ -1357,7 +1360,9 @@ outside this design are the user's decisions
 * erofs-utils 1.9.4, `man/mkfs.erofs.1`: `-T` ("Specify a UNIX timestamp
   for image creation time for reproducible builds"), `--all-time`, `-U`,
   `--all-root`, https://github.com/erofs/erofs-utils (tag `v1.9.4`, read
-  2026-10-31).
+  2026-10-31); `-b` and `-x` as `mkfs.erofs --help` of Homebrew's
+  erofs-utils 1.9.4 describes them, and 16 KiB blocks by default on an
+  Apple Silicon host, checked with `dump.erofs -s` on 2026-11-06.
 * Microsoft, "FAT32 File System Specification, FAT: General Overview of
   On-Disk Format", version 1.03, 6 December 2000: FAT type determination,
   long directory entries, name limits and character sets, name matching,

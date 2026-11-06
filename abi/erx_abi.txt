@@ -9,6 +9,7 @@ include formats/elf64.txt
 include formats/virtio.txt
 include formats/mbr.txt
 include medium.txt
+include formats/erofs.txt
 include kernel.txt
 include protocols/9p.txt
 

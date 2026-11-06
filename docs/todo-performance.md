@@ -194,6 +194,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Also record the tree process's memory against `held` after the workload, which [Charges](design-tmp.md#data-model)
   leaves unpromised. Fixes on the table, cheapest first: the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
   reached by one round trip.
+* **[Low] files, reading an EROFS image without a cache** (`erx_erofs` and
+  `erx_verity`, [design-storage.md](design-storage.md#reading-erofs-images)):
+  every operation reads its names' inode and directory blocks through the
+  funnel again, and the superblock's CRC-32C runs bit by bit in Erlang at each
+  mount. Settled by operations a second over a release image on the host's
+  stock OTP with and without the design's metadata cache; the fix on the table
+  is that cache.
 * **[Low] files, resolving a path in Erlang** (`erx_path`, [design-files.md](design-files.md#resolving-a-path)):
   each run the resolver places is list work over up to 256 names and 64 entries in the calling process; a `.` or `..`
   after a name the path has not yet walked costs a walk of its own, one round trip more, and on the release file

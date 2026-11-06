@@ -127,6 +127,28 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ENTRY_SYSTEM` | 1 |
 | `ERX_ERANGE` | -5 |
 | `ERX_ERIGHTS` | -4 |
+| `ERX_EROFS_BLOCK_BITS` | 12 |
+| `ERX_EROFS_BLOCK_SIZE` | 4096 |
+| `ERX_EROFS_COMPAT_MTIME` | 2 |
+| `ERX_EROFS_COMPAT_SB_CHKSUM` | 1 |
+| `ERX_EROFS_I_ALL` | 31 |
+| `ERX_EROFS_I_DATALAYOUT_MASK` | 7 |
+| `ERX_EROFS_I_DATALAYOUT_SHIFT` | 1 |
+| `ERX_EROFS_I_NLINK_1` | 16 |
+| `ERX_EROFS_I_VERSION_MASK` | 1 |
+| `ERX_EROFS_INODE_FLAT_INLINE` | 2 |
+| `ERX_EROFS_INODE_FLAT_PLAIN` | 0 |
+| `ERX_EROFS_INODE_LAYOUT_COMPACT` | 0 |
+| `ERX_EROFS_INODE_LAYOUT_EXTENDED` | 1 |
+| `ERX_EROFS_INODE_SLOT_BITS` | 5 |
+| `ERX_EROFS_MAGIC` | 3774210530 |
+| `ERX_EROFS_NAME_MAX` | 255 |
+| `ERX_EROFS_S_IFDIR` | 16384 |
+| `ERX_EROFS_S_IFLNK` | 40960 |
+| `ERX_EROFS_S_IFMT` | 61440 |
+| `ERX_EROFS_S_IFREG` | 32768 |
+| `ERX_EROFS_SUPER_OFFSET` | 1024 |
+| `ERX_EROFS_XATTR_ENTRY_SIZE` | 4 |
 | `ERX_ESTALE` | -2 |
 | `ERX_ETIMEDOUT` | -9 |
 | `ERX_ETYPE` | -3 |
@@ -475,6 +497,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
 | `ERX_UTCB_BYTES_MAX` | 504 |
+| `ERX_VERITY_READ_BLOCKS_MAX` | 16 |
 | `ERX_VIRTIO_BLK_CONFIG_CAPACITY_HIGH` | 1 |
 | `ERX_VIRTIO_BLK_CONFIG_CAPACITY_LOW` | 0 |
 | `ERX_VIRTIO_BLK_S_IOERR` | 1 |
@@ -693,6 +716,94 @@ Storage: `wire_le`. Prefix size: 56. Alignment: 8.
 | `p_filesz` | `u64` | 32 | 1 |
 | `p_memsz` | `u64` | 40 | 1 |
 | `p_align` | `u64` | 48 | 1 |
+
+### `erx_erofs_dirent_t`
+
+Storage: `wire_le`. Prefix size: 12. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `nid_lo` | `u32` | 0 | 1 |
+| `nid_hi` | `u32` | 4 | 1 |
+| `nameoff` | `u16` | 8 | 1 |
+| `file_type` | `u8` | 10 | 1 |
+
+### `erx_erofs_inode_compact_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `i_format` | `u16` | 0 | 1 |
+| `i_xattr_icount` | `u16` | 2 | 1 |
+| `i_mode` | `u16` | 4 | 1 |
+| `i_nlink` | `u16` | 6 | 1 |
+| `i_size` | `u32` | 8 | 1 |
+| `i_mtime` | `u32` | 12 | 1 |
+| `i_u` | `u32` | 16 | 1 |
+| `i_ino` | `u32` | 20 | 1 |
+| `i_uid` | `u16` | 24 | 1 |
+| `i_gid` | `u16` | 26 | 1 |
+
+### `erx_erofs_inode_extended_t`
+
+Storage: `wire_le`. Prefix size: 64. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `i_format` | `u16` | 0 | 1 |
+| `i_xattr_icount` | `u16` | 2 | 1 |
+| `i_mode` | `u16` | 4 | 1 |
+| `i_nb` | `u16` | 6 | 1 |
+| `i_size` | `u64` | 8 | 1 |
+| `i_u` | `u32` | 16 | 1 |
+| `i_ino` | `u32` | 20 | 1 |
+| `i_uid` | `u32` | 24 | 1 |
+| `i_gid` | `u32` | 28 | 1 |
+| `i_mtime` | `u64` | 32 | 1 |
+| `i_mtime_nsec` | `u32` | 40 | 1 |
+| `i_nlink` | `u32` | 44 | 1 |
+
+### `erx_erofs_super_block_t`
+
+Storage: `wire_le`. Prefix size: 128. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `magic` | `u32` | 0 | 1 |
+| `checksum` | `u32` | 4 | 1 |
+| `feature_compat` | `u32` | 8 | 1 |
+| `blkszbits` | `u8` | 12 | 1 |
+| `sb_extslots` | `u8` | 13 | 1 |
+| `root_nid` | `u16` | 14 | 1 |
+| `inos` | `u64` | 16 | 1 |
+| `epoch` | `u64` | 24 | 1 |
+| `fixed_nsec` | `u32` | 32 | 1 |
+| `blocks` | `u32` | 36 | 1 |
+| `meta_blkaddr` | `u32` | 40 | 1 |
+| `xattr_blkaddr` | `u32` | 44 | 1 |
+| `uuid` | `u8` | 48 | 16 |
+| `volume_name` | `u8` | 64 | 16 |
+| `feature_incompat` | `u32` | 80 | 1 |
+| `available_compr_algs` | `u16` | 84 | 1 |
+| `extra_devices` | `u16` | 86 | 1 |
+| `devt_slotoff` | `u16` | 88 | 1 |
+| `dirblkbits` | `u8` | 90 | 1 |
+| `xattr_prefix_count` | `u8` | 91 | 1 |
+| `xattr_prefix_start` | `u32` | 92 | 1 |
+| `packed_nid` | `u64` | 96 | 1 |
+| `xattr_filter_reserved` | `u8` | 104 | 1 |
+| `build_time` | `u32` | 108 | 1 |
+| `root_nid_8b` | `u64` | 112 | 1 |
+
+### `erx_erofs_xattr_ibody_header_t`
+
+Storage: `wire_le`. Prefix size: 12. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `h_name_filter` | `u32` | 0 | 1 |
+| `h_shared_count` | `u8` | 4 | 1 |
 
 ### `erx_exec_stat_t`
 

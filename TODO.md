@@ -581,8 +581,27 @@ it; git history is the record of completed work.
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
   `Erx::Release.differences` the comparison `test/integration/runtime_release_test.rb` runs over two hosted packs
   until then.
-* [Low] runtime, `prim_file`: EROFS has no provider yet, so a path on it cannot arise; its entry's
-  `{erofs, Image}` provider ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
+* [Medium] runtime, `erx_erofs`: the EROFS reader and its funnel `erx_verity` are written and preloaded,
+  but nothing mounts an image: no `{erofs, Image}` provider in `erx_path` and `prim_file`
+  ([design-files.md](docs/design-files.md#namespaces)), no mount at domain creation from the boot image's
+  grants, and `erx_verity:open/2` takes a block-reading function and a block count where the design's
+  window pid, root hash, salt and tree layout go. Its operations take names from the image's root, the
+  shape the provider needs.
+* [Medium] runtime, `erx_verity`: blocks pass through unchecked until the image's hash tree is written and
+  checked in `checked/3` (M11); there is no cache, neither of checked blocks nor the reader's ETS table
+  of 256 metadata blocks per image ([design-storage.md](docs/design-storage.md#reading-erofs-images)
+  step 4), so every lookup reads its inode and directory blocks again; a log of a failed read goes only
+  to the reader's mount log function.
+* [Low] runtime, `erx_erofs`: the superblock's CRC-32C is computed bit by bit in Erlang; it moves to the
+  CRC-32C per-byte primitive when that lands. Device, FIFO and socket inodes answer `enotsup`, which the
+  packer's trees never hold.
+* [Low] runtime, `erx_erofs`: a walk that fails inside an operation (`eio`, `enotsup`, `enametoolong`) answers
+  `{[], Error}`, dropping the kinds it passed, so `erx_path` places the error at the first name; a superblock
+  claiming more blocks than the window holds fails later as a read failure, not at mount as malformed; the
+  fixtures pack every file with one owner, mode and time (`--all-root`, `-T 0`), so no case checks the
+  owner, mode-bit and mtime offsets against `mkfs.erofs` with other values.
+* [Low] build, `Erx::ErofsReads`: no module may name `erx_verity` but the reader, so the runtime's mount at
+  domain creation needs a list of the modules that may call `erx_verity:open/2` when it lands.
 * [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
   file of a grant has no implementation, so it raises `undef`.
 * [Medium] runtime, `otp/lib/kernel/src/file.erl`: `file`'s name calls (`copy`, `delete`,

@@ -7,6 +7,7 @@ require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
 require_relative 'device_callers'
 require_relative 'device_posters'
+require_relative 'erofs_reads'
 require_relative 'ns_writers'
 require_relative 'origin'
 require_relative 'runner'
@@ -124,6 +125,7 @@ module Erx
       check_test_image_builders(own_sources)
       check_device_callers(listed)
       check_device_posters(listed)
+      check_erofs_reads(listed)
       check_ns_writers(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
@@ -268,6 +270,13 @@ module Erx
     def check_device_callers(listed)
       sources = listed.select { |relative| DeviceCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = DeviceCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # Imports included: a stock module edited to read the funnel's store is as much a violation.
+    def check_erofs_reads(listed)
+      sources = listed.select { |relative| ErofsReads.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = ErofsReads.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 
