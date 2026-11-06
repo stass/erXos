@@ -519,6 +519,11 @@ it; git history is the record of completed work.
   where requests are sent (no `mkdir`, `symlink`, `link`, `lcreate`, `unlinkat` or `renameat` on a
   directory walk shorter than the entry's `Root`, refused with `eio`) would make it hold by
   construction; with a `-type parent()` and specs under dialyzer for the helpers that take one.
+* [Low] runtime, `erx_file_remote`: `parent/1` holds by construction (`with_links/6` refuses with `eio` a
+  place whose `Names` do not begin with its `Root`), but a directory walk built elsewhere with `split_at/2` or
+  `last_name/1` is not floored at `Root`. A floor where requests are sent (no `mkdir`, `symlink`, `link`,
+  `lcreate`, `unlinkat` or `renameat` on a walk shorter than the entry's `Root`, refused with `eio`) would cover
+  every builder; with a `-type parent()` and specs under dialyzer for the helpers that take one.
 * [Low] runtime, `erx_file_remote` and [design-files.md](docs/design-files.md#errors) step 3: `ebusy` for a
   mount's or bind's top comes before errors Linux reports first: `delete` of a directory top answers `ebusy`
   where Linux's `unlink` answers `eisdir` (stock `eperm`), and a rename onto a directory top in the same mount,

@@ -36,7 +36,6 @@ static bool erx_ns_above_a_mount(const erx_ns_t *, const erx_ns_result_t *);
 static erx_ns_status_t erx_ns_place_names(const erx_ns_mount_t *,
     erx_ns_result_t *);
 static void erx_ns_refuse(erx_ns_result_t *);
-static bool erx_ns_on_grant(const erx_ns_mount_t *);
 
 /* No NUL, and well-formed UTF-8: no overlong form, surrogate or value past Unicode's end. */
 static bool
@@ -279,9 +278,6 @@ erx_ns_resolve(const erx_ns_t *ns, const uint8_t *path, size_t length,
 		return (status);
 	}
 	out->res_mount = mount;
-	/* The point is the path or a whole-name prefix of it: equal lengths mean the path is the point. */
-	out->res_top = mount != NULL &&
-	    out->res_path_length == erx_ns_field_length(mount->point);
 	return (ERX_NS_OK);
 }
 
@@ -290,84 +286,9 @@ static void
 erx_ns_refuse(erx_ns_result_t *out)
 {
 	out->res_mount = NULL;
-	out->res_top = false;
 	out->res_nnames = 0;
 	out->res_names_length = 0;
 	out->res_path_length = 0;
-}
-
-/* A NULL mount is the empty root above a narrowed namespace's mounts. */
-static bool
-erx_ns_on_grant(const erx_ns_mount_t *mount)
-{
-	return (mount != NULL && mount->kind == ERX_NS_SERVER);
-}
-
-bool
-erx_ns_same_grant(const erx_ns_mount_t *a, const erx_ns_mount_t *b)
-{
-	if (!erx_ns_on_grant(a) || !erx_ns_on_grant(b) || a->server != b->server ||
-	    a->rights != b->rights)
-		return (false);
-	/* Bounded by the field, though a table's trees always end in a NUL. */
-	for (size_t index = 0; index < sizeof(a->tree); index++) {
-		if (a->tree[index] != b->tree[index])
-			return (false);
-		if (a->tree[index] == '\0')
-			break;
-	}
-	return (true);
-}
-
-/* Whether one provider takes both resolved paths (erx_ns_resolve_two). */
-static erx_ns_status_t
-erx_ns_pair(const erx_ns_result_t *first, const erx_ns_result_t *second)
-{
-	const erx_ns_mount_t *first_mount = first->res_mount;
-	const erx_ns_mount_t *second_mount = second->res_mount;
-
-	if ((erx_ns_on_grant(first_mount) || erx_ns_on_grant(second_mount)) &&
-	    !erx_ns_same_grant(first_mount, second_mount))
-		return (ERX_NS_EXDEV);
-	return (ERX_NS_OK);
-}
-
-/*
- * Whether a rename's source, as written, is `/`: stock prim_file's own test
- * (strcmp in efile_rename), so `//`, `/.` and the top of a mount or bind are
- * not, and answer as Linux answers (design-files.md, Errors).
- */
-static bool
-erx_ns_renames_root(const uint8_t *path, size_t length)
-{
-	return (length == 1 && path[0] == '/');
-}
-
-/*
- * Both paths resolved, the first first; a refusal of either refuses both results.
- * A rename checks whether its source is `/` between the resolution and the pairing.
- */
-static erx_ns_status_t
-erx_ns_resolve_both(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
-    const uint8_t *second, size_t second_length, bool rename,
-    erx_ns_result_t *first_out, erx_ns_result_t *second_out)
-{
-	erx_ns_status_t status;
-
-	erx_ns_refuse(second_out);
-	status = erx_ns_resolve(ns, first, first_length, first_out);
-	if (status == ERX_NS_OK)
-		status = erx_ns_resolve(ns, second, second_length, second_out);
-	if (status == ERX_NS_OK && rename &&
-	    erx_ns_renames_root(first, first_length))
-		status = ERX_NS_EINVAL;
-	if (status == ERX_NS_OK)
-		status = erx_ns_pair(first_out, second_out);
-	if (status != ERX_NS_OK) {
-		erx_ns_refuse(first_out);
-		erx_ns_refuse(second_out);
-	}
-	return (status);
 }
 
 erx_ns_status_t
@@ -375,17 +296,15 @@ erx_ns_resolve_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length
     const uint8_t *second, size_t second_length, erx_ns_result_t *first_out,
     erx_ns_result_t *second_out)
 {
-	return (erx_ns_resolve_both(ns, first, first_length, second, second_length,
-	    false, first_out, second_out));
-}
+	erx_ns_status_t status;
 
-erx_ns_status_t
-erx_ns_resolve_rename(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
-    const uint8_t *second, size_t second_length, erx_ns_result_t *first_out,
-    erx_ns_result_t *second_out)
-{
-	return (erx_ns_resolve_both(ns, first, first_length, second, second_length,
-	    true, first_out, second_out));
+	erx_ns_refuse(second_out);
+	status = erx_ns_resolve(ns, first, first_length, first_out);
+	if (status == ERX_NS_OK)
+		status = erx_ns_resolve(ns, second, second_length, second_out);
+	if (status != ERX_NS_OK)
+		erx_ns_refuse(first_out);
+	return (status);
 }
 
 /*

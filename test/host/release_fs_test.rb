@@ -26,7 +26,6 @@ class ReleaseFsTest < Minitest::Test
   NS_EEXIST = 4
   NS_EBUSY = 5
   NS_ELIMIT = 6
-  NS_EXDEV = 7
   NS_SERVER = 2
   RIGHTS_RO = 0
   RIGHTS_RW = 1
@@ -46,7 +45,7 @@ class ReleaseFsTest < Minitest::Test
   WIDE_DEPTH = 3
   WORKING_DIRECTORIES = %w[/ /d /d/e].freeze
 
-  Answer = Data.define(:status, :mount, :top, :nnames, :names, :path, :kind, :file, :listing)
+  Answer = Data.define(:status, :mount, :nnames, :names, :path, :kind, :file, :listing)
   Entry = Data.define(:point, :kind, :server, :tree, :root, :rights)
   CORE = %w[liberx/ns.c liberx/release_fs.c].freeze
 
@@ -182,21 +181,6 @@ class ReleaseFsTest < Minitest::Test
                  entries(lines).drop(2)
   end
 
-  # The namespace alone decides whether a path is its entry's point: a mount's top and
-  # a bind's top, whose names are its root's, are; the bind's source, a path below a
-  # point, and the empty root above a narrowed namespace's mounts are not.
-  def test_a_path_at_an_entrys_point_is_its_top
-    paths = { '/' => true, '/tmp' => true, '/tmp/b/c' => false, '/x' => true, '/x/e/..' => true, '//x/.' => true,
-              '/x/e' => false, '/xy' => false }
-    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), bind('/tmp/b/c', '/x', false), *paths.keys.map { |path| query(path) }])
-    answers = lines.drop(2).map { |line| parse(line) }
-    assert_equal [NS_OK] * paths.size, answers.map(&:status)
-    assert_equal paths.values, answers.map(&:top), answers.map(&:path).inspect
-    assert_equal 'b/c', answers[3].names
-    narrowed = ask(['/', '/lib'], mounts: [['/lib', '/lib']])
-    assert_equal [[nil, false], [0, true]], narrowed.map { |answer| [answer.mount, answer.top] }
-  end
-
   def test_a_bind_is_refused_whole
     # With the root's 99 bytes and its `/`, the source's names are 4,095 bytes: they
     # fit the result, but not with the new root's leading `/` and its NUL.
@@ -211,38 +195,21 @@ class ReleaseFsTest < Minitest::Test
     assert_equal NS_ENAMETOOLONG.to_s, edit([bind(deep, '/x', false)], mounts: [['/', "/#{'r' * 99}"]]).first
   end
 
-  # A rename or a link takes two paths only where one provider takes both: one
-  # grant's tree through one set of rights, whatever the entries' points and roots,
-  # or the release file system; any other pair is exdev, and both results are empty.
-  def test_two_paths_resolve_together_or_answer_exdev
-    exdev = [NS_EXDEV, nil, '', nil, '']
+  # The two paths of a rename or a link resolve in one call, each as it would alone,
+  # whatever entries they reach: whether one provider takes both is prim_file's to
+  # decide. A path that fails answers its status, the first's first, and both results
+  # are empty.
+  def test_two_paths_resolve_together
     einval = [NS_EINVAL, nil, '', nil, '']
     cases = { ['/tmp/b', '/tmp/c/d'] => [NS_OK, 1, 'b', 1, 'c/d'], ['/tmp/b', '/x/e'] => [NS_OK, 1, 'b', 4, 'a/e'],
-              ['/tmp/b', '/u/b'] => exdev, ['/tmp/b', '/v/b'] => exdev, ['/tmp/b', '/ro/b'] => exdev,
-              ['/tmp/b', '/etc'] => exdev, ['/etc', '/tmp/b'] => exdev, ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'],
+              ['/tmp/b', '/u/b'] => [NS_OK, 1, 'b', 2, 'b'], ['/tmp/b', '/v/b'] => [NS_OK, 1, 'b', 3, 'b'],
+              ['/tmp/b', '/ro/b'] => [NS_OK, 1, 'b', 5, 'a/b'], ['/tmp/b', '/etc'] => [NS_OK, 1, 'b', 0, 'etc'],
+              ['/etc', '/tmp/b'] => [NS_OK, 0, 'etc', 1, 'b'], ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'],
               ['/tmp/b', "/x\xff"] => einval, ["/a\0", '/u/b'] => einval, ['/ro/a', '/ro/b'] => [NS_OK, 5, 'a/a', 5, 'a/b'] }
     lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), mount('/u', 7, 'u', RIGHTS_RW), mount('/v', 8, 'tmp', RIGHTS_RW),
                   bind('/tmp/a', '/x', false), bind('/tmp/a', '/ro', true)] + cases.keys.map { |first, second| two(first, second) })
     assert_equal ['0'] * 5, lines.first(5)
     cases.keys.zip(lines.drop(5)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
-  end
-
-  # A rename whose source is written `/` is einval, stock's answer for a rename of `/`,
-  # before the pair could be exdev; `//`, the top of a mount or bind, a last `.` or `..`,
-  # or a destination at a top resolves as any other pair.
-  def test_a_rename_of_root_is_einval_before_exdev
-    exdev = [NS_EXDEV, nil, '', nil, '']
-    einval = [NS_EINVAL, nil, '', nil, '']
-    cases = { ['/', '/tmp/b'] => einval, ['/', '/etc'] => einval, ['//', '/etc'] => [NS_OK, 0, '', 0, 'etc'], ['//', '/tmp/b'] => exdev,
-              ['/tmp', '/u/b'] => exdev, ['/tmp/', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
-              ['/x', '/tmp/c'] => [NS_OK, 3, 'a', 1, 'c'], ['/tmp/..', '/etc'] => [NS_OK, 0, '', 0, 'etc'],
-              ['tmp', '/etc'] => exdev, ['/.', '/etc'] => [NS_OK, 0, '', 0, 'etc'], ['/tmp/.', '/u/b'] => exdev, ['/tmp/a/..', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
-              ['/tmp/b', '/u/b'] => exdev, ['/tmp/b', '/tmp'] => [NS_OK, 1, 'b', 1, ''],
-              ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'], ["/a\0", '/u/b'] => einval }
-    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), mount('/u', 7, 'u', RIGHTS_RW), bind('/tmp/a', '/x', false)] +
-                 cases.keys.map { |first, second| rename(first, second) })
-    assert_equal ['0'] * 3, lines.first(3)
-    cases.keys.zip(lines.drop(3)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
   end
 
   # A draw keeps the counter's low 32 bits and skips NOFID, also past a wrap.
@@ -406,7 +373,6 @@ class ReleaseFsTest < Minitest::Test
   def unmount(point) = "U #{hex(point.b)}"
   def query(path) = "Q #{hex(path.b)}"
   def two(first, second) = "T #{hex(first.b)} #{hex(second.b)}"
-  def rename(first, second) = "R #{hex(first.b)} #{hex(second.b)}"
 
   def pair(line)
     status, first_mount, first_names, second_mount, second_names = line.split(' ')
@@ -434,11 +400,10 @@ class ReleaseFsTest < Minitest::Test
   end
 
   def parse(line)
-    status, mount, top, nnames, names, path, kind, file, listing = line.split(' ', 9)
-    return Answer.new(status: Integer(status), mount: nil, top: false, nnames: 0, names: '', path: '', kind: nil, file: nil, listing: []) if mount.nil?
+    status, mount, nnames, names, path, kind, file, listing = line.split(' ', 8)
+    return Answer.new(status: Integer(status), mount: nil, nnames: 0, names: '', path: '', kind: nil, file: nil, listing: []) if mount.nil?
 
-    Answer.new(status: Integer(status), mount: mount == '-' ? nil : Integer(mount), top: top == '1',
-               nnames: Integer(nnames),
+    Answer.new(status: Integer(status), mount: mount == '-' ? nil : Integer(mount), nnames: Integer(nnames),
                names: unhex(names), path: unhex(path), kind: Integer(kind), file: Integer(file),
                listing: listing == '-' ? [] : listing.split(','))
   end
@@ -484,9 +449,9 @@ class ReleaseFsTest < Minitest::Test
     WORKING_DIRECTORIES.flat_map do |cwd|
       paths.zip(ask(paths, cwd: cwd, driver: driver)).filter_map do |path, answer|
         names, normal, kind, file, listing = model(path, cwd: cwd)
-        got = [answer&.status, answer&.mount, answer&.top, answer&.nnames, answer&.names, answer&.path, answer&.kind, answer&.file,
+        got = [answer&.status, answer&.mount, answer&.nnames, answer&.names, answer&.path, answer&.kind, answer&.file,
                answer&.listing]
-        want = [NS_OK, 0, normal == '/', names.split('/').size, names, normal, kind, file, listing]
+        want = [NS_OK, 0, names.split('/').size, names, normal, kind, file, listing]
         "#{cwd} #{path}: #{got} != #{want}" if got != want
       end
     end

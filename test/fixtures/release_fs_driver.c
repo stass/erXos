@@ -21,11 +21,10 @@
  *                       <1 or 0> <fid>
  *   T <first> <second>  erx_ns_resolve_two; answers <status> and, for each
  *                       path, <mount or -> <names>
- *   R <first> <second>  erx_ns_resolve_rename; answers as T does
  *   Q <path>            answer one line:
- *                       <status> <mount or -> <top> <nnames> <names> <path> <kind> <file> <listing>
+ *                       <status> <mount or -> <nnames> <names> <path> <kind> <file> <listing>
  *
- * status is erx_ns_status_t's number, mount the table's index, top 1 or 0, kind
+ * status is erx_ns_status_t's number, mount the table's index, kind
  * erx_release_fs_kind_t's number and listing the names joined by `,`. A refused
  * path answers its status and nothing more. An operand may be `-`, for empty.
  */
@@ -51,11 +50,7 @@ static size_t driver_unhex(const char *, uint8_t *, size_t);
 static void driver_put_hex(const char *, size_t);
 static void driver_field(const char *, char *, size_t);
 static void driver_answer(const uint8_t *, size_t);
-typedef erx_ns_status_t driver_two_t(const erx_ns_t *, const uint8_t *, size_t,
-    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
-
-static void driver_answer_two(driver_two_t *, const uint8_t *, size_t,
-    const uint8_t *, size_t);
+static void driver_answer_two(const uint8_t *, size_t, const uint8_t *, size_t);
 
 static size_t
 driver_unhex(const char *text, uint8_t *bytes, size_t capacity)
@@ -94,14 +89,14 @@ driver_field(const char *text, char *field, size_t capacity)
 }
 
 static void
-driver_answer_two(driver_two_t *resolve, const uint8_t *first,
-    size_t first_length, const uint8_t *second, size_t second_length)
+driver_answer_two(const uint8_t *first, size_t first_length,
+    const uint8_t *second, size_t second_length)
 {
 	static erx_ns_result_t results[2];
 	erx_ns_status_t status;
 
-	status = resolve(&ns, first, first_length, second, second_length,
-	    &results[0], &results[1]);
+	status = erx_ns_resolve_two(&ns, first, first_length, second,
+	    second_length, &results[0], &results[1]);
 	printf("%d", (int)status);
 	for (size_t index = 0; index < 2; index++) {
 		if (results[index].res_mount == NULL)
@@ -135,7 +130,7 @@ driver_answer(const uint8_t *path, size_t length)
 		fputs("- ", stdout);
 	else
 		printf("%d ", (int)(out.res_mount - ns.mounts));
-	printf("%d %u ", out.res_top ? 1 : 0, out.res_nnames);
+	printf("%u ", out.res_nnames);
 	driver_put_hex(out.res_names, out.res_names_length);
 	putchar(' ');
 	driver_put_hex(out.res_path, out.res_path_length);
@@ -231,11 +226,9 @@ main(int argc, char **argv)
 			printf("%d %lu\n", found ? 1 : 0, (unsigned long)fid);
 			break;
 		case 'T':
-		case 'R':
 			length = driver_unhex(first, path, sizeof(path));
 			other_length = driver_unhex(second, other, sizeof(other));
-			driver_answer_two(line[0] == 'T' ? erx_ns_resolve_two :
-			    erx_ns_resolve_rename, path, length, other, other_length);
+			driver_answer_two(path, length, other, other_length);
 			break;
 		case 'Q':
 			length = driver_unhex(first, path, sizeof(path));

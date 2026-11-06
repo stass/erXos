@@ -1182,7 +1182,7 @@ static ERL_NIF_TERM rename_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv
     ASSERT(argc == 2);
 
     /* erXos: both paths resolve under one hold of the namespace's lock. */
-    if((posix_errno = efile_marshal_rename_paths(env, argv[0], argv[1], &existing_path, &new_path))) {
+    if((posix_errno = efile_marshal_paths(env, argv[0], argv[1], &existing_path, &new_path))) {
         return marshal_error_to_term(env, &existing_path, posix_errno);
     } else if((posix_errno = efile_rename(&existing_path, &new_path))) {
         return posix_error_to_tuple(env, posix_errno);

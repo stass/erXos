@@ -3,10 +3,9 @@
 
 %% prim_file's operations on a path below a file server's grant (design-files.md, Erlang
 %% clients). prim_file's NIF answers such a path with its mount entry's grant, {Pid, Tree,
-%% Rights}, and its place, {Point, Root, Names, Top}: the entry's point in the namespace,
-%% the entry's root in the tree, the path's names from the tree's root, the entry's root
-%% included, and whether the path is the entry's point itself, the top of a mount or of
-%% a bind, as the namespace decides it. prim_file calls the operation here, in the calling process, with the path as
+%% Rights}, and its place, {Point, Root, Names}: the entry's point in the namespace, the
+%% entry's root in the tree, and the path's names from the tree's root, the entry's root
+%% included. prim_file calls the operation here, in the calling process, with the path as
 %% the caller wrote it. Rights are the entry's, so a read-only bind of a writable grant
 %% arrives read-only, and a request that writes is refused with erofs here, before
 %% anything is sent.
@@ -68,10 +67,10 @@
 %% A path's names from the tree's root, joined by "/": <<>> is the root.
 -type names() :: binary().
 %% Where a path lies on its grant: the entry maps the namespace path Point to the tree's
-%% names Root, and Names begins with Root. Top is the namespace's own answer to whether
-%% the path is Point itself, which every operation on a parent and a last name takes
-%% through parent/1 and not from the names: a bind's top has its root's names.
--type place() :: {Point :: binary(), Root :: names(), Names :: names(), Top :: boolean()}.
+%% names Root, and Names begins with Root: at Point they are Root, below it they are more.
+%% with_links/6 refuses any other place from the NIF with eio, so parent/1 finds a last name in every
+%% place that is not its entry's top.
+-type place() :: {Point :: binary(), Root :: names(), Names :: names()}.
 %% A path as the caller wrote it, encoded as prim_file encodes it for its NIF, NUL-terminated.
 -type path() :: binary().
 %% A path's text: a path() without its NUL.
@@ -339,7 +338,7 @@ make_symlink(Grant, Place, EncodedTarget, Path) ->
 
 %% An operation that makes a name, following links as one/5 does: a last "." or ".."
 %% answers eexist once the rest of the path is a directory (step 2), as does a path whose
-%% place says Top (step 3), a name that always exists; else Make runs on the grant, the
+%% place is its entry's top (step 3), a name that always exists; else Make runs on the grant, the
 %% path's parent and its text, unless the rights refuse a write.
 make(Grant, Place, Path, Make, Local) ->
     with_links(Grant, [Place], [text(Path)],
@@ -410,7 +409,7 @@ delete(Grant, Place, Path) ->
 
 %% An operation that removes a name, following links as one/5 does: a last "." or ".."
 %% answers Special's error once the rest of the path is a directory (step 2), and a path
-%% whose place says Top, the top of a mount or of a bind, ebusy (step 3); else Remove runs
+%% whose place is its entry's top, the top of a mount or of a bind, ebusy (step 3); else Remove runs
 %% on the grant, the path's parent and its text, unless the rights refuse a write.
 remove(Grant, Place, Path, Special, Remove, Local) ->
     with_links(Grant, [Place], [text(Path)],
@@ -477,7 +476,7 @@ make_link(Grant, Place, OtherPlace, Existing, New) ->
     with_links(Grant, [Place, OtherPlace], [text(Existing), text(New)], fun linked/3,
                fun([From, To]) -> prim_file:make_link(From, To) end).
 
-linked(Grant, [{_, _, Names, _}, OtherPlace], [ExistingText, NewText]) ->
+linked(Grant, [{_, _, Names}, OtherPlace], [ExistingText, NewText]) ->
     Walk = {names(Names), case slashed(ExistingText) of
                               true -> directory;
                               false -> nofollow
@@ -580,7 +579,7 @@ has(Mode, [Mode | _]) -> true;
 has(Mode, [_ | Modes]) -> has(Mode, Modes);
 has(_, _) -> false.
 
-open_on(Grant, {_, _, Names, _}, Text, #{access := read, directory := Directory, flags := Flags} = Open) ->
+open_on(Grant, {_, _, Names}, Text, #{access := read, directory := Directory, flags := Flags} = Open) ->
     Mode = case Directory orelse slashed(Text) of
                true -> directory;
                false -> follow
@@ -1195,7 +1194,7 @@ set_cwd(Grant, Place, Path) ->
 %% chdir's checks on what the path reaches: a directory, which the domain's user may
 %% search, as the owner whose permission bits a server checks (design-tmp.md,
 %% Permissions); else enotdir or eacces, or the walk's answer.
-cwd_at(Grant, {_, _, Names, _} = Reached, Text) ->
+cwd_at(Grant, {_, _, Names} = Reached, Text) ->
     case act(Grant, [{names(Names), followed(Text)}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
         {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =/= ?ERX_P9_S_IFDIR -> {error, enotdir};
         {ok, #{mode := Mode}} when Mode band 8#100 =:= 0 -> {error, eacces};
@@ -1204,7 +1203,7 @@ cwd_at(Grant, {_, _, Names, _} = Reached, Text) ->
     end.
 
 %% The namespace path a place names: the entry's point, then the names below its root.
-namespace_path({Point, Root, Names, _}) ->
+namespace_path({Point, Root, Names}) ->
     {_, Below} = split_at(length(names(Root)), names(Names)),
     joined([Point | Below], false).
 
@@ -1217,7 +1216,7 @@ identity(Text) ->
     Found = case prim_file:erx_resolve([Text]) of
                 {remote, Grant, Place} ->
                     with_links(Grant, [Place], [Text],
-                               fun({Pid, Tree, _} = OnGrant, [{_, _, Names, _}], _) ->
+                               fun({Pid, Tree, _} = OnGrant, [{_, _, Names}], _) ->
                                        case act(OnGrant, [{names(Names), follow}],
                                                 fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
                                            {ok, #{qid := {_, _, QidPath}}} -> {found, {Pid, Tree, QidPath}};
@@ -1368,10 +1367,12 @@ names(Names) -> binary:split(Names, <<"/">>, [global]).
 %% operation that acts on a parent and a last name takes them from here and decides what
 %% top means for it (design-files.md, Errors, step 3), so none acts on a top's parent.
 %% This is the one caller of split_last/1, which test/host/erx_file_remote_test.rb checks.
-%% Below its top a place has at least one name past its entry's Root.
+%% A place is its entry's top exactly when its Names are its Root; with_links/6 lets no
+%% place through whose Names do not begin with Root's, so any other has a name past Root
+%% and its Dir is never shorter than Root.
 -spec parent(place()) -> {Dir :: [binary()], Name :: binary()} | top.
-parent({_, _, _, true}) -> top;
-parent({_, _, Names, false}) -> split_last(names(Names)).
+parent({_, Root, Root}) -> top;
+parent({_, _, Names}) -> split_last(names(Names)).
 
 %% A parent's names, its last name's included.
 whole({Dir, Name}) -> Dir ++ [Name].
@@ -1387,7 +1388,7 @@ split_last(NameList) ->
 %% text, Local on the text of a path that a link led to the NIF's own providers.
 one(Grant, Place, Path, Try, Local) ->
     with_links(Grant, [Place], [text(Path)],
-               fun(OnGrant, [{_, _, Names, _}], [Text]) -> Try(OnGrant, names(Names), Text) end,
+               fun(OnGrant, [{_, _, Names}], [Text]) -> Try(OnGrant, names(Names), Text) end,
                fun([Text]) -> Local(Text) end).
 
 %% Runs Try on the grant and the places its paths lie on, and gives its answer, unless a
@@ -1395,7 +1396,9 @@ one(Grant, Place, Path, Try, Local) ->
 %% through the link and every path of the operation resolved again by prim_file's NIF:
 %% Try runs again where they lie now, or Local runs on their texts when no grant holds
 %% them. Each link counts towards one limit for the operation, the links met while
-%% reading a link included, so following ends after ?LINKS_MAX links with eloop.
+%% reading a link included, so following ends after ?LINKS_MAX links with eloop. Every
+%% place Try is given has Names that begin with its Root's, the namespace's own rule
+%% (place()); one that does not answers eio and nothing is sent.
 -spec with_links(grant(), [place()], [text()], Try, Local) -> term() when
       Try :: fun((grant(), [place()], [text()]) -> term() | link()),
       Local :: fun(([text()]) -> term()).
@@ -1403,10 +1406,23 @@ with_links(Grant, Places, Texts, Try, Local) ->
     with_links(Grant, Places, Texts, Try, Local, [0 || _ <- Places]).
 
 with_links(Grant, Places, Texts, Try, Local, Followed) ->
-    case Try(Grant, Places, Texts) of
-        {link, Which, At} -> through(Grant, Places, Texts, Try, Local, Followed, Which, At);
-        Answer -> Answer
+    case placed(Places) of
+        false ->
+            {error, eio};
+        true ->
+            case Try(Grant, Places, Texts) of
+                {link, Which, At} -> through(Grant, Places, Texts, Try, Local, Followed, Which, At);
+                Answer -> Answer
+            end
     end.
+
+%% Whether each place's Names begin with its Root's names.
+placed([]) -> true;
+placed([{_, Root, Names} | Places]) -> below(names(Root), names(Names)) andalso placed(Places).
+
+below([], _) -> true;
+below([Name | Root], [Name | Names]) -> below(Root, Names);
+below(_, _) -> false.
 
 through(Grant, Places, Texts, Try, Local, Followed, Which, At) ->
     case nth(Which, Followed) of
@@ -1441,7 +1457,7 @@ follow(Grant, Places, Texts, Try, Local, Followed, Which, At) ->
 %% root's own names has no such directory, and a relative one answers enoent. A link that
 %% is empty answers enoent, as on Linux. Reading the link may meet an earlier one, which
 %% is answered as a link() for the caller to follow.
-link_path(Grant, {Point, Root, Names, _}, At, Slashed) ->
+link_path(Grant, {Point, Root, Names}, At, Slashed) ->
     {Through, After} = split_at(At + 1, names(Names)),
     case act(Grant, [{Through, nofollow}], fun([Fid]) -> {readlink, Fid} end) of
         {ok, <<>>} ->

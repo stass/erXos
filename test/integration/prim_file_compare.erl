@@ -232,8 +232,8 @@ two_paths(Show) ->
     Show("rename two", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/u/y">>) end)),
     Show("rename ro", Reached(fun() -> prim_file:rename(<<"/tmp/a/x">>, <<"/ro/y">>) end)),
     Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/lib/y">>) end)),
-    %% A rename whose source is "/" or the top of a mount is einval before it is exdev or
-    %% erofs; a last "." keeps the order of the other two-path refusals.
+    %% A rename whose source is "/" is einval before it is exdev or erofs; "//", a mount's
+    %% or a bind's top and a last "." keep the order of the other two-path refusals.
     Show("rename root", Reached(fun() -> prim_file:rename(<<"/">>, <<"/tmp/y">>) end)),
     Show("rename root local", Reached(fun() -> prim_file:rename(<<"/">>, <<"/lib/y">>) end)),
     Show("rename mount top", Reached(fun() -> prim_file:rename(<<"/tmp/">>, <<"/u/y">>) end)),

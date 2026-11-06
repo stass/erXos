@@ -12,8 +12,9 @@
  * path, and the rest are the release's file paths. Whatever the path holds, a
  * resolved result keeps design-files.md's properties; a change keeps the table's
  * (points normalised and unique, at most ERX_NS_MOUNTS_MAX, `/` never removed) or
- * leaves it as it was, and a bind's point reaches what its source did; a rename's
- * pair is a pair's but einval for a source of `/`; a lookup and a listing
+ * leaves it as it was, and a bind's point reaches what its source did; a path's names
+ * begin with its entry's root's and are exactly them at the entry's point, which
+ * erx_file_remote's parent/1 relies on; a pair is two resolutions; a lookup and a listing
  * agree with a plain scan of the table.
  */
 
@@ -45,8 +46,7 @@ static void fuzz_change(erx_ns_t *, const uint8_t *, size_t);
 static void fuzz_check_two(const erx_ns_t *, const uint8_t *, size_t,
     const uint8_t *, size_t);
 static bool fuzz_same_result(const erx_ns_result_t *, const erx_ns_result_t *);
-static void fuzz_check_rename(const erx_ns_t *, const uint8_t *, size_t,
-    const uint8_t *, size_t);
+static void fuzz_check_root_names(const erx_ns_result_t *);
 
 static bool
 fuzz_next_line(const uint8_t *bytes, size_t length, size_t *cursor,
@@ -257,14 +257,8 @@ fuzz_check_result(const erx_ns_t *ns, const erx_ns_result_t *out)
 	/* The result is a prefix match, and the longest one. */
 	if (out->res_mount != NULL && !fuzz_under(out->res_path, out->res_mount->point))
 		abort();
-	/*
-	 * The top is exactly the path at its entry's point, and a path on an entry with no
-	 * names is its top, so erx_file_remote never takes the parent of no names.
-	 */
-	if (out->res_top != (out->res_mount != NULL &&
-	    strcmp(out->res_path, out->res_mount->point) == 0) ||
-	    (out->res_mount != NULL && out->res_names_length == 0 && !out->res_top))
-		abort();
+	if (out->res_mount != NULL)
+		fuzz_check_root_names(out);
 	for (uint32_t index = 0; index < ns->count; index++) {
 		if (fuzz_under(out->res_path, ns->mounts[index].point) && (out->res_mount == NULL ||
 		    strlen(ns->mounts[index].point) > strlen(out->res_mount->point)))
@@ -369,11 +363,29 @@ for (uint32_t other = 0; other < fs->count; other++) {
 }
 }
 
+/*
+ * A path's names begin with its entry's root's names, a whole-name prefix, and are
+ * exactly them when the path is the entry's point: erx_file_remote's parent/1 takes a
+ * place whose Names are its Root as the entry's top, and any other as one with more
+ * names than its Root (design-files.md, Erlang clients).
+ */
+static void
+fuzz_check_root_names(const erx_ns_result_t *out)
+{
+	const char *root = out->res_mount->root + 1;
+	size_t length = strlen(root);
+	bool at_point = strcmp(out->res_path, out->res_mount->point) == 0;
+
+	if (out->res_names_length < length || memcmp(out->res_names, root, length) != 0 ||
+	    (length > 0 && out->res_names_length > length && out->res_names[length] != '/') ||
+	    at_point != (out->res_names_length == length))
+		abort();
+}
+
 static bool
 fuzz_same_result(const erx_ns_result_t *a, const erx_ns_result_t *b)
 {
-	return (a->res_mount == b->res_mount && a->res_top == b->res_top &&
-	    a->res_nnames == b->res_nnames &&
+	return (a->res_mount == b->res_mount && a->res_nnames == b->res_nnames &&
 	    a->res_names_length == b->res_names_length &&
 	    a->res_path_length == b->res_path_length &&
 	    memcmp(a->res_names, b->res_names, a->res_names_length) == 0 &&
@@ -382,9 +394,8 @@ fuzz_same_result(const erx_ns_result_t *a, const erx_ns_result_t *b)
 
 /*
  * erx_ns_resolve_two agrees with two calls of erx_ns_resolve: the first
- * failure's status, else exdev exactly when a grant's path is paired with
- * a path not on the same grant's tree through the same rights; and both
- * results empty unless it answers ERX_NS_OK.
+ * failure's status, else ERX_NS_OK with both results, whatever entries they
+ * reach; and both results empty unless it answers ERX_NS_OK.
  */
 static void
 fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
@@ -392,7 +403,6 @@ fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
 {
 	static erx_ns_result_t one, two, pair_one, pair_two;
 	erx_ns_status_t first_status, second_status, status, want;
-	bool on_grant;
 
 	first_status = erx_ns_resolve(ns, first, first_length, &one);
 	second_status = erx_ns_resolve(ns, second, second_length, &two);
@@ -400,65 +410,18 @@ fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
 	    second_length, &pair_one, &pair_two);
 	if (first_status != ERX_NS_OK)
 		want = first_status;
-	else if (second_status != ERX_NS_OK)
+	else
 		want = second_status;
-	else {
-		on_grant = (one.res_mount != NULL &&
-		    one.res_mount->kind == ERX_NS_SERVER) ||
-		    (two.res_mount != NULL && two.res_mount->kind == ERX_NS_SERVER);
-		want = !on_grant || (one.res_mount != NULL && two.res_mount != NULL &&
-		    one.res_mount->kind == ERX_NS_SERVER &&
-		    two.res_mount->kind == ERX_NS_SERVER &&
-		    one.res_mount->server == two.res_mount->server &&
-		    one.res_mount->rights == two.res_mount->rights &&
-		    strcmp(one.res_mount->tree, two.res_mount->tree) == 0) ?
-		    ERX_NS_OK : ERX_NS_EXDEV;
-	}
 	if (status != want)
 		abort();
 	if (status == ERX_NS_OK) {
 		if (!fuzz_same_result(&one, &pair_one) ||
 		    !fuzz_same_result(&two, &pair_two))
 			abort();
-	} else if (pair_one.res_mount != NULL || pair_one.res_top || pair_one.res_nnames != 0 ||
+	} else if (pair_one.res_mount != NULL || pair_one.res_nnames != 0 ||
 	    pair_one.res_names_length != 0 || pair_one.res_path_length != 0 ||
-	    pair_two.res_mount != NULL || pair_two.res_top || pair_two.res_nnames != 0 ||
+	    pair_two.res_mount != NULL || pair_two.res_nnames != 0 ||
 	    pair_two.res_names_length != 0 || pair_two.res_path_length != 0)
-		abort();
-}
-
-/*
- * erx_ns_resolve_rename agrees with erx_ns_resolve_two except for a source of
- * the one byte `/`, both paths resolving: that is ERX_NS_EINVAL with both
- * results refused. Any other source, `//` or the top of a mount or bind,
- * answers as erx_ns_resolve_two answers.
- */
-static void
-fuzz_check_rename(const erx_ns_t *ns, const uint8_t *source, size_t source_length,
-    const uint8_t *destination, size_t destination_length)
-{
-	static erx_ns_result_t one, two, pair_one, pair_two, rename_one, rename_two;
-	erx_ns_status_t status, want;
-
-	want = erx_ns_resolve_two(ns, source, source_length, destination,
-	    destination_length, &pair_one, &pair_two);
-	if (erx_ns_resolve(ns, source, source_length, &one) == ERX_NS_OK &&
-	    erx_ns_resolve(ns, destination, destination_length, &two) == ERX_NS_OK &&
-	    source_length == 1 && source[0] == '/') {
-		status = erx_ns_resolve_rename(ns, source, source_length, destination,
-		    destination_length, &rename_one, &rename_two);
-		if (status != ERX_NS_EINVAL || rename_one.res_mount != NULL || rename_one.res_top ||
-		    rename_one.res_nnames != 0 || rename_one.res_names_length != 0 ||
-		    rename_one.res_path_length != 0 || rename_two.res_mount != NULL || rename_two.res_top ||
-		    rename_two.res_nnames != 0 || rename_two.res_names_length != 0 ||
-		    rename_two.res_path_length != 0)
-			abort();
-		return;
-	}
-	status = erx_ns_resolve_rename(ns, source, source_length, destination,
-	    destination_length, &rename_one, &rename_two);
-	if (status != want || !fuzz_same_result(&rename_one, &pair_one) ||
-	    !fuzz_same_result(&rename_two, &pair_two))
 		abort();
 }
 
@@ -529,10 +492,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		fuzz_check_two(&ns, line, line_length, (const uint8_t *)point,
 		    strlen(point));
 		fuzz_check_two(&ns, (const uint8_t *)point, strlen(point), line,
-		    line_length);
-		fuzz_check_rename(&ns, line, line_length, (const uint8_t *)point,
-		    strlen(point));
-		fuzz_check_rename(&ns, (const uint8_t *)point, strlen(point), line,
 		    line_length);
 	}
 

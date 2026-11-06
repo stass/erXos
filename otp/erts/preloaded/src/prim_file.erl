@@ -586,14 +586,17 @@ read_file_nif(_Filename) ->
 
 %% erXos: a path on a file server's grant comes back from the NIF as
 %% {remote, Grant, Place}, Grant {Pid, Tree, Rights} as the path's mount entry
-%% holds it and Place {Point, Root, Names, Top}, the entry's point and root and the path's
+%% holds it and Place {Point, Root, Names}, the entry's point and root and the path's
 %% names from the tree's root, the entry's root included, and the operation runs
 %% in this process through erx_file_remote (design-files.md, Erlang clients). A
-%% rename or a hard link whose paths both lie on one grant's tree, through one
-%% set of rights, answers {remote, Grant, Place, OtherPlace}; paths that do not
-%% answer {error, exdev} from the NIF, which asks no server.
+%% rename's or a hard link's two paths, when a grant holds either, come back as
+%% {remote, Grant, Place, OtherGrant, OtherPlace}, a path on the NIF's own providers
+%% as local and local. One provider takes both only when the two grants are equal,
+%% the same tree of the same server through the same rights; any other pair is exdev,
+%% as between two Unix file systems, and no server is asked.
 remote({remote, Grant, Place}, Operation) -> Operation(Grant, Place);
-remote({remote, Grant, Place, OtherPlace}, Operation) -> Operation(Grant, Place, OtherPlace);
+remote({remote, Grant, Place, Grant, OtherPlace}, Operation) -> Operation(Grant, Place, OtherPlace);
+remote({remote, _Grant, _Place, _OtherGrant, _OtherPlace}, _Operation) -> {error, exdev};
 remote(Result, _Operation) -> Result.
 
 %% erXos: the namespace's changes, for erx_ns, which checks their arguments.
@@ -633,7 +636,9 @@ erx_resolve(Paths) ->
     try
         case Paths of
             [Path] -> erx_resolve_nif(encode_path(Path));
-            [Path, OtherPath] -> erx_resolve_nif(encode_path(Path), encode_path(OtherPath))
+            [Path, OtherPath] ->
+                remote(erx_resolve_nif(encode_path(Path), encode_path(OtherPath)),
+                       fun(Grant, Place, OtherPlace) -> {remote, Grant, Place, OtherPlace} end)
         end
     catch
         error:badarg -> {error, einval}
@@ -921,7 +926,7 @@ delete(Path) ->
 rename(Source, Destination) ->
     try
         {EncodedSource, EncodedDestination} = {encode_path(Source), encode_path(Destination)},
-        remote(rename_nif(EncodedSource, EncodedDestination),
+        remote(renamed_root(EncodedSource, rename_nif(EncodedSource, EncodedDestination)),
                fun(Grant, Place, OtherPlace) ->
                        erx_file_remote:rename(Grant, Place, OtherPlace,
                                               EncodedSource, EncodedDestination)
@@ -929,6 +934,16 @@ rename(Source, Destination) ->
     catch
         error:badarg -> {error, badarg}
     end.
+%% erXos: the one site of rename's step 1 (design-files.md, Errors): a source written
+%% "/" answers einval once both paths resolve, as stock's efile_rename answers a failed
+%% rename of "/" by its text. Its NIF answers past resolution are a pair a grant takes
+%% part in, before remote/2 compares the grants and before a server is asked; eio, a
+%% path on a grant whose server ended; and erofs, from the NIF's read-only providers.
+%% A refusal of a path itself, such as enoent or enametoolong, comes first.
+renamed_root(<<"/", 0>>, {remote, _Grant, _Place, _OtherGrant, _OtherPlace}) -> {error, einval};
+renamed_root(<<"/", 0>>, {error, Reason}) when Reason =:= eio; Reason =:= erofs -> {error, einval};
+renamed_root(_Source, Answer) -> Answer.
+
 make_dir(Path) ->
     try
         Encoded = encode_path(Path),

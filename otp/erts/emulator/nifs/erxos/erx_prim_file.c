@@ -192,7 +192,7 @@ efile_load(ErlNifEnv *env)
 	return (erx_build_table());
 }
 
-/* What erx_ns_resolve, erx_ns_resolve_two or erx_ns_resolve_rename refuses with. */
+/* What erx_ns_resolve or erx_ns_resolve_two refuses a path with. */
 static posix_errno_t
 erx_ns_errno(erx_ns_status_t status)
 {
@@ -207,8 +207,6 @@ erx_ns_errno(erx_ns_status_t status)
 		return (EEXIST);
 	case ERX_NS_EBUSY:
 		return (EBUSY);
-	case ERX_NS_EXDEV:
-		return (EXDEV);
 	case ERX_NS_EINVAL:
 	case ERX_NS_ELIMIT:
 		break;
@@ -239,9 +237,6 @@ erx_ns_answer(ErlNifEnv *env, erx_ns_status_t status)
 		break;
 	case ERX_NS_ELIMIT:
 		reason = "system_limit";
-		break;
-	case ERX_NS_EXDEV:
-		reason = "exdev";
 		break;
 	case ERX_NS_EINVAL:
 		reason = "einval";
@@ -322,13 +317,11 @@ erx_grant_term(ErlNifEnv *env, const efile_path_t *path)
 }
 
 /*
- * {Point, Root, Names, Top}: where the path lies, for erx_file_remote. The entry maps
- * the namespace path Point to the tree's names Root ("" for the tree's root), and
- * Names are the path's names from the tree's root, Root's first, joined by `/`. A
- * client following a symbolic link expresses the link's directory as a namespace path
- * with them (design-files.md, Resolving a path). Top is the namespace's res_top, true
- * when the path is the entry's point itself, which has no parent the client may act on
- * (design-files.md, Errors, step 3).
+ * {Point, Root, Names}: where the path lies, for erx_file_remote. The entry maps the
+ * namespace path Point to the tree's names Root ("" for the tree's root), and Names
+ * are the path's names from the tree's root, Root's first, joined by `/`. A client
+ * following a symbolic link expresses the link's directory as a namespace path with
+ * them (design-files.md, Resolving a path).
  */
 static ERL_NIF_TERM
 erx_place_term(ErlNifEnv *env, const efile_path_t *path)
@@ -337,8 +330,7 @@ erx_place_term(ErlNifEnv *env, const efile_path_t *path)
 
 	memcpy(enif_make_new_binary(env, path->result.res_names_length, &names),
 	    path->result.res_names, path->result.res_names_length);
-	return (enif_make_tuple4(env, path->point, path->root, names,
-	    enif_make_atom(env, path->result.res_top ? "true" : "false")));
+	return (enif_make_tuple3(env, path->point, path->root, names));
 }
 
 /*
@@ -369,27 +361,51 @@ efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result)
 	return (EFILE_EREMOTE);
 }
 
-typedef erx_ns_status_t erx_ns_two_t(const erx_ns_t *, const uint8_t *, size_t,
-    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
+/*
+ * A path of a pair as prim_file's remote/2 compares it: Grant and Place for a path on
+ * a grant, `local` and `local` for one on the NIF's own providers.
+ */
+static void
+erx_pair_terms(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *grant,
+    ERL_NIF_TERM *place)
+{
+	if (path->on_mount && path->kind == ERX_NS_SERVER) {
+		*grant = erx_grant_term(env, path);
+		*place = erx_place_term(env, path);
+	} else {
+		*grant = enif_make_atom(env, "local");
+		*place = *grant;
+	}
+}
+
+/* Whether a resolved path lies on a grant whose process has ended. */
+static bool
+erx_on_ended_grant(const efile_path_t *path)
+{
+	return (path->on_mount && path->kind == ERX_NS_SERVER && path->server == 0);
+}
 
 /*
- * Both paths resolve under one hold of the lock (erx_ns_resolve_two, or
- * erx_ns_resolve_rename for a rename), so a mount between them cannot split
- * the pair. Two paths on one grant answer {remote, Grant, Place, OtherPlace}
- * in the first path's `remote`; two paths neither on a grant are the release
- * file system's.
+ * Both paths resolve under one hold of the lock (erx_ns_resolve_two), so a mount
+ * between them cannot split the pair. Two paths neither on a grant are the NIF's own
+ * providers', and the operation runs here. Otherwise the first path's `remote` is
+ * {remote, Grant, Place, OtherGrant, OtherPlace}, each path's grant and place or
+ * `local` and `local` (erx_pair_terms), and prim_file decides whether one provider
+ * takes both (design-files.md, Erlang clients); a path on a grant whose process has
+ * ended answers eio, as one path does.
  */
-static posix_errno_t
-erx_marshal_two(ErlNifEnv *env, erx_ns_two_t *resolve, ERL_NIF_TERM first,
-    ERL_NIF_TERM second, efile_path_t *first_result, efile_path_t *second_result)
+posix_errno_t
+efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
+    efile_path_t *first_result, efile_path_t *second_result)
 {
+	ERL_NIF_TERM first_grant, first_place, second_grant, second_place;
 	erx_ns_status_t status;
 
 	if (!erx_inspect_path(env, first, &first_result->bytes) ||
 	    !erx_inspect_path(env, second, &second_result->bytes))
 		return (EINVAL);
 	enif_rwlock_rlock(ns_lock);
-	status = resolve(&name_space, first_result->bytes.data,
+	status = erx_ns_resolve_two(&name_space, first_result->bytes.data,
 	    first_result->bytes.size - 1, second_result->bytes.data,
 	    second_result->bytes.size - 1, &first_result->result,
 	    &second_result->result);
@@ -398,32 +414,16 @@ erx_marshal_two(ErlNifEnv *env, erx_ns_two_t *resolve, ERL_NIF_TERM first,
 	enif_rwlock_runlock(ns_lock);
 	if (status != ERX_NS_OK)
 		return (erx_ns_errno(status));
-	/* The pair resolved, so either both are on the grant or neither. */
-	if (!first_result->on_mount || first_result->kind != ERX_NS_SERVER)
+	if ((!first_result->on_mount || first_result->kind != ERX_NS_SERVER) &&
+	    (!second_result->on_mount || second_result->kind != ERX_NS_SERVER))
 		return (0);
-	if (first_result->server == 0)
+	if (erx_on_ended_grant(first_result) || erx_on_ended_grant(second_result))
 		return (EIO);
-	first_result->remote = enif_make_tuple4(env, enif_make_atom(env, "remote"),
-	    erx_grant_term(env, first_result), erx_place_term(env, first_result),
-	    erx_place_term(env, second_result));
+	erx_pair_terms(env, first_result, &first_grant, &first_place);
+	erx_pair_terms(env, second_result, &second_grant, &second_place);
+	first_result->remote = enif_make_tuple5(env, enif_make_atom(env, "remote"),
+	    first_grant, first_place, second_grant, second_place);
 	return (EFILE_EREMOTE);
-}
-
-posix_errno_t
-efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
-    efile_path_t *first_result, efile_path_t *second_result)
-{
-	return (erx_marshal_two(env, erx_ns_resolve_two, first, second,
-	    first_result, second_result));
-}
-
-posix_errno_t
-efile_marshal_rename_paths(ErlNifEnv *env, ERL_NIF_TERM source,
-    ERL_NIF_TERM destination, efile_path_t *source_result,
-    efile_path_t *destination_result)
-{
-	return (erx_marshal_two(env, erx_ns_resolve_rename, source, destination,
-	    source_result, destination_result));
 }
 
 posix_errno_t
@@ -1084,7 +1084,8 @@ efile_list_dir(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *result)
 
 /*
  * The release is read-only, and marshalling has resolved every path these are
- * given, so each meets EROFS.
+ * given, so each meets EROFS; prim_file turns a rename's EROFS for a source
+ * written `/` into einval (design-files.md, Errors, step 1).
  */
 posix_errno_t
 efile_rename(const efile_path_t *old_path, const efile_path_t *new_path)

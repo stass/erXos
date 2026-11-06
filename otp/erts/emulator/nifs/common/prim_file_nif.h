@@ -186,13 +186,6 @@ posix_errno_t efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t
 posix_errno_t efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
                                   efile_path_t *first_result, efile_path_t *second_result);
 
-/** @brief erXos: efile_marshal_paths for a rename, the source first. A source
- * that names / or the top of a mount answers EINVAL before the pair could be
- * EXDEV, as stock answers a rename of / (erx_ns_resolve_rename). */
-posix_errno_t efile_marshal_rename_paths(ErlNifEnv *env, ERL_NIF_TERM source,
-                                         ERL_NIF_TERM destination, efile_path_t *source_result,
-                                         efile_path_t *destination_result);
-
 /** @brief Returns the underlying handle as an implementation-defined term.
  *
  * This is an internal function intended to support tests and tricky

@@ -44,7 +44,7 @@ class ErxFileRemoteTest < Minitest::Test
     [io:format("~s ~s ~b~n", [M, F, A]) || {{M, F, A}, _} <- Calls],
     halt().
   ERLANG
-  LINKED = "linked(Grant, [{_, _, Names, _}, OtherPlace], [ExistingText, NewText]) ->\n"
+  LINKED = "linked(Grant, [{_, _, Names}, OtherPlace], [ExistingText, NewText]) ->\n"
   SEEDED_LINKED = "#{LINKED}    _ = split_last(names(Names)),\n".freeze
 
   def test_both_modules_are_on_the_preload_list

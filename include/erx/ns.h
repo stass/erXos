@@ -39,13 +39,12 @@ typedef enum erx_ns_rights {	/* no value writes and runs together (F6) */
 
 typedef enum erx_ns_status {
 	ERX_NS_OK,
-	ERX_NS_EINVAL,		/* not UTF-8, holds a NUL, or a rename of `/` */
+	ERX_NS_EINVAL,		/* not UTF-8, or holds a NUL */
 	ERX_NS_ENAMETOOLONG,	/* over a limit of the path, a name or the count */
 	ERX_NS_ENOENT,		/* empty, or reaches no mount */
 	ERX_NS_EEXIST,		/* a mount or bind at a point the table already has */
 	ERX_NS_EBUSY,		/* unmounting `/` */
-	ERX_NS_ELIMIT,		/* the table already holds ERX_NS_MOUNTS_MAX entries */
-	ERX_NS_EXDEV		/* two paths that one provider cannot take together */
+	ERX_NS_ELIMIT		/* the table already holds ERX_NS_MOUNTS_MAX entries */
 } erx_ns_status_t;
 
 /*
@@ -74,57 +73,35 @@ typedef struct erx_ns {
 /*
  * What a path resolved to; a source check lets only liberx/ns.c write these
  * fields. res_mount is NULL for the empty root, a read-only
- * directory above the mount points of a narrowed namespace. res_names is the names
- * after the mount's point, under its root, joined by `/` with no leading `/`.
- * res_path is the whole path, normalised and absolute, which is what a working
- * directory stores. Both are NUL-terminated, and neither holds `.`, `..` or an
- * empty name. res_top says whether res_path is its entry's point itself, the top
- * of a mount or of a bind, whose names are its root's: the one place that decides
- * which paths have no parent the entry reaches, which every client operation on a
- * parent and a last name answers for itself (design-files.md, Errors, step 3).
+ * directory above the mount points of a narrowed namespace. res_names is the path's
+ * names from the tree's root, the entry's root's first, joined by `/` with no leading
+ * `/`: at the entry's point they are its root's names, and below it they are more.
+ * res_path is the whole path, normalised and absolute, which
+ * is what a working directory stores. Both are NUL-terminated, and neither
+ * holds `.`, `..` or an empty name.
  */
 typedef struct erx_ns_result {
 	const erx_ns_mount_t *res_mount;
 	uint32_t	res_nnames;
-	bool		res_top;
 	size_t		res_names_length;
 	size_t		res_path_length;
 	char		res_names[ERX_PATH_MAX];
 	char		res_path[ERX_PATH_MAX];
 } erx_ns_result_t;
 
-/* Anything but ERX_NS_OK leaves res_mount NULL, res_top false and every count zero. */
+/* Anything but ERX_NS_OK leaves res_mount NULL and every count zero. */
 erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 	    erx_ns_result_t *);
 /*
- * Resolves the two paths of a link, the first into the first result,
+ * Resolves the two paths of a rename or a link, the first into the first result,
  * in one call, so a caller holding its lock across the call sees both on one
- * table. The pair is ERX_NS_OK when one provider takes both: one grant's tree
- * through one set of rights (erx_ns_same_grant), or, for two paths neither on a
- * grant, the runtime's own read-only providers. A path on a grant with any other
- * path is ERX_NS_EXDEV, as between two Unix file systems, and no server is asked
- * (design-files.md, Erlang clients). A path that fails answers its own status,
- * the first path's first. Anything but ERX_NS_OK leaves both results as a refused
- * erx_ns_resolve leaves its one.
+ * table. Whether one provider takes both is the caller's to decide from the two
+ * entries (design-files.md, Erlang clients). A path that fails answers its own
+ * status, the first path's first. Anything but ERX_NS_OK leaves both results as a
+ * refused erx_ns_resolve leaves its one.
  */
 erx_ns_status_t	erx_ns_resolve_two(const erx_ns_t *, const uint8_t *, size_t,
 	    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
-/*
- * erx_ns_resolve_two for a rename, the source first. A source written as `/` is
- * ERX_NS_EINVAL, once both paths resolve and before the pair could be
- * ERX_NS_EXDEV: stock prim_file answers einval for a rename of `/`. Any other
- * source, `//` and the top of a mount or bind included, resolves as
- * erx_ns_resolve_two resolves it (design-files.md, Errors).
- */
-erx_ns_status_t	erx_ns_resolve_rename(const erx_ns_t *, const uint8_t *, size_t,
-	    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
-/*
- * Whether two entries reach the same tree of the same grant through the same
- * rights, whatever their points and roots: a request through one may name
- * anything the other reaches. False unless both are ERX_NS_SERVER.
- */
-bool		erx_ns_same_grant(const erx_ns_mount_t *, const erx_ns_mount_t *);
-
 /*
  * Adds an ERX_NS_SERVER entry for the grant `server` at the point the path
  * resolves to, with the tree it roots in, which must be one name, and `rights`.
