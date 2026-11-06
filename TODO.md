@@ -131,6 +131,11 @@ it; git history is the record of completed work.
   the status mirror, so `parked` not mirrored and a slot epoch mirrored relaxed pass every mode. It has one waker in flight, and judges a lost wake only with
   no event or timeout left, so a stuck absorb with no work passes. A two-waker variant and a check of every
   quiet state passed the core by hand (623,596 and 287,527 states) and should replace them.
+* [Low] stopgap, `test/guest/native_threads/guest.c` and `test/guest/function_api/cases.c`,
+  `park_timeout_races_wake`: between its racing parks and its quiet ones the helper waits through `settle`,
+  a umtx wait on the semaphore the park shares, so an up the race left over returns that wait early and is
+  gone before the quiet park looks. The quiet park catches only an up arriving after `settle`; a wait that
+  does not block on the semaphore, or a zero-deadline down right after the race, would catch both.
 * [Medium] stopgap, `liberx/backend/fiasco/time.c`: the time page is the root's own page, not yet mapped read-only into a
   test task, whose reads need it; the second task's `erx_vm_map` is the mapping's way in.
 * [Low] stopgap, `liberx/backend/fiasco/group.c`, `irq.c`: `erx_group_configure` and `_info` have no body until the adapter

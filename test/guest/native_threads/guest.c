@@ -36,6 +36,11 @@
 #define DETACHED_PAGES	4u
 #define PARK_ROUNDS	2000u
 #define PARK_EXECUTORS	2u
+/*
+ * More than the wakes a quiet park can meet, five: the case's trigger and the late
+ * releases of park_alone's, park_trigger_in_window's and park_ping's four executors.
+ */
+#define QUIET_PARKS	16u
 #define CPUS_MAX	16u
 #define HOG_PRIORITY	100u
 #define NORMAL_PRIORITY	1u
@@ -845,8 +850,28 @@ static _Atomic uint32_t park_race_stale;
 static _Atomic uint32_t park_race_left;
 
 /*
- * Parks with deadlines as short as the wakes come, then one with no waker: a
- * semaphore left holding an up would return it woken.
+ * Whether a park with no waker of its own times out. Every legitimate early return
+ * comes with an epoch it read moved, and another case's executor that the reaper
+ * releases late moves the group's, as the case's trigger does, so a return with both
+ * epochs as read is a stale up.
+ */
+static bool
+park_quiet_times_out(uint32_t slot)
+{
+	for (uint32_t attempt = 0; attempt < QUIET_PARKS; attempt++) {
+		const uint64_t group = group_epoch(), epoch = slot_epoch(slot);
+
+		if (erx_park(group, epoch, erx_fiasco_clock_ns() + 5 * NS_PER_MS) == ERX_ETIMEDOUT)
+			return (true);
+		if (group_epoch() == group && slot_epoch(slot) == epoch)
+			return (false);
+	}
+	return (false);
+}
+
+/*
+ * Parks with deadlines as short as the wakes come, then quiet ones: a semaphore
+ * left holding an up would return one woken.
  */
 static void
 park_race_helper(uint64_t arg)
@@ -861,7 +886,7 @@ park_race_helper(uint64_t arg)
 	/* The waker's last wake has returned before this thread looks at its epochs. */
 	while (atomic_load_explicit(&park_race_left, memory_order_acquire) == 0)
 		settle(NS_PER_MS);
-	if (erx_park(group_epoch(), slot_epoch(slot), erx_fiasco_clock_ns() + 5 * NS_PER_MS) != ERX_ETIMEDOUT)
+	if (!park_quiet_times_out(slot))
 		atomic_store_explicit(&park_race_stale, 1, memory_order_release);
 	bump_done();
 	erx_thread_exit();
@@ -870,6 +895,7 @@ park_race_helper(uint64_t arg)
 static bool
 case_park_timeout_races_wake(void)
 {
+	const uint64_t deadline = erx_fiasco_clock_ns() + PATIENCE_NS;
 	uint64_t thread;
 	uint32_t slot;
 
@@ -882,6 +908,17 @@ case_park_timeout_races_wake(void)
 	while (atomic_load_explicit(&park_race_stop, memory_order_acquire) == 0)
 		(void)erx_executor_wake(slot - 1);
 	atomic_store_explicit(&park_race_left, 1, memory_order_release);
+	/*
+	 * A wake from elsewhere, as a late release of another case's executor is: the group
+	 * epoch moves. Mostly it lands in the quiet park; a park timed out first meets none.
+	 */
+	while (atomic_load_explicit(&erx_fiasco_group_status()->exec[slot - 1].state, memory_order_acquire) !=
+	    ERX_EXEC_STATE_PARKED && atomic_load_explicit(&done, memory_order_acquire) == 0) {
+		if (erx_fiasco_clock_ns() > deadline)
+			return (false);
+		settle(NS_PER_MS / 10);
+	}
+	erx_fiasco_group_trigger();
 	return (wait_for(&done, 1) && atomic_load(&park_race_stale) == 0);
 }
 

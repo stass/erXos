@@ -31,6 +31,8 @@
 #define DETACHED_PAGES	16u
 #define PARK_ROUNDS	2000u
 #define PARK_EXECUTORS	2u
+/* More than the wakes a quiet park can meet, four: the late releases of earlier cases' executors. */
+#define QUIET_PARKS	16u
 #define NS_PER_MS	UINT64_C(1000000)
 #define PATIENCE_NS	(UINT64_C(60000) * NS_PER_MS)
 #define TLS_VALUE	UINT64_C(0x5a5a00001234beef)
@@ -992,7 +994,26 @@ static _Atomic uint32_t park_race_stop;
 static _Atomic uint32_t park_race_slot;
 static _Atomic uint32_t park_race_stale;
 
-/* Parks with deadlines as short as the wakes come, then one with no waker: a stale up would return it woken. */
+/*
+ * Whether a park with no waker of its own times out. Every legitimate early return
+ * comes with an epoch it read moved, and another case's executor that the reaper
+ * releases late moves the group's, so a return with both epochs as read is a stale up.
+ */
+static bool
+park_quiet_times_out(uint32_t slot)
+{
+	for (uint32_t attempt = 0; attempt < QUIET_PARKS; attempt++) {
+		const uint64_t group = group_epoch(), epoch = slot_epoch(slot);
+
+		if (erx_park(group, epoch, erx_clock_ns() + 5 * NS_PER_MS) == ERX_ETIMEDOUT)
+			return (true);
+		if (group_epoch() == group && slot_epoch(slot) == epoch)
+			return (false);
+	}
+	return (false);
+}
+
+/* Parks with deadlines as short as the wakes come, then quiet ones: a stale up would return one woken. */
 static void
 park_race_helper(uint64_t arg)
 {
@@ -1003,9 +1024,9 @@ park_race_helper(uint64_t arg)
 	for (uint32_t round = 0; round < RACE_ROUNDS; round++)
 		(void)erx_park(group_epoch(), slot_epoch(slot), erx_clock_ns() + (round % 8 + 1) * 10000);
 	atomic_store_explicit(&park_race_stop, 1, memory_order_release);
-	/* The waker sees the stop only after its last wake has passed. */
+	/* The waker stops soon after this; a wake of its still in flight moves the slot's epoch. */
 	settle(5 * NS_PER_MS);
-	if (erx_park(group_epoch(), slot_epoch(slot), erx_clock_ns() + 5 * NS_PER_MS) != ERX_ETIMEDOUT)
+	if (!park_quiet_times_out(slot))
 		atomic_store_explicit(&park_race_stale, 1, memory_order_release);
 	function_api_bump_done();
 	erx_thread_exit();
