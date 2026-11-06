@@ -268,7 +268,7 @@ check below over it, and packs the result. The manifest holds:
   device-tree path of its UART, where the machine has one; and the
   `secure` attribute of each of the two console lines, the UART and the
   host link, which marks a line at which a system-shell principal's login
-  opens the system shell, as Unix's `/etc/ttys` marks the terminals where
+  opens the system shell, as UNIX's `/etc/ttys` marks the terminals where
   root may log in; a display domain's terminal windows carry theirs in
   the `console_line` parameter of its entry
   ([design-live.md](design-live.md#the-console)). The manifest grants

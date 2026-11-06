@@ -56,7 +56,7 @@ Decisions every reader of this document needs:
 
 ## Context
 
-A Unix pipe is a kernel buffer: the kernel serialises writers and readers
+A UNIX pipe is a kernel buffer: the kernel serialises writers and readers
 and knows when the last end goes. erXos's kernel keeps no pipe object, by
 the user's decision, so the buffer, its arbitration and its end-of-stream
 rule live in user space, built from the kernel's general objects
@@ -133,7 +133,7 @@ path.
   close, a fault, a kill, or the end of the session's tree.
 * **PR3. Isolation.** Writers never share memory; a hostile writer can
   corrupt only its own records and cannot starve the others; a hostile
-  reader can harm only the stream it shares with its co-readers, as a Unix
+  reader can harm only the stream it shares with its co-readers, as a UNIX
   reader that stops reading or reads everything can, and no writer's
   records; nothing a holder writes into shared memory makes another party
   crash, loop, or touch memory out of bounds.
@@ -671,7 +671,7 @@ meanwhile adds at most as much again.
 
 **Losing bytes to a reader's end.** Claiming bytes in the lock page before
 copying them means a reader that ends in the middle of a read loses what
-it was taking, as a Unix process killed inside `read` does; ring space is
+it was taking, as a UNIX process killed inside `read` does; ring space is
 freed only after the copy, so a writer never overwrites bytes a reader is
 still copying.
 
@@ -838,7 +838,7 @@ a pipe, never waits on itself:
   ([Reading and merging](#reading-and-merging)). A pipe takes any number
   of write ends: what bounds them is the session's `pipes` quota, which
   counts lanes, and its budget. A writer that finds no room in its own
-  ring waits for the reader, as a Unix writer does; no creation ever waits
+  ring waits for the reader, as a UNIX writer does; no creation ever waits
   on a reader. Each write end puts three capabilities into every read
   end's holder, its ring, its reader page and its doorbell, which stay
   there until the lane is drained, so a reader that drains nothing, a
@@ -995,13 +995,13 @@ relayed by its session
   naming the stream it sends on, a write end it holds; the pipe server
   makes the end at once and holds it for a ticket, so the end counts as a
   holder while it is in flight and a pipe in flight is never closed, as a
-  descriptor in flight on Unix keeps its file open. The sender writes the
+  descriptor in flight on UNIX keeps its file open. The sender writes the
   ticket into the stream as a control record ([Reading and
   merging](#reading-and-merging)); whichever read end of that stream meets
   it in `recvmsg` redeems the ticket, and the pipe server installs the end
-  into that read end's program, as Unix gives the descriptor to whichever
+  into that read end's program, as UNIX gives the descriptor to whichever
   process reads the message, while a `read` that skips it discards the
-  ticket. The sender keeps its own end, as on Unix, and no capability
+  ticket. The sender keeps its own end, as on UNIX, and no capability
   passes between the programs
   ([design-programs.md](design-programs.md#passing-descriptors)).
   [Deposits](#deposits) gives a deposit's whole lifetime, the limit of 16
@@ -1250,7 +1250,7 @@ version is refused ([design.md](design.md#compatibility)). Documented
 differences, each pinned by a test:
 
 * a pipe has at most 64 read ends, and a spawn or a fork that would make
-  another fails with `EMFILE`, where Unix has no such limit;
+  another fails with `EMFILE`, where UNIX has no such limit;
 * a reader that ends inside a `read` loses the bytes it was taking;
 * a reader whose job is stopped while it holds the reader lock, which it
   holds only for a copy or a redemption, holds up its co-readers until it
@@ -1305,7 +1305,7 @@ writer's record by at most two lanes' capacity for each read end ([Reading
 and merging](#reading-and-merging)). A hostile reader can corrupt the lock
 page and the reader pages, steal or garble the stream for its co-readers,
 hold the reader lock, or stop the stream's writers by a false read
-position, all within the stream it already shares, as a Unix reader that
+position, all within the stream it already shares, as a UNIX reader that
 reads everything or stops reading can; it cannot write a writer's records,
 since it maps every ring read-only, and it cannot make a writer fail,
 since nothing a reader writes decides `EPIPE`.
@@ -1330,12 +1330,12 @@ never by a value read from shared memory.
 objects are zero when made. A pipe's memory is never deleted under a
 party that maps it, so no party reads memory that is gone, and none
 faults. Bytes from a pipe reach a terminal only when a reader writes them
-to a tty, which delivers them unchanged, as on Unix
+to a tty, which delivers them unchanged, as on UNIX
 ([design-live.md](design-live.md#the-tty)).
 
 **Residual risks accepted.** Co-readers trust each other with their shared
 stream; a holder that keeps an end delays the end of the stream or a
-broken pipe for everyone else, as on Unix; a writer can ring its readers'
+broken pipe for everyone else, as on UNIX; a writer can ring its readers'
 doorbells needlessly, which costs each at most one wake per wait; a reader
 that keeps a gone writer's lane mapped and never drains it holds that lane's
 memory, charged to the session, until it ends; a reader whose job is
@@ -1508,7 +1508,7 @@ and kernel objects that exist for other purposes.
 ## Alternatives considered
 
 **A kernel pipe object.** The kernel would own the buffer and count each
-end's holders, as Unix kernels and Zircon's sockets do. The user chose to
+end's holders, as UNIX kernels and Zircon's sockets do. The user chose to
 keep pipes out of the kernel; a kernel buffer also costs two kernel calls
 and bounce copies per transfer, which shared rings avoid.
 
@@ -1534,7 +1534,7 @@ read-only by every end, in which the session publishes which write ends
 are open and whether a read end remains. It loses: the channel already
 carries the same facts to each holder, in order and without loss, and a
 page needs a fixed table of write ends, which bounds them and makes a
-spawn fail when the table is full, where Unix blocks a writer and never a
+spawn fail when the table is full, where UNIX blocks a writer and never a
 spawn.
 
 **Rings held by the reader, a registration gate and lending.** The read end
@@ -1547,7 +1547,7 @@ borrower ends the ring goes and its writer gets `SIGPIPE` though the read
 end lives on, which breaks `(cat f1; cat f2) | (head -1; cat)`; and a read
 end cannot be shared at all, so concurrent readers are impossible. With
 the session as the home, no gate, service thread or lending is needed, and
-both cases behave as on Unix.
+both cases behave as on UNIX.
 
 **End of stream and broken pipe from fields in the rings.** A reader could
 learn that its writers are gone, and a writer that its readers are, from a

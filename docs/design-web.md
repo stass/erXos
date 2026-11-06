@@ -1084,7 +1084,7 @@ library for the host tool's server; TypeScript for the client. And:
    the browser is left out.
 6. **The default display's name** is the environment variable `display`,
    lower case as rc's own variables are, which a login sets and a user
-   changes as on Unix. `DISPLAY` would read as X's to a ported program
+   changes as on UNIX. `DISPLAY` would read as X's to a ported program
    that checks it.
 7. **One operation fits one update.** `ui.txt` bounds an `image`'s
    encoded bytes at 48 KiB, so every operation of a valid tree fits one

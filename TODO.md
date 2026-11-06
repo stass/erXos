@@ -152,7 +152,7 @@ it; git history is the record of completed work.
   group but its own handle, so `ERX_CAP_SELF` and unbinding with `ERX_CAP_NULL` fail there, and `erx_event.h` tells a caller to unbind first.
   The first native consumer needs the unbind defined in the interface, with its status checked.
 * [Medium] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_crash_dump.c`, `beam/bif.c`: what `imports.txt` lists as
-  `[stock_process]` and `[stock_descriptors]`, the Unix process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
+  `[stock_process]` and `[stock_descriptors]`, the UNIX process ERTS still assumes: the signal dispatcher, `sigaction` and the pipes of
   Darwin's main thread, `nice`, `alarm`, `uname` and the crash dump's descriptors (edit 34). The first native boot answers each,
   as `ENOSYS` tracing shows it;
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
@@ -1657,7 +1657,7 @@ document's "residual risks accepted" paragraph.
   `SCM_RIGHTS`: a socket is owned by one program at the network service,
   whose protocol has no way to share it, so a child inherits no socket
   descriptor and an `exec` closes every socket
-  ([design-programs.md](docs/design-programs.md)). Unix software relies on
+  ([design-programs.md](docs/design-programs.md)). UNIX software relies on
   keeping them: pre-fork servers, PostgreSQL's backend per connection,
   services started with a socket as their standard input and output, and
   programs that `exec` with a connection open. Design sockets with several

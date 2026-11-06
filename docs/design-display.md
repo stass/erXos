@@ -744,7 +744,7 @@ display domain, whose new `erx_term` makes its window and presents the
 token with `offer_line`. A valid token connects at the new line a tty
 with a shell of the session that asked, with no login, as rio's new
 window runs a shell in its opener's namespace, and the line then has
-that session's principal, as any Unix terminal carries its user's
+that session's principal, as any UNIX terminal carries its user's
 authority. An offer without a valid token gets a login and never a
 shell. So the display's first window, which it offers alone before any
 session is introduced to it, shows a login, and so does the single
@@ -905,7 +905,7 @@ terminal window sets that window's display, a web login sets `web`, a
 configured domain takes it from its manifest entry, and a login at the
 serial console or over the host link sets none. A user changes it as any
 environment variable, for the domain or for one program it starts, as on
-Unix.
+UNIX.
 
 `erx_ui:open(Options)` looks up `Options`' `display`, or the default when
 `Options` names none, in the registry, and opens there. A name that is
@@ -1103,7 +1103,7 @@ position of the fault.
   authority of the shells in its windows, as an X11 or Wayland server
   has: through them it reaches what their principals reach, their
   other sessions included, and a lock at the UART leaves the windows
-  opened from it running, as on Unix. It also routes the input of the
+  opened from it running, as on UNIX. It also routes the input of the
   sessions introduced to it, reads and writes its display's clipboard
   where `snarf` is on, and records the
   passphrase of whoever logs in at its windows. It has nothing beyond:

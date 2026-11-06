@@ -31,7 +31,7 @@ Decisions every reader of this document needs:
   their urgency. Nothing else in ERTS's scheduler changes, and its process
   state protocol is untouched ([Scheduling](#scheduling)).
 * **ERTS is a parts bin.** Ethread's pthread layer runs on musl's threads,
-  which run on `liberx`; the Unix sys layer, the poll set, the forker, Unix
+  which run on `liberx`; the UNIX sys layer, the poll set, the forker, UNIX
   signals and dynamic loading are deleted, not stubbed; ERTS's
   address-space manager reserves and commits through the kernel. What
   ERTS assumes never constrains the design ([The inventory](#the-inventory)).
@@ -299,7 +299,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | References | per-scheduler counters (`erl_bif_unique.c`) | none | **redone**: AES-128 of a nonrepeating counter forms every reference; a bounded local registry resolves aliases ([Unguessable references](#unguessable-references)) | identity is unique by construction; guessing an undisclosed reply tag has an explicit cryptographic bound |
 | Ports | ports, port tasks, linked-in drivers, spawn drivers, `fd` ports (`io.c`, `erl_port_task.c`) | sub-spaces and lanes | **kept** for three linked-in drivers: the lane driver, the program driver and `ram_file_drv`, which `file:open(Bin, [ram])` needs and which reaches no operating system; spawn and `fd` ports, the forker and `erl_child_setup` dropped ([Programs as ports](#programs-as-ports)) | a port already has an owner, a link, serialised work, busy flow control and an exit status |
 | Device drivers | linked-in drivers | Erlang processes over the device NIF | **redone**: a driver is an Erlang process; the C under it is the device NIF, parsing nothing ([The device NIF](#the-device-nif)) | a device that lies corrupts no memory |
-| Operating-system adaptation | the Unix sys layer, Unix signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the C path for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
+| Operating-system adaptation | the UNIX sys layer, UNIX signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the C path for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
 | Time | the time supervisor's correction over OS clocks (`erl_time_sup.c`) | the counter and the time page | **redone**: one clock; correction for imperfect clocks deleted; Erlang's monotonic and system time semantics kept | the counter is exact |
 | Code from storage | `erl_prim_loader` through `prim_file` | boot-image slices mapped read-only | **kept**, with whole-file reads returning binaries over the slice's pages, without a copy, and an EROFS image's files read by the EROFS reader, preloaded Erlang, from blocks the hash-checking primitive returned; the code server checks the hash of every blob it fetches from the code service ([Code in the system domain](#code-in-the-system-domain)) | `init` and boot scripts need no change, and a slice's files are covered by the boot image's validation |
 | Executing Erlang code | the interpreter and BeamAsm, one per build | memory objects mapped writable at one address and executable at another | **both kept**, as two runtime images: the interpreter image for the system domain, the BeamAsm image for other domains ([BeamAsm](#beamasm)) | the interpreter keeps generated code, JIT objects and C++ out of the trusted base and is deterministic; BeamAsm is up to four times faster |
@@ -1671,7 +1671,7 @@ which that tty is connected, if any. `standard_error` writes
 with `erlang:display_string/2` (edit 39).
 
 **The console service is a program with its own line editor on a raw terminal,
-as on Unix.** The device carries bytes; `edlin` and `group`, stock OTP in user
+as on UNIX.** The device carries bytes; `edlin` and `group`, stock OTP in user
 mode, edit the line and keep its history. `erx_console`, in the system domain,
 sits between them and the console's driver, exchanging ordinary messages with no
 connection: input bytes go to the group as `{self(), {data, Chars}}`, and each
@@ -1716,8 +1716,8 @@ depends on the domain:
 | The domain | `erx_tty_owner` | What it does with the bytes |
 | --- | --- | --- |
 | a session's | the terminal relay | writes them to the session's tty, as any writer does, and answers when they are all in the tty ([design-live.md](design-live.md#the-tty)) |
-| the system domain | `erx_console` | writes them to the UART's driver unchanged, as Unix writes to `/dev/console`, and answers when the driver has written them, so a service never waits on a shell's or a session's tty, nor on any other console line ([design-live.md](design-live.md#the-console)) |
-| any other, which has no terminal | the logger proxy | sends them as log records to its console facet, under its name, which the console escapes, and answers at once: a Unix daemon's rule, that with no terminal its output goes to a log under its name |
+| the system domain | `erx_console` | writes them to the UART's driver unchanged, as UNIX writes to `/dev/console`, and answers when the driver has written them, so a service never waits on a shell's or a session's tty, nor on any other console line ([design-live.md](design-live.md#the-console)) |
+| any other, which has no terminal | the logger proxy | sends them as log records to its console facet, under its name, which the console escapes, and answers at once: a UNIX daemon's rule, that with no terminal its output goes to a log under its name |
 
 **C output never waits.** `erts_printf` and stdio to descriptors 1 and 2 have no
 process to yield and no way to wait on what their own executor must run, and the
@@ -1756,7 +1756,7 @@ with `{flush, true}`, stock's default, traps while another process holds
 `erx_tty_owner` (edit 42) to `erx_output:halt/2`, which sends the owner
 `{tty_drain, From, Ref}` and waits up to `flush_timeout`, or 5 s where that is
 `infinity`. The owner answers once the master has answered every byte it holds, or
-at once when the tty is stopped, since nothing would take them and a hang-up on Unix
+at once when the tty is stopped, since nothing would take them and a hang-up on UNIX
 discards them too; `erx_console` and the logger proxy hold nothing they have
 answered for. It then gives up the name, so the second call of `erlang:halt/2` goes
 straight on. `erlang:halt/1` with a string is the crash path, which stays bounded and
@@ -1786,7 +1786,7 @@ or shell's group ends prints why and halts with status 1, since nothing would re
 the terminal again.
 
 `erx_console` answers a `put_chars_sync` only on `erx_console_written`, so
-`io:format` returns when its bytes are out, as `write` on a Unix terminal does.
+`io:format` returns when its bytes are out, as `write` on a UNIX terminal does.
 It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
 `-erx console_driver Module`, an ordinary argument of the boot information page,
 names the driver, and the last naming wins: the manifest names the console UART's driver,
@@ -2700,7 +2700,7 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `os:cmd/1`, `open_port({spawn, _}, _)`, `open_port({spawn_executable, _}, _)`, `open_port({fd, _, _}, _)` | `badarg`, which `os:cmd` raises with the cause `{open_port, badarg}`: ports wrap no operating-system process or descriptor; a program is a port a session's command server opens through `erx_program` ([Programs as ports](#programs-as-ports)) |
 | `open_port({spawn_driver, Name}, _)` | only the linked-in drivers: `erx_lane` and `erx_program`, which `erx_connections` and `erx_program` open, and `ram_file_drv`, which `ram_file` opens; any other name is `badarg` |
 | `os:getenv/0,1`, `os:putenv/2` | an environment per domain, initialised from the domain's specification |
-| `os:set_signal/2` | `badarg`; there are no Unix signals |
+| `os:set_signal/2` | `badarg`; there are no UNIX signals |
 | `erlang:system_info(emu_flavor)` | `emu` in a domain that runs the interpreter image, the system domain and command domains among them; `jit` in one that runs the BeamAsm image |
 | `erlang:system_info(schedulers)` | the normal schedulers created: the cpuset's CPU count, at most 32 |
 | `erlang:system_info(schedulers_online)` | follows the group's capacity, rounded up, within the limit Erlang code set |
@@ -3272,7 +3272,7 @@ for `erl_printf.c`'s and musl's loops not to spin on a drain their own executor 
 run, a drain at halt for a queue that dies with its producer, and a rule for bytes
 written before the drain starts. A process waits on its tty's owner in `receive`
 instead, which needs none of these, and C's own diagnostic text goes to the log that
-already never waits. Unix's own console log has the same shape: a kernel `printk`
+already never waits. UNIX's own console log has the same shape: a kernel `printk`
 does not wait for the terminal, and a process's `write` does.
 
 **Upcalls into ERTS.** Scheduler activations would tell ERTS when an
@@ -3284,7 +3284,7 @@ Executors never block, so the only event an upcall would carry is
 preemption, which ERTS does not need to know about.
 
 **A POSIX layer under ERTS.** A file-descriptor and `poll` emulation would
-let ERTS's Unix sys layer run unchanged. It loses on simplicity: erXos
+let ERTS's UNIX sys layer run unchanged. It loses on simplicity: erXos
 would maintain an emulation of a model it does not have, and the poll set
 would still be a second readiness mechanism beside the IRQ objects bound
 to groups. The POSIX-lite personality serves programs only, and ERTS

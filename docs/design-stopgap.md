@@ -644,7 +644,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
 | `sched_getaffinity`, `prctl` | not offered: `ENOSYS` | so `sysconf(_SC_NPROCESSORS_*)` answers musl's default of 1 in any program, and `pthread_setname_np` on the caller fails, which ERTS ignores; ERTS counts CPUs from the boot information page |
-| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's (`libc_root_write.c`, alone in its file so that musl's reference pulls in the console and not the start path) to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on Unix; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's (`libc_root_write.c`, alone in its file so that musl's reference pulls in the console and not the start path) to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on UNIX; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
 | `sched_yield` | `erx_yield` | |

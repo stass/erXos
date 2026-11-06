@@ -67,7 +67,7 @@ dirty I/O scheduler, one aux thread, one poll thread, the signal dispatcher
 and the main thread. On the host, `+S 1 +SDcpu 1 +SDio 1 +A 1` gave 9
 threads ([measured](research-baselines.md#erts-node-baselines-host-otp-2842)).
 
-**The forker is mandatory on Unix.** `erl_sys_late_init`
+**The forker is mandatory on UNIX.** `erl_sys_late_init`
 (`erts/emulator/sys/unix/sys_drivers.c:170-194`) always opens the `forker`
 driver. `forker_start` (lines 1589 to 1695) reads `BINDIR` from the
 environment and exits if it is missing (lines 1603 to 1612), creates an
@@ -155,7 +155,7 @@ with `clock_gettime` (with `CLOCK_MONOTONIC_RAW` when present, lines 284 to
 311), system time with `clock_gettime(CLOCK_REALTIME)`, and uses `times`
 (line 74).
 
-**Files.** `prim_file` on Unix (`erts/emulator/nifs/unix/unix_prim_file.c`)
+**Files.** `prim_file` on UNIX (`erts/emulator/nifs/unix/unix_prim_file.c`)
 uses `open`, `read`, `pread`, `pwrite`, `pwritev`, `write`, `lseek`, `fstat`,
 `stat`, `lstat`, `access`, `readlink`, `opendir`/`readdir`, `mkdir`,
 `rmdir`, `unlink`, `rename`, `link`, `symlink`, `chmod`, `chown`,
@@ -194,7 +194,7 @@ from `uname` at run time (`os_flavor`, `sys.c:855-866`).
 
 **Terminal.** `user_drv` uses the new shell only when standard input and
 output are terminals (`lib/kernel/src/user_drv.erl:183-197`); `prim_tty`
-then needs terminfo (`setupterm`, `tigetnum`, `tigetflag`) on any Unix
+then needs terminfo (`setupterm`, `tigetnum`, `tigetflag`) on any UNIX
 (`lib/kernel/src/prim_tty.erl:218-260` and `:333-346`); without it the shell
 falls back to the old, line-buffered mode (`user_drv.erl:205-215`), which
 relies on the terminal driver for echo and erasing. `prim_tty` also has an

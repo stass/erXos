@@ -39,11 +39,11 @@ Decisions every reader of this document needs:
 
 ## Context
 
-The vision puts the interactive environment first, and Unix users bring
-Unix habits: `ls | grep`, `ps`, job control. The command shell meets them
+The vision puts the interactive environment first, and UNIX users bring
+UNIX habits: `ls | grep`, `ps`, job control. The command shell meets them
 without making POSIX the base: its language is rc's, whose single quoting
 rule and list values remove the Bourne shell's commonest traps; its
-commands are Erlang modules that pass records; and the Unix commands it
+commands are Erlang modules that pass records; and the UNIX commands it
 runs are toybox's applets, each a program in a sub-space of the session
 and a port of its runtime
 ([design-programs.md](design-programs.md#a-program-is-a-port)). It sits
@@ -470,12 +470,12 @@ or hostile program delays none of its work:
 * **Input.** Bytes from the master go through the line discipline to what
   reads the tty: the group while the shell prompts, on a raw tty with
   `edlin`'s editing and history, and otherwise the foreground job, whose opens
-  may compete, as on Unix, with the relay serving their reads one at a time. In
+  may compete, as on UNIX, with the relay serving their reads one at a time. In
   cooked mode the line discipline collects a line and the relay answers the
   foreground job's pending read with it, newline included, when the line
   ends. `Ctrl-D` at the start of a line answers that read with no bytes,
   which the program reads as the end of its input; its later reads go on, as
-  on a Unix terminal. Input typed after `Ctrl-C` and before the next prompt
+  on a UNIX terminal. Input typed after `Ctrl-C` and before the next prompt
   is discarded. The relay handles input before output, so `Ctrl-C` and
   `Ctrl-Z` act however much output waits.
 * **Output.** What any program writes to the terminal goes through the line
@@ -485,7 +485,7 @@ or hostile program delays none of its work:
   holds at most 4 KiB for the master, and a write takes only what room there
   is. A program that writes faster than the terminal, or to a session that is
   not connected, waits for room with no request outstanding, so a signal
-  interrupts it as on a Unix terminal
+  interrupts it as on a UNIX terminal
   ([design-programs.md](design-programs.md#the-terminal)), and nothing piles up
   in the session. A background job's write goes through as well; `TOSTOP`
   comes with process groups, in the second tier, and follows POSIX there.
@@ -497,7 +497,7 @@ or hostile program delays none of its work:
   the job.
 * **Modes across jobs.** The shell sets the tty back to cooked before it
   starts a foreground job, keeps a stopped job's `termios` for its `fg`, and
-  takes its own raw setting back when the job ends or stops, as a Unix shell
+  takes its own raw setting back when the job ends or stops, as a UNIX shell
   does.
 
 **Jobs and their tags.** A job is the set of its stages and of every
@@ -520,7 +520,7 @@ the job ending and then wakes each member it finds among the runtime's
 processes, and each spawn checks its job after the new process exists, so
 a process spawned while the search runs is either found by it or ended by
 its spawner. `kill %N` of a paused job resumes it after the signal, as a
-Unix shell continues a stopped job it signals.
+UNIX shell continues a stopped job it signals.
 
 **Stopping and continuing.** Stopping a job pauses its programs, through
 the port driver's pause of each program's image, and marks its tag
@@ -530,7 +530,7 @@ mark, resume the programs and then have each program's handler send it
 `SIGCONT`. A `SIGCONT` that reaches one program of a stopped job from
 elsewhere, under the `kill` rules, resumes that program and makes the job
 table show the job running in the background, while its other members
-stay stopped until `fg` or `bg`, as a Unix job's other processes do
+stay stopped until `fg` or `bg`, as a UNIX job's other processes do
 ([design-programs.md](design-programs.md#job-control)). On the stopgap,
 which pauses no space, stopping a job stops only its Erlang commands: the
 shell reports those stopped and names the job's programs, which run on, so
@@ -645,7 +645,7 @@ for its parser and for `where`'s predicates. Each program it starts holds
 only the descriptors, grants and rights its starter handed it, starts only
 what `/bin` lists and only with the right to start commands, and reaches
 the terminal only through the session's tty, which does not filter it, as
-on Unix ([design-programs.md](design-programs.md#security)). A command acts only
+on UNIX ([design-programs.md](design-programs.md#security)). A command acts only
 through what it was handed, and one with less than the session's runs in
 a domain of its own (SH1). An Erlang command run in the session's domain is
 trusted session code: the context is its interface, not a boundary.

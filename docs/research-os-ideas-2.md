@@ -49,7 +49,7 @@ What separates erXos from every row, with no precedent found:
 * one pid space, one message system and one inspector span every domain and
   every runtime;
 * ERTS is taken apart and fitted to the kernel interface, where the others
-  keep it unmodified behind an emulated Unix interface.
+  keep it unmodified behind an emulated UNIX interface.
 
 Further claims for which no precedent was found: exhaustive schedule
 exploration of an operating system's own services; a BEAM heap or process

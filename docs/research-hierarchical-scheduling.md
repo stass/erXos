@@ -1852,7 +1852,7 @@ full in `~/erxos-scratch/draft/research-results/fiasco-hvf-check.md`.
   `a4f4ad18`, `hello` `0513c99b`, `drivers-frst` `6459d709` and `libfdt`
   `5756062b` as GitHub archives whose hashes were recorded.
 * **Method.** Every guest ran under a Ruby harness: QEMU with standard input
-  closed, `-no-reboot`, no display or monitor, the serial port on a Unix
+  closed, `-no-reboot`, no display or monitor, the serial port on a UNIX
   socket, each serial line timestamped with the host's monotonic clock,
   scripted keystrokes, a hard deadline, and the guest killed with `SIGTERM`
   then `SIGKILL` on every exit path. The main HVF configuration was

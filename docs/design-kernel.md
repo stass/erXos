@@ -1865,7 +1865,7 @@ filling lazily needs no copy-on-write, and a source points at no object.
 capability in the caller's table, into a space the caller holds with
 `MAP`, with a ceiling fixed from that capability's rights (K4), and is on
 the object's reverse map, not attached to the capability: closing or
-moving the capability leaves the mapping, as closing a file leaves a Unix
+moving the capability leaves the mapping, as closing a file leaves a UNIX
 process's mapping of it. A mapping goes when its space releases its range
 or ends. When its object is deleted, the record stays, marked
 `ERX_MAP_DELETED`, with no translation and no reference, until the space
@@ -5453,7 +5453,7 @@ Four capabilities a message cover erXos's
 uses, which pass a buffer, a gate or a doorbell at a time, and keep the
 operation's bound small.
 
-**Why not queued.** Unix's `SCM_RIGHTS` and Zircon's channels queue
+**Why not queued.** UNIX's `SCM_RIGHTS` and Zircon's channels queue
 capabilities in messages, where they belong to no table. Queues can then
 hold each other's ends in cycles that no process can reach, so Linux keeps
 a garbage collector for descriptors in flight, and a race in it,
@@ -5613,7 +5613,7 @@ operation, so a moved capability never passes through zero. A released
 object is destroyed the same way as a deleted one, without being deleted,
 for every type but memory and groups. A memory object lives on while a
 mapping of it remains, so a space that closed its capability keeps what
-it mapped, as a Unix process keeps a mapping of a file it closed; the
+it mapped, as a UNIX process keeps a mapping of a file it closed; the
 object is destroyed when its last mapping goes, or when it is deleted. A
 group lives on while it has member threads or child groups, and is
 destroyed when the last of them goes, so no executor is ever left in a
@@ -5633,7 +5633,7 @@ its space, marked `ERX_MAP_DELETED`, with no translation, until the space
 releases its range, and every access to it faults with kind
 `ERX_FAULT_DELETED`. The fault is reported like any other: the thread
 stops and its record goes to its space's fault gate, so a program ends
-with `SIGBUS`, as a Unix process does when it touches a mapping of a file
+with `SIGBUS`, as a UNIX process does when it touches a mapping of a file
 that was truncated ([design-programs.md](design-programs.md#a-programs-end)),
 and an Erlang domain ends and its supervisor restarts it
 ([design-system.md](design-system.md#ending-a-domain)). A DMA mapping of a
@@ -8800,7 +8800,7 @@ Fiasco's scheduling:
 
 **Capabilities queued in messages.**
 
-* *How it works.* As with Zircon's channels and Unix's `SCM_RIGHTS`, a
+* *How it works.* As with Zircon's channels and UNIX's `SCM_RIGHTS`, a
   message carries capabilities into the receiver's queue, and the receiver
   takes them when it reads the message.
 * *Why it lost.* A queued capability belongs to no table: queues can hold
@@ -8977,7 +8977,7 @@ Fiasco's scheduling:
   stored pages back through calls that withdraw them, report them dirty
   and confirm each write-back under a supply generation.
 * *Its merit.* Every session that maps a file shares the server's one
-  copy, so stores are coherent across sessions at once, as on Unix.
+  copy, so stores are coherent across sessions at once, as on UNIX.
 * *Why it lost.* It puts a pager into the kernel's fault path: a fault
   that waits on another domain, with a deadline, a supply generation, a
   four-state page machine, an authenticated fault source so a server can
@@ -9102,7 +9102,7 @@ Fiasco's scheduling:
   table that runs the fault decision and retries, with the hardware's
   privileged-access-never, or user translations switched off, keeping
   ordinary kernel accesses away from user memory.
-* *Its merit.* Arguments of any size and shape, as on Unix.
+* *Its merit.* Arguments of any size and shape, as on UNIX.
 * *Why it lost.* The kernel would touch memory a domain names, take
   faults in kernel mode that may populate pages and pass preemption
   points, keep a fixup table and a per-core isolation scheme, and order

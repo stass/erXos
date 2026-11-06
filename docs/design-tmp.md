@@ -42,7 +42,7 @@ Decisions every reader needs:
 * **The tree speaks Linux; the client speaks OTP.** The tree answers with
   the `file:posix()` atoms of Linux's errors, as any 9P2000.L server
   answers with Linux's numbers; `erx_file_remote` turns them into the
-  answers stock `prim_file` gives on a Unix host, for every server alike
+  answers stock `prim_file` gives on a UNIX host, for every server alike
   ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)).
 
 ## Where `/tmp` runs
@@ -294,7 +294,7 @@ else. Searching a directory (`walk`) needs `x`; opening for reading, or
 listing a directory, needs `r`; opening for writing needs `w`; adding or
 removing a name needs `w` and `x` on the directory. A read, a write or a
 truncation through an opened fid needs only that the fid was opened for
-it, so a mode changed after the open changes nothing for it, as on Unix;
+it, so a mode changed after the open changes nothing for it, as on UNIX;
 truncation through an unopened fid needs `w`. Changing mode and times
 needs nothing, as for a file's owner. A refused check is `EACCES`. A
 file or directory is made with the mode its request carries, which
@@ -372,7 +372,7 @@ dies with a removed file open frees the file's charge
 ## The client's answers
 
 `erx_file_remote` turns the tree's answers into what stock `prim_file`
-answers on a Unix host, by rules it applies to every server
+answers on a UNIX host, by rules it applies to every server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)):
 its error steps (`rename` of `"/"` answers `einval`; a removal, rename or
 creation whose path ends in `.` or `..` resolves the rest of the path and

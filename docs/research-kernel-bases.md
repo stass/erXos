@@ -588,7 +588,7 @@ From the broad survey; sizes in lines, with headers.
 | RT-Thread 5.3.0 | Apache-2.0 | C | `qemu-virt64-aarch64`: GICv2 and v3, ITS, GICv2m (`pic-gicv2m.c`, unverified), 4-CPU SMP, PSCI | none; `qemu.py` defaults to GICv2 with `its=on` | RT-Smart processes with own address spaces | src 33.6k, aarch64 9.1k, lwp 43.8k | SCons (Python), Kconfig |
 | HelenOS 0.14.1 | BSD-3-Clause-style per file; some GPL third-party code | C | `virt`, HiKey960; GICv2 only; arm64 SMP a stub | none | microkernel | generic 40k, arm64 5.2k | Meson |
 | managarm | MIT | C++ kernel; some Rust user space | GICv2 and v3; SMP code | not checked | asynchronous microkernel | thor 38.9k, arm 4.9k | Meson |
-| SerenityOS | BSD-2-Clause | C++ | `virt` with `-cpu max`; GICv2 and v3; no AArch64 SMP | `Meta/run.py` uses HVF on macOS | Unix processes | kernel 152k, aarch64 13.1k | CMake, Ninja, Python |
+| SerenityOS | BSD-2-Clause | C++ | `virt` with `-cpu max`; GICv2 and v3; no AArch64 SMP | `Meta/run.py` uses HVF on macOS | UNIX processes | kernel 152k, aarch64 13.1k | CMake, Ninja, Python |
 | Plan 9 Foundation | MIT | Plan 9 C | no arm64 kernel | - | - | - | mk |
 | 9front | MIT (exceptions listed) | Plan 9 C | `sys/src/9/arm64` conf `qemu`: GICv3, PSCI SMP, virtio-pci | none found | processes | port 70.7k, arm64 4.6k | mk |
 | Inferno 4th edition | MIT (bulk) | C, Limbo | native ports 32-bit only; inferno64 is hosted arm64 | - | Dis VM in the kernel; `os/port/dis.c` hands one interpreter between kprocs | os/port 45k, libinterp 34.6k | mk |

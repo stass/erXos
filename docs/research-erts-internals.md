@@ -246,7 +246,7 @@ stop-the-world for managed threads.
 ## Thread-specific data
 
 `ErtsSchedulerData` sits in cache-aligned global arrays and is found through
-`pthread_getspecific`. No compiler TLS is used, and a default Unix build
+`pthread_getspecific`. No compiler TLS is used, and a default UNIX build
 creates 13 pthread keys.
 
 * `erts_get_scheduler_data()` is an out-of-line call returning
@@ -860,7 +860,7 @@ every normal scheduler, and generated code pins process state in x19-x28.
   ignores errors (jit/beam_jit_common.cpp:121-123;
   jit/beam_jit_common.hpp:75, 116; asmjit/core/errorhandler.cpp:15-17).
 
-## OTP boot on a Unix host
+## OTP boot on a UNIX host
 
 `erl_init:start/2` loads the static NIFs and calls `init:boot/1`, `init`
 reads the boot script through `erl_prim_loader`, and kernel starts
@@ -927,7 +927,7 @@ writing.
   of sys.h (sys.h:672-957) and three drivers that io.c always initialises:
   `fd`, `spawn` and, outside win32, `forker` (io.c:3029-3035). The win32
   layer is about 6,500 lines of C (sys/win32/, by `wc`).
-* The Unix layer parks the initial thread in `select` forever
+* The UNIX layer parks the initial thread in `select` forever
   (sys/unix/sys.c:1229-1287), dispatches signals from a pipe on a thread of
   its own (sys/unix/sys.c:1105-1201), probes whether memory is readable by
   writing it into a pipe (sys/unix/sys.c:497-516), and allocates with

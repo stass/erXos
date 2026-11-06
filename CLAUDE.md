@@ -36,12 +36,12 @@ These shape every design and change; the rules below apply them.
    simple. Barrelfish's "Tackling OS Complexity with Declarative
    Techniques" and the BOOM project are the references
    ([research-os-ideas.md](docs/research-os-ideas.md)).
-5. **Unix look and feel.** To its users the system feels like Unix, as QNX
+5. **UNIX look and feel.** To its users the system feels like UNIX, as QNX
    and Plan 9 do. A POSIX-like layer that runs FreeBSD programs, ported at
    the source level, is a goal, but not at the expense of the other
    principles; full POSIX compliance is not the bar. Programs brought in
    from elsewhere come from FreeBSD or are BSD-licensed where possible.
-   Where Unix systems differ and erXos must choose, it follows FreeBSD.
+   Where UNIX systems differ and erXos must choose, it follows FreeBSD.
 
 ## Collaboration
 
@@ -449,7 +449,7 @@ scripts live in `~/erxos-scratch/tools/`.
   invisible format characters and invalid UTF-8. Text attributed to a source
   (log records, names, inspector output, what the host tool prints from a
   guest) escapes tab and newline too. A program's own output is not such
-  text: as on Unix and QNX, `write` and stdio deliver its bytes unchanged to
+  text: as on UNIX and QNX, `write` and stdio deliver its bytes unchanged to
   a tty, which does only `termios`-style processing.
 * **Generated code is code too.** Generated C, Erlang and headers must be
   readable, ASCII-only and free of undefined behavior, and are produced by a

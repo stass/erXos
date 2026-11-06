@@ -667,7 +667,7 @@ offset, as 9P2000.L does. Passing an open, by a spawn, a fork or
 asks nothing of the server. A description passes only among the programs
 of one session, so the session holds every description its programs share.
 It clunks every fid it holds when the last open naming it closes, so a
-passed file lives as long as an open names it, as on Unix
+passed file lives as long as an open names it, as on UNIX
 ([design-programs.md](design-programs.md#descriptors-and-files)).
 
 #### Locks
@@ -678,7 +678,7 @@ file. A lock's owner is the client's domain, from the lane the request
 arrived on, with the request's `ProcId`; `ClientId` is recorded and
 decides nothing, so no domain can release or test another domain's locks
 as its own. A session gives each program a `ProcId` of its own, so its
-programs' locks conflict with each other as Unix processes' do. A read
+programs' locks conflict with each other as UNIX processes' do. A read
 lock needs a fid open for reading and a write lock a fid open for writing.
 A request without 9P2000.L's `BLOCK` flag that conflicts is answered
 `blocked` at once; one with it is held, as a pending request of the file's
@@ -1442,7 +1442,7 @@ Error step 5 below finds the working directory through this path.
   with `lopen`; with one (`write`, `append`, `exclusive`), it walks the
   last name's directory and sends `lcreate`, which creates the file or
   opens the one already there in one step, so two processes opening one
-  new name both succeed, as on Unix; `lcreate`'s `eloop` sends the client
+  new name both succeed, as on UNIX; `lcreate`'s `eloop` sends the client
   through the link, counted with the path's others
   ([Resolving a path](#resolving-a-path)). It returns OTP's file
   descriptor record with `erx_file_remote` as its module, holding the
@@ -1492,7 +1492,7 @@ return `{remote, {Pid, Tree, Rights}, Place, OtherPlace}`, each place
 `{Point, Root, Names}` of its own entry, and
 `erx_file_remote` sends the one request that takes both. A path on a
 grant paired with a path on another grant, another tree, other rights
-or a provider of the NIF returns `{error, exdev}`, as between two Unix
+or a provider of the NIF returns `{error, exdev}`, as between two UNIX
 file systems, without asking either server. Two paths neither on a
 grant are the NIF's own providers', which are read-only.
 
@@ -1549,7 +1549,7 @@ than sent as a mode outside the `0..8#7777` a server's modes are typed
 with ([Serving](#serving-the-erx_fs-behaviour)).
 
 **Errors.** `erx_file_remote` answers as stock `prim_file` answers on a
-Unix host, whose platform layer adjusts some of the system's errors after
+UNIX host, whose platform layer adjusts some of the system's errors after
 they happen (`efile_rename`, `efile_del_file` and `efile_del_dir` in
 `unix_prim_file.c`). A server answers with the atoms of Linux's own
 errors, as any 9P2000.L server does, and the one translation lives here,
@@ -1807,7 +1807,7 @@ table:
 * a symbolic link is followed by the client, through its own namespace,
   at most 40 times for one path;
 * a working directory is a path, so a domain or program whose working
-  directory is renamed stays at the old path, where Unix follows the
+  directory is renamed stays at the old path, where UNIX follows the
   directory, and `get_cwd` answers the path of a working directory that
   was removed, where Linux's `getcwd` answers `enoent`, and an entry the
   working directory lies under is unmounted like any other, where Linux's
@@ -2195,7 +2195,7 @@ oracle guest, are already dependencies of the harness.
 ## Alternatives considered
 
 **One machine-wide tree with permission bits.** Every domain would see the
-same tree, and owner and mode bits would decide access, as in Unix. It
+same tree, and owner and mode bits would decide access, as in UNIX. It
 loses because authority would then live in a second system beside exports
 and facets, and every service would have to check it; a namespace built
 from grants needs no check beyond the funnel's.

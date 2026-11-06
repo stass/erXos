@@ -100,11 +100,11 @@ such as checksums and bulk copies where per-byte performance matters.
 This brings more system behaviour into the same inspectable,
 supervised environment as applications.
 
-Native programs have a place too. A Unix-compatible programming interface
-using the musl C library supports recompiled Unix software, with the
+Native programs have a place too. A UNIX-compatible programming interface
+using the musl C library supports recompiled UNIX software, with the
 available interface growing in stages. Each program runs in a protected
 space under its session,
-with the authority its starter supplies. The goal is useful Unix
+with the authority its starter supplies. The goal is useful UNIX
 software alongside Erlang, with compatibility tested and differences
 documented.
 

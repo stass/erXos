@@ -2,14 +2,14 @@
 
 A **native program** is a program that a session or another program
 starts in a **sub-space** of the session, holding only what its starter
-handed it: toybox's applets, a recompiled Unix program, an executable a
+handed it: toybox's applets, a recompiled UNIX program, an executable a
 user built, or `rc`. In Erlang it is a **port** of the session's runtime,
 and its whole world is its session: its one way to reach anything is its
 **channel** to its **handler**, an Erlang process of the session that is
 its process table, its namespace, its file server and its source of
 signals. This document is how a program starts, what it inherits, how it
 signals and is signalled, how it ends, and the **POSIX-lite personality**,
-musl's POSIX functions over `liberx`, which lets ordinary Unix programs be
+musl's POSIX functions over `liberx`, which lets ordinary UNIX programs be
 recompiled for erXos without porting. The key idea is that capabilities,
 never the kind of program, carry authority, and that a program holds none
 of them itself: what it may reach is a table its handler keeps, built from
@@ -75,7 +75,7 @@ Decisions every reader of this document needs:
 
 ## Context
 
-By the user's decisions, erXos gives Unix programs a POSIX-ish interface,
+By the user's decisions, erXos gives UNIX programs a POSIX-ish interface,
 so that they need not be ported to Erlang, without Linux binary
 compatibility or a Linux virtual machine, and grows it toward what QNX
 offers: shared libraries first static, then dynamic, `fork`, and terminals
@@ -159,7 +159,7 @@ Functional requirements:
 
 Non-functional requirements:
 
-* **Cost.** A program's cost approaches a Unix process's: code is mapped
+* **Cost.** A program's cost approaches a UNIX process's: code is mapped
   shared from the boot image or a file object, never copied; a program
   costs two spaces, a budget, a group, a channel, a thread and its pipe
   ends, and no work in any domain but its session
@@ -626,7 +626,7 @@ holds one ends the program (Credit, below).
 | `{kill, Target, Signal}` | signal one of the requester's own children, the requester itself, or a process its `signal` right reaches, `Target` being a process id; in the second tier, also a process group of the requester's own POSIX session, `{group, Pgid}` ([The terminal](#the-terminal)); `Signal` is a signal's name, or `0` to check that the target exists. When the requester is among the targets, its own report precedes the reply, so it takes the signal before `kill` returns, as POSIX requires | `ok`; `{error, esrch}` for any other target; `{error, eperm}` in the first tier for `sigstop`, `sigtstp`, `sigttin`, `sigttou` and `sigcont`, which belong to the session's job control |
 | `{waited, Pid, N}` | the program's `wait`, `waitpid` or `waitid` returned the state of its child `Pid` whose count of state changes is `N`, and a `waitid` with `WNOWAIT` sends none ([A program's end](#a-programs-end)); the event executor sends it too for an exit that `liberx` reaps itself (Automatic reaping, below). When `N` is the record's latest for `Pid`, the handler marks that state taken, and for an exit the child leaves the record and the `children` quota, after which a `kill` of it fails with `esrch`; so a program cannot lift its quota by naming a child that runs | `ok`, also when `N` is not the latest, which changes nothing |
 | `{stop, Signal}` | in the second tier, pause the program for a stop signal under its default action ([The terminal](#the-terminal)) | `ok` once the program has been paused and continued, so the reply reaches it only after it is continued; at once when POSIX discards the signal |
-| `{file, Op}` | an operation of 9P2000.L for the program ([design-files.md](design-files.md#the-file-protocol)), with a path to resolve through the program's namespace, or the program's `Open`, in place of a fid: `walk`, `lopen`, `lcreate`, `read`, `write`, `clunk`, `close`, the program's own operation for a descriptor close that leaves its open other references, which releases the program's locks on the file and keeps the open ([Descriptors and files](#descriptors-and-files)), `remove`, `getattr`, `setattr`, `readdir`, `fsync`, `lock`, `getlock`, `link`, `symlink`, `mknod`, `renameat`, `unlinkat`, `readlink`, `mkdir`, `statfs` and the xattr operations; a read or a write names a count and a slot of the data area, and for `pread` and `pwrite` an offset, and its open's description supplies the offset otherwise; for `lock` and `getlock` the handler sets `ProcId` to the program's own, one per program, so its programs' locks conflict as Unix processes' do ([Descriptors and files](#descriptors-and-files), [design-files.md](design-files.md#locks)) | the operation's reply, `{ok, Open}` for an `lopen` or an `lcreate`, `{ok, Count}` for a read or a write, mapped to `Errno` on failure |
+| `{file, Op}` | an operation of 9P2000.L for the program ([design-files.md](design-files.md#the-file-protocol)), with a path to resolve through the program's namespace, or the program's `Open`, in place of a fid: `walk`, `lopen`, `lcreate`, `read`, `write`, `clunk`, `close`, the program's own operation for a descriptor close that leaves its open other references, which releases the program's locks on the file and keeps the open ([Descriptors and files](#descriptors-and-files)), `remove`, `getattr`, `setattr`, `readdir`, `fsync`, `lock`, `getlock`, `link`, `symlink`, `mknod`, `renameat`, `unlinkat`, `readlink`, `mkdir`, `statfs` and the xattr operations; a read or a write names a count and a slot of the data area, and for `pread` and `pwrite` an offset, and its open's description supplies the offset otherwise; for `lock` and `getlock` the handler sets `ProcId` to the program's own, one per program, so its programs' locks conflict as UNIX processes' do ([Descriptors and files](#descriptors-and-files), [design-files.md](design-files.md#locks)) | the operation's reply, `{ok, Open}` for an `lopen` or an `lcreate`, `{ok, Count}` for a read or a write, mapped to `Errno` on failure |
 | `{local, Op}` | an operation the session answers from its own tables, which reaches no server but by a `walk` or a `getattr`: `{seek, Open, Offset, Whence}` on the open's description, `{setfl, Open, Flags}` of the description's status flags, `{chdir, Path}`, and `{access, Path, Mode}`, answered from the rights of the grant the path resolves through ([Descriptors and files](#descriptors-and-files)) | `{ok, Value}`; `{error, Errno}` |
 | `{tty, Open, Request}` | a terminal's `ioctl` for a `tty` open: `tcgetattr`, `tcsetattr`, `tcgetpgrp`, `tcsetpgrp` and the window size, which the handler takes to the session's terminal relay, the owner of every terminal of the session, never through the file protocol ([The terminal](#the-terminal)) | the relay's answer; `{error, enotty}` for any other open |
 | `{watch, Open, Events}` | ask for one `{ready, Open, Events}` report once a terminal or a socket is ready for `Events`: the session's terminal relay answers for a terminal, and the network service, over its own protocol, for a socket; a file is always ready, and the file protocol carries no watch ([The terminal](#the-terminal)) | `ok` at once, the report later |
@@ -790,7 +790,7 @@ A description lives in the session, not at the server, where POSIX puts
 it, and every open that names it, in any program of the session, shares
 it: a `dup` shares one open, and a spawn, a `fork` or a passed descriptor
 gives the receiver an open of its own that names the same description. The
-description serializes the requests that use its offset, as a Unix kernel
+description serializes the requests that use its offset, as a UNIX kernel
 serializes a regular file's, and sends each read and write with an
 explicit offset, as 9P2000.L does; it counts the opens that name it and
 clunks every fid it holds when the last one closes. Its status flags are
@@ -845,9 +845,9 @@ nothing. So two programs given one file share its offset and its status
 flags, as POSIX processes do: `{date; uname} >f` writes both outputs one
 after the other, and `>[2=1]` is a `dup`, one object under two numbers.
 A passed file reaches the program whatever its namespace holds, and a
-file removed after it was opened stays readable through it, as on Unix.
+file removed after it was opened stays readable through it, as on UNIX.
 The shell's redirections open, create or truncate the file before the
-spawn, as a Unix shell does, and a redirection to `/dev/null` hands the
+spawn, as a UNIX shell does, and a redirection to `/dev/null` hands the
 program a `null` descriptor. A pipe end's `O_NONBLOCK` stays in the
 program that set it, since a child receives an end of its own. A
 directory passes the same way, its description's unopened fid being the
@@ -1045,7 +1045,7 @@ through the program's namespace: a path that names nothing fails with
 `ENOENT`, and one that names a file no `rx` grant reaches fails with
 `EACCES`. `posix_spawnp` searches `PATH`, `/bin` by default, with `access`
 and `X_OK` through the namespace, as POSIX says, so `which`,
-`test -x /bin/grep` and `env grep` behave as on Unix. The handler turns
+`test -x /bin/grep` and `env grep` behave as on UNIX. The handler turns
 the path into one of four images:
 
 * **A program command.** The session's export serves `/bin`, an `rx`
@@ -1280,7 +1280,7 @@ composes them and the image runs only when no cause remains. A
 continue lifts both from its target, as POSIX's `SIGCONT` continues a
 process however it was stopped: an authorized `SIGCONT` makes the
 program's handler lift the `signal` cause and tells the job table, which
-lifts the `job` cause and shows the job running, as a Unix shell does once
+lifts the `job` cause and shows the job running, as a UNIX shell does once
 one of a stopped job's processes runs; `fg` and `bg` lift the `job` cause
 from every program of the job and send each `SIGCONT`. Each reaches only
 its target, so an outer job's `fg` continues no program of another job,
@@ -1299,7 +1299,7 @@ without sending `SIGTSTP`: the shell keeps the job's `termios` and restores
 it at `fg`, and a second-tier program on a pseudo-terminal
 gets its `SIGTSTP` from the terminal's line discipline instead ([The
 terminal](#the-terminal)). `kill %N` of a paused job resumes it after the
-signal, as a Unix shell continues a stopped job it signals. Programs'
+signal, as a UNIX shell continues a stopped job it signals. Programs'
 groups sit under the session's **programs group**, whose grant the session
 sets to nine tenths of its own by default, so a busy program never slows
 the relay that would stop it.
@@ -1587,7 +1587,7 @@ recorded as such.
 
 ### The cost of a program
 
-A program costs what a Unix process costs plus what isolation needs, and
+A program costs what a UNIX process costs plus what isolation needs, and
 nothing outside its session: no domain, no work in the system domain, no
 third party on any path. The budget for one program's start, with its
 standard streams as opens on the terminal:
@@ -1606,7 +1606,7 @@ connections at an estimated 5 to 10 us each for a namespace of ten
 mounts, the handler's Erlang steps and `liberx`'s start-up, which
 `tools/erx bench spawn` checks against `posix_spawn` of the same applet on
 the host ([Performance](#performance)). Four things keep it close to a
-Unix process:
+UNIX process:
 
 * **Shared code.** A program of the boot image maps its code from the
   boot image's slice, and an executable or library from a code object,
@@ -1634,11 +1634,11 @@ Unix process:
 owns. The session's export serves it as `/dev/tty`, a file whose reads and
 writes reach the relay, and a program's standard streams that go to the
 terminal are opens on it, so one program's output and error streams reach the
-terminal in the order the program wrote them, as they do through one Unix
+terminal in the order the program wrote them, as they do through one UNIX
 terminal. A write reaches the terminal exact, apart from the tty's output
 flags, whichever job wrote it. A read returns what the line discipline gives
 while the program's job is in the foreground, a line when the tty is cooked,
-and waits while the job is in the background, as on Unix. A terminal's
+and waits while the job is in the background, as on UNIX. A terminal's
 `ioctl`s are `{tty, Open, Request}` requests to the handler, which takes them
 to the relay ([The program protocol](#the-program-protocol)). `tcgetattr` and
 `tcsetattr` read and set the tty's `termios`, so a program can turn off `ECHO`
@@ -1656,7 +1656,7 @@ input for that reader: a complete line in canonical mode, and otherwise
 what `VMIN` and `VTIME` ask for, which the line discipline decides. Only
 then does `liberx` send the read, which is answered at once, with bytes or
 with `eagain` when another reader took them first, and `liberx` then
-watches again. Several opens of a foreground job may read, as on Unix, and
+watches again. Several opens of a foreground job may read, as on UNIX, and
 the relay serves their reads one at a time. A read under `O_NONBLOCK` is sent
 at once and fails with `EAGAIN` on `eagain`. A blocking read watches
 `{watch, Open, [read]}`, which is the line discipline's `read_wait` and starts
@@ -1666,7 +1666,7 @@ otherwise `VMIN` of them, and reports `POLLIN` from that, so a `poll` never
 consumes input or starts a read's time.
 `Ctrl-D` at the start of a
 line answers that read with no bytes, the end of file, and later reads go
-on, as on a Unix terminal. A job in the background gets no report in the
+on, as on a UNIX terminal. A job in the background gets no report in the
 first tier, so its read waits until the job is in the foreground; in the
 second tier the line discipline sends a background group that reads its
 controlling terminal `SIGTTIN` instead.
@@ -1680,13 +1680,13 @@ once and followed, once, by `{ready, Open, [out]}` when the relay has room. That
 wait is open, so a handler runs in it. Only then does it send the write, which is
 answered at once with the count taken, or with `eagain` when another writer took
 the room first, and `liberx` then watches again. A blocking `write` goes on until
-every byte is taken and returns that count, as on Unix: if a signal interrupts it,
+every byte is taken and returns that count, as on UNIX: if a signal interrupts it,
 it returns the count so far, or fails with `EINTR` if nothing was taken. A write
 under `O_NONBLOCK` is sent at once and returns the count, or fails with `EAGAIN`
 on `eagain`. `poll` reports `POLLOUT` from the same reports. musl's stdio is
 ordinary code above this: `__stdio_write` repeats on a short count, and a failed
 `write` sets `F_ERR` and discards its buffer (`musl/src/stdio/__stdio_write.c`),
-as it does on any Unix.
+as it does on any UNIX.
 
 **Pseudo-terminals, in the second tier.** A session's own tty is a
 **pseudo-terminal** whose master is the console. In the second tier a program
@@ -1774,7 +1774,7 @@ It needs nothing else from the console.
 ### The second tier
 
 The second tier adds what programs that cannot be changed expect of a
-Unix: `fork`, the `exec` family, shared libraries and mappings of files,
+UNIX: `fork`, the `exec` family, shared libraries and mappings of files,
 and the terminals of [The terminal](#the-terminal). It rests on the
 kernel's sealed objects, copy-on-write children and copies of spaces
 ([design-kernel.md](design-kernel.md#copy-on-write-children-and-copies-of-spaces))
@@ -2305,7 +2305,7 @@ executable and spawn it; the shell's default namespace gives `rx` only for
 
 #### Passing descriptors
 
-Programs that share a stream pass descriptors to each other, as Unix
+Programs that share a stream pass descriptors to each other, as UNIX
 programs do with `SCM_RIGHTS`. `socketpair(AF_UNIX, SOCK_STREAM, 0)` gives
 a program two descriptors of kind `socketpair`, each the read end of one
 pipe and the write end of the other, made by the session's pipe server;
@@ -2344,7 +2344,7 @@ files](#descriptors-and-files)).
 
 Whichever program's `recvmsg` meets the control record **redeems** the
 tickets, and the session installs what each stands for into that program,
-as Unix gives a descriptor to whichever process reads the message. The
+as UNIX gives a descriptor to whichever process reads the message. The
 reader redeems under its pipe's reader lock, so those waits are closed too
 ([design-pipes.md](design-pipes.md#reading-and-merging)). A `read`, or a
 `recvmsg` without room for the descriptors, skips the control record: in a
@@ -2354,14 +2354,14 @@ record, releases the reader lock, and sends the request
 the session closes what the ticket stood for, as Linux closes the
 descriptors a reader gives no room for (`MSG_CTRUNC`). A pipe end is
 deposited as an end the pipe server makes at once, so the end stays open
-while it is in flight, as on Unix, and the sender keeps its own
+while it is in flight, as on UNIX, and the sender keeps its own
 ([design-pipes.md](design-pipes.md#the-second-tier)). A `file` or `tty`
 descriptor is deposited as an open the sender's handler makes at once on
 the same open-file description, and the redeemer's handler moves that
 open into the redeemer's table at redemption, as `posix_spawn` hands a
 file to a child; a directory passes the same way.
 
-**A passed file's lifetime.** A passed file lives as on Unix: its
+**A passed file's lifetime.** A passed file lives as on UNIX: its
 open-file description lives while any open in any program's table names
 it, a deposit's included, and clunks its fid when the last one closes
 ([Descriptors and files](#descriptors-and-files)). So a file passed with
@@ -2382,7 +2382,7 @@ Linux fails a send beyond its limit of descriptors in flight.
 
 Every program whose image is a C program runs with a POSIX-lite
 personality: musl's POSIX functions over `liberx`, enough to recompile and
-link ordinary Unix programs without porting them, statically in the first
+link ordinary UNIX programs without porting them, statically in the first
 tier and dynamically too in the second. Services and drivers do not use
 it, nothing above the kernel interface depends on it, and no Erlang code
 sees it but the session's command server, port driver and handlers, which
@@ -2719,7 +2719,7 @@ A program is untrusted by its session and by every server its session
 reaches for it: its trust boundaries are the frames it sends its handler,
 the bytes it writes into pipes, its data area and terminals, and the
 executable or library it names. A program trusts its session wholly, as a
-Unix process trusts its kernel. What crosses the boundaries:
+UNIX process trusts its kernel. What crosses the boundaries:
 
 | Input | Source | Validation |
 | --- | --- | --- |
@@ -2750,7 +2750,7 @@ code behaving. A program never executes code it can write (P10).
 **Residual risks accepted.** A program that holds an `rw` and an `rx`
 grant over one tree can write an executable or a library and run it, with
 its own authority. A program on a tty can send the terminal any control
-sequence, a fake prompt included, as on Unix and over `ssh`
+sequence, a fake prompt included, as on UNIX and over `ssh`
 ([design-live.md](design-live.md#security)). A session's programs share the session's connections to its
 servers: a few hostile programs of one session can fill a connection's
 lane with requests and delay their siblings' requests there, within what
@@ -3132,7 +3132,7 @@ terminal cases.
   fids; a socket named in `SCM_RIGHTS`, which fails with `EOPNOTSUPP`; a
   socket descriptor without `FD_CLOEXEC` held across an `exec`, which the
   new image finds closed; a file passed by a sender that then ends, which
-  the receiver reads on, as on Unix; a received file that the
+  the receiver reads on, as on UNIX; a received file that the
   receiver passes on to a child and to a third program by `SCM_RIGHTS` and
   then closes, which both read on until each lets it go; a sender that
   passes a file and then execs, whose receiver reads on; and a receiver
@@ -3507,7 +3507,7 @@ children of. It stays an option, not a commitment; the eager copy is
 correct, charged at the call, and simple.
 
 **Pseudo-terminals in the kernel.** The kernel could carry the line
-discipline, as Unix kernels do. It loses: the kernel holds no terminal
+discipline, as UNIX kernels do. It loses: the kernel holds no terminal
 policy, and the session already serves files and owns its terminal; a line
 discipline in the session is a pure state machine, tested on the host.
 
@@ -3521,7 +3521,7 @@ the open-file description, its offset and its status flags, and a pass
 could be a request to the server for a grant that shares it. It loses:
 9P2000.L has no such request and carries an explicit offset in every
 read and write, a passed file would end with the grant it was passed
-from rather than live as on Unix, and every pass would cost a round trip.
+from rather than live as on UNIX, and every pass would cost a round trip.
 POSIX puts the description beside the process table, which for programs
 is the session ([Descriptors and files](#descriptors-and-files)).
 
@@ -3590,7 +3590,7 @@ proves hard to adapt.
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| The handler on every file path costs more than the estimate | medium | file-heavy programs, compilers and `grep -r` among them, run slower than on Unix by the handler's hop on each request | E-P2; the data area's 64 KiB slots, and walk, open and first read in one round trip ([design-files.md](design-files.md#performance)); a lane from the program to a file server of the session's own domain, a change behind the handler that no program sees ([Alternatives considered](#alternatives-considered)) |
+| The handler on every file path costs more than the estimate | medium | file-heavy programs, compilers and `grep -r` among them, run slower than on UNIX by the handler's hop on each request | E-P2; the data area's 64 KiB slots, and walk, open and first read in one round trip ([design-files.md](design-files.md#performance)); a lane from the program to a file server of the session's own domain, a change behind the handler that no program sees ([Alternatives considered](#alternatives-considered)) |
 | A reader's look at its pipe's writers is linear in their number | low | a pipe with hundreds of write ends, a `make`'s shared output among them, costs each read a scan of every writer's lane | the pipe server tells readers of writers that are gone, so the list shrinks as children end; E-P1's `make`-shaped job measures it; a wake mask that names the writer that rang is the fix if it shows ([design-pipes.md](design-pipes.md#risks-and-open-questions)) |
 | toybox's applets depend on Linux interfaces more than expected | medium | medium | applets built one by one against the seam, each with its tests; sbase as the fallback |
 | Recompiled programs expect `fork`, `exec`, or `sh` syntax in `system` | high | in the first tier a program fails to link, or its `system` command means something else in rc | the spawn helpers of toybox and similar programs are rewritten over `posix_spawn` in the tree; link failures are loud; the second tier provides `fork` and `exec`; rc's porting note lists the translations, and a command rc cannot parse fails with a diagnostic |
@@ -3624,7 +3624,7 @@ nothing is orphaned.
 One engineering question, with the answer the design follows:
 
 * **Does forwarding carry enough of toybox's tests?** The forwarding command
-  mirrors a working directory's names and contents, not every Unix
+  mirrors a working directory's names and contents, not every UNIX
   attribute. Recommended: build it with the first applets and count the
   tests recorded as unsupported; if they leave an applet's behaviour
   unchecked, write rc tests for that applet in the shell's corpus. The count

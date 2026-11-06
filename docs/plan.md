@@ -107,7 +107,7 @@ numbers are names; the table's order is the order.
 | M7 The stopgap leaves | erXos's kernel boots Phase 1's system and runs every test and benchmark it ran on the stopgap | integration | track K | GK3 |
 | M2 The execution contract holds | a native test domain and a hostile domain share four CPUs by grants; no wakeup is lost; a blocking call from an executor is refused | 4,000 lines of C17 | M7 | G2 |
 | M5 A wall around some processes | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain under load and watch everything it held come back; a hostile runtime attacks a neighbour's funnel for ten minutes without effect; kill the system domain and read its crash record after the reset | 9,000 lines of C17, 6,000 of Erlang | M2 | G5 |
-| Track P The POSIX-lite personality | a Unix program recompiled unchanged pipes, polls, spawns children and takes `SIGINT` | 10,000 to 15,000 lines of C | track S's programs | GP, then G6 after its first part |
+| Track P The POSIX-lite personality | a UNIX program recompiled unchanged pipes, polls, spawns children and takes `SIGINT` | 10,000 to 15,000 lines of C | track S's programs | GP, then G6 after its first part |
 | Track D Windows, widgets and the web | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser and on a QEMU `virt` desktop whose terminal windows run the shell; a Raspberry Pi 4 kiosk | estimated per part before it starts; the designs give no figure | M5 and track S's programs for the web over the host link; M9 for the desktop; later parts track P, track Q, M10 to M12 | GW, GD |
 | M8 Cooperation earns its place | the ladder from plain threads to full cooperation, measured on seven workloads, with each feature kept or dropped by its numbers | 4,000 lines of C17 and C | G6 | G8 |
 | M9 A driver is an Erlang process | a driver process dies under load, its supervisor restarts it, and nobody notices | estimate: 3,000 lines of C17, 5,000 of Erlang | G6 | G9 |
@@ -660,7 +660,7 @@ medium, with flush of helper work, and
 `/proc`, with the previous boot's crash record under `[kernel, crash]`
 where the platform keeps one ([design-files.md](design-files.md)); the
 host link's files stream, stream 4, which `tools/erx files` relays to a
-Unix socket on the Mac so that any 9P2000.L client there mounts the
+UNIX socket on the Mac so that any 9P2000.L client there mounts the
 machine's `proc` tree, and the host-tree domain, which holds QEMU's
 virtio-9p device and serves the Mac's tree at `/host`, from M5, whose
 domain service creates it
@@ -843,7 +843,7 @@ image's program list: names, help, required facets and declared output
 fields, with callback and live-load publication checks
 ([Generation work](#generation-work)).
 
-**Goal.** A command shell with rc's language in every session, and Unix
+**Goal.** A command shell with rc's language in every session, and UNIX
 commands from toybox as ports of the session, sharing one command
 namespace with Erlang commands ([design-shell.md](design-shell.md),
 [design-programs.md](design-programs.md)).
@@ -954,10 +954,10 @@ user with the numbers before M8 and M9 build on it.
 
 ## Track P: The POSIX-lite personality
 
-**Goal.** Unix programs recompiled without porting
+**Goal.** UNIX programs recompiled without porting
 ([design-programs.md](design-programs.md#the-posix-lite-personality)).
 
-**Demo.** A Unix program recompiled unchanged against erXos's musl runs
+**Demo.** A UNIX program recompiled unchanged against erXos's musl runs
 from the shell: it creates pipes, waits on them with `poll`, spawns
 children with `posix_spawn`, runs an `rc` command with `system`, and
 handles `SIGINT` from the terminal; a program compiled into a tree the
@@ -1620,7 +1620,7 @@ runs its fuzz budget clean.
 
 ## Track Q: The second tier
 
-**Goal.** What programs that cannot be changed expect of a Unix, toward
+**Goal.** What programs that cannot be changed expect of a UNIX, toward
 what QNX offers: `fork`, the `exec` family, shared libraries, mappings of
 files, and pseudo-terminals with process groups and sessions, on which
 full-screen programs run
