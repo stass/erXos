@@ -152,6 +152,22 @@ module Erx
       end
     end
 
+    # A decompiled tree whose console node is renamed, with /chosen/stdout-path naming it
+    # through the alias alias_name and with the UART's options after a colon: the same
+    # PL011 at the same address, which bootstrap and the kernel still find by stdout-path,
+    # under a path the manifest's console is not. dtc merges the appended aliases block
+    # into the tree's own. Raises when the tree has no such node or no stdout-path.
+    def self.seed_stdout_path(dts, node:, renamed:, alias_name:)
+      moved = dts.sub(/^\t#{Regexp.escape(node.delete_prefix('/'))} \{$/) { "\t#{renamed.delete_prefix('/')} {" }
+      raise Error, "the device tree has no node #{node} to rename" if moved == dts
+
+      aimed = moved.gsub("\"#{node}\"") { "\"#{renamed}\"" }
+                   .sub(/^(\t+)stdout-path = "[^"]*";$/) { "#{Regexp.last_match(1)}stdout-path = \"#{alias_name}:115200n8\";" }
+      raise Error, 'the device tree has no /chosen/stdout-path to seed' unless aimed.include?("stdout-path = \"#{alias_name}:")
+
+      "#{aimed}\n/ {\n\taliases {\n\t\t#{alias_name} = \"#{renamed}\";\n\t};\n};\n"
+    end
+
     # The numbers of a property such as `reg = <0x00 0x9000000 0x00 0x1000>;`.
     def self.cells(body, property) = body[/^\t\t#{property} = <(.*?)>;/, 1].to_s.split.map { |cell| Integer(cell) }
     private_class_method :cells
@@ -248,6 +264,8 @@ module Erx
           if count == cpus.first
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
                                       points: Run.command_line_refusal_checkpoints)
+            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, dtb: seeded_stdout_tree(accel, count, built),
+                                      points: Run.stdout_path_refusal_checkpoints)
           end
           prove_pet(accel, count, built) if count == cpus.first
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
@@ -341,6 +359,15 @@ module Erx
          { name: 'root-refusal', pattern: /\Aerx: root task refused the boot: the kernel command line/n, seconds: 30 }.freeze].freeze
       end
 
+      # A device tree that names the console's UART by another path than the manifest's
+      # console, through an alias and with options after it: the root says both paths
+      # and ends the machine.
+      def self.stdout_path_refusal_checkpoints
+        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+         { name: 'root-refusal', seconds: 30,
+           pattern: %r{\Aerx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, #{Regexp.escape(SEEDED_STDOUT_NODE)}\r?\n}n }.freeze].freeze
+      end
+
       def self.point(name, pattern, whole, seconds: 30)
         { name: name, pattern: pattern, seconds: seconds,
           verify: whole_line(whole, speaker: 'the root task reports') }.freeze
@@ -424,9 +451,33 @@ module Erx
         raise Error, "a stopped pet ended the machine with cause #{cause}" unless cause == CrashFrame::CODEC.member('crash_cause', 'watchdog')
       end
 
-      def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil)
+      def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil, dtb: nil)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end, command_line: command_line)
+            .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end,
+                 command_line: command_line, dtb: dtb)
+      end
+
+      # The seeded tree's name for the console's PL011, which its stdout-path names through
+      # the alias SEEDED_STDOUT_ALIAS.
+      SEEDED_STDOUT_NODE = '/uart@9000000'
+      SEEDED_STDOUT_ALIAS = 'serial0'
+
+      # QEMU's own tree for the machine a boot gets, with the console's node renamed
+      # (seed_stdout_path). -dtb hands a boot this tree in place of the one QEMU would write.
+      def seeded_stdout_tree(accel, count, built)
+        directory = File.join(@root, 'build/production-image/device-tree')
+        FileUtils.mkdir_p(directory)
+        stock = File.join(directory, "#{accel}-#{count}cpu.dtb")
+        seeded = File.join(directory, "#{accel}-#{count}cpu-stdout.dtb")
+        argv = QemuPlan.argv(accel: accel, image: File.expand_path(built.single), serial: '/dev/null', cpus: count, memory_mib: MEMORY_MIB, program: @qemu)
+        machine = argv.index('-machine') + 1
+        @runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]], name: 'qemu-dumpdtb-seed', deadline: 30)
+        listing = File.read(@runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', stock], name: 'dtc-seed', deadline: 30).fetch('log'))
+        source = File.join(directory, "#{accel}-#{count}cpu-stdout.dts")
+        File.write(source, ProductionImage.seed_stdout_path(listing, node: '/pl011@9000000', renamed: SEEDED_STDOUT_NODE,
+                                                                    alias_name: SEEDED_STDOUT_ALIAS))
+        @runner.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', seeded, source], name: 'dtc-seeded', deadline: 30)
+        seeded
       end
 
       def image(fiasco, directory: 'build/production-image/boot', manifest_source: nil)

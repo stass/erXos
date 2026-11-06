@@ -34,14 +34,16 @@
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/backend/fiasco/watchdog_thread.h"
 
-/* The longest line: the identifiers' digits, two counts and the words around. */
-#define ERX_ROOT_LINE_MAX	256
+/* The longest line: a refusal that names two device-tree paths of ERX_BOOT_STDOUT_PATH_MAX bytes. */
+#define ERX_ROOT_LINE_MAX	640
 
 /* The report's words, its identifiers as digits, and two 32-bit counts. */
 _Static_assert(ERX_ROOT_LINE_MAX >= 64 +
     2 * (sizeof(((erx_boot_handoff_view_t *)0)->build_id) +
     sizeof(((erx_boot_handoff_view_t *)0)->index_hash)) + 2 * 10,
     "the root task's report fits one line");
+_Static_assert(ERX_ROOT_LINE_MAX >= 128 + 2 * ERX_BOOT_STDOUT_PATH_MAX,
+    "the console refusal and its words fit one line");
 
 extern char erx_fiasco_image_start[];
 extern char erx_fiasco_image_end[];

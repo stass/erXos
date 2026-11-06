@@ -21,7 +21,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
-| `ERX_BOOT_HANDOFF_VERSION` | 2 |
+| `ERX_BOOT_HANDOFF_VERSION` | 3 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
 | `ERX_BOOT_KERNEL_ALIGN` | 2097152 |
 | `ERX_BOOT_KIP_VIEW_MIN` | 4096 |
@@ -32,6 +32,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_BOOT_SLOT_A` | 1 |
 | `ERX_BOOT_SLOT_B` | 2 |
 | `ERX_BOOT_SLOT_NONE` | 0 |
+| `ERX_BOOT_STDOUT_PATH_MAX` | 256 |
 | `ERX_BOOT_STRINGS_MAX` | 2048 |
 | `ERX_BOOT_VALUE_NORMAL` | 2 |
 | `ERX_BOOT_VALUE_TRIAL` | 3 |
@@ -1410,7 +1411,7 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 
 ### `erx_boot_handoff_t`
 
-Storage: `wire_le`. Prefix size: 2136. Alignment: 8.
+Storage: `wire_le`. Prefix size: 2400. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -1425,6 +1426,9 @@ Storage: `wire_le`. Prefix size: 2136. Alignment: 8.
 | `pool_regions` | `u32` | 80 | 1 |
 | `bootargs_len` | `u32` | 84 | 1 |
 | `bootargs` | `u8` | 88 | 2048 |
+| `stdout_path_len` | `u32` | 2136 | 1 |
+| `stdout_path` | `u8` | 2140 | 256 |
+| `reserved` | `u32` | 2396 | 1 |
 
 ### `erx_boot_info_t`
 

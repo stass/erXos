@@ -117,6 +117,31 @@ chosen_initrd(void const *fdt, erx_boot_range_t *initrd)
   return true;
 }
 
+// The full path of the node /chosen/stdout-path names, written into path, and its
+// length (Devicetree Specification v0.4, section 3.6: the value ends at the first
+// ":", where the UART's options begin, and is a full path or an alias, which
+// libfdt resolves through /aliases). 0 when the property is absent, is no string,
+// names no node, or resolves to a path longer than ERX_BOOT_STDOUT_MAX; the
+// root then refuses the boot and says the tree names no console.
+static size_t
+chosen_stdout_path(void const *fdt, int chosen, char (&path)[ERX_BOOT_STDOUT_MAX + 1])
+{
+  if (chosen < 0)
+    return 0;
+  int size = 0;
+  char const *value = static_cast<char const *>(fdt_getprop(fdt, chosen, "stdout-path", &size));
+  if (!value || size <= 0)
+    return 0;
+  size_t length = strnlen(value, size);
+  if (length == static_cast<size_t>(size))
+    return 0;
+  char const *colon = static_cast<char const *>(memchr(value, ':', length));
+  int node = fdt_path_offset_namelen(fdt, value, static_cast<int>(colon ? colon - value : length));
+  if (node < 0 || fdt_get_path(fdt, node, path, sizeof(path)) != 0)
+    return 0;
+  return strnlen(path, sizeof(path));
+}
+
 // The device tree's reservation block and every region inherited code has
 // reserved so far, its device-tree nodes and the device tree's own included.
 static size_t
@@ -264,8 +289,10 @@ erx_image_load(Platform_base *plat)
   size_t args_length = 0;
   if (args && args_size > 0)
     args_length = erx_boot_args_cut(args, strnlen(args, args_size), ERX_BOOT_ARGS_MAX);
-  if (!erx_boot_handoff_write(&plan, args, args_length, options->erx_handoff,
-                              sizeof(options->erx_handoff)))
+  static char stdout_path[ERX_BOOT_STDOUT_MAX + 1];
+  size_t stdout_length = chosen_stdout_path(fdt, chosen, stdout_path);
+  if (!erx_boot_handoff_write(&plan, args, args_length, stdout_path, stdout_length,
+                              options->erx_handoff, sizeof(options->erx_handoff)))
     refuse("handoff record", "write");
 
   printf("erXos image: index ");

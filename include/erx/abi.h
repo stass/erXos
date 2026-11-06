@@ -27,7 +27,7 @@ struct erx_rights {
 #define ERX_ARCH_ELF_MACHINE UINT16_C(183)
 #define ERX_ARCH_USER_LIMIT UINT64_C(281474976710656)
 #define ERX_BOOT_DET UINT32_C(1)
-#define ERX_BOOT_HANDOFF_VERSION UINT32_C(2)
+#define ERX_BOOT_HANDOFF_VERSION UINT32_C(3)
 #define ERX_BOOT_INSTALLED_ONLY UINT32_C(2)
 #define ERX_BOOT_KERNEL_ALIGN UINT32_C(2097152)
 #define ERX_BOOT_KIP_VIEW_MIN UINT32_C(4096)
@@ -38,6 +38,7 @@ struct erx_rights {
 #define ERX_BOOT_SLOT_A UINT32_C(1)
 #define ERX_BOOT_SLOT_B UINT32_C(2)
 #define ERX_BOOT_SLOT_NONE UINT32_C(0)
+#define ERX_BOOT_STDOUT_PATH_MAX UINT32_C(256)
 #define ERX_BOOT_STRINGS_MAX UINT32_C(2048)
 #define ERX_BOOT_VALUE_NORMAL UINT32_C(2)
 #define ERX_BOOT_VALUE_TRIAL UINT32_C(3)
@@ -2838,7 +2839,7 @@ typedef uint32_t erx_p9_setattr_valid_t;
 
 typedef uint32_t erx_pack_flags_t;
 
-#define ERX_BOOT_HANDOFF_SIZE 2136
+#define ERX_BOOT_HANDOFF_SIZE 2400
 #define ERX_BOOT_HANDOFF_ALIGN 8
 #define ERX_BOOT_HANDOFF_OFF_VERSION 0
 #define ERX_BOOT_HANDOFF_OFF_FLAGS 4
@@ -2851,6 +2852,9 @@ typedef uint32_t erx_pack_flags_t;
 #define ERX_BOOT_HANDOFF_OFF_POOL_REGIONS 80
 #define ERX_BOOT_HANDOFF_OFF_BOOTARGS_LEN 84
 #define ERX_BOOT_HANDOFF_OFF_BOOTARGS 88
+#define ERX_BOOT_HANDOFF_OFF_STDOUT_PATH_LEN 2136
+#define ERX_BOOT_HANDOFF_OFF_STDOUT_PATH 2140
+#define ERX_BOOT_HANDOFF_OFF_RESERVED 2396
 typedef struct erx_boot_handoff erx_boot_handoff_t;
 struct erx_boot_handoff {
 	_Alignas(8) uint32_t	version;
@@ -2864,6 +2868,9 @@ struct erx_boot_handoff {
 	uint32_t	pool_regions;
 	uint32_t	bootargs_len;
 	uint8_t	bootargs[2048];
+	uint32_t	stdout_path_len;
+	uint8_t	stdout_path[256];
+	uint32_t	reserved;
 };
 _Static_assert(sizeof(erx_boot_handoff_t) == ERX_BOOT_HANDOFF_SIZE, "erx_boot_handoff size");
 _Static_assert(_Alignof(erx_boot_handoff_t) == ERX_BOOT_HANDOFF_ALIGN, "erx_boot_handoff alignment");
@@ -2889,6 +2896,12 @@ _Static_assert(offsetof(erx_boot_handoff_t, bootargs_len) ==
     ERX_BOOT_HANDOFF_OFF_BOOTARGS_LEN, "erx_boot_handoff.bootargs_len offset");
 _Static_assert(offsetof(erx_boot_handoff_t, bootargs) ==
     ERX_BOOT_HANDOFF_OFF_BOOTARGS, "erx_boot_handoff.bootargs offset");
+_Static_assert(offsetof(erx_boot_handoff_t, stdout_path_len) ==
+    ERX_BOOT_HANDOFF_OFF_STDOUT_PATH_LEN, "erx_boot_handoff.stdout_path_len offset");
+_Static_assert(offsetof(erx_boot_handoff_t, stdout_path) ==
+    ERX_BOOT_HANDOFF_OFF_STDOUT_PATH, "erx_boot_handoff.stdout_path offset");
+_Static_assert(offsetof(erx_boot_handoff_t, reserved) ==
+    ERX_BOOT_HANDOFF_OFF_RESERVED, "erx_boot_handoff.reserved offset");
 
 #define ERX_BOOT_INFO_SIZE 272
 #define ERX_BOOT_INFO_ALIGN 8

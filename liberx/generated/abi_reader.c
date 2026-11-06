@@ -1408,6 +1408,11 @@ erx_boot_handoff_decode(const uint8_t *bytes, size_t length,
 	for (size_t index = 0; index < 2048; index++) {
 		value.bootargs[index] = bytes[88 + index * 1];
 	}
+	value.stdout_path_len = erx_abi_load_u32(bytes + 2136);
+	for (size_t index = 0; index < 256; index++) {
+		value.stdout_path[index] = bytes[2140 + index * 1];
+	}
+	value.reserved = erx_abi_load_u32(bytes + 2396);
 
 	*result = value;
 	return (true);

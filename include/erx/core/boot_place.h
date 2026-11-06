@@ -36,6 +36,8 @@ extern "C" {
 /* The image format's version, and the most of a command line the record holds. */
 #define ERX_BOOT_IMAGE_VERSION		2
 #define ERX_BOOT_ARGS_MAX		2048
+/* The longest node path of /chosen/stdout-path the record holds. */
+#define ERX_BOOT_STDOUT_MAX		256
 /* The entry a refusal concerns when it concerns no entry. */
 #define ERX_BOOT_NO_ENTRY		UINT32_MAX
 
@@ -121,12 +123,15 @@ bool erx_boot_load_plan(const erx_boot_load_request_t *, erx_boot_workspace_t *,
 size_t erx_boot_args_cut(const char *, size_t, size_t);
 
 /*
- * Writes the handoff record over size bytes at record from the plan and the
- * first bootargs_len bytes of bootargs, at most the record's bound. Returns
- * false when the record does not fit, and then writes nothing.
+ * Writes the handoff record over size bytes at record from the plan, the
+ * first bootargs_len bytes of bootargs, at most the record's bound, and the
+ * stdout_len bytes of the node path /chosen/stdout-path names, at most
+ * ERX_BOOT_STDOUT_MAX, stored empty unless it is a node path
+ * (erx_boot_node_path_valid). Returns false when the record does not fit,
+ * and then writes nothing.
  */
 bool erx_boot_handoff_write(const erx_boot_load_plan_t *, const char *, size_t,
-    uint8_t *, size_t);
+    const char *, size_t, uint8_t *, size_t);
 
 #ifdef __cplusplus
 }

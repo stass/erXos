@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_handoff.h"
 #include "erx/core/boot_place.h"
 #include "erx/elf_plan.h"
 #include "erx/pack.h"
@@ -61,6 +62,8 @@ _Static_assert(ERX_BOOT_ID_SIZE == sizeof(((erx_boot_handoff_t *)0)->build_id),
     "the seam's identifier size is the record's");
 _Static_assert(ERX_BOOT_IMAGE_VERSION == ERX_PACK_VERSION,
     "the seam's image version is the format's");
+_Static_assert(ERX_BOOT_STDOUT_MAX == ERX_BOOT_STDOUT_PATH_MAX,
+    "the first stage's stdout path bound is the ABI's");
 _Static_assert(ERX_BOOT_ARGS_MAX == ERX_BOOT_STRINGS_MAX,
     "the seam's command line bound is the ABI's");
 
@@ -476,15 +479,21 @@ erx_boot_args_cut(const char *args, size_t length, size_t limit)
 
 bool
 erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
-    size_t bootargs_len, uint8_t *record, size_t size)
+    size_t bootargs_len, const char *stdout_path, size_t stdout_len,
+    uint8_t *record, size_t size)
 {
 	erx_boot_handoff_t *handoff;
 
 	if (plan == NULL || record == NULL || size < ERX_BOOT_HANDOFF_SIZE ||
 	    bootargs_len > ERX_BOOT_STRINGS_MAX ||
 	    (bootargs == NULL && bootargs_len != 0) ||
+	    stdout_len > ERX_BOOT_STDOUT_PATH_MAX ||
+	    (stdout_path == NULL && stdout_len != 0) ||
 	    ((uintptr_t)record % ERX_BOOT_HANDOFF_ALIGN) != 0)
 		return (false);
+	/* A node name outside the specification's characters: the tree names no console. */
+	if (!erx_boot_node_path_valid((const uint8_t *)stdout_path, stdout_len))
+		stdout_len = 0;
 	handoff = (erx_boot_handoff_t *)(void *)record;
 	*handoff = (erx_boot_handoff_t){
 		.version = ERX_BOOT_HANDOFF_VERSION,
@@ -492,6 +501,7 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 		.image_start = plan->archive.start,
 		.image_size = plan->archive.size,
 		.bootargs_len = (uint32_t)bootargs_len,
+		.stdout_path_len = (uint32_t)stdout_len,
 	};
 	for (size_t index = 0; index < ERX_BOOT_ID_SIZE; index++)
 		handoff->build_id[index] = plan->build_id[index];
@@ -499,5 +509,7 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 		handoff->index_hash[index] = plan->index_hash[index];
 	for (size_t index = 0; index < bootargs_len; index++)
 		handoff->bootargs[index] = (uint8_t)bootargs[index];
+	for (size_t index = 0; index < stdout_len; index++)
+		handoff->stdout_path[index] = (uint8_t)stdout_path[index];
 	return (true);
 }

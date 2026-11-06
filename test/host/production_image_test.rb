@@ -125,6 +125,23 @@ class ProductionImageTest < Minitest::Test
     assert_match point.fetch(:pattern), 'erx: root task refused the boot: manifest: root_memory is more than this machine gives the root'
   end
 
+  # The seeded boot: the console's node is renamed, stdout-path names it through an alias
+  # with options, and the refusal it expects names both paths.
+  def test_the_seeded_tree_renames_the_console_and_names_it_through_an_alias
+    dts = "/dts-v1/;\n\n/ {\n\tmodel = \"virt\";\n\n\tpl011@9000000 {\n\t\treg = <0x00 0x9000000 0x00 0x1000>;\n\t};\n\n" \
+          "\taliases {\n\t\tserial0 = \"/pl011@9000000\";\n\t};\n\n\tchosen {\n\t\tstdout-path = \"/pl011@9000000\";\n\t};\n};\n"
+    seeded = Erx::ProductionImage.seed_stdout_path(dts, node: '/pl011@9000000', renamed: '/uart@9000000', alias_name: 'serial0')
+    refute_includes seeded, 'pl011@9000000'
+    assert_includes seeded, "\tuart@9000000 {\n"
+    assert_includes seeded, "\t\tstdout-path = \"serial0:115200n8\";\n"
+    assert seeded.end_with?("/ {\n\taliases {\n\t\tserial0 = \"/uart@9000000\";\n\t};\n};\n")
+    assert_raises(Erx::Error) { Erx::ProductionImage.seed_stdout_path("/ {\n};\n", node: '/a', renamed: '/b', alias_name: 'c') }
+    point = Erx::ProductionImage::Run.stdout_path_refusal_checkpoints.last
+    line = "erx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, /uart@9000000\r\n"
+    assert_match point.fetch(:pattern), line
+    refute_match point.fetch(:pattern), line.sub('/uart@9000000', '(none)')
+  end
+
   def checkpoint_verifier(name, **options)
     built = Struct.new(:build_id, :index_hash).new('aa', 'bb')
     points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 4, **options)

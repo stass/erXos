@@ -34,10 +34,20 @@ typedef struct erx_boot_manifest {
 	erx_boot_words_t	system_args;	/* points into the manifest's bytes */
 	erx_runtime_limits_t	limits;
 	erx_boot_console_t	console;
+	erx_boot_words_t	console_path;	/* machine.console, into the manifest's bytes */
 } erx_boot_manifest_t;
 
 /* Fills *result, or returns false and names the check that refused the bytes in *reason. */
 bool	erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t *result,
 	    const char **reason);
+
+/*
+ * Whether the manifest's console is the UART /chosen/stdout-path names
+ * (docs/design-system.md, "Devices"): stdout_path is that node's full path, as
+ * bootstrap resolved it, and the two paths match whole. An empty stdout_path, a
+ * tree that names no node, matches no console.
+ */
+bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *stdout_path,
+	    size_t stdout_len);
 
 #endif /* ERX_BACKEND_BOOT_MANIFEST_H */

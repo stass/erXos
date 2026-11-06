@@ -46,18 +46,28 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	    (record.flags & ~(uint32_t)(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA)) != 0 ||
 	    record.image_size == 0 || record.image_start % ERX_PAGE_SIZE != 0 || record.image_size % ERX_PAGE_SIZE != 0 ||
 	    __builtin_add_overflow(record.image_start, record.image_size, &end) ||
-	    record.bootargs_len > ERX_BOOT_STRINGS_MAX)
+	    record.bootargs_len > ERX_BOOT_STRINGS_MAX || record.stdout_path_len > ERX_BOOT_STDOUT_PATH_MAX)
 		abort();
 	if (view.flags != record.flags || view.development != ((record.flags & ERX_PACK_DEVELOPMENT) != 0) ||
 	    view.image.start != record.image_start || view.image.size != record.image_size ||
 	    view.pool_usable != record.pool_usable || view.pool_heap != record.pool_heap ||
 	    view.pool_regions != record.pool_regions || view.bootargs_len != record.bootargs_len ||
+	    view.stdout_path_len != record.stdout_path_len ||
 	    memcmp(view.build_id, record.build_id, sizeof(view.build_id)) != 0 ||
 	    memcmp(view.index_hash, record.index_hash, sizeof(view.index_hash)) != 0)
 		abort();
 	/* The whole string the view points to lies inside the record. */
 	if (view.bootargs != (const char *)at + ERX_BOOT_HANDOFF_OFF_BOOTARGS ||
-	    ERX_BOOT_HANDOFF_OFF_BOOTARGS + view.bootargs_len > ERX_BOOT_HANDOFF_SIZE)
+	    ERX_BOOT_HANDOFF_OFF_BOOTARGS + view.bootargs_len > ERX_BOOT_HANDOFF_SIZE ||
+	    view.stdout_path != (const char *)at + ERX_BOOT_HANDOFF_OFF_STDOUT_PATH ||
+	    ERX_BOOT_HANDOFF_OFF_STDOUT_PATH + view.stdout_path_len > ERX_BOOT_HANDOFF_OFF_RESERVED)
 		abort();
+	/* An accepted stdout path is empty or a node path: no byte the root could not print. */
+	for (uint32_t index = 0; index < view.stdout_path_len; index++) {
+		const char c = view.stdout_path[index];
+
+		if (c < 0x21 || c > 0x7e || c == 0x3a || (index == 0 && c != 0x2f))
+			abort();
+	}
 	return (0);
 }

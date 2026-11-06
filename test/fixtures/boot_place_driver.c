@@ -110,7 +110,8 @@ run_plan(char **argv)
 		    copy->source - request.window_start, copy->target,
 		    copy->file_size, copy->mem_size);
 	}
-	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, record, sizeof(record)))
+	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14, record,
+	    sizeof(record)))
 		abort();
 	fwrite(record, 1, 48, stdout);
 	printf("\n");
@@ -139,8 +140,9 @@ run_handoff(char **argv)
 	covered = erx_boot_handoff_covered(&view, &range, 1);
 	range.size -= 1;
 	printf("flags %" PRIx32 " development %d image %" PRIx64 " %" PRIx64
-	    " bootargs %.*s covered %d %d\n", view.flags, view.development,
+	    " bootargs %.*s stdout %.*s covered %d %d\n", view.flags, view.development,
 	    view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
+	    (int)view.stdout_path_len, view.stdout_path,
 	    covered, erx_boot_handoff_covered(&view, &range, 1));
 	free(file);
 	return (0);

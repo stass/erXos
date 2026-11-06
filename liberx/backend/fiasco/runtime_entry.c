@@ -41,6 +41,8 @@ static const char	*release_read(const erx_boot_handoff_view_t *, erx_boot_manife
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 console_uart_build(const erx_boot_console_t *);
 static size_t		 console_uart_number(char *, uint64_t);
+static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
+static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /* The manifest's words, then each erx.arg word, which takes a byte and its NUL at the least. */
@@ -73,6 +75,8 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	reason = release_read(handoff, &manifest);
 	if (reason != NULL)
 		return (reason);
+	if (!erx_boot_console_matches(&manifest, handoff->stdout_path, handoff->stdout_path_len))
+		return (console_refusal(&manifest, handoff));
 	erx_fiasco_task_console_set(manifest.console.base);
 	reason = gather_args(handoff, &manifest, &nargs);
 	if (reason != NULL)
@@ -98,6 +102,47 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	if (status != ERX_BOOT_INFO_OK)
 		return (erx_boot_info_reason(status));
 	erx_fiasco_libc_root_start(main);
+}
+
+/*
+ * The device service's refusal of a console that is not the UART
+ * /chosen/stdout-path names (docs/design-system.md, "Devices"), naming both
+ * paths. Each is printed only as a node path (erx_boot_node_path_valid), which
+ * is ASCII without controls, and cut at ERX_BOOT_STDOUT_PATH_MAX bytes; the
+ * handoff's path is always one, and a manifest path that is not one is named
+ * by a fixed word.
+ */
+static const char *
+console_refusal(const erx_boot_manifest_t *manifest, const erx_boot_handoff_view_t *handoff)
+{
+	static const char console_is[] = "manifest: the console ";
+	static const char stdout_is[] = " is not the node /chosen/stdout-path names, ";
+	static const char no_node[] = "(none)";
+	static const char not_node[] = "(not a node path)";
+	static char line[sizeof(console_is) + sizeof(stdout_is) + 2 * ERX_BOOT_STDOUT_PATH_MAX];
+	const erx_boot_words_t console = erx_boot_node_path_valid((const uint8_t *)manifest->console_path.bytes,
+	    manifest->console_path.length) ? manifest->console_path : (erx_boot_words_t){ not_node, sizeof(not_node) - 1 };
+	const erx_boot_words_t node = handoff->stdout_path_len == 0 ? (erx_boot_words_t){ no_node, sizeof(no_node) - 1 } :
+	    (erx_boot_words_t){ handoff->stdout_path, handoff->stdout_path_len };
+	size_t used = 0;
+
+	used = line_append(line, used, (erx_boot_words_t){ console_is, sizeof(console_is) - 1 });
+	used = line_append(line, used, console);
+	used = line_append(line, used, (erx_boot_words_t){ stdout_is, sizeof(stdout_is) - 1 });
+	used = line_append(line, used, node);
+	line[used] = '\0';
+	return (line);
+}
+
+/* Appends at most ERX_BOOT_STDOUT_PATH_MAX bytes of words at line + used; returns the new length. */
+static size_t
+line_append(char *line, size_t used, erx_boot_words_t words)
+{
+	const size_t length = words.length < ERX_BOOT_STDOUT_PATH_MAX ? words.length : ERX_BOOT_STDOUT_PATH_MAX;
+
+	for (size_t at = 0; at < length; at++)
+		line[used + at] = words.bytes[at];
+	return (used + length);
 }
 
 /*

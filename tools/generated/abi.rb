@@ -7765,10 +7765,10 @@ module Erx
       ).freeze
       types["erx_boot_handoff"] = Layout.new(
         name: "erx_boot_handoff".b,
-        version: 2,
+        version: 3,
         storage: "wire_le".b,
         alignment: 8,
-        size: 2136,
+        size: 2400,
         fields: [
           Field.new(
             name: "version".b,
@@ -7915,6 +7915,48 @@ module Erx
             type: types.fetch("u8"),
             offset: 88,
             count: 2048,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "stdout_path_len".b,
+            type: types.fetch("u32"),
+            offset: 2136,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "stdout_path".b,
+            type: types.fetch("u8"),
+            offset: 2140,
+            count: 256,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u32"),
+            offset: 2396,
+            count: nil,
             bits: [].freeze,
             atomic: nil,
             writer: nil,
@@ -10238,7 +10280,7 @@ module Erx
           ).freeze,
           "boot_handoff_version".b => Constant.new(
             name: "boot_handoff_version".b,
-            value: 2,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -10299,6 +10341,12 @@ module Erx
           "boot_slot_none".b => Constant.new(
             name: "boot_slot_none".b,
             value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "boot_stdout_path_max".b => Constant.new(
+            name: "boot_stdout_path_max".b,
+            value: 256,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

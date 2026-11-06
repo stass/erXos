@@ -119,7 +119,7 @@ class BootPlaceTest < Minitest::Test
     assert_equal 2, output.scan(/^copy /).size
     # The record starts with the version, the flags, the build id and the hash.
     record = output.b[/copy [^\n]*\n(?!copy)(.*)\n\z/mn, 1]
-    assert_equal [2, 1], record.unpack('VV')
+    assert_equal [3, 1], record.unpack('VV')
   end
 
   def test_an_image_without_a_dynamic_section_runs_where_it_is_linked
@@ -231,19 +231,21 @@ class BootPlaceTest < Minitest::Test
     File.binread(@runner.run([@driver, 'handoff', path], name: 'handoff', deadline: 30).fetch('log')).strip
   end
 
-  def record(version: 2, flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1')
+  # stdout_path's length sits after the 2048 bytes of bootargs, and its bytes after that.
+  def record(version: 3, flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000', stdout_length: stdout.bytesize)
     bytes = [version, flags].pack('VV') + ("\x11".b * 8) + ("\x22".b * 32) + [start, size, 0, 0, 0, args.bytesize].pack('Q<4VV') + args.b
+    bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b
     bytes.ljust(@codec.layout_size('erx_boot_handoff'), "\0".b)
   end
 
   def test_the_kernel_accepts_a_good_record_and_says_what_it_holds
-    assert_equal 'flags 1 development 1 image 40204000 8000 bootargs erx.a=1 covered 1 0', handoff(record)
+    assert_equal 'flags 1 development 1 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0', handoff(record)
     assert_match(/development 0 /, handoff(record(flags: 2)))
   end
 
   def test_the_kernel_refuses_a_record_bootstrap_did_not_write
     assert_equal 'refused version', handoff("\0".b * @codec.layout_size('erx_boot_handoff'))
-    assert_equal 'refused version', handoff(record(version: 1))
+    assert_equal 'refused version', handoff(record(version: 2))
     assert_equal 'refused flags', handoff(record(flags: 4))
     assert_equal 'refused image_range', handoff(record(start: 0x4020_4001))
     assert_equal 'refused image_range', handoff(record(size: 0))
@@ -253,6 +255,21 @@ class BootPlaceTest < Minitest::Test
     long[84, 4] = [2049].pack('V')
     assert_equal 'refused bootargs_length', handoff(long)
     assert_equal 'refused record_extent', handoff(record.byteslice(0, 100))
+  end
+
+  # The path bootstrap resolved from /chosen/stdout-path reaches the root as the node's
+  # full path: empty when the tree names none, and otherwise only the characters a node
+  # path has, so the root's refusal can print it as it is.
+  def test_the_stdout_path_is_a_node_path_or_nothing
+    assert_match(/ stdout  covered/, handoff(record(stdout: '')))
+    assert_match(%r{ stdout /soc/serial@1,0x9000000_a\+b-c covered}, handoff(record(stdout: '/soc/serial@1,0x9000000_a+b-c')))
+    assert_match(/ stdout \/ covered/, handoff(record(stdout: '/')))
+    assert_match(/ stdout \/a{255} covered/, handoff(record(stdout: "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
+    assert_equal 'refused stdout_path_length', handoff(record(stdout: '', stdout_length: 257))
+    assert_equal 'refused stdout_path', handoff(record(stdout: 'serial0'))
+    assert_equal 'refused stdout_path', handoff(record(stdout: '/pl011@9000000:115200'))
+    assert_equal 'refused stdout_path', handoff(record(stdout: "/pl011\e[2J"))
+    assert_equal 'refused stdout_path', handoff(record(stdout: "/pl011\0"))
   end
 
   def test_a_command_line_is_cut_at_the_last_whole_word

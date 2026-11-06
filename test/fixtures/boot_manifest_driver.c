@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "liberx/backend/core/boot_manifest.h"
 
@@ -22,7 +23,7 @@ main(int argc, char **argv)
 	FILE *file;
 	size_t length;
 
-	if (argc != 2 || (file = fopen(argv[1], "rb")) == NULL)
+	if ((argc != 2 && argc != 3) || (file = fopen(argv[1], "rb")) == NULL)
 		return (2);
 	length = fread(bytes, 1, sizeof(bytes), file);
 	fclose(file);
@@ -38,5 +39,9 @@ main(int argc, char **argv)
 	    manifest.limits.funnel_depth, manifest.limits.exports, (unsigned long long)manifest.limits.tmp,
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
+	if (argc == 3)
+		printf("console %.*s matches %d\n", (int)manifest.console_path.length,
+		    manifest.console_path.bytes,
+		    erx_boot_console_matches(&manifest, argv[2], strlen(argv[2])));
 	return (0);
 }

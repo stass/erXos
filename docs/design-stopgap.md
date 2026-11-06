@@ -137,7 +137,10 @@ Inherited code reads no executable and no modules.
    `Root_section_rwx` for the root's image, whose segments one range cannot tell apart, and
    `Root_section_ro` for the archive.
 4. `erx_boot_handoff_write` writes the `erx_boot_handoff` record of `abi/kernel.txt` (flags, build
-   identifier, index hash, the archive's range, and `/chosen/bootargs` cut at the last whole word)
+   identifier, index hash, the archive's range, `/chosen/bootargs` cut at the last whole word, and
+   the full path of the node `/chosen/stdout-path` names: libfdt resolves the value up to its first
+   `:`, a path or an alias of `/aliases`, and the path is empty when that names no node or is longer
+   than `ERX_BOOT_STDOUT_PATH_MAX`)
    into the options block for the kernel. That block is mapped into no task, so it also writes the
    record, by `erx_image_load`, into the **handoff page**, a free page from
    `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
@@ -180,11 +183,15 @@ service's bodies directly.
    event (`watchdog.c:127`).
 7. Points its own `_pager` and `_exc_handler` at its gate and runs the service and the watchdog.
    **From here the service alone touches the root's tables.**
-8. Creates its reaper, fills the boot information page (`runtime_entry.c`), moves off the image's small
+8. Checks that the manifest's `console` is the node path the handoff view's `stdout_path` carries,
+   the device service's check at boot ([design-system.md](design-system.md#devices)), which the root
+   makes while no device service runs, and otherwise refuses the boot with both paths
+   (`erx_boot_console_matches` in `liberx/backend/core/boot_manifest.c`). Creates its reaper, fills
+   the boot information page (`runtime_entry.c`), moves off the image's small
    stack and enters musl's start path, whose `main` (`runtime_main.c`) calls `sys/erxos`'s `erx_runtime_main`.
    ERTS reads the boot information page, so the one `argv` word in musl's start block goes unused.
 
-A failure in steps 1 to 6 prints its reason through `l4_vcon_write` and ends the machine, with no
+A failure in steps 1 to 6, or of step 8's console check, prints its reason through `l4_vcon_write` and ends the machine, with no
 crash record.
 
 ### Boot information

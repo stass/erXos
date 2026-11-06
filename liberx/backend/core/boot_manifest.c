@@ -105,5 +105,20 @@ erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t 
 		.processes = limits.processes,
 	};
 	result->console = console_read(&view);
+	result->console_path = (erx_boot_words_t){
+		(const char *)string_at(&view, &view.header.console), view.header.console.length
+	};
+	return (true);
+}
+
+bool
+erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *stdout_path, size_t stdout_len)
+{
+	if (manifest->console_path.length == 0 || manifest->console_path.length != stdout_len)
+		return (false);
+	for (size_t at = 0; at < stdout_len; at++) {
+		if (manifest->console_path.bytes[at] != stdout_path[at])
+			return (false);
+	}
 	return (true);
 }

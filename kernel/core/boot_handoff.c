@@ -40,6 +40,10 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		return ("image_range");
 	if (handoff->bootargs_len > ERX_BOOT_STRINGS_MAX)
 		return ("bootargs_length");
+	if (handoff->stdout_path_len > ERX_BOOT_STDOUT_PATH_MAX)
+		return ("stdout_path_length");
+	if (!erx_boot_node_path_valid(handoff->stdout_path, handoff->stdout_path_len))
+		return ("stdout_path");
 	*view = (erx_boot_handoff_view_t){
 		.flags = handoff->flags,
 		.development = (handoff->flags & ERX_PACK_DEVELOPMENT) != 0,
@@ -50,6 +54,8 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		.pool_regions = handoff->pool_regions,
 		.bootargs = (const char *)handoff->bootargs,
 		.bootargs_len = handoff->bootargs_len,
+		.stdout_path = (const char *)handoff->stdout_path,
+		.stdout_path_len = handoff->stdout_path_len,
 	};
 	for (size_t index = 0; index < sizeof(view->build_id); index++)
 		view->build_id[index] = handoff->build_id[index];

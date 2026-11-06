@@ -38,7 +38,7 @@ limit pack_path_max u32 4096
 limit pack_strings_max u32 4194304
 limit pack_hash_size u32 32
 limit boot_locator_version u32 1
-limit boot_handoff_version u32 2
+limit boot_handoff_version u32 3
 limit boot_kip_view_type u32 16
 limit boot_koptions_view_type u32 17
 limit boot_kip_view_min u32 4096
@@ -61,6 +61,8 @@ limit lane_side_data u32 8192
 limit label_split u32 2147483648
 limit boot_version u32 1
 limit boot_strings_max u32 2048
+# The longest node path of /chosen/stdout-path the handoff record carries.
+limit boot_stdout_path_max u32 256
 limit crash_version u32 2
 limit crash_size u32 16384
 limit crash_magic u64 0x4853415243585245

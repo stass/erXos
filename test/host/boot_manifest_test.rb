@@ -50,10 +50,26 @@ class BootManifestTest < Minitest::Test
     Erx::Manifest.admit(source: source, codec: @codec, context: context).bytes
   end
 
-  def read(bytes)
+  def read(bytes, stdout_path: '/pl011@9000000')
     path = File.join(@directory, 'manifest.bin')
     File.binwrite(path, bytes)
-    Open3.capture2e(@driver, path, stdin_data: '')
+    Open3.capture2e(@driver, path, stdout_path, stdin_data: '')
+  end
+
+  def console_line(stdout_path)
+    output, status = read(admitted, stdout_path: stdout_path)
+    assert status.success?, output
+    output.lines.grep(/\Aconsole /).fetch(0).chomp
+  end
+
+  # The device service's check at boot (docs/design-system.md, "Devices"): the manifest's
+  # console is the node /chosen/stdout-path names, whole path against whole path.
+  def test_the_console_matches_only_the_node_stdout_path_names
+    assert_equal 'console /pl011@9000000 matches 1', console_line('/pl011@9000000')
+    assert_equal 'console /pl011@9000000 matches 0', console_line('/pl011@9040000')
+    assert_equal 'console /pl011@9000000 matches 0', console_line('/pl011@900000')
+    assert_equal 'console /pl011@9000000 matches 0', console_line('/pl011@9000000/uart')
+    assert_equal 'console /pl011@9000000 matches 0', console_line('')
   end
 
   def test_the_page_takes_the_node_the_words_and_the_limits_of_the_source
