@@ -12,7 +12,7 @@ require 'tmpdir'
 # generated erx_9p_grammar, which checks every request it sends and every reply, is
 # preloaded and held to the same rule, as is erx_path, the resolver of every path, which
 # calls nothing but BIFs and the callbacks its caller hands it, and so are the EROFS
-# reader, erx_erofs, and its funnel, erx_verity, which serve paths in the calling process. xref, on stock's emulator (ERX_ERL and ERX_ERLC,
+# reader, erx_erofs, its open files, erx_erofs_file, and its funnel, erx_verity, which serve paths in the calling process. xref, on stock's emulator (ERX_ERL and ERX_ERLC,
 # which make check supplies), lists each module's calls to other modules; each must be a
 # BIF or name a module of the preloaded Makefile's list. A seeded call to lists:usort/1
 # must be caught.
@@ -22,7 +22,8 @@ class ErxFileRemoteTest < Minitest::Test
               'erx_9p_grammar' => 'otp/erts/preloaded/src/erx_9p_grammar.erl',
               'erx_path' => 'otp/erts/preloaded/src/erx_path.erl',
               'erx_verity' => 'otp/erts/preloaded/src/erx_verity.erl',
-              'erx_erofs' => 'otp/erts/preloaded/src/erx_erofs.erl' }
+              'erx_erofs' => 'otp/erts/preloaded/src/erx_erofs.erl',
+              'erx_erofs_file' => 'otp/erts/preloaded/src/erx_erofs_file.erl' }
             .transform_values { |path| File.join(ROOT, path) }.freeze
   PRELOAD_MAKEFILE = File.join(ROOT, 'otp/erts/preloaded/src/Makefile')
   INCLUDES = %w[otp/lib/kernel/include erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze

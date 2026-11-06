@@ -9,8 +9,15 @@
 %% turn, checks it, builds the new table from the one the term holds and puts it, so
 %% two changes never lose each other and a resolution reads the term without a copy or
 %% a lock. Until the process writes a table the term is absent, and
-%% prim_file:erx_table/0 answers the boot table. The changes are pure functions over a
-%% table, change/2, which a session's handler can apply to a program's table as well.
+%% prim_file:erx_table/0 answers the boot table. The changes are functions over a
+%% table, change/2, which a session's handler can apply to a program's table as well;
+%% each is pure but for an image's mount, which reads the image.
+%%
+%% An EROFS image mounts from the block service's window on it, read-only: the change
+%% mounts the image with erx_erofs:mount/3 once the point and options pass, and the
+%% entry holds that mount as its provider, so the table holds only mounts erx_ns made.
+%% A mount that fails answers its error, and its diagnostic goes to the kernel log, as
+%% does the diagnostic of every later operation that fails on the image.
 %%
 %% The process monitors every grant pid its table holds. When one ends, it rewrites
 %% that pid's entries to the provider ended, which answers eio, and they stay until
@@ -22,14 +29,17 @@
 %% Each call answers ok or {error, Reason}: einval for a malformed path, place or
 %% option, a mount point holding . or .., or an unmount where no entry is; enametoolong
 %% beyond the bounds of a place; enoent for a source no entry holds; eexist for a point
-%% that already has an entry; ebusy for unmounting /; and system_limit beyond the
-%% table's 64 entries.
+%% that already has an entry; ebusy for unmounting /; system_limit beyond the table's
+%% 64 entries; and for an image whose mount fails, the reader's error: eio for a
+%% window that does not answer or an image it cannot read, enotsup for a feature it
+%% does not implement.
 
 -module(erx_ns).
 
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1, mount/3, unmount/1, bind/2, bind/3, tmp_limit/0, change/2]).
+-export([image_log/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([entry/0, table/0]).
 
@@ -37,19 +47,20 @@
 
 -type name() :: binary().
 -type rights() :: ro | rw | rx.
--type provider() :: release | {grant, pid(), Tree :: name()} | ended.
+-type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()} | ended.
 -type entry() :: #{point := [name()], provider := provider(), root := [name()], rights := rights()}.
 -type table() :: [entry()].
 -type option() :: {tree, binary()} | rights().
--type reason() :: einval | enametoolong | enoent | eexist | ebusy | system_limit.
+-type reason() :: einval | enametoolong | enoent | eexist | ebusy | system_limit | file:posix().
 %% A change as the process receives it, from this module's functions or from any other
 %% process, so every field is checked before it changes anything. A bind's source is
 %% the place it reached, an absolute path of plain names.
--type request() :: {mount, To :: binary(), pid(), [option()]}
+-type request() :: {mount, To :: binary(), pid() | {erofs, Window :: pid()}, [option()]}
                  | {bind, From :: binary(), To :: binary(), [] | [ro]}
                  | {unmount, To :: binary()}.
 %% A change once checked against the table, with its paths as plain names.
--type checked() :: {mount, [name()], pid(), name(), rights()}
+-type checked() :: {mount, [name()], provider(), rights()}
+                 | {mount_image, [name()], Window :: pid()}
                  | {bind, [name()], [name()], boolean()}
                  | {unmount, [name()]}.
 %% The module whose erx_table/0 reads the term (prim_file, or a stub in the EUnit
@@ -67,7 +78,12 @@ start_link(Prim) ->
 
 %% Mounts the grant Pid at To, a local process. Options name the tree the grant roots in,
 %% {tree, Name}, once, and at most one of ro, rw and rx, ro when none is given.
--spec mount(pid(), file:name_all(), [option()]) -> ok | {error, reason()}.
+%%
+%% Or mounts at To, read-only, the EROFS image the block service's window Window holds,
+%% with no option or ro alone.
+-spec mount(pid() | {erofs, pid()}, file:name_all(), [option()]) -> ok | {error, reason()}.
+mount({erofs, Window}, To, Options) ->
+    request(fun() -> {mount, text(To), {erofs, Window}, Options} end);
 mount(Pid, To, Options) ->
     request(fun() -> {mount, text(To), Pid, Options} end).
 
@@ -97,9 +113,10 @@ tmp_limit() ->
 %% answered, a malformed one with einval.
 -spec change(request() | term(), table()) -> {ok, table()} | {error, reason()}.
 change(Request, Table) ->
-    case checked(Request, Table) of
-        {ok, Checked} -> {ok, applied(Checked, Table)};
-        {error, _} = Error -> Error
+    maybe
+        {ok, Checked} ?= checked(Request, Table),
+        {ok, Ready} ?= mounted(Checked),
+        {ok, applied(Ready, Table)}
     end.
 
 %% The process ---------------------------------------------------------------------
@@ -111,9 +128,9 @@ init(Prim) ->
 -spec handle_call(term(), gen_server:from(), state()) -> {reply, ok | {error, reason()}, state()}.
 handle_call(Request, _From, #{prim := Prim} = State) ->
     Table = Prim:erx_table(),
-    case checked(Request, Table) of
-        {ok, Checked} ->
-            {reply, ok, put_table(applied(Checked, Table), State)};
+    case change(Request, Table) of
+        {ok, Changed} ->
+            {reply, ok, put_table(Changed, State)};
         {error, _} = Error ->
             {reply, Error, State}
     end.
@@ -160,7 +177,13 @@ checked({mount, To, Pid, Options}, Table) when is_pid(Pid), node(Pid) =:= node()
         {ok, Tree, Rights} ?= mount_options(Options, undefined, undefined),
         {ok, Point} ?= new_point(To, Table),
         ok ?= tree(Tree),
-        {ok, {mount, Point, Pid, Tree, Rights}}
+        {ok, {mount, Point, {grant, Pid, Tree}, Rights}}
+    end;
+checked({mount, To, {erofs, Window}, Options}, Table)
+  when is_pid(Window), node(Window) =:= node(), Options =:= [] orelse Options =:= [ro] ->
+    case new_point(To, Table) of
+        {ok, Point} -> {ok, {mount_image, Point, Window}};
+        {error, _} = Error -> Error
     end;
 checked({bind, From, To, Options}, Table) when Options =:= []; Options =:= [ro] ->
     maybe
@@ -260,8 +283,8 @@ plain(Names) ->
 %% The changes ---------------------------------------------------------------------
 
 -spec applied(checked(), table()) -> table().
-applied({mount, Point, Pid, Tree, Rights}, Table) ->
-    Table ++ [#{point => Point, provider => {grant, Pid, Tree}, root => [], rights => Rights}];
+applied({mount, Point, Provider, Rights}, Table) ->
+    Table ++ [#{point => Point, provider => Provider, root => [], rights => Rights}];
 applied({bind, Place, Point, ReadOnly}, Table) ->
     {ok, #{rights := Rights} = Holder} = holder(Place, Table),
     Table ++ [Holder#{point := Point, rights := case ReadOnly of true -> ro; false -> Rights end}];
@@ -274,6 +297,32 @@ ended(Pid, Table) ->
          #{provider := {grant, Pid, _}} -> Entry#{provider := ended};
          #{} -> Entry
      end || Entry <- Table].
+
+%% Mounting an image ---------------------------------------------------------------
+
+%% The mount runs in erx_ns's process or change/2's caller, and its log in whatever
+%% process reads a path on the image.
+
+%% A checked change with its image mounted: the mount's entry change, or the reader's
+%% error once its diagnostic, fixed text and numbers of the reader's, is in the kernel
+%% log with the window's pid. Every other change is ready as it is.
+mounted({mount_image, Point, Window}) ->
+    case erx_erofs:mount(Window, unchecked, fun ?MODULE:image_log/1) of
+        {ok, Fs} ->
+            {ok, {mount, Point, {erofs, Fs}, ro}};
+        {error, Reason, Diagnostic} ->
+            _ = erx_log:debug(["erx_ns: image ", pid_to_list(Window), ": ", Diagnostic]),
+            {error, Reason}
+    end;
+mounted(Checked) ->
+    {ok, Checked}.
+
+%% The kernel log line of an operation that failed on a mounted image, which runs in the
+%% process that read the path: a fun of an exported function, so a reload of this module
+%% leaves the mounts' log working.
+-spec image_log(binary()) -> term().
+image_log(Diagnostic) ->
+    erx_log:debug(["erx_ns: image: ", Diagnostic]).
 
 %% In the calling process ----------------------------------------------------------
 

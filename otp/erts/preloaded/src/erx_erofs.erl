@@ -32,12 +32,18 @@ b blocks reads O(log b) of them, so the work of every operation is bounded
 by its names and the image's size; nothing recurses on the image's data.
 It calls only BIFs, since it runs in whatever process reads a path, the
 code server included.
+
+`mount/3` opens the image through the funnel from the block service's
+window on it; `erx_ns` mounts the result in the namespace, `prim_file`
+calls the operations below on the names `erx_path` resolves there, and an
+open file of the image is `erx_erofs_file`'s.
 """.
 
--export([mount/2, walk/2, read_link/2, read_file_info/2, list_dir/2,
-         read_file/2, pread/4]).
+-export([mount/3, walk/2, read_link/2, read_file_info/2, file_info/2,
+         list_dir/2, read_file/2, pread/4]).
 -export_type([fs/0, kind/0, info/0]).
 
+-include("file.hrl").
 -include("generated/erx_abi.hrl").
 
 -define(BLOCK, ?ERX_EROFS_BLOCK_SIZE).
@@ -84,12 +90,20 @@ code server included.
 -define(FAIL(Posix, Text, Args), throw({?MODULE, Posix, Text, Args})).
 
 -doc """
-Mounts the image: reads block 0, checks the superblock and the root
-directory, and returns the mount, or the error and its diagnostic. `Log`
-receives the diagnostic of every later failed operation.
+Mounts the image the block service's window `Window` holds, checked
+against `Tree`: opens it through the funnel, reads block 0, checks the
+superblock and the root directory, and returns the mount, or the error and
+its diagnostic. `Log` receives the diagnostic of every later failed
+operation.
 """.
--spec mount(erx_verity:image(), log()) -> {ok, fs()} | {error, posix(), binary()}.
-mount(Image, Log) when is_function(Log, 1) ->
+-spec mount(pid(), erx_verity:tree(), log()) -> {ok, fs()} | {error, posix(), binary()}.
+mount(Window, Tree, Log) when is_function(Log, 1) ->
+    case erx_verity:open(Window, Tree) of
+        {ok, Image} -> mount_image(Image, Log);
+        {error, eio} -> {error, eio, <<"erofs: the window did not answer its length">>}
+    end.
+
+mount_image(Image, Log) ->
     Probe = #fs{image = Image, log = Log, blocks = 1, meta = 0, root = 0,
                 epoch = 0, nsec = 0, compact_mtime = false},
     try
@@ -135,6 +149,39 @@ read_file_info(Fs, Names) ->
                                    uid => I#inode.uid, gid => I#inode.gid,
                                    mtime => I#inode.mtime, inode => I#inode.nid}
                          end).
+
+-doc """
+What `read_file_info/2` answers, as the record stock's `prim_file` NIF
+returns for a path: its times POSIX seconds, for `prim_file` to convert.
+""".
+-spec file_info(fs(), [name()]) -> #file_info{} | {error, posix()}.
+file_info(Fs, Names) ->
+    case operation(Fs, Names, fun stat/1) of
+        {ok, Info} -> Info;
+        Error -> Error
+    end.
+
+%% A stat of the inode. Every time is the image's modification time, as the format keeps
+%% no other. The owner's read bit gives the access, never write, since the image takes
+%% none, as stock's access(2) answers on a read-only mount; a link's own record carries
+%% none, which prim_file takes from the file the link leads to. No device number is
+%% given to an image, so it has none.
+stat(#inode{type = Type, mtime = {Seconds, _}} = I) ->
+    #file_info{size = I#inode.size, type = Type,
+               access = access(I),
+               atime = Seconds, mtime = Seconds, ctime = Seconds, mode = type_bits(Type) bor I#inode.mode,
+               links = I#inode.nlink, major_device = 0, minor_device = 0,
+               inode = I#inode.nid, uid = I#inode.uid, gid = I#inode.gid}.
+
+access(#inode{type = symlink}) -> undefined;
+access(#inode{mode = Mode}) when Mode band 8#400 =:= 0 -> none;
+access(#inode{}) -> read.
+
+%% The file type bits of st_mode, which stat shows and the inode's mode, as decoded,
+%% leaves out.
+type_bits(regular) -> 8#100000;
+type_bits(directory) -> 8#040000;
+type_bits(symlink) -> 8#120000.
 
 -doc "Lists the names of the directory `Names` names, without `.` and `..`.".
 -spec list_dir(fs(), [name()]) -> {ok, [name()]} | {error, posix()}.

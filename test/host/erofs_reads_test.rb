@@ -31,8 +31,9 @@ class ErofsReadsTest < Minitest::Test
   end
 
   def test_the_reader_may_only_read_through_the_funnel
-    assert_empty lines_of(READER => "f(I) -> erx_verity:read(I, 0, 1).\n-type t() :: erx_verity:image().\n")
-    text = "f(I) -> erx_verity:open(F, 1).\ng(I) -> erx_verity:close(I).\n"
+    assert_empty lines_of(READER => "f(I) -> erx_verity:read(I, 0, 1).\n-type t() :: erx_verity:image().\n" \
+                                "g(W) -> erx_verity:open(W, unchecked).\n-type u() :: erx_verity:tree().\n")
+    text = "f(I) -> erx_verity:check(I, 1).\ng(I) -> erx_verity:close(I).\n"
     assert_equal [[READER, 1], [READER, 2]], lines_of(READER => text)
   end
 

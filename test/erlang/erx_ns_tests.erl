@@ -18,6 +18,8 @@ ns_test_() ->
      [fun boot_table_until_a_change/0,
       fun mount_adds_a_grant_entry/0,
       fun mount_refusals/0,
+      fun mount_of_an_image_adds_a_read_only_entry/0,
+      fun image_mount_refusals/0,
       fun bind_roots_at_the_place_from_reaches/0,
       fun bind_of_a_relative_path_starts_at_the_working_directory/0,
       fun bind_refusals/0,
@@ -160,9 +162,45 @@ a_grant_ended_while_the_process_was_down_ends_on_restart() ->
 a_malformed_request_answers_einval_and_changes_nothing() ->
     [?assertEqual({error, einval}, gen_server:call(erx_ns, Request))
      || Request <- [nonsense, {mount, <<"/x">>, self(), bad}, {bind, 1, 2, []}, {unmount, {}},
-                    {mount, <<"/x">>, self(), [{tree, <<"t">>} | tail]}]],
+                    {mount, <<"/x">>, self(), [{tree, <<"t">>} | tail]},
+                    {mount, <<"/x">>, {erofs, not_a_mount}, []}]],
     ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
     ?assert(is_process_alive(whereis(erx_ns))).
+
+%% An image mounts from a window, read-only, its entry holding the reader's mount, and
+%% unmounts as any entry does.
+mount_of_an_image_adds_a_read_only_entry() ->
+    Window = erx_erofs_tests:window(erx_erofs_tests:fixture("compact")),
+    ?assertEqual(ok, erx_ns:mount({erofs, Window}, <<"/release/">>, [])),
+    [_, #{point := [<<"release">>], provider := {erofs, Fs}, root := [], rights := ro}] = table(),
+    ?assertEqual({ok, [<<"b">>]}, erx_erofs:list_dir(Fs, [<<"a">>])),
+    ?assertEqual(ok, erx_ns:mount({erofs, Window}, "/again", [ro])),
+    ?assertEqual(ok, erx_ns:unmount(<<"/release">>)),
+    ?assertMatch([#{point := []}, #{point := [<<"again">>]}], table()).
+
+%% A malformed image, a window that ended and anything but ro answer before the table
+%% changes; the mount's diagnostic goes to the log.
+image_mount_refusals() ->
+    register(erx_ns_log, self()),
+    Window = erx_erofs_tests:window(erx_erofs_tests:fixture("compact")),
+    {Gone, Ref} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN', Ref, process, Gone, _} -> ok end,
+    [?assertEqual({error, Reason}, erx_ns:mount(Source, To, Options))
+     || {Reason, Source, To, Options} <-
+            [{eio, {erofs, erx_erofs_tests:window(binary:copy(<<0>>, 8192))}, <<"/x">>, []},
+             {eio, {erofs, Gone}, <<"/x">>, []},
+             {einval, {erofs, not_a_pid}, <<"/x">>, []},
+             {einval, {erofs, Window}, <<"/x">>, [rw]},
+             {einval, {erofs, Window}, <<"/x">>, [rx]},
+             {einval, {erofs, Window}, <<"/x">>, [{tree, <<"t">>}]},
+             {einval, {erofs, Window}, <<"x">>, []},
+             {eexist, {erofs, Window}, <<"/">>, []}]],
+    ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
+    unregister(erx_ns_log),
+    ?assertMatch([{log, ["erx_ns: image ", _, ": ", <<"erofs: block 0: no EROFS magic">>]} | _], logged()).
+
+logged() ->
+    receive {log, _} = Log -> [Log | logged()] after 0 -> [] end.
 
 %% The table once erx_ns has handled every message before this call.
 settled() ->

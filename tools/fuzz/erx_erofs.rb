@@ -21,6 +21,8 @@ module ErxErofsFuzz
   SOURCES = [File.join(PRELOADED, 'erx_verity.erl'),
              *%w[erx_erofs_tests erx_erofs_fuzz].map { |name| File.join(ROOT, "test/erlang/#{name}.erl") }].freeze
   INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
+  # file.hrl, for the reader's #file_info{}.
+  KERNEL_INCLUDE = File.join(ROOT, 'otp/lib/kernel/include')
   FIXTURES = File.join(ROOT, 'test/fixtures/erofs')
   DEADLINE_SECONDS = '300'
 
@@ -68,7 +70,7 @@ module ErxErofsFuzz
     Dir.mktmpdir('erx-erofs-fuzz') do |work|
       reader = File.join(work, 'erx_erofs.erl')
       File.binwrite(reader, reader_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, reader, *SOURCES,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-I', KERNEL_INCLUDE, '-o', work, reader, *SOURCES,
                                        stdin_data: '')
       raise output unless status.success?
 

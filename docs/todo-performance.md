@@ -198,9 +198,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   `erx_verity`, [design-storage.md](design-storage.md#reading-erofs-images)):
   every operation reads its names' inode and directory blocks through the
   funnel again, and the superblock's CRC-32C runs bit by bit in Erlang at each
-  mount. Settled by operations a second over a release image on the host's
+  mount. An open file of an image (`erx_erofs_file`) walks its names again for
+  every read, and `erx_verity` sends the window one request per 4 KiB block,
+  since a window request carries at most 8 sectors, all sent before the first
+  answer. Settled by operations a second over a release image on the host's
   stock OTP with and without the design's metadata cache; the fix on the table
-  is that cache.
+  is that cache, and an open file keeping its inode.
 * **[Low] files, resolving a path in Erlang** (`erx_path`, [design-files.md](design-files.md#resolving-a-path)):
   each run the resolver places is list work over up to 256 names and 64 entries in the calling process; a `.` or `..`
   after a name the path has not yet walked costs a walk of its own, one round trip more, and on the release file

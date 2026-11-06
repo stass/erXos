@@ -45,6 +45,7 @@ main([PrefixText, Mode]) ->
     pins(Mode),
     tmp(Prefix, Mode),
     namespace(Mode),
+    image(Mode),
     remote(Mode),
     resources(),
     io:format("end\tok~n"),
@@ -345,6 +346,73 @@ loop(Count, Fun) ->
 
 %% A grant of erx_fs_test_tree, which test/integration/runtime_prim_file_test.rb compiles
 %% into test/ebin with erx_fs: / holds a/ (with b/ and f), the link l -> "a" and f.
+%% Only the release has erx_ns. An EROFS image, the fixture image of the reader's tests at
+%% /image.erofs, mounted at /img from a RAM window: its paths reach the EROFS reader, a
+%% link on it is followed from the place it lies, an absolute link through the namespace,
+%% an operation that writes answers erofs once the directory is walked, a malformed image
+%% is refused, and the image leaves with its entry. Each line is `image <case>`.
+image("stock") -> ok;
+image("release") ->
+    Show = fun(Case, Result) -> io:format("image ~s\t~0tp~n", [Case, Result]) end,
+    Crc = fun({ok, Data}) -> {ok, erlang:crc32(Data)}; (Other) -> Other end,
+    {ok, Bytes} = prim_file:read_file(<<"/image.erofs">>),
+    Show("mount", erx_ns:mount({erofs, ram_window(Bytes)}, <<"/img">>, [])),
+    Show("read", Crc(prim_file:read_file(<<"/img/big">>))),
+    Show("info", info(prim_file:read_file_info(<<"/img/big">>))),
+    Show("dir info", info(prim_file:read_file_info(<<"/img/a">>))),
+    Show("list", prim_file:list_dir(<<"/img/a">>)),
+    Show("link", prim_file:read_link(<<"/img/to-small">>)),
+    Show("link info", info(prim_file:read_link_info(<<"/img/to-small">>))),
+    Show("via link", Crc(prim_file:read_file(<<"/img/to-small">>))),
+    Show("up link", Crc(prim_file:read_file(<<"/img/a/b/up/small">>))),
+    Show("absolute link", prim_file:read_file_info(<<"/img/to-b">>)),
+    Show("missing", prim_file:read_file(<<"/img/nope">>)),
+    Show("not dir", prim_file:read_file(<<"/img/small/x">>)),
+    {ok, Fd} = prim_file:open(<<"/img/big">>, [read, binary]),
+    Show("open read", Crc(file:read(Fd, 5000))),
+    Show("open pread", Crc(file:pread(Fd, 12000, 1000))),
+    Show("open position", file:position(Fd, eof)),
+    Show("open write", file:write(Fd, <<"x">>)),
+    Show("open close", file:close(Fd)),
+    Show("open dir", prim_file:open(<<"/img/a">>, [read])),
+    {ok, Cwd} = prim_file:get_cwd(),
+    Show("cwd", prim_file:set_cwd(<<"/img/a/b">>)),
+    Show("cwd read", Crc(prim_file:read_file(<<"c/leaf">>))),
+    Show("cwd up", Crc(prim_file:read_file(<<"../../small">>))),
+    ok = prim_file:set_cwd(Cwd),
+    Show("cwd file", prim_file:set_cwd(<<"/img/small">>)),
+    Show("make_dir", prim_file:make_dir(<<"/img/new">>)),
+    Show("make_dir missing", prim_file:make_dir(<<"/img/nope/new">>)),
+    Show("make_dir existing", prim_file:make_dir(<<"/img/a">>)),
+    Show("open exclusive", prim_file:open(<<"/img/small">>, [write, exclusive])),
+    Show("open dir to write", prim_file:open(<<"/img/a">>, [write])),
+    Show("create via link", prim_file:open(<<"/img/to-b">>, [write])),
+    Show("open to write", prim_file:open(<<"/img/small">>, [write])),
+    Show("write_file", prim_file:write_file(<<"/img/new">>, <<"x">>)),
+    Show("delete", prim_file:delete(<<"/img/small">>)),
+    Show("del_dir", prim_file:del_dir(<<"/img/a/b/c">>)),
+    Show("rename", prim_file:rename(<<"/img/small">>, <<"/img/moved">>)),
+    Show("write_file_info", prim_file:write_file_info(<<"/img/small">>, #file_info{mode = 8#600})),
+    Show("symlink", prim_file:make_symlink(<<"small">>, <<"/img/new">>)),
+    Show("symlink existing", prim_file:make_symlink(<<"small">>, <<"/img/to-small">>)),
+    Show("link to", prim_file:make_link(<<"/img/small">>, <<"/img/new">>)),
+    Show("bad image", erx_ns:mount({erofs, ram_window(binary:copy(<<0>>, 8192))}, <<"/bad">>, [])),
+    Show("unmount", erx_ns:unmount(<<"/img">>)),
+    Show("after", prim_file:read_file_info(<<"/img/big">>)).
+
+%% A RAM window over Bytes: answers gen_server calls as erx_blk_window does.
+ram_window(Bytes) ->
+    spawn(fun() -> ram_window_loop(Bytes) end).
+
+ram_window_loop(Bytes) ->
+    receive
+        {'$gen_call', From, info} ->
+            gen:reply(From, {ok, #{role => slot_a, sectors => byte_size(Bytes) div 512}});
+        {'$gen_call', From, {read, Sector, Count}} ->
+            gen:reply(From, {ok, binary:part(Bytes, Sector * 512, Count * 512)})
+    end,
+    ram_window_loop(Bytes).
+
 test_grant() ->
     {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [], rw),
     unlink(Grant),

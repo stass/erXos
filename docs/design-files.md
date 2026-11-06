@@ -1246,6 +1246,12 @@ holding `.` or `..` is refused with `einval`, since it names an entry
 rather than a directory to resolve.
 `erx_ns:mount(Pid, To, Options)` adds an entry for a grant's pid, with
 the tree and the rights its options name.
+`erx_ns:mount({erofs, Window}, To, Options)` adds a read-only entry for
+the EROFS image that the block service's window `Window` holds: `erx_ns`'s
+process mounts the image with the EROFS reader, which reads it
+through `erx_verity` ([design-storage.md](design-storage.md#reading-erofs-images)),
+so an image the reader refuses is refused before the table changes, and
+the entry's provider is the reader's mount.
 `erx_ns:unmount(To)` removes the entry at exactly `To`; unmounting `/`
 fails. Each takes effect for the whole domain at once, for every
 resolution that starts after it returns, and changes nothing for any
@@ -1788,7 +1794,8 @@ decoder's buffer and which no place's names exceed; the decoder has a
 fuzz target of its own ([Verification](#verification-and-testing)). On an EROFS mount
 the operation runs through `erx_erofs`, the EROFS reader, which answers
 the resolver's walks and link reads on its image and returns OTP's file
-descriptor record with itself as the module for an open file
+descriptor record with its open-file module, `erx_erofs_file`, as the
+module for an open file
 ([design-storage.md](design-storage.md#reading-erofs-images)). On a
 grant it runs through `erx_file_remote`. A grant entry's provider is
 `{grant, Pid, Tree}` with the entry's `rights`, as the table held them

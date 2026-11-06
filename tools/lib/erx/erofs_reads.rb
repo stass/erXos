@@ -17,7 +17,8 @@ module Erx
   #
   # * outside erx_verity.erl, any naming of erx_verity, a call, a quoted atom or a
   #   string, except in the reader's modules the call erx_verity:read( (or its
-  #   name, erx_verity:read/3) and the type erx_verity:image(;
+  #   name, erx_verity:read/3), the call erx_verity:open( with which the reader's mount
+  #   opens the window, and the types erx_verity:image( and erx_verity:tree(;
   # * in the reader's modules, a remote call or fun M:F/A on a module outside
   #   READER_MODULES, a remote call through a variable or a macro, and apply.
   #
@@ -31,7 +32,7 @@ module Erx
     # BIFs that reach no state outside their arguments.
     READER_MODULES = %w[erx_verity binary maps].freeze
     NAMED = /(?<![A-Za-z0-9_@])'?erx_verity'?(?![A-Za-z0-9_@])/
-    READER_USE = /\A'?erx_verity'?\s*:\s*'?(?:read'?\s*[(\/]|image'?\s*\()/
+    READER_USE = /\A'?erx_verity'?\s*:\s*'?(?:read'?\s*[(\/]|(?:open|image|tree)'?\s*\()/
     # A remote call or a fun M:F/A, its module a name, a variable or a macro.
     REMOTE = /(?<![A-Za-z0-9_@])(?<module>\??[A-Za-z_][A-Za-z0-9_@]*)\s*:\s*[a-z][A-Za-z0-9_@]*\s*[(\/]/
     APPLY = /(?<![A-Za-z0-9_@:])apply\s*\(/
@@ -58,7 +59,7 @@ module Erx
         next if READERS.include?(path) && READER_USE.match?(code[offset..])
 
         Violation.new(path: path, line: line_of(code, offset),
-                      detail: "only #{FUNNEL} names erx_verity, but for the reader's erx_verity:read/3")
+                      detail: "only #{FUNNEL} names erx_verity, but for the reader's erx_verity:read/3 and open/2")
       end
     end
 

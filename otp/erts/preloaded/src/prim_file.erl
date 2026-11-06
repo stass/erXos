@@ -1,5 +1,5 @@
-%% Modified by erXos: a path on the release reaches the NIF as its names, and a path on
-%% a file server's grant runs through erx_file_remote.
+%% Modified by erXos: a path on the release reaches the NIF as its names, a path on an
+%% EROFS image the EROFS reader, and a path on a file server's grant erx_file_remote.
 %%
 %% %CopyrightBegin%
 %%
@@ -148,6 +148,8 @@ open(Name, Modes) ->
         Encoded = encode_path(Name),
         Ops = #{release => fun(Names) -> opened(open_nif(Names, Modes), Modes) end,
                 remote => fun(Grant, Where) -> erx_file_remote:open(Grant, Where, Modes) end,
+                image => fun(Fs, Names) -> erx_erofs_file:open(Fs, Names, Modes) end,
+                image_exists => erx_open_exists(Modes),
                 top => erx_open_top(Modes)},
         case {erx_has(write, Modes) orelse erx_has(append, Modes), erx_has(exclusive, Modes)} of
             {_, true} -> erx_do(Encoded, create, ?ERX_NOFOLLOW, Ops);
@@ -602,7 +604,8 @@ read_file(Filename) ->
     try
         Encoded = encode_path(Filename),
         erx_do(Encoded, lookup, ?ERX_FOLLOW,
-               #{release => fun read_file_nif/1, remote => fun erx_file_remote:read_file/2})
+               #{release => fun read_file_nif/1, remote => fun erx_file_remote:read_file/2,
+                 image => fun erx_erofs:read_file/2})
     catch
         error:badarg -> {error, badarg}
     end.
@@ -614,13 +617,18 @@ read_file_nif(_Filename) ->
 %% flags, and the operation runs where the resolver's last action lies: on the release,
 %% its NIF's call on the action's names, the last name's included; on a file server's
 %% grant, through erx_file_remote, whose {resume, Which, Reply} hands a walk's reply back
-%% to that path's resumption; on a grant whose server ended, eio. Ops holds the
-%% operation's release and remote calls and, for one that names its last name, its
-%% answer at a top; any other answers eio, as no lookup ends at one. Like erx_path this
-%% calls only BIFs and preloaded modules: read_file/1 reads the boot script before stdlib
-%% is loaded.
+%% to that path's resumption; on an EROFS image, the reader's call (erx_image/4); on a
+%% grant whose server ended, eio. Ops holds the operation's release and remote calls, its
+%% image call if it only reads, its image_exists answer if it creates, and, for one that
+%% names its last name, its answer at a top; any other answers eio, as no lookup ends at
+%% one. Like erx_path this calls only BIFs and preloaded modules: read_file/1 reads the
+%% boot script before stdlib is loaded.
 erx_do(Encoded, Op, Flags, Ops) ->
-    erx_run(erx_resolve(Encoded, Op, Flags, erx_table()), Ops).
+    erx_run(erx_resolve(Encoded, Op, Flags, erx_table()), erx_mode(Flags), Ops).
+
+%% How a target's last name is walked, as the operation's flags follow it.
+erx_mode(#{follow := true}) -> follow;
+erx_mode(#{}) -> nofollow.
 
 erx_resolve(Encoded, Op, Flags, Table) ->
     Text = binary:part(Encoded, 0, byte_size(Encoded) - 1),
@@ -633,9 +641,9 @@ erx_resolve(Encoded, Op, Flags, Table) ->
             {error, eio}
     end.
 
-erx_run({error, _} = Error, _Ops) ->
+erx_run({error, _} = Error, _Mode, _Ops) ->
     Error;
-erx_run(Action, #{release := Local, remote := Remote} = Ops) ->
+erx_run(Action, Mode, #{release := Local, remote := Remote} = Ops) ->
     case erx_where(Action) of
         top ->
             erx_top(Ops);
@@ -643,19 +651,77 @@ erx_run(Action, #{release := Local, remote := Remote} = Ops) ->
             Local(Names);
         {grant, Grant, Where} ->
             case Remote(Grant, Where) of
-                {resume, 1, Reply} -> erx_run(erx_resume(Action, Reply), Ops);
+                {resume, 1, Reply} -> erx_run(erx_resume(Action, Reply), Mode, Ops);
+                Answer -> Answer
+            end;
+        {image, Entry, Where} ->
+            case erx_image(Entry, Where, Mode, Ops) of
+                {resume, 1, Reply} -> erx_run(erx_resume(Action, Reply), Mode, Ops);
                 Answer -> Answer
             end;
         ended ->
             {error, eio}
     end.
 
+%% An operation on an EROFS image (design-storage.md, Reading EROFS images), run in the
+%% calling process as a grant's runs at its server.
+%%
+%% The action's names are walked first. A walk that did not pass as the operation asks,
+%% having stopped short or ended on a link it follows, goes back as {resume, 1, Reply},
+%% as erx_file_remote's does, for the action's resumption.
+%%
+%% A target then runs the operation's image call on its names; an operation that
+%% writes has none and answers erofs.
+%%
+%% A parent comes from an operation that creates, deletes or renames. One that creates
+%% names in its image_exists call what it answers for a last name that exists: the last
+%% name is walked with the directory, a link followed as the operation's flags say, and
+%% a missing one answers erofs, as FreeBSD's lookup answers CREATE on a read-only mount.
+%% Delete and rename have no such call and answer erofs once the directory is walked,
+%% as FreeBSD refuses their last name before it looks it up.
+erx_image(#{provider := {erofs, Fs}} = Entry, {target, Names}, Mode, Ops) ->
+    case {erx_walked(Entry, Names, Mode), Ops} of
+        {{stopped, Reply}, _} -> {resume, 1, Reply};
+        {{passed, _}, #{image := Image}} -> Image(Fs, Names);
+        {{passed, _}, #{}} -> {error, erofs}
+    end;
+erx_image(Entry, {parent, Names, Last}, Mode, #{image_exists := Exists}) ->
+    Directories = length(Names),
+    case erx_walked(Entry, Names ++ [Last], Mode) of
+        {passed, Kind} -> Exists(Kind);
+        {stopped, {Kinds, {error, enoent}}} when length(Kinds) =:= Directories -> {error, erofs};
+        {stopped, Reply} -> {resume, 1, Reply}
+    end;
+erx_image(Entry, {parent, Names, _Last}, _Mode, _Ops) ->
+    case erx_walked(Entry, Names, directory) of
+        {stopped, Reply} -> {resume, 1, Reply};
+        {passed, _} -> {error, erofs}
+    end.
+
+%% What an open that writes answers at an existing name on an EROFS image, in the order
+%% of open(2) with O_CREAT, as the release's NIF answers: eexist when exclusive, eisdir
+%% for a directory, and erofs for anything else.
+erx_open_exists(Modes) ->
+    Exclusive = erx_has(exclusive, Modes),
+    fun(_) when Exclusive -> {error, eexist};
+       (directory) -> {error, eisdir};
+       (_) -> {error, erofs}
+    end.
+
+%% What make_dir, make_symlink and make_link answer at an existing name on an image.
+erx_eexist(_Kind) ->
+    {error, eexist}.
+
 %% A rename's or a hard link's two last actions, from one table, the first settled. On
 %% one grant, one tree and one set of rights Remote's one request takes both, and a walk
 %% that stopped goes to its own path's resumption before the two are compared again; on
-%% the release both, its NIF's call on their names. Any other pair is exdev, as between
-%% two Unix file systems, once the second's walk has passed, and no server is asked to
-%% act. A failure comes first, the first path's before the second's, then a top's Top.
+%% the release both, its NIF's call on their names. A second path on an EROFS image
+%% answers as Ops's image_exists call says once it is walked (erx_image/4); only
+%% make_link reaches it, since a rename onto an image is refused before (erx_read_only/1).
+%% Any other
+%% pair is exdev, as between two UNIX file systems, once the second's walk has passed,
+%% and no server is asked to act. A failure comes first, the first path's before the
+%% second's, then a top's Top.
 erx_two({error, _} = Error, _, _) ->
     Error;
 erx_two(_, {error, _} = Error, _) ->
@@ -678,6 +744,11 @@ erx_two(First, Second, #{release := Local, remote := Remote} = Ops) ->
             {error, eio};
         {_, ended} ->
             {error, eio};
+        {_, {image, Entry, Where}} ->
+            case erx_image(Entry, Where, nofollow, Ops) of
+                {resume, 1, Reply} -> erx_two(First, erx_resume(Second, Reply), Ops);
+                Answer -> Answer
+            end;
         _ ->
             case erx_settle(Second, directory) of
                 {Second, _} -> {error, exdev};
@@ -698,6 +769,7 @@ erx_top(_Ops) -> {error, eio}.
 erx_on(#{provider := release}, {target, Names}) -> {release, Names};
 erx_on(#{provider := release}, {parent, Names, Last}) -> {release, Names ++ [Last]};
 erx_on(#{provider := {grant, Pid, Tree}, rights := Rights}, Where) -> {grant, {Pid, Tree, Rights}, Where};
+erx_on(#{provider := {erofs, _}} = Entry, Where) -> {image, Entry, Where};
 erx_on(#{provider := ended}, _) -> ended.
 
 erx_resume({target, _, _, Resume}, Reply) -> Resume(Reply);
@@ -738,23 +810,27 @@ erx_last([Kind]) -> Kind;
 erx_last([_ | Kinds]) -> erx_last(Kinds).
 
 %% erx_path's callbacks, by the entry's provider. The release holds no links, so its walk
-%% never reports one to read.
+%% never reports one to read; an EROFS image's are read by the reader.
 erx_walk(#{provider := release}, Names) -> release_walk_nif(Names);
 erx_walk(#{provider := {grant, Pid, Tree}, rights := Rights}, Names) -> erx_file_remote:walk({Pid, Tree, Rights}, Names);
+erx_walk(#{provider := {erofs, Fs}}, Names) -> erx_erofs:walk(Fs, Names);
 erx_walk(#{provider := ended}, _Names) -> {[], {error, eio}}.
 
 erx_link_text(#{provider := {grant, Pid, Tree}, rights := Rights}, Names) ->
     erx_file_remote:link_text({Pid, Tree, Rights}, Names);
+erx_link_text(#{provider := {erofs, Fs}}, Names) ->
+    erx_erofs:read_link(Fs, Names);
 erx_link_text(_Entry, _Names) ->
     {error, eio}.
 
 %% The working directory set_cwd/1 would store, as {cwd, Text}: the place its target
 %% reached, the entry's point and then the names below the entry's root, once the
-%% release's walk or erx_file_remote:set_cwd/2 has found a directory there.
+%% release's walk, the image's or erx_file_remote:set_cwd/2 has found a directory there.
 erx_cwd({target, #{point := Point, root := Root}, Names, _} = Action) ->
     Found = case erx_where(Action) of
                 {release, _} -> erx_cwd_on_release(release_walk_nif(Names));
                 {grant, Grant, Where} -> erx_file_remote:set_cwd(Grant, Where);
+                {image, Entry, _} -> erx_image_cwd(erx_walked(Entry, Names, follow));
                 ended -> {error, eio}
             end,
     case Found of
@@ -766,6 +842,11 @@ erx_cwd({error, _} = Error) ->
     Error;
 erx_cwd(_Elsewhere) ->
     {error, eio}.
+
+%% set_cwd's answer on an image: a directory, its last link followed, or enotdir.
+erx_image_cwd({passed, directory}) -> ok;
+erx_image_cwd({passed, _}) -> {error, enotdir};
+erx_image_cwd({stopped, Reply}) -> {resume, 1, Reply}.
 
 erx_cwd_on_release({[], ok}) -> ok;
 erx_cwd_on_release({[_ | _] = Kinds, ok}) ->
@@ -788,7 +869,8 @@ erx_text(Names) -> iolist_to_binary([[<<"/">>, Name] || Name <- Names]).
 %% one directory.
 erx_identity(Encoded) ->
     case erx_do(Encoded, lookup, ?ERX_FOLLOW, #{release => fun(_) -> none end,
-                                                remote => fun erx_file_remote:identity/2}) of
+                                                remote => fun erx_file_remote:identity/2,
+                                                image => fun(_, _) -> none end}) of
         {Pid, Tree, QidPath} -> {Pid, Tree, QidPath};
         _ -> none
     end.
@@ -807,7 +889,7 @@ erx_tmp_limit() ->
 %% mounting): the persistent term erx_ns's process alone writes, or until it writes one
 %% the boot table, the domain's local entries. These are the release slice at /, and
 %% each EROFS image where its release names it, of which the boot information names
-%% none yet.
+%% none yet; erx_ns:mount/3 mounts an image the runtime holds a window on.
 erx_table() ->
     persistent_term:get(erx_ns, [#{point => [], provider => release, root => [], rights => ro}]).
 
@@ -844,7 +926,8 @@ read_link_all(Name) -> read_link_1(Name, true).
 read_link_1(Name, AcceptRawNames) ->
     Encoded = encode_path(Name),
     try erx_do(Encoded, lookup, ?ERX_NOFOLLOW,
-               #{release => fun read_link_nif/1, remote => fun erx_file_remote:read_link/2}) of
+               #{release => fun read_link_nif/1, remote => fun erx_file_remote:read_link/2,
+                 image => fun erx_erofs:read_link/2}) of
         {ok, RawName} -> translate_raw_name(RawName, AcceptRawNames);
         {error, Reason} -> {error, Reason}
     catch
@@ -864,7 +947,8 @@ list_dir_all(Name) -> list_dir_1(Name, false).
 list_dir_1(Name, SkipInvalid) ->
     Encoded = encode_path(Name),
     try erx_do(Encoded, lookup, ?ERX_FOLLOW,
-               #{release => fun list_dir_nif/1, remote => fun erx_file_remote:list_dir/2}) of
+               #{release => fun list_dir_nif/1, remote => fun erx_file_remote:list_dir/2,
+                 image => fun erx_erofs:list_dir/2}) of
         {ok, RawNames} -> list_dir_convert(RawNames, SkipInvalid, []);
         {error, Reason} -> {error, Reason}
     catch
@@ -926,7 +1010,8 @@ read_info_1(Name, FollowLinks, TimeType) ->
 erx_info(Encoded, FollowLinks) ->
     erx_do(Encoded, lookup, #{follow => FollowLinks =:= 1, willbedir => false},
            #{release => fun(Names) -> read_info_nif(Names, FollowLinks) end,
-             remote => fun(Grant, Where) -> erx_file_remote:read_file_info(Grant, Where, FollowLinks =:= 1) end}).
+             remote => fun(Grant, Where) -> erx_file_remote:read_file_info(Grant, Where, FollowLinks =:= 1) end,
+             image => fun erx_erofs:file_info/2}).
 
 %% erXos: a link's own record takes the access of the file it leads to, as stock's
 %% access(2) follows links, or none when that is a link again or is not reached.
@@ -1172,6 +1257,7 @@ make_dir(Path) ->
     try
         erx_do(encode_path(Path), create, #{follow => false, willbedir => true},
                #{release => fun make_dir_nif/1, remote => fun erx_file_remote:make_dir/2,
+                 image_exists => fun erx_eexist/1,
                  top => {error, eexist}})
     catch
         error:badarg -> {error, badarg}
@@ -1218,6 +1304,7 @@ make_link(Existing, New) ->
             {Linked, _} ->
                 erx_two(Linked, erx_resolve(EncodedNew, create, ?ERX_NOFOLLOW, Table),
                         #{release => fun make_hard_link_nif/2, remote => fun erx_file_remote:make_link/3,
+                          image_exists => fun erx_eexist/1,
                           top => {error, eexist}})
         end
     catch
@@ -1229,6 +1316,7 @@ make_symlink(Existing, New) ->
         erx_do(EncodedNew, create, ?ERX_NOFOLLOW,
                #{release => fun(Names) -> make_soft_link_nif(Target, Names) end,
                  remote => fun(Grant, Where) -> erx_file_remote:make_symlink(Grant, Where, Target) end,
+                 image_exists => fun erx_eexist/1,
                  top => {error, eexist}})
     catch
         error:badarg -> {error, badarg}
