@@ -376,6 +376,46 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [High] storage, `/data` (`erlang/apps/erx_files/src/erx_lfs.erl`): M6's exit criterion has
+  no QEMU test yet. A data suite (or a case of `tools/lib/erx/block_device.rb`) writes and
+  syncs a file under `/data`, lets the harness kill QEMU after the sync line, boots again on
+  the same disk under HVF and reads the file back. The host test's `synced_file_survives_a_cut`
+  covers the same path over a RAM window only.
+* [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
+  `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
+  volume or, with a request of a volume of its own, writes any sector of the data window;
+  a forged `done` answers one client's request with another's result. Tie each request to
+  its volume in the NIF and tag each run with a fresh reference.
+* [Medium] storage, littlefs: a crafted image whose directory tail points back at itself,
+  off the list mount checks, makes `lfs_dir_find` and `lfs_dir_read` loop forever on a
+  dirty I/O thread, and every caller of `/data` waits with it (`erx_lfs` calls have no
+  timeout). Not reproduced; add a seed to `tools/fuzz/lfs_image_target.rb`. littlefs's
+  `LFS_ASSERT`s on disk state stay live, so one reachable from a damaged image resets the
+  machine, at every boot if it is reached at mount.
+* [Medium] storage, `erx_lfs`: once the qid table is full, `listing/4` leaves out entries it
+  cannot draw a qid for and numbers the next offset from the entries kept, so a listing
+  repeats entries or ends early instead of answering `enfile`.
+* [Low] storage, `erx_lfs`: a make whose qid draw fails leaves the new file open in its
+  slot; the owner traps exits and ignores its supervisor's abnormal end; `remove/3` ignores
+  the node unlink names, so it removes whatever entry has the name now; a 65,537-byte write
+  (msize 65560) and a readdir offset of 2^32 or more answer `eio`.
+* [Medium] storage, block service: a window has no `flush` (design-storage.md, Interfaces),
+  so `erx_lfs` answers littlefs's sync at once. A write is answered once the device has
+  completed it, which holds across a QEMU kill but not across a power cut on a medium with a
+  write cache.
+* [Medium] storage, `erx_lfs`: a mount that reports `LFS_ERR_CORRUPT` formats the partition,
+  blank blocks or not: one metadata pair whose copies both fail their checksum, or a cycle
+  in the list, wipes the volume rather than refusing it, and the log says only "mounted".
+  An installation step that formats the data partition once would remove this.
+* [Medium] tests, `test/host/erx_littlefs_test.rb`: the NIF runs uninstrumented in the stock
+  runtime. A loaded NIF under AddressSanitizer needs `DYLD_INSERT_LIBRARIES`, which the
+  development host's sandbox strips from every child; on a host that passes it, build the
+  library with `-fsanitize=address,undefined` and run `beam.smp` directly with the runtime
+  inserted. littlefs itself runs under both sanitizers in `tools/fuzz/lfs_image_fuzz.c`.
+* [Low] storage, `erx_lfs`: the qid table is keyed by path, not by littlefs's metadata pair
+  and id, and has no `forget`, so it shrinks only at a remove and fills at 65,536 paths met
+  (`enfile`), unlike design-storage.md's "littlefs and FAT".
+
 * [Low] tooling, `tools/lib/erx/oracle_comparison.rb:104`, `oracle_qemu.rb:203-213,232,239`: the
   oracle comparison's host side has gaps. (1) A repeated sequence number keeps the first copy
   (`frames.compact.uniq(&:first)`), so a stray or forged frame wins over the real one; the CRC is

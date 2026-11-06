@@ -1000,6 +1000,16 @@ $(OBJDIR)/%.o: nifs/common/%.cpp
 # "The hosted backend").
 $(OBJDIR)/erx_device.o $(OBJDIR)/erx_device_nif.o: CFLAGS += $(if $(findstring hosted,$(TARGET)),-DERX_DEVICE_STAND_IN)
 
+# littlefs, the stopgap read-write file system of /data (docs/design-stopgap.md,
+# "littlefs in the system domain"), built unmodified from its fetched source.
+LFS_DIR = $(ERX_TREE)/build/third_party/littlefs/littlefs-2.11.3
+LFS_CFLAGS = -I$(LFS_DIR) -DLFS_NO_DEBUG -DLFS_NO_WARN -DLFS_NO_ERROR
+
+$(OBJDIR)/lfs.o $(OBJDIR)/lfs_util.o: $(OBJDIR)/%.o: $(LFS_DIR)/%.c
+	$(V_CC) $(CFLAGS) $(LFS_CFLAGS) -c $< -o $@
+
+$(OBJDIR)/erx_littlefs_nif.o: CFLAGS += $(LFS_CFLAGS)
+
 $(OBJDIR)/%.o: nifs/erxos/%.c
 	$(V_CC) $(CFLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
@@ -1225,6 +1235,7 @@ NIF_OBJS = \
 	$(OBJDIR)/erx_watchdog_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
 	$(OBJDIR)/erx_log_nif.o \
+	$(OBJDIR)/erx_littlefs_nif.o \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \
 	$(OBJDIR)/prim_file_nif.o \
@@ -1259,6 +1270,8 @@ OS_OBJS = \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \
 	$(OBJDIR)/erx_prim_file.o \
+	$(OBJDIR)/lfs.o \
+	$(OBJDIR)/lfs_util.o \
 	$(OBJDIR)/sys_float.o \
 	$(OBJDIR)/sys_time.o
 
@@ -1494,7 +1507,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(NIF_COMMON_SRC) > $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
-	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(wildcard nifs/erxos/*.c) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_SOURCE_ROOT) -I$(ERX_SOURCE_ROOT)/include $(LFS_CFLAGS) $(wildcard nifs/erxos/*.c) >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)

@@ -30,4 +30,12 @@ init([]) ->
                 shutdown => 2000,
                 type => worker,
                 modules => [erx_blk_service]},
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service]}}.
+    %% /data: littlefs on the data window (docs/design-stopgap.md, "littlefs in the
+    %% system domain"), once the service holds the windows. It is not restarted.
+    Data = #{id => erx_lfs_sup,
+             start => {erx_lfs_sup, start_link, []},
+             restart => temporary,
+             shutdown => infinity,
+             type => supervisor,
+             modules => [erx_lfs_sup]},
+    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Data]}}.

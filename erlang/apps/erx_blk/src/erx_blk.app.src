@@ -13,6 +13,6 @@
   {modules, [erx_blk, erx_blk_app, erx_blk_request, erx_blk_service, erx_blk_sup, erx_blk_table,
               erx_blk_window, erx_blk_write]},
   {registered, [erx_blk, erx_blk_service, erx_blk_sup]},
-  {applications, [kernel, stdlib, erx]},
+  {applications, [kernel, stdlib, erx, erx_files]},
   {mod, {erx_blk_app, []}},
   {env, []}]}.

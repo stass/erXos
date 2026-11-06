@@ -923,14 +923,15 @@ littlefs reads and programs whole sectors. Its `erase` returns success with no r
 from a read, program or sync callback:
 
 1. The callback allocates a NIF resource holding a state word, starting *pending*, a result and a buffer. A program copies its bytes into the buffer.
-2. It posts `{block, Op, Sector, Count, Ref}` to the owner with `enif_send`, where `Ref` is the resource term and `Sector` is `(Block * BlockSize + Off)
+2. It posts `{erx_lfs_block, Op, Sector, Count, Ref}` to the owner with `enif_send`, where `Ref` is the resource term and `Sector` is `(Block * BlockSize + Off)
    / SectorSize`. If `enif_send` reports the owner dead, it fails at once.
-3. It waits with `erx_umtx_wait(&state, pending, deadline)`, in a loop.
+3. It waits on the request's condition variable, under its mutex, until the state leaves *pending* or the deadline passes;
+   the mutex and condition variable are musl's, over `erx_umtx_wait` and `erx_umtx_wake`.
 4. The owner translates `Op` into the [block service's request](design-storage.md#interfaces): `{read, Sector, Count}`; `{write, Sector, Bytes}`, with
    `Bytes = payload(Ref)`, a short NIF returning the buffer as a binary; or `flush`. It sends with a monitor and a reply tag, remembers the one
    outstanding `{Tag, Ref}`, and returns to its receive. The resource stays private to the owner.
-5. On the answer it calls `complete(Ref, Result)`, a short NIF that copies any read bytes into the buffer, stores `ok` or `error`, moves the state from
-   *pending* to *done* by compare-and-swap, and calls `erx_umtx_wake`.
+5. On the answer it calls `complete(Ref, Result)`, a short NIF that copies any read bytes into the buffer, stores `ok` or `error`, under the mutex moves the state from
+   *pending* to *done*, and signals the condition variable.
 6. The callback, on *done*, copies a read's bytes into littlefs's buffer and returns 0, or `LFS_ERR_IO` for `error`.
 
 **No dirty-scheduler deadlock.** Steps 4 and 5 and `erx_device` run on normal schedulers, and interrupts arrive by the dispatcher. One operation holds
