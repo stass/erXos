@@ -1,3 +1,7 @@
+%% Modified by erXos: handle_call({copy, ...}) may open a /tmp file, whose descriptor
+%% names erx_file_remote, so it copies and closes through file:copy/3 and file:close/1.
+%% Two descriptors of one module use that module's copy (prim_file:copy for release
+%% files, as stock does); a mixed pair uses file's 64 KiB read and write loop.
 %%
 %% %CopyrightBegin%
 %%
@@ -180,13 +184,13 @@ handle_call({copy, SourceName, SourceOpts, DestName, DestOpts, Length},
 					 [write, binary | DestOpts]) of
 			{ok, Dest} ->
 			    DestReply = 
-				?PRIM_FILE:copy(Source, Dest, Length),
-			    ?PRIM_FILE:close(Dest),
+				file:copy(Source, Dest, Length),
+			    file:close(Dest),
 			    DestReply;
 			{error, _} = Error ->
 			    Error
 		    end,
-		?PRIM_FILE:close(Source),
+		file:close(Source),
 		SourceReply;
 	    {error, _} = Error ->
 		Error

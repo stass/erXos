@@ -418,6 +418,18 @@ it; git history is the record of completed work.
   `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
 * [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
   file of a grant has no implementation, so it raises `undef`.
+* [Medium] runtime, `otp/lib/kernel/src/file.erl`: `file`'s name calls (`copy`, `delete`,
+  `rename`, `read_file_info` and the rest of `check_and_call/2`) still send the path to
+  `file_server_2`, which then talks to a 9P server itself, where design-files.md (the
+  file server paragraph) says `file` resolves the path first and sends only local paths
+  there. A slow or stuck server stalls every name call in the runtime, and a server that
+  called `file:` name functions while serving would deadlock. Resolving in the caller
+  removes both.
+* [Medium] runtime, `file:copy_opened_int/4`: a short read is taken as end of file, and
+  `erx_file_remote:read/2` may answer fewer bytes than asked, so a copy from a remote
+  file into a local one could stop early and still answer `{ok, N}`. Unreachable today
+  (the `/tmp` server answers whole units and the release tree is read-only). Either the
+  loop reads until `eof` or `erx_file_remote` fills each read.
 * [Medium] runtime, `erx_file_remote`: `read_file` keeps up to the size a server's `getattr` answers and
   `read_line` reads until a server sends a `"\n"`, so a hostile server can make the caller, perhaps the code
   server, hold as much as it sends until the node dies; stock fails such a size up front with `enomem`. A

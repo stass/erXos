@@ -881,6 +881,14 @@ tmp(Prefix, Mode) ->
     Show = fun(Step, Result) -> io:format("tmp ~s\t~0tp~n", [Step, Result]) end,
     Show("write", file:write_file(At(<<"x">>), <<"hello">>)),
     Show("read", file:read_file(At(<<"x">>))),
+    %% file:copy/2 runs in file_server_2, which opens both files itself: one from the
+    %% release (prim_file's descriptor) into /tmp (erx_file_remote's), then one within /tmp,
+    %% whose 5 bytes over the 6 already there show that the destination is truncated.
+    Show("copy in", file:copy(<<Prefix/binary, "/corpus/a.txt">>, At(<<"copied">>))),
+    Show("copy in read", file:read_file(At(<<"copied">>))),
+    Show("copy within", file:copy(At(<<"x">>), At(<<"copied">>))),
+    Show("copy within read", file:read_file(At(<<"copied">>))),
+    Show("copy delete", file:delete(At(<<"copied">>))),
     Show("info", tmp_info(file:read_file_info(At(<<"x">>)))),
     Show("make dir", file:make_dir(At(<<"d">>))),
     Show("make dir again", file:make_dir(At(<<"d">>))),
