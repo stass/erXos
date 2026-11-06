@@ -479,9 +479,19 @@ it; git history is the record of completed work.
   not a recurring one; a recurring crash would want `erx_ramfs_sup` to give up on `/tmp` alone.
 * [Low] /tmp, `erx_ramfs_serving`: the serving set's `xref` closure follows only calls it can
   name, so a module a serving process reaches through `apply/3` or a fun value it was handed is
-  not in it; the cold-code case of [/tmp's verification](docs/design-tmp.md#verification) runs in
-  a runtime that has used `/tmp` before, not a fresh one, and the seeded faults of that section
-  (a module left out of the list, inode numbers from the tree's own counter) are not yet run.
+  not in it. Two seeded faults of [/tmp's verification](docs/design-tmp.md#verification) are not caught by
+  the hosted tests: the rename split into two steps (the client unlinks the destination, then renames)
+  passes the concurrency case with 0 misses in 1,608 stats over 800 renames, so that case does not yet
+  show it runs the interleaving it exists for (one scheduler may starve the statters; a case run with
+  schedulers online or with the statters sending ahead of the renamers would settle it); and a grant that
+  does not clunk a dead owner's fids passes the hosted killed-process case, probably because the runtime's own handle
+  release clunks first, so only `test/host/erx_ramfs_test.rb` catches it. The cold case's seeded start that skips one module of the generated list is not run: no module the
+  serving processes need is found unloaded at the cold steps in the one tried (`epp` is loaded by io formatting
+  alone), so the choice of module wants a trace of the first calls of the unseeded cold steps, and the
+  deadline path (a deadlocked code server) wants the later cold steps under a deadline too. The walk-in-place seed of that section
+  breaks every open in the /tmp transcript, so it ends the run before the `victim` case; it is run only against the
+  test grant (`test_seeded_walk_removes_the_victim`), and for /tmp it needs a fault confined to the path operations.
+  "Held is back" is read through `bfree`, whole 4,096-byte blocks, so a leak of one node's charge goes unseen.
 * [Low] runtime, `erx_prim_file.c`: `file:sendfile` on a release file answers `einval`, since `efile_get_handle`'s
   empty binary fails `prim_inet`'s length check, and so misses `file`'s fallback on `enotsup`; the check belongs
   in `prim_file:sendfile`. Two concurrent relative `set_cwd` calls can store an answer no serial order gives:

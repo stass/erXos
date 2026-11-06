@@ -14,6 +14,17 @@
 main([_, "seeded", Seed]) ->
     seeded(Seed),
     erlang:halt(0);
+%% The /tmp transcript with a seeded fault loaded: a client beam by code:load_binary (the
+%% client is preloaded), any other module from the seed's directory on the code path.
+main([_, "tmp-seeded", Seed]) ->
+    load_seeded_client(Seed),
+    tmp(<<>>, "release"),
+    erlang:halt(0);
+%% Code from /tmp in a runtime whose first use of /tmp is the code server's.
+main([_, "cold", Seed]) ->
+    load_seeded_client(Seed),
+    cold(),
+    erlang:halt(0);
 main([PrefixText, Mode]) ->
     Prefix = case PrefixText of
                  "/" -> <<>>;
@@ -814,10 +825,7 @@ grant_gone(Show) ->
 %% appender's byte; an offset left where it was on an error; an append's unknown At read
 %% as a fid's without append.
 seeded(Seed) ->
-    {ok, Beam} = prim_file:read_file(<<"/test/seeded/", (list_to_binary(Seed))/binary,
-                                       "/erx_file_remote.beam">>),
-    _ = code:unstick_mod(erx_file_remote),
-    {module, erx_file_remote} = code:load_binary(erx_file_remote, "seeded", Beam),
+    load_seeded_client(Seed),
     Show = fun(Case, Result) -> io:format("seeded ~s\t~0tp~n", [Case, Result]) end,
     case Seed of
         "walk" ->
@@ -828,6 +836,16 @@ seeded(Seed) ->
         "append" -> appends(Show);
         "cap" -> past_the_cap(Show);
         "unknown" -> unknown_at(Show)
+    end.
+
+load_seeded_client(Seed) ->
+    case prim_file:read_file(<<"/test/seeded/", (list_to_binary(Seed))/binary, "/erx_file_remote.beam">>) of
+        {ok, Beam} ->
+            _ = code:unstick_mod(erx_file_remote),
+            {module, erx_file_remote} = code:load_binary(erx_file_remote, "seeded", Beam),
+            ok;
+        {error, enoent} ->
+            ok
     end.
 
 %% /tmp against stock (design-tmp.md, Verification, "Against stock OTP"): the same
@@ -1029,33 +1047,178 @@ tmp_erxos("release") ->
     Show("zero dir", file:make_dir(<<"/zero/d">>)),
     unlink(Zero),
     exit(Zero, shutdown),
+    %% Open after unlink: what a file holds is given back at its last close, and a
+    %% process that opens a file, removes it and is killed gives it back too.
+    Free = tmp_free(erx_ramfs),
+    {ok, Gone} = file:open(<<"/tmp/held">>, [read, write, binary]),
+    ok = file:delete(<<"/tmp/held">>),
+    ok = file:write(Gone, binary:copy(<<7>>, 50000)),
+    Show("held while open", tmp_free(erx_ramfs) < Free),
+    ok = file:close(Gone),
+    Show("held after close", tmp_free(erx_ramfs) =:= Free),
+    Parent = self(),
+    Killed = spawn(fun() ->
+                           {ok, Fd} = file:open(<<"/tmp/held2">>, [read, write, binary]),
+                           ok = file:delete(<<"/tmp/held2">>),
+                           ok = file:write(Fd, binary:copy(<<8>>, 50000)),
+                           Parent ! {written, self()},
+                           receive never -> ok end
+                   end),
+    receive {written, Killed} -> ok end,
+    Show("held while owner lives", tmp_free(erx_ramfs) < Free),
+    exit(Killed, kill),
+    Show("held after owner killed", tmp_wait_free(erx_ramfs, Free, 100)),
+    %% A file written and renamed over b while others stat b: every stat finds b. Then
+    %% writers filling the tree stop at the cap together.
+    {ok, Conc} = erx_ramfs_sup:start_link(200000, <<"/conc">>, erx_ramfs_conc),
+    Show("concurrent renames", tmp_concurrent_renames()),
+    Show("concurrent stats", get(stats)),
+    Show("concurrent fill", tmp_concurrent_fill(erx_ramfs_conc)),
+    unlink(Conc),
+    exit(Conc, shutdown),
     %% Restart: kill the tree process with a file open; the open file answers eio,
-    %% and /tmp comes back empty, mounted again.
+    %% and /tmp comes back empty, mounted again, with no old owner alive.
     ok = file:write_file(<<"/tmp/before">>, <<"b">>),
     {ok, Open} = file:open(<<"/tmp/before">>, [read, binary]),
     {ok, #file_info{inode = OldInode}} = file:read_file_info(<<"/tmp/before">>),
     OldTree = whereis(erx_ramfs),
+    Old = tmp_processes(OldTree),
     exit(OldTree, kill),
     Show("restarted", tmp_restarted(OldTree, 100)),
+    Show("old owners counted", length(Old) >= 3),
+    Show("no old owner alive", tmp_all_dead(Old, 100)),
     Show("old fd", file:read(Open, 1)),
     Show("empty", file:list_dir(<<"/tmp">>)),
     ok = file:write_file(<<"/tmp/after">>, <<"a">>),
     {ok, #file_info{inode = NewInode}} = file:read_file_info(<<"/tmp/after">>),
     Show("inode above", NewInode > OldInode),
-    %% Code from /tmp: a module written as a .beam, found through the code path.
-    Loaded = erlang:loaded(),
-    {ok, tmp_cold, Beam} = compile:forms([{attribute, 1, module, tmp_cold},
-                                          {attribute, 1, export, [{f, 0}]},
-                                          {function, 1, f, 0, [{clause, 1, [], [], [{atom, 1, cold}]}]}],
-                                         [binary]),
-    true = code:add_patha("/tmp"),
-    Show("cold missing", code:ensure_loaded(tmp_nowhere)),
-    ok = file:write_file(<<"/tmp/tmp_cold.beam">>, Beam),
-    Show("cold load", code:ensure_loaded(tmp_cold)),
-    Show("cold call", tmp_cold:f()),
-    Show("serving loaded", [M || M <- erx_ramfs_serving:modules(), not lists:member(M, Loaded)]),
-    true = code:del_path("/tmp"),
     ok.
+
+%% Free blocks of a tree, through the callback the grant uses.
+tmp_free(Name) ->
+    {ok, #{bfree := Free}} = erx_ramfs:statfs(persistent_term:get({erx_ramfs, Name})),
+    Free.
+
+tmp_wait_free(_Name, _Free, 0) ->
+    timeout;
+tmp_wait_free(Name, Free, Tries) ->
+    case tmp_free(Name) of
+        Free -> ok;
+        _ -> receive after 20 -> tmp_wait_free(Name, Free, Tries - 1) end
+    end.
+
+%% The tree process, its grant and every process linked to the grant: the file owners.
+tmp_processes(Tree) ->
+    {links, [Sup]} = process_info(Tree, links),
+    [Grant] = [Pid || {grant, Pid, _, _} <- supervisor:which_children(Sup)],
+    {links, Linked} = process_info(Grant, links),
+    lists:usort([Tree, Grant | [P || P <- Linked, P =/= Sup]]).
+
+tmp_all_dead(Old, 0) ->
+    [P || P <- Old, is_process_alive(P)];
+tmp_all_dead(Old, Tries) ->
+    case [P || P <- Old, is_process_alive(P)] of
+        [] -> none;
+        _ -> receive after 20 -> tmp_all_dead(Old, Tries - 1) end
+    end.
+
+%% Eight processes each write a fresh file and rename it over b, while eight stat b.
+%% POSIX makes the rename atomic: no stat misses b. Returns {Misses, Stats, Renames}.
+tmp_concurrent_renames() ->
+    Dir = <<"/conc/r">>,
+    B = <<Dir/binary, "/b">>,
+    ok = file:make_dir(Dir),
+    ok = file:write_file(B, <<"b">>),
+    Parent = self(),
+    Stop = atomics:new(1, []),
+    Stat = fun() ->
+                   Count = fun Loop(Stats, Misses) ->
+                                   case atomics:get(Stop, 1) of
+                                       1 -> {Stats, Misses};
+                                       0 ->
+                                           case file:read_file_info(B) of
+                                               {ok, _} -> Loop(Stats + 1, Misses);
+                                               {error, _} -> Loop(Stats + 1, Misses + 1)
+                                           end
+                                   end
+                           end,
+                   Parent ! {stats, self(), Count(0, 0)}
+           end,
+    Rename = fun(N) ->
+                     fun() ->
+                             Mine = <<Dir/binary, "/w", (integer_to_binary(N))/binary>>,
+                             [begin
+                                  ok = file:write_file(Mine, <<"new", N>>),
+                                  ok = file:rename(Mine, B)
+                              end || _ <- lists:seq(1, 100)],
+                             Parent ! {renamed, self()}
+                     end
+             end,
+    %% Statters run at high priority so that they ask whenever a renamer waits.
+    Stats = [spawn_opt(Stat, [{priority, high}]) || _ <- lists:seq(1, 8)],
+    Renamers = [spawn(Rename(N)) || N <- lists:seq(1, 8)],
+    [receive {renamed, R} -> ok end || R <- Renamers],
+    atomics:put(Stop, 1, 1),
+    Counts = [receive {stats, S, Count} -> Count end || S <- Stats],
+    put(stats, lists:sum([N || {N, _} <- Counts])),
+    {lists:sum([M || {_, M} <- Counts]), lists:sum([N || {N, _} <- Counts]) > 0, length(Renamers) * 100}.
+
+%% Eight writers fill a tree whose cap is small: each ends with enospc, none crashes,
+%% and what is left is less than one more file.
+tmp_concurrent_fill(Name) ->
+    Parent = self(),
+    Fill = fun(N) ->
+                   fun() ->
+                           Last = fun Loop(I) ->
+                                          File = <<"/conc/f", (integer_to_binary(N))/binary, "_",
+                                                   (integer_to_binary(I))/binary>>,
+                                          case file:write_file(File, binary:copy(<<N>>, 3000)) of
+                                              ok -> Loop(I + 1);
+                                              {error, Posix} -> Posix
+                                          end
+                                  end(1),
+                           Parent ! {filled, self(), Last}
+                   end
+           end,
+    Writers = [spawn(Fill(N)) || N <- lists:seq(1, 8)],
+    Ends = [receive {filled, W, Last} -> Last end || W <- Writers],
+    Tail = tmp_free(Name),
+    {lists:usort(Ends), Tail < 2}.
+
+%% Code from /tmp in a runtime whose first use of /tmp is the code server's: a path
+%% with /tmp on it, a module found nowhere (the code server lists /tmp and reads a missing
+%% file in its own process, under a deadline), then a prepared .beam written there and
+%% loaded. None of the modules the serving processes call may be loaded by these steps.
+cold() ->
+    {ok, Beam} = prim_file:read_file(<<"/test/cold/tmp_cold.beam">>),
+    Serving = erx_ramfs_serving:modules(),
+    %% Nothing is formatted between the two snapshots: formatting loads modules itself.
+    Before = erlang:loaded(),
+    true = code:add_patha("/tmp"),
+    Missing = deadline(30000, fun() -> code:ensure_loaded(tmp_nowhere) end),
+    Rest = case Missing of
+               timeout -> [];
+               _ ->
+                   Written = deadline(30000, fun() -> file:write_file(<<"/tmp/tmp_cold.beam">>, Beam) end),
+                   Load = deadline(30000, fun() -> code:load_abs("/tmp/tmp_cold") end),
+                   [{"write", Written}, {"load", Load}, {"call", deadline(30000, fun() -> tmp_cold:f() end)}]
+           end,
+    After = erlang:loaded(),
+    Show = fun(Step, Result) -> io:format("cold ~s\t~0tp~n", [Step, Result]) end,
+    Show("serving missing at start", [M || M <- Serving, not lists:member(M, Before)]),
+    Show("missing", Missing),
+    [Show(Step, Result) || {Step, Result} <- Rest],
+    Show("serving loaded by it", [M || M <- Serving, not lists:member(M, Before), lists:member(M, After)]).
+
+deadline(Millis, Fun) ->
+    {Pid, Ref} = spawn_monitor(fun() -> exit({result, Fun()}) end),
+    receive
+        {'DOWN', Ref, process, Pid, {result, Result}} -> Result;
+        {'DOWN', Ref, process, Pid, Reason} -> {crashed, Reason}
+    after Millis ->
+        exit(Pid, kill),
+        timeout
+    end.
 
 tmp_restarted(_OldTree, 0) ->
     timeout;

@@ -125,6 +125,7 @@ class RuntimePrimFileTest < Minitest::Test
   # (ENOTEMPTY, which prim_file answers as eexist, and EBUSY), where macOS answers einval.
   TMP_DIFFERENCES = {
     'tmp del_dir child/..' => ['{error,einval}', '{error,eexist}'],
+    'tmp del_dir other full' => ['{error,einval}', '{error,eexist}'],
     'tmp rename child/..' => ['{error,einval}', '{error,ebusy}'],
     'tmp rename to child/.' => ['{error,einval}', '{error,ebusy}']
   }.freeze
@@ -144,15 +145,42 @@ class RuntimePrimFileTest < Minitest::Test
 
   # /tmp's own cases, which stock has no counterpart for. A write past the cap is refused
   # whole: the file it made stays, empty. A restart leaves /tmp empty and the old open file
-  # answering eio, and the code server reads /tmp with every serving module loaded.
+  # answering eio, and the restart leaves no old owner alive. A
+  # working directory is a path: on a grant that ended it answers eio, and once its mount
+  # is gone it reaches the release file system.
   TMP_ERXOS = {
     'tmpx limit' => 'true', 'tmpx small fits' => 'ok', 'tmpx small past' => '{error,enospc}',
     'tmpx small b' => '{ok,regular,0,read_write,420,1}', 'tmpx small write' => 'ok', 'tmpx small kept' => '{ok,<<3>>}',
     'tmpx zero list' => '{ok,[]}', 'tmpx zero write' => '{error,enospc}', 'tmpx zero dir' => '{error,enospc}',
     'tmpx restarted' => 'ok', 'tmpx old fd' => '{error,eio}', 'tmpx empty' => '{ok,[]}',
-    'tmpx inode above' => 'true', 'tmpx cold missing' => '{error,nofile}',
-    'tmpx cold load' => '{module,tmp_cold}', 'tmpx cold call' => 'cold', 'tmpx serving loaded' => '[]'
+    'tmpx inode above' => 'true', 'tmpx old owners counted' => 'true', 'tmpx no old owner alive' => 'none',
+    'tmpx held while open' => 'true', 'tmpx held after close' => 'true',
+    'tmpx held while owner lives' => 'true', 'tmpx held after owner killed' => 'ok',
+    'tmpx concurrent renames' => '{0,true,800}', 'tmpx concurrent fill' => '{[enospc],true}',
+    'tmpx cwd path' => '{ok,"/tmp/seq/w"}', 'tmpx small cwd' => 'ok',
+    'tmpx small cwd info' => '{ok,regular,60000,read_write,420,1}', 'tmpx small cwd ended' => '{error,eio}',
+    'tmpx small cwd unmounted' => '{error,enoent}', 'tmpx small cwd kept' => '{ok,"/small"}'
   }.freeze
+
+  # The working directory in /tmp, by the client's error steps (design-files.md, Erlang
+  # clients): stock answers the same, and these pin what both answer.
+  TMP_CWD = {
+    'tmp cwd set' => 'ok', 'tmp cwd get' => '{ok,"w"}', 'tmp cwd write' => 'ok',
+    'tmp cwd read' => '{ok,<<"rel">>}', 'tmp cwd read absolute' => '{ok,<<"rel">>}',
+    'tmp cwd list' => '{ok,["f","sub"]}', 'tmp cwd set file' => '{error,enotdir}',
+    'tmp cwd set missing' => '{error,enoent}', 'tmp cwd kept' => '{ok,"w"}',
+    'tmp cwd set file/' => '{error,enotdir}', 'tmp cwd set sub' => 'ok', 'tmp cwd sub' => '{ok,"sub"}',
+    'tmp cwd set ..' => 'ok', 'tmp cwd set unsearchable' => '{error,eacces}', 'tmp cwd set link' => 'ok',
+    'tmp cwd link' => '{ok,"w"}', 'tmp cwd set link out' => 'ok', 'tmp cwd out' => '{ok,"corpus"}',
+    'tmp del_dir cwd full' => '{error,einval}', 'tmp del_dir cwd sub/..' => '{error,einval}',
+    'tmp del_dir cwd empty' => 'ok', 'tmp cwd gone write' => '{error,enoent}',
+    'tmp cwd back' => 'ok', 'tmp cwd back where' => 'true'
+  }.freeze
+
+  def test_tmp_working_directory
+    release = table(@fixture.release)
+    TMP_CWD.each { |step, want| assert_equal want, release[step], step }
+  end
 
   def test_tmp_serves_the_domain
     release = table(@fixture.release)
@@ -514,6 +542,93 @@ class RuntimePrimFileTest < Minitest::Test
                   "        {unknown, _} -> checked_offset(Sent + Count);\n"]
   }.freeze
 
+  # Seeded faults of design-tmp.md's Verification for /tmp. Each replaces passages of one
+  # module; `mode` is the run it is loaded into: `tmp-seeded` runs the /tmp transcript and
+  # `caught` lists the lines that must then differ from the unseeded run's, `cold` runs the
+  # code-from-/tmp case and `caught` names what that run shows. A client seed is loaded
+  # after boot (the client is preloaded); any other module is put first on the code path.
+  TmpSeed = Data.define(:name, :source, :passages, :mode, :caught)
+  CORE = 'erlang/apps/erx_files/src/erx_ramfs_core.erl'
+  RAMFS = 'erlang/apps/erx_files/src/erx_ramfs.erl'
+  GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
+  TMP_SEEDS = [
+    TmpSeed.new(name: 'tmp-enotempty', source: CLIENT, mode: 'tmp-seeded', caught: ['tmp del dir full'],
+                passages: [["        {error, Full} when Full =:= enotempty; Full =:= eexist -> working_directory_step(Path);\n",
+                            "        {error, eexist} -> working_directory_step(Path);\n"]]),
+    TmpSeed.new(name: 'tmp-dot-first', source: CLIENT, mode: 'tmp-seeded', caught: ['tmp del_dir missing/.'],
+                passages: [["        true -> on_ok(directory(Rest), Special(Last));\n",
+                            "        true -> Special(Last);\n"]]),
+    TmpSeed.new(name: 'tmp-dot-text', source: CLIENT, mode: 'tmp-seeded',
+                caught: ['tmp delete file/.', 'tmp file kept'],
+                passages: [["special_name(<<\".\">>) -> true;\n", "special_name(<<\".\">>) -> false;\n"]]),
+    TmpSeed.new(name: 'tmp-setattr-node', source: CORE, mode: 'tmp-seeded', caught: ['tmp truncate 0444'],
+                passages: [["        {Ino, Access, _} = Handle,\n        {ok, Ino, N, {open, Access}}\n",
+                            "        {Ino, _Access, _} = Handle,\n        {ok, Ino, N, node}\n"]]),
+    TmpSeed.new(name: 'tmp-clunk-keeps-charge', source: CORE, mode: 'tmp-seeded',
+                caught: ['tmpx held after close'],
+                passages: [["            {done, ok, charged(-freed_charge(N1), release(Ino, N1, Tree))};\n",
+                            "            {done, ok, release(Ino, N1, Tree)};\n"]]),
+    TmpSeed.new(name: 'tmp-inode-counter-in-state', source: RAMFS, mode: 'tmp-seeded',
+                caught: ['tmpx inode above'],
+                passages: [["        {ok, Stamp} -> erx_ramfs_core:step(Request, Stamp, time_ns(), Tree);\n",
+                            "        {ok, _} ->\n            Next = case get(counter) of undefined -> 1000000; C -> C + 1 end,\n" \
+                            "            put(counter, Next),\n            erx_ramfs_core:step(Request, Next, time_ns(), Tree);\n"]]),
+    TmpSeed.new(name: 'cold-unpreloaded-client-call', source: CLIENT, mode: 'cold', caught: ['halted'],
+                passages: [["read_file(Grant, Place, Path) ->\n", "read_file(Grant, Place, Path) ->\n    _ = base64:encode(<<>>),\n"],
+                           ["list_dir(Grant, Place, Path) ->\n", "list_dir(Grant, Place, Path) ->\n    _ = base64:encode(<<>>),\n"],
+                           ["read_file_info(Grant, Place, FollowLinks, Path) ->\n",
+                            "read_file_info(Grant, Place, FollowLinks, Path) ->\n    _ = base64:encode(<<>>),\n"]])
+  ].freeze
+
+  public
+
+  # Each caught line must differ from the unseeded run's, which is the one design-tmp.md
+  # and stock agree on, so the named line is what shows the fault.
+  TMP_SEEDS.select { |seed| seed.mode == 'tmp-seeded' }.each do |seed|
+    define_method(:"test_seeded_#{seed.name.tr('-', '_')}_is_caught") do
+      transcript = table(seeded_tmp_run(seed))
+      refute_empty transcript.keys.grep(/\Atmpx? /), "the /tmp transcript ran under #{seed.name}"
+      seed.caught.each do |key|
+        assert transcript.key?(key), "#{key} is in the seeded run under #{seed.name}"
+        refute_equal table(@fixture.release).fetch(key), transcript.fetch(key), "#{seed.name} left #{key} as it was"
+      end
+    end
+  end
+
+  # The unseeded run of the cold case: a fresh runtime, every serving module loaded at
+  # start, a missing module answered, a prepared beam loaded from /tmp and none of the
+  # serving modules loaded by those steps.
+  def test_code_from_tmp_in_a_cold_runtime
+    output, status = cold_run('none')
+    cold = table(output)
+    assert_equal 0, status.exitstatus, output.last(20).join("\n")
+    assert_equal({ 'cold serving missing at start' => '[]', 'cold missing' => '{error,nofile}',
+                   'cold write' => 'ok', 'cold load' => '{module,tmp_cold}', 'cold call' => 'cold', 'cold serving loaded by it' => '[]' },
+                 cold.slice(*%w[cold\ serving\ missing\ at\ start cold\ missing cold\ write cold\ load cold\ call
+                                cold\ serving\ loaded\ by\ it]))
+  end
+
+  # A module erx_file_remote calls that is not preloaded: the code server, which is /tmp's
+  # client, halts the node with the error handler's message.
+  def test_seeded_cold_unpreloaded_client_call_is_caught
+    output, status = cold_run('cold-unpreloaded-client-call')
+    refute_equal 0, status.exitstatus, 'the node halted'
+    assert_match(/called the unloaded module/, output.join("\n"))
+    refute table(output).key?('cold call'), 'the case did not finish'
+  end
+
+  private
+
+  def cold_run(seed)
+    run_beam(@fixture.archive, '/', 'cold', seed, boot: '/bin/start', seed_dir: (seed == 'none' ? nil : seed))
+  end
+
+  def seeded_tmp_run(seed)
+    output, status = run_beam(@fixture.archive, '/', 'tmp-seeded', seed.name, boot: '/bin/start', seed_dir: seed.name)
+    assert_equal 0, status.exitstatus, output.last(20).join("\n")
+    output
+  end
+
   def compile_driver(tree)
     client = File.read(File.join(ROOT, CLIENT))
     includes = [File.join(ROOT, 'otp/lib/kernel/include'), File.join(ROOT, 'erlang/apps/erx/include')]
@@ -526,12 +641,32 @@ class RuntimePrimFileTest < Minitest::Test
       erlc([File.join(seeded, 'erx_file_remote.erl')], seeded, includes)
       File.delete(File.join(seeded, 'erx_file_remote.erl'))
     end
+    TMP_SEEDS.each { |seed| compile_tmp_seed(tree, seed, includes) }
+    cold = File.join(tree, 'test/cold')
+    FileUtils.mkdir_p(cold)
+    File.write(File.join(cold, 'tmp_cold.erl'), "-module(tmp_cold).\n-export([f/0]).\nf() -> cold.\n")
+    erlc([File.join(cold, 'tmp_cold.erl')], cold, [])
+    File.delete(File.join(cold, 'tmp_cold.erl'))
     source = File.expand_path('prim_file_compare.erl', __dir__)
     expression = "{ok,_}=compile:file(\"#{source}\",[{outdir,\"#{tree}/test/ebin\"},{i,\"#{OUTPUT.root}/lib\"}]),halt()."
     output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', RUN_SECONDS.to_s,
                                      Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR),
                                      '-noshell', '-eval', expression, stdin_data: '')
     assert status.success?, output
+  end
+
+  def compile_tmp_seed(tree, seed, includes)
+    original = File.read(File.join(ROOT, seed.source))
+    text = seed.passages.reduce(original) do |source, (passage, fault)|
+      assert_equal 1, source.scan(passage).size, "the #{seed.name} seed's passage is in #{seed.source} once"
+      source.sub(passage) { fault }
+    end
+    directory = File.join(tree, 'test/seeded', seed.name)
+    FileUtils.mkdir_p(directory)
+    path = File.join(directory, File.basename(seed.source))
+    File.write(path, text)
+    erlc([path], directory, includes)
+    File.delete(path)
   end
 
   def erlc(sources, outdir, includes)
@@ -561,9 +696,10 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
-  def run_beam(archive, root, *arguments, boot:)
+  def run_beam(archive, root, *arguments, boot:, seed_dir: nil)
     prefix = root == '/' ? '' : root
     erxos = Erx::ErlangApps::APPLICATIONS.flat_map { |application| ['-pa', "#{prefix}/lib/#{application}/ebin"] }
+    erxos += ['-pa', "#{prefix}/test/seeded/#{seed_dir}"] if seed_dir
     test = ['-noshell', *erxos, '-pa', "#{prefix}/test/ebin", '-run', 'prim_file_compare', 'main', root, *arguments]
     return capture_beam({ 'ROOTDIR' => root, 'BINDIR' => File.dirname(OUTPUT.beam) }, [OUTPUT.beam, archive, *test]) if archive
 
