@@ -168,7 +168,7 @@ class TopLevelCliTest < Minitest::Test
     tests = Dir.glob('*_test.rb', base: File.join(root, 'test/integration'))
     reads_build = tests.select { |name| File.read(File.join(root, 'test/integration', name)).include?('Runtime.check_current') }
     assert_equal %w[runtime_console_test.rb runtime_device_test.rb runtime_hosted_smoke_test.rb
-                    runtime_prim_file_test.rb runtime_release_test.rb],
+                    runtime_literal_token_test.rb runtime_prim_file_test.rb runtime_release_test.rb],
                  reads_build.sort
     ordinary = Erx::CLI.integration_tests(root).map { |path| File.basename(path) }
     assert_empty reads_build & ordinary

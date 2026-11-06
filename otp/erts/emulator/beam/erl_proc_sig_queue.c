@@ -17,7 +17,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: the dirty signal handler has no select to clean up.
+ * Modified by erXos: the dirty signal handler has no select to clean up,
+ * and a copy literal area request that gives an on-heap message its first
+ * fragment copies the message's other references (its seq_trace token)
+ * into that fragment too.
  *
  * %CopyrightEnd%
  */
@@ -8189,14 +8192,42 @@ handle_cla(Process *c_p,
             cnt += scanned/ERTS_PROC_SIG_ADJ_MSGQ_SCAN_FACTOR;
 
             if (lit_sz > 0) {
-                ErlHeapFragment *new_hfrag = new_message_buffer(lit_sz);
-                ErlOffHeap *ohp = &new_hfrag->off_heap;
-                Eterm *hp = new_hfrag->mem;
+                /*
+                 * A message without a fragment lives on the heap, and
+                 * the garbage collector updates its references as
+                 * roots. The fragment attached below ends that, so the
+                 * message's other references, such as a seq_trace
+                 * token on the heap, are copied into the fragment too;
+                 * left behind, the next collection would free what
+                 * they point to.
+                 */
+                int gets_first_frag = !msg->data.attached;
+                Uint refs_sz = 0;
+                ErlHeapFragment *new_hfrag;
+                ErlOffHeap *ohp;
+                Eterm *hp;
+                int ref;
+
+                for (ref = 1; gets_first_frag && ref < ERL_MESSAGE_REF_ARRAY_SZ; ref++) {
+                    if (is_not_immed(msg->m[ref]))
+                        refs_sz += size_object(msg->m[ref]);
+                }
+
+                new_hfrag = new_message_buffer(lit_sz + refs_sz);
+                ohp = &new_hfrag->off_heap;
+                hp = new_hfrag->mem;
 
                 if (in_refs) {
 		    if (ErtsInArea(msg->m[0], literals, lit_bsize)) {
 			Uint sz = size_object(msg->m[0]);
 			msg->m[0] = copy_struct(msg->m[0], sz, &hp, ohp);
+                    }
+                }
+
+                for (ref = 1; gets_first_frag && ref < ERL_MESSAGE_REF_ARRAY_SZ; ref++) {
+                    if (is_not_immed(msg->m[ref])) {
+                        Uint sz = size_object(msg->m[ref]);
+                        msg->m[ref] = copy_struct(msg->m[ref], sz, &hp, ohp);
                     }
                 }
 
@@ -8217,7 +8248,7 @@ handle_cla(Process *c_p,
                 *last_hfrag = new_hfrag;
 
                 cnt += scanned/ERTS_PROC_SIG_ADJ_MSGQ_SCAN_FACTOR;
-                cnt += lit_sz/ERTS_PROC_SIG_ADJ_MSGQ_COPY_FACTOR;
+                cnt += (lit_sz + refs_sz)/ERTS_PROC_SIG_ADJ_MSGQ_COPY_FACTOR;
             }
         }
 
