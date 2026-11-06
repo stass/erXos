@@ -439,12 +439,14 @@ module Erx
       problems.empty? ? 0 : 1
     end
 
-    # The suites the system domain runs under HVF, compared with stock. OTP's
-    # four groups and musl's libc-test in a test domain are not here yet
-    # (docs/plan.md, M3), so a run whose every part passed is still partial
-    # and exits 2, never 0. A failed run, or a host whose QEMU does not offer
-    # HVF, exits 1.
-    def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil)
+    # The suites the system domain runs under HVF, compared with stock: the
+    # fast subset, then musl's libc-test in test tasks on LIBC_TEST_CPUS CPUs.
+    # OTP's four groups are not here yet (docs/plan.md, M3), so a run whose
+    # every part passed is still partial and exits 2, never 0. A failed part,
+    # or a host whose QEMU does not offer HVF, exits 1.
+    LIBC_TEST_CPUS = 4
+
+    def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil, libc_test: method(:check_libc_test))
       no_arguments(arguments)
       offered = accelerators || QemuGate.available_accelerators(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
       accel = QemuGate::SUITE_ACCELERATOR
@@ -454,10 +456,14 @@ module Erx
       end
       status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
       Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
+      libc = libc_test.call([accel, LIBC_TEST_CPUS.to_s])
+      Terminal.puts("libc-test #{accel} #{LIBC_TEST_CPUS} CPUs: #{libc.zero? ? 'passed' : 'failed'}")
+      return 1 unless status.zero? && libc.zero?
+
       fast = OracleSuites::FAST.flat_map { |group, suites| suites.map { |suite| "#{group}/#{suite}" } }
-      Terminal.puts("partial: the system domain runs #{fast.join(' and ')}; OTP's emulator, kernel, " \
-                    'stdlib and compiler groups and libc-test are not wired yet, so the check is not passed')
-      status.zero? ? 2 : 1
+      Terminal.puts("partial: the system domain runs #{fast.join(' and ')}; OTP's emulator, kernel, stdlib and " \
+                    'compiler groups are not classified there yet, so the check is not passed')
+      2
     end
 
     def self.help(_arguments)

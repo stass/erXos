@@ -519,6 +519,22 @@ it; git history is the record of completed work.
   `bidirectional_traffic` failed on stock in the group run and skips on both sides with fewer suites. A result that
   depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group once the boot script
   above is fixed and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
+  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
+  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
+  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
+* [Medium] `test/oracle/hosted_known_differences/compiler.txt`, `tools/lib/erx/oracle_qemu.rb`: OTP's compiler
+  group runs whole in the system domain under QEMU HVF (`tools/erx oracle qemu --suites compiler`): 1030 same and
+  the hosted table's 8 known rows, each with the same erXos status, but compile_SUITE `pre_load_check` differs:
+  stock fails with `{not_used,[beam_a,...,beam_ssa_dead]}` in two QEMU-path runs and in the hosted run, the hosted
+  erXos fails the same way, and erXos in the system domain passes. Stock's log prints a `do_warnings` worker's
+  `{badmatch,killed}` during the case, which points at the case's `code:purge/1` meeting workers the previous case
+  left running, so the result may depend on timing; that is not established. Trace it on stock, then classify it.
+  Both erXos sides read one table (design-build.md), so a row naming erXos's `passed` would be stale on hosted:
+  if the cause is timing, the table needs a way to name a case whose stock result is not stable. Until then
+  `make check-oracle` does not run the group. Reports: erxos-history `oracle-qemu/2026-11-06-compiler`.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

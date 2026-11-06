@@ -334,7 +334,7 @@ nothing from `test/fixtures`, and `production_image_test.rb` checks the loaded f
 No production image carries test code, by construction rather than by a caller's
 convention. `ProductionImage#build` takes no additions: its image holds the system
 release and nothing else. The one way to add files to that release is the test entry
-point, `ProductionImage#build_test_image(directory:, added:)`, which packs them with
+point, `ProductionImage#build_test_image(directory:, added:, machine:)`, which packs them with
 `ERX_PACK_TEST_CODE` set in the archive's flags. The packer sets the bit only in a
 development build, the archive check and the kernel refuse it in any other, the
 kernel's banner prints `test image: carries test code` after the development warning,
@@ -348,6 +348,18 @@ the two QEMU harnesses that boot test code, `OracleQemu`, the oracle's run, and
 packer a literal true for its `test_code` keyword; each harness's boot transcript
 checks the banner's test-image line;
 `test/host/checks_test.rb` seeds its violations.
+
+A test image may also name a larger machine (`ProductionImage::Machine`): its RAM,
+its `fiasco_reserve`, which grows with RAM because Fiasco sizes its kernel memory
+as 6% of it, and a growth added to both `root_memory` and `system_baseline` of the
+development manifest; the rest of the added RAM widens the archive's room
+below RAM. No other line of the manifest changes, and the manifest check proves the
+grown manifest against the platform record with that RAM and reserve as it proves
+the development one. The production image always boots on the development machine,
+which is the platform record's own 512 MiB and 64 MiB. `OracleQemu` boots on 2 GiB
+with a 160 MiB reserve and the system domain 1 GiB larger, since OTP's suites ask
+for more than the development baseline holds beside `/tmp`'s cap (compiler's
+`beam_ssa_check_SUITE` asks for a 98 MiB heap).
 
 | Archive entry | Kind | What it is |
 | --- | --- | --- |

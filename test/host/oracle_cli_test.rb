@@ -41,13 +41,30 @@ class OracleCliTest < Minitest::Test
   def test_check_oracle_runs_under_hvf_only_and_says_what_it_leaves_out
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf tcg])
+      libc_calls = []
+      libc = ->(arguments) { libc_calls << arguments && 0 }
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf tcg], libc_test: libc)
       assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
       assert_includes output, 'oracle qemu hvf: passed'
       refute_includes output, 'oracle qemu tcg'
-      assert_includes output, 'partial: the system domain runs kernel/file_SUITE and stdlib/filelib_SUITE'
-      assert_equal [[%w[file_SUITE], { accel: 'hvf', cpus: 1, jobs: 4 }], [%w[filelib_SUITE], { accel: 'hvf', cpus: 1, jobs: 4 }]],
-                   qemu.calls.grep(Array)
+      assert_includes output, 'partial: the system domain runs kernel/file_SUITE and stdlib/filelib_SUITE; ' \
+                              "OTP's emulator, kernel, stdlib and compiler groups are not classified there yet"
+      options = { accel: 'hvf', cpus: 1, jobs: 4 }
+      assert_equal [[%w[file_SUITE], options], [%w[filelib_SUITE], options]], qemu.calls.grep(Array)
+      assert_equal [%w[hvf 4]], libc_calls
+      assert_includes output, 'libc-test hvf 4 CPUs: passed'
+    end
+  end
+
+  # A libc-test failure fails the check even when every OTP group passed.
+  def test_check_oracle_fails_when_libc_test_fails
+    Dir.mktmpdir do |directory|
+      status, output = run_cli('check-oracle', qemu_class: FakeQemu.new(directory, passing: true), accelerators: %w[hvf],
+                                               libc_test: ->(_) { 1 })
+      assert_equal 1, status
+      assert_includes output, 'oracle qemu hvf: passed'
+      assert_includes output, 'libc-test hvf 4 CPUs: failed'
+      refute_includes output, 'partial:'
     end
   end
 
@@ -56,7 +73,7 @@ class OracleCliTest < Minitest::Test
   def test_check_oracle_and_oracle_qemu_use_separate_default_directories
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf])
+      run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf], libc_test: ->(_) { 0 })
       run_cli('oracle', 'qemu', qemu_class: qemu)
       check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }.values_at(0, -1)
       assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf/kernel'), check
@@ -68,7 +85,7 @@ class OracleCliTest < Minitest::Test
   def test_check_oracle_fails_without_hvf_and_never_falls_back_to_tcg
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg], libc_test: ->(_) { flunk 'libc-test ran' })
       assert_equal 1, status
       assert_includes output, "failed: this host's QEMU does not offer hvf"
       assert_empty qemu.calls
@@ -77,9 +94,11 @@ class OracleCliTest < Minitest::Test
 
   def test_check_oracle_fails_when_a_run_fails
     Dir.mktmpdir do |directory|
-      status, output = run_cli('check-oracle', qemu_class: FakeQemu.new(directory, passing: false), accelerators: %w[tcg hvf])
+      status, output = run_cli('check-oracle', qemu_class: FakeQemu.new(directory, passing: false), accelerators: %w[tcg hvf],
+                                                                        libc_test: ->(_) { 0 })
       assert_equal 1, status
       assert_includes output, 'oracle qemu hvf: failed'
+      assert_includes output, 'libc-test hvf 4 CPUs: passed'
     end
   end
 

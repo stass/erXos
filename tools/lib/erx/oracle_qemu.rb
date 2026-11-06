@@ -46,7 +46,16 @@ module Erx
   # TODO.md holds that residual.
   class OracleQemu
     WORK = '/tmp/ct'
-    MEMORY_MIB = ProductionImage::MEMORY_MIB
+    # The machine the suites run on. OTP's suites need more than the development
+    # manifest's system domain holds: compiler's beam_ssa_check_SUITE asks for a
+    # 98 MiB heap, which the 240 MiB baseline, /tmp's 160 MiB cap within it, cannot
+    # give, and ERTS then ends the whole run. The archive, which carries a group's
+    # suites, their data and stock's applications, is 55 MB for the compiler group,
+    # near the 64 MiB the development layout leaves bootstrap for it. A 2 GiB
+    # machine, whose Fiasco keeps about 123 MiB for kernel memory where the
+    # development machine's keeps 32 MiB, gives the system domain 1 GiB more and
+    # leaves the archive 480 MiB; nothing else of the manifest changes.
+    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'
     # The line erx_ct_oracle prints when Common Test returns; the machine ends
@@ -263,7 +272,8 @@ module Erx
       inputs = [*compiled.flat_map { |file| [file.path, file.source] }, *added.map { |entry| entry.fetch('receipt') }].uniq
       ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                      .build_test_image(directory: directory,
-                                       added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS))
+                                       added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS),
+                                       machine: MACHINE)
     end
 
     # Boots the image under its deadline and reads the events it printed. The
@@ -271,10 +281,10 @@ module Erx
     # deadline still shows the cases it finished.
     def run_guest(built, suites, accel:, cpus:)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@out, 'guest'))
-      points = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB, test_image: built.test_code), ProductionImage::Run::SLOGAN,
+      points = [*Qemu.boot_transcript(memory_mib: MACHINE.memory_mib, test_image: built.test_code), ProductionImage::Run::SLOGAN,
                 { name: 'oracle-result', pattern: RESULT, seconds: @deadline }]
       guest = self.class.boot_guest(Qemu.new(root: @root, runner: @runner, program: @qemu), directory: directory,
-                                    accel: accel, cpus: cpus, image: built.single, memory_mib: MEMORY_MIB,
+                                    accel: accel, cpus: cpus, image: built.single, memory_mib: MACHINE.memory_mib,
                                     checkpoints: points, machine_end: true,
                                     command_line: self.class.command_line(suites, accel: accel))
       printed = OracleComparison.printed_events(guest.serial)

@@ -178,7 +178,35 @@ class ProductionImageTest < Minitest::Test
   def test_the_production_build_takes_no_additions
     production = Erx::ProductionImage.instance_method(:build).parameters
     refute_includes production.map(&:last), :added
-    assert_equal [%i[keyreq directory], %i[keyreq added]], Erx::ProductionImage.instance_method(:build_test_image).parameters
+    assert_equal [%i[keyreq directory], %i[keyreq added], %i[key machine]],
+                 Erx::ProductionImage.instance_method(:build_test_image).parameters
+  end
+
+  # A larger machine grows root_memory and system_baseline by the same amount and
+  # leaves every other line alone, so the manifest check proves the same properties.
+  def test_a_larger_machine_grows_the_root_and_the_system_baseline_alone
+    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
+    grown = machine.manifest(source)
+    number = ->(text, field) { Integer(text[/^  #{field} ([0-9]+)$/, 1], 10) }
+    %w[root_memory system_baseline].each do |field|
+      assert_equal number.call(source, field) + (1024 << 20), number.call(grown, field)
+    end
+    changed = source.lines.zip(grown.lines).reject { |old, new| old == new }.map { |old, _| old[/\A *[a-z_]+/].strip }
+    assert_equal %w[root_memory system_baseline], changed
+    assert_equal source, Erx::ProductionImage::DEVELOPMENT_MACHINE.manifest(source)
+    record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
+    assert_equal record, Erx::ProductionImage::DEVELOPMENT_MACHINE.platform(record), 'the development machine is the record'
+    assert_equal({ 'ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20, 'units' => [] },
+                 machine.platform('ram_bytes' => 1, 'fiasco_reserve' => 1, 'units' => []))
+  end
+
+  # A manifest without exactly one line of a field is refused, never left ungrown.
+  def test_a_manifest_without_one_line_of_a_grown_field_is_refused
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256)
+    ["  system_baseline 1\n", "  root_memory 1\n  root_memory 2\n  system_baseline 1\n"].each do |source|
+      assert_raises(Erx::Error) { machine.manifest(source) }
+    end
   end
 
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.

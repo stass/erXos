@@ -62,6 +62,31 @@ module Erx
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
     private_constant :NOTHING_ADDED
 
+    # The QEMU virt machine an image boots on: its RAM, the part of it Fiasco keeps
+    # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
+    # 6% of it), and system_growth_mib, which is added to both root_memory and
+    # system_baseline of the development manifest. What the growth leaves of the added
+    # RAM widens the room bootstrap keeps for the archive. The production image boots
+    # on DEVELOPMENT_MACHINE; a test image whose suites need more memory or carry a
+    # larger archive (OracleQemu) names a larger one, and Pack's manifest check proves
+    # the grown manifest against the platform record of that machine as it proves the
+    # development one.
+    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib) do
+      def platform(record) = record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
+
+      # The development manifest's text with root_memory and system_baseline each grown
+      # by system_growth_mib; any other line is unchanged.
+      def manifest(source)
+        %w[root_memory system_baseline].reduce(source) do |text, field|
+          pattern = /^(  #{field} )([0-9]+)$/
+          raise Error, "the manifest does not have exactly one #{field} line" unless text.scan(pattern).size == 1
+
+          text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + (system_growth_mib << 20)}" }
+        end
+      end
+    end
+    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 64, system_growth_mib: 0)
+
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
       @root = File.realpath(root)
@@ -93,7 +118,8 @@ module Erx
     # stale file cannot stand in for this build's. The image carries the system release
     # and nothing else.
     def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
-      assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false)
+      assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
+               machine: DEVELOPMENT_MACHINE)
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
@@ -108,15 +134,16 @@ module Erx
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
     # test code, OracleQemu and BlockDevice, call it, which the source check holds
     # (Checks::TEST_IMAGE_BUILDERS).
-    def build_test_image(directory:, added:)
+    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE)
       raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
 
-      assemble(directory: directory, manifest_source: File.binread(File.join(@root, MANIFEST)), added: added, test_code: true)
+      assemble(directory: directory, manifest_source: machine.manifest(File.binread(File.join(@root, MANIFEST))), added: added,
+               test_code: true, machine: machine)
     end
 
     # Both entry points' one build: the system release, any additions, and the mark that
     # says whether there are some.
-    def assemble(directory:, manifest_source:, added:, test_code:)
+    def assemble(directory:, manifest_source:, added:, test_code:, machine:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
@@ -133,7 +160,8 @@ module Erx
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task, images: images,
                     manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs], test_code: test_code)
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs], test_code: test_code,
+                    machine: machine)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
@@ -668,13 +696,13 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, output:, imports:, test_code:)
+    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, output:, imports:, test_code:, machine:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
                                       imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
-      platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
+      platform = machine.platform(JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record'))
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,

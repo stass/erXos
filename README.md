@@ -414,8 +414,9 @@ stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
 `tools/erx oracle qemu`: `file_SUITE` and `filelib_SUITE` under Common
 Test in the system domain under QEMU with HVF, compared case by case with stock OTP on the host against the
-tables of known differences in `test/oracle/hosted_known_differences/`. It says it is partial: OTP's
-`emulator`, `kernel`, `stdlib` and `compiler` groups and libc-test do not
+tables of known differences in `test/oracle/hosted_known_differences/`, then musl's libc-test in test tasks
+on four CPUs (`tools/erx check-libc-test hvf 4`). It says it is partial: OTP's
+`emulator`, `kernel`, `stdlib` and `compiler` groups do not
 run there yet. Native benchmarks carry their own label, apart from Linux suite
 results. Interpreter benchmarks need a separate native bootstrap, built
 with `tools/erx oracle build --backend native --flavour emu`.
