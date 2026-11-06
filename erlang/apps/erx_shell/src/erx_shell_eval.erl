@@ -28,7 +28,7 @@ parent's variables, as in rc; a body run under redirections gives back
 the shell it changed. Every request and reply threads the runner's own
 state, and the one effect outside the runner is parsing, which `eval`
 and run_source/2 do in a bounded child process
-(erx_shell_parse:next_bounded/2); so with a pure runner, such as the
+(erx_shell_parse:next_bounded/3); so with a pure runner, such as the
 tests' fake, evaluation is a function of the tree and the shell. A
 runner that cannot do what it is asked, such as open a redirection's
 file, replies `{fault, Message}`, which ends the unit as a fault of the
@@ -117,9 +117,12 @@ its own process, never the session (docs/design-shell.md, SH2).
       | {here, erx_shell_lex:fd(), Text :: binary()}
       | {dup, To :: erx_shell_lex:fd(), From :: erx_shell_lex:fd()}
       | {close, erx_shell_lex:fd()}.
-%% How a unit or a source ended: normally, by `exit`, or by a fault that
-%% stops a script.
+%% How a unit or a source ended: normally, by `exit`, at a unit that does
+%% not parse, which ends a script with `$status` set as rc's does, or by a
+%% language fault, which ends it with no status, as rc's ends. Message is
+%% what was written to descriptor 2 after `rc: `.
 -type outcome() :: {ok, shell()} | {exit, shell()}
+                 | {syntax_error, Message :: binary(), shell()}
                  | {error, Message :: binary(), shell()}.
 
 %% A language fault and an `exit` unwind to the unit as throws carrying the
@@ -169,25 +172,50 @@ true_status(Status) ->
 
 -doc """
 Runs a whole source, a script or a `-c` string, one unit at a time,
-parsing each in a bounded child (erx_shell_parse:next_bounded/2). It stops
+parsing each in a bounded child (erx_shell_parse:next_bounded/3). It stops
 at `exit`, at a language fault, and at a unit that does not parse, whose
-diagnostic it writes to descriptor 2 and sets as `$status`.
+diagnostic it writes to descriptor 2 and whose message alone it sets as
+`$status`, as rc does. Whether an `if not` may start a unit passes from
+each unit to the next, starting without it, as rc's parser carries it
+(erx_shell_parse:if_not_may_follow/2).
 """.
 -spec run_source(binary(), shell()) -> outcome().
 run_source(Source, Sh) ->
-    case erx_shell_parse:next_bounded(Source, final) of
+    run_source(Source, 0, false, Sh).
+
+%% Lines is how many lines of the source came before Source, so that a
+%% diagnostic names the source's own line.
+run_source(Source, Lines, IfBefore, Sh) ->
+    case erx_shell_parse:next_bounded(Source, final, IfBefore) of
         eof ->
             {ok, Sh};
         {ok, Program, Rest} ->
             case run_unit(Program, Sh) of
-                {ok, Sh1} -> run_source(Rest, Sh1);
-                Ended -> Ended
+                {ok, Sh1} ->
+                    Lines1 = Lines + lines_used(Source, Rest),
+                    IfAfter = erx_shell_parse:if_not_may_follow(Program, IfBefore),
+                    run_source(Rest, Lines1, IfAfter, Sh1);
+                Ended ->
+                    Ended
             end;
         {incomplete, Pos, Message} ->
-            parse_fault({incomplete, Pos, Message}, Sh);
+            parse_fault(after_lines({incomplete, Pos, Message}, Lines), Sh);
         {error, Diagnostic, _Rest} ->
-            parse_fault(Diagnostic, Sh)
+            parse_fault(after_lines(Diagnostic, Lines), Sh)
     end.
+
+%% The lines of Source a unit took, Rest being what follows it.
+lines_used(Source, Rest) ->
+    Used = binary_part(Source, 0, byte_size(Source) - byte_size(Rest)),
+    length(binary:matches(Used, <<"\n">>)).
+
+%% A diagnostic of a unit with its line counted from the start of the
+%% source, Lines lines before the unit.
+after_lines({too_long, _} = Diagnostic, _Lines) -> Diagnostic;
+after_lines({too_deep, {Line, Column}}, Lines) ->
+    {too_deep, {Line + Lines, Column}};
+after_lines({Kind, {Line, Column}, Message}, Lines) ->
+    {Kind, {Line + Lines, Column}, Message}.
 
 -doc """
 Runs one parsed unit. A language fault writes `rc: ` and the fault to
@@ -203,9 +231,14 @@ run_unit(Program, Sh) ->
     end.
 
 parse_fault(Diagnostic, Sh) ->
-    Message = erx_shell_parse:format_error(Diagnostic),
-    Sh1 = say(2, [<<"rc: ">>, Message, $\n], Sh),
-    {error, Message, set_status(Message, Sh1)}.
+    Printed = erx_shell_parse:format_error(Diagnostic),
+    {syntax_error, Printed, syntax_status(Diagnostic, Printed, Sh)}.
+
+%% The shell after a unit that does not parse: its diagnostic Printed written
+%% to descriptor 2 and `$status` its message alone, as rc sets it.
+syntax_status(Diagnostic, Printed, Sh) ->
+    Sh1 = say(2, [<<"rc: ">>, Printed, $\n], Sh),
+    set_status(erx_shell_parse:message(Diagnostic), Sh1).
 
 fault_outcome(Message, Sh) ->
     Sh1 = say(2, [<<"rc: ">>, Message, $\n], Sh),
@@ -387,23 +420,27 @@ builtin(Name, Args, Sh) ->
 %% language matched, so it is a fault.
 holds_nul(Text) -> binary:match(Text, <<0>>) =/= nomatch.
 
-%% `eval` runs its text as units of the current shell; a fault in it is the
-%% unit's fault, and text that does not parse sets `$status` and ends it.
+%% `eval` runs its text as units of the current shell, a source of its own
+%% for where `if not` may stand; a fault in it is the unit's fault, and text
+%% that does not parse sets `$status` and ends it.
 eval(Text, Sh) ->
-    case erx_shell_parse:next_bounded(iolist_to_binary(Text), final) of
+    eval(iolist_to_binary(Text), 0, false, Sh).
+
+eval(Text, Lines, IfBefore, Sh) ->
+    case erx_shell_parse:next_bounded(Text, final, IfBefore) of
         eof ->
             Sh;
         {ok, Program, Rest} ->
-            eval(Rest, seq(Program, Sh));
+            IfAfter = erx_shell_parse:if_not_may_follow(Program, IfBefore),
+            eval(Rest, Lines + lines_used(Text, Rest), IfAfter, seq(Program, Sh));
         {incomplete, Pos, Message} ->
-            eval_fault({incomplete, Pos, Message}, Sh);
+            eval_fault(after_lines({incomplete, Pos, Message}, Lines), Sh);
         {error, Diagnostic, _Rest} ->
-            eval_fault(Diagnostic, Sh)
+            eval_fault(after_lines(Diagnostic, Lines), Sh)
     end.
 
 eval_fault(Diagnostic, Sh) ->
-    Message = erx_shell_parse:format_error(Diagnostic),
-    set_status(Message, say(2, [<<"rc: ">>, Message, $\n], Sh)).
+    syntax_status(Diagnostic, erx_shell_parse:format_error(Diagnostic), Sh).
 
 shift(Count, Sh) ->
     Star = var(<<"*">>, Sh),
@@ -473,8 +510,10 @@ with_redirs(Redirs, Fun, Sh) ->
                    {Result, runner_state_of(Result)}
            end,
     case ask({redirect, Expanded, Body}, Sh1) of
-        {{ok, Sh2}, Sh3} -> Sh2#sh{rs = Sh3#sh.rs};
-        {{unwind, Unwind}, Sh3} -> throw(with_runner_state(Unwind, Sh3#sh.rs))
+        %% Inner is the shell the body left; Outer holds the runner's state
+        %% after the redirections were undone.
+        {{ok, Inner}, Outer} -> Inner#sh{rs = Outer#sh.rs};
+        {{unwind, Unwind}, Outer} -> throw(with_runner_state(Unwind, Outer#sh.rs))
     end.
 
 runner_state_of({ok, #sh{rs = RunnerState}}) -> RunnerState;
@@ -685,14 +724,14 @@ subscript(Text, Value) ->
     Digits = length(lists:takewhile(fun is_digit/1, binary_to_list(Text))),
     From = leading_number(Text),
     <<_:Digits/binary, After/binary>> = Text,
-    Extra = case After of
-                <<"-">> -> Length - From;
-                <<"-", To/binary>> -> leading_number(To) - From;
-                _ -> 0
-            end,
-    case From < 1 orelse From > Length orelse Extra < 0 of
+    Following = case After of
+                    <<"-">> -> Length - From;
+                    <<"-", To/binary>> -> leading_number(To) - From;
+                    _ -> 0
+                end,
+    case From < 1 orelse From > Length orelse Following < 0 of
         true -> [];
-        false -> lists:sublist(Value, From, min(Extra, Length - From) + 1)
+        false -> lists:sublist(Value, From, min(Following, Length - From) + 1)
     end.
 
 %% rc's `^`: two lists of one length join word by word, a single word

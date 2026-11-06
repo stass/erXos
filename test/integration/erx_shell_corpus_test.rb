@@ -14,7 +14,11 @@ require_relative '../../tools/lib/erx/rc_oracle'
 # The corpus uses rc's language alone and the commands echo, true and false,
 # which the fake runner and the host's /bin both provide. A script that ends
 # on a fault of the language ends rc with no status, which the evaluator
-# reports as a fault. Each difference found is a bug, or is classified in
+# reports as a fault. A syntax error is compared by its message alone: rc
+# writes `rc: FILE:LINE: message` (`rc: line N: message` in `eval` text)
+# and the shell `rc: syntax error at line L, column C: message`, a
+# documented difference that SYNTAX_ERROR_LINES pins; both set $status to
+# the message. Each other difference found is a bug, or is classified in
 # DIFFERENCES and pinned there to the evaluator's own output.
 class ErxShellCorpusTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -34,10 +38,12 @@ class ErxShellCorpusTest < Minitest::Test
     # (TODO.md), so whatis says it cannot show the body.
     'whatis-function' => Run.new(stdout: "st not supported\n", stderr: "f: a function; its body is not shown\n",
                                  status: 'ok '),
-    # rc's parser refuses an `if not' that does not directly follow an `if',
-    # across units too; erx_shell_parse does not check it (TODO.md), so
-    # the evaluator runs the second `if not' on the flag the `if' left.
-    'if-not-follows' => Run.new(stdout: "first\nsecond\nafter\n", stderr: '', status: 'ok '),
+    # An upstream bug: after a sequence of two or more commands rc's parser
+    # (code.c) sets its `if not' flag from the first command, not the last,
+    # so it lets `if not' follow `if(...) a; b' and refuses it after
+    # `b; if(...) a'. The parser lets the last command decide.
+    'if-not-sequence' => Run.new(stdout: "b\n", stderr: "rc: `if not' does not follow `if(...)'\n",
+                                 status: "ok `if not' does not follow `if(...)'"),
     # rc keeps its internal mark on a pattern character written unquoted in
     # a subject of ~, so `a*' there equals no quoted text; the evaluator
     # takes a subject as text, so it equals 'a*'. Kept: rc's result follows
@@ -47,6 +53,13 @@ class ErxShellCorpusTest < Minitest::Test
     # sees exit status 1; the evaluator's copy keeps rc's own fault status.
     'substitution-fault' => Run.new(stdout: "bq error\n", stderr: "rc: null list in concatenation\n",
                                     status: 'ok ')
+  }.freeze
+
+  # The diagnostic line of a syntax error on each side, the message
+  # captured; syntax_errors_by_message rewrites each to `rc: message`.
+  SYNTAX_ERROR_LINES = {
+    rc: /^rc: (?:\S+:\d+|line \d+): (.*)$/,
+    evaluator: /^rc: syntax error at line \d+, column \d+: (.*)$/
   }.freeze
 
   def self.scripts = Dir[File.join(CORPUS, '*.rc')].sort
@@ -75,6 +88,17 @@ class ErxShellCorpusTest < Minitest::Test
     end
   end
 
+  def test_syntax_errors_are_compared_by_message_alone
+    message = "`if not' does not follow `if(...)'"
+    assert_equal("a\nrc: #{message}\n", syntax_errors_by_message("a\nrc: ../script.rc:6: #{message}\n", :rc))
+    assert_equal("rc: #{message}\n", syntax_errors_by_message("rc: line 2: #{message}\n", :rc))
+    assert_equal("rc: #{message}\n",
+                 syntax_errors_by_message("rc: syntax error at line 5, column 1: #{message}\n", :evaluator))
+    fault = "rc: null list in concatenation\n"
+    assert_equal(fault, syntax_errors_by_message(fault, :rc))
+    assert_equal(fault, syntax_errors_by_message(fault, :evaluator))
+  end
+
   private
 
   def oracle_run(script)
@@ -88,7 +112,11 @@ class ErxShellCorpusTest < Minitest::Test
              when :exited then 'fault'
              else flunk("rc gave #{result.describe} for #{script}")
              end
-    Run.new(stdout: result.stdout, stderr: result.stderr, status: status)
+    Run.new(stdout: result.stdout, stderr: syntax_errors_by_message(result.stderr, :rc), status: status)
+  end
+
+  def syntax_errors_by_message(stderr, side)
+    stderr.gsub(SYNTAX_ERROR_LINES.fetch(side)) { "rc: #{Regexp.last_match(1)}" }
   end
 
   def evaluator_run(script)
@@ -97,7 +125,8 @@ class ErxShellCorpusTest < Minitest::Test
                                      '-run', 'erx_shell_fake_runner', 'main', script, directory, stdin_data: '')
     assert status.success?, "#{script}: #{output}"
     outcome, final = File.read(File.join(directory, 'status')).lines(chomp: true)
-    Run.new(stdout: File.read(File.join(directory, 'stdout')), stderr: File.read(File.join(directory, 'stderr')),
+    Run.new(stdout: File.read(File.join(directory, 'stdout')),
+            stderr: syntax_errors_by_message(File.read(File.join(directory, 'stderr')), :evaluator),
             status: outcome == 'ok' ? "ok #{final}" : 'fault')
   end
 end

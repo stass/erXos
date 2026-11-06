@@ -1,5 +1,5 @@
-# rc refuses an `if not' that does not directly follow an `if' (see
-# DIFFERENCES in erx_shell_corpus_test.rb).
+# An `if not' that follows no `if' ends the script, after the lines
+# before it have run, as rc's parser refuses it.
 if(false) echo a
 if not echo first
 if not echo second

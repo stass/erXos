@@ -11,13 +11,15 @@
 
 %% Fixtures: a whole source parsed as an evaluator reads a script, one unit
 %% at a time from the rest the last one left, stopping at the first fault,
-%% with every diagnostic's line counted from the source's start; the one
+%% with every diagnostic's line counted from the source's start and whether
+%% an `if not` may follow carried from unit to unit; the one
 %% command a source parses to; and its words.
 program(Source) ->
     program(Source, 0, []).
 
 program(Source, Lines, Units) ->
-    case erx_shell_parse:next(Source, final) of
+    IfBefore = erx_shell_parse:if_not_may_follow(lists:append(lists:reverse(Units)), false),
+    case erx_shell_parse:next(Source, final, IfBefore) of
         eof ->
             {ok, lists:append(lists:reverse(Units))};
         {ok, Cmds, Rest} ->
@@ -274,6 +276,57 @@ if_and_if_not_test() ->
                         {and_or, cmd([<<"b">>]), [{'and', cmd([<<"c">>])}]}},
                        {if_not, cmd([<<"d">>])}]},
                  program(<<"if(~ $x a) b && c\nif not d">>)).
+
+%% An `if not` stands only where rc's parser lets it: first in a sequence
+%% whose command before it, in the same sequence or the unit before, is an
+%% `if` or an `if not` whose body is an `if` or empty, or as the body of an
+%% accepted `if not`. A line with no commands leaves the flag as it was; a
+%% source, a block, a function's body and a switch arm start without it.
+-define(IF_NOT, <<"`if not' does not follow `if(...)'">>).
+
+if_not_where_rc_accepts_it_test_() ->
+    Sources = [<<"if(a) b; if not c">>, <<"if(a) b\n\n# note\nif not c">>,
+               <<"if(a) b; if not if(c) d; if not e">>, <<"if(a) b; if not; if not c">>,
+               <<"if(a) b; if not if not c">>, <<"if(a) if(b) c; if not d">>,
+               <<"{if(a) b; if not c}">>, <<"switch(x){case a\nif(b) c; if not d}">>,
+               <<"fn f {if(a) b\nif not c}">>],
+    [{Source, ?_assertMatch({ok, _}, program(Source))} || Source <- Sources].
+
+if_not_where_rc_refuses_it_test_() ->
+    Cases = [{<<"if not c">>, {1, 1}}, {<<"a; if not c">>, {1, 4}},
+             {<<"if(a) b; c; if not d">>, {1, 13}}, {<<"if(a) b; if not c; if not d">>, {1, 20}},
+             {<<"if(a) b &\nif not c">>, {2, 1}}, {<<"if(a) b; x | if not c">>, {1, 14}},
+             {<<"if(a) b; x && if not c">>, {1, 15}}, {<<"if(a) if not c">>, {1, 7}},
+             {<<"if(a) b; {if not c}">>, {1, 11}}, {<<"if(a) b; fn f {if not c}">>, {1, 16}},
+             {<<"if(a) b; ! if not c">>, {1, 12}}, {<<"if(a) b; if not {if not c}">>, {1, 18}},
+             {<<"if not if not c">>, {1, 1}}],
+    [{Source, ?_assertEqual({error, {syntax, Pos, ?IF_NOT}}, program(Source))}
+     || {Source, Pos} <- Cases].
+
+if_not_after_the_unit_before_test() ->
+    IfNot = {ok, [{if_not, cmd([<<"c">>])}], <<>>},
+    ?assertEqual(IfNot, erx_shell_parse:next(<<"if not c\n">>, final, true)),
+    ?assertEqual(IfNot, erx_shell_parse:next_bounded(<<"if not c\n">>, final, true)),
+    ?assertMatch({error, {syntax, {1, 1}, ?IF_NOT}, <<>>},
+                 erx_shell_parse:next_bounded(<<"if not c\n">>, final, false)),
+    ?assertMatch({error, {syntax, {1, 1}, ?IF_NOT}, <<>>},
+                 erx_shell_parse:next(<<"if not c\n">>, final)).
+
+if_not_may_follow_test() ->
+    Follows = fun(Source, Before) ->
+                      {ok, Program, <<>>} = erx_shell_parse:next(Source, final, Before),
+                      erx_shell_parse:if_not_may_follow(Program, Before)
+              end,
+    ?assert(Follows(<<"# nothing\n">>, true)),
+    ?assertNot(Follows(<<"# nothing\n">>, false)),
+    ?assert(Follows(<<"if(a) b\n">>, false)),
+    ?assert(Follows(<<"a; if(a) b\n">>, false)),
+    ?assertNot(Follows(<<"if(a) b; a\n">>, false)),
+    ?assertNot(Follows(<<"if(a) b &\n">>, false)),
+    ?assert(Follows(<<"if not;\n">>, true)),
+    ?assert(Follows(<<"if not if(a) b\n">>, true)),
+    ?assertNot(Follows(<<"if not b\n">>, true)),
+    ?assertNot(Follows(<<"if not if not b\n">>, true)).
 
 if_body_on_the_next_line_test() ->
     ?assertEqual({'if', [cmd([<<"t">>]), cmd([<<"u">>])], cmd([<<"b">>])},
@@ -545,7 +598,7 @@ format_error_test() ->
 %% the bound is derived with: to a program where the shape is valid rc,
 %% and to a program or a diagnostic where it nests too deep, never closes
 %% or is valid only for some cuts; and
-%% next_bounded/2, in its child with the whole heap, must return the same.
+%% next_bounded/3, in its child with the whole heap, must return the same.
 parse_heap_sweep_test_() ->
     {timeout, 120, fun parse_heap_sweep/0}.
 
@@ -566,7 +619,7 @@ parse_heap_sweep() ->
                 Source <- [Fill(Prefix, Shape)],
                 Result <- [within_half_the_parse_heap(Source)],
                 not expected(lists:member(Shape, Valid), Result)
-                    orelse erx_shell_parse:next_bounded(Source, final) =/= Result],
+                    orelse erx_shell_parse:next_bounded(Source, final, false) =/= Result],
     ?assertEqual([], Wrong).
 
 expected(true, Result) -> element(1, Result) =:= ok;
@@ -585,11 +638,11 @@ within_half_the_parse_heap(Source) ->
 %% The last source is a unit of 1 KB in a buffer twice the parse heap: the
 %% child is handed a copy of its window, so the buffer does not count
 %% against the child heap. (A window of 64 bytes or less would be copied
-%% to the child whatever next_bounded/2 does.)
+%% to the child whatever next_bounded/3 does.)
 next_bounded_parses_as_next_does_test() ->
     Sources = [<<"a|b\nc">>, <<"if(t)\n">>, <<"echo )\nb\n">>, <<>>,
                binary:copy(<<"a\n">>, erx_shell_parse:max_command_bytes()),
                <<"echo ", (binary:copy(<<"a">>, 1000))/binary, "\n",
                  (binary:copy(<<"b">>, 2 * erx_shell_parse:parse_heap_bytes()))/binary>>],
-    [?assertEqual(erx_shell_parse:next(S, End), erx_shell_parse:next_bounded(S, End))
+    [?assertEqual(erx_shell_parse:next(S, End), erx_shell_parse:next_bounded(S, End, false))
      || S <- Sources, End <- [more, final]].

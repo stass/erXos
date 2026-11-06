@@ -180,7 +180,9 @@ read(L) ->
     end.
 
 %% What rc makes of a byte straight after a word: `(` subscripts it and the
-%% start of another word is joined to it by a caret, which consumes nothing.
+%% start of another word is joined to it by a caret, which consumes nothing:
+%% an inserted caret carries the offset of the token it joins, so the parser
+%% tells it from a written `^` by that offset (erx_shell_parse:simple/2).
 adjacent(#lx{word = false}) ->
     none;
 adjacent(L) ->

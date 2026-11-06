@@ -8,7 +8,7 @@
 %% at a chosen number of levels near 256, each within the bound on a unit; and
 %% units at and just over the 4,096-byte bound on one unit, among them runs of
 %% one fragment, and scripts many times longer. Each input is parsed as an
-%% evaluator parses a script, one unit at a time with next/2 from the rest the
+%% evaluator parses a script, one unit at a time with next/3 from the rest the
 %% last one left, and each unit is parsed again as more input may follow.
 %% Every input must parse or fail with a diagnostic, never raise. A diagnostic
 %% must name a line and column inside the source and say what is wrong in
@@ -123,11 +123,12 @@ drop(Bytes) -> binary_part(Bytes, 1, byte_size(Bytes) - 1).
 
 %% A nesting: openers, each one level, from the context each needs to the
 %% context it leaves, with the text that closes it. A word context takes
-%% words; a name context takes the one part that follows `$`.
+%% words; a name context takes the one part that follows `$`; an after_if
+%% context takes a command, which may be an `if not`.
 openers() ->
     [{block, command, <<"{">>, <<"}">>, command},
      {'if', command, <<"if(x) ">>, <<>>, command},
-     {if_not, command, <<"if not ">>, <<>>, command},
+     {if_not, after_if, <<"if not ">>, <<>>, after_if},
      {'not', command, <<"! ">>, <<>>, command},
      {subshell, command, <<"@ ">>, <<>>, command},
      {local, command, <<"x=y ">>, <<>>, command},
@@ -155,6 +156,9 @@ openers() ->
      {fn_names, command, <<"fn ">>, <<" {x}">>, word},
      {var_sub, word, <<"$x(">>, <<")">>, word}].
 
+takes(after_if, command) -> true;
+takes(Context, From) -> Context =:= From.
+
 kinds() ->
     lists:usort([Kind || {Kind, _, _, _, _} <- openers()]).
 
@@ -163,14 +167,16 @@ kinds() ->
 %% It fits the bound on a unit with the newline it is read as having, so its
 %% depth is what the parser checks: openers are chosen within a byte budget
 %% that always leaves two bytes a level, which an opener from every context
-%% fits in (`! `, `$`, `(...)`).
+%% fits in (`! `, `$`, `(...)`). An `if(x);` one level deep comes first, so
+%% the nesting may start with a chain of `if not`.
 mixed(Favoured) ->
     N = case rand:uniform(5) of
             1 -> rand:uniform(20);
             _ -> ?MAX_LEVELS - 3 + rand:uniform(5)
         end,
-    {Open, Close} = nest(N, Favoured, command, [], [], ?MAX_COMMAND - 2),
-    Source = iolist_to_binary([lists:reverse(Open), <<"x">>, Close]),
+    If = <<"if(x);">>,
+    {Open, Close} = nest(N, Favoured, after_if, [], [], ?MAX_COMMAND - 2 - byte_size(If)),
+    Source = iolist_to_binary([If, lists:reverse(Open), <<"x">>, Close]),
     byte_size(Source) < ?MAX_COMMAND orelse fail(nesting_over_the_bound, Source, N),
     case N =< ?MAX_LEVELS of
         true -> {Source, {levels, N}};
@@ -181,7 +187,7 @@ nest(0, _Favoured, _Context, Open, Close, _Budget) ->
     {Open, Close};
 nest(N, Favoured, Context, Open, Close, Budget) ->
     Cost = fun({_, _, Text, Closer, _}) -> byte_size(Text) + byte_size(Closer) end,
-    Fitting = [O || {_, From, _, _, _} = O <- openers(), From =:= Context,
+    Fitting = [O || {_, From, _, _, _} = O <- openers(), takes(Context, From),
                     Cost(O) + 2 * (N - 1) =< Budget],
     Choice = case [O || {Kind, _, _, _, _} = O <- Fitting, Kind =:= Favoured] of
                  [_ | _] = Preferred when Favoured =/= any ->
@@ -227,7 +233,7 @@ check(Source) ->
     check(Source, any).
 
 check(Source, Expect) ->
-    Result = units(Source, Source, 0, []),
+    Result = units(Source, Source, 0, false, []),
     case {Result, Expect} of
         {{ok, Units}, _} ->
             Program = lists:append(Units),
@@ -241,7 +247,10 @@ check(Source, Expect) ->
                 any -> ok
             end,
             Levels =< ?MAX_LEVELS orelse fail(too_many_levels, Source, Levels),
-            [round_trip(Source, Unit) || Unit <- Units],
+            lists:foldl(fun(Unit, IfBefore) ->
+                                round_trip(Source, Unit, IfBefore),
+                                erx_shell_parse:if_not_may_follow(Unit, IfBefore)
+                        end, false, Units),
             ok;
         {{error, {too_deep, Pos}}, Expect} when Expect =:= too_deep; Expect =:= any ->
             position(Source, Pos),
@@ -267,10 +276,11 @@ check(Source, Expect) ->
 
 %% A source parsed one unit at a time, as an evaluator parses a script: the
 %% units' programs in order, or the first diagnostic, its line counted from
-%% the start of the source.
-units(Source, Left, Lines, Acc) ->
-    Next = parse(Source, Left, final),
-    as_more_may_follow(Source, Left, Next),
+%% the start of the source. IfBefore is what the unit before left for
+%% whether an `if not` may start the next.
+units(Source, Left, Lines, IfBefore, Acc) ->
+    Next = parse(Source, Left, final, IfBefore),
+    as_more_may_follow(Source, Left, Next, IfBefore),
     case Next of
         eof ->
             {ok, lists:reverse(Acc)};
@@ -279,10 +289,11 @@ units(Source, Left, Lines, Acc) ->
             binary:last(Unit) =:= $\n orelse Rest =:= <<>>
                 orelse fail(unit_not_whole_lines, Source, Unit),
             read_size(Unit) =< ?MAX_COMMAND orelse fail(over_size_accepted, Source, Unit),
-            units(Source, Rest, Lines + length(binary:matches(Unit, <<"\n">>)), [Cmds | Acc]);
+            units(Source, Rest, Lines + length(binary:matches(Unit, <<"\n">>)),
+                  erx_shell_parse:if_not_may_follow(Cmds, IfBefore), [Cmds | Acc]);
         {error, {too_long, Limit} = TooLong, Rest} ->
             Limit =:= ?MAX_COMMAND orelse fail(wrong_bound, Source, Limit),
-            too_long(Source, Left),
+            too_long(Source, Left, IfBefore),
             resumes_at_a_line(Source, Left, Rest),
             {error, TooLong};
         {incomplete, Pos, Message} ->
@@ -295,8 +306,8 @@ units(Source, Left, Lines, Acc) ->
             {error, {syntax, shift(Pos, Lines), Message}}
     end.
 
-parse(Source, Buffer, End) ->
-    try erx_shell_parse:next(Buffer, End)
+parse(Source, Buffer, End, IfBefore) ->
+    try erx_shell_parse:next(Buffer, End, IfBefore)
     catch Class:Reason:Stack -> fail(raised, Source, {Class, Reason, Stack})
     end.
 
@@ -318,7 +329,7 @@ read_size(Bytes) ->
 %% A unit is too long only when what is left is over the bound and the
 %% whole lines within the bound, parsed on their own, are an unfinished
 %% unit: a unit that ends within the bound is never too long.
-too_long(Source, Left) ->
+too_long(Source, Left, IfBefore) ->
     read_size(Left) > ?MAX_COMMAND orelse fail(too_long_within_bound, Source, Left),
     Within = binary_part(Left, 0, min(byte_size(Left), ?MAX_COMMAND)),
     case binary:matches(Within, <<"\n">>) of
@@ -326,7 +337,7 @@ too_long(Source, Left) ->
             ok;
         Newlines ->
             {Last, 1} = lists:last(Newlines),
-            case parse(Source, binary_part(Left, 0, Last + 1), more) of
+            case parse(Source, binary_part(Left, 0, Last + 1), more, IfBefore) of
                 {incomplete, _, _} -> ok;
                 Other -> fail(too_long_within_bound, Source, Other)
             end
@@ -343,7 +354,7 @@ resumes_at_a_line(Source, Left, Rest) ->
 %% incomplete: a unit that ends before that line is the same. A fault may
 %% be found by reading a line continued into the unfinished one, and then
 %% lie before it, so a fault is held only to the weaker rule.
-as_more_may_follow(Source, Left, Final) ->
+as_more_may_follow(Source, Left, Final, IfBefore) ->
     Unfinished = case binary:matches(Left, <<"\n">>) of
                      [] -> byte_size(Left);
                      Newlines -> byte_size(Left) - element(1, lists:last(Newlines)) - 1
@@ -352,7 +363,7 @@ as_more_may_follow(Source, Left, Final) ->
                  {ok, _, Rest} -> byte_size(Rest) >= Unfinished;
                  _ -> Unfinished =:= 0
              end,
-    case parse(Source, Left, more) of
+    case parse(Source, Left, more, IfBefore) of
         {ok, _, <<>>} when Unfinished > 0 -> fail(unfinished_line_run, Source, Final);
         Final -> ok;
         {incomplete, _, _} when not Before -> ok;
@@ -385,6 +396,7 @@ fixed(Message) ->
                            | [<<"'", K/binary, "'">> || K <- Named]]],
     Expected = [<<"expected '", K/binary, "'">> || K <- [<<"(">>, <<")">>, <<"{">>, <<"}">>]],
     Fixed = [<<"a command must follow">>, <<"a word must follow">>,
+             <<"`if not' does not follow `if(...)'">>,
              <<"a word must follow '^'">>, <<"a variable name must follow '$'">>,
              <<"a switch body must begin with case">>, <<"a case takes only words">>,
              <<"malformed redirection">>, <<"malformed pipe">>,
@@ -397,7 +409,7 @@ fixed(Message) ->
 printable(Text) ->
     lists:all(fun(C) -> C >= $\s andalso C =< $~ end, binary_to_list(Text)).
 
-round_trip(Source, Program) ->
+round_trip(Source, Program, IfBefore) ->
     case printed(Program) of
         heredoc ->
             ok;
@@ -406,7 +418,7 @@ round_trip(Source, Program) ->
         Printed when byte_size(Printed) >= ?MAX_COMMAND ->
             ok;
         Printed ->
-            case erx_shell_parse:next(Printed, final) of
+            case erx_shell_parse:next(Printed, final, IfBefore) of
                 {ok, Program, <<>>} -> ok;
                 Other -> fail(round_trip, Source, {Printed, Other})
             end

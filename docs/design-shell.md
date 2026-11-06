@@ -234,7 +234,15 @@ at its end, or an `&&`, `|` or `if(...)` with nothing after it. The
 tokenizer reads a source as if it ended with a newline, so only constructs
 that may span lines can reach its end. The interactive layer then
 reads another line, and a script that ends that way fails as one that does
-not parse. The depth bound counts levels: `{...}`, `if`, `if not`, `for`,
+not parse. An `if not` stands only where it follows an `if`, as rc's
+parser checks: first in a sequence after an `if`, or after an `if not`
+whose body is an `if` or empty, or as the body of such an `if not`;
+elsewhere it is a syntax error. Where it may stand passes from command
+to command of a sequence and from unit to unit of a source, through
+lines with no command; a source, an `eval`'s text, a block, a function's
+body and a switch arm start without it (rc carries it into an arm whose
+`case` has no patterns; the shell does not). After a syntax error `$status`
+is the diagnostic's message alone, as in rc. The depth bound counts levels: `{...}`, `if`, `if not`, `for`,
 `while`, `switch`, `fn`, `!`, `@`, a redirection or an assignment written
 before a command, `(...)`, `$`, `$#`, `$"`, `` `{...} ``, `<{...}` and
 `>{...}` each
@@ -731,7 +739,11 @@ remain independent of catalog generation.
   Every script of the shell's test corpus runs under both, and their
   output and `$status` are compared; each difference is a bug, a
   documented difference with a test (the interactive layer, records in
-  pipes, `within`), or an upstream bug recorded as such. The corpus calls
+  pipes, `within`), or an upstream bug recorded as such. A script that
+  stops at a syntax error is compared by the diagnostic's message alone,
+  since rc names the file and line (`rc: FILE:LINE: message`) and the
+  shell the line and column; both set `$status` to the message. The
+  corpus calls
   only rc's builtins and toybox's applets, which the test also builds for
   the host and puts first in plan9port rc's `$path`, so both shells run
   the same commands; it starts from plan9port's own `test.rc` and its

@@ -1,0 +1,13 @@
+# Where an `if not' may stand passes from line to line of a script,
+# through lines that hold no command; `eval' text starts afresh and
+# carries it from line to line of its own, and a syntax error in it sets
+# $status and the script goes on.
+if(false) echo a
+
+# a comment
+if not echo c
+if(false) echo b
+eval 'if not echo e'
+echo $status
+eval 'if(false) echo f
+if not echo g'

@@ -18,7 +18,7 @@ before it have run, and an interactive loop resumes after it. A unit
 holds at most max_command_bytes() of source, and next/2 parses no more of
 the source than that, so the heap a parse needs is bounded by the unit
 and not by the source, which has no bound. The evaluator parses through
-`next_bounded/2`, which runs next/2 in a child process with a fixed heap,
+`next_bounded/3`, which runs next/3 in a child process with a fixed heap,
 so that bound holds whatever the evaluator's own heap holds.
 `format_error/1` renders a diagnostic as the line the shell prints. The
 tree is what the evaluator walks, so its shape is the types below. It
@@ -43,6 +43,15 @@ binds to what:
 * `=` makes an assignment where it touches a simple command's first part,
   or follows its whole first word after a blank; anywhere else it is a
   part of the word it touches, so `echo a=b` prints `a=b`, as in rc.
+* An `if not` stands only where it follows an `if`, as rc's parser checks
+  (its code.c): first in a sequence after a command that leaves the flag
+  if_not_may_follow/2 computes, or as the body of an `if not` that stands
+  there; anywhere else it is a syntax error at its `if`. The flag passes
+  from command to command of a sequence and, through next/3's `IfBefore`,
+  from unit to unit of a source; a source, a block, a function's body and
+  a switch arm start without it. rc's own flag after a sequence of two or
+  more commands reflects the first of them, which is an upstream bug;
+  here the last one decides.
 
 A diagnostic names the line and column of the first fault, the
 tokenizer's or the parser's, in fixed words, counted from the start of the
@@ -58,8 +67,8 @@ redirection's or an assignment's own words, and the redirections after a
 tree's depth is bounded by those levels and so is this parser's recursion.
 """.
 
--export([next/2, next_bounded/2, max_command_bytes/0, parse_heap_bytes/0,
-         format_error/1]).
+-export([next/2, next/3, next_bounded/3, if_not_may_follow/2,
+         max_command_bytes/0, parse_heap_bytes/0, format_error/1, message/1]).
 
 -export_type([result/0, program/0, cmd/0, word/0, redir/0, pipe/0,
               diagnostic/0, pos/0]).
@@ -67,7 +76,13 @@ tree's depth is bounded by those levels and so is this parser's recursion.
 %% The bound on nesting (docs/design-shell.md, "Bounds").
 -define(MAX_DEPTH, 256).
 
-%% The heap of the process next_bounded/2 parses a unit in, and the bound
+%% Whether End says if more source may follow.
+-define(END(End), (End =:= more orelse End =:= final)).
+
+%% rc's diagnostic for an `if not` where no `if` comes before it.
+-define(IF_NOT_ALONE, <<"`if not' does not follow `if(...)'">>).
+
+%% The heap of the process next_bounded/3 parses a unit in, and the bound
 %% on a unit derived from it (docs/design-shell.md, "Bounds"): the worst
 %% parse of a unit at the bound must fit in half that heap. The worst
 %% erx_shell_parse_tests's sweep finds, nine shapes behind about a hundred
@@ -132,7 +147,7 @@ tree's depth is bounded by those levels and so is this parser's recursion.
 -spec max_command_bytes() -> pos_integer().
 max_command_bytes() -> ?MAX_COMMAND.
 
--doc "The heap, in bytes, of the process next_bounded/2 parses a unit in.".
+-doc "The heap, in bytes, of the process next_bounded/3 parses a unit in.".
 -spec parse_heap_bytes() -> pos_integer().
 parse_heap_bytes() -> ?PARSE_HEAP.
 
@@ -158,34 +173,46 @@ newline of its own.
 
 Only the first max_command_bytes() of `Buffer` are parsed, and a unit
 that fits them is parsed the same whatever follows it.
+
+`IfBefore` says whether an `if not` may start the unit: what
+if_not_may_follow/2 gave for the unit before it in the same source, and
+`false` for a source's first unit.
 """.
--spec next(binary(), more | final) -> result().
-next(<<>>, End) when End =:= more; End =:= final ->
+-spec next(binary(), more | final, boolean()) -> result().
+next(<<>>, End, IfBefore) when ?END(End), is_boolean(IfBefore) ->
     eof;
-next(Buffer, End) when is_binary(Buffer), (End =:= more orelse End =:= final) ->
-    rest(Buffer, unit_of(window(Buffer, End))).
+next(Buffer, End, IfBefore)
+  when is_binary(Buffer), ?END(End), is_boolean(IfBefore) ->
+    rest(Buffer, unit_of(window(Buffer, End), IfBefore)).
+
+-doc "next/3 for the first unit of a source.".
+-spec next(binary(), more | final) -> result().
+next(Buffer, End) ->
+    next(Buffer, End, false).
 
 -doc """
-next/2 run in a child process whose heap is fixed at parse_heap_bytes(),
+next/3 run in a child process whose heap is fixed at parse_heap_bytes(),
 the one call the evaluator parses through: the heap a parse may take is
 then bounded by the unit alone, whatever the evaluator holds. The child
-is handed a copy of the part of `Buffer` that next/2 reads, so the rest
+is handed a copy of the part of `Buffer` that next/3 reads, so the rest
 of the source does not count against its heap, and returns its result as
 its exit reason, so it has ended when the result arrives. A child the
 heap limit kills gives `too_long`, never a crash of the caller; one whose
 parse raises, which the fuzz target shows does not happen, ends with a
 fixed reason, so nothing of the source reaches a log.
 """.
--spec next_bounded(binary(), more | final) -> result().
-next_bounded(<<>>, End) when End =:= more; End =:= final ->
+-spec next_bounded(binary(), more | final, boolean()) -> result().
+next_bounded(<<>>, End, IfBefore) when ?END(End), is_boolean(IfBefore) ->
     eof;
-next_bounded(Buffer, End) when is_binary(Buffer), (End =:= more orelse End =:= final) ->
+next_bounded(Buffer, End, IfBefore)
+  when is_binary(Buffer), ?END(End), is_boolean(IfBefore) ->
     {Window, Reach} = window(Buffer, End),
     Copy = binary:copy(Window),
     Heap = #{size => ?PARSE_HEAP div erlang:system_info(wordsize), kill => true,
              error_logger => false, include_shared_binaries => true},
     Parse = fun() ->
-                    exit({?MODULE, try unit_of({Copy, Reach}) catch _:_ -> crashed end})
+                    Unit = try unit_of({Copy, Reach}, IfBefore) catch _:_ -> crashed end,
+                    exit({?MODULE, Unit})
             end,
     {Pid, Ref} = spawn_opt(Parse, [monitor, {max_heap_size, Heap}]),
     receive
@@ -194,6 +221,25 @@ next_bounded(Buffer, End) when is_binary(Buffer), (End =:= more orelse End =:= f
         {'DOWN', Ref, process, Pid, killed} -> rest(Buffer, too_long);
         {'DOWN', Ref, process, Pid, _Other} -> error({?MODULE, parse_crashed})
     end.
+
+-doc """
+Whether an `if not` may start the unit after `Program`, a unit that
+next/3 accepted with `IfBefore`. The last command decides: an `if`, or
+an `if not` whose body is an `if` or empty, leaves it true, and every
+other command false; a unit with no commands leaves `IfBefore` as it was.
+""".
+-spec if_not_may_follow(program(), boolean()) -> boolean().
+if_not_may_follow(Program, IfBefore) when is_boolean(IfBefore) ->
+    lists:foldl(fun(Cmd, _) -> leaves_if(Cmd) end, IfBefore, Program).
+
+%% Whether an `if not` may follow Cmd in its sequence: rc's code.c sets
+%% its flag after an `if`, and after an `if not` from the command that is
+%% its body, keeping it when there is none. An `if not` with an empty body
+%% stood where the flag was true, so the flag stays true.
+leaves_if({'if', _, _}) -> true;
+leaves_if({if_not, empty}) -> true;
+leaves_if({if_not, {'if', _, _}}) -> true;
+leaves_if(_) -> false.
 
 %% The part of Buffer a unit within the bound lies in, and how far the unit
 %% may reach. A buffer that fits the bound, counting the newline its end is
@@ -238,9 +284,9 @@ lines_end(Buffer, End) ->
               | {fault, diagnostic(), At :: erx_shell_lex:offset()}
               | too_long.
 
--spec unit_of({binary(), whole | cut}) -> unit().
-unit_of({Window, Reach}) ->
-    try unit(erx_shell_lex:text(Window), 1) of
+-spec unit_of({binary(), whole | cut}, boolean()) -> unit().
+unit_of({Window, Reach}, IfBefore) ->
+    try unit(erx_shell_lex:text(Window), 1, IfBefore) of
         {Program, End} ->
             %% End may be past the newline text/1 added to a last line.
             {parsed, Program, min(End, byte_size(Window))}
@@ -281,17 +327,19 @@ after_line(Buffer, At) ->
 %% the `eof` after them, and twice as many are read and parsed again, so a
 %% unit of N lines takes about log2 N parses and its tokens are read past
 %% its end by fewer lines than it holds.
--spec unit(binary(), pos_integer()) -> {program(), erx_shell_lex:offset()}.
-unit(Text, Lines) ->
+-spec unit(binary(), pos_integer(), boolean()) ->
+          {program(), erx_shell_lex:offset()}.
+unit(Text, Lines, IfBefore) ->
     case erx_shell_lex:lines(Text, Lines) of
         {more, Tokens} ->
             try
-                line(Tokens)
+                line(Tokens, IfBefore)
             catch
-                throw:{?MODULE, _, {incomplete, _}} -> unit(Text, 2 * Lines)
+                throw:{?MODULE, _, {incomplete, _}} ->
+                    unit(Text, 2 * Lines, IfBefore)
             end;
         {last, Tokens} ->
-            line(Tokens)
+            line(Tokens, IfBefore)
     end.
 
 -doc """
@@ -299,62 +347,80 @@ The line the shell prints for a diagnostic. It holds only numbers and the
 diagnostic's fixed words, so it needs no escaping.
 """.
 -spec format_error(diagnostic()) -> binary().
-format_error({too_long, Limit}) ->
-    iolist_to_binary(io_lib:format("syntax error: line too long, over ~b bytes", [Limit]));
-format_error({too_deep, Pos}) ->
-    at(Pos, iolist_to_binary(io_lib:format("nested deeper than ~b", [?MAX_DEPTH])));
-format_error({_, Pos, Message}) ->
-    at(Pos, Message).
+format_error({too_long, _} = Diagnostic) ->
+    <<"syntax error: ", (message(Diagnostic))/binary>>;
+format_error({too_deep, Pos} = Diagnostic) ->
+    at(Pos, message(Diagnostic));
+format_error({_, Pos, _} = Diagnostic) ->
+    at(Pos, message(Diagnostic)).
+
+-doc """
+A diagnostic's message without its position, which is what `$status` is
+set to after a unit that does not parse, as rc sets it.
+""".
+-spec message(diagnostic()) -> binary().
+message({too_long, Limit}) ->
+    iolist_to_binary(io_lib:format("line too long, over ~b bytes", [Limit]));
+message({too_deep, _Pos}) ->
+    iolist_to_binary(io_lib:format("nested deeper than ~b", [?MAX_DEPTH]));
+message({_, _Pos, Message}) ->
+    Message.
 
 at({Line, Column}, Message) ->
     iolist_to_binary(io_lib:format("syntax error at line ~b, column ~b: ~ts",
                                    [Line, Column, Message])).
 
 %% One of rc's lines, commands separated by `;` and `&` up to the newline
-%% that ends it, and the offset where the next line starts.
--spec line(tokens()) -> {program(), erx_shell_lex:offset()}.
-line(Tokens) ->
-    case sequence(Tokens, 0, line) of
+%% that ends it, and the offset where the next line starts. IfBefore says
+%% whether an `if not` may start it.
+-spec line(tokens(), boolean()) -> {program(), erx_shell_lex:offset()}.
+line(Tokens, IfBefore) ->
+    case sequence(Tokens, 0, line, IfBefore) of
         {Cmds, [{newline, _, Next} | _]} -> {Cmds, Next};
         {_, [Token | _]} -> unexpected(Token)
     end.
 
 %% Commands separated by `;`, `&` and newlines, up to a token that cannot
 %% start one, which the caller checks. In a switch arm a `case` ends it too;
-%% in a line, which is rc's unit of parsing, a newline ends it.
+%% in a line, which is rc's unit of parsing, a newline ends it. IfBefore
+%% says whether an `if not` may start the first command; it passes from
+%% each command to the next as leaves_if/1 says.
 sequence(Tokens, D, Mode) ->
-    sequence(Tokens, D, Mode, []).
+    sequence(Tokens, D, Mode, false).
 
-sequence([{newline, _, _} | _] = Tokens, _D, line, Acc) ->
+sequence(Tokens, D, Mode, IfBefore) ->
+    sequence(Tokens, D, Mode, IfBefore, []).
+
+sequence([{newline, _, _} | _] = Tokens, _D, line, _IfBefore, Acc) ->
     {lists:reverse(Acc), Tokens};
-sequence([{Separator, _, _} | Tokens], D, Mode, Acc)
+sequence([{Separator, _, _} | Tokens], D, Mode, IfBefore, Acc)
   when Separator =:= newline; Separator =:= ';'; Separator =:= '&' ->
-    sequence(Tokens, D, Mode, Acc);
+    sequence(Tokens, D, Mode, IfBefore, Acc);
 %% A `case` joined to what follows it, or assigned to, is a command.
-sequence([{word, _, <<"case">>}, {Next, _, _} | _] = Tokens, _D, arm, Acc)
+sequence([{word, _, <<"case">>}, {Next, _, _} | _] = Tokens, _D, arm, _IfBefore, Acc)
   when Next =/= caret, Next =/= '=' ->
     {lists:reverse(Acc), Tokens};
-sequence(Tokens, D, Mode, Acc) ->
+sequence(Tokens, D, Mode, IfBefore, Acc) ->
     case starts_command(Tokens) of
         false ->
             {lists:reverse(Acc), Tokens};
         true ->
-            case command(Tokens, D) of
+            case command(Tokens, D, IfBefore) of
                 {Cmd, [{'&', _, _} | Rest]} ->
-                    sequence(Rest, D, Mode, [{background, Cmd} | Acc]);
+                    sequence(Rest, D, Mode, false, [{background, Cmd} | Acc]);
                 {Cmd, [{newline, _, _} | _] = Rest} when Mode =:= line ->
                     {lists:reverse(Acc, [Cmd]), Rest};
                 {Cmd, [{Separator, _, _} | Rest]}
                   when Separator =:= newline; Separator =:= ';' ->
-                    sequence(Rest, D, Mode, [Cmd | Acc]);
+                    sequence(Rest, D, Mode, leaves_if(Cmd), [Cmd | Acc]);
                 {Cmd, Rest} ->
                     {lists:reverse(Acc, [Cmd]), Rest}
             end
     end.
 
-%% cmd && cmd || cmd ...
-command(Tokens, D) ->
-    {First, Rest} = pipeline(Tokens, D),
+%% cmd && cmd || cmd ...; IfNot says whether an `if not` may stand first.
+command(Tokens, D, IfNot) ->
+    {First, Rest} = pipeline(Tokens, D, IfNot),
     and_or(Rest, D, First, []).
 
 and_or([{Op, _, _} | Tokens], D, First, Acc) when Op =:= andand; Op =:= oror ->
@@ -369,8 +435,15 @@ and_or(Tokens, _D, First, []) ->
 and_or(Tokens, _D, First, Acc) ->
     {{and_or, First, lists:reverse(Acc)}, Tokens}.
 
-%% cmd | cmd |[2] cmd ...
+%% cmd | cmd |[2] cmd ...; only the first may be an `if not`, and only
+%% where IfNot allows it.
 pipeline(Tokens, D) ->
+    pipeline(Tokens, D, false).
+
+pipeline([{keyword, At, 'if'}, {keyword, _, 'not'} | Tokens], D, true) ->
+    {Body, Rest} = compound_body(Tokens, enter(D, At), true),
+    stages(Rest, D, {if_not, Body}, []);
+pipeline(Tokens, D, _IfNot) ->
     {First, Rest} = unary(Tokens, D),
     stages(Rest, D, First, []).
 
@@ -396,8 +469,13 @@ unary([{keyword, At, '!'} | Tokens], D) ->
 unary([{keyword, At, '@'} | Tokens], D) ->
     {Body, Rest} = prefixed(Tokens, enter(D, At)),
     {{subshell, Body}, Rest};
+unary([{keyword, _, 'if'} = If, {keyword, _, 'not'} | _], _D) ->
+    fail(If, ?IF_NOT_ALONE);
 unary([{keyword, At, 'if'} | Tokens], D) ->
-    if_command(Tokens, enter(D, At));
+    D1 = enter(D, At),
+    {Condition, Rest} = condition(Tokens, D1),
+    {Body, Rest1} = compound_body(Rest, D1),
+    {{'if', Condition, Body}, Rest1};
 unary([{keyword, At, for} | Tokens], D) ->
     for_command(Tokens, enter(D, At));
 unary([{keyword, At, while} | Tokens], D) ->
@@ -446,26 +524,23 @@ prefixed(Tokens, D) ->
         false -> {empty, Tokens}
     end.
 
-%% What `if`, `for` and `while` run: the command that follows, on this line
-%% or the next. At the end of the source more input could still supply it.
+%% What `if`, `if not`, `for` and `while` run: the command that follows, on
+%% this line or the next. At the end of the source more input could still
+%% supply it. IfNot says whether it may be an `if not`, as the body of one
+%% may.
 compound_body(Tokens, D) ->
+    compound_body(Tokens, D, false).
+
+compound_body(Tokens, D, IfNot) ->
     case skip_newlines(Tokens) of
         [{eof, _, _} = Token] ->
             fail(Token, <<"a command must follow">>);
         Rest ->
             case starts_command(Rest) of
-                true -> command(Rest, D);
+                true -> command(Rest, D, IfNot);
                 false -> {empty, Rest}
             end
     end.
-
-if_command([{keyword, _, 'not'} | Tokens], D) ->
-    {Body, Rest} = compound_body(Tokens, D),
-    {{if_not, Body}, Rest};
-if_command(Tokens, D) ->
-    {Condition, Rest} = condition(Tokens, D),
-    {Body, Rest1} = compound_body(Rest, D),
-    {{'if', Condition, Body}, Rest1}.
 
 for_command(Tokens, D) ->
     {Var, Rest} = word(expect('(', Tokens), D),

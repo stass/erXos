@@ -1,0 +1,6 @@
+# After a line of two or more commands rc's parser lets an `if not'
+# follow when the first command is an `if' (see DIFFERENCES in
+# erx_shell_corpus_test.rb).
+if(false) echo a; echo b
+if not echo c
+echo after

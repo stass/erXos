@@ -64,8 +64,10 @@ run(Source) ->
 -doc """
 `erl -run erx_shell_fake_runner main Script Directory`: runs Script and
 writes `stdout`, `stderr` and `status` into Directory. `status` holds the
-final `$status` after `ok`, the outcome, or `fault` alone for a fault of
-the language, which ends a script with no status, as in rc.
+final `$status` after `ok`, the outcome, or after `fault` for a fault of
+the language, which ends a script with no status, as in rc. A unit that
+does not parse ends a script with its `$status` set, as in rc, so it is
+`ok`.
 """.
 -spec main([string()]) -> no_return().
 main([Script, Directory]) ->
@@ -73,6 +75,7 @@ main([Script, Directory]) ->
     {Outcome, Out, Err} = run(Source),
     Status = case Outcome of
                  {error, _, Shell} -> [<<"fault\n">>, status_line(Shell)];
+                 {syntax_error, _, Shell} -> [<<"ok\n">>, status_line(Shell)];
                  {_, Shell} -> [<<"ok\n">>, status_line(Shell)]
              end,
     ok = file:write_file(filename:join(Directory, "stdout"), Out),

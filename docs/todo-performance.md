@@ -297,13 +297,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   tool and over the network front end. Settled by bytes served and time to the
   first rendered view; the fix on the table is splitting the bundle by route.
 * **[Low] shell, a process per parsed unit.** The evaluator parses each unit
-  of source, rc's line, through `erx_shell_parse:next_bounded/2`, which spawns
+  of source, rc's line, through `erx_shell_parse:next_bounded/3`, which spawns
   a child with a fixed 8 MiB heap and copies the unit's tree back as its exit
   reason ([design-shell.md](design-shell.md#the-language)). Nothing has
   measured the spawn and the copy against the parse itself, for a script of
   many short lines and for a unit at the 4 KiB bound. Measure: a `tools/erx
   bench` workload running a script of 10,000 one-command lines and one of
-  4 KiB units, through `next_bounded/2` and through `next/2` called directly,
+  4 KiB units, through `next_bounded/3` and through `next/2` called directly,
   with a mailbox of pending stage messages: the receive of the child's
   `'DOWN'` gets no receive marker, so it scans the whole mailbox.
   Fixes on the table: parsing a run of short units in one child, or parsing a

@@ -24,6 +24,7 @@ out(Source) ->
 
 shell_of({ok, Shell}) -> Shell;
 shell_of({exit, Shell}) -> Shell;
+shell_of({syntax_error, _, Shell}) -> Shell;
 shell_of({error, _, Shell}) -> Shell.
 
 %% A runner that records every request and answers from Answers, a fun of
@@ -133,13 +134,57 @@ a_fault_stops_the_script_and_keeps_what_ran_test() ->
     ?assertEqual(<<"error">>, erx_shell_eval:status(Shell)).
 
 a_unit_that_does_not_parse_stops_the_script_test() ->
-    {{error, Message, Shell}, Out, _} = run(<<"echo one\nif(\n">>),
+    {{syntax_error, Line, Shell}, Out, Err} = run(<<"echo one\nif(\n">>),
     ?assertEqual(<<"one\n">>, Out),
-    ?assertEqual(Message, erx_shell_eval:status(Shell)).
+    ?assertEqual(<<"syntax error at line 3, column 1: expected ')'">>, Line),
+    ?assertEqual(<<"rc: ", Line/binary, "\n">>, Err),
+    ?assertEqual(<<"expected ')'">>, erx_shell_eval:status(Shell)).
 
 eval_runs_in_the_current_shell_test() ->
     ?assertEqual(<<"a b\nfrom-fn\n">>,
                  out(<<"eval x'=(a b)'; echo $x; eval 'fn g { echo from-fn }'; g\n">>)).
+
+%%% Syntax errors and where `if not` may stand
+
+-define(IF_NOT, <<"`if not' does not follow `if(...)'">>).
+
+%% A unit that does not parse ends a script after the units before it have
+%% run; its diagnostic goes to descriptor 2 and $status is its message alone.
+a_syntax_error_ends_the_script_with_its_message_as_status_test() ->
+    {Outcome, Out, Err} = run(<<"echo a\necho )\necho b\n">>),
+    ?assertMatch({syntax_error, _, _}, Outcome),
+    ?assertEqual(<<"a\n">>, Out),
+    Prefix = <<"rc: syntax error at line 2, column 6: ">>,
+    PrefixSize = byte_size(Prefix),
+    <<Prefix:PrefixSize/binary, Line/binary>> = Err,
+    ?assertEqual(string:trim(Line, trailing, "\n"), erx_shell_eval:status(shell_of(Outcome))).
+
+an_if_not_carries_across_units_of_a_script_test() ->
+    ?assertEqual(<<"c\n">>, out(<<"if(false) echo a\n\n# note\nif not echo c\n">>)),
+    {Outcome, Out, Err} = run(<<"if(false) echo a; echo b\nif not echo c\necho d\n">>),
+    ?assertEqual({<<"b\n">>, <<"rc: syntax error at line 2, column 1: ", ?IF_NOT/binary, "\n">>},
+                 {Out, Err}),
+    ?assertEqual(?IF_NOT, erx_shell_eval:status(shell_of(Outcome))).
+
+%% The shell's own diagnostics are written best effort: a runner that
+%% cannot write them still gets the unit's outcome back, never a throw.
+diagnostics_survive_a_runner_that_cannot_write_test() ->
+    Answers = fun({write, _, _}) -> {fault, <<"w">>};
+                 ({run, _, _}) -> <<>>
+              end,
+    ?assertMatch({{error, _, _}, _}, requests(<<"x=()\necho a^$x\n">>, Answers)),
+    ?assertMatch({{syntax_error, _, _}, _}, requests(<<"echo (\n">>, Answers)),
+    ?assertMatch({{ok, _}, _}, requests(<<"eval 'echo ('\n">>, Answers)).
+
+eval_text_starts_with_no_if_before_it_test() ->
+    {{ok, Shell}, Out, Err} = run(<<"if(false) echo a\neval 'if not echo e'\n">>),
+    ?assertEqual({<<>>, <<"rc: syntax error at line 1, column 1: ", ?IF_NOT/binary, "\n">>},
+                 {Out, Err}),
+    ?assertEqual(?IF_NOT, erx_shell_eval:status(Shell)),
+    {_, _, Later} = run(<<"eval 'echo a
+# b
+if not echo c'\n">>),
+    ?assertEqual(<<"rc: syntax error at line 3, column 1: ", ?IF_NOT/binary, "\n">>, Later).
 
 %%% Builtins
 

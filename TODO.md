@@ -1277,12 +1277,18 @@ it; git history is the record of completed work.
 next newline, even inside braces, where plan9port may wait for the whole
 command; `>>{`, `<>{` and `>[2]{` are refused; and a NUL byte is a word
 byte, which the evaluator refuses in a program's arguments and a file
-name but hands the runner inside a variable's value, which a program's
-environment must leave out; and a keyword joins no word that touches it,
+name but hands the runner in a variable's value and name (`$n = 1` with
+`n=a=b` exports `a=b=1`), in a `whatis` name (whose `not found` then
+writes the NUL to descriptor 2) and in a glob's text; the evaluator
+should build the environment it exports itself, of valid names and
+values without a NUL, and refuse a NUL in `whatis` and glob requests,
+so no runner has to remember them; and a keyword joins no word that touches it,
 where rc's hand-written parser joins one in an argument (`echo for=x`
 prints `for=x` in rc, `for =x` here), and the same holds after a
 subscript's `)` and the `}` of `` `{...} `` and `<{...}` (`echo
-$x(1)=2`), while `echo (a)=b` is refused in rc and two words here; `not=1`
+$x(1)=2`), while a list followed directly by a word or `(` is refused in rc
+(`echo (a)=b`, `x=(a)b`, `x=(a b)(1)`: "No free carats around parens")
+and accepted here; `not=1`
 and `in=x` are assignments in rc and refused here; and `cat <<=` takes `=`
 as its tag in rc. The joining rules would hold by construction if the
 lexer marked each token with whether a blank came before it and the
@@ -1291,11 +1297,6 @@ Add each
 to the corpus and follow rc
   (`erlang/apps/erx_shell/src/erx_shell_lex.erl`,
   `erlang/apps/erx_shell/src/erx_shell_parse.erl`).
-* [Medium] shell, `if not` that does not follow an `if`: rc refuses it
-  before running the unit, across units of one source too (``rc: file:line:
-  `if not' does not follow `if(...)'``); erx_shell_parse accepts it and
-  the evaluator runs it on the flag. Pinned as a difference by the
-  corpus's `if-not-follows.rc` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
 * [Low] shell, `whatis` of a function: rc prints `fn name {body}` as its
   parser deparses the body; the evaluator has no printer of syntax trees
   and says it cannot show the body, status `not supported`. Write the
@@ -1320,10 +1321,23 @@ to the corpus and follow rc
 * [Low] shell, the evaluator's smaller differences from rc, each to follow
   rc or record with a corpus case: `shift -1` empties `$*` in rc and
   shifts nothing here; `builtin builtin echo` runs a program `builtin` in
-  rc; after a syntax error rc's `$status` is the message alone (`syntax
-  error`), here the whole diagnostic; a copy's status is `1` in rc
+  rc; a copy's status is `1` in rc
   (`@{exit foo}`, a faulting pipeline stage gives `1|`) and the copy's own
   status here; and rc runs `fn sigexit` when the shell exits
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Low] shell, one reader of a source's units: `run_source`, `eval` and
+  the parser's fuzz target each step through units by hand, threading
+  the rest, the lines read and whether an `if not` may follow; the
+  interactive loop would be a fourth. A cursor in erx_shell_parse that
+  `next_bounded` takes and returns, with diagnostics already counted from
+  the source's start, would hold that state in one place; split
+  `outcome()` then into a unit's and a source's, since `run_unit` never
+  gives `syntax_error` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
+* [Low] shell, a runner's reply of the wrong shape: `with_redirs`, a
+  substitution's capture and `whatis` match the reply directly, so a
+  runner that breaks its contract crashes the evaluator with the whole
+  shell, its variables included, in the error reason; answer such a
+  reply with a language fault that names only the request
   (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
 * [Low] shell, escaping the shell's own diagnostics: `whatis`'s `not
   found` and a runner's fault text name what may come from a shared file

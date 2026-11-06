@@ -1,0 +1,3 @@
+# A block starts without an `if' before it, even after one.
+if(false) echo a; {if not echo b}
+echo after
