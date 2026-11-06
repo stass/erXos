@@ -14,9 +14,9 @@ class RuntimeBuildTest < Minitest::Test
   Runtime = Erx::Runtime
   ErlangApps = Erx::ErlangApps
 
-  # Stands in for every subprocess: rsync copies, the emulator's make leaves an
-  # executable, xref of the serving set answers with serving_reached in its log, and
-  # each step's name is recorded.
+  # Stands in for every subprocess: rsync copies with file times, as -a does, the
+  # emulator's make leaves an executable, xref of the serving set answers with
+  # serving_reached in its log, and each step's name is recorded.
   class RecordingRunner
     attr_reader :steps, :relinked, :options
     attr_accessor :fail_step, :link_leaves_nothing, :serving_reached
@@ -34,7 +34,7 @@ class RuntimeBuildTest < Minitest::Test
       raise Erx::Error, "#{name} failed" if name == fail_step
 
       case name
-      when 'runtime-copy' then FileUtils.cp_r("#{argv[-2]}.", argv[-1])
+      when 'runtime-copy' then FileUtils.cp_r("#{argv[-2]}.", argv[-1], preserve: true)
       when 'runtime-emulator' then make_emulator
       when 'serving-set' then serving_log
       end
@@ -78,7 +78,7 @@ class RuntimeBuildTest < Minitest::Test
     @root = File.realpath(Dir.mktmpdir('erx-runtime-build-'))
     @sdk = '/sdk/one'
     %w[configure erts/configure make/configure erts/emulator/Makefile.in erts/config.h.in erts/autoconf/config.sub
-       otp_only.c].each { |path| write_otp(path, 'stock') }
+       otp_only.c OTP_VERSION].each { |path| write_otp(path, 'stock') }
     write_otp(Runtime::XCOMP_FILE, 'stock')
     Runtime::LIBERX_SOURCES.each { |path| write_tree(path, 'stock') }
     # erXos's applications, each with its resource file and no modules but erx_files'
@@ -141,14 +141,33 @@ class RuntimeBuildTest < Minitest::Test
     refute configured?
   end
 
-  # The makefile make runs is configure's output, so an edit to a template reaches
-  # the build only through configure.
+  # The makefile make runs is configure's output, so an edit to what configure reads
+  # reaches the build only through configure.
   def test_every_template_of_configure_configures_again
-    %w[erts/emulator/Makefile.in erts/config.h.in erts/autoconf/config.sub erts/configure].each do |path|
+    %w[erts/emulator/Makefile.in erts/config.h.in erts/autoconf/config.sub erts/configure OTP_VERSION].each do |path|
       build
       write_otp(path, "changed #{path}")
       build
       assert configured?, "#{path} changed and configure did not run"
+    end
+  end
+
+  # OTP's makefiles ask for configure again when a template is newer than the makefile
+  # configure made from it, and the copy carries otp/'s file times. A checkout that
+  # writes a template again with the same bytes, as a rebase does, leaves the stamp
+  # alone, so the configured copy stays, and its templates must stay older than what
+  # configure wrote. A time ahead of the clock stands in for the checkout.
+  def test_a_template_written_again_with_the_same_bytes_stays_older_than_configure
+    later = Time.now + 3600
+    FileUtils.touch(File.join(@root, 'otp/erts/config.h.in'), mtime: later)
+    build
+    assert configured?
+    FileUtils.touch(File.join(@root, 'otp/erts/emulator/Makefile.in'), mtime: later)
+    build
+    refute configured?
+    configured_at = File.mtime(File.join(@output.root, '.erx-configured'))
+    %w[erts/config.h.in erts/emulator/Makefile.in].each do |path|
+      assert_operator File.mtime(File.join(@output.root, path)), :<, configured_at, "make would ask to configure #{path} again"
     end
   end
 

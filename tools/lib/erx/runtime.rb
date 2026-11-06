@@ -40,8 +40,16 @@ module Erx
     # otp/ tracks prebuilt beams with their sources' file times, so make could keep one
     # older than a source edit. These never enter the copy, and make compiles them.
     BUILT_BEAMS = %w[kernel stdlib].map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }.freeze
-    # The templates configure turns into the makefiles and headers make reads.
-    CONFIGURE_INPUTS = %w[**/*.in **/configure **/config.sub **/config.guess].freeze
+    # What configure reads from otp/ besides the cross file: the templates it turns into
+    # the makefiles and headers make reads, its scripts, the release's version, which
+    # it writes into the makefiles, and otp_build, which runs it.
+    CONFIGURE_INPUTS = %w[**/*.in **/configure **/config.sub **/config.guess OTP_VERSION otp_build].freeze
+    # The one file time every configure input has in the copy. OTP's makefiles ask for
+    # configure again when a template is newer than what configure made from it, and the
+    # copy would carry otp/'s times, which a checkout moves without changing a byte. The
+    # stamp, over the inputs' bytes, alone decides when to configure again; this time,
+    # older than anything configure writes, keeps make's own rule from deciding too.
+    CONFIGURE_INPUT_TIME = Time.utc(2000, 1, 1)
     # Deadlines in seconds, each many times what a clean build took on an idle host.
     DEADLINES = { compile: 120, copy: 300, configure: 1_800, emulator: 1_800, libs: 1_800 }.freeze
     # What the build leaves for the hosted smoke test and the seam check.
@@ -77,9 +85,11 @@ module Erx
       Digest::SHA256.hexdigest(digests.join("\n"))
     end
 
-    def self.configure_stamp(otp:, sdk_root:)
-      paths = [*Dir.glob(CONFIGURE_INPUTS, base: otp), self::XCOMP_FILE].uniq.sort
-      lines = paths.map { |path| "#{path} #{Digest::SHA256.file(File.join(otp, path)).hexdigest}" }
+    # Configure's inputs, as paths relative to otp/.
+    def self.configure_inputs(otp:) = [*Dir.glob(CONFIGURE_INPUTS, base: otp), self::XCOMP_FILE].uniq.sort
+
+    def self.configure_stamp(otp:, inputs:, sdk_root:)
+      lines = inputs.map { |path| "#{path} #{Digest::SHA256.file(File.join(otp, path)).hexdigest}" }
       Digest::SHA256.hexdigest([sdk_root, *lines].join("\n"))
     end
 
@@ -142,7 +152,8 @@ module Erx
     # These records live in the copy, so removing the copy forgets them too.
     def copy_sources
       otp = File.join(@root, 'otp')
-      stamp = self.class.configure_stamp(otp: otp, sdk_root: sdk_root)
+      inputs = self.class.configure_inputs(otp: otp)
+      stamp = self.class.configure_stamp(otp: otp, inputs: inputs, sdk_root: sdk_root)
       FileUtils.rm_rf(@output.root) unless stored(in_copy('.erx-configure-stamp')) == stamp
       FileUtils.mkdir_p(@output.root)
       @runner.run(['rsync', '-a', *BUILT_BEAMS, "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
@@ -150,7 +161,17 @@ module Erx
       (stored(in_copy('.erx-paths')).to_s.lines(chomp: true) - paths).each { |path| FileUtils.rm_f(in_copy(path)) }
       File.write(in_copy('.erx-paths'), paths.join("\n"))
       remove_orphan_beams(otp)
+      pin_configure_inputs(inputs)
       File.write(in_copy('.erx-configure-stamp'), stamp)
+    end
+
+    # lutime sets a link's own time, not its target's, so no file outside the copy is
+    # touched. The stamp was taken over the same list, so a missing input is otp/
+    # changing under the build.
+    def pin_configure_inputs(inputs)
+      inputs.each { |path| File.lutime(CONFIGURE_INPUT_TIME, CONFIGURE_INPUT_TIME, in_copy(path)) }
+    rescue SystemCallError => e
+      raise Error, "cannot set the time of configure's input in #{@output.root}: #{e.message}; otp/ changed during the build"
     end
 
     def stored(path) = File.file?(path) ? File.read(path) : nil
