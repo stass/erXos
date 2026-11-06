@@ -184,6 +184,14 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Also record the tree process's memory against `held` after the workload, which [Charges](design-tmp.md#data-model)
   leaves unpromised. Fixes on the table, cheapest first: the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
   reached by one round trip.
+* **[Low] files, a resolution step per walk** (`erx_ns_step`, [design-files.md](design-files.md#resolving-a-path)):
+  each walk a resolution asks for is one NIF call, which takes the namespace's read lock and checks a cursor of up to
+  8 KiB; a `.` or `..` after a name the path has not yet walked costs a walk of its own, one round trip more; and a
+  link costs two round trips, the walk that stops at it and the read of it. Measure, hosted, against stock OTP 29.1.2
+  on the same host: 1,000 `file:read_file_info/1` calls each of `/tmp/a/b/c`, `/tmp/a/x/../b/c` and a path through
+  one link, and of the same three on the release file system. Fixes on the table, cheapest first: a smaller cursor;
+  sending a `..` that follows a new name in the same walk, which the grant answers from its fid's record of the
+  directories it came through, for walks that stay below the entry's `root` (design-files.md's Alternatives weighs it).
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 
 * **The production image's `NOTICES`** (`tools/lib/erx/production_image.rb`, Phase 1 stopgap): `NOTICES` is 12.6 MiB of a 13.6 MiB image, never released and touched page by page at boot. Measure: the root's boot time with and without those pages.

@@ -257,8 +257,9 @@ every server.
 ## Operations
 
 Each callback of `erx_fs` is one step. Walking is `erx_fs`'s: it calls
-`walk` for one plain name at a time, handles `..` itself, never asks the
-tree to follow a link, and stops at a `symlink`, which `erx_file_remote`
+`walk` for one plain name at a time, handles `..` itself for a client
+from outside erXos (erXos's own send none), never asks the tree to
+follow a link, and stops at a `symlink`, which `erx_file_remote`
 reads and resolves through the caller's namespace, following or not
 following a path's last link as the operation asks
 ([design-files.md](design-files.md#resolving-a-path)). So a link in
@@ -374,12 +375,12 @@ dies with a removed file open frees the file's charge
 `erx_file_remote` turns the tree's answers into what stock `prim_file`
 answers on a UNIX host, by rules it applies to every server
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)):
-its error steps (`rename` of `"/"` answers `einval`; a removal, rename or
-creation whose path ends in `.` or `..` resolves the rest of the path and
-then answers Linux's error for such a name, `del_dir`'s `einval` for `.`
-and `enotempty` for `..` among them; a mount point, `/tmp` itself,
-answers `ebusy`; `enotempty` becomes `eexist` and `eisdir` from `delete`
-becomes `eperm`; a failed `del_dir` of the working directory answers
+its error steps (`rename` of `"/"` answers `einval`; the resolution's
+own answers are FreeBSD's, `einval` for a removal or rename whose last
+name is `.` or `..` among them; `/tmp` itself, the top of its mount,
+answers `ebusy` to `del_dir`, `eperm` to `delete`, `exdev` to `rename`
+and `eexist` to an operation that makes it; `enotempty` becomes `eexist`
+and `eisdir` from `delete` becomes `eperm`; a failed `del_dir` of the working directory answers
 `einval`, while an empty one is removed), its mapping of `getattr` to
 `#file_info{}`, and its offsets: a write moves an open file's offset to
 `At` plus the count, so an append leaves it after the appender's own
@@ -470,8 +471,8 @@ included, answering an error for each case it refuses.
 ## Differences from stock OTP
 
 These add to the differences every server has
-([design-files.md](design-files.md#compatibility-and-migration)): `..`
-resolved on the text, a working directory that is a path, `exdev`
+([design-files.md](design-files.md#compatibility-and-migration)): FreeBSD's
+answers where macOS's differ, a working directory that is a path, `exdev`
 between grants, trees or rights, links followed by the client, writes atomic per 64 KiB
 request, a positioned write to an `append` file appending as on Linux
 where macOS writes at the offset, and `file:allocate/3` answering
@@ -482,9 +483,6 @@ where macOS writes at the offset, and `file:allocate/3` answering
 * A directory's size is 0 and its `nlink` is 2 plus its subdirectories,
   as on Linux's tmpfs; macOS reports others.
 * Reads never change `atime`.
-* A removal whose path ends in `..` answers `eexist` (Linux's `ENOTEMPTY`) and
-  a rename whose source or target ends in `.` or `..` answers `ebusy`, as
-  Linux's do; macOS answers `einval`.
 * The owner and group are 0, permissions are checked as for the owner
   and never bypassed, and changing the owner to anyone else fails with
   `eperm`.
@@ -527,7 +525,11 @@ the code under test ran.
   the listed differences; every other difference fails the test. Cases
   added for the client's rules: `rename("/", "x")`, `del_dir(".")`,
   `del_dir("missing/.")`, `del_dir("child/..")` from the directory
-  holding `child`, `delete("file/.")`, `rename("child/..", "x")`,
+  holding `child`, `delete("file/.")`, `delete("child/.")`,
+  `delete("child/..")`, `read_file_info("link/../x")` with `link` a
+  link to a directory elsewhere, `read_file_info("file/..")`,
+  `read_file_info("missing/../x")`, `set_cwd("link")` and then
+  `get_cwd()`, `make_link("link", "new")`, `rename("child/..", "x")`,
   `rename("x", "child/.")`, `make_dir("child/.")`,
   `make_dir("missing/..")`, `make_symlink("t", "child/..")`,
   `make_link("file", "child/.")`, `make_link("child/.", "new")`, the
@@ -536,12 +538,20 @@ the code under test ran.
   a writable one after `chmod 0444`, and `write_file_info` of a record
   read with `read_file_info`. Seeded: the client without its
   `ENOTEMPTY`-to-`eexist` rule, which the `del_dir` of a non-empty
-  directory catches; a client that answers a last `.` or `..` before
-  resolving the rest, which `del_dir("missing/.")` catches; one that
-  resolves a last `.` on the text, which `delete("file/.")` catches as
-  the file removed; a path operation that walks its fid in place, which
+  directory catches; a machine that answers a last `.` or `..` before
+  walking the names before it, which `del_dir("missing/.")` catches; one
+  that removes a name on `..` before walking it, which
+  `read_file_info("missing/../x")` catches; one that sends `delete` with
+  the walk of `file/.`'s names, which `delete("file/.")` catches as the
+  file removed; a path operation that walks its fid in place, which
   the `victim` case catches as `victim` removed; `setattr` checking the
   node's mode for an open handle, which the `chmod 0444` case catches.
+  `/tmp`'s own cases, which stock has no counterpart for: the top of the
+  mount, where `del_dir("/tmp")` answers `ebusy`, `delete("/tmp")`
+  `eperm`, `rename("/tmp", "/x")` `exdev` and `make_dir("/tmp")`
+  `eexist`, and `/tmp/..` reaches `/`, none of them asking the tree.
+  Seeded: a machine that treats a top as an ordinary last name, whose
+  `del_dir("/tmp")` then goes to the release's `/` and answers `erofs`.
 * **Fids and nodes.** A fid walked to a file, the file removed, then an
   `lopen` and a `getattr` through the fid, which answer `enoent`, and a
   new file made between. Seeded: a tree that gives the next node a freed
