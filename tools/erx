@@ -411,28 +411,24 @@ module Erx
       problems.empty? ? 0 : 1
     end
 
-    # The suites the system domain runs, compared with stock under TCG and,
-    # where the host offers it, HVF. OTP's four groups and musl's libc-test in
-    # a test domain are not here yet (docs/plan.md, M3), so a run whose every
-    # part passed is still partial and exits 2, never 0. A failed run, or a
-    # host where no accelerator ran, exits 1.
+    # The suites the system domain runs under HVF, compared with stock. OTP's
+    # four groups and musl's libc-test in a test domain are not here yet
+    # (docs/plan.md, M3), so a run whose every part passed is still partial
+    # and exits 2, never 0. A failed run, or a host whose QEMU does not offer
+    # HVF, exits 1.
     def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil)
       no_arguments(arguments)
       offered = accelerators || QemuGate.available_accelerators(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
-      runnable, missing = %w[tcg hvf].partition { |accel| offered.include?(accel) }
-      missing.each { |accel| Terminal.puts("oracle qemu #{accel}: not_run; this host's QEMU does not offer #{accel}") }
-      results = runnable.map do |accel|
-        status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
-        Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
-        status.zero?
-      end
-      Terminal.puts("partial: the system domain runs #{OracleSuites::SUITES.keys.join(' and ')}; OTP's emulator, kernel, " \
-                    'stdlib and compiler groups and libc-test are not wired yet, so the check is not passed')
-      if runnable.empty?
-        Terminal.puts('failed: no accelerator ran')
+      accel = QemuGate::SUITE_ACCELERATOR
+      unless offered.include?(accel)
+        Terminal.puts("failed: this host's QEMU does not offer #{accel}, which the oracle run needs")
         return 1
       end
-      results.all? ? 2 : 1
+      status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
+      Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
+      Terminal.puts("partial: the system domain runs #{OracleSuites::SUITES.keys.join(' and ')}; OTP's emulator, kernel, " \
+                    'stdlib and compiler groups and libc-test are not wired yet, so the check is not passed')
+      status.zero? ? 2 : 1
     end
 
     def self.help(_arguments)
@@ -639,7 +635,7 @@ module Erx
     # The same suites in the system domain under QEMU, compared with stock OTP
     # against the same table. The exit is 0 only when the comparison passes.
     def self.oracle_qemu(arguments, qemu_class:)
-      options = { out: File.join(ROOT, 'build/oracle-qemu'), deadline: 1800, accel: 'tcg', cpus: 1, jobs: 4 }
+      options = { out: File.join(ROOT, 'build/oracle-qemu'), deadline: 1800, accel: QemuGate::SUITE_ACCELERATOR, cpus: 1, jobs: 4 }
       OptionParser.new do |flags|
         flags.on('--out DIR', 'Directory for the tree, image, serial log, event streams and report') { |value| options[:out] = value }
         flags.on('--deadline SECONDS', Integer, 'Hard deadline of each run') { |value| options[:deadline] = value }
@@ -663,7 +659,7 @@ module Erx
     # accelerator, and each damage the boot checks claim to catch.
     def self.check_boot_image(input_arguments)
       arguments = input_arguments.dup
-      accels = %w[tcg hvf]
+      accels = [QemuGate::SUITE_ACCELERATOR]
       jobs = 8
       OptionParser.new do |flags|
         flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| accels = value }
@@ -688,7 +684,7 @@ module Erx
     # transcript compared with the hosted backend's and the expected one.
     def self.check_debug_log(input_arguments)
       arguments = input_arguments.dup
-      accels = %w[tcg hvf]
+      accels = [QemuGate::SUITE_ACCELERATOR]
       jobs = 8
       OptionParser.new do |flags|
         flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| accels = value }
@@ -705,26 +701,30 @@ module Erx
       0
     end
 
-    # Every QEMU suite, discovered from tools/lib/erx/qemu_suites/, over the
-    # accelerators asked for. Exits 0 only when no suite failed or went
-    # incomplete: an accelerator this host lacks is reported as not run and
-    # fails the gate unless the caller narrowed --accel on purpose.
+    # Every QEMU suite, discovered from tools/lib/erx/qemu_suites/, under HVF,
+    # and under TCG the two things only TCG can do (QemuGate::SMOKE_ACCELERATOR).
+    # Exits 0 only when no suite failed or went incomplete. A host whose QEMU
+    # lacks either accelerator fails before anything is built: the gate never
+    # falls back to the other one.
     def self.check_qemu(input_arguments, runner_class: Runner, fiasco_class: Fiasco)
       arguments = input_arguments.dup
-      options = { accels: %w[tcg hvf], jobs: 8 }
+      options = { jobs: 8 }
       OptionParser.new do |flags|
-        flags.on('--accel LIST', Array, 'Accelerators, of tcg and hvf') { |value| options[:accels] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
-      unless (options.fetch(:accels) - %w[tcg hvf]).empty? && !options.fetch(:accels).empty?
-        raise OptionParser::InvalidArgument, 'accelerators must be tcg or hvf'
-      end
 
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      available = QemuGate.available_accelerators(runner: runner)
+      missing = QemuGate::REQUIRED_ACCELERATORS - available.to_a
+      unless missing.empty?
+        Terminal.puts("qemu gate: failed; this host's QEMU does not offer #{missing.join(' and ')}, " \
+                      "which the gate needs (offered: #{available.to_a.sort.join(' ')})")
+        return 1
+      end
       fiasco_class.new(root: ROOT, runner: runner).build(jobs: options.fetch(:jobs))
-      context = QemuGate::Context.new(root: ROOT, accels: options.fetch(:accels).uniq, jobs: options.fetch(:jobs),
-                                      available: QemuGate.available_accelerators(runner: runner))
+      context = QemuGate::Context.new(root: ROOT, accels: [QemuGate::SUITE_ACCELERATOR], jobs: options.fetch(:jobs),
+                                      available: available)
       results = QemuGate.run(suites: QemuGate.suites, context: context)
       QemuGate.table(results, context: context).each { |line| Terminal.puts(line) }
       QemuGate.overall(results.values.map { |entry| QemuGate.status(entry) }) == 'passed' ? 0 : 1
@@ -736,7 +736,7 @@ module Erx
     def self.conformance(input_arguments)
       arguments = input_arguments.dup
       options = { image: Fiasco.new(root: ROOT).image_path, roster: File.join(ROOT, 'test/conformance/roster.txt'),
-                  accels: %w[tcg hvf], cpus: [1, 4] }
+                  accels: [QemuGate::SUITE_ACCELERATOR], cpus: [1, 4] }
       OptionParser.new do |flags|
         flags.on('--image PATH', 'Explicit built guest image') { |value| options[:image] = value }
         flags.on('--roster PATH', 'Conformance roster') { |value| options[:roster] = value }

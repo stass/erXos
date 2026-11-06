@@ -15,20 +15,29 @@ module Erx
   # needs no entry in a shared list; the file calls declare_suite once with a
   # callable that takes a Context and returns a Result.
   #
-  # A Result is a map from a cell (a configuration such as `tcg-4cpu`, or a
+  # A Result is a map from a cell (a configuration such as `hvf-4cpu`, or a
   # declared case) to what happened there. The gate never turns an absence
   # into a pass:
   #   passed     ran and agreed
   #   failed     ran and disagreed, or the suite raised
   #   timed_out  was killed at its deadline
   #   partial    ran, but the guest did not finish its report or skipped
-  #   not_run    could not run here, such as HVF on a host without it
+  #   not_run    could not run here, such as TCG's smoke on a host without TCG
   #   pending    declared before the call it tests exists; nothing ran
   # A suite is failed when any cell failed or timed out, incomplete when any
   # cell was not run or partial, pending when every cell is pending, and
   # passed otherwise. The gate passes only when no suite is failed or
   # incomplete; a pending suite is listed and does not fail it.
   module QemuGate
+# Every suite runs under this accelerator.
+SUITE_ACCELERATOR = 'hvf'
+# TCG runs only the deterministic-mode transcript (`erx.det=1` needs TCG
+# with instruction counting) and one boot smoke of the production image
+# at one CPU; the production_image suite owns both.
+SMOKE_ACCELERATOR = 'tcg'
+# What the host's QEMU must offer for the gate to run at all.
+REQUIRED_ACCELERATORS = [SUITE_ACCELERATOR, SMOKE_ACCELERATOR].freeze
+
     CELL_STATUSES = %w[passed failed timed_out partial not_run pending].freeze
     FAILED_CELLS = %w[failed timed_out].freeze
     INCOMPLETE_CELLS = %w[partial not_run].freeze

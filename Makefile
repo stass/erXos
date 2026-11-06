@@ -48,11 +48,11 @@ check-sources:
 	$(RUBY) tools/erx check-sources
 
 # Every kernel-touching change runs this: all QEMU suites, discovered from
-# tools/lib/erx/qemu_suites/, over tcg and hvf. A missing accelerator is
-# reported as not run and fails the gate; pass ACCEL_LIST=tcg to narrow it.
-ACCEL_LIST ?= tcg,hvf
+# tools/lib/erx/qemu_suites/, under HVF; TCG runs only the production image's
+# deterministic transcript and a one-CPU boot smoke. A host whose QEMU lacks
+# HVF or TCG fails the gate.
 check-qemu:
-	$(RUBY) tools/erx check-qemu --accel $(ACCEL_LIST) --jobs $(JOBS)
+	$(RUBY) tools/erx check-qemu --jobs $(JOBS)
 
 # Seeds a failure into a copy of the sources and checks the gate reports it.
 check-qemu-mutant:

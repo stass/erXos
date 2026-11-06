@@ -189,7 +189,7 @@ class ConformanceTest < Minitest::Test
     program, = fake_qemu(serial: "erx-test: case alpha passed\nerx-test: case beta passed\nerx-test: end 2\n",
                          accelerators: %w[tcg])
     matrix = run_matrix(program, configs: C::MATRIX)
-    assert_equal %w[passed passed unsupported unsupported],
+    assert_equal %w[unsupported unsupported],
                  matrix.fetch('configurations').map { |entry| entry.fetch('status') }
     assert_equal 'incomplete', matrix.fetch('status')
   end

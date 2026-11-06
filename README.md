@@ -230,7 +230,8 @@ ok
 ```
 
 * **It boots to an Erlang shell** on QEMU `virt` (AArch64), under HVF and
-  TCG, with 1 to 8 CPUs.
+  TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs only the
+  deterministic-mode transcript and a boot smoke.
 * **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
   backend. OTP 29.1.2 and musl live in the tree, modified.
 * **The serial console's driver** (PL011) is an Erlang process.
@@ -392,8 +393,7 @@ For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
 `tools/erx oracle qemu`: `file_SUITE` and `filelib_SUITE` under Common
-Test in the system domain under QEMU, with TCG and, where the host offers
-it, HVF, compared case by case with stock OTP on the host against the
+Test in the system domain under QEMU with HVF, compared case by case with stock OTP on the host against the
 hosted run's table of known differences. It says it is partial: OTP's
 `emulator`, `kernel`, `stdlib` and `compiler` groups and libc-test do not
 run there yet. Native benchmarks carry their own label, apart from Linux suite

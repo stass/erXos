@@ -40,15 +40,15 @@ class OracleCliTest < Minitest::Test
     end
   end
 
-  def test_check_oracle_runs_each_offered_accelerator_and_says_what_it_leaves_out
+  def test_check_oracle_runs_under_hvf_only_and_says_what_it_leaves_out
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf tcg])
       assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
-      assert_includes output, 'oracle qemu hvf: not_run'
-      assert_includes output, 'oracle qemu tcg: passed'
+      assert_includes output, 'oracle qemu hvf: passed'
+      refute_includes output, 'oracle qemu tcg'
       assert_includes output, "partial: the system domain runs #{Erx::OracleSuites::SUITES.keys.join(' and ')}"
-      assert_equal [[Erx::OracleSuites::SUITES.keys, { accel: 'tcg', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
+      assert_equal [[Erx::OracleSuites::SUITES.keys, { accel: 'hvf', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
     end
   end
 
@@ -57,22 +57,21 @@ class OracleCliTest < Minitest::Test
   def test_check_oracle_and_oracle_qemu_use_separate_default_directories
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
+      run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf])
       run_cli('oracle', 'qemu', qemu_class: qemu)
       check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }
-      assert_equal File.join(Erx::ROOT, 'build/check-oracle/tcg'), check
+      assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf'), check
       assert_equal File.join(Erx::ROOT, 'build/oracle-qemu'), plain
       refute check.start_with?("#{plain}/")
     end
   end
 
-  def test_check_oracle_fails_when_no_accelerator_ran
+  def test_check_oracle_fails_without_hvf_and_never_falls_back_to_tcg
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
-      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: [])
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
       assert_equal 1, status
-      assert_includes output, 'oracle qemu tcg: not_run'
-      assert_includes output, 'failed: no accelerator ran'
+      assert_includes output, "failed: this host's QEMU does not offer hvf"
       assert_empty qemu.calls
     end
   end
@@ -81,7 +80,6 @@ class OracleCliTest < Minitest::Test
     Dir.mktmpdir do |directory|
       status, output = run_cli('check-oracle', qemu_class: FakeQemu.new(directory, passing: false), accelerators: %w[tcg hvf])
       assert_equal 1, status
-      assert_includes output, 'oracle qemu tcg: failed'
       assert_includes output, 'oracle qemu hvf: failed'
     end
   end

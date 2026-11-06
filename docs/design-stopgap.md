@@ -1003,7 +1003,7 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 
 ## Verification
 
-Each increment is a QEMU transcript test under TCG and HVF, one and four CPUs, kept in the suite. Each case has a seeded failure, a test-only patch that makes it fail, which shows the case
+Each increment is a QEMU transcript test under HVF, one and four CPUs, kept in the suite (TCG runs only the production image's deterministic transcript and one boot smoke at one CPU). Each case has a seeded failure, a test-only patch that makes it fail, which shows the case
 ran the code it claims to; `make check-native-seeds` keeps the suites' seeds and the semaphore race's test kernel. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
 the tests.
 
@@ -1094,10 +1094,10 @@ call, and no stub takes a snapshot of it.
 
 ## Read in source, never run
 
-The gate's `native_musl` suite has run `libl4sys.p.a` linked beside musl, and musl's start, TLS, identifiers, join, detached exit and condition variables on the root, under TCG and HVF at 1 and 4 CPUs.
+The gate's `native_musl` suite has run `libl4sys.p.a` linked beside musl, and musl's start, TLS, identifiers, join, detached exit and condition variables on the root, under HVF at 1 and 4 CPUs.
 
 The gate's `boot_image`, `native_boot`, `production_image`, `native_memory`, `debug_log`, `native_threads`, `native_crash` and `native_task` suites have run the load plan, the region reservations, the banner, the descriptor check, `sigma0`'s paging of the root's image, of the
-handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under TCG and HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
+handoff page and of the archive, `user_ptr`, `l4_vcon_write`, power-off and every call of the [Protection](#protection) table that does not fault, under HVF at 1 and 4 CPUs, with `l4sys` (`libl4sys.p.a`, since `libl4sys-direct.a` lacks `l4_utcb_wrap`) and
 `libsigma0.a` linked freestanding. They have also run `l4sigma0_map_mem` over the root's image, one gate as the pager, exception handler and request target of the root's threads, with a root thread calling its own task's gate, the 128 KiB area in
 `l4_task_add_ku_mem` on the root, semaphore creation, threads on those UTCB slots, and the deletion of a thread and its semaphore when a start fails at each step, so that an unbound thread that never started can be deleted. `native_threads` and `native_watchdog` have run, with each thread on a CPU in turn, service calls and semaphore wakes across
 CPUs, timed waits racing wakes, `l4_scheduler_run_thread`'s mask on a thread before its start and while it runs, priority 255 over a spinning thread, the deletion of a running thread's capability from another CPU with the marker cleared afterwards, the same for the first thread, an index and its
@@ -1116,7 +1116,7 @@ The gate's `function_api` suite has run `l4sigma0_map_iomem` over QEMU's `fw_cfg
 
 The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; `l4_irq_detach` stopping deliveries, a software object's fire while detached arriving at the next bind, and a detached line opening again at its next bind; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
 
-The gate's `production_image` suite has run ERTS's interpreter as the root, `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`, `l4_scheduler_info` as a CPU count, the release's files through `erx_prim_file` from the archive, `init`, `kernel_sup`'s children to `erx_console`'s banners, under TCG and HVF at 1 and 4 CPUs, and a release's pets, kept past the deadlines and then stopped, under both at 1 CPU.
+The gate's `production_image` suite has run ERTS's interpreter as the root, `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`, `l4_scheduler_info` as a CPU count, the release's files through `erx_prim_file` from the archive, `init`, `kernel_sup`'s children to `erx_console`'s banners, under HVF at 1 and 4 CPUs, with a one-CPU boot and the deterministic transcript under TCG, and a release's pets, kept past the deadlines and then stopped, under both at 1 CPU.
 
 The same suite boots the image twice in deterministic mode to the shell and compares the two serial transcripts byte for byte from erXos's banner to the shell's line, which includes the counter Fiasco's timer reports; Fiasco's own boot, its delay calibration and timer setup included, gives the same bytes each time.
 

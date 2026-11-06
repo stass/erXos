@@ -13,7 +13,7 @@ class QemuGateTest < Minitest::Test
   Gate = Erx::QemuGate
   ROOT = File.expand_path('../..', __dir__)
 
-  def context(accels: %w[tcg hvf], available: %w[tcg hvf])
+  def context(accels: %w[hvf], available: %w[hvf tcg])
     Gate::Context.new(root: ROOT, accels: accels, available: available, jobs: 1)
   end
 
@@ -94,7 +94,7 @@ class QemuGateTest < Minitest::Test
   end
 
   def test_a_missing_accelerator_is_reported_as_not_run
-    here = context(available: %w[tcg])
+    here = context(accels: %w[hvf tcg], available: %w[tcg])
     assert_equal %w[hvf], here.missing
     assert_equal %w[tcg], here.runnable
 
@@ -106,6 +106,17 @@ class QemuGateTest < Minitest::Test
     assert_match(/hvf is not offered/, entry.notes.first)
   end
 
+def test_suites_run_under_hvf_and_tcg_is_the_smoke_alone
+  assert_equal 'hvf', Gate::SUITE_ACCELERATOR
+  assert_equal 'tcg', Gate::SMOKE_ACCELERATOR
+  assert_equal %w[hvf tcg], Gate::REQUIRED_ACCELERATORS
+
+  # Neither accelerator offered: the production-image suite starts no guest, and names both gaps.
+  entry = Gate.suites.find { |suite| suite.name == 'production_image' }.run.call(context(available: []))
+  assert_equal({ 'hvf-1cpu' => 'not_run', 'hvf-4cpu' => 'not_run', 'tcg-1cpu' => 'not_run' }, entry.cells)
+  assert_equal ["hvf is not offered by this host's QEMU", "tcg is not offered by this host's QEMU"], entry.notes
+end
+
   def test_pending_conformance_cases_are_reported_as_pending_and_start_no_guest
     entry = Gate.suites.find { |suite| suite.name == 'conformance' }.run.call(context(available: []))
     refute_empty entry.cells
@@ -116,7 +127,7 @@ class QemuGateTest < Minitest::Test
   def test_the_table_names_each_suite_its_status_and_what_did_not_run
     results = { 'a' => Gate.result({ 'tcg-1cpu' => 'passed', 'hvf-1cpu' => 'not_run' }, notes: ['hvf is not offered']),
                 'b' => Gate.result({ 'case x' => 'pending' }) }
-    lines = Gate.table(results, context: context(available: %w[tcg]))
+    lines = Gate.table(results, context: context(accels: %w[tcg hvf], available: %w[tcg]))
     assert_match(/\Aa +incomplete +tcg-1cpu passed, hvf-1cpu not_run\z/, lines[0])
     assert_match(/\Ab +pending +case x pending\z/, lines[1])
     assert_equal 'a: hvf is not offered', lines[2]

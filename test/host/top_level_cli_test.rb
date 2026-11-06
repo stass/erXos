@@ -76,6 +76,24 @@ class TopLevelCliTest < Minitest::Test
           checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
   end
 
+  # The gate needs HVF for its suites and TCG for its smoke and deterministic boots, and never
+  # falls back from one to the other: a host without HVF fails before anything is built.
+  def test_check_qemu_fails_clearly_when_hvf_is_not_offered
+    log = File.join(@directory, 'accel.log')
+    File.write(log, "Accelerators supported in QEMU binary:\ntcg\n")
+    runner = Object.new.tap { |fake| fake.define_singleton_method(:run) { |_argv, **_options| { 'log' => log } } }
+    fiasco = Class.new { define_method(:new) { |**| raise 'must not build' } }.new
+    status, output = run_cli('check-qemu', runner_class: Factory.new(runner), fiasco_class: fiasco)
+    assert_equal 1, status
+    assert_includes output, 'does not offer hvf, which the gate needs (offered: tcg)'
+  end
+
+  def test_check_qemu_takes_no_accelerator_choice
+    status, output = run_cli('check-qemu', '--accel', 'tcg,hvf', runner_class: UnexpectedRunner)
+    assert_equal 2, status
+    assert_includes output, '--accel'
+  end
+
   def test_check_runs_every_generation_gate_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|

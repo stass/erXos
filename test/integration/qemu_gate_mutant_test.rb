@@ -37,10 +37,10 @@ class QemuGateMutantTest < Minitest::Test
 
   def gate_status(source)
     probe = lambda do |_context|
-      runs = Erx::DebugLogProbe::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [1])
+      runs = Erx::DebugLogProbe::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [1])
       Erx::QemuGate.result(runs.transform_values { 'passed' })
     end
-    context = Erx::QemuGate::Context.new(root: ROOT, accels: %w[tcg], available: %w[tcg], jobs: 8)
+    context = Erx::QemuGate::Context.new(root: ROOT, accels: %w[hvf], available: %w[hvf], jobs: 8)
     results = Erx::QemuGate.run(suites: [Erx::QemuGate::Suite.new(name: 'debug_log', run: probe)], context: context)
     [Erx::QemuGate.status(results.fetch('debug_log')), results.fetch('debug_log').notes]
   end
@@ -57,7 +57,7 @@ class QemuGateMutantTest < Minitest::Test
       source_copy(directory, mutate: true)
       status, notes = gate_status(directory)
       assert_equal 'failed', status
-      assert_match(/debug-log probe: tcg-1cpu/, notes.first)
+      assert_match(/debug-log probe: hvf-1cpu/, notes.first)
     end
   end
 end

@@ -269,7 +269,7 @@ QEMU identity, resolved invocation and observed checkpoints.
 
 The conformance harness (`tools/erx conformance`,
 `tools/lib/erx/conformance.rb`) runs the roster `test/conformance/roster.txt`
-over a matrix of configurations, TCG and HVF with one and four CPUs, one
+over a matrix of configurations, HVF with one and four CPUs, one
 guest boot per configuration. A roster line declares a case the guest runs,
 with its share of the guest's deadline, or a pending case whose call does
 not exist yet. The guest reports each case on the serial console as
@@ -430,7 +430,7 @@ RAM. TLC fixtures cover wrong properties, parser errors, resource failure,
 incomplete searches, cache invalidation and empty filters.
 
 Acceptance also uses the real tools: both stock OTP flavours and their
-required suites, the frozen stopgap banner under TCG and HVF, clean
+required suites, the frozen stopgap banner under HVF, clean
 rebuilds with identical bytes for the archive, the single bootable file
 and the two-file form, the single file's archive equal to the two-file
 archive, both forms booting under the harness, and the boot validator's
@@ -449,7 +449,7 @@ Each declaration lives with what it declares:
 | Chokepoint checks | `tools/lib/erx/chokepoint_rules/NAME.rb`, one group of rules; a core's group is named after its source and states its rules or why it has none | a `kernel/core` or `kernel/sched` source has no group, or a group file declares nothing, twice, or an empty group |
 | `check-sanitizers` | the line `# erx-gate: sanitizers` in a test under `test/host` or `test/integration` | a comment resembles it but is not it, a test reads the sanitizer switch directly or through a helper without declaring, a core or `liberx` source is named by no declaring test, or nothing declares |
 | Test pool (`check`, `check-sanitizers`) | every `*_test.rb` under `test/host` (and the declaring or non-excused integration tests); `# erx-gate: serial` on a file that cannot share the machine | a file's log has no Minitest summary or zero runs, a file fails or times out, a file is listed twice, or the verdicts differ from the file list |
-| `check-qemu` | `tools/lib/erx/qemu_suites/NAME.rb`, one suite that boots the kernel under QEMU; a suite is a callable returning each cell (a configuration or a declared case) as `passed`, `failed`, `timed_out`, `partial`, `not_run` or `pending` | a suite is failed when a cell failed or timed out, or its file raised; it is incomplete when a cell was not run (an accelerator the host lacks) or partial; a suite with no cell fails; only a pending suite, whose cases await their calls, does not fail the gate |
+| `check-qemu` | `tools/lib/erx/qemu_suites/NAME.rb`, one suite that boots the kernel under QEMU; a suite is a callable returning each cell (a configuration or a declared case) as `passed`, `failed`, `timed_out`, `partial`, `not_run` or `pending` | a suite is failed when a cell failed or timed out, or its file raised; it is incomplete when a cell was not run (an accelerator the host lacks) or partial; a suite with no cell fails; only a pending suite, whose cases await their calls, does not fail the gate. Every suite runs under HVF; TCG runs only the production image's deterministic-mode transcript (`erx.det=1`, which needs TCG with instruction counting) and one boot of it to the shell at one CPU. A host whose QEMU lacks HVF or TCG fails the gate before anything is built, and the gate never falls back from one to the other. Linux hosts are not tested yet |
 | `check-fuzz`, native targets | `tools/fuzz/KIND_target.rb` beside `tools/fuzz/KIND_fuzz.c`, naming sources, include paths and seeds | either file lacks the other, or a declaration is empty or malformed |
 
 Discovery could otherwise make a security gate quietly run less, so

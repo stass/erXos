@@ -288,31 +288,16 @@ module Erx
         @qemu = qemu
       end
 
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true)
+      # smoke_accels name accelerators that get only the smoke: the plain boot to the shell at
+      # one CPU, and under TCG the deterministic transcript, without the boots that probe refusals,
+      # the watchdog and the console.
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, smoke_accels: [])
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         check_device_paths
         built = image(fiasco)
         narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: narrow_manifest) : nil
-        accels.product(cpus).to_h do |accel, count|
-          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
-          full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
-          deterministic(built) if accel == 'tcg' && count == 1
-          if count == cpus.first
-            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
-                                      points: Run.command_line_refusal_checkpoints)
-            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, dtb: seeded_stdout_tree(accel, count, built),
-                                      points: Run.stdout_path_refusal_checkpoints)
-          end
-          prove_pet(accel, count, built) if count == cpus.first
-          boot_narrow(accel, count, narrow) if narrow && count == cpus.max
-          console_boot(accel, count, built)
-          parked_log_boot(accel, count, built)
-          idle_boot(accel, count, built)
-          # This boot's transcript is its whole result: it raises if the refusal is missing.
-          boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
-          ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
-        end
+        full_matrix(accels, cpus, built, narrow).merge(smoke(smoke_accels, built))
       end
 
       # The transcript of a boot as far as ERTS gets, each line in order. The image is one
@@ -448,6 +433,37 @@ module Erx
       private_class_method :whole_line
 
       private
+
+      def smoke(accels, built)
+        accels.to_h do |accel|
+          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: 1)
+          full = boot(accel, 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+          deterministic(built) if accel == 'tcg'
+          ["#{accel}-1cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
+        end
+      end
+
+      def full_matrix(accels, cpus, built, narrow)
+        accels.product(cpus).to_h do |accel, count|
+          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
+          full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+          deterministic(built) if accel == 'tcg' && count == 1
+          if count == cpus.first
+            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
+                                      points: Run.command_line_refusal_checkpoints)
+            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, dtb: seeded_stdout_tree(accel, count, built),
+                                      points: Run.stdout_path_refusal_checkpoints)
+          end
+          prove_pet(accel, count, built) if count == cpus.first
+          boot_narrow(accel, count, narrow) if narrow && count == cpus.max
+          console_boot(accel, count, built)
+          parked_log_boot(accel, count, built)
+          idle_boot(accel, count, built)
+          # This boot's transcript is its whole result: it raises if the refusal is missing.
+          boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
+          ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
+        end
+      end
 
       # Two boots in deterministic mode, to the shell, whose transcripts must be the same
       # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG.

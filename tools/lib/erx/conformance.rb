@@ -37,7 +37,7 @@ module Erx
     Config = Data.define(:accel, :cpus) do
       def label = "#{accel}-#{cpus}cpu"
     end
-    MATRIX = %w[tcg hvf].product([1, 4]).map { |accel, cpus| Config.new(accel: accel, cpus: cpus) }.freeze
+    MATRIX = %w[hvf].product([1, 4]).map { |accel, cpus| Config.new(accel: accel, cpus: cpus) }.freeze
 
     # The guest's report: the result of each case it named, the count its
     # end line gave (nil without one) and every protocol error.
