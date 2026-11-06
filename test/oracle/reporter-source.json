@@ -1,6 +1,6 @@
 {
   "path": "lib/common_test/src/test_server_ctrl.erl",
   "original_sha256": "9afd96d36994e3eecfdedc721909f258633d323478d8dd6e5b65c4f60ff998e5",
-  "reporting_sha256": "f6172b7eb3637faebf6ec291e37c411eb97589a3c3375dd33240b2fd98fd2cd3",
+  "reporting_sha256": "88cb64c17bc8f6a28e441da57f52cad2482c3e7a168bbac6972a21a2c8fc2d39",
   "license": "Apache-2.0"
 }

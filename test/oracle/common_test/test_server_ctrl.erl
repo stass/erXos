@@ -19,7 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: emit reporting-only case observations at their owner; refuse a slave start without distribution.
+%% Modified by erXos: emit reporting-only case observations at their owner; refuse a slave start and find no old release without distribution.
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 -module(test_server_ctrl).
 -moduledoc false.
@@ -913,6 +913,15 @@ handle_call(get_target_info, _From, State) ->
 handle_call({start_node, _Name, slave, _Options}, _From, State)
   when node() =:= nonode@nohost ->
     {reply,{{error,not_alive},undefined,undefined},State};
+%% An old release runs only as a node this one starts, so without
+%% distribution none is available. The search would also fail inside this
+%% server on erXos, which has no PATH for find_release_path/1 to split.
+handle_call({is_release_available, _Release}, _From, State)
+  when node() =:= nonode@nohost ->
+    {reply,false,State};
+handle_call({find_release, _Release}, _From, State)
+  when node() =:= nonode@nohost ->
+    {reply,not_available,State};
 %% erXos no-distribution guard end.
 handle_call({start_node, Name, Type, Options}, From, State) ->
     %% test_server_ctrl does gen_server:reply/2 explicitly

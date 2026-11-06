@@ -306,7 +306,12 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'catch open_port({fd, 0, 1}, []).' => /badarg/,
       'catch open_port({spawn_driver, "tcp_inet"}, []).' => /badarg/,
       '[code:which(M) || M <- [prim_socket, prim_net, socket_registry]].' => /^\[non_existing,non_existing,non_existing\]$/,
-      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, rex]].' => /^\[undefined,undefined,undefined,undefined,undefined\]$/,
+      '[whereis(N) || N <- [heart, socket_registry, erl_epmd, net_kernel, auth]].' => /^\[undefined,undefined,undefined,undefined,undefined\]$/,
+      # rex, global and global_group start without a carrier, as on a stock node that is
+      # not distributed, so a name registered globally answers on this node alone.
+      '[is_pid(whereis(N)) || N <- [rex, global_name_server, global_group]].' => /^\[true,true,true\]$/,
+      'global:register_name(erx_local, self()).' => /^yes$/,
+      'global:whereis_name(erx_local) =:= self().' => /^true$/,
       '[M || {M, _} <- code:all_loaded(), lists:member(M, [socket, prim_socket, prim_net, socket_registry, gen_tcp, inet_tcp, heart, erl_epmd])].' => /^\[heart\]$/,
       'inet:getaddr("localhost", inet).' => /^\{ok,\{127,0,0,1\}\}$/,
       'inet:gethostbyname("no.such.name").' => /^\{error,nxdomain\}$/,

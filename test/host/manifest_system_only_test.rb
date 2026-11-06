@@ -183,7 +183,7 @@ class ManifestSystemOnlyTest < Minitest::Test
 
   def test_device_memory_counts_against_root_memory
     # Principal and baseline alone fit by exactly the device's reservation less one page.
-    source = @source.sub('memory 134217728', "memory #{402_653_184 - 134_217_728 - 2_097_152 + 4096}")
+    source = @source.sub('memory 134217728', "memory #{402_653_184 - 251_658_240 - 2_097_152 + 4096}")
     refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
   end
 

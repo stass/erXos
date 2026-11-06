@@ -4,7 +4,11 @@
 # The development manifest of QEMU virt: the system domain alone, as
 # docs/design-stopgap.md's "The Phase 1 manifest check" admits it. Fixed
 # medium roles carry partition 0, as docs/design-abi.md says, and root_memory
-# leaves 64 MiB below RAM less fiasco_reserve for the boot archive.
+# leaves 64 MiB below RAM less fiasco_reserve for the boot archive. /tmp's cap,
+# 160 MiB, holds a whole OTP suite group under Common Test: stdlib's copied
+# suites, logs and priv_dir directories charge about 97 MiB at the end of a
+# stock run. The system baseline, 240 MiB, holds that cap and ERTS, and with
+# the system principal's 128 MiB leaves 16 MiB of root_memory for devices.
 manifest 1
 share system
   quota_ns 30000000
@@ -33,7 +37,7 @@ runtime_limits system
   max_message_heap 1048576
   funnel_depth 64
   exports 256
-  tmp 33554432
+  tmp 167772160
   overlay 0
   atoms 65536
   foreign_atoms 1024
@@ -64,7 +68,7 @@ machine
   hostlink "/pl011@9040000"
   platform "qemu-virt"
   root_memory 402653184
-  system_baseline 134217728
+  system_baseline 251658240
   system_share @share.system
   users_share @share.users
   system_principal @principal.system

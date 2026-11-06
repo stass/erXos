@@ -216,9 +216,13 @@ init([]) ->
                       [User, LoggerSup, Config, RefC, SafeSup]}};
         _ ->
             DistChildren =
+		%% erXos: start_distribution false leaves out only the carrier's
+		%% part, net_sup and dist_ac; rex, global and global_group start as
+		%% on a stock node that is not distributed (design-runtime.md,
+		%% Configuration).
 		case application:get_env(kernel, start_distribution) of
-		    {ok, false} -> [];
-		    _ -> start_distribution()
+		    {ok, false} -> start_distribution(local);
+		    _ -> start_distribution(carrier)
 		end,
 
             InetDb = #{id => inet_db,
@@ -274,7 +278,7 @@ init(safe) ->
 
     {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp]}}.
 
-start_distribution() ->
+start_distribution(Part) ->
     Rpc = #{id => rex,
             start => {rpc, start_link, []},
             restart => permanent,
@@ -305,7 +309,10 @@ start_distribution() ->
                 type => worker,
                 modules => [global_group]},
 
-    [Rpc, Global | DistAC] ++ [NetSup, GlGroup].
+    case Part of
+        local -> [Rpc, Global, GlGroup];
+        carrier -> [Rpc, Global | DistAC] ++ [NetSup, GlGroup]
+    end.
 
 start_dist_ac() ->
     Spec = [#{id => dist_ac,
