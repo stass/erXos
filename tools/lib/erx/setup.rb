@@ -17,10 +17,10 @@ module Erx
   # The decision of what to run (Setup.plan) is a pure function of what exists;
   # Setup#call gathers that and performs the steps in order.
   class Setup
-    # Sources the gates need. tla-tools is left out on purpose: only
+    # Sources the gates need (libc-test is for the native libc canary suite). tla-tools is left out on purpose: only
     # `make check-tla` uses it, and its pin is a separate matter. The OCI
     # oracle image is left out because the native oracle does not use it.
-    SOURCE_IDS = %w[otp musl arm-registers].freeze
+    SOURCE_IDS = %w[otp musl arm-registers libc-test].freeze
 
     Step = Data.define(:name, :kind, :argv, :deadline)
 

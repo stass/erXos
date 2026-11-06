@@ -16,7 +16,7 @@ class SetupTest < Minitest::Test
 
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}).map(&:name)
-    assert_equal NAMES.first(3), %w[source-otp source-musl source-arm-registers]
+    assert_equal NAMES.first(4), %w[source-otp source-musl source-arm-registers source-libc-test]
     assert_equal %w[oracle-jit oracle-emu runtime], NAMES.last(3)
   end
 
@@ -68,26 +68,26 @@ class SetupDecisionsTest < Minitest::Test
     end
   end
 
-  def lock_with_sha(sha256)
+  def lock_with_sha(sha256, id: 'musl')
     text = File.read(File.expand_path('../../deps.lock', __dir__))
     lock = Erx::JsonInput.parse(text)
-    lock.fetch('sources').find { |source| source['id'] == 'musl' }['sha256'] = sha256
+    lock.fetch('sources').find { |source| source['id'] == id }['sha256'] = sha256
     JSON.pretty_generate(lock)
   end
 
   # A tree whose deps.lock pins musl to the bytes of a tiny archive built here.
-  def with_tree
+  def with_tree(id: 'musl', directory: 'musl-1.2.6')
     Dir.mktmpdir('erx-setup-') do |temporary|
       root = File.realpath(temporary)
       content = File.join(root, 'content')
-      FileUtils.mkdir_p(File.join(content, 'musl-1.2.6'))
-      File.write(File.join(content, 'musl-1.2.6/hello.txt'), "hello\n")
+      FileUtils.mkdir_p(File.join(content, directory))
+      File.write(File.join(content, directory, 'hello.txt'), "hello\n")
       cache = File.join(root, 'other/build/downloads')
       FileUtils.mkdir_p(cache)
       sample = File.join(cache, 'sample.tar.gz')
-      system('tar', '-czf', sample, '-C', content, 'musl-1.2.6', exception: true)
+      system('tar', '-czf', sample, '-C', content, directory, exception: true)
       sha256 = Digest::SHA256.file(sample).hexdigest
-      File.write(File.join(root, 'deps.lock'), lock_with_sha(sha256))
+      File.write(File.join(root, 'deps.lock'), lock_with_sha(sha256, id: id))
       FileUtils.mkdir_p(File.join(root, 'build'))
       runner = RecordingRunner.new(Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')))
       yield root, runner, sample, sha256
@@ -168,6 +168,18 @@ class SetupDecisionsTest < Minitest::Test
       assert_equal "hello\n", File.read(File.join(root, 'build/third_party/musl/musl-1.2.6/hello.txt'))
       assert setup.send(:source_valid?, 'musl')
       refute_includes runner.programs, 'curl'
+      refute_includes runner.programs, 'git'
+    end
+  end
+
+  def test_a_cached_libc_test_archive_is_adopted_and_unpacked
+    with_tree(id: 'libc-test', directory: 'libc-test-63e36e9') do |root, runner, sample, sha|
+      File.rename(sample, File.join(root, 'other/build/downloads', "libc-test-#{sha}.tar.gz"))
+      setup = setup_for(root, runner, cache: File.join(root, 'other/build/third_party'))
+      setup.send(:obtain_source, 'libc-test')
+      assert File.file?(File.join(root, 'build/downloads', "libc-test-#{sha}.tar.gz"))
+      assert_equal "hello\n", File.read(File.join(root, 'build/third_party/libc-test/libc-test-63e36e9/hello.txt'))
+      assert setup.send(:source_valid?, 'libc-test')
       refute_includes runner.programs, 'git'
     end
   end
