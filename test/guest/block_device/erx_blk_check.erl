@@ -32,6 +32,11 @@
 -define(RECORD_BYTES, 16).
 -define(HOST_TAG, <<"ERXHOST!">>).
 -define(GUEST_TAG, <<"ERXGUEST">>).
+%% erx_blk names why it did not start in one kernel log record, which erx_console writes
+%% to the line at its next poll of the log, every LOG_POLL_MS (100 ms). The harness ends
+%% the guest on "blk: done", so a run without a driver waits for a few polls first and
+%% the serial log holds the reason.
+-define(LOG_DRAIN_MS, 500).
 
 -spec main() -> ok.
 main() ->
@@ -43,7 +48,8 @@ main() ->
             refused(?SECTORS),
             lists:foreach(fun write/1, ?WRITE_SECTORS);
         _NoDriver ->
-            line("no driver", [])
+            line("no driver", []),
+            timer:sleep(?LOG_DRAIN_MS)
     end,
     line("done", []).
 

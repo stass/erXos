@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * erx_device's pure decisions (docs/design-runtime.md, "The device NIF"): which
- * peripheral and register a name means, what a register allows, and how a field goes into a
- * word. It reads no hardware and no global state, needs nothing of ERTS and builds for the
+ * peripheral and register a name means, which pages hold a window, what a register allows,
+ * and how a field goes into a word. It reads no hardware and no global state, needs nothing of ERTS and builds for the
  * host. Every table entry comes from tools/gen_hw.rb.
  */
 
@@ -15,7 +15,61 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
 #include "erx/hw/device_types.h"
+
+/*
+ * The pages that hold a window. A window may be smaller than a page and start anywhere in
+ * one, as each 0x200-byte virtio-mmio slot does, but the kernel maps device memory in whole
+ * pages only, so the mapping is the window's first page through its last, and the register
+ * table's offsets apply from `offset`, the window's base inside the first page.
+ */
+typedef struct erx_device_pages {
+	uint64_t	base;	/* the first page's physical address */
+	uint64_t	size;	/* the bytes of the pages, a multiple of ERX_PAGE_SIZE */
+	uint64_t	offset;	/* the window's base less `base`, below ERX_PAGE_SIZE */
+} erx_device_pages_t;
+
+/*
+ * False for an empty window and for one that wraps or reaches the address space's last
+ * page, whose end a page-sized size cannot state.
+ */
+static inline bool
+erx_device_window_pages(uint64_t base, uint64_t size, erx_device_pages_t *pages)
+{
+	const uint64_t mask = ERX_PAGE_SIZE - 1;
+	uint64_t last;
+
+	if (size == 0 || __builtin_add_overflow(base, size - 1, &last) || (last | mask) == UINT64_MAX)
+		return (false);
+	pages->base = base & ~mask;
+	pages->size = (last | mask) + 1 - pages->base;
+	pages->offset = base & mask;
+	return (true);
+}
+
+/*
+ * Whether a window base suits every register of the peripheral: device memory faults on an
+ * access not aligned to its width, so a base that would misalign one is refused at open.
+ */
+static inline bool
+erx_device_base_aligned(const erx_device_peripheral_t *peripheral, uint64_t base)
+{
+	for (uint32_t index = 0; index < peripheral->register_count; index++) {
+		const uint64_t bytes = peripheral->registers[index].width / 8u;
+
+		if (bytes > 1 && (base & (bytes - 1)) != 0)
+			return (false);
+	}
+	return (true);
+}
+
+/* Whether two windows' mappings would share a page. */
+static inline bool
+erx_device_pages_overlap(const erx_device_pages_t *a, const erx_device_pages_t *b)
+{
+	return (a->base < b->base + b->size && b->base < a->base + a->size);
+}
 
 /* What writing a field takes, decided before any access. */
 typedef enum erx_device_field_op {

@@ -47,7 +47,7 @@ init() ->
 
 %% The device's record, for the boot: a second open of a window names the same device, so
 %% a restarted driver finds what its predecessor had, and the same window with anything
-%% else is `{error, ebusy}`. Spec is what the device service
+%% else is `{error, ebusy}`, as is a window in a page another device's window holds. Spec is what the device service
 %% hands a driver, which does not look inside it: the peripheral's name in the SVD source,
 %% its register window and its lines' selectors, and for a device that does DMA the bytes of
 %% memory the boot reserves for it (erx_device_record). A hosted runtime has no devices, so

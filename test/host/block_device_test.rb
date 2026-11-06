@@ -36,8 +36,8 @@ class BlockDeviceTest < Minitest::Test
     assert_nil Device.line_difference(good_log([*Device.expected_lines, 'blk: stray']))
   end
 
-  def test_the_driver_does_not_start_yet_so_the_suite_is_pending
-    refute Device::DRIVER_LANDED
+  def test_the_driver_starts_so_the_suite_runs
+    assert Device::DRIVER_LANDED
   end
 
   def test_a_wrong_transport_version_or_no_driver_is_a_difference

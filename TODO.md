@@ -1907,20 +1907,23 @@ document's "residual risks accepted" paragraph.
   `tools/erx bench`. Decide whether ERTS's `perf` support and
   `erlang:statistics` use it. Replaces the stopgap's direct user access
   (Stopgap replacements above).
-* [High] erx_blk, the block driver: under QEMU `virt` (HVF) with the `block_device` suite's disk on
-  `virtio-mmio-bus.31`, `erx_device:open/1` answers `{error, einval}` for the block record
-  (`window => {physical, 16#0a003e00, 512}`, `lines => [79]`, `dma_memory => 2097152`), so `erx_blk:init/1` returns
-  `ignore` and the suite's test module prints `blk: no driver`. A virtio-mmio slot is 0x200 bytes and not
-  page-aligned; the suspected cause is the NIF's or the backend's physical window refusing an unaligned base. The fix
-  needs a failing host test first, then the suite's HVF run passing, and then `Erx::BlockDevice::DRIVER_LANDED` set
-  (`tools/lib/erx/block_device.rb`), which turns the suite on. The NIF logs the failure only at debug level, which
-  the console does not show; `erx_blk:init/1`'s refusal reason should reach the console.
 * [Medium] erx_blk, `tools/lib/erx/device_posters.rb`: the rule "only `erx_blk_write` calls `erx_device:post/4`" is
   tree-wide, but every virtio driver will post; once a second poster joins `SITES`, the write path's argument also
   needs "only `erx_blk` opens a block record", which no check holds. Scope the rule per device class. Rename
-  `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`). The check is lexical: a
-  module name held in a variable or a macro escapes it, where the BEAM call-graph check the design once named would
-  see the macro form.
+  `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`).
+* [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts is lexical, over Erlang
+  sources: a call whose module comes from a macro (or a variable, or `apply/3`) escapes it. The check design.md's
+  chokepoint table and design-storage.md's U4 name, over the storage domain's BEAM files with the compiler's call
+  graph, replaces it.
+* [Medium] runtime, `otp/erts/emulator/nifs/erxos/erx_device.c`: a device record maps the pages that hold its window
+  (`erx_device_window_pages`), and an open of another window in one of those pages answers `ebusy`, so only one of
+  QEMU `virt`'s eight virtio-mmio slots per page can be driven at a time (the QEMU plan's second disk, on
+  `virtio-mmio-bus.30`, shares the first one's page, so its open would be refused). The console handoff
+  (`liberx/backend/fiasco/service_task.c`, `erx_fiasco_task_mem_physical_body`) compares the request's base with the
+  console's exactly, which holds for a page-aligned UART only; test containment instead. design-platforms.md's
+  virtio-mmio rows give each device a domain of its own, which PL2's one-unit-per-page rule rules out on `virt`. Let records whose windows share a page share its one mapping, each still
+  reaching only its own window through the register table, and test two slots of one page in
+  `test/fixtures/erx_device_harness.c`.
 * [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
   (`erlang/apps/erx_blk/src/erx_blk.erl`, `submit/3`, `resume/1`, `recover/2`) are tested only end to end, by the
   `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are

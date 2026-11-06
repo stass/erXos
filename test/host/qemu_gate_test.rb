@@ -163,10 +163,10 @@ class QemuGateTest < Minitest::Test
     assert_equal 'pending', Gate.status(entry)
   end
 
-  def test_the_block_device_suite_is_pending_until_the_driver_lands_and_starts_no_guest
-    entry = Gate.suites.find { |suite| suite.name == 'block_device' }.run.call(context)
-    assert_equal({ 'hvf-1cpu' => 'pending' }, entry.cells)
-    assert_equal 'pending', Gate.status(entry)
+  # The suite boots a guest, so this checks only what it declares: one CPU under HVF.
+  def test_the_block_device_suite_declares_its_one_hvf_cell
+    suite = Gate.suites.find { |candidate| candidate.name == 'block_device' }
+    assert_equal Gate.suite_cells([1]), suite.cells
   end
 
   def test_the_table_names_each_suite_its_status_and_what_did_not_run

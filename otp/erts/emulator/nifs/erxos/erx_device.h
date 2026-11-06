@@ -47,9 +47,10 @@ typedef struct erx_device_element {
 
 /*
  * ERX_OK with the device's index. The same spec again is that device again, so a restarted
- * driver finds its record, and the same window with anything else is ERX_EBUSY. A new spec
- * maps the window and makes the lines' objects. A spec that does not fit its peripheral is
- * ERX_EINVAL. A hosted stand-in, always a new device, is plain memory of the peripheral's
+ * driver finds its record, and the same window with anything else is ERX_EBUSY, as is a
+ * window in a page another record's window holds. A new spec maps the pages that hold the
+ * window and makes the lines' objects. A spec that does not fit its peripheral, or whose base
+ * misaligns one of its registers, is ERX_EINVAL. A hosted stand-in, always a new device, is plain memory of the peripheral's
  * size with software objects for lines; elsewhere one is ERX_ENOTSUP. A failure may leave a
  * mapping and a line's object made, for the boot. The keys are what the caller interned the
  * table's names as, in the table's order, and may be NULL. The caller serialises opens.

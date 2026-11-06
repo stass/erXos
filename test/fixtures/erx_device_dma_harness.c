@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/device_check.h"
 #include "otp/erts/emulator/nifs/erxos/erx_device.h"
 
 #define CHECK(condition)							\
@@ -60,8 +61,8 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 {
 	(void)budget;
 	(void)resource;
-	(void)base;
-	CHECK(attr == ERX_MEM_ATTR_DEVICE);
+	/* Both backends refuse what the kernel interface refuses: anything but whole pages. */
+	CHECK(erx_backend_physical_check(base, size, attr) == ERX_OK);
 	*mem = make_memory(ERX_PAGE_SIZE);
 	CHECK(size <= ERX_PAGE_SIZE);
 	memset(memories[*mem].bytes, 0, ERX_PAGE_SIZE);

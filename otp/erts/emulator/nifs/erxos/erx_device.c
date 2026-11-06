@@ -30,6 +30,7 @@ struct erx_device {
 	volatile uint8_t		*windows[ERX_DEVICE_WINDOWS_MAX];
 	uint64_t			base;
 	uint64_t			size;
+	erx_device_pages_t		pages;
 	bool				stand_in;
 	uint32_t			line_count;
 	uint64_t			selectors[ERX_DEVICE_LINES_MAX];
@@ -41,9 +42,12 @@ struct erx_device {
 static erx_device_t devices[ERX_DEVICE_MAX];
 static _Atomic uint32_t devices_open;
 
-/* A window's mapping: device memory from the kernel, or the hosted stand-in's plain memory. */
+/*
+ * A window's mapping: the pages that hold it, as device memory from the kernel, with the
+ * window at its offset inside them; or the hosted stand-in's plain memory, `size` bytes.
+ */
 static int
-map_window(const erx_device_spec_t *spec, uint64_t size, volatile uint8_t **window)
+map_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint64_t size, volatile uint8_t **window)
 {
 	uint64_t mem, addr;
 	int status;
@@ -54,25 +58,32 @@ map_window(const erx_device_spec_t *spec, uint64_t size, volatile uint8_t **wind
 		return (*window != NULL ? ERX_OK : ERX_ENOMEM);
 	}
 #else
+	(void)size;
 	if (spec->stand_in)
 		return (ERX_ENOTSUP);
 #endif
-	status = erx_mem_create_physical(0, 0, spec->base, size, ERX_MEM_ATTR_DEVICE, &mem);
+	status = erx_mem_create_physical(0, 0, pages->base, pages->size, ERX_MEM_ATTR_DEVICE, &mem);
 	if (status == ERX_OK)
-		status = erx_vm_reserve(0, size, 0, &addr);
+		status = erx_vm_reserve(0, pages->size, 0, &addr);
 	if (status == ERX_OK)
-		status = erx_vm_map(ERX_CAP_SELF, addr, size, mem, 0, ERX_PROT_RW);
+		status = erx_vm_map(ERX_CAP_SELF, addr, pages->size, mem, 0, ERX_PROT_RW);
 	if (status == ERX_OK)
-		*window = (volatile uint8_t *)(uintptr_t)addr;
+		*window = (volatile uint8_t *)(uintptr_t)(addr + pages->offset);
 	return (status);
 }
 
-/* Every part of the spec the table or the record bounds, checked before anything is made. */
+/*
+ * Every part of the spec the table or the record bounds, checked before anything is made,
+ * and the pages a window's mapping covers. A stand-in has none.
+ */
 static bool
-spec_fits(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral)
+spec_fits(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, erx_device_pages_t *pages)
 {
+	*pages = (erx_device_pages_t){ 0 };
 	return (peripheral != NULL && spec->line_count <= ERX_DEVICE_LINES_MAX &&
-	    (spec->stand_in || spec->size >= peripheral->window_size));
+	    (spec->stand_in ||
+	    (spec->size >= peripheral->window_size && erx_device_base_aligned(peripheral, spec->base) &&
+	    erx_device_window_pages(spec->base, spec->size, pages))));
 }
 
 static bool
@@ -88,19 +99,27 @@ same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_d
 }
 
 /*
- * Whether an earlier open of the same window decides this one, and what it decides. A
- * stand-in has no window to share, so it is always a new device.
+ * Whether an earlier open decides this one, and what it decides. The same window is that
+ * device again, or refused if anything else differs. A window whose pages another window's
+ * mapping holds is refused: one device page has one mapping, its record's. A stand-in has no window to share, so it
+ * is always a new device.
  */
 static bool
-find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, uint32_t open, uint32_t *device,
-    int *status)
+find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, const erx_device_pages_t *pages,
+    uint32_t open, uint32_t *device, int *status)
 {
 	for (uint32_t index = 0; index < open && !spec->stand_in; index++) {
-		if (devices[index].stand_in || devices[index].base != spec->base)
+		if (devices[index].stand_in)
 			continue;
-		*device = index;
-		*status = same_spec(&devices[index], spec, peripheral) ? ERX_OK : ERX_EBUSY;
-		return (true);
+		if (devices[index].base == spec->base) {
+			*device = index;
+			*status = same_spec(&devices[index], spec, peripheral) ? ERX_OK : ERX_EBUSY;
+			return (true);
+		}
+		if (erx_device_pages_overlap(&devices[index].pages, pages)) {
+			*status = ERX_EBUSY;
+			return (true);
+		}
 	}
 	return (false);
 }
@@ -111,17 +130,18 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 {
 	const erx_device_peripheral_t *const peripheral = erx_device_peripheral_find(spec->peripheral, spec->peripheral_length);
 	const uint32_t open = atomic_load_explicit(&devices_open, memory_order_relaxed);
+	erx_device_pages_t pages;
 	erx_device_t *record;
 	int status;
 
-	if (!spec_fits(spec, peripheral))
+	if (!spec_fits(spec, peripheral, &pages))
 		return (ERX_EINVAL);
-	if (find_open(spec, peripheral, open, device, &status))
+	if (find_open(spec, peripheral, &pages, open, device, &status))
 		return (status);
 	if (open == ERX_DEVICE_MAX)
 		return (ERX_ELIMIT);
 	record = &devices[open];
-	status = map_window(spec, spec->stand_in ? peripheral->window_size : spec->size, &record->windows[0]);
+	status = map_window(spec, &pages, peripheral->window_size, &record->windows[0]);
 	for (uint32_t line = 0; status == ERX_OK && line < spec->line_count; line++) {
 		status = erx_irq_create(0, 0, spec->stand_in ? ERX_IRQ_SOFT : ERX_IRQ_LINE, spec->lines[line],
 		    &record->irqs[line]);
@@ -132,6 +152,7 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 	record->peripheral = peripheral;
 	record->base = spec->base;
 	record->size = spec->size;
+	record->pages = pages;
 	record->stand_in = spec->stand_in;
 	record->line_count = spec->line_count;
 	for (uint32_t index = 0; register_keys != NULL && index < peripheral->register_count; index++)

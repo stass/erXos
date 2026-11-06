@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/device_check.h"
 #include "otp/erts/emulator/nifs/erxos/erx_device.h"
 
 #define CHECK(condition)							\
@@ -31,7 +32,7 @@ static const erx_device_element_t plain = { .indexed = false };
 
 static _Alignas(8) uint8_t window_memory[ERX_DEVICE_MAX + 1][WINDOW_BYTES];
 static uint32_t next_window;
-static uint64_t last_physical_size;
+static uint64_t last_physical_base, last_physical_size;
 static int fail_physical, fail_reserve, fail_map, fail_irq;
 static uint32_t irq_created;
 
@@ -40,7 +41,9 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 {
 	(void)budget;
 	(void)resource;
-	CHECK(attr == ERX_MEM_ATTR_DEVICE);
+	/* Both backends refuse what the kernel interface refuses: anything but whole pages. */
+	CHECK(erx_backend_physical_check(base, size, attr) == ERX_OK);
+	last_physical_base = base;
 	last_physical_size = size;
 	*mem = base;
 	return (fail_physical);
@@ -51,7 +54,7 @@ erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
 {
 	(void)addr;
 	(void)flags;
-	CHECK(size <= WINDOW_BYTES);
+	CHECK(size <= WINDOW_BYTES && size % ERX_PAGE_SIZE == 0);
 	*reserved = (uint64_t)(uintptr_t)window_memory[next_window];
 	return (fail_reserve);
 }
@@ -234,6 +237,69 @@ spec_of(const char *name, uint64_t base)
 	return (spec);
 }
 
+/* The pages a window's mapping covers: from its first page through its last, nothing past them. */
+static void
+check_window_pages(void)
+{
+	erx_device_pages_t pages;
+
+	CHECK(erx_device_window_pages(0x9000000, 0x1000, &pages) && pages.base == 0x9000000 && pages.size == 0x1000 &&
+	    pages.offset == 0);
+	CHECK(erx_device_window_pages(0xa003e00, 0x200, &pages) && pages.base == 0xa003000 && pages.size == 0x1000 &&
+	    pages.offset == 0xe00);
+	CHECK(erx_device_window_pages(0xa003fff, 1, &pages) && pages.base == 0xa003000 && pages.size == 0x1000 &&
+	    pages.offset == 0xfff);
+	CHECK(erx_device_window_pages(0xa003f00, 0x200, &pages) && pages.base == 0xa003000 && pages.size == 0x2000 &&
+	    pages.offset == 0xf00);
+	CHECK(erx_device_window_pages(0xa003000, 0x1001, &pages) && pages.size == 0x2000);
+	CHECK(!erx_device_window_pages(0xa003000, 0, &pages));
+	CHECK(!erx_device_window_pages(UINT64_MAX - 0xfff, 0x200, &pages));
+	CHECK(!erx_device_window_pages(0x1000, UINT64_MAX, &pages));
+	CHECK(erx_device_window_pages(UINT64_MAX - 0x1fff, 0x1000, &pages) && pages.size == 0x1000);
+
+	const erx_device_pages_t one = { .base = 0xa003000, .size = 0x1000 }, next = { .base = 0xa004000, .size = 0x1000 },
+	    both = { .base = 0xa003000, .size = 0x2000 };
+
+	CHECK(!erx_device_pages_overlap(&one, &next) && !erx_device_pages_overlap(&next, &one));
+	CHECK(erx_device_pages_overlap(&one, &both) && erx_device_pages_overlap(&both, &next));
+	CHECK(erx_device_pages_overlap(&one, &one));
+}
+
+/*
+ * A window smaller than a page and inside one, as QEMU virt's last virtio-mmio slot is: the
+ * mapping is the page that holds it, the registers are read from the window's base inside
+ * that page, and another window in the same page is refused while this one is open.
+ */
+static uint32_t
+check_slot(void)
+{
+	const char *const name = "virtio_mmio";
+	const erx_device_peripheral_t *const peripheral = erx_device_peripheral_find(name, strlen(name));
+	erx_device_spec_t spec = { .peripheral = name, .peripheral_length = strlen(name), .base = 0x0a003e00,
+	    .size = 0x200, .line_count = 1, .lines = { 79 } };
+	uint8_t *const page = window_memory[next_window];
+	const uint32_t version = 2;
+	uint32_t device = 99, again = 99;
+	uint64_t value = 0;
+
+	CHECK(peripheral != NULL && peripheral->window_size == 0x200);
+	bcopy(&version, page + 0xe00 + register_of(peripheral, "version")->offset, sizeof(version));
+	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_OK);
+	CHECK(last_physical_base == 0x0a003000 && last_physical_size == ERX_PAGE_SIZE);
+	CHECK(erx_device_read(erx_device_get(device), register_of(peripheral, "version"), plain, &value) && value == 2);
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_OK && again == device);
+	spec.base = 0x0a003c00;
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
+	spec.base = 0x0a002f00;
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
+	spec.base = 0x0a005e02;
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EINVAL);
+	spec.base = 0x0a003e00;
+	spec.size = 0x400;
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
+	return (device);
+}
+
 /* What open refuses makes nothing visible, and a window already open is that device again. */
 static uint32_t
 check_open(const char *name)
@@ -298,7 +364,8 @@ check_open(const char *name)
 	spec.size = WINDOW_BYTES * 2;
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
 
-	for (uint32_t base = 1; base < ERX_DEVICE_MAX; base++) {
+	CHECK(check_slot() == 1);
+	for (uint32_t base = 2; base < ERX_DEVICE_MAX; base++) {
 		spec = spec_of(name, 0x9000000 + UINT64_C(0x1000) * base);
 		CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_OK && again == base);
 	}
@@ -468,6 +535,7 @@ main(void)
 	CHECK(erx_device_peripheral_find("", 0) == NULL);
 	CHECK(erx_device_peripheral_find("no_such_peripheral", 18) == NULL);
 	check_keys();
+	check_window_pages();
 	check_every_entry(peripheral);
 	device = check_open(name);
 	check_peripheral(peripheral, erx_device_get(device));

@@ -1894,6 +1894,22 @@ device can reach it: an unconfined device's is the system domain's for
 the whole boot and never freed, and a confined device's is freed only
 after the kernel has unbound it from the device's window.
 
+**Windows smaller than a page.** A device's register window may be
+smaller than a page and start anywhere in one, as each 0x200-byte
+virtio-mmio slot of QEMU `virt` does, while the kernel maps device
+memory in whole pages only. A record's mapping is therefore the pages
+that hold its window, its first page through its last and nothing
+beyond them (`erx_device_window_pages`, a pure function of the window's
+base and size), and the register table's offsets apply from the
+window's base inside that mapping. The windows of other devices that
+share those pages lie inside the mapping too, but no name in any table
+reaches them: every access is a register of the record's own
+peripheral, at an offset below its window's size. Every device of a
+shared page belongs to one domain, since devices whose registers share a
+page form one unit ([design-platforms.md](design-platforms.md#invariants),
+PL2), so the mapping reaches no other domain's device. Records whose
+windows share a page share that page's one mapping.
+
 **Registers by name.** `erx_device:read(Dev, Reg)` and
 `erx_device:write(Dev, Reg, Value)`, with `erx_device:read_field/3` and
 `erx_device:write_field/4` for a field of a register, all four BIFs, take a register's
