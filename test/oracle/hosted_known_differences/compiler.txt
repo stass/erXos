@@ -15,3 +15,30 @@
 # whose case agrees with stock is stale.
 #
 # suite        group  case                status     reason
+
+# erXos runs no distribution in Phase 1 (design.md), and these compile the
+# compiler on a shielded peer node, which needs it.
+compilation_SUITE  -  self_compile             failed  cannot run: no distribution; the case starts a peer node (test_server:run_on_shielded_node)
+compilation_SUITE  -  self_compile_old_inliner failed  cannot run: no distribution; the case starts a peer node (test_server:run_on_shielded_node)
+
+# The release ships no port programs in Phase 1, and the case removes its
+# work directory with os:cmd("rm -rf ...").
+compile_SUITE      -  forms_2                  failed  cannot run: spawn port; os:cmd fails with open_port badarg
+
+# The release ships beams without their sources (release_files.rb), and
+# the case compiles lib/compiler/src/compile.erl.
+compile_SUITE      -  makedep                  failed  cannot run: the release ships no sources
+
+# The release ships each application's beams and .app file, not its
+# .appup (tools/lib/erx/release_files.rb), which the case reads.
+compile_SUITE      -  appup_test               failed  the release ships no .appup files (release_files.rb); erXos has no release upgrades
+
+# crypto and public_key are outside the shipped set until the network
+# service (design-runtime.md, "crypto, ssl, ssh, inets and the rest").
+compile_SUITE      -  encrypted_abstr          failed  cannot run: C helper; debug_info_key needs crypto, which erXos does not ship (design-runtime.md)
+compile_SUITE      -  deterministic_docs       failed  cannot run: compiles ssh.erl, which includes public_key.hrl; public_key is not shipped (design-runtime.md)
+
+# statistics(runtime) fails with notsup where the backend reports a
+# group's CPU time unsupported (design-runtime.md, edit 33); smith times
+# itself with it.
+inline_SUITE       p  smith                    failed  statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)

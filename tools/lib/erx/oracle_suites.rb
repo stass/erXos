@@ -41,8 +41,10 @@ module Erx
     REPORTER = %w[erx_oracle_events.erl erx_oracle_observer.erl common_test/test_server_ctrl.erl
                   erx_ct_oracle.erl].freeze
     TEST_SERVER = %w[ts_install_cth.erl ts_lib.erl].freeze
-    # Stock's own builds of what Common Test needs and erXos does not build.
-    STOCK_APPLICATIONS = %w[common_test sasl].freeze
+    # Stock's own builds of what Common Test needs and erXos does not build:
+    # erl2html2 parses each suite with syntax_tools' epp_dodger, and cover is
+    # in tools.
+    STOCK_APPLICATIONS = %w[common_test sasl syntax_tools tools].freeze
     # The stock applications whose src directory a suite includes a header
     # from: compiler's holds beam_opcodes.hrl, which its build generates.
     STOCK_INCLUDES = %w[compiler].freeze
@@ -119,7 +121,7 @@ module Erx
        *compile_suites(suite_directory, suites, erlc: erlc)]
     end
 
-    # Stock's installed Common Test and SASL, each copied whole to
+    # Stock's installed STOCK_APPLICATIONS, each copied whole to
     # `directory/<application>`.
     def copy_stock_applications(directory, erl:)
       install = File.expand_path('../lib/erlang/lib', File.dirname(erl))

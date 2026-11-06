@@ -2346,7 +2346,8 @@ What a read cannot settle, and what settles it:
   import check closes it by name at link, and any remaining number shows at the `default:` of `__erx_syscall`, which a
   temporary trace there shows.
 * **Which of OTP's suites need `statistics(runtime)`.** Of `kernel` and `stdlib`,
-  `dist_util` alone calls it, and the suites are unread. A `notsup` that the oracle comparison shows to
+  `dist_util` alone calls it, and the suites are unread. Of the `compiler` suites, only `inline_SUITE`'s
+  `smith` calls it, to time itself, and fails with `notsup` on the hosted runtime. A `notsup` that the oracle comparison shows to
   matter gets a body in the Fiasco backend, from `l4_thread_stats_time`.
 * **The contents of `imports.txt`.** The categories above come from reading ERTS;
   the names come from the first link.

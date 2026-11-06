@@ -108,7 +108,8 @@ class OracleCliTest < Minitest::Test
     line = Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'tcg')
     words = line.split(' ')
     assert_equal "erx.watchdog=#{Erx::ProductionImage::Run::TCG_WATCHDOG}", words.first
-    assert_equal %w[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /test/ct/reporter -run erx_ct_oracle main
+    assert_equal %w[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /lib/syntax_tools/ebin -pa /lib/tools/ebin -pa /test/ct/reporter
+                    -run erx_ct_oracle main
                     /test/ct/suites /tmp/ct file_SUITE], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
     assert words.drop(1).all? { |word| word.start_with?('erx.arg=') }
     refute_includes Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'hvf'), 'erx.watchdog'
@@ -220,6 +221,24 @@ class OracleCliTest < Minitest::Test
     assert_equal %w[stdlib compiler], compiler.keys
     assert_includes compiler.fetch('compiler'), 'bif_SUITE'
     assert_equal %w[filelib_SUITE], compiler.fetch('stdlib')
+  end
+
+  # Common Test's erl2html2 parses each suite with syntax_tools' epp_dodger
+  # before it runs it, and OTP's suites call syntax_tools' merl and tools'
+  # cover, so a release without them cannot run a suite as stock does.
+  def test_the_release_takes_the_stock_applications_common_test_needs
+    Dir.mktmpdir do |directory|
+      root = File.expand_path('../..', __dir__)
+      install = File.join(directory, 'stock/lib/erlang/lib')
+      %w[common_test-1.0 sasl-1.0 syntax_tools-1.0 tools-1.0].each do |application|
+        FileUtils.mkdir_p(File.join(install, application, 'ebin'))
+      end
+      lib = File.join(directory, 'lib')
+      FileUtils.mkdir_p(lib)
+      suites = Erx::OracleSuites.new(root: root, out: directory, runner: nil, deadline: 1, group: 'compiler')
+      suites.copy_stock_applications(lib, erl: File.join(directory, 'stock/bin/erl'))
+      assert_equal %w[common_test sasl syntax_tools tools], Dir.children(lib).sort
+    end
   end
 
   def test_hosted_runs_each_group_in_its_own_directory_and_prints_the_combined_report
