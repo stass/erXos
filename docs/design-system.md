@@ -118,7 +118,7 @@ Functional requirements:
 
 1. **Boot** the system domain from the boot image, start the system
    release, create the domains the manifest lists, and reach the login or
-   the system shell on the console.
+   the system shell on the console's UART.
 2. **Build and end domains** on the domain service's decision: budget,
    space, group, connection to the system domain, crash area, runtime image,
    release, first thread; and end each by destroying its own budget.
@@ -261,10 +261,19 @@ check below over it, and packs the result. The manifest holds:
   grants inside it leave to the system domain's own threads; the lane
   size per class of domain; the
   vault's sealing backend; the services the watchdog process asks for
-  liveness; the principals that hold the system-shell facet in a release
-  build; the console, `console`, by the device-tree path of its UART; and
-  the host-link port, `hostlink`, by the device-tree path of its UART,
-  where the machine has one.
+  liveness; the **system-shell principals**, whose login at a secure line
+  opens the system shell (`root` in a development build, and by default
+  none in a release build); the console, `console`, by the device-tree
+  path of its UART; and the host-link port, `hostlink`, by the
+  device-tree path of its UART, where the machine has one; and the
+  `secure` attribute of each of the two console lines, the UART and the
+  host link, which marks a line at which a system-shell principal's login
+  opens the system shell, as Unix's `/etc/ttys` marks the terminals where
+  root may log in; a display domain's terminal windows carry theirs in
+  the `console_line` parameter of its entry
+  ([design-live.md](design-live.md#the-console)). The manifest grants
+  the system-shell facet to no domain: the console grants it to a login,
+  holds it for that login and ends it with the login.
 * **Each principal:** its name, budget, share of `users`, quota of
   domains, and quota of names it may bind.
 * **Each configured domain:** its name; its principal; its kind (`service`
@@ -317,8 +326,9 @@ The records cover principals, configured domains, named domain and
 runtime limits, lane classes, units and devices, role-based partition
 windows, services, facets with typed bounded scope parameters,
 introductions, read-only image extents and hash-tree metadata, boot order,
-liveness, system-shell principals and partial-boot programs. A unit owns
-its devices' one holder field. Domain records refer to complete named
+liveness, system-shell principals, the console lines' `secure`
+attributes and partial-boot programs. A unit owns its devices' one
+holder field. Domain records refer to complete named
 limit records, so neither a runtime default nor a second compiled table
 can supply missing configuration. `erx_share_t` is the 48-byte wire
 representation of the scheduler's existing `erx_grant_t`: exact quota,
@@ -339,7 +349,8 @@ content, so both readers have a fuzz target
 | the domain service | the configured domains in the boot order, their restart intensities, `required` and rescue marks, facets and introductions; `system_lane`, `system_queue`, `peer_held` and `system_reserve`; the host name; the vault's sealing backend, which it passes to the vault at its creation |
 | the device service | each device's holder, unit and confinement mark, each domain's windows by role, the image records, an unconfined device's memory size, and the console's and the host link's paths |
 | the resource policy | the principals' budgets, shares and quotas; the lane size per class; `system_reserve`, which bounds the service grants it sets |
-| the principal service | the principals, and the holders of the system-shell facet |
+| the principal service | the principals, and which of them are system-shell principals, which it tells the console with each login it confirms |
+| the console service | the `secure` attribute of the UART and the host link; a terminal window's comes from the `console_line` parameter of the `offer_line` facet that offered it, never from the display, and the console grants the system-shell facet only at a secure line |
 | the watchdog process | the services it asks for liveness |
 
 **The check.** The packer proves these properties over the manifest
@@ -409,7 +420,19 @@ violation fails the build with the property, the record and the field:
    `erx_web_login` facet and parses browsers' bytes, holds no unconfined
    device, its network listener is TLS, and the host link's facets do not
    list `web`, so the web's development paths stay out of a release
-   ([design-web.md](design-web.md)). The manifest has no partial boot.
+   ([design-web.md](design-web.md)). A display domain, a configured
+   domain holding a display device and its input devices, whose release
+   serves that display's windows
+   ([design-display.md](design-display.md#overview)), holds no
+   unconfined DMA device, a virtio-mmio one among them, since it parses
+   what its clients and its input devices send; a violation names the
+   device and this property, and a development manifest that gives it one
+   passes, with the display domain reported in the trusted base. No
+   `offer_line` facet, whatever domain holds it, has a `console_line`
+   that marks its terminal windows `secure`, so
+   the system shell opens only at a login at the UART or the host link
+   ([design-live.md](design-live.md#the-console)). The manifest has no
+   partial boot.
    The packer sets the boot image's `ERX_PACK_UNCONFINED_DMA` exactly
    when the manifest gives an unconfined device.
 10. **The domains have a boot order:** no configured domain's facets lead
@@ -625,9 +648,9 @@ writes the record there, and the next boot validates it by its magic,
 form, boot value and checksum and gives the root task a read-only page holding it;
 elsewhere the record goes to the console and the kernel log alone
 ([design-platforms.md](design-platforms.md#the-crash-record)). The
-inspector shows the previous boot's record at `[kernel, crash]` only to a
-holder of the system-shell facet, and the console shows nothing of it
-before a login ([design-live.md](design-live.md#paths)).
+inspector shows the previous boot's record at `[kernel, crash]` only to
+the system shell, and no console line shows anything of it before a
+login ([design-live.md](design-live.md#paths)).
 
 ## Algorithms and behavior
 
@@ -744,8 +767,12 @@ and 6 give way to the partial boot below.
    the manifest lists them. Once the slot writer runs, and before the
    network domain or any user domain exists, the update service has it
    read and advance the reset count (below).
-4. **The console** shows a login in release builds and the system shell in
-   development builds ([design-live.md](design-live.md#the-console)).
+4. **The console** serves its lines: the UART, the host link where the
+   machine has one, and each terminal window a display domain offers
+   with `offer_line`. Each line starts with a login in release builds;
+   in development builds the console logs `root` in at the UART, a
+   secure line, so the UART shows the system shell
+   ([design-live.md](design-live.md#the-console)).
 
 **A reset loop ends in rescue.** The **reset count** counts the
 machine's consecutive unordered ends, a fault of the system domain, its
@@ -760,7 +787,7 @@ the update service has the slot writer add one early in every boot, a
 trial boot included, as step 3 says,
 and set it to zero at an ordered end, before the storage services freeze,
 and at the first successful login, or in a development build when the
-console starts the system shell, which stands in for a login. When the
+console logs `root` in at the UART at boot. When the
 count it read is past three, the system release boots its **rescue
 configuration**: the console, a login, and the domains the manifest marks
 for rescue, in the default manifests the devices domain, the storage
@@ -2236,7 +2263,7 @@ domain, in a domain the manifest lists: the vault.
 | resource policy, `erx_policy` | the group tree, grants, capacity, budgets, lane sizes | [Resource policy](#resource-policy) |
 | device service, `erx_devices` | the device catalogue, each device given to the domain the manifest names, `/dev` | [Devices](#devices) |
 | watchdog, `erx_watchdog` | pets the kernel's watchdog every period, at priority `max`, once every service it lists has answered a liveness call | [Boot](#boot) |
-| console service, `erx_console` | the serial console over its driver in the system domain, the host-link port's bytes, the menu, the login prompt, the system shell and the connection of sessions' ttys | [Devices](#devices), [design-live.md](design-live.md#the-console) |
+| console service, `erx_console` | the console lines: the UART over its driver in the system domain, the host-link port's bytes and the terminal windows displays offer; each line's menu and login prompt, the connection of sessions' ttys, and the system-shell facet, which it grants to a login at a secure line, holds for that login and ends with it | [Devices](#devices), [design-live.md](design-live.md#the-console) |
 | inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included | [design-live.md](design-live.md#inspection) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
@@ -2495,11 +2522,14 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   names the machine's backend, and the vault never falls
   back to a weaker one: without the configured backend it serves no login
   (below). A slot made under another backend than the configured one opens
-  only at the console: a login from the host link or the network that
-  finds no slot of the principal's under the configured backend derives
-  against the dummy and does not match, and the vault logs that the file
-  waits for the console, so no login from afar turns a file made under a
-  weaker backend into one sealed under the machine's. At the console,
+  only at the console's UART: a login from the host link, a terminal
+  window or the network that finds no slot of the principal's under the
+  configured backend derives against the dummy and does not match, and
+  the vault logs that the file waits for the UART, so no login away from
+  the UART turns a file made under a weaker backend into one sealed under
+  the machine's. A terminal window is never presence at the machine,
+  whether or not its line is secure, since its display domain sees and
+  can inject every byte typed there. At the UART,
   where whoever is present could enrol the principal afresh anyway
   (Enrolment, below), the vault opens such a slot with its passphrase,
   when the backend that made it still answers, and moves the master key
@@ -2599,37 +2629,37 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   * A TPM whose lockout authorization is set, as every TPM the vault has
     provisioned is, keeps its parameters until it is cleared. A fresh
     installation on such a TPM serves logins under them, says so at the
-    console, and offers there to clear the TPM: `TPM2_Clear` under the
-    platform hierarchy, whose authorization is empty after a start that no
-    firmware preceded, after which it provisions the TPM as at a first
-    start. Where firmware starts the TPM and keeps the platform hierarchy,
-    the owner clears it through the firmware instead. Clearing is also the
-    owner's way to other parameters, and it loses every slot the TPM
-    sealed.
+    console's UART, and offers there to clear the TPM: `TPM2_Clear` under
+    the platform hierarchy, whose authorization is empty after a start
+    that no firmware preceded, after which it provisions the TPM as at a
+    first start. Where firmware starts the TPM and keeps the platform
+    hierarchy, the owner clears it through the firmware instead. Clearing
+    is also the owner's way to other parameters, and it loses every slot
+    the TPM sealed.
 * **The passphrase slot is the verifier.** The vault checks every
   passphrase: a passphrase is right exactly when it opens the principal's
   passphrase slot, since the cipher authenticates what it seals, so no
   other record of any passphrase exists, verifiers are as secret as the
   keys, and a principal with no keys has a file that seals none.
 * **Enrolment.** A principal starts with no file. Its first passphrase is
-  set only at the console, by whoever is at the machine: a login there for
-  a principal the manifest lists that has no file asks for a new
+  set only at the console's UART, by whoever is at the machine: a login
+  there for a principal the manifest lists that has no file asks for a new
   passphrase twice, and the vault makes the principal's master key, its
   passphrase slot under the configured parameters and backend, and a file
-  with no keys. The host link and the network enrol no one, so no one
-  remote can claim a principal that has not enrolled, and presence at the
-  machine is the root of trust, as far as the boot that put up the
-  console's prompt can be trusted
+  with no keys. The host link, terminal windows and the network enrol no
+  one, so no one remote, and no display domain, can claim a principal that
+  has not enrolled, and presence at the machine is the root of trust, as
+  far as the boot that put up the UART's prompt can be trusted
   ([design-platforms.md](design-platforms.md#trust-in-the-boot)). The rule
   is provisional, for the user to decide ([Risks and open
   questions](#risks-and-open-questions)). The vault cannot tell a deleted
   file from a principal that never enrolled, so whoever can both write the
-  vault's partition and reach the console can delete a principal's file
-  and enrol that principal afresh, under every backend: the principal's
-  keys are lost with the file, but its name and authority are taken
-  ([Security](#security)). A fresh installation, the one that brings
+  vault's partition and reach the console's UART can delete a principal's
+  file and enrol that principal afresh, under every backend: the
+  principal's keys are lost with the file, but its name and authority are
+  taken ([Security](#security)). A fresh installation, the one that brings
   erXos's F2FS included, starts every principal with no file, so its
-  principals enrol at the console at its first boot, where whoever
+  principals enrol at the UART at its first boot, where whoever
   installed it is.
 * **Changing a passphrase** re-wraps one slot: the vault opens the master
   key with the old passphrase and wraps it into a fresh slot under the new
@@ -2639,10 +2669,10 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   A principal that has forgotten its passphrase has lost its keys unless
   another of its slots opens: an administrator can only have the principal
   service remove its file, after which the principal enrols again at the
-  console.
+  console's UART.
 * **One owner per file.** Each principal's file, and the machine's, has
   one owner process in the vault, through which every change to it passes:
-  an enrolment, a passphrase change, a re-wrap, the console's move to the
+  an enrolment, a passphrase change, a re-wrap, the UART's move to the
   configured backend, and a key's addition or removal. The file's clear
   header carries its **generation**, which each publication raises by one.
   A change is computed from the file as published at one generation, and
@@ -2660,23 +2690,28 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   vault answers `unavailable`, and the next start reads whichever file the
   medium kept, each of them complete.
 * **Logins.** The principal service passes the vault every name it is
-  given, the passphrase and the terminal it came from: the console, a
-  host-link session or a network connection. The vault answers matched,
-  did not match, `limited` or `unavailable`, and nothing else:
+  given, the passphrase and the terminal it came from: the console's
+  UART, the host link, a terminal window or a network connection. The
+  vault answers matched, did not match, `limited` or `unavailable`, and
+  nothing else:
   * **Limits by name and by terminal.** The vault counts failures by
-    the name given, whether or not it is a principal's, and by terminal.
-    It answers `limited`, without a derivation, to a name that has had 5
-    failures in the last 60 seconds from local terminals (the console and
-    the host link), or 5 from network connections, and to a terminal that
-    has had 5. A counter goes 60 seconds after its last failure, and every
-    failure costs a derivation, so no more counters live than derivations
-    fit in a minute.
+    the name given, whether or not it is a principal's, in three classes
+    of terminal, and by terminal. It answers `limited`, without a
+    derivation, to a name that has had 5 failures in the last 60 seconds
+    from local terminals (the UART and the host link), 5 from terminal
+    windows or 5 from network connections, and to a terminal that has had
+    5. Each class has its own counter for a name, so a display domain
+    typing wrong passphrases into its windows, or a network peer, cannot
+    lock a name out at the UART. A counter goes 60 seconds after its last
+    failure, and every failure costs a derivation, so no more counters
+    live than derivations fit in a minute.
   * **Two queues.** It runs one derivation at a time for local terminals
-    and one for network connections, each on one thread, so a flood of
-    network logins never delays a console login, and logins cost it at
-    most two derivations' memory, 128 MiB, and two CPUs.
+    and one for terminal windows and network connections together, each
+    on one thread, so a flood of logins from a display or the network
+    never delays a login at the UART or the host link, and logins cost it
+    at most two derivations' memory, 128 MiB, and two CPUs.
   * **No answer tells a principal from a stranger.** A name that is no
-    principal's, and away from the console a principal that has not
+    principal's, and away from the UART a principal that has not
     enrolled, gets the work and the answer of a wrong passphrase: the
     vault runs the derivation against a dummy file it made at boot, whose
     one slot, under the configured parameters and backend, is for a random
@@ -2694,11 +2729,12 @@ as for any service ([design-domains.md](design-domains.md#facets)).
     tells whether a principal exists.
   * **The TPM's tries.** Under `tpm`, each failure for a principal also
     counts against the TPM's lockout, which covers all its objects at
-    once. So that no remote party can lock the console out, the vault
-    counts network failures for every name alike, forgiving one as often
-    as the TPM does, and answers `limited` to network logins once that
-    count, or the TPM's own, would leave fewer than 8 of the TPM's tries
-    (provisional) for local terminals and unordered ends; since strangers'
+    once. So that no remote party and no display domain can lock the UART
+    out, the vault counts network and terminal-window failures for every
+    name alike, forgiving one as often as the TPM does, and answers
+    `limited` to network and window logins once that count, or the TPM's
+    own, would leave fewer than 8 of the TPM's tries (provisional) for
+    local terminals and unordered ends; since strangers'
     names count alike, the limit tells nothing about who is a principal.
   * While a session of that principal lives, the vault keeps its master
     key and the opened keys, and destroys them when the last one ends.
@@ -2714,13 +2750,13 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   when its partition does not mount, or the configured backend does not
   answer, it answers every login and every enrolment `unavailable`, and
   the console says why, rather than take principals for unenrolled,
-  which would let whoever is at the console claim any of them. Sessions
+  which would let whoever is at the UART claim any of them. Sessions
   already open keep their keys.
 * **On a trial boot** every file system mounts read-only
   ([design-storage.md](design-storage.md#system-updates)), the vault's
   partition included: logins work, and a login whose slot is due for a
   re-wrap answers as any other and leaves the slot as it is, for a login
-  on a normal boot; an enrolment, a passphrase change or the console's
+  on a normal boot; an enrolment, a passphrase change or the UART's
   move to the configured backend answers `unavailable` until the next
   normal boot, the console saying why. A trial begins with an ordered end
   of the machine, whose checkpoint freezes the vault's partition after
@@ -2797,7 +2833,7 @@ partition, as a fresh installation does.
 | A domain sends the domain service a malformed message, or one about a connection it is not a party to | the generated admission and the connection's state | nothing | none needed: the message is dropped | a counter on the sending domain |
 | The domain service or the device service stops answering | the watchdog process's liveness call | the domain service's records, in the ETS table its holder keeps | its supervisor restarts it, and the pets resume at its first answer; a service that never answers again ends the machine at the watchdog's deadline | a log line; at worst the crash record naming the watchdog |
 | The machine ends unordered more than three times in a row | the reset count, in its own sector beside the boot-selection record | the machine, booted in its rescue configuration | the operator, at the console | the console's login, saying the machine booted for rescue and why |
-| The system domain faults, halts outside an ordered end, or misses the watchdog's deadline | the kernel | the machine | none: the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console, brief in a release build; the previous boot's crash record in the inspector at the next boot, to a holder of the system-shell facet, where the platform keeps one |
+| The system domain faults, halts outside an ordered end, or misses the watchdog's deadline | the kernel | the machine | none: the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console, brief in a release build; the previous boot's crash record in the inspector at the next boot, to the system shell, where the platform keeps one |
 | The system release fails to boot | the root task's end | the machine | none | the report on the console; the machine ends by `erx.panic` |
 | A configured domain fails to start, or ends repeatedly | the domain service's restart intensity | its objects until destroyed | the domain service restarts it within its intensity; beyond it, a `required` domain ends the machine as a fault would, and any other stays down | a log line; the inspector shows the domain down or the machine's end |
 | A trial fails: its lease passes, or the system domain ends | the kernel's lease; the kernel | the machine | none | the machine resets and boots the committed slot; the update service records the failed trial |
@@ -2922,9 +2958,8 @@ domain.
   system domain's slogan and dump, may hold one typed shortly before a
   crash; development builds run trusted code only. A release build's brief
   record holds no register but the program counter, no stack and no text,
-  and the inspector shows either form only to a holder of the system-shell
-  facet, never on the console before a login ([The crash
-  record](#the-crash-record)).
+  and the inspector shows either form only to the system shell, never on
+  a console line before a login ([The crash record](#the-crash-record)).
 * Tokens and passwords leave the vault whole, to their purpose's grantee,
   because their protocols send them; each release is logged.
 * Under `none`, machine keys are as readable as the medium, and whoever
@@ -2936,26 +2971,31 @@ domain.
   through the TPM, at the rate its lockout allows.
 * Anyone who can reach a network login and knows a principal's name can
   keep that principal from logging in over the network, though not at the
-  console, for as long as it keeps failing; under `tpm`, anyone who can
-  reach a network login can keep every principal from logging in over the
-  network, by spending the TPM's tries that network logins may use.
+  UART or the host link, for as long as it keeps failing; under `tpm`,
+  anyone who can reach a network login can keep every principal from
+  logging in over the network, by spending the TPM's tries that network
+  logins may use. A display domain can do the same to logins at terminal
+  windows, every display's, since all windows count as one class, and
+  under `tpm` it spends the tries that network and window logins share;
+  neither it nor the network can keep a principal from logging in at the
+  UART or the host link.
 * Whoever can write the vault's partition can forge any principal's login
   under `none`: it replaces the principal's file with one sealed under a
   passphrase of its choosing, which the vault accepts, since the file is
   the only check; under `device` or `tpm`, a slot forged away from the
   board does not open, and a file forged under `none` opens only at the
-  console, where its forger could enrol the principal afresh anyway
+  console's UART, where its forger could enrol the principal afresh anyway
   (Sealing). Under every backend it can put back an older copy of a file,
   which opens with the passphrase it was sealed under, so a changed
   passphrase keeps opening a copy taken before the change. Only the
   storage domain that serves the vault alone writes that partition, so
   either takes the medium in hand ([design.md](design.md#residual-risks)).
-* Whoever can write the vault's partition and also reach the console can
-  take any principal, under every backend: it deletes the principal's
-  file, which the vault cannot tell from a principal that never enrolled,
-  and enrols the principal afresh at the console. The principal's keys
-  are lost with the file. Anchoring the set of enrolled principals in the
-  TPM would detect the deletion under `tpm`
+* Whoever can write the vault's partition and also reach the console's
+  UART can take any principal, under every backend: it deletes the
+  principal's file, which the vault cannot tell from a principal that
+  never enrolled, and enrols the principal afresh at the UART. The
+  principal's keys are lost with the file. Anchoring the set of enrolled
+  principals in the TPM would detect the deletion under `tpm`
   ([Risks and open questions](#risks-and-open-questions)).
 * The vault's own TPM driver can clear the TPM, which loses every slot
   sealed in it and the keys behind them; it is inside the vault's
@@ -3058,8 +3098,9 @@ under test ran.
   left down when it is not; the previous boot's crash record read by the
   inspector where the platform keeps one, in its brief form in a release
   build, with no register but the program counter, no stack and no text,
-  in its full form in a development build, and refused to a caller without
-  the system-shell facet and on the console before a login; a development
+  in its full form in a development build, and refused to every caller
+  but the system shell, a session of a system-shell principal among them,
+  and on every console line before a login; a development
   build's manifest with a partial boot of two native programs, which run,
   write to the kernel log through the early console, end, and end the
   machine, the root-task entry petting the watchdog throughout; a manifest
@@ -3227,28 +3268,31 @@ under test ran.
   login and opens with the same passphrase afterwards; a slot whose
   parameters exceed the ceiling does not open and costs one derivation
   against the dummy; a file wholly forged under `none` on a machine
-  configured for `device` or `tpm` does not match from the host link or
-  the network and is never re-wrapped there, while at the console only the
-  passphrase it was sealed under moves it; a machine file of another
+  configured for `device` or `tpm` does not match from the host link, a
+  terminal window, a secure one included, or the network and is never
+  re-wrapped there, while at the UART only the passphrase it was sealed
+  under moves it; a machine file of another
   backend is replaced by fresh machine keys; a re-wrap computed before a
   passphrase change publishes nothing, so the old passphrase never opens
   the file again; a passphrase change answered before a power cut is the
   file the next start reads; a stranger, a principal with a wrong
   passphrase, and principals whose slots have older or configured
   parameters all answer after the same login envelope; six failed logins
-  within 60 s from the network get `limited` while the console still logs
-  the principal in, and a flood of network logins spread over many
-  principals leaves a console login's time unchanged; a name that is no
+  within 60 s from the network, and six from terminal windows, each get
+  `limited` while the UART and the host link still log the principal in,
+  and a flood of network or window logins spread over many principals
+  leaves a UART login's time unchanged; a name that is no
   principal's, and a principal that has not enrolled tried from the
   network, get did not match, in the time a wrong passphrase takes, and
   six failures for a name that is no principal's get `limited` exactly as
-  a principal's do; a principal without a file enrols at the console and
-  nowhere else; the system domain grants the tree of the vault's storage
-  domain to the vault alone, a principals' storage domain finds no key
-  file, and re-creating the data partition leaves every key file and
-  machine key in place; a passphrase change rewrites one slot and leaves
-  the sealed keys' bytes as they were, after which the file opens only
-  with the new passphrase, and a change without the old passphrase is
+  a principal's do; a principal without a file enrols at the UART and
+  nowhere else, not at the host link, a terminal window, a secure one
+  included, or the network; the system domain grants the tree of the
+  vault's storage domain to the vault alone, a principals' storage domain
+  finds no key file, and re-creating the data partition leaves every key
+  file and machine key in place; a passphrase change rewrites one slot and
+  leaves the sealed keys' bytes as they were, after which the file opens
+  only with the new passphrase, and a change without the old passphrase is
   refused; the vault destroys a principal's key objects when its last
   session ends; its domain has no crash area; every token release appears
   in the log; with its partition unmounted, or its backend silent, every
@@ -3256,7 +3300,7 @@ under test ran.
   one due for a re-wrap included, which leaves its slot as it was, an
   enrolment or a passphrase change gets `unavailable`, and every change
   the vault confirmed before the trial is seen in it; a principal whose
-  file was deleted enrols afresh at the console, as one that never
+  file was deleted enrols afresh at the UART, as one that never
   enrolled; an SSH user facet signs `rsa-sha2-256` and `rsa-sha2-512`
   user-authentication data for an RSA key and refuses `ssh-rsa`; the
   domain library maps the sealing page into the domain of the release
@@ -3266,17 +3310,17 @@ under test ran.
   sealing page, checked by a walk of its mappings. Under QEMU with swtpm
   behind `tpm-tis-device`, the `tpm` backend, with the TPM's driver in the
   vault's domain: wrong passphrases spend the TPM's tries and strangers'
-  names spend none; network failures stop at the reserve while the console
-  still logs in; a response altered between the TPM and the vault fails
-  its HMAC; once the TPM is cleared every slot it sealed fails to open; a
-  TPM that returns another storage key than the machine's file records
-  gets `unavailable` before any command that carries a value, and a slot
-  sealed under one storage key does not open under another; no file holds
-  the lockout authorization, so a party that can send the TPM any command
-  and read the whole medium cannot reset its count of failures; and a
-  fresh installation over a TPM an earlier installation provisioned serves
-  logins, offers the clear at the console, and after it provisions the TPM
-  as at a first start. On each board, under `device`: a file copied to
+  names spend none; network and window failures stop at the reserve while
+  the UART still logs in; a response altered between the TPM and the vault
+  fails its HMAC; once the TPM is cleared every slot it sealed fails to
+  open; a TPM that returns another storage key than the machine's file
+  records gets `unavailable` before any command that carries a value, and
+  a slot sealed under one storage key does not open under another; no file
+  holds the lockout authorization, so a party that can send the TPM any
+  command and read the whole medium cannot reset its count of failures;
+  and a fresh installation over a TPM an earlier installation provisioned
+  serves logins, offers the clear at the UART, and after it provisions the
+  TPM as at a first start. On each board, under `device`: a file copied to
   another board opens no slot, and a board whose key was never provisioned,
   or whose read failed, has no device secret and no sealing page, and its
   vault answers `unavailable`.
@@ -3565,8 +3609,8 @@ Open questions, with recommended answers:
   The `erx_seal` behaviour hides the choice, so any of them fits behind
   it.
 * **Should `tpm` anchor the set of enrolled principals in the TPM?**
-  Whoever can write the vault's partition and reach the console can
-  delete a principal's file and enrol the principal afresh (Security).
+  Whoever can write the vault's partition and reach the console's UART
+  can delete a principal's file and enrol the principal afresh (Security).
   Options: (a) state it as a residual, which the design does; (b) under
   `tpm`, keep a TPM NV counter that versions the machine's file, which
   lists every enrolled principal and its file's version, so a missing or
@@ -3588,12 +3632,12 @@ Open questions, with recommended answers:
   one recorded name, where (c) adds a certificate store to the domain that
   holds every key.
 * **How are principals enrolled?** Provisional ([The
-  vault](#the-vault)): the first passphrase is set at the console
-  only, by whoever is at the machine, and a change needs the old
+  vault](#the-vault)): the first passphrase is set at the console's
+  UART only, by whoever is at the machine, and a change needs the old
   passphrase. The alternatives are a passphrase the administrator gives
   the packer, which puts a verifier into every copy of the image, and a
   one-time enrolment code the packer prints for each principal, which the
-  console asks for. Recommended: the console, with the enrolment code if
+  UART's login asks for. Recommended: the UART, with the enrolment code if
   machines are installed unattended.
 
 ## References

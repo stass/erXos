@@ -1454,22 +1454,38 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
-* [Medium] display, design-live's console: The console section of
-  [design-live.md](docs/design-live.md#the-console) describes one line, the
-  UART. [design-display.md](docs/design-display.md#terminal-windows)
-  offers terminal windows as further lines through `offer_line`; rewrite
-  the section for several lines, the UART one of them, each with its own
-  menu, login and connected session, before track D's desktop part of
-  [plan.md](docs/plan.md#track-d-windows-widgets-and-the-web) starts.
-  The rewrite waits on four decisions the designs leave open: whether the
-  console's log lines and the system runtime's `erlang:display_string/2`,
-  `erlang:display/1` and `standard_error` reach the UART alone or every
-  line (the kernel's early console is the UART by design); whether a
-  session holding the system-shell facet may connect at an offered line,
-  where the display domain sees and can inject its bytes; what a
-  development build shows first on a new terminal window, where the UART
-  shows `root`'s system shell; and whether connecting a session already
-  connected at another line is refused or moves it.
+* [High] logging: a central system log service that every source writes
+  to, with routing to the UART and other readers and per-reader access,
+  needs its design; it replaces the console's role as the kernel log's
+  reader and decides which log lines each console line shows, a terminal
+  window's and the host link's among them
+  ([design-live.md](docs/design-live.md#the-console)).
+* [Medium] console, log lines at console lines: until the log design
+  settles routing, state in
+  [design-live.md](docs/design-live.md#the-console) the access rule it
+  must keep, that a line shows only log lines of domains its principal
+  may inspect, and reconcile the **Logs** bullet, which still makes
+  `erx_console` the sink, with design-kernel's log service.
+* [Medium] console, leftovers of the one-line model: the overview
+  diagram and the paragraph after it in
+  [design-live.md](docs/design-live.md#overview) describe one serial
+  console; the host tool reads `[kernel, crash]`, which only the system
+  shell's facet reaches, so either the host link gets its own crash
+  reading grant or the tool reads it through the system shell; and the
+  system-shell facet, which only the console and the system shell hold,
+  may read more simply as the console's per-line login record.
+* [Low] console, residuals to state: processes the system shell starts
+  are system-domain processes and outlive its login; a development
+  manifest does not have to mark the UART secure, though development
+  builds assume it; host-link login failures count in the UART's class
+  and can lock a name out there; a refused connection names the line a
+  terminal is connected at, which a display can read
+  ([design-live.md](docs/design-live.md#security)).
+* [Low] console, moving a session: an explicit detach and attach, as
+  screen and tmux offer, run by the session's own user, so a terminal
+  can move from one console line to another; connecting a terminal
+  already connected at another line is refused
+  ([design-live.md](docs/design-live.md#the-console)).
 * [Low] display, plan9port compatibility: check against plan9port's source
   that acme and sam allocate no screens and reach the screen image only
   through `libdraw`'s `getwindow`, as

@@ -100,8 +100,8 @@ Generated path dispatch calls handwritten scope checks and data collectors;
 it does not enumerate restricted objects before authorizing the query.
 Unknown field names are refused without making atoms. Adding a schema field
 does not expose it automatically: its visibility rule and each public
-projection must be declared. The previous-boot crash record retains its
-system-shell requirement regardless of an inspect facet's scope.
+projection must be declared. The previous-boot crash record is shown
+only to the system shell, whatever an inspect facet's scope.
 
 Shell, host and `/proc` output share generated field order, unit labels
 and status/reporter formatting. Dynamic names and values still pass through

@@ -1666,7 +1666,8 @@ UART ([design-system.md](design-system.md#drivers)), and the kernel keeps
 only its early console for its own log. A session's standard I/O goes
 through Erlang's I/O protocol to its group, in its own domain, and from
 there to its tty ([design-live.md](design-live.md#the-tty)), whose bytes
-reach the console while the session is connected. `standard_error` writes
+reach the console line, the UART, the host link or a terminal window, at
+which that tty is connected, if any. `standard_error` writes
 with `erlang:display_string/2` (edit 39).
 
 **The console service is a program with its own line editor on a raw terminal,
@@ -1715,7 +1716,7 @@ depends on the domain:
 | The domain | `erx_tty_owner` | What it does with the bytes |
 | --- | --- | --- |
 | a session's | the terminal relay | writes them to the session's tty, as any writer does, and answers when they are all in the tty ([design-live.md](design-live.md#the-tty)) |
-| the system domain | `erx_console` | writes them to the console's driver unchanged and answers when the driver has written them, so a service never waits on a shell's or a session's tty ([design-live.md](design-live.md#the-console)) |
+| the system domain | `erx_console` | writes them to the UART's driver unchanged, as Unix writes to `/dev/console`, and answers when the driver has written them, so a service never waits on a shell's or a session's tty, nor on any other console line ([design-live.md](design-live.md#the-console)) |
 | any other, which has no terminal | the logger proxy | sends them as log records to its console facet, under its name, which the console escapes, and answers at once: a Unix daemon's rule, that with no terminal its output goes to a log under its name |
 
 **C output never waits.** `erts_printf` and stdio to descriptors 1 and 2 have no
@@ -2812,7 +2813,7 @@ across them is the conformance suite.
 | --- | --- | --- | --- | --- |
 | ERTS fatal error in a domain | `erts_exit`, an assertion, an exhausted table | the dump in the crash area; an exit record | the domain service, through the domain library | links, monitors and the domain pid fire with `{domain_down, D, crash}`; the slogan in the death record and the dump in the inspector |
 | A domain faults (a NIF's wild pointer, a stack overflow into a guard page) | the kernel's fault classifier | the domain's threads, stopped; a fault record | the domain service ends the domain or keeps it for inspection | the fault record, registers and backtrace in the inspector |
-| The system domain's runtime faults or halts outside an ordered shutdown | the kernel | the crash record, brief in a release build and full in a development build | the kernel ends the machine by `erx.panic`, a reset in release builds | the crash record on the console, or in the surviving region at the next boot, which the inspector shows only to a holder of the system-shell facet |
+| The system domain's runtime faults or halts outside an ordered shutdown | the kernel | the crash record, brief in a release build and full in a development build | the kernel ends the machine by `erx.panic`, a reset in release builds | the crash record on the UART, or in the surviving region at the next boot, which the inspector shows only to the system shell |
 | The domain's budget is exhausted | `erx_vm_commit` returns `ERX_ENOMEM` | nothing committed | ERTS's allocation-failure path, which is fatal | as an ERTS fatal error, with the allocator named in the slogan |
 | A facet exceeds its `max_heap_size` | ERTS's heap limit, queued frames counted | the facet killed; its lane holding what it did not take | the facet's supervisor restarts it | the grantee's calls fail with the facet's exit; a log line |
 | The group's quota is exhausted | the kernel throttles | nothing fails | none needed | slower progress; throttling counters in the inspector |
@@ -3151,7 +3152,7 @@ listed in [design-stopgap.md](design-stopgap.md#verification).
 | `erx_output_write` on descriptors 1 and 2 writes, and on an open descriptor 3 answers `EBADF` | the descriptor check removed: the bytes arrive on descriptor 3 |
 | `erlang:display_string/2` with all 256 byte values, to a full non-blocking pipe that is then drained, delivers exactly those bytes in order | stock's `written += res` restored: the bytes differ and AddressSanitizer reports the read; an escaping step added: the comparison fails |
 | In a session's domain with one executor and a stopped tty, `erlang:display_string/2` waits, another process goes on running, and once the tty is connected every byte arrives in order | the trap removed: the bytes reach the C path and the comparison fails |
-| In the system domain, while a session is connected and with the system shell's tty raw, `erlang:display_string/2` of a newline reaches the driver as that one byte, and the service goes on | a tty's `output/3` added on this path: the byte becomes CR-LF; the write sent to a tty that is not connected: the deadline fires |
+| In the system domain, while a session is connected at the UART and with the system shell's tty raw, `erlang:display_string/2` of a newline reaches the driver as that one byte, and the service goes on | a tty's `output/3` added on this path: the byte becomes CR-LF; the write sent to a tty that is not connected: the deadline fires |
 | With one executor, a flood of `erts_printf` and of `fprintf(stderr, ...)` past the debug log's rate returns, `ferror(stderr)` stays clear, the executor parks afterwards, and the log reports a count of lines dropped | `erx_output_write` answering `EAGAIN` past the rate: `erl_printf.c`'s loop spins and the deadline fires |
 | `erlang:display_string(stdout, <<"done\r\n">>), erlang:halt(0)` in a session's domain delivers those bytes; on a stopped tty it halts at once and on a tty whose master stops answering it halts within 5 s | the trap in `halt_2` removed: the bytes are lost; `tty_drain` that waits on a stopped tty: the halt misses its deadline |
 | Before any owner runs, and from the owner itself, `erlang:display_string/2` reaches `erx_output_write`; the same with the owner killed in mid-write | the owner test removed: the owner waits on itself and the deadline fires; the monitor removed: the writer waits past the deadline |

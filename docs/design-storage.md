@@ -867,7 +867,7 @@ its health checks fail and it commits nothing, and the update service
 refuses such an update before writing it, from its manifest's storage
 formats. A fresh installation on a machine that had one has
 three one-time consequences: every principal starts with no file and
-enrols at the console, where the installer is; the machine's keys are
+enrols at the console's UART, where the installer is; the machine's keys are
 made afresh, so its SSH host key changes once; and under `tpm` the TPM
 keeps the lockout authorization the earlier installation set, which the
 vault reports at the console and provisions again by clearing the TPM,

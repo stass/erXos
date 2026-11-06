@@ -866,6 +866,11 @@ file objects follow M5, on erXos's kernel:
   and the parser's fuzz target; plan9port's rc built from its pinned
   source as the oracle, with the corpus from `test.rc`, the parser checks
   and `trip.rc`;
+* the session domain, which the domain service starts for a console
+  line's login and the host link's, in a development build `root`'s, with
+  the shell and its command server in it; the principals, quotas and
+  logins of other principals follow in M10
+  ([design-domains.md](design-domains.md#principals-sessions-and-quotas));
 * programs as ports of the session, over the sub-spaces M5 brings: the
   port driver `erx_program`, which carves the program's budget from the
   session's, creates a child group of the session's programs group, the
@@ -1044,9 +1049,10 @@ In this track W1 to W8 name design-web's invariants and G1 to G7
 design-display's, not the plan's gates or E-S1's workloads. Parts that
 land after M11 repeat M11's closure over what they add.
 
-1. **The web over the host link**, after M5 and track S's programs, which
-   bring the domain service and the session domain a browser's views run
-   in. The web domain, a configured domain of the development manifest,
+1. **The web over the host link**, after M5, which brings the domain
+   service, and track S's programs, which bring `root`'s session domain,
+   the session a browser's views run in. The web domain, a configured
+   domain of the development manifest,
    with the connection core `erx_web_conn`; the session's `erx_web_line`,
    whose views fetch records, the kernel log and traces through the
    session's own inspect and trace facets; the host link's `web` facet,
@@ -1077,8 +1083,10 @@ land after M11 repeat M11's closure over what they add.
    binding of one window's directory into a program's namespace;
    `/snarf`; the terminal emulator `erx_term` as a console line, through
    the console service's `offer_line` and the manifest's `console_line`
-   parameter, which needs design-live's console section rewritten for
-   several lines first; the inspector's windows under `[domains, Id]` and
+   parameter with its `secure` attribute, the window tokens through which
+   a session opens a window without a login, and the console's lines
+   ([design-live.md](design-live.md#the-console)); the inspector's
+   windows under `[domains, Id]` and
    `/proc`
    ([design-display.md](design-display.md#windows-and-the-window-system),
    [design-display.md](design-display.md#terminal-windows)).
@@ -1125,7 +1133,9 @@ overrun shows a gap with its count (W7); the seventeenth view, the
 sixty-fifth line view and the fifth connection of a line are each
 refused, a client that never sends `next` gets one update per view while
 the web domain holds under 1 MiB for it, and a record that changed 100
-times while the client paused arrives once (W8); a release manifest that
+times while the client paused arrives once (W8); every view through the
+host link's `web` facet equals what `root`'s session reads through its
+own facets (design-web's W1 over the host link); a release manifest that
 lists the host link's `web` facet fails the manifest check; `make web`
 twice with the network disabled gives byte-identical files; each
 chokepoint check catches its seeded violation; the end-to-end tests run
@@ -1159,11 +1169,23 @@ includes `vttest`'s core; V1's byte test of design-live with a terminal
 window in place of the serial line; the virtio-gpu response and
 virtio-input event parsers' fuzz targets; the framebuffer copy under UBSan
 at its bounds; screenshots through QEMU's monitor equal the reference
-images under TCG and HVF; a crash of the display driver, of `erx_screen`,
-of a window process and of a terminal emulator each loses only what that
-party owned (design-display's requirement 10 and failure table); a
+images under TCG and HVF; a fault injected for each row of
+design-display's failure table has that row's effect and recovery and
+loses only what the failing party owned (requirement 10 and the
+failures test of
+[design-display.md](design-display.md#verification-and-testing)); a
 release manifest that gives the display domain an unconfined DMA device
-fails the manifest check; each chokepoint check catches its seeded
+fails the manifest check (design-display's confinement test), and a
+release manifest that marks a display's terminal windows `secure` fails
+it too; a principal named for the system shell who logs in at a terminal
+window that is not secure gets no system shell, and `erx:attach` of the
+UART login's session from a window, and a window opened from it, give
+that session's own shell (V6 of
+[design-live.md](design-live.md#invariants)); a display's offers with no
+window token, a forged, used, expired or another display's one each get
+a login (V7), and, once M11's vault checks passphrases, a login at a
+window cannot enrol a principal;
+each chokepoint check catches its seeded
 violation.
 
 **Exit criteria, widgets and presentations on the desktop.** The parity
@@ -1570,10 +1592,12 @@ default domain.
 **Demo.** Two users log in; each gets a domain; one exhausts its memory and
 another its CPU share; only their own domains end or slow down.
 
-**Scope.** The principal service, sessions, quotas and ceilings; principal
+**Scope.** The principal service, a session domain per login of every
+principal over track S's session domain, quotas and ceilings; principal
 groups and budgets in the resource policy; facets for every service; the
 console's login, which checks passphrases only from M11, when the vault
-arrives, and the system-shell facet
+arrives, and the system-shell facet, which the console grants to a login
+at a secure line and holds itself
 ([design-live.md](design-live.md#the-console)); the host link's configured
 facet sets; supervised domains and their code overlays, kept per principal
 as manifests in the code store, each principal's hot store and overlays in
@@ -1586,8 +1610,9 @@ the data partition.
 **Exit criteria.** Quota and ceiling tests per limit, a session's programs
 within its budget included; a user's domain at its limits leaves the
 other user's latency within its budget (W5); a release-configured build's
-console shows a login, and a session without the system-shell facet gets
-no system shell; a host-link session holds exactly its configured facets;
+console lines each show a login, a principal the manifest does not name
+for the system shell gets none, and a lock or a log out at the UART ends
+its system shell; a host-link session holds exactly its configured facets;
 an overlay survives its domain's restarts and the machine's reboots, and
 is dropped when its release changes; each principal's hot store answers
 only for its own blobs; the code service's decoder of overlays and stores

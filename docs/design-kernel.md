@@ -2693,8 +2693,7 @@ fixed fields and the rest for the log's tail). It has two
   it stops
   ([design-runtime.md](design-runtime.md#the-root-task-entry)), and so
   may carry what the root task held, a passphrase among it, which is why
-  the system domain shows a record only to holders of the system-shell
-  facet (below).
+  the system domain shows a record only to the system shell (below).
 
 ```c
 typedef struct erx_crash_record {
@@ -2827,9 +2826,8 @@ never hands on, or keeps, a full record that a development build left. The
 decision, `erx_crash_previous_length`, is a pure function over the
 bytes, bounded by `ERX_CRASH_SIZE`, with a fuzz target over both forms,
 since the region is memory that firmware and the previous boot wrote. The
-system domain shows the record in the inspector after the reboot, to a
-holder of the system-shell facet alone
-([design-live.md](design-live.md#inspection)).
+system domain shows the record in the inspector after the reboot, to the
+system shell alone ([design-live.md](design-live.md#inspection)).
 
 ### The watchdog
 
@@ -8210,8 +8208,8 @@ a release build's, carries no secret: the cause, the program counter and
 the fault address, and no register, stack or text. The full form, a
 development build's, carries the registers and the log's tail and so may
 carry what the root task held, a passphrase it was checking among it,
-and the system domain shows it to holders of the system-shell facet
-alone ([The root task](#the-root-task)). Timing channels between domains
+and the system domain shows it to the system shell alone
+([The root task](#the-root-task)). Timing channels between domains
 sharing a CPU are a residual risk too.
 
 **Speculation.** The kernel applies the mitigations Linux applies on each

@@ -681,7 +681,7 @@ The header is 368 bytes with alignment 8. Its fields are:
 
 | Offset | Field | Type and meaning |
 | --- | --- | --- |
-| 0, 4, 6 | `magic`, `version`, `flags` | `u32`, `u16`, `u16`; magic/version above; development at flag bit 0 and partial boot at bit 1, all other bits zero |
+| 0, 4, 6 | `magic`, `version`, `flags` | `u32`, `u16`, `u16`; magic/version above; development at flag bit 0, partial boot at bit 1, the UART console line secure at bit 2 and the host-link line secure at bit 3, all other bits zero |
 | 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 368 |
 | 16, 24, 32, 40 | `host`, `console`, `hostlink`, `platform` | four string references; system identifier, absolute device-tree path, optional device-tree path and platform identifier |
 | 48, 56, 64 | `root_memory`, `system_baseline`, `system_reservation` | three `u64` byte counts; the root assumption, configured baseline and checked admission reservation |
@@ -989,6 +989,22 @@ order whose ready set is ordered by domain-name bytes. It rejects a
 cycle and never emits a partial order. The shell-principal list is a
 strictly increasing, duplicate-free list of principal indices. A
 liveness list likewise names each configured target at most once.
+
+A console line's `secure` attribute has no table of its own. The two
+fixed lines carry it in the header's flags:
+`ERX_MANIFEST_CONSOLE_SECURE`, bit 2, for the UART that `console` names,
+and `ERX_MANIFEST_HOSTLINK_SECURE`, bit 3, for the host link, which is
+set only when `hostlink` names a path; the source names them as the
+`machine` flags `console_secure` and `hostlink_secure`. A display
+domain's terminal windows carry theirs in its `console_line`, which
+packs as an ordinary facet record: a facet of the console service
+granted to the display domain, whose operation set holds `offer_line`
+and whose parameters hold the console contract's boolean `secure`
+parameter, once, for every window that display offers
+(`abi/services/console.txt`). The checker refuses a release manifest in
+which any such facet has `secure` 1, and the console service reads the
+attribute of a window's line from the facet that offered it, never from
+the display.
 
 Partial-boot programs have system-identifier names and executable image
 indices. All use the machine's declared default native limits and the

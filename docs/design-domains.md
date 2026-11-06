@@ -2208,7 +2208,9 @@ session has alive at once, the children of any one program, the pipes its
 pipe server keeps and the objects of the files its programs map shared
 ([design-programs.md](design-programs.md#the-second-tier)), each
 charged to the session's budget. Development builds have one principal,
-`root`, whose console session holds every facet. Policy is Erlang in the
+`root`, whose session at the UART holds every facet a session can hold;
+the system-shell facet, which no session holds, belongs to `root`'s
+login there. Policy is Erlang in the
 system domain; the kernel supplies budgets, groups and capabilities, and
 each runtime the limits above.
 

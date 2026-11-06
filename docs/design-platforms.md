@@ -742,8 +742,8 @@ as `erx.panic` says. Where the record goes is a platform fact:
   build's, so memory a cold boot left behind is never shown as a crash and
   a release build never keeps a development build's full record, and hands
   it to the system domain among the root capabilities, where the inspector
-  shows it as the end of the boot before, only to a holder of the
-  system-shell facet and never on the console before a login
+  shows it as the end of the boot before, only to the system shell, which
+  only a login at a secure console line opens
   ([design-system.md](design-system.md#the-crash-record)); a region
   without a valid record is shown as none. Whether the region survives a
   warm reset through `SYSTEM_RESET` on each board is a fact the boot probe
@@ -984,7 +984,7 @@ a boot argument.
 | A trial request that fails or times out | the kernel's poll of the mailbox | the watchdog's reset | the machine boots the committed slot |
 | A node left out because it shares a kept page | the device pass | the node in no resource | a boot log line naming it |
 | The board's key cannot be read within 1 s, or was never programmed | the kernel's read at boot, with its deadline | the machine, without a device secret; after a missed deadline, the firmware's buffer page, out of every mapping and never reused, for a completion that may still come | the banner says which; a vault configured for `device` answers logins `unavailable` |
-| The system runtime stops petting the kernel's watchdog, or the system domain faults | the kernel's timer; the fault | the crash record, brief in release builds and full in development builds, on the early console and in the boards' crash region, and a machine that boots again, directly by `SYSTEM_RESET` or through the hardware watchdog after a development build's halt | the record on the console, and in the inspector after the next boot on a board, to a holder of the system-shell facet |
+| The system runtime stops petting the kernel's watchdog, or the system domain faults | the kernel's timer; the fault | the crash record, brief in release builds and full in development builds, on the early console and in the boards' crash region, and a machine that boots again, directly by `SYSTEM_RESET` or through the hardware watchdog after a development build's halt | the record on the UART, and in the inspector after the next boot on a board, to the system shell alone |
 | The machine ends unordered at every boot | the reset count, in its own sector beside the boot-selection record ([Slots and the boot-selection record](#slots-and-the-boot-selection-record)) | a machine in its rescue configuration after the fourth such end | the console's login, and the crash record in the inspector |
 | The kernel stops running on a board | the hardware watchdog | a machine that boots again, without a crash record | the inspector shows the boot before as ended without a record |
 | The kernel stops running on QEMU `virt` | the harness's deadline | the serial log | the harness reports a timed-out run as such |
@@ -1079,8 +1079,7 @@ in [Trust in the boot](#trust-in-the-boot).
 * **The crash record.** On each board, a forced fault of the system domain
   resets the machine and the next boot's inspector shows the record with
   the fault's cause, in the brief form in a release build and the full
-  form in a development build, to a holder of the system-shell facet
-  alone; the paired failures corrupt one byte of the region before the
+  form in a development build, to the system shell alone; the paired failures corrupt one byte of the region before the
   reset, and leave a development build's full record for a release
   build, and each expects the inspector to show none. On QEMU, the
   harness finds the record in the serial log before `erx: end reset`.
