@@ -1468,7 +1468,8 @@ Error step 5 below finds the working directory through this path.
   answers on a platform without preallocation; `file:advise/4`, which
   9P2000.L has no operation for either, answers `ok`, as stock's
   `efile_advise` answers on a platform without `posix_fadvise`, advice
-  being only a recommendation;
+  being only a recommendation, once its arguments pass stock's checks: an
+  unknown advice, or a negative offset or length, answers `{error, einval}`;
   `file:ipread_s32bu_p32bu/3` reads the pointer block and then its data
   through the same reads as `pread`, as stock's NIF does; `file:sendfile/5` takes
   `file`'s fallback of reads and sends, since a remote file has no

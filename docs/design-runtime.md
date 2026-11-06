@@ -1623,7 +1623,8 @@ directory cannot exist, and nothing can disagree with the index.
 | `read_link` | `einval`, as stock for a path that is not a link: the provider has no links |
 | `get_cwd`, `set_cwd` | starts at `/`; set takes a directory that exists, under the NIF's lock |
 | any write mode, `make_dir`, `delete`, `del_dir`, `rename`, `make_link`, `make_symlink`, `write_file_info` | `erofs` |
-| `efile_from_fd`, `efile_dup_handle`, `allocate`, `advise`, `altname` and anything else | `enotsup` |
+| `advise` | `ok` once `prim_file_nif.c` has checked its arguments, as stock's `efile_advise` answers without `posix_fadvise` |
+| `efile_from_fd`, `efile_dup_handle`, `allocate`, `altname` and anything else | `enotsup` |
 | a path over the limits, or not UTF-8 | as [design-files.md](design-files.md#resolving-a-path) says: `enametoolong`, `einval` |
 | a missing name; a file used as a directory | `enoent`; `enotdir` |
 | `read_file` or `open` of a file whose bytes fail their hash | `eio`, with the check's name on standard error; `read_file_info` still answers, from the index, which has its own hash |

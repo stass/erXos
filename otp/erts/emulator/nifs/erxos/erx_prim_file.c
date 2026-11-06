@@ -853,14 +853,18 @@ efile_sync(efile_data_t *d, int data_only)
 	return (1);
 }
 
+/*
+ * Advice is only a recommendation, and prim_file_nif.c has checked its arguments: ok,
+ * as stock's efile_advise answers without posix_fadvise.
+ */
 int
 efile_advise(efile_data_t *d, Sint64 offset, Sint64 length, enum efile_advise_t advise)
 {
+	(void)d;
 	(void)offset;
 	(void)length;
 	(void)advise;
-	d->posix_errno = ENOTSUP;
-	return (0);
+	return (1);
 }
 
 int

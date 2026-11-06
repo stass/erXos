@@ -1080,10 +1080,28 @@ synced(Fd, DataOnly) ->
                 end).
 
 %% 9P2000.L has no operation for advice, which is only a recommendation: ok, as stock's
-%% efile_advise answers without posix_fadvise.
--spec advise(#file_descriptor{}, integer(), integer(), atom()) -> ok | {error, posix()}.
-advise(Fd, _Offset, _Length, _Advice) ->
-    on_open(Fd, fun(_) -> ok end).
+%% efile_advise answers without posix_fadvise, once the arguments pass stock's
+%% advise_nif: an offset or length that is not a number is badarg, and one that is not
+%% an integer from 0 to 2^63 - 1, or advice POSIX does not name, einval.
+-spec advise(#file_descriptor{}, term(), term(), term()) -> ok | {error, posix() | badarg}.
+advise(Fd, Offset, Length, Advice) ->
+    on_open(Fd, fun(_) -> advised(Offset, Length, Advice) end).
+
+advised(Offset, Length, _) when not is_number(Offset); not is_number(Length) ->
+    {error, badarg};
+advised(Offset, Length, Advice)
+  when is_integer(Offset), Offset >= 0, Offset =< ?OFFSET_MAX,
+       is_integer(Length), Length >= 0, Length =< ?OFFSET_MAX ->
+    case known_advice(Advice) of
+        true -> ok;
+        false -> {error, einval}
+    end;
+advised(_, _, _) ->
+    {error, einval}.
+
+known_advice(Advice) ->
+    Advice =:= normal orelse Advice =:= random orelse Advice =:= sequential
+        orelse Advice =:= will_need orelse Advice =:= dont_need orelse Advice =:= no_reuse.
 
 %% Nor for preallocation: enotsup, as stock answers without it.
 -spec allocate(#file_descriptor{}, integer(), integer()) -> {error, posix()}.

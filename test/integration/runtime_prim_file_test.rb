@@ -229,7 +229,7 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
-  # An open file's ipread_s32bu_p32bu (file_SUITE's ipread) in /tmp:
+  # An open file's ipread_s32bu_p32bu and advise (file_SUITE's ipread and advise) in /tmp:
   # these pin what both answer. Any atom stands for infinity, as in stock's prim_file.
   TMP_HANDLES = {
     'tmp ipread' => '{ok,{5,24,<<"hello">>}}', 'tmp ipread exact' => '{ok,{5,24,<<"hello">>}}',
@@ -237,7 +237,10 @@ class RuntimePrimFileTest < Minitest::Test
     'tmp ipread payload past end' => '{ok,{5,100,eof}}', 'tmp ipread short block' => 'eof',
     'tmp ipread past end' => 'eof', 'tmp ipread negative' => '{error,einval}',
     'tmp ipread max too big' => '{error,einval}', 'tmp ipread bad max' => '{ok,{5,24,<<"hello">>}}',
-    'tmp ipread closed' => '{error,einval}', 'tmp ipread delete' => 'ok'
+    'tmp ipread closed' => '{error,einval}', 'tmp ipread delete' => 'ok',
+    'tmp advise known' => '[ok,ok,ok,ok,ok,ok]', 'tmp advise unknown' => '{error,einval}',
+    'tmp advise negative offset' => '{error,einval}', 'tmp advise negative length' => '{error,einval}',
+    'tmp advise closed' => '{error,einval}', 'tmp advise delete' => 'ok'
   }.freeze
 
   def test_tmp_open_file_handles
@@ -288,7 +291,7 @@ class RuntimePrimFileTest < Minitest::Test
     release = table(@fixture.release)
     assert_equal '{1,0,0,0,0,0,0,0,0}', release.fetch('pin info')
     assert_equal '{directory,365,0,1}', release.fetch('pin top')
-    assert_equal '{error,enotsup}', release.fetch('pin advise')
+    assert_equal 'ok', release.fetch('pin advise')
     assert_equal '{error,enotsup}', release.fetch('pin allocate')
     assert_equal 'ok', release.fetch('pin sync')
     assert_equal '{error,erofs}', release.fetch('pin write')

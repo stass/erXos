@@ -950,6 +950,7 @@ tmp(Prefix, Mode) ->
     tmp_large(At, Show),
     tmp_ahead(At, Show),
     tmp_ipread(At, Show),
+    tmp_advise(At, Show),
     tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
@@ -1066,6 +1067,23 @@ ipread(Fd, Offset, Max) ->
     try file:ipread_s32bu_p32bu(Fd, Offset, Max)
     catch Class:Reason -> {raised, Class, Reason}
     end.
+
+%% file:advise/4 (file_SUITE's advise): each advice POSIX names answers ok, as stock's
+%% posix_fadvise or its absence does; an unknown advice, a negative offset or length
+%% einval; a closed file einval.
+tmp_advise(At, Show) ->
+    Name = At(<<"advise">>),
+    ok = file:write_file(Name, <<"advise">>),
+    {ok, Fd} = file:open(Name, [raw, read]),
+    Show("advise known", [file:advise(Fd, 0, 0, Advice)
+                          || Advice <- [normal, random, sequential, will_need, dont_need,
+                                        no_reuse]]),
+    Show("advise unknown", file:advise(Fd, 0, 0, bad_advise)),
+    Show("advise negative offset", file:advise(Fd, -1, 0, normal)),
+    Show("advise negative length", file:advise(Fd, 0, -1, normal)),
+    ok = file:close(Fd),
+    Show("advise closed", file:advise(Fd, 0, 0, normal)),
+    Show("advise delete", file:delete(Name)).
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the
