@@ -24,6 +24,8 @@ module Erx
     PERIPHERAL_INCLUDE_PATHS = PERIPHERAL_HEADERS.map { |header| Regexp.escape(header.delete_prefix('include/')) }.freeze
     PERIPHERAL_INCLUDE = %r{#{INCLUDE}[<"](?:#{PERIPHERAL_INCLUDE_PATHS.join('|')})[>"]}i
     PERIPHERAL_OWNERS = [Chokepoints::Site.new(glob: 'kernel/platform/**/*')].freeze
+    # The prefix of every name Hardware.owned_symbols makes, so no list can fall behind the SVD files.
+    OWNED_REGISTER = /\bERX_DEVICE_OWNED_\w+/
 
     declare_group(
       rules: [
@@ -45,7 +47,10 @@ module Erx
           scope: DEVICE_SCOPE,
           pattern: /\berx_device_access_(?:load|store)\d+\b/,
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
-                  Chokepoints::Site.new(glob: 'include/erx/hw/device_access.h')],
+                  Chokepoints::Site.new(glob: 'include/erx/hw/device_access.h'),
+                  # The DMA harness's device model, which stands in for the generated accesses.
+                  Chokepoints::Site.new(glob: 'test/fixtures/device_model/erx/hw/device_access.h'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_dma_harness.c')],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_device_access_load32(0, 0); }\n" }
         ),
         # The generated peripheral accessors are static inline, so they leave no symbol for the
@@ -78,8 +83,23 @@ module Erx
                   Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.h"),
                   Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device_bif.c"),
                   Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c'),
-                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_harness.c')],
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_harness.c'),
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_dma_harness.c')],
           seed: { 'otp/erts/emulator/sys/erxos/seeded.c' => "void f(void) { erx_device_read(0, 0, e, 0); }\n" }
+        ),
+        # write/3 and write_field/4 refuse a register the SVD source marks ownedByNif, and only
+        # erx_device.c holds the raw accessors, so the NIF's own sequences alone write one. This
+        # keeps the generated names of owned registers, which those sequences use, in that file.
+        Chokepoints::Forbidden.new(
+          name: 'device-owned-registers',
+          rule: 'only erx_device.c names a register the device NIF owns',
+          design: DEVICE_DESIGN,
+          scope: DEVICE_SCOPE,
+          pattern: OWNED_REGISTER,
+          sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
+                  Chokepoints::Site.new(glob: 'include/erx/hw/device_owned.h')],
+          seed: { 'otp/erts/emulator/nifs/erxos/seeded.c' => "unsigned x = ERX_DEVICE_OWNED_VIRTIO_MMIO_STATUS;\n",
+                  'otp/erts/emulator/beam/seeded.c' => "unsigned y = ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_READY;\n" }
         ),
         # A device address reaches no runtime code but erx_device.c's, which builds every one for its queues.
         Chokepoints::Forbidden.new(

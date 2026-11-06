@@ -11,6 +11,16 @@
 
 #include "erx/abi.h"
 
+bool
+erx_device_queue_features(uint64_t wanted, uint64_t offered, uint64_t *accepted)
+{
+	const uint64_t version_1 = UINT64_C(1) << ERX_VIRTIO_F_VERSION_1;
+	const uint64_t access_platform = UINT64_C(1) << ERX_VIRTIO_F_ACCESS_PLATFORM;
+
+	*accepted = (wanted & offered & ERX_VIRTIO_F_DEVICE_TYPE_MASK) | version_1 | (offered & access_platform);
+	return ((offered & version_1) != 0);
+}
+
 /* The ring heads are u16 pairs and the trailing event word a u16; the used ring is aligned. */
 bool
 erx_device_queue_layout(uint32_t size, erx_device_queue_layout_t *layout)

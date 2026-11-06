@@ -13,7 +13,9 @@
 %% field reads the word and writes it back, so a field's update is not atomic against
 %% another process using the device; a device has one driver. On a one-to-clear field it
 %% is one write. It is badarg where a read has a side effect: such a register is written
-%% whole with write/3.
+%% whole with write/3. Both are badarg for a register the NIF owns, which the SVD source
+%% marks `ownedByNif` (virtio's status, features, queue setup, doorbell and ring
+%% addresses): only the NIF's own sequences write those, negotiate/2 and post/4.
 %%
 %% irq_bind/2 makes the calling process the receiver of `{erx_irq, Dev, Line}`, once per
 %% fire of the line, at the next safe point. A level-sensitive line stays masked until
@@ -25,7 +27,7 @@
 -export([open/1]).
 -export([read/2, write/3, read_field/3, write_field/4, field/4]).
 -export([irq_bind/2, irq_ack/2]).
--export([queue_create/4, reset_done/1, post/4, complete/2]).
+-export([queue_create/4, negotiate/2, post/4, complete/2]).
 -export([stand_in_fire/2]).
 
 -export_type([device/0, register_name/0, spec/0, queue/0, segment/0]).
@@ -37,7 +39,7 @@
 -type window() :: {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
 -type spec() :: #{peripheral := atom(), window := window(), lines := [non_neg_integer()]}.
 -opaque queue() :: non_neg_integer().
--type segment() :: {out, iodata()} | {in, pos_integer()}.
+-type segment() :: {out, binary()} | {in, pos_integer()}.
 
 init() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
@@ -91,21 +93,28 @@ irq_ack(_Dev, _Line) ->
 %% reach Erlang. The same queue again is that queue again, so a restarted driver finds it;
 %% the same Index with another geometry is `{error, ebusy}`. A device that is not
 %% virtio-mmio version 2 is `{error, enotsup}`, as any queue is on a hosted runtime. The
-%% device takes the queue at reset_done/1.
+%% device takes the queue at the next negotiate/2.
 -spec queue_create(device(), non_neg_integer(), pos_integer(), pos_integer()) ->
           {ok, queue()} | {error, atom() | {status, integer()}}.
 queue_create(_Dev, _Index, _Size, _BufferSize) ->
     erlang:nif_error(undef).
 
-%% The reset rule's last step: called once the driver has reset the device by register
-%% writes and has reached virtio's queue setup, before DRIVER_OK. Every queue of the device
-%% forgets what was posted, its buffers return to its pool, its rings are zeroed, and the
-%% device takes it again. `{error, ebusy}` when the device still has a queue ready, as one
-%% it was never reset from has, and `{error, erange}` for a queue larger than the device
-%% offers; until a later reset_done/1 succeeds, post/4 and complete/2 on that queue are
-%% `{error, broken}`.
--spec reset_done(device()) -> ok | {error, atom() | {status, integer()}}.
-reset_done(_Dev) ->
+%% Virtio's initialisation, whole, which a driver calls at its start and at every restart,
+%% after queue_create/4 for each of its queues: the NIF resets the device and reads the
+%% features it offers. Of those it accepts the device type's own bits that Wanted (below
+%% 2^64) names, VERSION_1 and an offered ACCESS_PLATFORM always, and never a bit that
+%% changes the ring or the transport; it has the device confirm them, installs every queue
+%% of the device and sets DRIVER_OK. Installing a queue forgets what was posted on it,
+%% returns its buffers to its pool and zeroes its rings, so no descriptor the device held
+%% before the reset is used again.
+%% `{ok, Accepted}` with the features the device runs with. `{error, enotsup}` for a device
+%% that is not virtio-mmio version 2, offers no VERSION_1 or refuses the features;
+%% `{error, ebusy}` when the device's status does not read 0 after the reset or it still
+%% has a queue ready; `{error, erange}` for a queue larger than the device offers. A
+%% failure after the reset leaves the device FAILED, and any failure every queue's post/4 and complete/2
+%% `{error, broken}` until a later negotiate/2 succeeds.
+-spec negotiate(device(), non_neg_integer()) -> {ok, non_neg_integer()} | {error, atom() | {status, integer()}}.
+negotiate(_Dev, _Wanted) ->
     erlang:nif_error(undef).
 
 %% Posts one request of 1 to 4 segments, every `out` before every `in`, laid end to end in
@@ -113,7 +122,7 @@ reset_done(_Dev) ->
 %% lengths. There is no buffer to take or fill first, so none is ever held and not posted.
 %% Tag, below 2^64, comes back with the completion. `{error, full}` when the queue has too
 %% few free descriptors, so the driver waits for completions; `{error, broken}` when the
-%% queue needs reset_done/1; badarg for segments longer than a buffer, empty or out of
+%% queue needs negotiate/2; badarg for segments longer than a buffer, empty or out of
 %% order.
 -spec post(device(), queue(), non_neg_integer(), [segment()]) ->
           ok | {error, full | broken}.
@@ -124,7 +133,7 @@ post(_Dev, _Queue, _Tag, _Segments) ->
 %% what the device wrote into the request's in segments, end to end, cut at the length it
 %% reported. One call copies at most 64 KiB and one buffer, so a driver calls again until it gets
 %% `{ok, []}`. A device's malformed entry breaks the queue: what came before it is
-%% returned, and the next call is `{error, broken}` until reset_done/1.
+%% returned, and the next call is `{error, broken}` until negotiate/2.
 -spec complete(device(), queue()) -> {ok, [{non_neg_integer(), binary()}]} | {error, broken}.
 complete(_Dev, _Queue) ->
     erlang:nif_error(undef).

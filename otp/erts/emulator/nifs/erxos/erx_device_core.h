@@ -67,11 +67,11 @@ erx_device_read_allowed(const erx_device_register_t *reg)
 	return (reg->access != ERX_DEVICE_WRITE_ONLY);
 }
 
-/* A word may set writable bits only, and only erx_device's own address function writes a device address. */
+/* A word may set writable bits only, and never of a register the NIF owns, which erx_device.c's own sequences write. */
 static inline bool
 erx_device_write_allowed(const erx_device_register_t *reg, uint64_t value)
 {
-	return (reg->access != ERX_DEVICE_READ_ONLY && !reg->holds_device_address && (value & ~reg->writable) == 0);
+	return (reg->access != ERX_DEVICE_READ_ONLY && !reg->owned_by_nif && (value & ~reg->writable) == 0);
 }
 
 static inline bool
@@ -105,7 +105,7 @@ erx_device_field_plan(const erx_device_register_t *reg, const erx_device_field_t
 	const erx_device_field_plan_t refused = { .op = ERX_DEVICE_FIELD_REFUSED };
 	erx_device_field_plan_t plan = { .op = ERX_DEVICE_FIELD_WRITE };
 
-	if (reg->holds_device_address || field->access == ERX_DEVICE_READ_ONLY || value > (field->mask >> field->shift))
+	if (reg->owned_by_nif || field->access == ERX_DEVICE_READ_ONLY || value > (field->mask >> field->shift))
 		return (refused);
 	plan.bits = value << field->shift;
 	if (field->clear)

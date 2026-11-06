@@ -42,7 +42,7 @@ of the carved file as it stands in the tree. The edits, all made by that script:
 * The upstream states access on fields only. Each register gets the weakest
   access that admits all its fields: read-only if every field is, otherwise
   read-write. Fields are listed from the lowest bit up.
-* `holdsDeviceAddress` is `false` on every register, the mark the profile
+* `ownedByNif` is `false` on every register, the mark the profile
   requires.
 * Three registers differ from upstream on purpose, because the Arm manual (DDI
   0183G, sections 3.2 and 3.3) says so: `DR` carries `readAction` `modify`,
@@ -82,7 +82,7 @@ which is not redistributable and is not in the tree.
       "license": "BSD-3-Clause",
       "evidence": "file SPDX",
       "reviewed": false,
-      "sha256": "64d44cf45b7029536b91a6dfe10dc9361f4076a737ebc2b917f441d7a99e0e1c",
+      "sha256": "716a244fb04ab21f2a41c2af2074e600c32ca620bd70b9d360434273a43aa117",
       "kind": "file",
       "non_ascii_lines": []
     }

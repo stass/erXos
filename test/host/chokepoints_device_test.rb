@@ -41,4 +41,18 @@ class ChokepointsDeviceTest < Minitest::Test
       end
     end
   end
+
+  # Every owned register's generated name is caught outside erx_device.c, so a new mark in an
+  # SVD file is covered without an edit here, and the generated header that defines them passes.
+  def test_an_owned_register_named_outside_erx_device_fails
+    owned = [rule('device-owned-registers')]
+    plan = Erx::Hardware.output_plan(root: ROOT)
+    assert_empty evaluate(owned, { 'include/erx/hw/device_owned.h' => plan.fetch('include/erx/hw/device_owned.h') })
+    symbols = Erx::Hardware.devices(root: ROOT).flat_map { |device| Erx::Hardware.owned_symbols(device) }
+    assert_includes symbols, 'ERX_DEVICE_OWNED_VIRTIO_MMIO_STATUS'
+    symbols.each do |symbol|
+      refute_empty evaluate(owned, { 'otp/erts/emulator/nifs/erxos/erx_device_bif.c' => "x = #{symbol};\n" }), symbol
+      assert_empty evaluate(owned, { 'otp/erts/emulator/nifs/erxos/erx_device.c' => "x = #{symbol};\n" }), symbol
+    end
+  end
 end

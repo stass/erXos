@@ -14,6 +14,7 @@
 #endif
 
 #include "erx/hw/device_access.h"
+#include "erx/hw/device_owned.h"
 #include "liberx/backend/api.h"
 
 /* The rings are virtio's little-endian layouts, written and read through their own types. */
@@ -259,22 +260,36 @@ erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *irq)
 }
 
 /*
- * The queues. Each record is written whole by erx_device_queue_create and changes only under
- * the caller's serialisation. `ready` is true from an install to the next erx_device_reset_done:
- * a queue that is not ready is one the device may have forgotten, so nothing is posted on it
- * and nothing completed from it.
+ * The queues and the device's initialisation. Each queue record is written whole by
+ * erx_device_queue_create and changes only under the caller's serialisation. `ready` is true
+ * from the install at the end of a negotiation to the start of the next: a queue that is not
+ * ready is one the device may have forgotten, so nothing is posted on it and nothing
+ * completed from it.
  */
 typedef struct virtio_registers {
+	/* What the NIF reads and the driver may read too. */
 	const erx_device_register_t	*version;
-	const erx_device_register_t	*sel;
+	const erx_device_register_t	*device_features;
 	const erx_device_register_t	*num_max;
+	/* The registers the NIF owns (erx/hw/device_owned.h), which only this file writes. */
+	const erx_device_register_t	*status;
+	const erx_device_register_t	*device_features_sel;
+	const erx_device_register_t	*driver_features;
+	const erx_device_register_t	*driver_features_sel;
+	const erx_device_register_t	*sel;
 	const erx_device_register_t	*num;
 	const erx_device_register_t	*ready;
 	const erx_device_register_t	*notify;
-	/* The registers that hold a device address, low word then high word: write_address's alone. */
+	/* The rings' device addresses, low word then high word: write_address's alone. */
 	const erx_device_register_t	*desc[2];
 	const erx_device_register_t	*driver[2];
 	const erx_device_register_t	*device[2];
+	/* The status register's bits, from its fields in the table. */
+	uint64_t			acknowledge;
+	uint64_t			driver_bit;
+	uint64_t			features_ok;
+	uint64_t			driver_ok;
+	uint64_t			failed;
 } virtio_registers_t;
 
 typedef struct queue_record {
@@ -303,40 +318,75 @@ plain_register(const erx_device_t *device, const char *name)
 	    &peripheral->registers[found]);
 }
 
-static bool
-virtio_registers(const erx_device_t *device, virtio_registers_t *regs)
+/* A plain register's one access, at its own offset. */
+static uint64_t
+get(const erx_device_t *device, const erx_device_register_t *reg)
 {
-	static const char *const address_names[3][2] = { { "queue_desc_low", "queue_desc_high" },
-	    { "queue_driver_low", "queue_driver_high" }, { "queue_device_low", "queue_device_high" } };
-	const erx_device_register_t **const address_regs[3] = { regs->desc, regs->driver, regs->device };
-	bool found;
+	return (load(device, reg, reg->offset));
+}
 
-	regs->version = plain_register(device, "version");
-	regs->sel = plain_register(device, "queue_sel");
-	regs->num_max = plain_register(device, "queue_num_max");
-	regs->num = plain_register(device, "queue_num");
-	regs->ready = plain_register(device, "queue_ready");
-	regs->notify = plain_register(device, "queue_notify");
-	found = regs->version != NULL && regs->sel != NULL && regs->num_max != NULL && regs->num != NULL &&
-	    regs->ready != NULL && regs->notify != NULL;
-	for (uint32_t ring = 0; ring < 3; ring++) {
-		for (uint32_t word = 0; word < 2; word++) {
-			address_regs[ring][word] = plain_register(device, address_names[ring][word]);
-			found = found && address_regs[ring][word] != NULL && address_regs[ring][word]->holds_device_address;
-		}
-	}
-	return (found);
+static void
+put(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
+{
+	store(device, reg, reg->offset, value);
+}
+
+/* A field's mask in the status register, by its table name, or 0 for none. */
+static uint64_t
+status_bit(const erx_device_peripheral_t *virtio, const erx_device_register_t *status, const char *name)
+{
+	const uint32_t found = erx_device_field_named(virtio, status, name);
+
+	return (found == status->field_count ? 0 : virtio->fields[status->first_field + found].mask);
 }
 
 /*
- * The one function that writes a register the SVD source marks as holding a device address,
- * from an address erx_mem_dma_addr gave for memory of a queue.
+ * The registers of a virtio-mmio device: those the NIF only reads by name, and those it owns
+ * by their generated index in the table, which is virtio_mmio's because the device's
+ * peripheral is. False for any other peripheral.
  */
+static bool
+virtio_registers(const erx_device_t *device, virtio_registers_t *regs)
+{
+	const erx_device_peripheral_t *const virtio = erx_device_peripheral_find("virtio_mmio", sizeof("virtio_mmio") - 1);
+	const erx_device_register_t *owned;
+
+	if (virtio == NULL || device->peripheral != virtio)
+		return (false);
+	owned = virtio->registers;
+	regs->version = plain_register(device, "version");
+	regs->device_features = plain_register(device, "device_features");
+	regs->num_max = plain_register(device, "queue_num_max");
+	regs->status = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_STATUS];
+	regs->device_features_sel = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_DEVICE_FEATURES_SEL];
+	regs->driver_features = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_DRIVER_FEATURES];
+	regs->driver_features_sel = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_DRIVER_FEATURES_SEL];
+	regs->sel = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_SEL];
+	regs->num = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_NUM];
+	regs->ready = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_READY];
+	regs->notify = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_NOTIFY];
+	regs->desc[0] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DESC_LOW];
+	regs->desc[1] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DESC_HIGH];
+	regs->driver[0] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DRIVER_LOW];
+	regs->driver[1] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DRIVER_HIGH];
+	regs->device[0] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DEVICE_LOW];
+	regs->device[1] = &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_QUEUE_DEVICE_HIGH];
+	regs->acknowledge = status_bit(virtio, regs->status, "acknowledge");
+	regs->driver_bit = status_bit(virtio, regs->status, "driver");
+	regs->features_ok = status_bit(virtio, regs->status, "features_ok");
+	regs->driver_ok = status_bit(virtio, regs->status, "driver_ok");
+	regs->failed = status_bit(virtio, regs->status, "failed");
+	return (regs->version != NULL && regs->device_features != NULL && regs->num_max != NULL &&
+	    regs->acknowledge != 0 && regs->driver_bit != 0 && regs->features_ok != 0 && regs->driver_ok != 0 &&
+	    regs->failed != 0);
+}
+
+/* The one function that writes a ring's device address, one erx_mem_dma_addr gave for memory of a queue. */
 static void
 write_address(const erx_device_t *device, const erx_device_register_t *const words[2], uint64_t addr)
 {
-	store(device, words[0], words[0]->offset, addr & UINT32_MAX);
-	store(device, words[1], words[1]->offset, addr >> 32);
+	put(device, words[0], addr & UINT32_MAX);
+	put(device, words[1], addr >> 32);
 }
 
 /* Contiguous memory of at least `size` bytes, mapped here, and its object. */
@@ -407,7 +457,7 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	record = &queues[queues_open];
 	memset(record, 0, sizeof(*record));
 	if (!virtio_registers(device, &record->regs) ||
-	    load(device, record->regs.version, record->regs.version->offset) != ERX_VIRTIO_MMIO_VERSION)
+	    get(device, record->regs.version) != ERX_VIRTIO_MMIO_VERSION)
 		return (ERX_ENOTSUP);
 	record->device = device;
 	record->index = index;
@@ -420,8 +470,8 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 }
 
 /*
- * The reset plan's checks for one queue: the device has let it go and can take its size.
- * They write only the selector, so a refusal changes nothing of any queue.
+ * The install's checks for one queue: the device has let it go, as a reset makes it, and can
+ * take its size. They write only the selector, so a refusal changes nothing of any queue.
  */
 static int
 install_check(const queue_record_t *record)
@@ -429,44 +479,40 @@ install_check(const queue_record_t *record)
 	const erx_device_t *const device = record->device;
 	const virtio_registers_t *const regs = &record->regs;
 
-	store(device, regs->sel, regs->sel->offset, record->index);
-	if (load(device, regs->ready, regs->ready->offset) != 0)
+	put(device, regs->sel, record->index);
+	if (get(device, regs->ready) != 0)
 		return (ERX_EBUSY);
-	if (load(device, regs->num_max, regs->num_max->offset) < record->core.size)
+	if (get(device, regs->num_max) < record->core.size)
 		return (ERX_ERANGE);
 	return (ERX_OK);
 }
 
-/* The reset plan's effects for one queue, which cannot fail: forget, zero, then size, addresses and ready. */
+/* The install's effects for one queue, which cannot fail: forget, zero, then size, addresses and ready. */
 static void
 install_apply(queue_record_t *record)
 {
 	const erx_device_t *const device = record->device;
 	const virtio_registers_t *const regs = &record->regs;
 
-	store(device, regs->sel, regs->sel->offset, record->index);
+	put(device, regs->sel, record->index);
 	erx_device_queue_reset(&record->core);
 	/* The device has let the queue go, so nothing else reaches the rings now. */
 	memset((void *)(uintptr_t)record->rings, 0, record->layout.bytes);
-	store(device, regs->num, regs->num->offset, record->core.size);
+	put(device, regs->num, record->core.size);
 	write_address(device, regs->desc, record->ring_addrs[0]);
 	write_address(device, regs->driver, record->ring_addrs[1]);
 	write_address(device, regs->device, record->ring_addrs[2]);
 	atomic_thread_fence(memory_order_seq_cst);
-	store(device, regs->ready, regs->ready->offset, 1);
+	put(device, regs->ready, 1);
 	record->ready = true;
 }
 
-/* Every queue of the device is checked before any is changed, so the plan applies whole or not at all. */
-int
-erx_device_reset_done(const erx_device_t *device)
+/* Every queue of the device is checked before any is changed, so the install applies whole or not at all. */
+static int
+install_queues(const erx_device_t *device)
 {
 	int status = ERX_OK;
 
-	for (uint32_t open = 0; open < queues_open; open++) {
-		if (queues[open].device == device)
-			queues[open].ready = false;
-	}
 	for (uint32_t open = 0; status == ERX_OK && open < queues_open; open++) {
 		if (queues[open].device == device)
 			status = install_check(&queues[open]);
@@ -476,6 +522,75 @@ erx_device_reset_done(const erx_device_t *device)
 			install_apply(&queues[open]);
 	}
 	return (status);
+}
+
+/* The 64 feature bits the device offers, low word then high. */
+static uint64_t
+offered_features(const erx_device_t *device, const virtio_registers_t *regs)
+{
+	uint64_t words[2];
+
+	for (uint32_t word = 0; word < 2; word++) {
+		put(device, regs->device_features_sel, word);
+		words[word] = get(device, regs->device_features) & UINT32_MAX;
+	}
+	return (words[0] | words[1] << 32);
+}
+
+static void
+accept_features(const erx_device_t *device, const virtio_registers_t *regs, uint64_t accepted)
+{
+	for (uint32_t word = 0; word < 2; word++) {
+		put(device, regs->driver_features_sel, word);
+		put(device, regs->driver_features, (accepted >> (32 * word)) & UINT32_MAX);
+	}
+}
+
+/*
+ * Virtio's initialisation, section 3.1.1, whole: the reset, ACKNOWLEDGE and DRIVER, the
+ * features, FEATURES_OK read back, every queue of the device installed, and DRIVER_OK. Every
+ * queue stops being ready before the reset, so nothing is posted while the device may still
+ * hold an old descriptor, and is ready again only after this reset. A step that fails sets
+ * FAILED, so the device stays unusable until the next negotiation resets it.
+ */
+int
+erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted)
+{
+	virtio_registers_t regs;
+	uint64_t device_status, taken;
+	int result = ERX_OK;
+
+	for (uint32_t open = 0; open < queues_open; open++) {
+		if (queues[open].device == device)
+			queues[open].ready = false;
+	}
+	if (!virtio_registers(device, &regs) || get(device, regs.version) != ERX_VIRTIO_MMIO_VERSION)
+		return (ERX_ENOTSUP);
+	put(device, regs.status, 0);
+	if (get(device, regs.status) != 0)
+		return (ERX_EBUSY);
+	device_status = regs.acknowledge;
+	put(device, regs.status, device_status);
+	device_status |= regs.driver_bit;
+	put(device, regs.status, device_status);
+	if (!erx_device_queue_features(wanted, offered_features(device, &regs), &taken))
+		result = ERX_ENOTSUP;
+	if (result == ERX_OK) {
+		accept_features(device, &regs, taken);
+		device_status |= regs.features_ok;
+		put(device, regs.status, device_status);
+		if ((get(device, regs.status) & regs.features_ok) == 0)
+			result = ERX_ENOTSUP;
+	}
+	if (result == ERX_OK)
+		result = install_queues(device);
+	if (result != ERX_OK) {
+		put(device, regs.status, device_status | regs.failed);
+		return (result);
+	}
+	put(device, regs.status, device_status | regs.driver_ok);
+	*accepted = taken;
+	return (ERX_OK);
 }
 
 static queue_record_t *
@@ -513,7 +628,7 @@ apply_post(const queue_record_t *record, const erx_device_piece_t *pieces, const
 	atomic_thread_fence(memory_order_release);
 	avail->idx = plan->avail_idx;
 	atomic_thread_fence(memory_order_seq_cst);
-	store(record->device, record->regs.notify, record->regs.notify->offset, record->index);
+	put(record->device, record->regs.notify, record->index);
 }
 
 int

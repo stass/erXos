@@ -117,21 +117,26 @@ typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length)
  * the pool at most ERX_MEM_CONTIGUOUS_MAX, else ERX_EINVAL. The same queue again is that queue
  * again, posted buffers and all, so a restarted driver finds it, and the same index with
  * another geometry is ERX_EBUSY. A device that is not virtio-mmio version 2 is ERX_ENOTSUP. A
- * new queue is not on the device until erx_device_reset_done installs it. A failure may leave
+ * new queue is not on the device until erx_device_negotiate installs it. A failure may leave
  * memory made, for the boot.
  */
 int	erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,
 	    uint32_t *queue);
 
 /*
- * The reset rule's last step, once the driver has reset the device and, at virtio's queue
- * setup step, before DRIVER_OK: every queue of the device forgets its chains, its buffers
- * return to its pool, its rings are zeroed, and the device takes it again. A queue the device
- * still has ready, as one never reset has, is ERX_EBUSY, and one larger than the device
- * offers ERX_ERANGE, each before anything of any queue changes. Until the device's queues
- * are installed again, post and complete on them are ERX_ECORRUPT.
+ * Virtio's initialisation, whole, and the reset rule with it: the NIF resets the device,
+ * reads the features it offers, accepts the ones erx_device_queue_features allows of those
+ * and of `wanted`, has the device confirm them with FEATURES_OK, installs every queue of the device
+ * and sets DRIVER_OK. Installing a queue forgets its chains, returns its buffers to its pool,
+ * zeroes its rings and gives the device its size, addresses and ready bit. ERX_OK with the
+ * accepted features. ERX_ENOTSUP for a device that is not virtio-mmio version 2, offers no
+ * VERSION_1 or refuses FEATURES_OK; ERX_EBUSY for a status that does not read 0 after the
+ * reset or a queue the device still has ready after it; ERX_ERANGE for a queue larger than
+ * the device offers. Every queue of the device stops being ready at the call's start, and a
+ * failure after the reset leaves the device FAILED and every queue's post and complete
+ * ERX_ECORRUPT until a later negotiation succeeds.
  */
-int	erx_device_reset_done(const erx_device_t *device);
+int	erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted);
 
 /*
  * Posts one chain: its pieces, readable before writable, laid end to end in a free buffer of

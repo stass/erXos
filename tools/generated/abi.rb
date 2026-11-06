@@ -13127,15 +13127,57 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "virtio_f_version_1_bit".b => Constant.new(
-            name: "virtio_f_version_1_bit".b,
-            value: 0,
+          "virtio_f_access_platform".b => Constant.new(
+            name: "virtio_f_access_platform".b,
+            value: 33,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "virtio_f_version_1_word".b => Constant.new(
-            name: "virtio_f_version_1_word".b,
-            value: 1,
+          "virtio_f_device_type_mask".b => Constant.new(
+            name: "virtio_f_device_type_mask".b,
+            value: 18445618173819486207,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "virtio_f_event_idx".b => Constant.new(
+            name: "virtio_f_event_idx".b,
+            value: 29,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_in_order".b => Constant.new(
+            name: "virtio_f_in_order".b,
+            value: 35,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_indirect_desc".b => Constant.new(
+            name: "virtio_f_indirect_desc".b,
+            value: 28,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_notification_data".b => Constant.new(
+            name: "virtio_f_notification_data".b,
+            value: 38,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_ring_packed".b => Constant.new(
+            name: "virtio_f_ring_packed".b,
+            value: 34,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_ring_reset".b => Constant.new(
+            name: "virtio_f_ring_reset".b,
+            value: 40,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_version_1".b => Constant.new(
+            name: "virtio_f_version_1".b,
+            value: 32,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

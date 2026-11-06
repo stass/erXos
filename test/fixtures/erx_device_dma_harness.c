@@ -4,11 +4,15 @@
  *
  * erx_device's queues on the host (test/host/erx_device_queue_test.rb): a virtio-mmio device
  * whose register window is plain memory and whose DMA addresses are this process's own, so
- * the harness plays the device. It reads the rings the NIF's effects wrote, writes into the
- * buffers and the used ring, and lies, and checks what erx_device_queue_create,
- * erx_device_reset_done, erx_device_post and erx_device_complete do with it: the reset plan
- * whole and in order, a post whole or not at all, each chain in its own buffer, and a broken
- * queue refused until the next reset.
+ * the harness plays the device. Its registers react as a device's do, through the access
+ * functions test/fixtures/device_model gives erx_device.c: a reset clears the status and the
+ * queue's ready bit, the feature words are banked by their selectors, and the device can
+ * refuse FEATURES_OK or a reset. The harness reads the rings the NIF's effects wrote, writes
+ * into the buffers and the used ring, and lies, and checks what erx_device_queue_create,
+ * erx_device_negotiate, erx_device_post and erx_device_complete do with it: the features
+ * masked to what the split ring serves, every failure leaving the device FAILED and the
+ * queue refused, the install whole and in order, a post whole or not at all, each chain in
+ * its own buffer, and a broken queue refused until the next negotiation.
  */
 
 #include <stdio.h>
@@ -116,13 +120,106 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 }
 
 /* The device's side of its registers, by the generated table's names. */
-static uint32_t *
-reg(const char *name)
+static uint64_t
+offset_of(const char *name)
 {
 	const uint32_t found = erx_device_register_named(virtio, name);
 
 	CHECK(found < virtio->register_count);
-	return ((uint32_t *)(void *)(window + virtio->registers[found].offset));
+	return (virtio->registers[found].offset);
+}
+
+static uint32_t *
+reg(const char *name)
+{
+	return ((uint32_t *)(void *)(window + offset_of(name)));
+}
+
+static uint32_t
+status_bit(const char *name)
+{
+	const erx_device_register_t *const status = &virtio->registers[erx_device_register_named(virtio, "status")];
+	const uint32_t found = erx_device_field_named(virtio, status, name);
+
+	CHECK(found < status->field_count);
+	return ((uint32_t)virtio->fields[status->first_field + found].mask);
+}
+
+/* What the device offers and does, and what it saw. */
+static struct {
+	uint64_t	offered;
+	bool		refuse_features;	/* FEATURES_OK does not stick */
+	bool		reset_sticks;		/* the status does not read 0 after a reset */
+	bool		ready_sticks;		/* a reset leaves the queue ready */
+	uint32_t	resets;
+	uint32_t	driver_features[2];
+} model;
+
+/*
+ * The device's reaction to a write, after the word lands in the window, and the order of
+ * section 3.1.1 checked at each step: the driver's features while ACKNOWLEDGE and DRIVER
+ * alone are set, a queue's setup between FEATURES_OK and DRIVER_OK, and DRIVER_OK only over
+ * an installed queue.
+ */
+static void
+device_write(uint64_t offset, uint32_t value)
+{
+	const uint32_t introduced = status_bit("acknowledge") | status_bit("driver");
+	const uint32_t features_ok = status_bit("features_ok");
+
+	if (offset == offset_of("status") && value == 0) {
+		model.resets++;
+		*reg("status") = model.reset_sticks ? status_bit("device_needs_reset") : 0;
+		if (!model.ready_sticks)
+			*reg("queue_ready") = 0;
+	} else if (offset == offset_of("status")) {
+		if (model.refuse_features)
+			*reg("status") = value & ~features_ok;
+		if ((value & status_bit("driver_ok")) != 0)
+			CHECK(*reg("queue_ready") == 1 && (value & status_bit("failed")) == 0);
+	} else if (offset == offset_of("queue_num") || offset == offset_of("queue_ready") ||
+	    offset == offset_of("queue_desc_low")) {
+		CHECK((*reg("status") & features_ok) != 0 && (*reg("status") & status_bit("driver_ok")) == 0);
+	} else if (offset == offset_of("device_features_sel")) {
+		*reg("device_features") = value < 2 ? (uint32_t)(model.offered >> (32 * value)) : 0;
+	} else if (offset == offset_of("driver_features")) {
+		CHECK(*reg("driver_features_sel") < 2 && *reg("status") == introduced);
+		model.driver_features[*reg("driver_features_sel")] = value;
+	}
+}
+
+uint32_t
+erx_device_access_load32(volatile uint8_t *at, uint64_t offset)
+{
+	CHECK(at == window && offset + 4 <= ERX_PAGE_SIZE);
+	return (*(volatile uint32_t *)(void *)(at + offset));
+}
+
+void
+erx_device_access_store32(volatile uint8_t *at, uint64_t offset, uint32_t value)
+{
+	CHECK(at == window && offset + 4 <= ERX_PAGE_SIZE);
+	*(volatile uint32_t *)(void *)(at + offset) = value;
+	device_write(offset, value);
+}
+
+/* virtio-mmio has no 64-bit register. */
+uint64_t
+erx_device_access_load64(volatile uint8_t *at, uint64_t offset)
+{
+	(void)at;
+	(void)offset;
+	CHECK(false);
+	return (0);
+}
+
+void
+erx_device_access_store64(volatile uint8_t *at, uint64_t offset, uint64_t value)
+{
+	(void)at;
+	(void)offset;
+	(void)value;
+	CHECK(false);
 }
 
 static uint64_t
@@ -206,6 +303,43 @@ open_virtio(void)
 	return (device);
 }
 
+/*
+ * The registers the NIF owns are these, and write/3's and write_field/4's C calls refuse
+ * each of them, for every field and any value, touching nothing of the device.
+ */
+static void
+check_owned(const erx_device_t *device)
+{
+	static const char *const owned[] = { "device_features_sel", "driver_features", "driver_features_sel", "queue_sel",
+	    "queue_num", "queue_ready", "queue_notify", "status", "queue_desc_low", "queue_desc_high", "queue_driver_low",
+	    "queue_driver_high", "queue_device_low", "queue_device_high" };
+	const erx_device_element_t plain = { .indexed = false };
+	uint8_t before[ERX_PAGE_SIZE];
+	uint32_t count = 0;
+
+	memcpy(before, window, sizeof(before));
+	for (uint32_t index = 0; index < virtio->register_count; index++) {
+		const erx_device_register_t *const reg = &virtio->registers[index];
+		const uint64_t values[] = { 0, 1, reg->writable };
+		bool listed = false;
+
+		for (uint32_t at = 0; at < sizeof(owned) / sizeof(owned[0]); at++)
+			listed = listed || strcmp(owned[at], reg->name) == 0;
+		CHECK(reg->owned_by_nif == listed);
+		if (!reg->owned_by_nif)
+			continue;
+		count++;
+		for (uint32_t at = 0; at < sizeof(values) / sizeof(values[0]); at++)
+			CHECK(!erx_device_write(device, reg, plain, values[at]));
+		for (uint32_t field = 0; field < reg->field_count; field++) {
+			CHECK(!erx_device_write_field(device, reg, plain, &virtio->fields[reg->first_field + field], 0));
+			CHECK(!erx_device_write_field(device, reg, plain, &virtio->fields[reg->first_field + field], 1));
+		}
+	}
+	CHECK(count == sizeof(owned) / sizeof(owned[0]));
+	CHECK(memcmp(before, window, sizeof(before)) == 0 && model.resets == 0);
+}
+
 static void
 check_create(const erx_device_t *device, uint32_t *queue)
 {
@@ -221,30 +355,88 @@ check_create(const erx_device_t *device, uint32_t *queue)
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, queue) == ERX_OK);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, &again) == ERX_OK && again == *queue);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE / 2, BUFFER_SIZE, &again) == ERX_EBUSY);
-	/* Nothing reaches the device before the reset installs the queue. */
+	/* Nothing reaches the device before a negotiation installs the queue. */
 	CHECK(*reg("queue_ready") == 0 && reg_address("queue_desc_low", "queue_desc_high") == 0);
 }
 
-/* The reset plan: refused whole while the device holds the queue, then rings zeroed, addresses, ready. */
-static rings_t
-check_reset(const erx_device_t *device, uint32_t queue)
+static uint64_t
+bit(uint32_t number)
+{
+	return (UINT64_C(1) << number);
+}
+
+/* A negotiation that fails after the reset leaves the device FAILED and nothing of the queue on it. */
+static void
+check_failed(const erx_device_t *device, uint32_t queue, int expected, bool failed)
 {
 	const erx_device_piece_t one = { .device_writes = true, .length = 1 };
+	const uint32_t resets = model.resets;
+	uint64_t accepted = 0;
+	uint32_t count;
+
+	CHECK(erx_device_negotiate(device, ~UINT64_C(0), &accepted) == expected && accepted == 0);
+	CHECK(model.resets == resets + 1);
+	CHECK(((*reg("status") & status_bit("failed")) != 0) == failed);
+	CHECK((*reg("status") & status_bit("driver_ok")) == 0);
+	CHECK(*reg("queue_num") == 0 && reg_address("queue_desc_low", "queue_desc_high") == 0);
+	CHECK(erx_device_post(device, queue, 1, &one, 1) == ERX_ECORRUPT);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
+}
+
+/*
+ * Nothing is posted before a negotiation; each refusal leaves the queue off the device; then
+ * the features are masked, the rings zeroed, and the size, the addresses and ready written.
+ */
+static rings_t
+check_negotiate(const erx_device_t *device, uint32_t queue)
+{
+	static const uint32_t ring_bits[] = { ERX_VIRTIO_F_INDIRECT_DESC, ERX_VIRTIO_F_EVENT_IDX,
+	    ERX_VIRTIO_F_RING_PACKED, ERX_VIRTIO_F_IN_ORDER,
+	    ERX_VIRTIO_F_NOTIFICATION_DATA, ERX_VIRTIO_F_RING_RESET };
+	const erx_device_piece_t one = { .device_writes = true, .length = 1 };
+	const uint32_t running = status_bit("acknowledge") | status_bit("driver") | status_bit("features_ok") |
+	    status_bit("driver_ok");
 	erx_device_queue_layout_t layout;
+	uint64_t accepted;
 	rings_t rings;
 	uint32_t count;
 
 	CHECK(erx_device_post(device, queue, 1, &one, 1) == ERX_ECORRUPT);
 	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
-	*reg("queue_ready") = 1;
-	CHECK(erx_device_reset_done(device) == ERX_EBUSY);
-	CHECK(*reg("queue_num") == 0 && reg_address("queue_desc_low", "queue_desc_high") == 0);
-	*reg("queue_ready") = 0;
-	*reg("queue_num_max") = QUEUE_SIZE / 2;
-	CHECK(erx_device_reset_done(device) == ERX_ERANGE);
-	CHECK(*reg("queue_num") == 0 && *reg("queue_ready") == 0);
 	*reg("queue_num_max") = 256;
-	CHECK(erx_device_reset_done(device) == ERX_OK);
+	model.offered = ~UINT64_C(0) & ~bit(ERX_VIRTIO_F_VERSION_1);
+	check_failed(device, queue, ERX_ENOTSUP, true);
+	model.offered = ~UINT64_C(0);
+	model.refuse_features = true;
+	check_failed(device, queue, ERX_ENOTSUP, true);
+	model.refuse_features = false;
+	model.reset_sticks = true;
+	check_failed(device, queue, ERX_EBUSY, false);
+	CHECK(*reg("status") == status_bit("device_needs_reset"));
+	model.reset_sticks = false;
+	*reg("queue_num_max") = QUEUE_SIZE / 2;
+	check_failed(device, queue, ERX_ERANGE, true);
+	*reg("queue_num_max") = 256;
+	*reg("queue_ready") = 1;
+	model.ready_sticks = true;
+	check_failed(device, queue, ERX_EBUSY, true);
+	model.ready_sticks = false;
+
+	/* Of all 64 bits, the device type's, VERSION_1 and ACCESS_PLATFORM, and no bit of the ring or the transport. */
+	const uint64_t always = bit(ERX_VIRTIO_F_VERSION_1) | bit(ERX_VIRTIO_F_ACCESS_PLATFORM);
+	CHECK(erx_device_negotiate(device, ~UINT64_C(0), &accepted) == ERX_OK);
+	CHECK(accepted == (ERX_VIRTIO_F_DEVICE_TYPE_MASK | always));
+	for (uint32_t at = 0; at < sizeof(ring_bits) / sizeof(ring_bits[0]); at++)
+		CHECK((accepted & bit(ring_bits[at])) == 0);
+	CHECK(model.driver_features[0] == (uint32_t)accepted && model.driver_features[1] == (uint32_t)(accepted >> 32));
+	CHECK(*reg("status") == running);
+	/* VERSION_1 and an offered ACCESS_PLATFORM always, and only what the driver wants of the rest. */
+	CHECK(erx_device_negotiate(device, bit(3), &accepted) == ERX_OK && accepted == (bit(3) | always));
+	CHECK(erx_device_negotiate(device, 0, &accepted) == ERX_OK && accepted == always);
+	CHECK(model.driver_features[0] == 0 && model.driver_features[1] == 3);
+	model.offered = bit(ERX_VIRTIO_F_VERSION_1) | bit(3);
+	CHECK(erx_device_negotiate(device, ~UINT64_C(0), &accepted) == ERX_OK && accepted == model.offered);
+
 	CHECK(*reg("queue_sel") == 0 && *reg("queue_num") == QUEUE_SIZE && *reg("queue_ready") == 1);
 	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
 	rings = device_rings();
@@ -253,6 +445,15 @@ check_reset(const erx_device_t *device, uint32_t queue)
 	for (uint32_t at = 0; at < layout.bytes; at++)
 		CHECK(((uint8_t *)rings.desc)[at] == 0);
 	return (rings);
+}
+
+/* A negotiation with the device type's bits the harness wants; its result checked above. */
+static int
+negotiate(const erx_device_t *device)
+{
+	uint64_t accepted;
+
+	return (erx_device_negotiate(device, 0, &accepted));
 }
 
 /* A virtio-blk read: the header goes out, the device writes 512 bytes and a status. */
@@ -316,7 +517,7 @@ check_posts(const erx_device_t *device, uint32_t queue, const rings_t *rings)
 	CHECK(rings->avail->idx == (uint16_t)(idx + 2) && *reg("queue_notify") == 0xff);
 }
 
-/* A lying device breaks the queue until a reset, which gives every buffer back. */
+/* A lying device breaks the queue until a negotiation, whose reset gives every buffer back. */
 static void
 check_broken(const erx_device_t *device, uint32_t queue, rings_t *rings, uint16_t *seen)
 {
@@ -327,9 +528,11 @@ check_broken(const erx_device_t *device, uint32_t queue, rings_t *rings, uint16_
 	rings->used->idx++;
 	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
 	CHECK(erx_device_post(device, queue, 5, whole, 1) == ERX_ECORRUPT);
-	CHECK(erx_device_reset_done(device) == ERX_EBUSY);
-	*reg("queue_ready") = 0;
-	CHECK(erx_device_reset_done(device) == ERX_OK);
+	model.ready_sticks = true;
+	CHECK(negotiate(device) == ERX_EBUSY);
+	CHECK(erx_device_post(device, queue, 5, whole, 1) == ERX_ECORRUPT);
+	model.ready_sticks = false;
+	CHECK(negotiate(device) == ERX_OK);
 	*rings = device_rings();
 	*seen = 0;
 
@@ -355,8 +558,7 @@ check_broken(const erx_device_t *device, uint32_t queue, rings_t *rings, uint16_
 	sunk = 0;
 	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1 && sunk_lengths[0] == 3);
 	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
-	*reg("queue_ready") = 0;
-	CHECK(erx_device_reset_done(device) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
 	*rings = device_rings();
 	CHECK(erx_device_post(device, queue, 10, whole, 1) == ERX_OK);
 	rings->used->idx = 2;
@@ -373,8 +575,9 @@ main(void)
 
 	device = erx_device_get(open_virtio());
 	CHECK(device != NULL);
+	check_owned(device);
 	check_create(device, &queue);
-	rings = check_reset(device, queue);
+	rings = check_negotiate(device, queue);
 	check_read(device, queue, &rings, &seen);
 	check_posts(device, queue, &rings);
 	check_broken(device, queue, &rings, &seen);

@@ -4,7 +4,7 @@
  *
  * erx_device's NIF calls (docs/design-runtime.md, "The device NIF"): opening a
  * device, which interns its table's names as atoms for the BIFs, binding a line to the
- * calling process, and a device's queues: creating one, the reset rule's last step, posting a
+ * calling process, and a device's queues: creating one, the device's initialisation, posting a
  * chain and completing what the device returned. A binding is a resource monitoring that process: its exit unbinds the
  * line unless a later binding has moved it, so the late exit of a crashed driver never
  * undoes its successor's binding.
@@ -279,24 +279,29 @@ queue_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint(env, queue)));
 }
 
+/* negotiate(Dev, Wanted) */
 static ERL_NIF_TERM
-reset_done_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+negotiate_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
 	const erx_device_t *const device = device_of(env, argv[0]);
+	ErlNifUInt64 wanted;
+	uint64_t accepted;
 	int status;
 
 	(void)argc;
-	if (device == NULL)
+	if (device == NULL || !enif_get_uint64(env, argv[1], &wanted))
 		return (enif_make_badarg(env));
 	enif_mutex_lock(device_lock);
-	status = erx_device_reset_done(device);
+	status = erx_device_negotiate(device, wanted, &accepted);
 	enif_mutex_unlock(device_lock);
-	return (status == ERX_OK ? enif_make_atom(env, "ok") : status_error(env, status));
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint64(env, accepted)));
 }
 
 /*
- * One `{out, IoData}` or `{in, Length}`. An out piece's bytes stay valid for the call: they
- * are a binary of the call's terms, or one enif_inspect_iolist_as_binary made in its env.
+ * One `{out, Binary}` or `{in, Length}`. An out piece is a binary, never an iolist, so its
+ * size is known before anything is copied, and its bytes stay valid for the call as a term of it.
  */
 static bool
 decode_piece(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_piece_t *piece)
@@ -309,7 +314,7 @@ decode_piece(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_piece_t *piece)
 	if (!enif_get_tuple(env, term, &arity, &pair) || arity != 2)
 		return (false);
 	if (enif_is_identical(pair[0], enif_make_atom(env, "out"))) {
-		if (!enif_inspect_iolist_as_binary(env, pair[1], &bytes) || bytes.size > ERX_DEVICE_BUFFER_MAX)
+		if (!enif_inspect_binary(env, pair[1], &bytes) || bytes.size > ERX_DEVICE_BUFFER_MAX)
 			return (false);
 		*piece = (erx_device_piece_t){ .device_writes = false, .data = bytes.data, .length = (uint32_t)bytes.size };
 		return (true);
@@ -427,7 +432,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "open", 1, open_nif, 0 },
 	{ "irq_bind", 2, irq_bind_nif, 0 },
 	{ "queue_create", 4, queue_create_nif, 0 },
-	{ "reset_done", 1, reset_done_nif, 0 },
+	{ "negotiate", 2, negotiate_nif, 0 },
 	{ "post", 4, post_nif, 0 },
 	{ "complete", 2, complete_nif, 0 },
 #ifdef ERX_DEVICE_STAND_IN

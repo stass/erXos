@@ -12,7 +12,10 @@ CMSIS-SVD supplies peripheral register names, offsets, widths, access,
 fields and enumerated values. The input profile uses bounded XML with
 no document types, entities or external references. A register array is
 `NAME[%s]` with `dim` and `dimIncrement`. Each register carries the profile's
-one extension, `holdsDeviceAddress`, saying whether it holds a device address;
+one extension, `ownedByNif`, saying whether the device NIF owns it and writes it
+only in sequences of its own (a ring's base address, a queue's setup, the
+device's status and features); `erx/hw/device_owned.h` names each owned register
+by its index in the table, for `erx_device.c` alone;
 a register without it is refused. Unsupported inheritance or access-sequence
 extensions fail until their semantic consumer is implemented. Registers fit their address block and cannot
 overlap. Fields fit their register, cannot overlap, and every enumerated

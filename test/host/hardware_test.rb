@@ -57,14 +57,14 @@ class HardwareTest < Minitest::Test
     malformed.each { |bytes| assert_raises(Erx::Error) { Erx::Hardware.parse_svd(bytes) } }
   end
 
-  def test_a_register_without_its_device_address_mark_is_refused
-    missing = @source.sub('<holdsDeviceAddress>false</holdsDeviceAddress>', '')
+  def test_a_register_without_its_owned_mark_is_refused
+    missing = @source.sub('<ownedByNif>false</ownedByNif>', '')
     error = assert_raises(Erx::Error) { Erx::Hardware.parse_svd(missing) }
-    assert_match(/holdsDeviceAddress/, error.message)
-    assert_raises(Erx::Error) { Erx::Hardware.parse_svd(@source.sub('<holdsDeviceAddress>false<', '<holdsDeviceAddress>maybe<')) }
-    refute(Erx::Hardware.parse_svd(@source).registers.any?(&:holds_device_address))
-    marked = @source.sub('<holdsDeviceAddress>false<', '<holdsDeviceAddress>true<')
-    assert_includes Erx::Hardware.device_table_header([Erx::Hardware.parse_svd(marked)]), '.holds_device_address = true'
+    assert_match(/ownedByNif/, error.message)
+    assert_raises(Erx::Error) { Erx::Hardware.parse_svd(@source.sub('<ownedByNif>false<', '<ownedByNif>maybe<')) }
+    refute(Erx::Hardware.parse_svd(@source).registers.any?(&:owned_by_nif))
+    marked = @source.sub('<ownedByNif>false<', '<ownedByNif>true<')
+    assert_includes Erx::Hardware.device_table_header([Erx::Hardware.parse_svd(marked)]), '.owned_by_nif = true'
   end
 
   def test_a_register_array_is_checked_whole

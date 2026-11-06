@@ -219,9 +219,9 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made, a retry takes another mapping from the shared device
   window and finds the line `ERX_EBUSY`. A boot's devices are few and a failure is a misconfiguration; the record's cleanup comes with the device service.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the NIF does not yet refuse `post/4` after the exit of a
-  driver process that used the device until `reset_done/1` (`docs/design-runtime.md`, "The reset rule", R8); it needs the
-  device's record to monitor the processes that post, as a line's binding does. A restarted driver's sequence (reset,
-  `queue_create/4`, `reset_done/1`) does not depend on it.
+  driver process that used the device until `negotiate/2` (`docs/design-runtime.md`, "The reset rule", R8); it needs the
+  device's record to monitor the processes that post, as a line's binding does. A restarted driver's sequence
+  (`queue_create/4`, `negotiate/2`) does not depend on it.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: every device is taken as `dma-coherent`, with no cache
   maintenance, and the barriers before the available index and the doorbell are C11 fences (inner shareable on AArch64),
   enough for QEMU `virt`'s virtio-mmio. A non-coherent device, the Raspberry Pi's, needs the record's coherence flag
@@ -233,7 +233,11 @@ it; git history is the record of completed work.
   needs a region call of its own (made once, filled by rectangle, never posted) before the display driver.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
-* [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "only the one address function writes a marked register" and "no loop over device-written bytes in the NIF" have no check until pools and queues give them sites (M6); `write/3` and `write_field/4` refuse every marked register, so no site exists.
+* [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "no loop over device-written bytes in the NIF" and "within `erx_device.c` only `write_address` writes a ring's address register" have no check: the first holds as `erx_device_complete` copies with `memcpy` alone, the second by reading the file; a check needs a function-level site.
+* [Medium] `erlang/apps/erx/src/erx_device.erl`, queues: no Erlang-level test runs the NIF glue on a virtio stand-in: `negotiate/2` with a `Wanted` below 0 or from 2^64 is `badarg`, its `{ok, Accepted}` shape, `post/4` with an iolist `out` is `badarg`, and `write/3` and `write_field/4` of an owned register by atom are `badarg`. The C paths are covered by `test/fixtures/erx_device_dma_harness.c`; the pattern is `test/integration/runtime_device_test.rb`'s for the PL011.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `negotiate/2`: `device_features` and `queue_num_max` stay readable through `read/2` though their selectors are the NIF's, so such a read returns whichever word or queue the NIF selected last; and a driver learns the offered features and a queue's maximum only through a negotiation, so a multi-queue device (virtio-blk with `MQ`) needs two. Refuse reads of selector-banked registers and have `negotiate/2` return the offered set, or design a read-only probe.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `negotiate/2`: the reset is read back once, so a device that finishes its reset asynchronously gets `{error, ebusy}`; a short bounded poll would serve it.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the install zeroes the rings but not the pool, so a device that reports a used length beyond what it wrote returns an earlier request's bytes of the same driver; and the whole-plan install is tested with one queue only.
 * [Low] stopgap, `liberx/backend/fiasco/thread.c`: a join can return before the index and executor slot are
   free, since the clear comes before the recycle and the marker later still, so a `pthread_create` right after
   a join on a nearly full table gets a transient `ERX_ENOMEM`. musl's port would report `EAGAIN`.

@@ -14,14 +14,14 @@ module Erx
   module Hardware
     XmlNode = Struct.new(:name, :attributes, :text, :children, keyword_init: true)
     Field = Struct.new(:name, :offset, :width, :access, :clear, :values, keyword_init: true)
-    Register = Struct.new(:name, :offset, :width, :access, :read_action, :fields, :holds_device_address, :count, :stride,
+    Register = Struct.new(:name, :offset, :width, :access, :read_action, :fields, :owned_by_nif, :count, :stride,
                           keyword_init: true)
     Device = Struct.new(:name, :size, :registers, keyword_init: true)
     IDENTIFIER = /\A[A-Za-z][A-Za-z0-9_]*\z/
     ARRAY_NAME = /\A(.*)\[%s\]\z/
     ELEMENTS_MAX = 256
     # Headers the device table owns under include/erx/hw, so no peripheral may be named for one.
-    DEVICE_HEADERS = %w[device_types device_table device_access].freeze
+    DEVICE_HEADERS = %w[device_types device_table device_access device_owned].freeze
     CONTAINERS = %w[device peripherals peripheral addressBlock registers register fields field
                     enumeratedValues enumeratedValue].freeze
     module_function
@@ -179,14 +179,15 @@ module Erx
       end.sort_by(&:begin)
     end
 
-    # The mark erXos adds to the SVD profile: whether a register holds a device address, such
-    # as a ring's base, which only erx_device's address function may write. A register
-    # without it is refused, so no one adds a register without deciding.
-    def device_address_mark(node)
-      case text(node, 'holdsDeviceAddress', default: '')
+    # The mark erXos adds to the SVD profile: whether the device NIF owns a register, writing
+    # it only in sequences of its own (a ring's base address, a queue's setup, the device's
+    # status and features), so that write/3 and write_field/4 refuse it. A register without the
+    # mark is refused, so no one adds a register without deciding.
+    def owned_mark(node)
+      case text(node, 'ownedByNif', default: '')
       when 'true' then true
       when 'false' then false
-      else raise Error, 'SVD register lacks its holdsDeviceAddress mark'
+      else raise Error, 'SVD register lacks its ownedByNif mark'
       end
     end
 
@@ -210,7 +211,7 @@ module Erx
 
     def parse_register(node, default_width:, block_size:)
       known_elements(node, allowed: %w[name description addressOffset size access readAction fields
-                                       holdsDeviceAddress dim dimIncrement])
+                                       ownedByNif dim dimIncrement])
       width = number(text(node, 'size', default: default_width.to_s))
       raise Error, 'SVD access width must be 32 or 64 bits' unless [32, 64].include?(width)
       offset = number(text(node, 'addressOffset'), maximum: block_size)
@@ -240,7 +241,7 @@ module Erx
         raise Error, 'mixed SVD write semantics require an explicit access sequence'
       end
       Register.new(name: identifier(name), offset: offset, width: width, access: mode, read_action: action.freeze,
-                   fields: fields.freeze, holds_device_address: device_address_mark(node), count: count, stride: stride).freeze
+                   fields: fields.freeze, owned_by_nif: owned_mark(node), count: count, stride: stride).freeze
     end
 
     def parse_field(node, width:, register_access:)
@@ -297,6 +298,13 @@ module Erx
         accessors + fields
       end
       (["ERX_HW_#{device.name.upcase}_H"] + symbols).freeze
+    end
+
+    # The name device_owned_header gives a register the NIF owns, which erx_device.c uses.
+    def owned_symbol(device, register) = "ERX_DEVICE_OWNED_#{device.name.upcase}_#{register.name.upcase}"
+
+    def owned_symbols(device)
+      device.registers.select(&:owned_by_nif).map { |register| owned_symbol(device, register) }.freeze
     end
 
     def validate_symbols(device)
@@ -435,7 +443,7 @@ module Erx
         \tuint8_t\t\twindow;
         \tuint8_t\t\twidth;
         \tuint8_t\t\taccess;
-        \tbool\t\tholds_device_address;
+        \tbool\t\towned_by_nif;
         \tbool\t\tplain_update;
         } erx_device_register_t;
 
@@ -463,7 +471,7 @@ module Erx
       "\t{ .name = \"#{register.name.downcase}\", .writable = #{c_integer(writable_mask(register), width: register.width)}, " \
         ".offset = #{register.offset}, .count = #{register.count}, .stride = #{register.stride}, " \
         ".first_field = #{first_field}, .field_count = #{register.fields.size}, .window = 0, .width = #{register.width}, " \
-        ".access = #{ACCESS_NAMES.fetch(register.access)}, .holds_device_address = #{register.holds_device_address}, " \
+        ".access = #{ACCESS_NAMES.fetch(register.access)}, .owned_by_nif = #{register.owned_by_nif}, " \
         ".plain_update = #{plain_update?(register)} },"
     end
 
@@ -502,6 +510,23 @@ module Erx
       generated_header('ERX_HW_DEVICE_ACCESS_H', body, includes: ['<stdint.h>'])
     end
 
+    # Each owned register's index in its peripheral's table, for erx_device.c alone, which the
+    # chokepoint device-owned-registers keeps. What stops a write to an owned register is the
+    # refusal in write/3 and write_field/4 and that only erx_device.c holds the raw accessors;
+    # these names keep the NIF's own sequences readable and in one file.
+    def device_owned_header(devices)
+      body = devices.flat_map do |device|
+        owned = device.registers.each_with_index.select { |register, _| register.owned_by_nif }
+        next [] if owned.empty?
+
+        ["/* #{device.name.downcase} */",
+         *owned.map { |register, index| "#define #{owned_symbol(device, register)}\t#{index}u" }, '']
+      end
+      generated_header('ERX_HW_DEVICE_OWNED_H',
+                       ['/*', " * The registers the device NIF owns, each by its index in its peripheral's table:",
+                        ' * write/3 and write_field/4 refuse them, and only erx_device.c names them.', ' */', '', *body])
+    end
+
     # All parsing and rendering completes before the first output is written.
     # The directory is owned by this frontend, making orphan checks explicit.
     def output_plan(root:)
@@ -509,12 +534,14 @@ module Erx
       names = devices.map { |device| device.name.downcase }
       raise Error, 'SVD device names collide' unless names.uniq == names
       raise Error, 'SVD device is named for a device table header' unless (names & DEVICE_HEADERS).empty?
-      symbols = %w[ERX_MMIO_H erx_mmio erx_mmio_t] + devices.flat_map { |device| generated_symbols(device) }
+      symbols = %w[ERX_MMIO_H erx_mmio erx_mmio_t] +
+                devices.flat_map { |device| generated_symbols(device) + owned_symbols(device) }
       raise Error, 'SVD combined C symbols collide' unless symbols.uniq == symbols
       tables = { 'include/erx/mmio.h' => mmio_header.freeze,
                  'include/erx/hw/device_types.h' => device_types_header(devices).freeze,
                  'include/erx/hw/device_table.h' => device_table_header(devices).freeze,
-                 'include/erx/hw/device_access.h' => device_access_header.freeze }
+                 'include/erx/hw/device_access.h' => device_access_header.freeze,
+                 'include/erx/hw/device_owned.h' => device_owned_header(devices).freeze }
       devices.each_with_object(tables) do |device, files|
         files[device_header_path(device)] = device_header(device).freeze
       end.freeze

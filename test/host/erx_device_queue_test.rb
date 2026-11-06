@@ -25,16 +25,19 @@ class ErxDeviceQueueTest < Minitest::Test
 
   def test_queues_on_a_device
     output = run_harness(File.join(ROOT, 'test/fixtures/erx_device_dma_harness.c'), CORE,
-                         File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'))
+                         File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'),
+                         includes: [File.join(ROOT, 'test/fixtures/device_model')])
     assert_match(/^erx_device_dma done$/, output)
   end
 
   private
 
-  def run_harness(*sources)
+  # Directories in includes come first, so the DMA harness's device model replaces the
+  # generated register accesses.
+  def run_harness(*sources, includes: [])
     Dir.mktmpdir('erx-device-queue-') do |directory|
       binary = File.join(directory, 'harness')
-      output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', NIFS,
+      output, status = Open3.capture2e(COMPILER, *FLAGS, *includes.flat_map { |dir| ['-I', dir] }, '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', NIFS,
                                        *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')

@@ -123,6 +123,15 @@ typedef struct erx_device_completion {
 	erx_device_segment_t	ranges[ERX_DEVICE_CHAIN_MAX];
 } erx_device_completion_t;
 
+/*
+ * The features a negotiation accepts of those the driver wants and the device offers: the
+ * device type's own bits the driver wants; VERSION_1, which this core's split ring of
+ * version 1 needs; ACCESS_PLATFORM whenever the device offers it, since every address the
+ * NIF gives is the device's own view of memory; and never a bit that changes the ring or
+ * the transport (abi/formats/virtio.txt). False for a device that does not offer VERSION_1.
+ */
+bool	erx_device_queue_features(uint64_t wanted, uint64_t offered, uint64_t *accepted);
+
 /* False for a size that is not a power of two from 1 to ERX_DEVICE_QUEUE_SIZE_MAX. */
 bool	erx_device_queue_layout(uint32_t size, erx_device_queue_layout_t *layout);
 

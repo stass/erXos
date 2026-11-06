@@ -133,7 +133,7 @@ check_field_value(const erx_device_register_t *reg, const erx_device_field_t *fi
 	const erx_device_field_plan_t plan = erx_device_field_plan(reg, field, value);
 	const uint64_t words[] = { 0, UINT64_MAX & width_mask(reg), reg->writable };
 
-	if (value > limit || reg->holds_device_address || field->access == ERX_DEVICE_READ_ONLY) {
+	if (value > limit || reg->owned_by_nif || field->access == ERX_DEVICE_READ_ONLY) {
 		CHECK(plan.op == ERX_DEVICE_FIELD_REFUSED);
 		return;
 	}
@@ -151,7 +151,7 @@ check_field_value(const erx_device_register_t *reg, const erx_device_field_t *fi
 
 		CHECK(erx_device_field_get(field, word) == value);
 		CHECK((word & ~reg->writable) == 0);
-		CHECK(erx_device_write_allowed(reg, word) || reg->holds_device_address);
+		CHECK(erx_device_write_allowed(reg, word) || reg->owned_by_nif);
 	}
 }
 
@@ -187,7 +187,7 @@ check_every_entry(const erx_device_peripheral_t *peripheral)
 		CHECK(reg->offset + (uint64_t)(reg->count - 1) * reg->stride + reg->width / 8 <= peripheral->window_size);
 		CHECK(erx_device_read_allowed(reg) == (reg->access != ERX_DEVICE_WRITE_ONLY));
 		CHECK(!erx_device_write_allowed(reg, reg->writable) ==
-		    (reg->access == ERX_DEVICE_READ_ONLY || reg->holds_device_address));
+		    (reg->access == ERX_DEVICE_READ_ONLY || reg->owned_by_nif));
 		if (reg->writable != UINT64_MAX)
 			CHECK(!erx_device_write_allowed(reg, ~reg->writable));
 		CHECK(erx_device_element_offset(reg, reg->count > 1, 0, &ignored));
@@ -361,7 +361,7 @@ check_peripheral(const erx_device_peripheral_t *uart, const erx_device_t *device
 	CHECK(imsc->offset == 0x38 && dr->offset == 0 && fr->offset == 0x18 && icr->offset == 0x44);
 	CHECK(erx_device_register_named(uart, "imsc") < uart->register_count);
 	for (uint32_t index = 0; index < uart->register_count; index++)
-		CHECK(!uart->registers[index].holds_device_address);
+		CHECK(!uart->registers[index].owned_by_nif);
 
 	/* A field's update reads the word back and keeps its neighbours, at the register's own offset. */
 	CHECK(erx_device_write_field(device, imsc, plain, rxim, 1) && erx_device_write_field(device, imsc, plain, rtim, 1));
@@ -426,7 +426,7 @@ check_peripheral(const erx_device_peripheral_t *fixture, const erx_device_t *dev
 	CHECK(!erx_device_write(device, slot, element, 0x5f));
 
 	/* A device address is readable, and no one writes it through this interface. */
-	CHECK(ring->holds_device_address && erx_device_read_allowed(ring));
+	CHECK(ring->owned_by_nif && erx_device_read_allowed(ring));
 	CHECK(!erx_device_write(device, ring, plain, 0x1000) && *(uint64_t *)(void *)&window_memory[0][0x80] == 0);
 	CHECK(!erx_device_write_allowed(ring, 0x1000) && !erx_device_write_allowed(ring, 0));
 	CHECK(erx_device_field_plan(ring, field_of(fixture, ring, "address"), 0x1000).op == ERX_DEVICE_FIELD_REFUSED);

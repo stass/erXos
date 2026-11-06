@@ -121,7 +121,7 @@ module Erx
     def render(register)
       read_action = register.read_action ? "<readAction>#{register.read_action}</readAction>" : ''
       lines = ['<register>',
-               "  <name>#{register.name}</name><holdsDeviceAddress>false</holdsDeviceAddress>",
+               "  <name>#{register.name}</name><ownedByNif>false</ownedByNif>",
                "  <description>#{escape(register.description)}</description>",
                "  <addressOffset>0x#{register.offset.to_s(16)}</addressOffset><access>#{register.access}</access>#{read_action}",
                '  <fields>',

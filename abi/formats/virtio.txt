@@ -7,8 +7,22 @@
 limit virtio_mmio_magic u32 0x74726976
 limit virtio_mmio_version u32 2
 limit virtio_id_block u32 2
-limit virtio_f_version_1_word u32 1
-limit virtio_f_version_1_bit u32 0
+# Feature bits, by number below 64. erx_device accepts what the device type defines (bits
+# 0 to 23 and 50 to 63) and, of the bits that extend the queues and the negotiation (24 to
+# 41) or are reserved (42 to 49), VERSION_1 and, whenever offered, ACCESS_PLATFORM, since
+# every address erx_device gives is the device's own view of memory (an I/O address behind
+# an IOMMU). Each other one changes the ring format or the transport (INDIRECT_DESC,
+# EVENT_IDX, RING_PACKED, IN_ORDER, NOTIFICATION_DATA and RING_RESET among them), and
+# erx_device drives the split ring of section 2.7 alone.
+limit virtio_f_device_type_mask u64 0xfffc000000ffffff
+limit virtio_f_indirect_desc u32 28
+limit virtio_f_event_idx u32 29
+limit virtio_f_version_1 u32 32
+limit virtio_f_access_platform u32 33
+limit virtio_f_ring_packed u32 34
+limit virtio_f_in_order u32 35
+limit virtio_f_notification_data u32 38
+limit virtio_f_ring_reset u32 40
 limit virtq_size_max u32 32768
 limit virtq_desc_table_align u32 16
 limit virtq_avail_ring_align u32 2

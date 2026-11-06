@@ -35,7 +35,7 @@ typedef struct erx_device_register {
 	uint8_t		window;
 	uint8_t		width;
 	uint8_t		access;
-	bool		holds_device_address;
+	bool		owned_by_nif;
 	bool		plain_update;
 } erx_device_register_t;
 

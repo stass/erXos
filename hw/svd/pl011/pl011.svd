@@ -19,7 +19,7 @@
       <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
       <registers>
         <register>
-          <name>DR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>DR</name><ownedByNif>false</ownedByNif>
           <description>Data Register, UARTDR</description>
           <addressOffset>0x0</addressOffset><access>read-write</access><readAction>modify</readAction>
           <fields>
@@ -31,7 +31,7 @@
           </fields>
         </register>
         <register>
-          <name>RSR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>RSR</name><ownedByNif>false</ownedByNif>
           <description>Receive Status Register/Error Clear Register, UARTRSR/UARTECR</description>
           <addressOffset>0x4</addressOffset><access>read-write</access>
           <fields>
@@ -42,7 +42,7 @@
           </fields>
         </register>
         <register>
-          <name>FR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>FR</name><ownedByNif>false</ownedByNif>
           <description>Flag Register, UARTFR</description>
           <addressOffset>0x18</addressOffset><access>read-only</access>
           <fields>
@@ -58,7 +58,7 @@
           </fields>
         </register>
         <register>
-          <name>ILPR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>ILPR</name><ownedByNif>false</ownedByNif>
           <description>IrDA Low-Power Counter Register, UARTILPR</description>
           <addressOffset>0x20</addressOffset><access>read-write</access>
           <fields>
@@ -66,7 +66,7 @@
           </fields>
         </register>
         <register>
-          <name>IBRD</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>IBRD</name><ownedByNif>false</ownedByNif>
           <description>Integer Baud Rate Register, UARTIBRD</description>
           <addressOffset>0x24</addressOffset><access>read-write</access>
           <fields>
@@ -74,7 +74,7 @@
           </fields>
         </register>
         <register>
-          <name>FBRD</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>FBRD</name><ownedByNif>false</ownedByNif>
           <description>Fractional Baud Rate Register, UARTFBRD</description>
           <addressOffset>0x28</addressOffset><access>read-write</access>
           <fields>
@@ -82,7 +82,7 @@
           </fields>
         </register>
         <register>
-          <name>LCR_H</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>LCR_H</name><ownedByNif>false</ownedByNif>
           <description>Line Control Register, UARTLCR_H</description>
           <addressOffset>0x2c</addressOffset><access>read-write</access>
           <fields>
@@ -96,7 +96,7 @@
           </fields>
         </register>
         <register>
-          <name>CR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>CR</name><ownedByNif>false</ownedByNif>
           <description>Control Register, UARTCR</description>
           <addressOffset>0x30</addressOffset><access>read-write</access>
           <fields>
@@ -115,7 +115,7 @@
           </fields>
         </register>
         <register>
-          <name>IFLS</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>IFLS</name><ownedByNif>false</ownedByNif>
           <description>Interrupt FIFO Level Select Register, UARTIFLS</description>
           <addressOffset>0x34</addressOffset><access>read-write</access>
           <fields>
@@ -124,7 +124,7 @@
           </fields>
         </register>
         <register>
-          <name>IMSC</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>IMSC</name><ownedByNif>false</ownedByNif>
           <description>Interrupt Mask Set/Clear Register, UARTIMSC</description>
           <addressOffset>0x38</addressOffset><access>read-write</access>
           <fields>
@@ -142,7 +142,7 @@
           </fields>
         </register>
         <register>
-          <name>RIS</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>RIS</name><ownedByNif>false</ownedByNif>
           <description>Raw Interrupt Status Register, UARTRIS</description>
           <addressOffset>0x3c</addressOffset><access>read-only</access>
           <fields>
@@ -160,7 +160,7 @@
           </fields>
         </register>
         <register>
-          <name>MIS</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>MIS</name><ownedByNif>false</ownedByNif>
           <description>Masked Interrupt Status Register, UARTMIS</description>
           <addressOffset>0x40</addressOffset><access>read-only</access>
           <fields>
@@ -178,7 +178,7 @@
           </fields>
         </register>
         <register>
-          <name>ICR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>ICR</name><ownedByNif>false</ownedByNif>
           <description>Interrupt Clear Register, UARTICR</description>
           <addressOffset>0x44</addressOffset><access>write-only</access>
           <fields>
@@ -196,7 +196,7 @@
           </fields>
         </register>
         <register>
-          <name>DMACR</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>DMACR</name><ownedByNif>false</ownedByNif>
           <description>DMA Control Register, UARTDMACR</description>
           <addressOffset>0x48</addressOffset><access>read-write</access>
           <fields>
@@ -206,7 +206,7 @@
           </fields>
         </register>
         <register>
-          <name>PERIPHID0</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PERIPHID0</name><ownedByNif>false</ownedByNif>
           <description>UARTPeriphID0 Register</description>
           <addressOffset>0xfe0</addressOffset><access>read-only</access>
           <fields>
@@ -214,7 +214,7 @@
           </fields>
         </register>
         <register>
-          <name>PERIPHID1</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PERIPHID1</name><ownedByNif>false</ownedByNif>
           <description>UARTPeriphID1 Register</description>
           <addressOffset>0xfe4</addressOffset><access>read-only</access>
           <fields>
@@ -223,7 +223,7 @@
           </fields>
         </register>
         <register>
-          <name>PERIPHID2</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PERIPHID2</name><ownedByNif>false</ownedByNif>
           <description>UARTPeriphID2 Register</description>
           <addressOffset>0xfe8</addressOffset><access>read-only</access>
           <fields>
@@ -232,7 +232,7 @@
           </fields>
         </register>
         <register>
-          <name>PERIPHID3</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PERIPHID3</name><ownedByNif>false</ownedByNif>
           <description>UARTPeriphID3 Register</description>
           <addressOffset>0xfec</addressOffset><access>read-only</access>
           <fields>
@@ -240,7 +240,7 @@
           </fields>
         </register>
         <register>
-          <name>PCELLID0</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PCELLID0</name><ownedByNif>false</ownedByNif>
           <description>UARTPCellID0 Register</description>
           <addressOffset>0xff0</addressOffset><access>read-only</access>
           <fields>
@@ -248,7 +248,7 @@
           </fields>
         </register>
         <register>
-          <name>PCELLID1</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PCELLID1</name><ownedByNif>false</ownedByNif>
           <description>UARTPCellID1 Register</description>
           <addressOffset>0xff4</addressOffset><access>read-only</access>
           <fields>
@@ -256,7 +256,7 @@
           </fields>
         </register>
         <register>
-          <name>PCELLID2</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PCELLID2</name><ownedByNif>false</ownedByNif>
           <description>UARTPCellID2 Register</description>
           <addressOffset>0xff8</addressOffset><access>read-only</access>
           <fields>
@@ -264,7 +264,7 @@
           </fields>
         </register>
         <register>
-          <name>PCELLID3</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>PCELLID3</name><ownedByNif>false</ownedByNif>
           <description>UARTPCellID3 Register</description>
           <addressOffset>0xffc</addressOffset><access>read-only</access>
           <fields>

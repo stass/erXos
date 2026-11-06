@@ -12,7 +12,7 @@
       <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
       <registers>
         <register>
-          <name>SLOT[%s]</name><holdsDeviceAddress>false</holdsDeviceAddress><dim>4</dim><dimIncrement>8</dimIncrement>
+          <name>SLOT[%s]</name><ownedByNif>false</ownedByNif><dim>4</dim><dimIncrement>8</dimIncrement>
           <addressOffset>0x40</addressOffset><access>read-write</access>
           <fields>
             <field><name>LOW</name><bitOffset>0</bitOffset><bitWidth>4</bitWidth></field>
@@ -21,35 +21,35 @@
           </fields>
         </register>
         <register>
-          <name>RING_BASE</name><holdsDeviceAddress>true</holdsDeviceAddress><size>64</size>
+          <name>RING_BASE</name><ownedByNif>true</ownedByNif><size>64</size>
           <addressOffset>0x80</addressOffset><access>read-write</access>
           <fields>
             <field><name>ADDRESS</name><bitOffset>0</bitOffset><bitWidth>64</bitWidth></field>
           </fields>
         </register>
         <register>
-          <name>WIDE</name><holdsDeviceAddress>false</holdsDeviceAddress><size>64</size>
+          <name>WIDE</name><ownedByNif>false</ownedByNif><size>64</size>
           <addressOffset>0x88</addressOffset><access>read-write</access>
           <fields>
             <field><name>ALL</name><bitOffset>0</bitOffset><bitWidth>64</bitWidth></field>
           </fields>
         </register>
         <register>
-          <name>DOORBELL</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>DOORBELL</name><ownedByNif>false</ownedByNif>
           <addressOffset>0x90</addressOffset><access>write-only</access>
           <fields>
             <field><name>QUEUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
           </fields>
         </register>
         <register>
-          <name>POP</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>POP</name><ownedByNif>false</ownedByNif>
           <addressOffset>0x94</addressOffset><access>read-write</access><readAction>clear</readAction>
           <fields>
             <field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
           </fields>
         </register>
         <register>
-          <name>STATUS</name><holdsDeviceAddress>false</holdsDeviceAddress>
+          <name>STATUS</name><ownedByNif>false</ownedByNif>
           <addressOffset>0x98</addressOffset><access>read-write</access>
           <fields>
             <field><name>PENDING</name><bitOffset>0</bitOffset><bitWidth>4</bitWidth>
