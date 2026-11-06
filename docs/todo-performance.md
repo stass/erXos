@@ -289,3 +289,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **One request in flight per window.** `erx_blk_window` answers one request at a time and waits on `erx_blk` for each,
   so a file system on one window has one request at the device while the queue holds several. Settled by
   `tools/erx bench` read throughput under HVF through one window against several clients of the device process.
+
+* **[Low] per-byte primitives, `erx_bytes:crc32c/2` runs the portable code only.** It
+  takes four bits per table step, two steps a byte, and does not use the CPU's CRC-32C
+  instructions that [the design](design-runtime.md#per-byte-primitives) puts behind the
+  architecture layer. Measure: a `tools/erx bench fs` read of an EROFS image that checks
+  its superblock and blocks, on HVF, against the same read with the call stubbed to a
+  constant. Fixes on the table: a byte-at-a-time table of 256 entries, slicing by eight,
+  then the AArch64 instructions chosen by feature detection in the architecture layer,
+  the portable code staying as their oracle in the same test.

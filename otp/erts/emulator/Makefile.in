@@ -1233,6 +1233,7 @@ LTTNG_OBJS = $(OBJDIR)/erlang_lttng.o
 NIF_OBJS = \
 	$(if $(findstring hosted,$(TARGET)),$(OBJDIR)/erx_stdio_nif.o) \
 	$(OBJDIR)/erx_watchdog_nif.o \
+	$(OBJDIR)/erx_bytes_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
 	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \
@@ -1266,6 +1267,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \
+	$(OBJDIR)/erx_crc32c.o \
 	$(OBJDIR)/erx_device_bif.o \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \
