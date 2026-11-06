@@ -1404,7 +1404,8 @@ Decisions taken with the owner:
    terminal windows. A window is never a secure line in a release build,
    so the system shell, which only a login at a secure line opens, is
    never connected there; a development manifest may mark windows
-   secure, its display domain being in the trusted base. A window
+   secure, its display domain being in that build's trusted base, and a
+   `root` login at such a window gets the system shell. A window
    without a login shows the shell of the session whose window token it
    presents, with that session's principal's authority.
 6. **The clipboard** is shared per display, as X does; the `snarf`

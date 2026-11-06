@@ -427,12 +427,17 @@ violation fails the build with the property, the record and the field:
    unconfined DMA device, a virtio-mmio one among them, since it parses
    what its clients and its input devices send; a violation names the
    device and this property, and a development manifest that gives it one
-   passes, with the display domain reported in the trusted base. No
-   `offer_line` facet, whatever domain holds it, has a `console_line`
-   that marks its terminal windows `secure`, so
+   passes, with the display domain reported in the trusted base. In
+   a release manifest no `offer_line` facet, whatever domain holds it,
+   has a `console_line` that marks its terminal windows `secure`, so
    the system shell opens only at a login at the UART or the host link,
    where the manifest marks them secure, as it does by default
-   ([design-live.md](design-live.md#the-console)). The manifest has no
+   ([design-live.md](design-live.md#the-console)); a release manifest
+   that marks a window secure fails with a diagnostic naming the display
+   and this property. A development manifest that marks a display's
+   windows secure passes, with the display domain reported in that
+   build's trusted base, and a `root` login at such a window gets the
+   system shell. The manifest has no
    partial boot.
    The packer sets the boot image's `ERX_PACK_UNCONFINED_DMA` exactly
    when the manifest gives an unconfined device.
@@ -788,8 +793,12 @@ advanced at boot and cleared at the two points that prove the boot good:
 the update service has the slot writer add one early in every boot, a
 trial boot included, as step 3 says,
 and set it to zero at an ordered end, before the storage services freeze,
-and at the first successful login, or in a development build when the
-console logs `root` in at the UART at boot. When the
+and at the first successful login at any line, typed or automatic: at
+the UART, the host link, a terminal window or the web, and in a
+development build the console's own logins of `root` at the UART at boot
+and at the host link's `console` line. A development build's automatic
+login comes early in every boot, so there rescue catches only a fault
+before the console's first login. When the
 count it read is past three, the system release boots its **rescue
 configuration**: the console, a login, and the domains the manifest marks
 for rescue, in the default manifests the devices domain, the storage

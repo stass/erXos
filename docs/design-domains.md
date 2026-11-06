@@ -204,7 +204,11 @@ Functional requirements:
    only from that domain's own runtime, by spawning, by handing out a name,
    or by an explicit export, and never grows in transit.
 9. **Inspection.** The system domain can inspect every domain; other domains
-   inspect what their facets allow ([design-live.md](design-live.md)).
+   inspect what their facets allow. A session inspects its principal's own
+   domains, except that in a development build `root`'s session inspects
+   every domain, as the host link does; in a release build machine-wide
+   inspection is the system shell's, at a secure line
+   ([design-live.md](design-live.md#inspection)).
 10. **Accounting.** Memory, CPU time, exports and queued frames are bounded
     per domain and charged to principals' budgets.
 11. **Native domains** take part in sends, links, monitors and exits without

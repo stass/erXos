@@ -812,7 +812,8 @@ deadline. An unordered end leaves no time to write, so the count is kept
 from the boot's side: the update service has the slot writer add one to
 it early in every boot, before the network domain or any user domain
 exists, and set it to zero at an ordered end and at the first successful
-login. A count past three when it is read makes the system release boot
+login at any line, typed or automatic, a development build's automatic
+logins of `root` at the UART and the host link included. A count past three when it is read makes the system release boot
 its rescue configuration, the console, a login and the services a login
 needs, with no user domain and no network
 ([design-system.md](design-system.md#boot)). The slot writer alone

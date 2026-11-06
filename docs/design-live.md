@@ -238,7 +238,7 @@ with it.
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
-| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line, and ends with that login; no session ever holds the facet, so no route into a session reaches the system shell ([Window tokens](#window-tokens)); every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; a release manifest that marks a terminal window secure fails the manifest check | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a principal holding the facet who logs in at a terminal window that is not secure gets no system shell; a lock and a log out at the UART end its system shell; the manifest check refuses a release manifest marking a window secure; a seeded console that grants the facet at a line that is not secure fails; the routes into a session are tested under [Window tokens](#window-tokens) |
+| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; no session ever holds the facet, so no route into a session reaches the system shell ([Window tokens](#window-tokens)); the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain; a release manifest that marks a terminal window secure fails the manifest check | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a principal holding the facet who logs in at a terminal window that is not secure gets no system shell; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read; the manifest check refuses a release manifest marking a window secure; a seeded console that grants the facet at a line that is not secure fails; the routes into a session are tested under [Window tokens](#window-tokens) |
 | **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login, or, at a window a window token opened, the principal of the session that asked for it; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again; a line gets a principal without a login only from a token the console minted for a session's own request, and every shell at it is then that principal's ([Window tokens](#window-tokens)). A terminal window thus carries its principal's authority, as a UNIX terminal does, and a compromised display domain has the authority of the shells in its windows and what any window system has, as an X11 or Wayland server does, and nothing beyond: no system shell, which a release build never connects at a window, no presence at the machine and nothing of a principal that neither uses the display nor types at it ([Window tokens](#window-tokens)) | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached; a shell without a login whose session the display chose | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails; the token tests are under [Window tokens](#window-tokens) |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
 | **V9.** Text labelled with its source is displayed only through the line escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records and the shell's records, and the host tool's printer; the kernel's log escapes on entry with its own ASCII class | a renderer that prints a name or a value raw; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
@@ -567,13 +567,15 @@ manifest ([design-system.md](design-system.md#the-manifest)), as UNIX's
 `/etc/ttys` marks the terminals where root may log in. A release
 manifest marks the UART and the host link secure by default and may
 clear either. The manifest check refuses a release manifest that marks a
-terminal window secure, so a display domain, which sees and can inject
+terminal window secure (property 9 of
+[design-system.md](design-system.md#the-manifest)), so a display domain, which sees and can inject
 every byte of its windows, never carries the system shell, which only a
 login at a secure line opens (**The system shell**, below;
 [design-display.md](design-display.md#security)). A development
 manifest may mark a display's windows secure, and each is then a secure
-line: a development build runs trusted code only, and its display domain
-is then in the trusted base. A development manifest marks the UART and
+line, where a `root` login gets the system shell: a development build
+runs trusted code only, and its display domain is then in that build's
+trusted base, which the manifest check reports. A development manifest marks the UART and
 the host link secure by default, and the console logs `root` in at both:
 at the UART at boot, and at the host link's `console` line when the host
 opens it, so each shows the system shell; a development manifest that
@@ -709,7 +711,8 @@ reads them with `erx_log_read` and writes each as a log line
   manifest names logs in at a secure line (in a development build
   `root`, and in a release build by default nobody), the console grants
   the facet to that login, holds it, and lends it only to the system
-  shell it starts at that line, whose calls present it to the inspector
+  shell it starts at that line and to that shell's `/proc` tree, whose
+  calls present it to the inspector
   for the records shown to the system shell alone; no session domain,
   terminal relay or session's facet table ever holds it. The system shell's tty
   lives in `erx_console` and is connected at that line alone, and its
@@ -1002,7 +1005,12 @@ its reporter:
   `unsupported`, a list cut at the page limit of 1,000 entries `partial`.
 
 **Scopes.** Queries arrive through an inspect facet whose scope is `all` or
-a list of domains. A path's owner is decided by construction: a process's
+a list of domains. A session's inspect facet has scope over its
+principal's own domains, with one exception: in a development build
+`root`'s session holds one of scope `all`, as the host link does
+([The host link](#the-host-link)). In a release build no session's facet
+has scope `all`, and machine-wide inspection is done in the system shell
+at a secure line. A path's owner is decided by construction: a process's
 domain is its pid's creation, a program's is the session under whose path
 it lies, and every other path names its domain or belongs to the machine.
 A scoped facet reaches only the paths its domains own: listings contain
@@ -1039,8 +1047,12 @@ holder of an inspect facet, with that facet's scope
 ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)). A
 domain mounts it at `/proc`, and a session's handler mounts it for a
 program the session gives it to, so `cat`, `ls` and `grep` read live
-state, and the tree grants nothing that `erx:i/1` with the same facet does
-not. Each `erx_procfs` is linked to the facet it serves, so revoking the
+state. The tree is a view of the inspector's tree and decides nothing
+itself: a read of a file is the inspector's query for the file's path
+through the facet the tree serves, rendered as text, and a path that
+answers `{error, scope}` reads as `enoent`, so the tree grants nothing
+that `erx:i/1` with the same facet does not, and each record has one gate
+for both forms by construction. Each `erx_procfs` is linked to the facet it serves, so revoking the
 facet ends the tree and every fid on it; like every file grant, the tree's
 grant acts for the domain it was made for
 ([design-files.md](design-files.md#narrowing-for-a-program)), so a session
@@ -1058,8 +1070,13 @@ until the facet ends.
   `/proc/domains/7/crash` the domain's last crash dump; the server fetches
   their pages from the inspector as reads reach them. `/proc/kernel/log`
   shows the kernel log's recent lines without consuming them, and
-  `/proc/kernel/crash` the last reset's crash record, only in a tree
-  served for the system-shell facet, which ends with the facet; the kernel's trace
+  `/proc/kernel/crash` is `[kernel, crash]`, the last reset's crash
+  record, rendered as a file: it answers only where that query does, in
+  the system shell's tree, and reads as `enoent` in every other tree.
+  The console starts the system shell's tree with that shell, over the
+  system domain's inspect facet and presenting the system-shell facet it
+  lends the shell; the tree is mounted only in the system shell's
+  namespace, is never given to a program, and ends with the login; the kernel's trace
   ring has no file, since only a tracer drains it ([Tracing](#tracing)).
 * **Names.** A name a domain reports, such as a module's or a program's,
   becomes an entry name through one injective encoding, which the same
@@ -1597,7 +1614,7 @@ cross, and the console copies the bytes without reading them; the shell
 runs with the target domain's authority, never the system domain's); the command
 shell and its programs ([design-shell.md](design-shell.md#security)); the
 `/proc` trees (one server per inspect facet, scope decided from the path
-alone, names encoded injectively, snapshots bounded per grant); the code
+and the facets the server presents alone, names encoded injectively, snapshots bounded per grant); the code
 store (blobs checked by hash before any loader reads them, each
 principal's hot store written only by the code service, overlays and
 stores read back from the data partition through a bounded, fuzzed
@@ -1625,8 +1642,10 @@ principal what another loaded.
 program's name among them, are what its domain claims; the record marks
 them. In development builds the host link holds every facet but the
 system-shell facet, `install` among them, and `root`'s logins at the UART and at the host link's
-`console` line hold the system-shell facet,
-which makes each as powerful as the system domain. Hot-loaded code in a
+`console` line and at a window the manifest marks secure hold the
+system-shell facet, which makes each as powerful as the system domain,
+and every `root` session inspects at scope `all`, wherever it logged in,
+the web included. Hot-loaded code in a
 domain has that domain's full authority, as OTP states for any loaded
 code. A persisted overlay is only as trustworthy as the data partition,
 and a compromised file system of that partition can run code in the
