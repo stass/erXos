@@ -119,6 +119,18 @@ module Erx
 
     def targets = (@targets ||= load_targets(__dir__))
 
+    # The command that builds target's fuzz program into program, public so a
+    # target's own test builds it as the gate does. Every program links the
+    # generated ABI reader, so its header's directory, include, comes with it
+    # whatever paths the target declares.
+    def compile_command(target, root:, compiler:, program:)
+      [compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
+       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
+       *[*target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] },
+       *[*target.sources, 'liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
+       File.join(root, "tools/fuzz/#{target.kind}_fuzz.c"), '-o', program]
+    end
+
     # The whole run's deadline, which allows every kind both in full.
     def deadline = targets.size * (COMPILE_DEADLINE + RUN_DEADLINE)
 
@@ -133,11 +145,7 @@ module Erx
           Dir.mkdir(corpus, 0o700)
           target.seeds.each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
           program = File.join(directory, "#{kind}-fuzz")
-          runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                      '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
-                      *target.includes.flat_map { |path| ['-I', File.join(root, path)] },
-                      *[*target.sources, 'liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
-                      File.join(root, "tools/fuzz/#{kind}_fuzz.c"), '-o', program],
+          runner.run(compile_command(target, root: root, compiler: compiler, program: program),
                      name: "compile-#{kind}-fuzz", deadline: COMPILE_DEADLINE)
           runner.run([program, "-runs=#{runs}", '-max_len=32768', '-timeout=5',
                       "-artifact_prefix=#{artifacts}/", corpus],

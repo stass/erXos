@@ -18,7 +18,6 @@ class ErxCrc32cTest < Minitest::Test
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   CORE = File.join(NIFS, 'erx_crc32c.c')
   HARNESS = File.join(ROOT, 'test/fixtures/erx_crc32c_harness.c')
-  FUZZ_ENTRY = File.join(ROOT, 'tools/fuzz/crc32c_fuzz.c')
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-fno-omit-frame-pointer',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
@@ -94,16 +93,19 @@ class ErxCrc32cTest < Minitest::Test
     output
   end
 
-  # Builds the libFuzzer entry over core and runs it once over the target's seeds.
+  # Builds the fuzz program with the gate's own command, core standing in for the
+  # target's source, and runs it once over the target's seeds.
   def run_fuzz(directory, target, core)
     corpus = File.join(directory, 'corpus')
     FileUtils.mkdir_p(corpus)
     target.seeds.each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
     program = File.join(directory, 'fuzz')
-    output, status = Open3.capture2e(COMPILER, '-std=c17', '-O1', '-g', '-fsanitize=fuzzer,address,undefined',
-                                     '-fno-sanitize-recover=undefined', '-I', NIFS, FUZZ_ENTRY, core, '-o', program,
-                                     stdin_data: '')
+    command = Erx::PackFuzz.compile_command(target, root: ROOT, compiler: COMPILER, program: program)
+    assert_includes command, CORE, 'the gate no longer builds the core this test substitutes'
+    command = command.map { |argument| argument == CORE ? core : argument }
+    output, status = Open3.capture2e(*command, stdin_data: '')
     assert status.success?, output
-    Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, program, '-runs=0', corpus, stdin_data: '', chdir: directory)
+    Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0', 'UBSAN_OPTIONS' => 'halt_on_error=1' }, program, '-runs=0', corpus,
+                    stdin_data: '', chdir: directory)
   end
 end
