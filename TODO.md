@@ -181,11 +181,6 @@ it; git history is the record of completed work.
   in the 160 MiB cap without `enospc`; kernel and emulator are
   untried. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
   reporter, on both sides) would bound it by the largest suite instead.
-* [Medium] `otp/lib/kernel/src/kernel.erl`, `docs/design-runtime.md` (kernel_sup table): `rex`, `global_name_server` and
-  `global_group` start only with a carrier, where stock starts them on every node, distributed or not; a local
-  `global:register_name` then fails with `noproc` (application_SUITE `failover`, `failover_comp`, `otp_2012`,
-  `script_start`, `ensure_started`, `ensure_all_started`, `otp_16504`). Decide whether this stays an explained
-  difference of the oracle's tables or whether `global` starts without a carrier, as stock's does.
 * [Medium] `tools/lib/erx/release_files.rb` (`OTP_APPLICATIONS`), `tools/lib/erx/native_runtime.rb`: the system
   release, hosted and native, ships `kernel` and `stdlib` only. `compiler` and `runtime_tools`, which design-runtime.md
   keeps, are built only by the hosted runtime and carried only by the oracle's hosted tree, so the target has the
@@ -210,9 +205,8 @@ it; git history is the record of completed work.
   with `einval`, with a regression test.
 * [Low] upstream, `otp/lib/stdlib/test/y2k_SUITE.erl`: `tz_next_date/1` returns its argument when local time equals UTC,
   so seven cases fail wherever the time zone is UTC, as erXos's is; stock passes only off UTC.
-* [Medium] `tools/erx oracle hosted`: OTP's emulator and kernel groups are wired but not yet compared: their tables
-  under `test/oracle/hosted_known_differences/` hold only file_SUITE's rows. Each group's run and classification is
-  its own package. Stock's wall-clock time for kernel on the development host: 5917 s.
+* [Medium] `tools/erx oracle hosted`: OTP's emulator group is wired but not yet compared: its table,
+  `test/oracle/hosted_known_differences/emulator.txt`, holds no rows. Its run and classification is its own package.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
