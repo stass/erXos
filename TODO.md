@@ -1091,16 +1091,6 @@ it; git history is the record of completed work.
   kernel capabilities pass as typed items. File access over 9P carries no
   such handle, its handles being 9P's fids
   ([design-live.md](docs/design-live.md#the-host-link)).
-* [High] shell, parse heap: parsing a 64 KiB source needs up to 32 MiB of
-  heap (64 KiB of `a|`; 24 MiB for `;`, `a ` or `x=y;`; measured on the
-  stock oracle emulator under `max_heap_size` with
-  `include_shared_binaries`), and the tree of 32,768 pipeline stages alone
-  outgrows the 4 MiB every evaluator gets, so a stage cannot parse every
-  source the parser must accept. Decide where a line or script is parsed
-  and with what heap: in the shell's own process, in a parse process
-  admitted against the stage allowance, or under a lower source bound. A
-  lazier token stream would roughly halve the need but not reach 4 MiB
-  ([design-shell.md](docs/design-shell.md#the-language)).
 * [Low] shell, parser choices to settle against plan9port's rc once its
   oracle runs: `|[a=b]` is read as descriptor a of the left command to b of
   the right one, which may be the reverse of rc's lex.c; an empty operand
@@ -1117,6 +1107,18 @@ to the corpus and follow rc
   budget, so a 128 MiB session admits one stage and `ps | where | sort`
   fails. Admit stages against their expected heap, or share the eighth
   among a pipeline's stages ([design-shell.md](docs/design-shell.md)).
+  The 8 MiB child each evaluator parses a unit in is admitted nowhere,
+  so SH2's claim that stages stay within the allowance leaves it out:
+  charge it with its evaluator or admit it against the allowance.
+* [Medium] shell, recovery after a refused unit: after `line too long`
+  `erx_shell_parse:next/2` resumes nothing it was handed, but the lines
+  of the unit that the terminal has not delivered yet (the rest of a
+  pasted `fn`, or of a line still being read) would run at the top
+  level, and after a syntax error inside a multi-line unit the lines
+  after the fault run, as in rc. Decide what the interactive loop
+  discards: the terminal's pending input, input up to a newline, or
+  input until the open constructs close
+  ([design-shell.md](docs/design-shell.md#the-language)).
 * [Medium] shell and programs, command domains: `system`, `popen` and
   every Erlang command a program starts begin a command domain, at an
   estimated 0.15 to 0.3 s each, and `wak`'s `system()` pays it per call.

@@ -5,16 +5,25 @@
 %% "Verification and testing"). Inputs come from four sources: soups of rc's
 %% token fragments and random bytes; mutations of valid scripts; nestings of
 %% every construct that counts as a level, mixed at random and each on its own,
-%% at a chosen number of levels near 256; and sources at and just over 64 KiB,
-%% among them 64 KiB runs of one fragment. Every input must parse or fail with a
-%% diagnostic, never raise. A diagnostic must name a line and column inside the
-%% source and say what is wrong in printable ASCII. A tree must have every node
-%% in the shape the parser's types give, must hold at most 256 levels, counted
-%% here by a walker of its own, and, printed back to rc's syntax by a printer
-%% of its own, must parse to itself. A nesting of N levels must parse to a tree
-%% of exactly N levels when N is at most 256 and fail with too_deep when it is
-%% more; a source of 65,536 bytes is read and one of 65,537 is too_long. The
-%% seed comes from make check-fuzz.
+%% at a chosen number of levels near 256, each within the bound on a unit; and
+%% units at and just over the 4,096-byte bound on one unit, among them runs of
+%% one fragment, and scripts many times longer. Each input is parsed as an
+%% evaluator parses a script, one unit at a time with next/2 from the rest the
+%% last one left, and each unit is parsed again as more input may follow.
+%% Every input must parse or fail with a diagnostic, never raise. A diagnostic
+%% must name a line and column inside the source and say what is wrong in
+%% printable ASCII, and the rest it leaves must start a line. A unit must end
+%% a line and hold at most 4,096 bytes with the newline it is read as having;
+%% too_long is right only when what is left holds more and its whole lines
+%% within the bound are an unfinished unit, so an input built within the bound
+%% is never too long. Parsed as more may follow, a unit gives the same result
+%% unless it reaches an unfinished last line, which is then incomplete. A tree
+%% must have every node in the shape the parser's types give, must hold at
+%% most 256 levels, counted here by a walker of its own, and each unit's,
+%% printed back to rc's syntax by a printer of its own, must parse to itself.
+%% A nesting of N levels must parse to a tree of exactly N levels when N is at
+%% most 256 and fail with too_deep when it is more. The seed comes from make
+%% check-fuzz.
 
 -module(erx_shell_parse_fuzz).
 -export([run/1]).
@@ -23,7 +32,7 @@
 -define(MUTATIONS, 150000).
 -define(MIXED, 3000).
 -define(MAX_LEVELS, 256).
--define(MAX_BYTES, 65536).
+-define(MAX_COMMAND, 4096).
 -define(IS_FD(F), (is_integer(F) andalso F >= 0 andalso F =< 16#7fffffff)).
 
 -define(FRAGMENTS,
@@ -139,33 +148,40 @@ openers() ->
      {list, name, <<"(">>, <<")">>, word},
      {var, name, <<"$">>, <<>>, name},
      {backquote, name, <<"`{">>, <<"}">>, command},
-{pipefd, name, <<">{">>, <<"}">>, command},
-{condition, command, <<"if(">>, <<") x">>, command},
-{for_in, command, <<"for(i in ">>, <<") x">>, word},
-{fn_names, command, <<"fn ">>, <<" {x}">>, word},
-{var_sub, word, <<"$x(">>, <<")">>, word}].
+     {pipefd, name, <<">{">>, <<"}">>, command},
+     {condition, command, <<"if(">>, <<") x">>, command},
+     {for_in, command, <<"for(i in ">>, <<") x">>, word},
+     {fn_names, command, <<"fn ">>, <<" {x}">>, word},
+     {var_sub, word, <<"$x(">>, <<")">>, word}].
 
 kinds() ->
     lists:usort([Kind || {Kind, _, _, _, _} <- openers()]).
 
 %% A source of N levels, N near 256 and now and then small, built mostly of
 %% the favoured kind when there is one, and what the parser must make of it.
+%% It fits the bound on a unit with the newline it is read as having, so its
+%% depth is what the parser checks: openers are chosen within a byte budget
+%% that always leaves two bytes a level, which an opener from every context
+%% fits in (`! `, `$`, `(...)`).
 mixed(Favoured) ->
     N = case rand:uniform(5) of
             1 -> rand:uniform(20);
             _ -> ?MAX_LEVELS - 3 + rand:uniform(5)
         end,
-    {Open, Close} = nest(N, Favoured, command, [], []),
+    {Open, Close} = nest(N, Favoured, command, [], [], ?MAX_COMMAND - 2),
     Source = iolist_to_binary([lists:reverse(Open), <<"x">>, Close]),
+    byte_size(Source) < ?MAX_COMMAND orelse fail(nesting_over_the_bound, Source, N),
     case N =< ?MAX_LEVELS of
         true -> {Source, {levels, N}};
         false -> {Source, too_deep}
     end.
 
-nest(0, _Favoured, _Context, Open, Close) ->
+nest(0, _Favoured, _Context, Open, Close, _Budget) ->
     {Open, Close};
-nest(N, Favoured, Context, Open, Close) ->
-    Fitting = [O || {_, From, _, _, _} = O <- openers(), From =:= Context],
+nest(N, Favoured, Context, Open, Close, Budget) ->
+    Cost = fun({_, _, Text, Closer, _}) -> byte_size(Text) + byte_size(Closer) end,
+    Fitting = [O || {_, From, _, _, _} = O <- openers(), From =:= Context,
+                    Cost(O) + 2 * (N - 1) =< Budget],
     Choice = case [O || {Kind, _, _, _, _} = O <- Fitting, Kind =:= Favoured] of
                  [_ | _] = Preferred when Favoured =/= any ->
                      case rand:uniform(10) of
@@ -176,22 +192,33 @@ nest(N, Favoured, Context, Open, Close) ->
                      pick(Fitting)
              end,
     {_, _, Text, Closer, Next} = Choice,
-    nest(N - 1, Favoured, Next, [Text | Open], [Closer | Close]).
+    nest(N - 1, Favoured, Next, [Text | Open], [Closer | Close], Budget - Cost(Choice)).
 
-%% The limits on size, and 64 KiB runs of fragments that stress one path.
+%% Units at the bound and a byte over it, a last line without a newline
+%% counting the one it is read as having, runs of fragments that stress one
+%% path and fit the bound, and scripts 16 times as long.
 bounds() ->
     Fill = fun(Prefix, Byte, Size) ->
                    <<Prefix/binary, (binary:copy(<<Byte>>, Size - byte_size(Prefix)))/binary>>
            end,
-    Runs = [binary:copy(F, ?MAX_BYTES div byte_size(F))
+    Line = fun(Size) -> Fill(<<"echo ">>, $a, Size) end,
+    Scripts = [binary:copy(F, 16 * ?MAX_COMMAND div byte_size(F))
+               || F <- [<<"a\n">>, <<"echo a; b | c\n">>, <<"{a\n}\n">>, <<"\n">>,
+                        <<"cat <<'E'\nx\nE\n">>]],
+    Runs = [binary:copy(F, (?MAX_COMMAND - 1) div byte_size(F))
             || F <- [<<"{">>, <<"(">>, <<"$">>, <<"! ">>, <<"x=y ">>, <<"a|">>, <<"a^">>,
                      <<"''">>, <<"<<a ">>, <<"\\\n">>, <<"a\n">>, <<"#">>, <<"`{">>,
                      <<"<<'E'\n">>, <<"if(x)">>, <<"$x(">>, <<"'">>]],
-    [Fill(<<"echo ">>, $a, ?MAX_BYTES),
-     Fill(<<"echo ">>, $a, ?MAX_BYTES + 1),
-     Fill(<<"# ">>, $c, ?MAX_BYTES),
-     <<"cat <<'E'\n", (Fill(<<>>, $b, ?MAX_BYTES - 13))/binary, "\nE\n">>
-     | Runs].
+    [Line(?MAX_COMMAND - 1),
+     Line(?MAX_COMMAND),
+     Line(?MAX_COMMAND + 1),
+     <<(Line(?MAX_COMMAND - 1))/binary, "\nb\n">>,
+     <<(Line(?MAX_COMMAND))/binary, "\nb\n">>,
+     Fill(<<"# ">>, $c, ?MAX_COMMAND - 1),
+     Fill(<<"# ">>, $c, ?MAX_COMMAND),
+     <<"cat <<'E'\n", (Fill(<<>>, $b, ?MAX_COMMAND - 13))/binary, "\nE\n">>,
+     <<"cat <<'E'\n", (Fill(<<>>, $b, ?MAX_COMMAND - 12))/binary, "\nE\n">>
+     | Runs ++ Scripts].
 
 %% Checks
 
@@ -199,15 +226,13 @@ check(Source) ->
     check(Source, any).
 
 check(Source, Expect) ->
-    Result = try erx_shell_parse:parse(Source)
-             catch Class:Reason:Stack -> fail(raised, Source, {Class, Reason, Stack})
-             end,
+    Result = units(Source, Source, 0, []),
     case {Result, Expect} of
-        {{ok, Program}, _} ->
+        {{ok, Units}, _} ->
+            Program = lists:append(Units),
             Levels = try program_levels(Program)
                      catch error:Reason1:Stack1 -> fail(malformed_tree, Source, {Program, Reason1, Stack1})
                      end,
-            byte_size(Source) =< ?MAX_BYTES orelse fail(over_size_accepted, Source, byte_size(Source)),
             case Expect of
                 {levels, Levels} -> ok;
                 {levels, Wanted} -> fail(wrong_levels, Source, {Wanted, Levels});
@@ -215,12 +240,12 @@ check(Source, Expect) ->
                 any -> ok
             end,
             Levels =< ?MAX_LEVELS orelse fail(too_many_levels, Source, Levels),
-            round_trip(Source, Program),
+            [round_trip(Source, Unit) || Unit <- Units],
             ok;
         {{error, {too_deep, Pos}}, Expect} when Expect =:= too_deep; Expect =:= any ->
             position(Source, Pos),
             error;
-        {{error, {too_long, Bytes}}, any} when Bytes =:= byte_size(Source), Bytes > ?MAX_BYTES ->
+        {{error, {too_long, _}}, any} ->
             error;
         {{error, {Kind, Pos, Message}}, any} when Kind =:= syntax; Kind =:= incomplete ->
             position(Source, Pos),
@@ -238,6 +263,102 @@ check(Source, Expect) ->
         {ok, _} -> ok;
         {error, _} -> error
     end.
+
+%% A source parsed one unit at a time, as an evaluator parses a script: the
+%% units' programs in order, or the first diagnostic, its line counted from
+%% the start of the source.
+units(Source, Left, Lines, Acc) ->
+    Next = parse(Source, Left, final),
+    as_more_may_follow(Source, Left, Next),
+    case Next of
+        eof ->
+            {ok, lists:reverse(Acc)};
+        {ok, Cmds, Rest} ->
+            Unit = binary_part(Left, 0, used(Source, Left, Rest)),
+            binary:last(Unit) =:= $\n orelse Rest =:= <<>>
+                orelse fail(unit_not_whole_lines, Source, Unit),
+            read_size(Unit) =< ?MAX_COMMAND orelse fail(over_size_accepted, Source, Unit),
+            units(Source, Rest, Lines + length(binary:matches(Unit, <<"\n">>)), [Cmds | Acc]);
+        {error, {too_long, Limit} = TooLong, Rest} ->
+            Limit =:= ?MAX_COMMAND orelse fail(wrong_bound, Source, Limit),
+            too_long(Source, Left),
+            resumes_at_a_line(Source, Left, Rest),
+            {error, TooLong};
+        {incomplete, Pos, Message} ->
+            {error, {incomplete, shift(Pos, Lines), Message}};
+        {error, {too_deep, Pos}, Rest} ->
+            resumes_at_a_line(Source, Left, Rest),
+            {error, {too_deep, shift(Pos, Lines)}};
+        {error, {syntax, Pos, Message}, Rest} ->
+            resumes_at_a_line(Source, Left, Rest),
+            {error, {syntax, shift(Pos, Lines), Message}}
+    end.
+
+parse(Source, Buffer, End) ->
+    try erx_shell_parse:next(Buffer, End)
+    catch Class:Reason:Stack -> fail(raised, Source, {Class, Reason, Stack})
+    end.
+
+%% The bytes of Left a result used up: Rest is what follows them.
+used(Source, Left, Rest) ->
+    Used = byte_size(Left) - byte_size(Rest),
+    Used > 0 orelse fail(no_progress, Source, Left),
+    Rest =:= binary_part(Left, Used, byte_size(Rest)) orelse fail(rest_not_a_suffix, Source, Rest),
+    Used.
+
+%% The bytes a unit is read as, with the newline a last line without one
+%% is read as having.
+read_size(Bytes) ->
+    case binary:last(Bytes) of
+        $\n -> byte_size(Bytes);
+        _ -> byte_size(Bytes) + 1
+    end.
+
+%% A unit is too long only when what is left is over the bound and the
+%% whole lines within the bound, parsed on their own, are an unfinished
+%% unit: a unit that ends within the bound is never too long.
+too_long(Source, Left) ->
+    read_size(Left) > ?MAX_COMMAND orelse fail(too_long_within_bound, Source, Left),
+    Within = binary_part(Left, 0, min(byte_size(Left), ?MAX_COMMAND)),
+    case binary:matches(Within, <<"\n">>) of
+        [] ->
+            ok;
+        Newlines ->
+            {Last, 1} = lists:last(Newlines),
+            case parse(Source, binary_part(Left, 0, Last + 1), more) of
+                {incomplete, _, _} -> ok;
+                Other -> fail(too_long_within_bound, Source, Other)
+            end
+    end.
+
+%% After a faulty unit, what is left starts a line.
+resumes_at_a_line(Source, Left, Rest) ->
+    Used = used(Source, Left, Rest),
+    Rest =:= <<>> orelse binary:at(Left, Used - 1) =:= $\n
+        orelse fail(resume_not_at_a_line, Source, Rest).
+
+%% Parsed as more may follow, Left gives what it gives as the whole input,
+%% unless the unit reaches an unfinished last line, which is then
+%% incomplete: a unit that ends before that line is the same. A fault may
+%% be found by reading a line continued into the unfinished one, and then
+%% lie before it, so a fault is held only to the weaker rule.
+as_more_may_follow(Source, Left, Final) ->
+    Unfinished = case binary:matches(Left, <<"\n">>) of
+                     [] -> byte_size(Left);
+                     Newlines -> byte_size(Left) - element(1, lists:last(Newlines)) - 1
+                 end,
+    Before = case Final of
+                 {ok, _, Rest} -> byte_size(Rest) >= Unfinished;
+                 _ -> Unfinished =:= 0
+             end,
+    case parse(Source, Left, more) of
+        {ok, _, <<>>} when Unfinished > 0 -> fail(unfinished_line_run, Source, Final);
+        Final -> ok;
+        {incomplete, _, _} when not Before -> ok;
+        More -> fail(more_differs, Source, {More, Final})
+    end.
+
+shift({Line, Column}, Lines) -> {Line + Lines, Column}.
 
 %% A position names a line of the source and a column of that line, or the
 %% column just past its end.
@@ -279,11 +400,13 @@ round_trip(Source, Program) ->
     case printed(Program) of
         heredoc ->
             ok;
-        Printed when byte_size(Printed) > ?MAX_BYTES ->
+        <<>> ->
+            ok;
+        Printed when byte_size(Printed) >= ?MAX_COMMAND ->
             ok;
         Printed ->
-            case erx_shell_parse:parse(Printed) of
-                {ok, Program} -> ok;
+            case erx_shell_parse:next(Printed, final) of
+                {ok, Program, <<>>} -> ok;
                 Other -> fail(round_trip, Source, {Printed, Other})
             end
     end.

@@ -3,15 +3,18 @@
 
 -module(erx_shell_lex).
 -moduledoc """
-The command shell's tokenizer: rc's lexical rules over one line or script
+The command shell's tokenizer: rc's lexical rules over a source
 (docs/design-shell.md, "The language"), as a pure function from bytes to
-tokens.
+tokens, one line at a time.
 
-`tokens/1` refuses a source over 64 KiB before reading it, then reads it
-once from start to end, as if it ended with a newline, and returns every
-token with the byte offset where it starts; `position/2` turns an offset
-into the line and column, both counted in bytes from 1, that a diagnostic
-names. It reads as plan9port's rc reads (its lex.c):
+`text/1` gives a source the newline it is read as ending with, and
+`lines/2` reads the tokens of as many of that text's first lines as the
+parser asks for, each to its newline and past the bodies of the here
+documents it names, so the parser reads a source only about as far as the
+command it is parsing. Every token carries the byte offset where it
+starts; `position/2` turns an offset into the line and column, both
+counted in bytes from 1, that a diagnostic names. It reads as plan9port's
+rc reads (its lex.c):
 
 * A word is a run of bytes outside ``\n \t#;&|^$=`'{}()<>``; one of `for`,
   `in`, `while`, `if`, `not`, `switch`, `fn`, `~`, `!` and `@` written
@@ -37,22 +40,22 @@ names. It reads as plan9port's rc reads (its lex.c):
   `$name` names a variable, a `^` straight after the name is dropped, and
   `$$` stands for `$`, as rc substitutes it.
 
-The tokens end with `eof`, or, where the source cannot be read on, with an
-`error` token that says why in fixed words, so the parser reports whichever
-fault comes first. Nothing the source holds makes the tokenizer raise, and
-no diagnostic quotes the source, so a sink that shows one has nothing
-untrusted to escape. An error is `incomplete` when only more lines could
+A `newline` token also carries the offset where the next line starts,
+after the here documents its line names. The tokens end with `eof`, after
+the lines asked for or at the end of the text, or, where the source cannot
+be read on, with an `error` token that says why in fixed words, so the
+parser reports whichever fault comes first. Nothing the source holds
+makes the tokenizer raise, and no diagnostic quotes the source, so a sink
+that shows one has nothing untrusted to escape. An error is `incomplete` when only more lines could
 cure it: an open quote, an unterminated here document or a line continued
 at its end. Every text a token carries is a copy, so the tokens hold no
 reference to the source.
 """.
 
--export([tokens/1, position/2, max_bytes/0]).
+-export([text/1, lines/2, position/2]).
 
 -export_type([token/0, offset/0, fd/0, doc/0, keyword/0, fault/0]).
 
-%% The bound on a line or script (docs/design-shell.md, "Overview").
--define(MAX_BYTES, 65536).
 %% The largest descriptor number a redirection may name.
 -define(MAX_FD, 16#7fffffff).
 
@@ -69,8 +72,9 @@ reference to the source.
         {word | quoted, offset(), binary()}
       | {keyword, offset(), keyword()}
       | {caret | sub | dollar | count | flat | backquote | andand | oror
-         | newline | eof | ';' | '&' | '=' | '{' | '}' | '(' | ')',
+         | eof | ';' | '&' | '=' | '{' | '}' | '(' | ')',
          offset(), none}
+      | {newline, offset(), Next :: offset()}
       | {redir, offset(), {write | append | read | rdwr, fd()}}
       | {heredoc, offset(), {fd(), doc()}}
       | {dup, offset(), {To :: fd(), From :: fd()}}
@@ -98,30 +102,34 @@ reference to the source.
              next_doc = 0 :: non_neg_integer(),
              bodies = #{} :: #{non_neg_integer() => doc()}}).
 
--doc "The largest source, in bytes, that tokens/1 reads.".
--spec max_bytes() -> pos_integer().
-max_bytes() -> ?MAX_BYTES.
+-doc """
+`Source` as lines/2 reads it: ending with a newline unless it is empty. The
+end of the input ends a line, as in rc, so a source's last line needs no
+newline of its own.
+""".
+-spec text(binary()) -> binary().
+text(<<>>) ->
+    <<>>;
+text(Source) when binary_part(Source, byte_size(Source), -1) =:= <<"\n">> ->
+    Source;
+text(Source) ->
+    <<Source/binary, "\n">>.
 
 -doc """
-The tokens of `Source`, ending with `eof` or an `error` token, or
-`too_long` for a source over max_bytes().
+The tokens of the first `Count` lines of `Text`, from text/1: `{more,
+Tokens}` when the text goes on after them, so their `eof` stands where
+the next line starts and more lines could follow, or `{last, Tokens}` when
+the tokens end at the end of the text, with `eof`, or at an `error` token,
+after which nothing can be read.
 """.
--spec tokens(binary()) -> {ok, [token(), ...]}
-                              | {error, {too_long, pos_integer()}}.
-tokens(Source) when byte_size(Source) > ?MAX_BYTES ->
-    {error, {too_long, byte_size(Source)}};
-tokens(Source) when is_binary(Source) ->
-    Text = case Source of
-               <<>> -> Source;
-               _ when binary_part(Source, byte_size(Source), -1) =:= <<"\n">> -> Source;
-               _ -> <<Source/binary, "\n">>
-           end,
-    {ok, lex(#lx{bin = Text}, [])}.
+-spec lines(binary(), pos_integer()) -> {more | last, [token(), ...]}.
+lines(Text, Count) when is_binary(Text), is_integer(Count), Count > 0 ->
+    lex(#lx{bin = Text}, Count, []).
 
 -doc """
 The line and column of an offset into `Source`, both counted in bytes from
-1. An offset at or past the end, such as that of the newline tokens/1
-reads after a source that has none, names the column after its last byte.
+1. An offset at or past the end, such as that of the newline text/1
+adds to a source that has none, names the column after its last byte.
 """.
 -spec position(binary(), offset()) -> {pos_integer(), pos_integer()}.
 position(Source, Offset) ->
@@ -133,15 +141,24 @@ position(Source, Offset) ->
             {length(Newlines) + 1, At - Last}
     end.
 
-lex(L, Acc) ->
+%% Count is the number of lines still to read. A newline that ends the text
+%% ends the tokens whatever Count is, so it may reach 0 there.
+lex(L, Count, Acc) ->
     case adjacent(L) of
         {Token, L1} ->
-            lex(L1, [Token | Acc]);
+            lex(L1, Count, [Token | Acc]);
         none ->
             L1 = skip_blanks(L#lx{word = false}),
             case read(L1) of
-                {more, Token, L2} -> lex(L2, [Token | Acc]);
-                {last, Token, L2} -> finish(L2, [Token | Acc])
+                {more, {newline, _, Next} = Token, L2}
+                  when Count =:= 1, Next < byte_size(L2#lx.bin) ->
+                    {more, finish(L2, [{eof, Next, none}, Token | Acc])};
+                {more, {newline, _, _} = Token, L2} ->
+                    lex(L2, Count - 1, [Token | Acc]);
+                {more, Token, L2} ->
+                    lex(L2, Count, [Token | Acc]);
+                {last, Token, L2} ->
+                    {last, finish(L2, [Token | Acc])}
             end
     end.
 
@@ -181,7 +198,8 @@ starts_joined(C) ->
 token(L, At) ->
     case peek(L) of
         $\n ->
-            {{newline, At, none}, here_documents(plain(advance(L)))};
+            L1 = here_documents(plain(advance(L))),
+            {{newline, At, L1#lx.at}, L1};
         $$ ->
             dollar(advance(L), At);
         $& ->
@@ -384,6 +402,10 @@ here_document(L, At) ->
 here_tag(L, At, Fd) ->
     {Tag, Quoted, L1} =
         case peek(L) of
+            eof ->
+                %% The text ends with a newline, so only a line continued
+                %% after `<<` reaches its end here: the tag may come next.
+                fault(L#lx.at, incomplete, <<"line continues past the end of the input">>);
             $' ->
                 {Text, After} = quoted(L),
                 {Text, true, After};
@@ -497,8 +519,8 @@ complete(#lx{continued = true, at = At}) ->
 complete(_) ->
     ok.
 
-%% The tokens in order, each here document's body in its token: one pass,
-%% so the list is copied once.
+%% The line's tokens in order, each here document's body in its token: one
+%% pass, so the list is copied once.
 finish(#lx{bodies = Bodies}, Acc) ->
     lists:foldl(fun(Token, Tokens) -> [fill(Token, Bodies) | Tokens] end, [], Acc).
 

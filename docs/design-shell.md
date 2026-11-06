@@ -74,8 +74,10 @@ scripts ([Alternatives considered](#alternatives-considered)).
 
 ## Overview
 
-A line is tokenized and parsed into a syntax tree, bounded at 64 KiB and a
-nesting depth of 256, and evaluated: each stage of a pipeline, each
+Each unit of a line or script, rc's line, is tokenized and parsed into a
+syntax tree, in a child process of the evaluator with a fixed heap,
+bounded at 4 KiB of source and a nesting depth of 256
+([Bounds](#the-language)), and evaluated: each stage of a pipeline, each
 command substitution and each background block is an Erlang process with
 a copy of the shell's variables. A stage that names an Erlang command
 calls it in that process; a stage that names a program has the command
@@ -104,7 +106,7 @@ processes.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **SH1.** A command acts only through the capabilities it was handed, and one handed fewer than the session's runs in a domain of its own | an Erlang command receives its grants and facets in its context and reaches services only through them; the shell's own lines run in the session's domain with the session's capabilities, since that is what the user typed them with; a command that `within` narrows, and every Erlang command a program starts, runs in a command domain built from exactly the capabilities its starter named, which its starter held, and named from its principal's pool of reusable names ([design-system.md](design-system.md#identifiers)), each facet among them made by the system domain for that domain alone and with no wider scope, and a program runs in a sub-space whose handler acts only on the program's own table ([design-programs.md](design-programs.md#what-a-program-can-start), [design-programs.md](design-programs.md#facets)); a handler never runs a builtin or a function for a program | a command that reaches a service by a registered name of the system domain; a narrowed or program-started command run in the session's domain; a domain given a capability its starter did not hold | a test that every command run in a session without an inspect facet gets `no_facet`; a test that a command domain's capabilities are exactly the grants and facets named before its startup message; `xargs ps` from a program with and without the `inspect` right, and a command domain that asks for the session's own facet instead of its own, which is refused; a narrowed program that asks its handler for every name of the command namespace in turn starts only what `/bin` lists and reaches nothing outside its grants |
-| **SH2.** A failing line, stage or command never ends the session | each stage, substitution and background block is an Erlang process of its own with `max_heap_size` set, counting the binaries it references; every input that reaches a stage is bounded in bytes, a line at 64 KiB, a record at 64 KiB and a pipe's records in flight at 256 and 1 MiB, so no input makes a stage grow without bound; every evaluator's Erlang stages are admitted whole within the session's stage allowance, an eighth of its budget, within the half the session keeps for its own services and from which no program's budget is carved ([design-system.md](design-system.md#resource-policy)), and only a foreground line waits for it, so stages together stay within memory the session keeps for them and no evaluator waits for an allowance its own parent holds; the parser refuses a line over its bounds before anything runs; a program is a sub-space with a budget of its own, carved from the other half, so what it spends never counts against a stage | a stage evaluated in the shell's own process; an unbounded parse; an input path without a byte bound; stages admitted beyond the allowance; a nested evaluator that waits for the allowance; a program's budget carved from the services' half | the overflow, deep-nesting and runaway-recursion tests; a native program that writes a 1 GiB line without a newline into an Erlang stage, which fails that stage alone; a record over 64 KiB, which fails its stage; as many stages as the allowance admits, each near its limit, and one more pipeline, which waits; a substitution inside a fully admitted pipeline, and a background job beyond the allowance, each of which fails with `too many stages` at once; a loop of programs that spends the programs' half, during which the shell still parses, prompts and runs builtins; the parser's fuzz target |
+| **SH2.** A failing line, stage or command never ends the session | each stage, substitution and background block is an Erlang process of its own with `max_heap_size` set, counting the binaries it references; every input that reaches a stage is bounded in bytes, a line at 64 KiB, a record at 64 KiB and a pipe's records in flight at 256 and 1 MiB, so no input makes a stage grow without bound; every evaluator's Erlang stages are admitted whole within the session's stage allowance, an eighth of its budget, within the half the session keeps for its own services and from which no program's budget is carved ([design-system.md](design-system.md#resource-policy)), and only a foreground line waits for it, so stages together stay within memory the session keeps for them and no evaluator waits for an allowance its own parent holds; the parser, in a child process of the evaluator with a fixed heap, refuses a unit over its bounds before it runs; a program is a sub-space with a budget of its own, carved from the other half, so what it spends never counts against a stage | a stage evaluated in the shell's own process; an unbounded parse; an input path without a byte bound; stages admitted beyond the allowance; a nested evaluator that waits for the allowance; a program's budget carved from the services' half | the overflow, deep-nesting and runaway-recursion tests; a native program that writes a 1 GiB line without a newline into an Erlang stage, which fails that stage alone; a record over 64 KiB, which fails its stage; as many stages as the allowance admits, each near its limit, and one more pipeline, which waits; a substitution inside a fully admitted pipeline, and a background job beyond the allowance, each of which fails with `too many stages` at once; a loop of programs that spends the programs' half, during which the shell still parses, prompts and runs builtins; the parser's fuzz target |
 | **SH3.** No stage turns a status into a value | a record's values are `attr()` values with their statuses; `where` and `sort` treat a comparison with a value that is not `ok` as undecided; `erx_render` prints every status as such | a stage that unwraps a value without its status | the record tests over `unknown` and `timeout` values ([design-live.md](design-live.md#invariants) V2) |
 
 ## Data model
@@ -207,8 +209,8 @@ what a terminal needs added:
 
 Its interpreter is ordinary Erlang, an estimated 2,000 to 3,000 lines for
 the language and as much again for the interactive layer: a tokenizer and a
-parser that build a syntax tree for each line or script, bounded at 64 KiB
-of source and a nesting depth of 256, and an evaluator over the tree. Plan
+parser that build a syntax tree for each unit of source, rc's line, and
+an evaluator over the tree. Plan
 9's rc is its oracle ([Verification and
 testing](#verification-and-testing)). One cost is deliberate: one-liners
 written for a POSIX shell (`2>&1`, `$(...)`, `for ... do`, `export`) do not
@@ -220,7 +222,8 @@ scripts is not the command shell's: toybox's own shell, which needs
 ([design-programs.md](design-programs.md#toybox)).
 
 The tokenizer and the parser, `erx_shell_lex` and `erx_shell_parse` in the
-`erx_shell` application, are pure functions from a source to a syntax tree
+`erx_shell` application, are pure functions from the source read so far
+to the syntax tree of its next unit and the source after it,
 or a diagnostic, and their types are the tree the evaluator walks. They
 follow plan9port rc's grammar in what binds to what. A diagnostic names a
 line and a column, counted in bytes from 1, and says what is wrong in fixed
@@ -239,6 +242,33 @@ hold what is inside them one level deeper. Sequences, `&&` and `||` chains,
 pipelines, `^` joins and a simple command's words are flat lists, so a long
 pipeline is not deep. No tree is deeper than its levels allow, so neither
 the parser nor anything that walks a tree recurses further.
+
+**Bounds.** A source is parsed one unit at a time, as rc does. The unit is
+rc's line: the commands up to a newline outside every construct, with the
+lines an open construct or a trailing `|`, `&&` or `||` carries it over
+and the bodies of its here documents. A unit, its newline and
+here-document bodies included, is at most 4 KiB of source, and the parser
+reads no more of a source than that. The evaluator parses each unit in a
+child process whose heap is fixed at 8 MiB, so the heap a parse takes is
+bounded by the unit alone, whatever the evaluator's own heap holds; the
+child hands back the tree as its exit reason, and one that the heap limit
+kills gives `line too long`, never a crash of the evaluator. The bound is
+half that heap over the worst cost per byte of source that a sweep of
+costly shapes at the bound measures, 778 bytes, rounded up to 1,024 since
+the heap grows in garbage-collection steps; a test parses each of the
+sweep's sources within half the heap, so a larger parse heap raises the
+bound in proportion and the test says whether it still holds. A script or
+`-c` string has no size bound; a unit over the bound fails with `line too
+long` and a script stops there, as at a syntax error, after the units
+before it have run. Nesting stays bounded at 256. One loop serves the
+terminal, `rc file`, `. file` and `rc -c`: it hands the parser the lines
+it has read, saying whether more may follow, so an unfinished last line is
+never run cut short; it runs the unit it gets back and keeps the rest; on
+`incomplete` it reads another line, or at the end of the input reports the
+diagnostic. After a faulty unit a script stops and the terminal goes on:
+after a syntax error or `too_deep` from the line after the fault, as rc
+skips to the end of that line, and after `line too long`, whose end is
+unknown, with none of what it holds.
 
 ### Commands
 
@@ -647,7 +677,7 @@ the tree, never adapted ([design.md](design.md#compatibility)).
 
 | Failure | Detection | What remains | Who cleans up | What the user sees |
 | --- | --- | --- | --- | --- |
-| A shell line is over 64 KiB, nests deeper than 256, or does not parse | the command shell's parser | nothing: the line is not run | no one: nothing ran | `syntax error` with the line and column; `$status` says so |
+| A shell unit, rc's line, is over 4 KiB, nests deeper than 256, or does not parse | the command shell's parser, in a child process of the evaluator | nothing: the unit is not run, nor anything after it in a script | no one: what ran before it stands | `syntax error` with the line and column, or `line too long`; `$status` says so |
 | An evaluator, stage or command passes its heap limit | `max_heap_size` | nothing of that process | the runtime, which kills the process | its stage's status is the kill's reason |
 | A stage meets a line or a record over 64 KiB | the stage's reader, or its send | nothing of that stage | the stage ends; its pipes' ends close with it | its stage's status is `line too long` or `record too large` |
 | An evaluator's Erlang stages do not fit the stage allowance | the shell, before it starts them | nothing: no stage runs | none | a foreground line waits for running stages to end, and fails with `too many stages` when it could never fit; a background job, a substitution or a pipeline inside a stage fails with `too many stages` at once |
@@ -660,8 +690,9 @@ the session; a stage's crash reason, cut at 256 bytes, is its `$status`.
 
 ## Security
 
-The command shell runs with the session's authority, bounded at 64 KiB
-and depth 256 a line and by its processes' heap limit, with fuzz targets
+The command shell runs with the session's authority, bounded at 4 KiB
+and depth 256 a unit of source, which the evaluator parses in a child
+process with a fixed heap, and by its processes' heap limit, with fuzz targets
 for its parser and for `where`'s predicates. Each program it starts holds
 only the descriptors, grants and rights its starter handed it, starts only
 what `/bin` lists and only with the right to start commands, and reaches
@@ -706,8 +737,9 @@ remain independent of catalog generation.
   the same commands; it starts from plan9port's own `test.rc` and its
   parser checks, and from the `trip.rc` of Byron Rakitzis's rc (zlib),
   with the cases for that implementation's extensions set apart. The
-  tokenizer and parser have a fuzz target that checks the 64 KiB and
-  depth-256 bounds.
+  tokenizer and parser have a fuzz target that checks the 4 KiB bound on
+  a unit both ways and the depth-256 bound, and a sweep parses each costly
+  shape at the unit bound within half the parse process's heap.
 * **Interaction:** line editing, history and completion through a scripted
   terminal; `Ctrl-Z`, `fg`, `bg`, `Ctrl-C` and `kill %N` on a job of
   Erlang commands, of programs, of both, and of programs three generations

@@ -4,15 +4,25 @@
 -module(erx_shell_parse).
 -moduledoc """
 The command shell's parser: rc's grammar over erx_shell_lex's tokens, as a
-pure function from a line or script to its syntax tree
-(docs/design-shell.md, "The language").
+pure function from the source read so far to its next unit and the unit's
+syntax tree (docs/design-shell.md, "The language").
 
-`parse/1` returns the program, the commands of the source in order, or the
-diagnostic of the first place the source does not parse; `format_error/1`
-renders a diagnostic as the `syntax error` line the shell prints. The tree
-is what the evaluator walks, so its shape is the types below. It follows
-plan9port's rc (its syntax.y) in what binds to what:
-
+A source is parsed one unit at a time, as rc does. The unit is rc's line:
+the commands up to a newline outside every construct, with the lines a
+construct or a trailing `|`, `&&` or `||` carries it over and the bodies
+of its here documents. `next/2` returns that unit's commands and the
+source after it, so a caller runs them and passes the rest back, whether
+the source is a script, a `-c` string or the lines a terminal has
+delivered; a script stops at a unit that does not parse, after the units
+before it have run, and an interactive loop resumes after it. A unit
+holds at most max_command_bytes() of source, and next/2 parses no more of
+the source than that, so the heap a parse needs is bounded by the unit
+and not by the source, which has no bound. The evaluator parses through
+`next_bounded/2`, which runs next/2 in a child process with a fixed heap,
+so that bound holds whatever the evaluator's own heap holds.
+`format_error/1` renders a diagnostic as the line the shell prints. The
+tree is what the evaluator walks, so its shape is the types below. It
+follows plan9port's rc (its syntax.y) in what binds to what:
 * `&&` and `||` bind loosest, left to right, and are one flat `and_or`;
   `|` binds tighter and is one flat `pipeline`. A newline may follow any
   of the three.
@@ -31,26 +41,48 @@ plan9port's rc (its syntax.y) in what binds to what:
 * `a=b` must stand first: `echo a=b` does not parse, as in rc.
 
 A diagnostic names the line and column of the first fault, the
-tokenizer's or the parser's, in fixed words. It is `incomplete` when only
-more lines could cure it, `too_long` over 64 KiB and `too_deep` when
-constructs nest more than 256 levels. Each of `{...}`, `if`, `if not`, `for`, `while`,
-`switch`, `fn`, `!`, `@`, a redirection or an assignment written before a
-command, `(...)`, `$`, `$#`, `$"`, `` `{...} ``, `<{...}` and `>{...}` is a level
-for what it holds; a redirection's or an assignment's own words, and the
-redirections after a `{...}`, stay at the level the construct is at. The
-rest, sequences, `and_or`, `pipeline`, `~`, simple commands and `^`, are
-flat lists, so the tree's depth is bounded by those levels and so is this
-parser's recursion.
+tokenizer's or the parser's, in fixed words, counted from the start of the
+source next/2 was given. It is `incomplete` when only more lines could
+cure it, `too_long` when the unit would exceed max_command_bytes() and
+`too_deep` when constructs nest more than 256 levels. Each of `{...}`,
+`if`, `if not`, `for`, `while`, `switch`, `fn`, `!`, `@`, a redirection
+or an assignment written before a command, `(...)`, `$`, `$#`, `$"`,
+`` `{...} ``, `<{...}` and `>{...}` is a level for what it holds; a
+redirection's or an assignment's own words, and the redirections after a
+`{...}`, stay at the level the construct is at. The rest, sequences,
+`and_or`, `pipeline`, `~`, simple commands and `^`, are flat lists, so the
+tree's depth is bounded by those levels and so is this parser's recursion.
 """.
 
--export([parse/1, format_error/1]).
+-export([next/2, next_bounded/2, max_command_bytes/0, parse_heap_bytes/0,
+         format_error/1]).
 
--export_type([program/0, cmd/0, word/0, redir/0, pipe/0, diagnostic/0,
-              pos/0]).
+-export_type([result/0, program/0, cmd/0, word/0, redir/0, pipe/0,
+              diagnostic/0, pos/0]).
 
-%% The bound on nesting (docs/design-shell.md, "Overview").
+%% The bound on nesting (docs/design-shell.md, "Bounds").
 -define(MAX_DEPTH, 256).
 
+%% The heap of the process next_bounded/2 parses a unit in, and the bound
+%% on a unit derived from it (docs/design-shell.md, "Bounds"): the worst
+%% parse of a unit at the bound must fit in half that heap. The worst
+%% erx_shell_parse_tests's sweep finds, nine shapes behind about a hundred
+%% prefixes at 4,096 bytes, takes 3,187,517 bytes of `max_heap_size` with
+%% `include_shared_binaries` on the stock emulator, 778 bytes per byte of
+%% source; since the heap grows in garbage-collection steps rather than
+%% byte by byte, PARSE_HEAP_PER_BYTE rounds that up to 1,024. The sweep
+%% checks the result, parsing each of its sources within half the heap, so
+%% a change to PARSE_HEAP moves the bound with it and the sweep says
+%% whether the derivation still holds.
+-define(PARSE_HEAP, (8 * 1024 * 1024)).
+-define(PARSE_HEAP_PER_BYTE, 1024).
+-define(MAX_COMMAND, (?PARSE_HEAP div 2 div ?PARSE_HEAP_PER_BYTE)).
+
+%% What next/2 makes of the source read so far.
+-type result() :: {ok, program(), Rest :: binary()}
+                | eof
+                | {incomplete, pos(), Message :: binary()}
+                | {error, diagnostic(), Rest :: binary()}.
 -type program() :: [cmd()].
 -type cmd() ::
         {simple, [word(), ...], [redir()]}
@@ -86,27 +118,176 @@ parser's recursion.
 -type pipe() :: {Left :: erx_shell_lex:fd(), Right :: erx_shell_lex:fd()}.
 %% Why a source does not parse; a position is a line and a column.
 -type diagnostic() :: {syntax | incomplete, pos(), Message :: binary()}
-                    | {too_long, Bytes :: pos_integer()}
+                    | {too_long, Limit :: pos_integer()}
                     | {too_deep, pos()}.
 -type pos() :: {Line :: pos_integer(), Column :: pos_integer()}.
 -type tokens() :: [erx_shell_lex:token()].
 -type depth() :: 0..?MAX_DEPTH.
 
--doc "The program `Source` holds, or why it does not parse.".
--spec parse(binary()) -> {ok, program()} | {error, diagnostic()}.
-parse(Source) ->
-    case erx_shell_lex:tokens(Source) of
-        {ok, Tokens} ->
+-doc "The most bytes of source one unit may hold.".
+-spec max_command_bytes() -> pos_integer().
+max_command_bytes() -> ?MAX_COMMAND.
+
+-doc "The heap, in bytes, of the process next_bounded/2 parses a unit in.".
+-spec parse_heap_bytes() -> pos_integer().
+parse_heap_bytes() -> ?PARSE_HEAP.
+
+-doc """
+The next unit of `Buffer`, the source read so far. `End` says whether
+more source may follow: with `more` the last line of `Buffer` may be
+unfinished and is never read, so a unit that reaches it is `incomplete`;
+with `final` `Buffer` is all there is, and its last line needs no
+newline of its own.
+
+* `{ok, Program, Rest}`: the unit at the start of `Buffer` parses to
+  `Program`, the commands of its line in order, none for a line with
+  nothing to run, and `Rest` is the source after it.
+* `eof`: `Buffer` is empty.
+* `{incomplete, Pos, Message}`: only more lines could complete the unit;
+  with `final` it is the diagnostic to print.
+* `{error, Diagnostic, Rest}`: the unit does not parse, or would exceed
+  max_command_bytes() (`{too_long, Limit}`). After a syntax error or
+  `too_deep`, `Rest` is the source after the line the fault was found on,
+  as rc skips to the end of that line; after `too_long`, where the unit
+  ends is unknown, so `Rest` is empty and nothing of it is resumed. A
+  script stops at either.
+
+Only the first max_command_bytes() of `Buffer` are parsed, and a unit
+that fits them is parsed the same whatever follows it.
+""".
+-spec next(binary(), more | final) -> result().
+next(<<>>, End) when End =:= more; End =:= final ->
+    eof;
+next(Buffer, End) when is_binary(Buffer), (End =:= more orelse End =:= final) ->
+    rest(Buffer, unit_of(window(Buffer, End))).
+
+-doc """
+next/2 run in a child process whose heap is fixed at parse_heap_bytes(),
+the one call the evaluator parses through: the heap a parse may take is
+then bounded by the unit alone, whatever the evaluator holds. The child
+is handed a copy of the part of `Buffer` that next/2 reads, so the rest
+of the source does not count against its heap, and returns its result as
+its exit reason, so it has ended when the result arrives. A child the
+heap limit kills gives `too_long`, never a crash of the caller; one whose
+parse raises, which the fuzz target shows does not happen, ends with a
+fixed reason, so nothing of the source reaches a log.
+""".
+-spec next_bounded(binary(), more | final) -> result().
+next_bounded(<<>>, End) when End =:= more; End =:= final ->
+    eof;
+next_bounded(Buffer, End) when is_binary(Buffer), (End =:= more orelse End =:= final) ->
+    {Window, Reach} = window(Buffer, End),
+    Copy = binary:copy(Window),
+    Heap = #{size => ?PARSE_HEAP div erlang:system_info(wordsize), kill => true,
+             error_logger => false, include_shared_binaries => true},
+    Parse = fun() ->
+                    exit({?MODULE, try unit_of({Copy, Reach}) catch _:_ -> crashed end})
+            end,
+    {Pid, Ref} = spawn_opt(Parse, [monitor, {max_heap_size, Heap}]),
+    receive
+        {'DOWN', Ref, process, Pid, {?MODULE, crashed}} -> error({?MODULE, parse_crashed});
+        {'DOWN', Ref, process, Pid, {?MODULE, Unit}} -> rest(Buffer, Unit);
+        {'DOWN', Ref, process, Pid, killed} -> rest(Buffer, too_long);
+        {'DOWN', Ref, process, Pid, _Other} -> error({?MODULE, parse_crashed})
+    end.
+
+%% The part of Buffer a unit within the bound lies in, and how far the unit
+%% may reach. A buffer that fits the bound, counting the newline its end is
+%% read as having, is read whole with `final` and to its last newline with
+%% `more`, and a unit that needs more lines than those is incomplete; one
+%% that does not fit is cut to the whole lines among its first ?MAX_COMMAND
+%% bytes, since every unit ends with a line, and a unit that needs more
+%% lines than those is too long. Nothing past the part is read.
+window(Buffer, final) ->
+    case fits(Buffer) of
+        true -> {Buffer, whole};
+        false -> cut(Buffer)
+    end;
+window(Buffer, more) ->
+    case fits(Buffer) of
+        true -> {binary_part(Buffer, 0, lines_end(Buffer, byte_size(Buffer))), whole};
+        false -> cut(Buffer)
+    end.
+
+fits(Buffer) when byte_size(Buffer) < ?MAX_COMMAND -> true;
+fits(Buffer) when byte_size(Buffer) =:= ?MAX_COMMAND -> binary:last(Buffer) =:= $\n;
+fits(Buffer) when is_binary(Buffer) -> false.
+
+cut(Buffer) ->
+    {binary_part(Buffer, 0, lines_end(Buffer, ?MAX_COMMAND)), cut}.
+
+%% The offset just past the last newline before End, or 0 if there is none.
+lines_end(_Buffer, 0) ->
+    0;
+lines_end(Buffer, End) ->
+    case binary:at(Buffer, End - 1) of
+        $\n -> End;
+        _ -> lines_end(Buffer, End - 1)
+    end.
+
+%% What the parse of a window makes of its unit, before rest/2 turns its
+%% offsets into the source that follows: the commands and the bytes they
+%% take, an incomplete unit, a fault and the offset it was found at, or a
+%% unit too long to parse. Its positions hold for the buffer Window starts.
+-type unit() :: {parsed, program(), Used :: non_neg_integer()}
+              | {incomplete, pos(), Message :: binary()}
+              | {fault, diagnostic(), At :: erx_shell_lex:offset()}
+              | too_long.
+
+-spec unit_of({binary(), whole | cut}) -> unit().
+unit_of({Window, Reach}) ->
+    try unit(erx_shell_lex:text(Window), 1) of
+        {Program, End} ->
+            %% End may be past the newline text/1 added to a last line.
+            {parsed, Program, min(End, byte_size(Window))}
+    catch
+        throw:{?MODULE, _, {incomplete, _}} when Reach =:= cut ->
+            too_long;
+        throw:{?MODULE, At, {incomplete, Message}} ->
+            {incomplete, erx_shell_lex:position(Window, At), Message};
+        throw:{?MODULE, At, {syntax, Message}} ->
+            {fault, {syntax, erx_shell_lex:position(Window, At), Message}, At};
+        throw:{?MODULE, At, too_deep} ->
+            {fault, {too_deep, erx_shell_lex:position(Window, At)}, At}
+    end.
+
+-spec rest(binary(), unit()) -> result().
+rest(Buffer, {parsed, Program, Used}) ->
+    {ok, Program, binary_part(Buffer, Used, byte_size(Buffer) - Used)};
+rest(_Buffer, {incomplete, _, _} = Incomplete) ->
+    Incomplete;
+rest(Buffer, {fault, Diagnostic, At}) ->
+    {error, Diagnostic, after_line(Buffer, At)};
+rest(_Buffer, too_long) ->
+    {error, {too_long, ?MAX_COMMAND}, <<>>}.
+
+%% The source after the first newline at or after At, or none. At lies in
+%% the window, which ends with a newline unless it ends the input.
+after_line(Buffer, At) when At >= byte_size(Buffer) ->
+    <<>>;
+after_line(Buffer, At) ->
+    case binary:match(Buffer, <<"\n">>, [{scope, {At, byte_size(Buffer) - At}}]) of
+        {Newline, 1} -> binary_part(Buffer, Newline + 1, byte_size(Buffer) - Newline - 1);
+        nomatch -> <<>>
+    end.
+
+%% The commands of the unit at the start of Text, from text/1, and the
+%% offset after it. The first Lines lines are read and parsed; when they
+%% end inside the unit and the text goes on, the parse is `incomplete` at
+%% the `eof` after them, and twice as many are read and parsed again, so a
+%% unit of N lines takes about log2 N parses and its tokens are read past
+%% its end by fewer lines than it holds.
+-spec unit(binary(), pos_integer()) -> {program(), erx_shell_lex:offset()}.
+unit(Text, Lines) ->
+    case erx_shell_lex:lines(Text, Lines) of
+        {more, Tokens} ->
             try
-                {ok, program(Tokens)}
+                line(Tokens)
             catch
-                throw:{?MODULE, At, {Kind, Message}} ->
-                    {error, {Kind, erx_shell_lex:position(Source, At), Message}};
-                throw:{?MODULE, At, too_deep} ->
-                    {error, {too_deep, erx_shell_lex:position(Source, At)}}
+                throw:{?MODULE, _, {incomplete, _}} -> unit(Text, 2 * Lines)
             end;
-        {error, _} = Error ->
-            Error
+        {last, Tokens} ->
+            line(Tokens)
     end.
 
 -doc """
@@ -114,9 +295,8 @@ The line the shell prints for a diagnostic. It holds only numbers and the
 diagnostic's fixed words, so it needs no escaping.
 """.
 -spec format_error(diagnostic()) -> binary().
-format_error({too_long, Bytes}) ->
-    iolist_to_binary(io_lib:format("syntax error: ~b bytes, over the limit of ~b",
-                                   [Bytes, erx_shell_lex:max_bytes()]));
+format_error({too_long, Limit}) ->
+    iolist_to_binary(io_lib:format("syntax error: line too long, over ~b bytes", [Limit]));
 format_error({too_deep, Pos}) ->
     at(Pos, iolist_to_binary(io_lib:format("nested deeper than ~b", [?MAX_DEPTH])));
 format_error({_, Pos, Message}) ->
@@ -126,18 +306,23 @@ at({Line, Column}, Message) ->
     iolist_to_binary(io_lib:format("syntax error at line ~b, column ~b: ~ts",
                                    [Line, Column, Message])).
 
--spec program(tokens()) -> program().
-program(Tokens) ->
-    case sequence(Tokens, 0, plain) of
-        {Cmds, [{eof, _, _}]} -> Cmds;
+%% One of rc's lines, commands separated by `;` and `&` up to the newline
+%% that ends it, and the offset where the next line starts.
+-spec line(tokens()) -> {program(), erx_shell_lex:offset()}.
+line(Tokens) ->
+    case sequence(Tokens, 0, line) of
+        {Cmds, [{newline, _, Next} | _]} -> {Cmds, Next};
         {_, [Token | _]} -> unexpected(Token)
     end.
 
 %% Commands separated by `;`, `&` and newlines, up to a token that cannot
-%% start one, which the caller checks. In a switch arm a `case` ends it too.
+%% start one, which the caller checks. In a switch arm a `case` ends it too;
+%% in a line, which is rc's unit of parsing, a newline ends it.
 sequence(Tokens, D, Mode) ->
     sequence(Tokens, D, Mode, []).
 
+sequence([{newline, _, _} | _] = Tokens, _D, line, Acc) ->
+    {lists:reverse(Acc), Tokens};
 sequence([{Separator, _, _} | Tokens], D, Mode, Acc)
   when Separator =:= newline; Separator =:= ';'; Separator =:= '&' ->
     sequence(Tokens, D, Mode, Acc);
@@ -152,6 +337,8 @@ sequence(Tokens, D, Mode, Acc) ->
             case command(Tokens, D) of
                 {Cmd, [{'&', _, _} | Rest]} ->
                     sequence(Rest, D, Mode, [{background, Cmd} | Acc]);
+                {Cmd, [{newline, _, _} | _] = Rest} when Mode =:= line ->
+                    {lists:reverse(Acc, [Cmd]), Rest};
                 {Cmd, [{Separator, _, _} | Rest]}
                   when Separator =:= newline; Separator =:= ';' ->
                     sequence(Rest, D, Mode, [Cmd | Acc]);
