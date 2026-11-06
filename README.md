@@ -238,15 +238,34 @@ ok
 * **Files work.** The file protocol, per-domain namespaces and `/tmp` all
   run, `/tmp` on a RAM file system written in Erlang. `prim_file` reaches
   file servers through grants.
+* **Storage works**: M6's demo of the [roadmap](docs/plan.md) runs. A
+  virtio block driver in Erlang (`erx_blk`) serves the partitions of an
+  MBR with extended boot records as windows. littlefs serves `/data`; a
+  file synced there survives a power cut, checked under HVF. An EROFS
+  reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
+  images in the namespace. CRC-32C is the first per-byte primitive.
+  `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU
+  harness boots from it, playing the firmware, which reads the
+  boot-selection record and boots the slot it names. The shell then reads
+  the release's files from that slot's EROFS image at `/images/release`.
+  The funnel does not check image hashes yet; that is M11.
+* **The command shell has begun.** `erx_shell` holds rc's tokenizer and
+  parser in Erlang, with a fuzz target and plan9port's rc built as the
+  host oracle. The evaluator, commands and job control are not built.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
-  `file_SUITE` and `filelib_SUITE` are compared case by case with stock
-  OTP.
+  compiler, stdlib, kernel and emulator suite groups are compared case by
+  case with stock OTP, and each known difference is classified by cause
+  (`test/oracle/hosted_known_differences/`). On QEMU the system domain
+  runs kernel's `file_SUITE` and stdlib's `filelib_SUITE` against stock.
+* **The release** carries kernel, stdlib, compiler and runtime_tools (the
+  last two loaded, not started), and the erXos applications `erx`,
+  `erx_files`, `erx_uart`, `erx_blk` and `erx_shell`.
 * **The build checks itself.** Generated ABI and hardware layers,
   reproducible boot images, fuzzing, ASan, UBSan, TSan and TLA+ models
   all run as build gates.
 * **Designed but not built yet:** erXos's own kernel, domains beyond the
-  system domain, the command shell, storage, networking, the display and
-  web UI, and the POSIX-lite layer. Each has a design document in
+  system domain, the rest of the command shell, networking, the display
+  and web UI, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Host setup
