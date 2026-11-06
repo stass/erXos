@@ -59,7 +59,8 @@
          <<"cat <<EOF >[2=1]\nhi $x^y $$ $\nEOF\ncat <<'Q'\n$z\nQ\n">>,
          <<"@ { a; b } | c\n# comment\nd \\\n e">>,
          <<">f x=1 ! @ a | b">>,
-         <<"{if(t)}; {! }; >g; x=y | z">>]).
+         <<"{if(t)}; {! }; >g; x=y | z">>,
+         <<"echo a=b x= =y; x=(p q=r); case=x">>]).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
@@ -504,7 +505,10 @@ printed(Program) ->
 
 seq(Cmds) -> [[cmd(C), <<";">>] || C <- Cmds].
 
-cmd({simple, Words, Redirs}) -> join([word(W) || W <- Words] ++ [redir(R) || R <- Redirs]);
+%% Redirections go straight after the first word: a second word that starts
+%% with `=` and follows it after a blank would make an assignment.
+cmd({simple, [First | Words], Redirs}) ->
+    join([word(First)] ++ [redir(R) || R <- Redirs] ++ [word(W) || W <- Words]);
 cmd({block, Cmds, Redirs}) -> [<<"{">>, seq(Cmds), <<"}">>, [[<<" ">>, redir(R)] || R <- Redirs]];
 cmd({background, Cmd}) -> [cmd(Cmd), <<" &">>];
 cmd({pipeline, First, Stages}) -> [cmd(First), [[<<" ">>, pipe(P), <<" ">>, cmd(C)] || {P, C} <- Stages]];
@@ -513,8 +517,10 @@ cmd({'not', Body}) -> [<<"! ">>, body(Body)];
 cmd({subshell, Body}) -> [<<"@ ">>, body(Body)];
 cmd({if_not, Body}) -> [<<"if not ">>, body(Body)];
 cmd({redirect, Redir, Body}) -> [redir(Redir), <<" ">>, body(Body)];
-cmd({assign, Name, Value}) -> [word(Name), <<"=">>, word(Value)];
-cmd({local, Name, Value, Cmd}) -> [word(Name), <<"=">>, word(Value), <<" ">>, cmd(Cmd)];
+%% Blanks around `=`: a name of several parts joined straight to `=` would
+%% read as one word.
+cmd({assign, Name, Value}) -> [word(Name), <<" = ">>, word(Value)];
+cmd({local, Name, Value, Cmd}) -> [word(Name), <<" = ">>, word(Value), <<" ">>, cmd(Cmd)];
 cmd({'if', Condition, Body}) -> [<<"if(">>, seq(Condition), <<") ">>, body(Body)];
 cmd({while, Condition, Body}) -> [<<"while(">>, seq(Condition), <<") ">>, body(Body)];
 cmd({for, Var, args, Body}) -> [<<"for(">>, word(Var), <<") ">>, body(Body)];

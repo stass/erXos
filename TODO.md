@@ -1278,18 +1278,19 @@ next newline, even inside braces, where plan9port may wait for the whole
 command; `>>{`, `<>{` and `>[2]{` are refused; and a NUL byte is a word
 byte, which the evaluator refuses in a program's arguments and a file
 name but hands the runner inside a variable's value, which a program's
-environment must leave out. Add each
+environment must leave out; and a keyword joins no word that touches it,
+where rc's hand-written parser joins one in an argument (`echo for=x`
+prints `for=x` in rc, `for =x` here), and the same holds after a
+subscript's `)` and the `}` of `` `{...} `` and `<{...}` (`echo
+$x(1)=2`), while `echo (a)=b` is refused in rc and two words here; `not=1`
+and `in=x` are assignments in rc and refused here; and `cat <<=` takes `=`
+as its tag in rc. The joining rules would hold by construction if the
+lexer marked each token with whether a blank came before it and the
+parser joined as rc's yyword does, in place of inserted carets and `sub`.
+Add each
 to the corpus and follow rc
   (`erlang/apps/erx_shell/src/erx_shell_lex.erl`,
   `erlang/apps/erx_shell/src/erx_shell_parse.erl`).
-* [Medium] shell, `=` inside a word: plan9port's rc (its hand-written
-  parser, which the oracle runs) takes `=` as a word after a command's
-  first word and inside a list, joined by free carets: `echo a=b x= =y`
-  prints `a=b x= =y` and `x=(p q=r)` assigns two words. erx_shell_parse
-  follows rc's yacc grammar and refuses both. Follow the hand-written
-  parser in the lexer's free carets and the parser, and add the cases to
-  the corpus (`erlang/apps/erx_shell/src/erx_shell_parse.erl`,
-  `test/shell/rc/corpus`).
 * [Medium] shell, `if not` that does not follow an `if`: rc refuses it
   before running the unit, across units of one source too (``rc: file:line:
   `if not' does not follow `if(...)'``); erx_shell_parse accepts it and

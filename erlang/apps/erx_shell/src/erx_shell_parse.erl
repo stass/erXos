@@ -22,7 +22,8 @@ and not by the source, which has no bound. The evaluator parses through
 so that bound holds whatever the evaluator's own heap holds.
 `format_error/1` renders a diagnostic as the line the shell prints. The
 tree is what the evaluator walks, so its shape is the types below. It
-follows plan9port's rc (its syntax.y) in what binds to what:
+follows plan9port's rc (its syntax.y, and its parse.c for `=`) in what
+binds to what:
 * `&&` and `||` bind loosest, left to right, and are one flat `and_or`;
   `|` binds tighter and is one flat `pipeline`. A newline may follow any
   of the three.
@@ -37,8 +38,11 @@ follows plan9port's rc (its syntax.y) in what binds to what:
 * A keyword starts a command only in a command's first place; elsewhere it
   is a word, so `echo if` prints `if`. `in` and `not` cannot start one.
 * `case` written unquoted as the first word of a command directly in a
-  `switch` body starts an arm, and the body must begin with one.
-* `a=b` must stand first: `echo a=b` does not parse, as in rc.
+  `switch` body starts an arm, and the body must begin with one; `case=x`
+  and `case =x` are assignments, as rc runs them.
+* `=` makes an assignment where it touches a simple command's first part,
+  or follows its whole first word after a blank; anywhere else it is a
+  part of the word it touches, so `echo a=b` prints `a=b`, as in rc.
 
 A diagnostic names the line and column of the first fault, the
 tokenizer's or the parser's, in fixed words, counted from the start of the
@@ -326,8 +330,9 @@ sequence([{newline, _, _} | _] = Tokens, _D, line, Acc) ->
 sequence([{Separator, _, _} | Tokens], D, Mode, Acc)
   when Separator =:= newline; Separator =:= ';'; Separator =:= '&' ->
     sequence(Tokens, D, Mode, Acc);
+%% A `case` joined to what follows it, or assigned to, is a command.
 sequence([{word, _, <<"case">>}, {Next, _, _} | _] = Tokens, _D, arm, Acc)
-  when Next =/= caret ->
+  when Next =/= caret, Next =/= '=' ->
     {lists:reverse(Acc), Tokens};
 sequence(Tokens, D, Mode, Acc) ->
     case starts_command(Tokens) of
@@ -487,7 +492,9 @@ braced(Tokens, D) ->
 %% A switch body: arms, each a `case` line and the commands up to the next.
 arms(Tokens, D, Acc) ->
     case skip_separators(Tokens) of
-        [{word, _, <<"case">>}, {Next, _, _} = Following | Rest] when Next =/= caret ->
+        %% `case` joined to what follows it, or assigned to, is a command.
+        [{word, _, <<"case">>}, {Next, _, _} = Following | Rest]
+          when Next =/= caret, Next =/= '=' ->
             {Patterns, Rest1} = words([Following | Rest], D),
             {Cmds, Rest2} = sequence(case_end(Rest1), D, arm),
             arms(Rest2, D, [{'case', Patterns, Cmds} | Acc]);
@@ -506,21 +513,44 @@ case_end([{'}', _, _} | _] = Rest) ->
 case_end([Token | _]) ->
     fail(Token, <<"a case takes only words">>).
 
-%% A command that starts with a word: an assignment if `=` follows it.
+%% A command that starts with a word: an assignment if `=` touches its
+%% first part, or follows the whole word after a blank, as in rc's
+%% parse.c; anywhere else `=` is a part of the word it touches. A caret the
+%% lexer inserted stands where the `=` does, while a written `^` comes
+%% before it, so `a^=b` is one word, as in rc.
 simple(Tokens, D) ->
-    case word(Tokens, D) of
-        {Name, [{'=', At, _} | Rest]} ->
-            {Value, Rest1} = word(Rest, D),
-            case starts_command(Rest1) of
-                true ->
-                    {Body, Rest2} = pipeline(Rest1, enter(D, At)),
-                    {{local, Name, Value, Body}, Rest2};
-                false ->
-                    {{assign, Name, Value}, Rest1}
-            end;
-        {First, Rest} ->
-            arguments(Rest, D, [First], [])
+    {First, Rest} = part(Tokens, D),
+    case Rest of
+        [{caret, At, _}, {'=', At, _} | Rest1] ->
+            assignment(First, At, Rest1, D);
+        _ ->
+            case concat(Rest, D, [First]) of
+                {Name, [{'=', At, _} | Rest1]} -> assignment(Name, At, Rest1, D);
+                {Word, Rest1} -> arguments(Rest1, D, [Word], [])
+            end
     end.
+
+%% `name=value`, alone or before the pipeline it applies to. The lexer
+%% joins what touches `=` to it, as it joins what touches a word, but a
+%% value starts afresh: its caret is dropped and a `(` the lexer read as a
+%% subscript opens a list.
+assignment(Name, At, Tokens, D) ->
+    {Value, Rest} = word(unjoined(Tokens), D),
+    case starts_command(Rest) of
+        true ->
+            {Body, Rest1} = pipeline(Rest, enter(D, At)),
+            {{local, Name, Value, Body}, Rest1};
+        false ->
+            {{assign, Name, Value}, Rest}
+    end.
+
+%% The tokens of an assignment's value with the lexer's joining to `=`
+%% undone: an inserted caret, which stands where the next token does, is
+%% dropped (a written `^` stays, and is refused, as in rc), and a `sub` is
+%% the `(` of a list.
+unjoined([{caret, At, _}, {_, At, _} = Next | Tokens]) -> [Next | Tokens];
+unjoined([{sub, At, _} | Tokens]) -> [{'(', At, none} | Tokens];
+unjoined(Tokens) -> Tokens.
 
 arguments(Tokens, D, Words, Redirs) ->
     case starts_word(Tokens) of
@@ -599,6 +629,8 @@ part([{quoted, _, Text} | Tokens], _D) ->
     {{quoted, Text}, Tokens};
 part([{keyword, _, Keyword} | Tokens], _D) ->
     {{word, atom_to_binary(Keyword)}, Tokens};
+part([{'=', _, _} | Tokens], _D) ->
+    {{word, <<"=">>}, Tokens};
 part([{dollar, At, _} | Tokens], D) ->
     D1 = enter(D, At),
     case name(Tokens, D1) of
@@ -638,7 +670,7 @@ name([Token | _] = Tokens, D) ->
     end.
 
 starts_word([{Kind, _, _} | _]) ->
-    lists:member(Kind, [word, quoted, keyword, dollar, count, flat, backquote,
+    lists:member(Kind, [word, quoted, keyword, '=', dollar, count, flat, backquote,
                         '(', pipefd]).
 
 starts_command([{keyword, _, Keyword} | _]) ->

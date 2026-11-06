@@ -24,10 +24,12 @@ rc reads (its lex.c):
   `$stem` and `.c`, and it is never a keyword.
 * `'...'` is the one quoting rule, with `''` for a quote inside, and may
   span lines.
-* Straight after a word or a quoted word, with nothing between them, `(`
-  is a subscript (`sub`) and the start of another word gets the caret rc
-  inserts (`caret`), so `$x(2)` subscripts and `-$flag.c` concatenates.
-  After a keyword neither happens, as in rc.
+* Straight after a word, a quoted word or `=`, with nothing between them,
+  `(` is a subscript (`sub`) and the start of another word or an `=` gets
+  the caret rc inserts (`caret`), so `$x(2)` subscripts, `-$flag.c`
+  concatenates and `a=b` is three parts joined. After a keyword neither
+  happens. `=` is a word of its own, as in rc's hand-written parser
+  (parse.c), which the parser joins or reads as an assignment.
 * A backslash before a newline outside quotes and comments reads as a
   space; `#` starts a comment, which ends at the next newline.
 * `>`, `>>`, `<`, `<>` and `<<` take an optional descriptor, `>[2]`;
@@ -193,7 +195,7 @@ adjacent(L) ->
     end.
 
 starts_joined(C) ->
-    C =:= $' orelse C =:= $` orelse C =:= $$ orelse word_char(C).
+    C =:= $' orelse C =:= $` orelse C =:= $$ orelse C =:= $= orelse word_char(C).
 
 token(L, At) ->
     case peek(L) of
@@ -227,6 +229,8 @@ token(L, At) ->
                 $> -> redirection(advance(L1), At, rdwr, 0);
                 _ -> redirection(L1, At, read, 0)
             end;
+        $= ->
+            {{'=', At, none}, (plain(advance(L)))#lx{word = true}};
         $' ->
             {Text, L1} = quoted(L),
             {{quoted, At, Text}, (plain(L1))#lx{word = true}};
@@ -241,7 +245,6 @@ token(L, At) ->
 %% above stands alone.
 punctuation($;) -> ';';
 punctuation($^) -> caret;
-punctuation($=) -> '=';
 punctuation($`) -> backquote;
 punctuation(${) -> '{';
 punctuation($}) -> '}';

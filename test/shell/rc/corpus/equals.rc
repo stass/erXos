@@ -1,0 +1,11 @@
+# = is a word byte after a command's first word, joined by free carets.
+echo a=b x= =y
+x=(p q=r); echo $#x $x
+y = 1; echo $y
+z=a=b; echo $z
+a=b echo $a
+echo a^b=c $x=1
+fn f { echo $* }; f k=v
+for(i in a=b c) echo $i
+~ a=b a=*; echo m $status
+switch(b){case b; case=x; echo case $case}

@@ -157,6 +157,26 @@ local_assignment_applies_to_the_pipeline_test() ->
                   {pipeline, cmd([<<"a">>]), [{{1, 0}, cmd([<<"b">>])}]}},
                  one(<<"x=1 a | b">>)).
 
+%% `=` is a word's byte except after a command's first word, as in rc's
+%% hand-written parser: free carets join it to what touches it.
+equals_inside_words_test() ->
+    Eq = w(<<"=">>),
+    ?assertEqual([w(<<"echo">>), {concat, [w(<<"a">>), Eq, w(<<"b">>)]},
+                  {concat, [w(<<"x">>), Eq]}, {concat, [Eq, w(<<"y">>)]}],
+                 args(<<"echo a=b x= =y">>)),
+    ?assertEqual({assign, w(<<"x">>), {list, [w(<<"p">>), {concat, [w(<<"q">>), Eq, w(<<"r">>)]}]}},
+                 one(<<"x=(p q=r)">>)),
+    ?assertEqual({assign, w(<<"z">>), {concat, [w(<<"a">>), Eq, w(<<"b">>)]}}, one(<<"z=a=b">>)),
+    ?assertEqual({assign, w(<<"y">>), w(<<"1">>)}, one(<<"y = 1">>)),
+    ?assertEqual([{concat, [w(<<"a">>), w(<<"b">>), Eq, w(<<"c">>)]}], args(<<"a^b=c">>)),
+    ?assertEqual([{concat, [w(<<"a">>), Eq, w(<<"b">>)]}], args(<<"a^=b">>)),
+    ?assertEqual({assign, {concat, [w(<<"a">>), w(<<"b">>)]}, w(<<"c">>)}, one(<<"a^b =c">>)),
+    ?assertEqual([w(<<"echo">>), {concat, [v(<<"x">>), Eq, w(<<"1">>)]}], args(<<"echo $x=1">>)),
+    %% In a switch, `case` assigned to is a command, as rc runs it.
+    ?assertEqual({switch, {list, [v(<<"x">>)]}, [{'case', [w(<<"a">>)], [{assign, w(<<"case">>), w(<<"*">>)},
+                                                               {assign, w(<<"case">>), w(<<"b">>)}]}]},
+                 one(<<"switch($x){case a\ncase= *\ncase = b\n}">>)).
+
 nested_lists_test() ->
     ?assertEqual([w(<<"echo">>), {list, [w(<<"a">>), {list, [w(<<"b">>)]}]}],
                  args(<<"echo (a (b))">>)).
@@ -328,7 +348,10 @@ line_continuation_test() ->
 %% Malformed sources: each a diagnostic at a position.
 
 syntax_errors_test_() ->
-    Cases = [{<<"echo a=b">>, {1, 7}, <<"unexpected '='">>},
+    Cases = [{<<"echo a=(b)">>, {1, 8}, <<"unexpected '('">>},
+             {<<"echo =">>, {1, 7}, <<"a word must follow">>},
+             {<<"a=^b">>, {1, 3}, <<"a word must follow">>},
+             {<<"x= ^b">>, {1, 4}, <<"a word must follow">>},
              {<<"echo x(1)">>, {1, 7}, <<"unexpected '('">>},
              {<<"a\n  }">>, {2, 3}, <<"unexpected '}'">>},
              {<<"echo {a}">>, {1, 6}, <<"unexpected '{'">>},
