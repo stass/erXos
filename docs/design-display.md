@@ -80,7 +80,12 @@ Decisions every reader of this document needs:
   behind the same behaviour as a native program in a sub-space of the
   display domain, for panels where its mature widgets and fonts pay; it
   is a stopgap, replaced by the Erlang renderer once that renderer
-  matches it on the kiosk's widget set and frame times.
+  matches it on the kiosk's widget set and frame times. Every renderer,
+  the web's browser renderer included
+  ([design-web.md](design-web.md#uis-the-browser-renderer)), renders the
+  tree as fits its medium: the tree states what the widgets are, their
+  values and their events, not their appearance, and renderers are
+  compared on those, never on pixels or layout.
 * **A presentation is a type and a canonical text, and grants nothing.**
   Every value the shell and the inspector emit already carries its type
   from the inspection schema. Its text is the form the shell parses back
@@ -151,7 +156,9 @@ everywhere, and GPU acceleration is out of scope.
    events as messages, from any domain that holds a display grant, with
    no widget handles and no imperative widget commands.
 4. The same application term renders through the Erlang renderer on a
-   desktop and through LVGL on a panel, with the same events.
+   desktop, through LVGL on a panel and through the browser renderer on
+   the web, with the same values and the same events, each as fits its
+   medium.
 5. A session's shell runs in a terminal window with its tty unchanged:
    the login, `Ctrl-G` menu, job control and `termios` behave as on the
    serial console.
@@ -175,6 +182,10 @@ everywhere, and GPU acceleration is out of scope.
 12. Drivers are Erlang processes over the device shim; the pixel work is
     per-byte C; nothing else of the display stack is native, apart from
     LVGL as a stopgap renderer.
+13. An application chooses by name which of its displays a UI opens on,
+    with a default its session sets; with no display it gets a stated
+    error at once, and when a display goes away each UI on it reports its
+    end to its opener.
 
 ## Overview
 
@@ -202,7 +213,7 @@ A **display domain** is a configured domain of the manifest holding one
 display device and its input devices. Its release runs the display
 driver, the input drivers, the window file server `erx_winfs`, one window
 process `erx_window` per window, the screen owner `erx_screen`, the
-display facets, widget servers, terminal emulators, the overlapping
+widget service behind the display facets, widget servers, terminal emulators, the overlapping
 policy's menu and, where the manifest asks for it, the LVGL renderer as
 a native program.
 
@@ -415,13 +426,22 @@ devices.
 ```
 
 A node's identity across trees is its `key` property when present and
-its position among its siblings otherwise, React's rule. State the
-application does not set lives in the server under the node's identity:
-an `input`'s text and cursor, a `scroll`'s offset, a `list`'s selection,
-the focus. A property the tree sets is authoritative; one it omits keeps
-the server's value. That one rule is the whole protocol for controlled
-and uncontrolled widgets. Content an application draws itself, acme-like,
-is a window of its own beside the widget window.
+its position among its siblings otherwise, React's rule. A tree states
+meaning, not appearance: what each node is, its values and the events it
+takes; layout properties are hints each renderer reads for its medium.
+Values the application does not set live in the server under the node's
+identity: an `input`'s text, a `checkbox`'s state, a `slider`'s value, a
+`list`'s selection. A property the tree sets is authoritative; one it
+omits keeps the server's value. That one rule is the whole protocol for
+controlled and uncontrolled widgets. Presentation state, a `scroll`'s
+offset, an `input`'s cursor and the focus, is each renderer's own, kept
+for its medium and never part of the tree or the server's state. An
+`input` with `secret => true` shows its text as marks; its text is never
+kept, by the server or by a renderer, and reaches the application only as
+`{erx_secret, Text}` in the event's detail, which every printer shows as
+`[secret]` ([Attributed text](design-live.md#attributed-text)). Content
+an application draws itself, acme-like, is a window of its own beside the
+widget window.
 
 ### Presentations
 
@@ -447,7 +467,8 @@ ESC ] 8 ; ; erx:TYPE/TEXT ESC \  TEXT  ESC ] 8 ; ; ESC \
 `TEXT` is the canonical text after the line escape, and the URI's `TEXT`
 is the same text with every byte outside `A-Z a-z 0-9 _ + , : = @ - . /`
 written as `%` and two hexadecimal digits, the encoding of `/proc`'s
-names, so the sequence is ASCII and holds no control character. The
+names with `.` and `/` kept, so the sequence is ASCII and holds no
+control character. The
 renderer emits links only when the tty's terminal declares them: the
 terminal emulator and the host tool's `console` set the session's
 `TERM` to a value whose terminfo-style capability table lists `links`,
@@ -739,16 +760,26 @@ runs `erx inspect` with the host session's own facets.
 An application reaches its widgets through its **display facet**, an
 `erx_facet` instance minted for its domain, beside its file grant, when
 the system domain introduces the domain to the display, and declared
-with its operations in `abi/services/display.txt`. Being a facet, it
-acts only for the grantee, admits requests within the grant's share of
-reductions and its `max_request`, and ends when revoked. The client
-library `erx_ui` calls its operations:
+with its operations in `abi/services/display.txt`. The facet is a process
+of the system domain in front of the display's widget service, as a facet
+in front of another domain's service is
+([Facets](design-domains.md#facets)), and the same declaration is served
+by every display domain and by the web domain
+([design-web.md](design-web.md)), so one facet type reaches either. Being
+a facet, it acts only for the grantee, admits requests within the
+grant's share of reductions and its `max_request`, and ends when revoked.
+It keeps the UIs opened through it, at most the grant's `windows`, so it
+can report each one's end. The client library `erx_ui` calls its
+operations:
 
-* `erx_ui:open(Facet, Options)` is `open_ui`: the facet starts a widget
-  server, `erx_ui_server`, which makes the window in the grantee's
-  directory as its holder, against the grantee's `windows` quota, and the
-  reply is `{ok, Window}`, a reference naming it; the window appears in
-  the grantee's tree like any other;
+* `erx_ui:open(Options)` is `open_ui` on the display that `Options`'
+  `display` names, or on the default display ([Choosing a
+  display](#choosing-a-display)): the display starts a widget server,
+  `erx_ui_server`, which makes the window in the grantee's directory as
+  its holder, against the grantee's `windows` quota, with the `label`
+  option as the window's title, and the reply is `{ok, Window}`, a
+  reference naming it; the window appears in the grantee's tree like any
+  other;
 * `erx_ui:tree(Window, Tree)` is `ui_tree`, answered `ok` or `{error,
   Reason}`;
 * `erx_ui:close(Window)` is `close_ui`, which ends the window.
@@ -781,11 +812,12 @@ inside `on_*` terms included, are bounded by its runtime's
 size by `max_request`.
 
 ```erlang
--callback start(Window :: binary(), Server :: pid(), Opts :: map()) -> {ok, State}.
-%% Window is the window's directory in the display domain's own grant.  The renderer
-%% reads the window's mouse and kbd in a process of its own, linked to Server, and
-%% sends Server {ui_hit, key(), Event :: atom(), Detail :: term()} for each event a
-%% node takes.
+-type target() :: {window, Dir :: binary()}     % the window's directory in the display domain's own grant
+                | {web, Ui :: pos_integer()}.   % the UI's entry in the web domain's table (design-web.md)
+-callback start(Target :: target(), Server :: pid(), Opts :: map()) -> {ok, State}.
+%% The renderer reads its target's input in a process of its own, linked to Server:
+%% a window's mouse and kbd, or a browser's events.  It sends Server
+%% {ui_hit, key(), Event :: atom(), Detail :: term()} for each event a node takes.
 -callback apply(Ops :: [diff_op()], State) -> {ok, State} | {error, term()}.
 -callback stop(State) -> ok.
 ```
@@ -804,14 +836,18 @@ The **LVGL renderer**, `erx_ui_lvgl`, starts the native program
 bound in its `/dev` and nothing else of the tree, and writes
 the same `diff_op()`s to its standard input in the binary form declared
 in `abi/formats/ui.txt`, from which the generator produces the program's
-bounded C reader; the program maps each kind to an LVGL object, sets its
+bounded C reader. That form carries an `on_*` property as the flag that
+the node takes the event, never the application's term, and a `present`
+property as its type, its canonical text from `erx_present:text/2` and
+its status, so the application's terms stay in the widget server and no
+renderer outside Erlang parses one. The program maps each kind to an LVGL object, sets its
 properties, renders into its own buffer, loads dirty rectangles into
 image 0 with `y` messages on `/dev/draw` and flushes, reads
 `/dev/mouse` and `/dev/kbd` for input, and writes events in the same
 format to its standard output, which `erx_ui_lvgl` reads with the same
 generated reader. Its fonts are LVGL's. The two renderers pass the same
-parity test (Verification), and an application cannot tell them apart
-except by pixels.
+parity test (Verification), which compares meaning, and an application
+cannot tell them apart except by pixels.
 
 **Presentations in widgets.** A node's `present` property is `{Type,
 Value}` or an `attr()` carrying one; the renderer shows
@@ -821,6 +857,39 @@ token when the status is not `ok` (G7), and a click sends the owner
 `on_select`. An inspector window is an ordinary application: it renders
 a record as a tree of labels with `present` properties and, on a select,
 queries the inspector through its own inspect facet (G4).
+
+### Choosing a display
+
+A domain holds a display facet for each display it was introduced to, in
+its capability registry
+([Granting a running domain](design-system.md#granting-a-running-domain))
+under the name of the domain that serves it: `display` for a display
+domain of that name, another name for a second display domain, `web` for
+the web domain. A session may hold none, one or several. The **default
+display** is the domain's environment variable `display`, which whoever
+starts the domain sets to the display it was started from: a login at a
+terminal window sets that window's display, a web login sets `web`, a
+configured domain takes it from its manifest entry, and a login at the
+serial console or over the host link sets none. A user changes it as any
+environment variable, for the domain or for one program it starts, as on
+Unix.
+
+`erx_ui:open(Options)` looks up `Options`' `display`, or the default when
+`Options` names none, in the registry, and opens there. A name that is
+unset, or that names no display facet the domain holds, answers `{error,
+no_display}` at once; nothing waits for a display to appear. The name
+selects among facets the domain already holds and grants nothing. A UI
+lives on the one display it opened on: the web is a second display, not a
+mirror of the first, and an application that wants a UI on both opens
+two.
+
+When a display goes away, its facets report it: each opener of a UI on it
+receives `{ui_down, Window, display_down}` from the facet, which then
+ends, and the registry drops its name, so a later `erx_ui:open/1` naming
+it answers `{error, no_display}` until the display's domain is back and
+the system domain introduces the domain to it again. A browser that
+closes is not a display going away: the web domain stays, and so do its
+UIs ([design-web.md](design-web.md#uis-the-browser-renderer)).
 
 ### Kiosks and glasses
 
@@ -887,7 +956,8 @@ through the file protocol; the display grant's parameters `windows`,
 operations, `open_ui`, `ui_tree` and `close_ui` for an application and
 `events` for a domain that holds input devices of the display, each
 grant naming the operations it allows, declared in
-`abi/services/display.txt`. The console service's `offer_line`, in
+`abi/services/display.txt` and served by every display domain and by the
+web domain. The console service's `offer_line`, in
 `abi/services/console.txt`, granted to a display domain whose manifest
 entry sets `console_line`.
 
@@ -898,11 +968,13 @@ commands `resize -r X0 Y0 X1 Y1`, `move -r X0 Y0 X1 Y1`, `hide`, `show`,
 `top`, which also makes the window take the keyboard, and `bottom`, each
 one line, at most 128 bytes.
 
-**Widgets**: `erx_ui:open/2`, `erx_ui:tree/2`, `erx_ui:close/1`, `{ui,
-Window, Term, Detail}`, `{ui_down, Window, Reason}`; the kinds,
-properties, events and bounds of `abi/formats/ui.txt`, which also
-declares the binary form of `diff_op()` and of events for the native
-renderer; the `erx_ui_renderer` behaviour.
+**Widgets**: `erx_ui:open/1` with the `display` and `label` options,
+`erx_ui:tree/2`, `erx_ui:close/1`, `{ui, Window, Term, Detail}`,
+`{ui_down, Window, Reason}` and `{error, no_display}`; the `display`
+environment variable; the kinds, properties, events and bounds of
+`abi/formats/ui.txt`, `secret` on `input` among them, which also declares
+the binary form of `diff_op()` and of events for renderers outside
+Erlang; the `erx_ui_renderer` behaviour and its `target()`.
 
 **Presentations**: the type table of `abi/inspection.txt`,
 `erx_present:text/2` and `parse/2`, the `-erx_args` declaration, the link
@@ -954,7 +1026,7 @@ at a terminal that declares `links`.
 | `erx_winfs` crashes | it holds every grant and window of the display, so its crash ends the display domain, with the effect of the domain's end below | as for the domain's end |
 | a terminal emulator crashes | its window ends with it, its holder; its line drops, and the session connected to it detaches, as a serial console's does when the line drops, reachable from another console | a new terminal window from the menu |
 | a widget server crashes | its window ends with it, its holder; the facet sends the application `{ui_down, Window, server_down}` | the application opens a new window |
-| the display domain ends | every window ends; sessions' fids fail with the connection down; terminal windows' sessions detach, as above | the domain service restarts the domain within its intensity; applications reopen |
+| the display domain ends | every window ends; sessions' fids fail with the connection down; terminal windows' sessions detach, as above; each opener of a UI on it receives `{ui_down, Window, display_down}` from its display facet, which ends | the domain service restarts the domain within its intensity and the system domain introduces its clients again; applications reopen |
 | a widget tree fails validation | `ui_tree` answers `{error, Reason}`; the realised tree is unchanged | the application's |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}` | the application reopens; the display domain logs the exit record |
 | an input device stops | its driver restarts and resets it | events resume |
@@ -1109,10 +1181,17 @@ Each passing case has a seeded failure that proves the code ran.
   property that applying its operations to the old tree yields the new
   one, over random trees, and that an unchanged subtree emits no
   operation; the **parity test**, one corpus of trees and input
-  sequences run through both renderers, comparing the events the
-  application receives and the set of nodes present, where a seeded swap
-  of two event names in the LVGL mapping fails it; the generated C
-  reader's fuzz target; G7's status tests through a widget tree.
+  sequences run through every renderer, the web's browser renderer
+  included, comparing meaning alone: the events and values the
+  application receives and the set of nodes present, never pixels or
+  layout, where a seeded swap of two event names in the LVGL mapping
+  fails it; the generated C reader's fuzz target; G7's status tests
+  through a widget tree; `erx_ui:open/1` with no display facet answering
+  `{error, no_display}` at once, a UI opened by name landing on that
+  display, and a stopped display domain sending each opener `{ui_down,
+  Window, display_down}`, where an `erx_ui` that ignores the `display`
+  option fails; a `secret` input's text absent from the server's state
+  and from every printed form.
 * **Presentations.** The round trip `parse(Type, text(Type, Value)) ==
   Value` for every type and a generated corpus of values; the renderer
   emits links only with `links` declared, checked at the tty's byte
@@ -1232,7 +1311,15 @@ Decisions taken with the owner:
 2. **LVGL is a stopgap.** The Erlang renderer exists for the desktop
    regardless, and one renderer is the simpler system; LVGL retires on
    panels when the parity test passes and the Erlang renderer matches
-   its frame times on a 240x240 panel, and stays until then.
+   its frame times on a 240x240 panel, and stays until then. Both gates
+   compare the two on the same panel: the parity test on meaning, the
+   frame times on speed; neither asks for the same pixels.
+7. **The web is a medium of its own.** Every renderer renders for its
+   medium, and nothing requires pixel or layout parity between the
+   browser and a native display; presentation state stays with each
+   renderer. Mirroring a display in the browser is left out: the web is a
+   second display an application names
+   ([design-web.md](design-web.md)).
 3. **Fonts.** plan9port's `fixed` fonts serve the terminal and the first
    widgets; anti-aliased fonts (the Go fonts, rasterised by a host step)
    are chosen with the first application that needs them.

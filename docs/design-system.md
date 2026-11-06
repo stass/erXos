@@ -405,9 +405,13 @@ violation fails the build with the property, the record and the field:
    device together with a window on a partition that no hash tree checks
    (a data, FAT or vault's partition) or a `hostile` device of another
    unit; the diagnostic names that hostile input when the violating holder
-   has one. The manifest has no partial boot. The packer sets the boot
-   image's `ERX_PACK_UNCONFINED_DMA` exactly when the manifest gives an
-   unconfined device.
+   has one. The web domain, the configured domain that holds the
+   `erx_web_login` facet and parses browsers' bytes, holds no unconfined
+   device, its network listener is TLS, and the host link's facets do not
+   list `web`, so the web's development paths stay out of a release
+   ([design-web.md](design-web.md)). The manifest has no partial boot.
+   The packer sets the boot image's `ERX_PACK_UNCONFINED_DMA` exactly
+   when the manifest gives an unconfined device.
 10. **The domains have a boot order:** no configured domain's facets lead
     back to it, so the check can order every server before its clients,
     and it writes that order.
@@ -1619,7 +1623,7 @@ root
  |   `- any other domain the manifest lists
  `- users (system domain: CONFIGURE)
      |- principal "alice"
-     |   |- domain 7 "web"
+     |   |- domain 7 "notes"
      |   |- session 8 "alice.1"
      |   |   `- sub-space group: her programs, one child group each
      |   `- domain 9 ...
@@ -2239,6 +2243,7 @@ domain, in a domain the manifest lists: the vault.
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
 | file trees, `erx_procfs` and the device service's tree | `/proc` for each inspect facet; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
+| web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |
 
 ### Identifiers
@@ -3021,7 +3026,9 @@ under test ran.
   property's diagnostic, beside the shipped manifests, which must pass,
   among them, for property 9, a release build's manifest that gives a
   device marked `hostile` and unconfined to a storage domain that also
-  holds data windows, and for property 13, one whose service grants leave
+  holds data windows, one that lists `web` among the host's facets, one
+  that gives the web domain a plain-HTTP listener and one that gives it an
+  unconfined device, and for property 13, one whose service grants leave
   the reserve on the whole of `system` but not on the CPUs of the system
   domain's own threads;
   the check's boot order over manifests whose facets form a chain, a tree

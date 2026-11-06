@@ -217,3 +217,18 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Low] display, composes run one at a time in `erx_screen`**, and a
   window waits in its flush call. Settled by several animating windows and
   a kiosk's flush latency.
+* **[Medium] web, a record view's round trip over the host tool's front end**
+  ([design-web.md](design-web.md#performance)): each update crosses the host
+  link, the system domain's relay, the web domain, the session's line and the
+  inspector, and a record view sends whole records every 2 s while they change.
+  Settled by round-trip times and link bytes per second for the machine's
+  record and a 1,000-child listing, under TCG and HVF and over a 115,200-baud
+  UART; the fix on the table is a record difference message.
+* **[Low] web, `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node
+  tree,** and a tree's first attachment, which arrives over several 64 KiB
+  updates. Settled by time per call on HVF and the attachment's time over the
+  UART host link; the fix on the table is keeping the delta from the server's
+  operations instead of comparing models.
+* **[Low] web, the client's first load and the bundle's size,** over the host
+  tool and over the network front end. Settled by bytes served and time to the
+  first rendered view; the fix on the table is splitting the bundle by route.

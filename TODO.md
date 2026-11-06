@@ -1411,6 +1411,20 @@ document's "residual risks accepted" paragraph.
   through `libdraw`'s `getwindow`, as
   [design-display.md](docs/design-display.md#compatibility-and-migration)
   assumes.
+* [Medium] web, the host-link front end: build the web client under
+  `web/`, `abi/protocols/web.txt` and its generated codecs, the web domain
+  with `erx_web_conn`, the session's `erx_web_line` and the browser
+  renderer, the host link's `web` facet and `tools/erx web`, as
+  [design-web.md](docs/design-web.md) describes.
+* [Medium] web, the network front end: cowboy over TLS in the web domain,
+  `erx_web_login` and its cookies, and the manifest check's refusal of the
+  web's development paths in release builds
+  ([design-web.md](docs/design-web.md#the-network-front-end)).
+* [Low] build, ASCII check: `Erx::SourceText` (`tools/lib/erx/source_text.rb`)
+  does not list `.ts` and `.tsx`, so the web client's sources and their
+  generated files escape the ASCII check that
+  [design-web.md](docs/design-web.md#chokepoints) relies on; add both
+  suffixes with a seeded non-ASCII `.ts` file in the check's test.
 
 * [Low] POSIX-lite personality, FreeBSD programs: survey what FreeBSD
   programs ported at the source level need beyond the planned layer

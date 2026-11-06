@@ -308,6 +308,14 @@ For a process of the system domain, the runtime is the system domain's
 own, which is trusted; its attributes are still marked `runtime`, because
 that is who reported them.
 
+The schema marks a path **append-only** when its record is a sequence of
+entries that only grows at the end, as a ring's readers see it:
+`[kernel, log]`. Each entry of such a path carries its sequence number,
+and a query with `offset` returns the entries from that number on,
+starting at the oldest the ring still holds, so a reader that follows the
+path learns how many entries it missed. The web's log view reads such a
+path ([design-web.md](design-web.md#views-on-the-line)).
+
 Generated builders and validators preserve every status and reporter.
 A reporter tag does not authenticate a report; the inspector checks the
 source and the caller's scope before collecting or exposing restricted
@@ -362,8 +370,9 @@ the closed list of exceptions, the grammar of the escape tokens and the
 bytes the kernel's log passes. A Ruby generator reads it together with the
 Unicode data OTP 29.1.2 carries (`lib/stdlib/uc_spec/UnicodeData.txt` and
 `DerivedCoreProperties.txt`, Unicode 17.0.0) and produces the Erlang tables
-of `erx_text`, the Ruby tables of the host tool, and the kernel's ASCII-only
-class for its log
+of `erx_text`, the Ruby tables of the host tool, the TypeScript table of
+the web client ([design-web.md](design-web.md#the-client)), and the
+kernel's ASCII-only class for its log
 ([design-kernel.md](design-kernel.md#console-log-and-panic)), so every
 display of labelled text escapes from the same rules.
 
@@ -715,6 +724,13 @@ render keeps its bytes. The escape takes whole text, since a record is
 whole when it is displayed, and holds no state between calls. One record is
 one line under its source's name.
 
+**Secrets.** A term `{erx_secret, Text}`, the form in which a widget's
+secret input reaches its application
+([design-display.md](design-display.md#widget-trees)), prints as
+`[secret]` in `erx_render`, in the trace relay's rendering of trace
+messages and in `erx_log_h`'s formatter, wherever it is nested, so its text
+reaches no screen, log line or trace record through them.
+
 The escape keeps what a display says about a source honest. It does not make
 a shared screen trustworthy: a program on the same terminal can print a line
 that looks like a log line, as on Unix, and the inspector and the host link's
@@ -908,7 +924,11 @@ a runtime report trusted or let a decoder bypass the output escaper
   capacity changes, refusals) go into ERTS's trace with the same timestamps
   ([design-runtime.md](design-runtime.md#failure-handling-diagnostics-and-debuggability)).
 * **One timeline.** `erx:trace(Spec)` starts any mix of the three and
-  prints one stream ordered by monotonic time; the trace facet streams the
+  prints one stream ordered by monotonic time; the trace facet sends the
+  merged stream to the process that started the trace, the shell's printer
+  for `erx:trace/1` and a view's process for the web
+  ([design-web.md](design-web.md#views-on-the-line)), and ends a trace whose
+  receiving process ends; it streams the
   same events to the host as casts on the host link's events stream, where
   `tools/erx trace` renders them with pids and domain names resolved. The
   merger holds each event until every source has shown a later time, a
@@ -1118,7 +1138,10 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   tool signs with the build's development key), `code` and `domain` for
   every domain, named by its domain id, which is never reused, where a
   name, unique among live domains machine-wide, passes to a later domain
-  once its holder ends, and `console`; in release builds what the system
+  once its holder ends, `console`, and `web`, the web domain's relay for
+  `tools/erx web` ([design-web.md](design-web.md#the-host-tools-front-end)),
+  which development builds alone offer and a release manifest that lists
+  it fails the manifest check; in release builds what the system
   manifest lists, by default nothing, and `console` there starts a login,
   as the serial console does. A `domain` facet carries
   `erx_domain`'s operations on one domain: stop it, and read its death
@@ -1253,7 +1276,9 @@ OTP's modules and fails if a shortcut collides with either.
 
 ### The host tool
 
-`tools/erx console | load | watch | inspect | source | trace | files`;
+`tools/erx console | load | watch | inspect | source | trace | files | web`;
+`web` serves the web client to a browser on the host and relays it over
+the `web` facet ([design-web.md](design-web.md#the-host-tools-front-end));
 `files` relays a Unix socket to the host link's files stream
 ([Files between the host and the machine](#files-between-the-host-and-the-machine)).
 Every command
