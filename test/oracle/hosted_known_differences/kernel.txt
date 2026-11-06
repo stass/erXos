@@ -351,4 +351,3 @@ prim_file_SUITE              files    large_write                  auto_skip  ca
 
 # /tmp (erx_file_remote and its server).
 prim_file_SUITE              files/file_info file_write_file_info_opts    failed     /tmp answers einval for a time before 1970, which 9P2000.L's setattr cannot carry (TODO.md, erx_file_remote)
-prim_file_SUITE              files/open read_file_rename_race        failed     a read_file racing a rename over its name answers enoent on /tmp (TODO.md)

@@ -262,7 +262,7 @@ walk(Dir, Name, Holder, Tree) ->
         ok ?= valid_name(Name),
         {ok, D} ?= directory(Dir, Tree),
         ok ?= permitted(D, ?X),
-        ok ?= has_a_name(D),
+        ok ?= not_a_removed_directory(D),
         {ok, Ino} ?= lookup(D, Name),
         {done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Holder, Tree)}
     end.
@@ -273,11 +273,17 @@ getattr(Ino, Tree) ->
         {done, {ok, attr(Ino, N)}, Tree}
     end.
 
+%% A file opens whether or not a name still reaches it. What reaches it is a fid
+%% a walk made while it had one, and a client's open is that walk and then this
+%% step, two steps where FreeBSD's open is one; so a rename or an unlink that falls
+%% between them leaves the open the file its walk found, never ENOENT. Permissions
+%% and O_TRUNC take effect here, at the open. The same holds for a description's
+%% later re-open of a removed file through its unopened fid, as a mapping's open.
 open(Ino, Flags, Stamp, Now, Tree) ->
     maybe
         {ok, Access, Options} ?= open_flags(Flags),
         {ok, N} ?= node(Ino, Tree),
-        ok ?= has_a_name(N),
+        ok ?= not_a_removed_directory(N),
         ok ?= openable(N, Access, Options),
         {done, {ok, handle(Ino, Access, Options)},
          opened(Ino, N, Options, Stamp, Now, Tree)}
@@ -320,7 +326,7 @@ make_existing(_Ino, _What, _Stamp, _Now, _Tree) ->
 
 make_new(Dir, D, Name, What, Stamp, Now, Tree) ->
     maybe
-        ok ?= named(D),
+        ok ?= not_a_removed_directory(D),
         ok ?= permitted(D, ?W bor ?X),
         ok ?= linkable(What, Tree),
         ok ?= unused_stamp(What, Stamp, Tree),
@@ -749,20 +755,18 @@ valid_kind(_) -> {error, einval}.
 still_names({node, Ino}, Found) when Ino =/= Found -> {error, enoent};
 still_names(_Kind, _Found) -> ok.
 
-%% A node no name reaches opens nothing, as an open after its unlink would
-%% not find it; an open made before the unlink keeps working.
-has_a_name(#node{links = 0}) -> {error, enoent};
-has_a_name(#node{}) -> ok.
-
 empty_if_directory(#node{data = {directory, _, Entries, _, _}})
   when map_size(Entries) > 0 ->
     {error, enotempty};
 empty_if_directory(#node{}) ->
     ok.
 
-%% A directory with no name takes no new one. The root's parent is itself.
-named(#node{data = {directory, none, _, _, _}}) -> {error, enoent};
-named(#node{}) -> ok.
+%% A removed directory finds nothing, takes no new name and opens nothing,
+%% as FreeBSD's tmpfs answers for a directory with no parent; any other node
+%% passes. The root's parent is itself.
+not_a_removed_directory(#node{data = {directory, none, _, _, _}}) ->
+    {error, enoent};
+not_a_removed_directory(#node{}) -> ok.
 
 %% A hard link is to a file or a link that still has a name (Linux's
 %% vfs_link: EPERM for a directory, ENOENT for a node with no links).
@@ -809,7 +813,7 @@ not_holding_source(error, _Dir, _Tree) ->
 %% may_create on the new directory.
 replaceable(error, _Moved, _NewDir, ND, _Tree) ->
     maybe
-        ok ?= named(ND),
+        ok ?= not_a_removed_directory(ND),
         ok ?= permitted(ND, ?W bor ?X),
         {ok, none}
     end;

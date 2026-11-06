@@ -85,6 +85,14 @@ make_file(Grant, Fid, Name, Spare) ->
     {ok, _, _} = call(Grant, {lcreate, Spare, Name, ?O_RDWR, 8#644, 0}),
     ok = call(Grant, {clunk, Spare}).
 
+%% A closed file under Name in the grant's root holding Data.
+write_file(Grant, Name, Data, Spare) ->
+    {ok, []} = call(Grant, {walk, 1, Spare, []}),
+    {ok, _, _} = call(Grant, {lcreate, Spare, Name, ?O_RDWR, 8#644, 0}),
+    Size = byte_size(Data),
+    {ok, Size, _} = call(Grant, {write, Spare, 0, Data}),
+    ok = call(Grant, {clunk, Spare}).
+
 %% A closed file of 50000 bytes, enough to show in statfs's free blocks.
 make_data_file(Grant, Name, Spare) ->
     {ok, []} = call(Grant, {walk, 1, Spare, []}),
@@ -94,17 +102,17 @@ make_data_file(Grant, Name, Spare) ->
 
 %% Fids and nodes ----------------------------------------------------------
 
-%% A fid walked to a file, the file removed, then a lopen and a getattr through the
-%% fid: the walk keeps the file, so getattr finds it with no links, and lopen answers
-%% enoent, as an open after the unlink would. Once the fid is clunked the file is
-%% gone, and a file made after it must not take its inode number.
+%% A fid walked to a file, the file removed, then a getattr and a lopen through the
+%% fid: the walk keeps the file, so getattr finds it with no links and lopen opens it,
+%% as the open that walk began would have. Once the fid is clunked the file is gone,
+%% and a file made after it must not take its inode number.
 a_fid_never_reaches_a_file_made_after_its_own_test() ->
     Grant = start(),
     make_file(Grant, 1, <<"f">>, 2),
     {ok, [{_, _, Old}]} = call(Grant, {walk, 1, 3, [<<"f">>]}),
     ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
-    ?assertEqual({error, enoent}, call(Grant, {lopen, 3, 0})),
     ?assertMatch({ok, #{nlink := 0, qid := {_, _, Old}}}, call(Grant, {getattr, 3, 16#7ff})),
+    ?assertMatch({ok, {_, _, Old}, _}, call(Grant, {lopen, 3, 0})),
     ok = call(Grant, {clunk, 3}),
     make_file(Grant, 1, <<"g">>, 4),
     {ok, [{_, _, New}]} = call(Grant, {walk, 1, 5, [<<"g">>]}),
@@ -128,6 +136,26 @@ a_stat_finds_a_name_renamed_over_between_its_walk_and_getattr_test() ->
     ok = call_as(Grant, Stat, {clunk, 11}),
     ok = call_as(Grant, Stat, {clunk, 10}),
     Stat ! stop,
+    stop(Grant).
+
+%% erx_file_remote's open of a path to read, sent by one process: attach, walk, lopen,
+%% then a read. A rename over the path's last name, sent by another, reaches the grant
+%% between the walk and the lopen, as the grant's mailbox can order them. A rename
+%% replaces its target atomically, so the open finds the old file, as an open sent
+%% before the rename would, and reads its bytes; it never answers enoent.
+an_open_finds_a_name_renamed_over_between_its_walk_and_lopen_test() ->
+    Grant = start(),
+    write_file(Grant, <<"a">>, <<"new">>, 2),
+    write_file(Grant, <<"b">>, <<"old">>, 3),
+    Open = spawn(fun() -> receive stop -> ok end end),
+    {ok, _} = call_as(Grant, Open, {attach, 10, ?NOFID, <<"user">>, <<"tmp">>, 0}),
+    {ok, [_]} = call_as(Grant, Open, {walk, 10, 11, [<<"b">>]}),
+    ok = call(Grant, {renameat, 1, <<"a">>, 1, <<"b">>}),
+    ?assertMatch({ok, _, _}, call_as(Grant, Open, {lopen, 11, 0})),
+    ?assertEqual({ok, <<"old">>}, call_as(Grant, Open, {read, 11, 0, 10})),
+    ok = call_as(Grant, Open, {clunk, 11}),
+    ok = call_as(Grant, Open, {clunk, 10}),
+    Open ! stop,
     stop(Grant).
 
 %% A walk that stops after its first name makes no fid, so it keeps nothing: the

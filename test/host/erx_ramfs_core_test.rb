@@ -53,10 +53,10 @@ class ErxRamfsCoreTest < Minitest::Test
              anchor: 'still_names({node, Ino}, Found) when Ino =/= Found -> {error, enoent};',
              replacement: 'still_names({node, Ino}, Found) when Ino =/= Found, Ino < 0 -> {error, enoent};',
              catching_case: 'unlink_of_a_node_removes_the_name_only_while_it_names_that_node_test'),
-    Seed.new(fault: 'an open of a node with no name left',
-             anchor: 'has_a_name(#node{links = 0}) -> {error, enoent};',
-             replacement: 'has_a_name(#node{links = -1}) -> {error, enoent};',
-             catching_case: 'open_of_a_node_with_no_name_is_enoent_test')
+    Seed.new(fault: 'an open of a directory with no name left',
+             anchor: "not_a_removed_directory(#node{data = {directory, none, _, _, _}}) ->\n    {error, enoent};",
+             replacement: "not_a_removed_directory(#node{data = {directory, nothing, _, _, _}}) ->\n    {error, enoent};",
+             catching_case: 'a_file_with_no_name_opens_and_a_directory_does_not_test')
   ].freeze
 
   def test_core_cases_pass_under_eunit

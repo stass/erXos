@@ -302,12 +302,20 @@ outlives the later of its handle's clunk and its grant's forget.
 
 A fid whose node lost its names still reaches it: `getattr` answers with
 `nlink` 0, and so a `stat` that races a rename over its name finds the
-old file or the new one, as on Unix. `open` refuses a node with no
-name (`ENOENT`), as FreeBSD's `tmpfs_open` does, so a walk then an
-`lopen` of a file removed in between opens nothing, as an `open` after
-the `unlink` would; a removed directory finds no name (`ENOENT`), as
-FreeBSD's tmpfs finds none in a directory with no parent, while `..`
-from it walks the grant's chain to the parent recorded on the way down.
+old file or the new one, as on Unix. `open` of a file opens it whether
+or not a name still reaches it: a client's open is a walk and then an
+`lopen`, two steps of the tree where FreeBSD's `open` is one, so a
+rename or an `unlink` that falls between them leaves the open the file
+its walk found, never `ENOENT`; permissions and `O_TRUNC` take effect
+at the `lopen`. The rule also lets a description re-open its removed
+file through its unopened fid, as a mapping's open or a change of
+`O_APPEND` does ([design-files.md](design-files.md)), where FreeBSD
+needs no open and so never meets `tmpfs_open`'s refusal. A
+removed directory finds no name, takes no new one and opens nothing
+(`ENOENT`), as FreeBSD's tmpfs answers for a directory with no parent
+(its `tmpfs_open` refuses a node with no links, which a lookup reaches
+only through a removed directory), while `..` from it walks the grant's
+chain to the parent recorded on the way down.
 
 **Permissions.** The domain is one user, who owns every file and is not
 a superuser: the tree checks the owner's permission bits and nothing
@@ -328,7 +336,7 @@ a link is made with `0777`, as Linux makes one.
 | --- | --- | --- |
 | `walk(Dir, Name)` | the node `Name` names in `Dir`, with its qid | `ENOENT` for a missing name or a `Dir` that is gone; `ENOTDIR` if `Dir` is not a directory; `EACCES` |
 | `getattr(Node)` | `valid` the basic fields and `data_version`; mode with type bits, `uid` and `gid` 0, `nlink` = `links`, size, `blocks` = chunks held times 8, times, `ino`, `data_version` | `ENOENT` for a node that is gone |
-| `open(Node, Flags)` | counts an open and returns `{Node, Access, Append}`; `O_TRUNC` on a file frees every chunk and sets size 0 | `ENOENT`, for a node no name reaches too, while opens made before its unlink go on; `EISDIR` for a directory opened to write; `EACCES` |
+| `open(Node, Flags)` | counts an open and returns `{Node, Access, Append}`; `O_TRUNC` on a file frees every chunk and sets size 0 | `ENOENT` for a node that is gone or a directory no name reaches; a file no name reaches opens; opens made before an unlink go on; `EISDIR` for a directory opened to write; `EACCES` |
 | `make(Dir, Name, {file, Mode, Flags})` (`lcreate`) | in one step: a new empty file, opened with `Flags`; or, without `O_EXCL`, the regular file `Name` already names, opened with `Flags`, `O_TRUNC` included; either way counted as an open | `EEXIST` with `O_EXCL` for any existing name, a dangling link included; `ELOOP` for a link without `O_EXCL`, which the client follows; `EISDIR` for a directory; `ENOENT` for a `Dir` with no name; `EACCES`; `ENOSPC` |
 | `make(Dir, Name, {directory, Mode})` | a new directory, with `links` 2; `Dir` gains a link, the new directory's `..` | `EEXIST`, `ENOENT` for a `Dir` with no name, `EACCES`, `ENOSPC` |
 | `make(Dir, Name, {symlink, Text})` | a link whose text is `Text` | `ENOENT` for an empty text; `ENAMETOOLONG` past 4,095 bytes; `EINVAL` for a NUL; `EEXIST`, `ENOENT` for a `Dir` with no name, `EACCES`, `ENOSPC` |
@@ -488,7 +496,7 @@ runs only in tests.
 | The domain's budget is exhausted | ERTS's allocator | nothing: the domain ends | the domain library | as any ERTS allocation failure ([design-runtime.md](design-runtime.md#crash-handling)); the cap keeps `/tmp`'s charges to their share, ERTS's overhead on top ([Charges](#data-model)) |
 | A bug crashes the tree process, the grant or an owner | the links, then the supervisor | nothing of `/tmp` | all of them end; `/tmp` restarts empty and is mounted again | `{error, eio}` for files open before, as for any server that died; a crash report in the log |
 | A caller ends during a request or with files open | the grant's monitor on the fid's owner ([design-files.md](design-files.md#fid-owners)) | the effects of the steps that ran | the grant clunks every fid the caller owned, after every request it sent; a removed file it held open is freed | nothing |
-| A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` and `walk` answer `{error, enoent}` |
+| A request names a fid whose node lost its names | the node's `links`, 0 | the node, held by the fid | the grant forgets it when no fid names it | `getattr` answers with `nlink` 0; `lopen` of a file opens it; `lopen` of a directory and `walk` answer `{error, enoent}` |
 | A grant ends holding nodes | the tree process's monitor on the grant, taken at its first walk | the effects of the steps that ran | the tree drops every hold of the grant, freeing each node nothing else keeps | nothing |
 | The version counter is exhausted | the counter's refusal | the tree | none | `{error, eio}` and a report, as for every server |
 
@@ -591,12 +599,15 @@ the code under test ran.
   and `make_dir("/tmp")` `eexist`, and `/tmp/..` reaches `/`, none of them asking the tree.
   Seeded: a machine that treats a top as an ordinary last name, whose
   `del_dir("/tmp")` then goes to the release's `/` and answers `erofs`.
-* **Fids and nodes.** A fid walked to a file, the file removed, then an
-  `lopen` through the fid, which answers `enoent`, and a `getattr`, which
-  answers with `nlink` 0; once the fid is clunked, a new file takes
+* **Fids and nodes.** A fid walked to a file, the file removed, then a
+  `getattr` through the fid, which answers with `nlink` 0, and an `lopen`,
+  which opens the file; once the fid is clunked, a new file takes
   another inode number. Seeded: a tree that gives the next node a freed
   inode number. A `stat` whose walk and `getattr` a rename over the name
-  falls between finds the old file (seeded: a walk that holds nothing);
+  falls between finds the old file (seeded: a walk that holds nothing),
+  and so does an open whose walk and `lopen` it falls between, which reads
+  the old file's bytes (`prim_file_compare.erl`'s rename race runs the
+  same through `prim_file:read_file`);
   a walk that stops after its first name keeps nothing; `..` from a
   removed directory returns to its parent and lets the directory go; a
   removed file stays until the last fid naming it is clunked (seeded: a

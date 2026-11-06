@@ -150,13 +150,44 @@ walk_holds_a_node_until_its_holder_forgets_it_test() ->
     {ok, Tree4} = ok_step({rename, ?ROOT, <<"a">>, ?ROOT, <<"b">>}, Tree3),
     ?assertEqual(0, attr(nlink, Old, Tree4)),
     ?assertEqual(5000, attr(size, Old, Tree4)),
-    refused(enoent, {open, Old, {read, []}}, Tree4),
     {ok, Tree5} = ok_step({forget, Old, g1}, Tree4),
     refused(enoent, {getattr, Old}, Tree5),
     ?assert(erx_ramfs_core:held(Tree5) < erx_ramfs_core:held(Tree4)),
     %% A second forget, or one of a holder that holds nothing, changes nothing.
     ?assertEqual({ok, Tree5}, step({forget, Old, g1}, Tree5)),
     ?assertEqual({ok, Tree5}, step({forget, Old, g2}, Tree5)).
+
+%% An open is a walk and then an open of the node the walk found, two steps that a
+%% rename over the name can fall between. A rename replaces its target atomically, so
+%% the open finds the old file, as an open that came before the rename would, and reads
+%% its bytes; the node is freed once both its open and its hold are let go.
+a_rename_between_a_walk_and_its_open_leaves_the_open_the_old_file_test() ->
+    {_, Tree1} = file(?ROOT, <<"a">>, <<"new">>, tree()),
+    {Old, Tree2} = file(?ROOT, <<"b">>, <<"old">>, Tree1),
+    {{ok, Old, _}, Tree3} = ok_step({walk, ?ROOT, <<"b">>, g1}, Tree2),
+    {ok, Tree4} = ok_step({rename, ?ROOT, <<"a">>, ?ROOT, <<"b">>}, Tree3),
+    {Handle, Tree5} = open(Old, {read, []}, Tree4),
+    ?assertEqual(<<"old">>, read(Handle, 0, 10, Tree5)),
+    Tree6 = clunk(Handle, Tree5),
+    {ok, Tree7} = ok_step({forget, Old, g1}, Tree6),
+    refused(enoent, {getattr, Old}, Tree7),
+    ?assertEqual(held(Tree1), held(Tree7)).
+
+%% The same open with O_TRUNC truncates the old file, which only the walk's hold
+%% keeps: its chunks are freed at the open, and its node once the open and the hold
+%% are let go.
+a_truncating_open_after_a_rename_over_the_name_truncates_the_old_file_test() ->
+    {_, Tree1} = file(?ROOT, <<"a">>, <<"new">>, tree()),
+    {Old, Tree2} = file(?ROOT, <<"b">>, binary:copy(<<1>>, 5000), Tree1),
+    {{ok, Old, _}, Tree3} = ok_step({walk, ?ROOT, <<"b">>, g1}, Tree2),
+    {ok, Tree4} = ok_step({rename, ?ROOT, <<"a">>, ?ROOT, <<"b">>}, Tree3),
+    {Handle, Tree5} = open(Old, {write, [trunc]}, Tree4),
+    ?assertMatch(#{nlink := 0, size := 0}, attr(Old, Tree5)),
+    ?assertEqual(held(Tree4) - 2 * ?CHUNK, held(Tree5)),
+    Tree6 = clunk(Handle, Tree5),
+    {ok, Tree7} = ok_step({forget, Old, g1}, Tree6),
+    refused(enoent, {getattr, Old}, Tree7),
+    ?assertEqual(held(Tree1), held(Tree7)).
 
 %% Holds are kept per holder: walking twice holds once, and every holder must let go.
 a_node_lives_until_every_holder_lets_go_test() ->
@@ -610,13 +641,15 @@ an_unlinked_open_file_lives_until_its_last_clunk_test() ->
     refused(enoent, {getattr, File}, Tree5),
     ?assertEqual({ok, Tree5}, step({clunk, Handle}, Tree5)).
 
-%% An open of a node no name reaches opens nothing, as an open after the
-%% unlink would not find it; the open made before the unlink still works.
-open_of_a_node_with_no_name_is_enoent_test() ->
+%% A file no name reaches opens while anything still keeps it, here an open made
+%% before its unlink; a directory with no name opens nothing, as FreeBSD's tmpfs_open
+%% refuses one. The opens made before either unlink still work.
+a_file_with_no_name_opens_and_a_directory_does_not_test() ->
     {File, Handle, Tree1} = create(?ROOT, <<"f">>, tree()),
     Tree2 = write(Handle, 0, <<"kept">>, Tree1),
     {ok, Tree3} = ok_step({unlink, ?ROOT, <<"f">>, file}, Tree2),
-    refused(enoent, {open, File, {read, []}}, Tree3),
+    {Again, Reopened} = open(File, {read, []}, Tree3),
+    ?assertEqual(<<"kept">>, read(Again, 0, 100, Reopened)),
     ?assertEqual(<<"kept">>, read(Handle, 0, 100, Tree3)),
     {Dir, Tree4} = mkdir(?ROOT, <<"d">>, Tree3),
     {_DirHandle, Tree5} = open(Dir, {read, []}, Tree4),

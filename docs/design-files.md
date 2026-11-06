@@ -1557,8 +1557,10 @@ other client's request can come between its parts:
   grant's subtree, since the chain ends at its root. After the fid's
   node is removed, the requests that reach it answer what the module
   answers for a node with no name, which `/tmp` keeps while a fid names
-  it: `getattr` answers with `nlink` 0, and `lopen` and `walk` answer
-  `enoent`; `..` still walks to the recorded parent.
+  it: `getattr` answers with `nlink` 0; `lopen` of a file opens it, so
+  an open whose walk and `lopen` a rename over the name falls between
+  opens the old file; `lopen` of a directory and `walk` answer `enoent`;
+  `..` still walks to the recorded parent.
 * **Held bytes.** What a grant holds for its client beyond its fids, such
   as the snapshot behind an open `/proc` file, is bounded by the server's
   per-fid bound and its pool; a server whose per-fid state is large sets a

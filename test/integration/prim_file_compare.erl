@@ -18,6 +18,10 @@
 %% The size cap of the tree the concurrency cases share.
 -define(CONC_CAP, 200000).
 
+%% How many reads the rename race case makes, as many as prim_file_SUITE's
+%% read_file_rename_race makes.
+-define(RACE_READS, 4999).
+
 main([_, "seeded", Seed]) ->
     seeded(Seed),
     erlang:halt(0);
@@ -1043,6 +1047,7 @@ tmp(Prefix, Mode) ->
     tmp_prim_file_handle(At, Show),
     tmp_archive(At, Show),
     tmp_directory_handle(At, Show),
+    tmp_rename_race(At, Show),
     tmp_cwd(At, Mode, Show),
     tmp_bind_top(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
@@ -1230,6 +1235,46 @@ tmp_directory_handle(At, Show) ->
     directory_handle(Dir, Show, "dirfd"),
     Show("dirfd file", closed(file:open(At(<<"dirfd/f">>), [read, directory]))),
     Show("dirfd delete", {file:delete(At(<<"dirfd/f">>)), file:del_dir(Dir)}).
+
+%% prim_file:read_file of a name that another process replaces by renames over it, as
+%% prim_file_SUITE's read_file_rename_race runs them. A rename replaces its target
+%% atomically, so every read finds the old file or the new one; the step shows ok, or
+%% the first read that found neither and what it answered. The renamer is stopped
+%% between two renames and shows that it made some during the reads, and the files
+%% are deleted again.
+tmp_rename_race(At, Show) ->
+    Name = At(<<"race">>),
+    Spare = At(<<"race.tmp">>),
+    Replace = fun(Data) ->
+                      ok = prim_file:write_file(Spare, Data),
+                      ok = prim_file:rename(Spare, Name)
+              end,
+    Replace(<<"fubar">>),
+    Renamer = spawn_link(fun() -> renames(Replace, <<"gazonk">>, <<"fubar">>, 1) end),
+    Show("rename race", race_reads(Name, 1)),
+    Renamer ! {stop, self()},
+    Renamed = receive
+                  {stopped, Renamer, Count} -> Count
+              after ?HELPER_WAIT -> helper_silent(renamer)
+              end,
+    Show("rename race renamed", Renamed > 1),
+    Show("rename race delete", file:delete(Name)).
+
+renames(Replace, Data, Next, Count) ->
+    Replace(Data),
+    receive
+        {stop, From} -> From ! {stopped, self(), Count}
+    after 0 ->
+        renames(Replace, Next, Data, Count + 1)
+    end.
+
+race_reads(_, Read) when Read > ?RACE_READS ->
+    ok;
+race_reads(Name, Read) ->
+    case prim_file:read_file(Name) of
+        {ok, Data} when Data =:= <<"gazonk">>; Data =:= <<"fubar">> -> race_reads(Name, Read + 1);
+        Other -> {read, Read, Other}
+    end.
 
 %% Making a name at a bind's top (design-files.md, Errors, step 3): the top is a name that
 %% exists, so make_dir, a creating open, make_symlink and make_link's new name answer as

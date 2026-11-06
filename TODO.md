@@ -487,6 +487,21 @@ it; git history is the record of completed work.
   replaces its target atomically, so a reader sees the old file or the new one. Find whether the client's walk and
   open or the server's release of the replaced node opens the window, and pin it in
   `test/integration/prim_file_compare.erl`.
+* [Medium] `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the oracle's release boots OTP's tracked
+  `bootstrap/bin/start.boot`, whose application specifications carry the bootstrap's versions (kernel 11.0.3, stdlib
+  8.0.4) where the shipped `.app` files say 11.0.4 and 8.1.1. So `application:which_applications()` reports versions
+  the release does not hold, and `systools:make_script` on a release file built from them answers `error`
+  (`no_valid_version`): application_SUITE `script_start`, `distr_changed_tc1` and `distr_changed_tc2` and global_SUITE
+  `global_groups_change` fail there (kernel.txt), before they reach their peers. Boot the tree from a boot script made
+  from the tree's own `.app` files, as `ReleaseFiles#boot_file` makes the system's (not the system's own, which starts
+  erXos's services), and rerun every group, since all of them boot through it; those four cases then fail at their
+  peers, and their rows take the peer reason.
+* [Low] `/tmp` (`erx_file_remote`, `erx_ramfs_core`): a `list_dir` or a `[read, directory]` open of a directory that a
+  rename of another directory replaces between the client's walk and its `lopen` answers `enoent`, where FreeBSD
+  answers the old listing or the new one; the tree refuses to open a removed directory, and cannot tell that open from
+  a later re-open of a narrowed namespace root, which must answer `enoent` (docs/design-tmp.md). Files no longer have
+  this window, since an `lopen` of a file with no name opens it. The cure by construction is a walk and an open that
+  reach the tree as one step. Not reproduced; found by reading the code.
 * [Medium] `otp/erts/preloaded/src/prim_file.erl` (`?ERX_FILE`), `erx_erofs_file`: prim_file forwards each open-file
   operation on a descriptor of `erx_file_remote` or `erx_erofs_file` to that module, but only the `/tmp` half is tested
   (`tmp_prim_file_handle` in `test/integration/prim_file_compare.erl`); add the same steps on an image file (`/img/big`).
