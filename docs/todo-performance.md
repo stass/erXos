@@ -189,15 +189,28 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Also record the tree process's memory against `held` after the workload, which [Charges](design-tmp.md#data-model)
   leaves unpromised. Fixes on the table, cheapest first: the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
   reached by one round trip.
-* **[Low] files, a resolution step per walk** (`erx_ns_step`, [design-files.md](design-files.md#resolving-a-path)):
-  each walk a resolution asks for is one NIF call, which takes the namespace's read lock and checks a cursor of up to
-  8 KiB; a `.` or `..` after a name the path has not yet walked costs a walk of its own, one round trip more; and a
-  link costs two round trips, the walk that stops at it and the read of it. Measure, hosted, against stock OTP 29.1.2
-  on the same host: 1,000 `file:read_file_info/1` calls each of `/tmp/a/b/c`, `/tmp/a/x/../b/c` and a path through
-  one link, and of the same three on the release file system. Fixes on the table, cheapest first: a smaller cursor;
-  sending a `..` that follows a new name in the same walk, which the grant answers from its fid's record of the
+* **[Low] files, resolving a path in Erlang** (`erx_path`, [design-files.md](design-files.md#resolving-a-path)):
+  each run the resolver places is list work over up to 256 names and 64 entries in the calling process; a `.` or `..`
+  after a name the path has not yet walked costs a walk of its own, one round trip more, and on the release file
+  system one `release_walk_nif` call more; and a link costs two round trips, the walk that stops at it and the read of
+  it. Measure, hosted, against stock OTP 29.1.2 on the same host: 1,000 `file:read_file_info/1` calls each of
+  `/tmp/a/b/c`, `/tmp/a/x/../b/c` and a path through one link, and of the same three on the release file system, each
+  with a table of 4 and of 64 entries, so the release's numbers show the resolver's own cost with no round trip to hide
+  it. Fixes on the table, cheapest first: keeping the table sorted by point length so placing stops at the first
+  match; sending a `..` that follows a new name in the same walk, which the grant answers from its fid's record of the
   directories it came through, for walks that stay below the entry's `root` (design-files.md's Alternatives weighs it).
 * **A grant's step count over a whole fid path** (`erx_fs_grant:repath/3`, [design-files.md](design-files.md#serving-the-erx_fs-behaviour)): every new fid, walk in place and clunk counts or uncounts each step of the fid's path, so a clone of a fid at depth D costs D map updates where it cost none, and an end of a grant's owner costs the sum of its fids' depths. Measure: a clone and a clunk of fids at depths 1, 16 and 256 under `tools/erx bench`, against the same with only the steps that differ between the old and new paths counted.
+* **[Low] files, a scan of every process per namespace change** (`erx_ns`,
+  [design-files.md](design-files.md#building-binding-and-mounting)): the table is a persistent term, so each `mount`,
+  `bind` and `unmount` replaces it. In OTP 29.1.2 a replaced value goes on a delete queue
+  (`otp/erts/emulator/beam/erl_bif_persistent.c:1189-1203`, `table_updater`), and `delete_tuple` (:1293-1300) frees
+  it at once only when it is an immediate; any other, such as the table, goes to `erts_queue_release_literals`, and
+  the literal area collector then asks every process of the runtime to look for it in its heap and copy what it
+  finds (`beam_bif_load.c:1466-1490`). Putting an equal value changes nothing (`erl_bif_persistent.c:726-729`). The
+  working directory is kept out of a persistent term for this reason. Measure, hosted: the time of 1,000
+  `erx_ns:bind/2` and `erx_ns:unmount/1` pairs with 100 and with 10,000 idle processes of 1 MiB heaps each, and a
+  domain's start-up with its usual mounts against the same start with none. Fix on the table: batching a domain's
+  start-up mounts into one put.
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 
 * **The production image's `NOTICES`** (`tools/lib/erx/production_image.rb`, Phase 1 stopgap): `NOTICES` is 12.6 MiB of a 13.6 MiB image, never released and touched page by page at boot. Measure: the root's boot time with and without those pages.

@@ -76,10 +76,10 @@ Decisions every reader of this document needs:
   plain names, and a server never follows a symbolic link during a walk
   or an open: the client reads the link and resolves its text through
   its own namespace ([Resolving a path](#resolving-a-path)).
-* **One resolver, one grammar, one codec.** `erx_ns_step`, a pure C17
-  state machine with a fuzz target, resolves every path for `prim_file`
-  in every runtime and for the handlers of every session, over every
-  provider. The protocol's terms have one grammar and one
+* **One resolver, one grammar, one codec.** `erx_path`, a pure,
+  preloaded Erlang module with a fuzz target, resolves every path for
+  `prim_file` in every runtime and for the handlers of every session,
+  over every provider, against one snapshot of the namespace's table. The protocol's terms have one grammar and one
   set of bounds for every client and server, every request goes to a fresh
   alias, so no reply can be forged or reused, and one codec turns the
   terms into 9P2000.L's bytes and back at the edges.
@@ -214,7 +214,7 @@ Non-goals:
   domain D (ERTS)                                      system domain
   +------------------------------------+  connection   +--------------------------+
   | file:read_file("/data/a")          |  (two lanes)  | D's grant on /data       |
-  |   prim_file -> erx_ns_step         |-------------->|  (erx_facet, read-write) |---> storage
+  |   prim_file -> erx_path            |-------------->|  (erx_facet, read-write) |---> storage
   |     mount /data -> grant G, "a"    |   9P2000.L    |                          |     service
   |   erx_file_remote: walk, lopen,    |   terms to    | /proc grant for D        |     (Erlang,
   |     read, clunk, each to an alias  |<--------------|  (erx_fs over the        |      erx_fs)
@@ -243,23 +243,24 @@ Non-goals:
 
 A path's journey:
 
-1. The caller's runtime or program starts the path's resolution with
-   `erx_ns_step`, from `/` or from its working directory, naming what the
-   operation does with the path's last name.
-2. `erx_ns_step` reads the path's names against the namespace's table,
-   finds the entry whose mount point is the longest prefix of where the
-   names lead, and answers with the next request to make: a walk of names
-   on that entry, a read of a link, or the operation itself on the names
-   reached.
+1. The caller's runtime or program resolves the path with `erx_path`, in
+   the calling process, from `/` or from its working directory, naming
+   what the operation does with the path's last name, over the
+   namespace's table as it stands when the resolution starts.
+2. `erx_path` reads the path's names against that table, finds the
+   entry whose mount point is the longest prefix of where the names lead,
+   and asks for the next request through a callback: a walk of names on
+   that entry or a read of a link; at the last name it returns the
+   operation's action, the operation itself on the names reached.
 3. A local provider answers at once, in the calling process: the release
-   file system in `prim_file`'s NIF, within the same call, an EROFS image
-   in the EROFS reader, in Erlang.
+   file system in one call of `prim_file`'s NIF, an EROFS image in the
+   EROFS reader, in Erlang.
 4. For a grant, the client walks the names from a fid on the grant's root
    in walks of at most 16 names, sending the operation with the last
    walk, such as an `lopen` and a first read; each request is a frame on
    the client's connection to the server, addressed to the grant and
    carrying a fresh alias, and each reply a frame to that alias. The
-   client hands a walk's reply back to `erx_ns_step`, which moves on:
+   client hands a walk's reply back to `erx_path`, which moves on:
    `.` and `..` act on the directories already reached, and a symbolic
    link's text takes the place of its name. A walk that meets a link
    ends there and makes no new fid, so an operation sent with it changes
@@ -279,7 +280,7 @@ clients](#native-clients-liberxs-file-client)).
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **F1.** A path never reaches a file server the domain does not hold | a request is a frame on the lane from the client's domain to the server's, addressed to a grant pid; the server's funnel admits a frame only to a pid its runtime exported to the domain that lane belongs to, with `send` ([design-domains.md](design-domains.md#invariants) D3); a grant's pid reaches a domain only through the system domain's introduction of the two; a namespace entry stores only a pid | a request path that names servers by anything but a pid; a server that acts on a pid named inside a request; a runtime that exported a grant to a domain the server did not make it for | a domain test mounts a pid its domain was never introduced to and finds every request fails with `eio`; the funnel's export tests |
-| **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made; a walk of `..` at the root stays at the root, as 9P's walk(5) specifies and 9P2000.L keeps, and the grammar refuses a name holding `/` or NUL; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; erXos's clients send neither `.` nor `..`, since both act on the client's place (F11) and every walk `erx_ns_step` asks for carries only plain names | a server that accepts `/` inside a name, walks above its root on `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test that walks `..` from the root and from below it, and whose links point above the root, at other mounts and in loops |
+| **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made; a walk of `..` at the root stays at the root, as 9P's walk(5) specifies and 9P2000.L keeps, and the grammar refuses a name holding `/` or NUL; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; erXos's clients send neither `.` nor `..`, since both act on the client's place (F11) and every walk `erx_path` asks for carries only plain names, and the client's one request function refuses a walk that names `.`, `..` or an empty name | a server that accepts `/` inside a name, walks above its root on `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test that walks `..` from the root and from below it, and whose links point above the root, at other mounts and in loops |
 | **F3.** Rearranging a namespace or narrowing it for a program never adds authority | `bind` copies an entry that exists, narrowed to a subtree; `unmount` removes one; `mount` takes a pid, which by F1 reaches only what the domain holds; a handler gives a program only fids it walked from its starter's fids, with rights in the program's table no wider than the starter's, and walks from them only names the resolver produced | an operation that creates a pid or a fid beyond its source; a handler that walks `..` for a program or records wider rights than its starter's | property tests over sequences of operations: the set of pids in the table only shrinks or gains pids the domain already held; a property test over chains of spawns that every program's mounts lie within, and carry rights within, its starter's |
 | **F4.** A client spends a server's CPU and memory only within the server's admission | the protocol checks fid, request, payload and lock bounds before any callback; a grant is one process with a `max_heap_size` that counts its binaries, so what it holds for its client is bounded by its fid pool times the server's per-fid bound; the server runs on its own group's grant and its grant processes schedule among themselves as Erlang processes do, so a flooding client fills its own lane and waits in its own runtime ([design-domains.md](design-domains.md#connections), [design-scheduler.md](design-scheduler.md#service-work)); a blocking lock waits as a pending request of the file's owner, within the client's requests in flight, and nothing in the server blocks | a callback before admission; a grant that holds unbounded state for one fid; a server thread that runs on a client's time; a request whose work grows with the client's input outside the grammar's bounds | hostile-client tests below: fid floods, lock floods, retained `/proc` results, a tiny expensive request, a client that never drains its replies |
 | **F5.** A read-only grant never writes | a grant with rights `ro` or `rx` refuses with `erofs`, as part of decoding the request and so before any callback, every operation the protocol's table marks as writing: `lopen` for writing or with truncation, `lcreate` whatever its flags, since whether it creates a file only the server learns, `write`, `setattr`, `remove`, `unlinkat`, `rename`, `renameat`, `link`, `symlink`, `mknod`, `mkdir`, `xattrcreate`, and a write lock | an operation added to the table and not marked; a request that reaches the grant's dispatch by a path other than its decoding funnel | the refusal set is generated from the protocol's operation table, each operation marked as reading or writing; a test of every writing operation through a read-only grant |
@@ -288,62 +289,70 @@ clients](#native-clients-liberxs-file-client)).
 | **F8.** Every store through a shared mapping reaches the file's server as an ordinary write, at a point POSIX names | the mapper writes back, with the protocol's `write`, every page the kernel reports as stored to since the last write-back (`erx_mem_dirty`), at `msync`, at every close of a mapping's open (a program's last `munmap` of the file, its `exec` and its end) and at the `close` that leaves the session's programs no open of the file, and deletes the object only after its last write-back; a write-back that fails is returned to the call that caused it, or logged at a program's end ([Shared mappings](#shared-mappings)) | an object deleted before its last write-back; a stored page the report leaves out; a program's end that the mapper does not see; a failed write-back reported nowhere | a test per write-back point, reading the file through another domain after it; a store made while a write-back runs, which the next write-back carries; a server that fails a write-back, whose `msync`, `munmap` and `close` return `EIO` and whose program's end leaves a log line |
 | **F9.** A program reaches a file only through its handler | a program's sub-space holds its channel, its data area and the memory its session mapped, and nothing else: no grant pid, no fid, no lane to any server; its handler acts only on the program's own table, the fids it walked for it and the files it opened ([design-programs.md](design-programs.md#invariants)) | a capability to a lane or a grant installed in a sub-space; a handler that acts on a fid outside the program's table | a sub-space test that enumerates a program's capabilities and finds only its channel and mapped memory; a hostile program that names another program's open numbers, every request failing with `EBADF` |
 | **F10.** A fid ends exactly once, and, if nothing ended it before, when the grant handles its owner's `DOWN` | the grant's fid table is the one record of a fid and the grant alone ends one, at its `clunk`, its `remove`, its owner's end or the grant's end; the grant monitors every owner, signals between two processes keep their order, so an owner's `DOWN` follows every request it sent, and monitoring a process that has already ended delivers its `DOWN` at once, as OTP's monitors do ([Fid owners](#fid-owners)) | a fid made without its owner monitored; a client that keeps its own record of fids to clean up | the exhaustive model of a grant's fid table with owners' ends among its events; the ended-owner and killed-opener tests ([design-tmp.md](design-tmp.md#verification)) |
-| **F11.** Every name of a resolution's place is a directory the resolution reached | a name joins the place only when a walk's reply gives it a directory's qid, or when it is an entry's mount point or lies above one, a directory of the namespace itself; `..` removes the place's last name, nothing at `/`, and `.` leaves the place as it is, so neither acts on a name not yet walked; the parent of a place is therefore the directory the walk came down through, which makes `..` physical, and at an entry's top it is the parent of the entry's mount point ([Resolving a path](#resolving-a-path)) | a step that adds a run's names to the place before their walk answers; a `..` that removes a name of the run; a walk that carries `.` or `..` | the step machine's fuzz target, differential against a reference model of FreeBSD's lookup; its property that no walk names `.` or `..` |
+| **F11.** Every name of a resolution's place is a directory the resolution reached | a name joins the place only when a walk's reply gives it a directory's qid, or when it is an entry's mount point or lies above one, a directory of the namespace itself; `..` removes the place's last name, nothing at `/`, and `.` leaves the place as it is, so neither acts on a name not yet walked; the parent of a place is therefore the directory the walk came down through, which makes `..` physical, and at an entry's top it is the parent of the entry's mount point ([Resolving a path](#resolving-a-path)) | a resolver that adds a run's names to the place before their walk answers; a `..` that removes a name of the run; a walk that carries `.` or `..` | the resolver's fuzz target, differential against a reference model of FreeBSD's lookup; its property that no walk names `.` or `..` |
 
 ## Data model
 
 ### Namespaces
 
-```c
-/* One entry of a namespace. Built by the domain service for a domain,
- * or by a session's handler for each program it starts; changed only
- * through erx_ns_bind, erx_ns_mount and erx_ns_unmount. */
-typedef enum erx_ns_kind {
-	ERX_NS_RELEASE,		/* the domain's release slice, read-only */
-	ERX_NS_EROFS,		/* an EROFS image the domain holds a window on */
-	ERX_NS_SERVER		/* a grant at a file server, by pid */
-} erx_ns_kind_t;
+```erlang
+%% One entry of a namespace. Built by the domain service for a domain, or by
+%% a session's handler for each program it starts; a domain's changes only
+%% through erx_ns:bind/2,3, erx_ns:mount/3 and erx_ns:unmount/1.
+-type entry() :: #{point := [name()],      % the mount point as plain names;
+                                           % [] is /
+                   provider := provider(),
+                   root := [name()],       % for a bind: where in the provider
+                                           % or grant the entry starts; else []
+                   rights := rights()}.    % the grant enforces them for the
+                                           % domain, the handler for each
+                                           % program
 
-typedef enum erx_ns_rights {	/* no value writes and runs together (F6) */
-	ERX_NS_RO,
-	ERX_NS_RW,
-	ERX_NS_RX
-} erx_ns_rights_t;
+-type provider() :: release                % the domain's release slice,
+                                           % read-only
+                  | {erofs, image()}       % an EROFS image the domain holds
+                                           % a window on
+                  | {grant, pid(), Tree :: name()}
+                                           % a grant at a file server, by pid,
+                                           % and the tree it roots in, its
+                                           % attach name
+                  | ended                  % a grant that has ended: every
+                                           % request answers eio, unsent
+                  | {fid, fid()}.          % a program's mount, in its
+                                           % handler's table: the fid the
+                                           % handler walked for it
 
-typedef struct erx_ns_mount {
-	char		point[ERX_PATH_MAX];	/* normalised, absolute */
-	erx_ns_kind_t	kind;
-	uint32_t	image;			/* ERX_NS_EROFS: which image */
-	erx_pid_t	server;			/* ERX_NS_SERVER: the grant's pid */
-	char		tree[ERX_NAME_MAX + 1];	/* ERX_NS_SERVER: the tree the grant
-						 * roots in, its attach name */
-	char		root[ERX_PATH_MAX];	/* for a bind: where in the provider or
-						 * grant the entry starts; else "/" */
-	erx_ns_rights_t	rights;			/* ERX_NS_RO, ERX_NS_RW or ERX_NS_RX: the
-						 * grant enforces them for the domain,
-						 * the handler for each program */
-} erx_ns_mount_t;
+-type rights() :: ro | rw | rx.            % no value writes and runs
+                                           % together (F6)
 
-typedef struct erx_ns {
-	uint32_t	count;			/* at most ERX_NS_MOUNTS_MAX (64) */
-	erx_ns_mount_t	mounts[ERX_NS_MOUNTS_MAX];
-	char		cwd[ERX_PATH_MAX];	/* a place: absolute, every name a
-						 * directory reached when it was set */
-} erx_ns_t;
+-type table() :: [entry()].                % at most ERX_NS_MOUNTS_MAX (64)
+-type place() :: [name()].                 % absolute; every name a directory
+                                           % reached (F11)
+-type name() :: binary().                  % plain: 1 to 255 bytes of UTF-8,
+                                           % not . or .., without / or NUL
 ```
 
 `ERX_PATH_MAX` is 4,096 bytes, a name is at most `ERX_NAME_MAX`, 255
 bytes, and a path has at most 256 names. These limits live in
-`abi/erx_abi.txt`. A runtime keeps
-one namespace for all its processes, in its own memory; a session's
-handler keeps one for each program, in the session's memory, with the fid
-of each mount, so a program's sub-space holds no namespace at all. The
-table is small and fixed, so a domain's file state costs at most about
-530 KiB of its own memory (an estimate from the sizes above), and nothing
-on any server until it walks. A `root` other than `/` comes only from
+`abi/erx_abi.txt` and reach Erlang through its generated header. A runtime
+keeps one namespace for all its processes, a table held in one persistent
+term that only `erx_ns`'s process writes ([Building, binding and
+mounting](#building-binding-and-mounting)), and its working directory, a
+place held as one binary in `prim_file`'s NIF that only `set_cwd` writes
+([Erlang clients](#erlang-clients-prim_file-and-erx_file_remote)). A
+session's handler keeps one table for each program, in its own state,
+whose entries carry the fid of each mount as their provider, so a
+program's sub-space holds no namespace at all. The resolver reads only an
+entry's `point` and `root`; the rest is its callers'. The table is a
+term read in place from the persistent term by every resolution, so a
+domain's file state costs one copy of it, a few KiB for a typical domain
+and bounded by the limits above, and nothing on any server until it
+walks; a resolution that still holds a table when it is replaced gets
+its own copy at the global collection that follows, which counts
+against that process's heap. A `root` other than `[]` comes only from
 `bind` within the domain, whose authority is the grant it already holds,
 or from a handler's narrowing for a program, whose authority is its
-starter's fid. A grant entry's `tree` arrives with its pid, from the facet
+starter's fid. A grant entry's tree arrives with its pid, from the facet
 or from `erx_ns:mount`'s options, and the grant checks it at every
 `attach`, so a client never keys a file by a tree its grant does not
 root in ([Identity and version](#identity-and-version)).
@@ -447,9 +456,8 @@ takes a fid on the grant's root with `attach`, as often as it likes, each
 attach a fid of its own.
 
 Fids are the client's to choose, as in 9P. A runtime draws them for all
-its processes from one counter, a 64-bit atomic it keeps beside its
-namespace, and a session's handlers from the session's: `prim_file`'s
-NIF adds one and takes the low 32 bits, drawing again for `NOFID`, so a
+its processes from one counter, a 64-bit atomic in `prim_file`'s NIF,
+and a session's handlers from the session's: the NIF adds one and takes the low 32 bits, drawing again for `NOFID`, so a
 draw is one atomic add in the calling process and no process allocates
 fids. A number therefore comes back, on any grant and to any owner,
 only after every other number has been drawn, over four billion fids
@@ -838,104 +846,116 @@ server, every walk carries only plain names (F2), and an entry's top, a
 bind's root, a narrowed program's mount and `/` need no rule of their
 own.
 
-**The machine.** `erx_ns_step` is a pure C17 state machine over a
-namespace's table and a **cursor**, which records where one resolution
-stands. Each call reads the table once, under the namespace's read lock
-in `prim_file`'s NIF, uses no heap, recurses nowhere and returns the next
-action; the caller performs the action and calls again with its reply.
-The cursor is text and counts, which the caller holds between calls, so
-it holds nothing of the table, and a mount, bind or unmount between two
-steps applies from the next step on.
+**The resolver.** `erx_path` is a pure Erlang module, preloaded with
+`prim_file`, that resolves one path against one table and one working
+directory, both handed to it as terms. It reaches a tree only through two
+callbacks its caller gives it, one that walks names on an entry and one
+that reads the link a walk reaches; it keeps the place, the names still
+to read, the links followed and FreeBSD's flags in its own variables,
+recurses only through tail calls, and calls nothing but BIFs, its own
+functions and those two callbacks. At the last name it returns the operation's **action** with a
+**resumption**: a fun that takes the reply of the walk sent with the
+operation and goes on from where the resolution stood.
 
-```c
-/* What an operation does with its last name: FreeBSD's nameiop. */
-typedef enum erx_ns_op {
-	ERX_NS_LOOKUP,		/* reads or changes what the path names */
-	ERX_NS_CREATE,		/* makes the last name */
-	ERX_NS_DELETE,		/* removes the last name */
-	ERX_NS_RENAME		/* a rename's new name */
-} erx_ns_op_t;
+```erlang
+%% What an operation does with its last name: FreeBSD's nameiop.
+-type op() :: lookup                 % reads or changes what the path names
+            | create                 % makes the last name
+            | delete                 % removes the last name
+            | rename.                % a rename's new name
 
-/* Where one resolution stands between two calls of erx_ns_step. */
-typedef struct erx_ns_cursor {
-	char		cur_place[ERX_PATH_MAX];	/* absolute; every name a
-							 * directory reached (F11) */
-	char		cur_rest[ERX_PATH_MAX];		/* the names still to read */
-	uint32_t	cur_run;			/* how many of cur_rest's first
-							 * names the walk in flight carries */
-	uint32_t	cur_links;			/* links followed so far */
-	erx_ns_op_t	cur_op;
-	bool		cur_follow;			/* follow a last link: FOLLOW */
-	bool		cur_directory;			/* a trailing `/` met, in the path
-							 * or a link's text: TRAILINGSLASH */
-	bool		cur_willbedir;			/* a new last name may be made only
-							 * as a directory: WILLBEDIR */
-} erx_ns_cursor_t;
+-type flags() :: #{follow := boolean(),      % follow a last link: FOLLOW
+                   willbedir := boolean()}.  % a new last name may be made
+                                             % only as a directory: WILLBEDIR
 
-/* The next action. */
-typedef enum erx_ns_next {
-	ERX_NS_WALK,		/* walk the names; hand back the reply */
-	ERX_NS_READLINK,	/* walk the names, read the link they reach */
-	ERX_NS_TARGET,		/* walk the names, act on what they reach */
-	ERX_NS_PARENT,		/* walk the names, act on that directory
-				 * with the last name */
-	ERX_NS_TOP,		/* the last name is a directory no request
-				 * to a parent can name */
-	ERX_NS_FAIL		/* the resolution's answer is an error */
-} erx_ns_next_t;
+%% A walk is handed names from the provider's root, the entry's root names
+%% first, and answers the kind of each name it passed, in order, up to and
+%% including the first that is not a directory, and how it ended.
+-type kind() :: directory | link | other.
+-type reply() :: {[kind()], ok | {error, posix()}}.
 
-erx_ns_status_t	erx_ns_start(const erx_ns_t *, const uint8_t *, size_t,
-	    erx_ns_op_t, bool follow, bool willbedir, erx_ns_cursor_t *,
-	    erx_ns_action_t *);
-erx_ns_status_t	erx_ns_step(const erx_ns_t *, erx_ns_cursor_t *,
-	    const erx_ns_reply_t *, erx_ns_action_t *);
+-type callbacks() :: #{walk := fun((entry(), [name()]) -> reply()),
+                       read_link := fun((entry(), [name()]) ->
+                                        {ok, binary()} | {error, posix()})}.
+
+-type action() :: {target, entry(), [name()], resume()}
+                                     % walk the names, act on what they reach
+                | {parent, entry(), [name()], name(), resume()}
+                                     % walk the names, act on that directory
+                                     % with the last name
+                | {top, entry()}     % the last name is a directory no request
+                                     % to a parent can name
+                | {empty_root, place()}
+                                     % the place is a directory of the empty
+                                     % root, which no provider holds
+                | {error, posix()}.  % the resolution's answer
+-type resume() :: fun((reply()) -> action()).
+
+-spec resolve(binary(), op(), flags(), table(), place(), callbacks()) ->
+          action().
 ```
 
-An action names its entry, copied out under the lock as the NIF copies
-out every entry it hands a caller ([Erlang
-clients](#erlang-clients-prim_file-and-erx_file_remote)),
-the names to walk from the entry's top, and for a parent the last name; a
-reply is the qid types a walk answered, one per name it passed, and its
-error, or a link's text.
+An action names its entry as the table holds it, the names to walk from
+the provider's root, the entry's `root` names first, and for a parent the
+last name; a program's entry, whose fid already stands at its root, has
+an empty `root`. The caller sends the
+operation together with the action's walk; when the walk stops before its
+last name or ends on a link the operation follows, the operation fails
+with `ebadf` and changes nothing ([Pipelined
+requests](#pipelined-requests)), and the caller calls the resumption with
+the walk's reply, which returns the next action. A resolution's state
+lives only in the resumption's closure, which the resolver made, so
+nothing a caller holds between two names needs a check of its own.
 
-**Checking a cursor and a reply.** Any process of the runtime can call
-the NIF with a cursor and a reply, and a link's text comes from a server,
-so `erx_ns_step` checks all three before it reads any of them, refuses
-one that fails with `einval` and returns no action:
+The table comes in whole and the resolver reads that one term from the
+resolution's first name to its last, so a mount, bind or unmount during
+a resolution is not seen by it (**Concurrency**, below), and a
+walk's reply is always read against the table the walk was sent under.
+Entries are opaque to the resolver beyond their `point` and `root`: it places names
+on an entry, hands the entry to the callbacks and returns it in an
+action, so a runtime's table of providers and grants and a handler's
+table of a program's fids resolve through the same function.
 
-* the place is absolute and fits `ERX_PATH_MAX` with its NUL; it has at
-  most 256 names, and each is plain: valid UTF-8 of 1 to 255 bytes, not
-  `.` or `..`, holding neither `/` nor NUL;
-* the names still to read, which may be none, are valid UTF-8 without
-  NUL and fit `ERX_PATH_MAX` with the place, each name at most 255
-  bytes, and `cur_run` is at most 16, a walk's limit, and counts no
-  more than the plain names at their head;
-* `cur_links` is at most 32 and `cur_op` one of the four operations;
-* a reply answers the action the cursor stands at: a walk's qid types
-  number no more than the names walked, and a link's text is valid
-  UTF-8 without NUL, so a text holding NUL or invalid UTF-8 is refused
-  rather than cut short; an empty text answers `enoent`, and one too
+**What comes in from outside.** Two inputs reach the resolver from beyond
+its caller's own code: the path, which in a session's handler is a
+program's, and a link's text, which comes from a server. A walk's reply
+comes from the caller's executor, which has already held the server's
+reply to its request ([Bounds](#bounds)). The resolver checks each as it
+reads it, by matching its bytes:
+
+* a path over `ERX_PATH_MAX` bytes answers `enametoolong`, one that is
+  not valid UTF-8 or contains NUL `einval`, and an empty one `enoent`, as
+  POSIX says;
+* a link's text that is not valid UTF-8 or holds NUL answers `einval`
+  rather than being cut short; an empty text answers `enoent`, and one too
   long to join the names still to read `enametoolong`, as resolution
-  answers rather than refusals.
+  answers;
+* a walk's reply holds no more kinds than the names walked, `directory`
+  for every kind but the last, and when it holds fewer kinds than names
+  it ends in an error or its last kind is not a directory; any other
+  reply answers `eio`, as a reply that exceeds its request does.
 
-The NIF builds the cursor from its Erlang tuple with the same checks, so
-`prim_file:erx_step/2`, `prim_file:erx_pair/2` and `erx_set_cwd/1` have
-one decoder, which the fuzz target feeds
-([Verification](#verification-and-testing)). Two fields record what the
-text alone cannot: `cur_run` is the walk in flight, which a table changed
-since it was sent would place otherwise, so its reply is read against the
-walk sent; `cur_directory` is FreeBSD's `TRAILINGSLASH`, set by a
+The table and the working directory are checked when they are written,
+as a place: at most 256 names, each plain, joining within
+`ERX_PATH_MAX`. `erx_ns` checks every point and root it adds so, and
+`set_cwd` stores only a place the resolver reached; a session's handler
+builds a program's table through the same checks. So no table or
+working directory a resolution is handed holds a name the resolver
+would refuse, and the resolver need not check them again.
+
+Two of FreeBSD's flags record what the text alone cannot.
+`TRAILINGSLASH` is set by a
 trailing `/` of the path or of any link's text the resolution reads and
 kept to its end, as `vfs_lookup` sets the flag again on each pass and
 nothing clears it, since a link's text takes the last name's place
-without the `/` that followed it; and `cur_willbedir` is FreeBSD's
-`WILLBEDIR`, which the caller gives at the start: true for `make_dir`,
-a program's `mkdir`, and a rename's destination when its source is a
-directory, as `kern_renameat` sets it from the source it has found.
+without the `/` that followed it. `WILLBEDIR` is given by the caller:
+true for `make_dir`, a program's `mkdir`, and a rename's destination when
+its source is a directory, as `kern_renameat` sets it from the source it
+has found.
 
-A step reads the cursor's names in this order:
+The resolver reads a path's names in this order:
 
-1. **Start.** `erx_ns_start` refuses a path over `ERX_PATH_MAX` bytes
+1. **Start.** The resolver refuses a path over `ERX_PATH_MAX` bytes
    (`enametoolong`), one that is not valid UTF-8 or contains NUL
    (`einval`), and an empty one (`enoent`, as POSIX says). The place
    starts at `/` for an absolute path and at the working directory for a
@@ -952,7 +972,8 @@ A step reads the cursor's names in this order:
 2. **A run.** Plain names gather into a **run** up to the next `.` or
    `..` or the last name. A name over 255 bytes, a place and run of more
    than 256 names, or a text that with its NUL would not fit
-   `ERX_PATH_MAX`, answers `enametoolong`, so a place always fits `cwd`.
+   `ERX_PATH_MAX`, answers `enametoolong`, so a place always fits the
+   bounds a working directory is held to.
 3. **Placing.** The place and the run, joined, lie on the entry whose
    mount point is their longest prefix, comparing whole names, so `/data`
    never matches `/database`, and the names up to that point join the
@@ -962,11 +983,15 @@ A step reads the cursor's names in this order:
    prefixes lie in the **empty root** when they are `/` or a directory
    above an entry's point, a read-only directory that lists only the
    names leading to the points below it, and answer `enoent` otherwise.
-4. **Walking.** The action is a walk, on that entry, of the place's names
-   below its point and then the run's, from the entry's top: an attach
-   and the entry's `root` names for a domain's entry, the program's fid
-   for a program's. The release file system answers the walk inside the
-   NIF, within the same call; the caller sends any other. Every walk
+   A resolution whose last action falls on such a directory returns
+   `{empty_root, Place}`, which the caller answers itself as that
+   read-only directory, asking no provider.
+4. **Walking.** The resolver asks its `walk` callback for a walk, on
+   that entry, of the place's names below its point and then the run's,
+   from the entry's top: an attach and the entry's `root` names for a
+   domain's entry, the program's fid for a program's. The release file
+   system answers the walk in one call of its NIF, the EROFS reader on
+   its image, and the client as a request to the grant. Every walk
    retraces the place, and the reply is read the same way for every
    name: a directory joins the place; a symbolic link is followed
    (below); anything else before a further name answers `enotdir`; and a
@@ -997,12 +1022,12 @@ A step reads the cursor's names in this order:
      `rename("file/.", "x")` answer `enotdir`. That is the `ENOTDIR`
      the three man pages list for a component that is not a directory,
      and FreeBSD's name-cache lookup and macOS answer it;
-   * with `cur_directory` set, the last name is walked as a target
+   * with `TRAILINGSLASH` set, the last name is walked as a target
      before any operation is sent, whatever the operation: a link is
      followed, a name that is not a directory answers `enotdir`, and a
-     missing name answers `enoent` unless `cur_willbedir` is set, in
+     missing name answers `enoent` unless `WILLBEDIR` is set, in
      which case the parent action follows, and an existing directory
-     goes on to the operation's own action, so the machine alone decides
+     goes on to the operation's own action, so the resolver alone decides
      every trailing-`/` answer of [Links and a trailing
      `/`](#erlang-clients-prim_file-and-erx_file_remote);
    * `CREATE` with a last `.` or `..`, and any of the three when the last
@@ -1014,26 +1039,28 @@ A step reads the cursor's names in this order:
    A target or parent walk that stops at a link, or ends on a last link
    the operation follows, makes no new fid, so the operation sent with it
    fails with `ebadf` and changes nothing ([Pipelined
-   requests](#pipelined-requests)); the caller hands the walk's reply
-   back and the machine follows the link. An operation is never sent with
+   requests](#pipelined-requests)); the caller calls the resumption with
+   the walk's reply and the resolver follows the link. An operation is
+   never sent with
    a walk whose names still need a check of their own, so
    `change_mode("file/.")` answers `enotdir` from a walk of its own and
    changes no mode.
 
 **Symbolic links.** A link before the last name, and a last link that the
-operation follows, is followed: the action is a walk to the link and its
-`readlink`, sent together, and the link's text takes the place of its
+operation follows, is followed: the resolver asks its `read_link`
+callback for a walk to the link and its `readlink`, sent together, and
+the link's text takes the place of its
 name among the names still to read, starting from the link's directory,
 which is the place, for a relative text, or from `/` for an absolute
 one. So `..` in a link's text, or after it, acts on the directories the
 text leads through. A resolution follows at most 32 links, FreeBSD's
 `MAXSYMLINKS` and macOS's, the links met inside a link's text included,
 and the next answers `eloop`; an empty link answers `enoent`, as
-FreeBSD's `namei` answers it; the count lives in the cursor and never
+FreeBSD's `namei` answers it; the count is the resolver's and never
 reaches a server. A link therefore leads only where its reader's own
 namespace leads, and a link on a narrowed mount that points above the
 mount's root names whatever the reader's namespace holds there, often
-nothing. Local providers follow links only through the machine: the EROFS
+nothing. Local providers follow links only through the resolver: the EROFS
 reader answers its walks and link reads as a grant does, and the release
 file system holds no links.
 
@@ -1049,7 +1076,7 @@ system calls pass them to `namei` (`kern_openat` through `vn_open_cred`,
 | `read_file`, `read_file_info`, `list_dir`, `set_cwd`, `change_mode`, `change_time`, `write_file_info`, `open` without a mode that creates; a program's `open` without `O_CREAT`, `stat`, `chmod`, `truncate`, `chdir` | `LOOKUP` | followed |
 | `read_link`, `read_link_info`; a program's `readlink`, `lstat` and `open` with `O_NOFOLLOW` | `LOOKUP` | acted on: read, described, or refused by `lopen`'s `eloop`, which a program's `open` answers as `EMLINK`, FreeBSD's open(2) answer |
 | `make_link`'s existing name; a program's `link`'s existing name | `LOOKUP` | followed, so the new name links the link's target, as FreeBSD's `link` makes it |
-| `open` with `write` or `append` and without `exclusive`, `write_file`; a program's `open` with `O_CREAT` and without `O_EXCL` | `CREATE` | followed, so the file is made or opened where the link leads; `lcreate`'s `eloop` hands the link to the machine |
+| `open` with `write` or `append` and without `exclusive`, `write_file`; a program's `open` with `O_CREAT` and without `O_EXCL` | `CREATE` | followed, so the file is made or opened where the link leads; `lcreate`'s `eloop` hands the link to the resolver |
 | `make_dir`, `make_symlink`, `make_link`'s new name, `open` with `exclusive`; a program's `mkdir`, `symlink`, `link`'s new name, `mknod`, `open` with `O_CREAT` and `O_EXCL` | `CREATE` | the name, which exists, so each answers `eexist`, a dangling link included |
 | `delete`, `del_dir`, `rename`'s source; a program's `unlink`, `rmdir`, `rename`'s source | `DELETE` | the name: `delete` and `unlink` remove it, `rename` moves it, and `del_dir` and `rmdir` answer `enotdir` |
 | `rename`'s destination; a program's `rename`'s destination | `RENAME` | the name, which the rename replaces |
@@ -1062,7 +1089,7 @@ then reaches must be a directory ([Links and a trailing
 The parent action sends the operation on the directory's fid with the
 name (`unlinkat`, `renameat`, `link`, `mkdir`, `symlink`, `mknod`,
 `lcreate`), and a target that acts on a last link acts on the link's own
-fid (`readlink`, `getattr`). The 32-link count and the machine's bounds
+fid (`readlink`, `getattr`). The 32-link count and the resolver's bounds
 hold across one path's whole resolution, each of a `rename`'s or a
 `make_link`'s two paths counted on its own.
 
@@ -1079,32 +1106,57 @@ actually reached, so it names that directory's parent at that moment,
 even after a rename moved it; a whole path is not resolved atomically,
 and a rename between the lookups of two names is seen only by the later
 one. erXos keeps at least the per-name atomicity, and the non-atomic
-whole: each step reads one table under the read lock and copies out what
-it needs; a server answers each name of a walk against its tree as the
+whole: a server answers each name of a walk against its tree as the
 tree then is, a name at a time or, as a server may, a whole walk of up
-to 16 names at once; and the two paths of a rename or a link are placed again together, under
-one hold of the lock, before their request is sent. Its `..` differs
-under a race. It removes the name the resolution walked down through,
-and the next walk retraces the place's names from the entry's top, so a
-directory moved while a resolution crosses it is passed at its old path:
-the resolution goes on through whatever that path names then, or answers
-the walk's error, where FreeBSD's follows the moved directory to its new
-parent. Without a rename racing the resolution the two agree, which the
-fuzz target's comparison with the reference model checks.
+to 16 names at once. The namespace's table, unlike a server's tree, is
+read once: a resolution takes the table as it stands when the resolution
+starts and holds that term to its end, so every name, link and walk
+reply of one resolution is placed by one table, and the two paths of a
+rename or a link, resolved against the same term, are compared on it
+before their request is sent. FreeBSD's lookup likewise holds a
+reference on the directory it stands in, so an ordinary unmount of that
+file system answers `EBUSY` until the lookup has left it; erXos's
+unmount does not wait, and a resolution under way finishes on the table
+it began with. Its `..` differs under a race. It removes the name the
+resolution walked down through, and the next walk retraces the place's
+names from the entry's top, so a directory moved while a resolution
+crosses it is passed at its old path: the resolution goes on through
+whatever that path names then, or answers the walk's error, where
+FreeBSD's follows the moved directory to its new parent. Without a rename
+racing the resolution the two agree, which the fuzz target's comparison
+with the reference model checks.
 
-**Properties.** A step runs in time linear in the cursor's length times
-the number of entries, at most 4,096 by 64, uses no heap, and recurses
-nowhere; a resolution takes at most one step per name and link it
-reads. The same C17 source builds into the runtime's `prim_file` NIF,
-through which a session's handlers resolve their programs' paths, and for
-the host, where its fuzz target and property tests run: no walk names
-`.`, `..` or an empty name; every walk's names lie at or below its
-entry's `root`; a place holds only names a walk answered as directories
-or the table gave it; and, with the tree held still, every outcome is the
-reference model's ([Verification](#verification-and-testing)). Nothing of
-this is in the kernel: the machine is `liberx`'s C17 and its callers are
-Erlang, the same code in both phases of [plan.md](plan.md), so nothing
-here touches the stopgap kernel or works around a gap of it.
+**A held table.** A resolution under way when its entry is unmounted, or
+a bind it passes is replaced, sends its remaining requests, at most one
+walk for each run and link it has left, to the grant the old entry
+names. That grant is still the domain's: `unmount` takes an entry out of
+the namespace and ends no grant, and the domain reaches a grant only
+through the export the server's runtime made for it (F1), whichever
+table names its pid. Once the grant ends, every request to it answers
+`eio` through the client's monitor on the grant, whichever table the
+resolution holds ([Erlang clients](#erlang-clients-prim_file-and-erx_file_remote)).
+A held table therefore reaches nothing the domain does not hold, walks
+nothing above the old entry's `root`, since its walks start there as
+any walk does (F2), and holds a grant for no longer than one
+resolution.
+
+**Properties.** A resolution reads each name of its path and of each
+link's text once, and for each run it places looks through at most 64
+entries, comparing at most 256 names with each; it makes at most one
+walk for each run and two for each link, follows at most 32 links,
+recurses only through tail calls and holds at most one table and one
+place, so its time and memory are bounded by the limits above. The same
+module resolves for `prim_file` in every runtime, for `erx_ns`'s `bind`
+and for every session's handler, and runs on the host, where its fuzz
+target and property tests run: no walk names `.`, `..` or an empty
+name; every walk's names lie at or below its entry's `root`; a place
+holds only names a walk answered as directories or the table gave it;
+every action names an entry of the table the resolution started with;
+and, with the tree held still, every outcome is the reference model's
+([Verification](#verification-and-testing)). Nothing of this is in the
+kernel: the resolver is preloaded Erlang in a user-mode runtime, the
+same code in both phases of [plan.md](plan.md), so nothing here touches
+the stopgap kernel or works around a gap of it.
 
 **Listings across mounts.** A directory's listing is its provider's
 entries, plus an entry of kind `directory` for every mount point directly
@@ -1140,18 +1192,22 @@ on one tree, through which a file is one entry of a session's file table.
 visible at `To` as well: it adds an entry with the mount that `From`
 resolves to and the names below it as its `root`, read-only if asked.
 `From` resolves as `set_cwd`'s path does, to a directory, in the calling
-process: `erx_ns:bind/2,3` runs the machine as `file`'s operations do,
-its walks answered by the NIF, the EROFS reader or `erx_file_remote`
-wherever they lie, so a link on the way is followed and `From` through
-a link roots the entry at the link's target. A `From` that ends in the
-empty root, or on a directory of the namespace above a mount point that
-no provider holds, is refused with `enoent`, since no entry's tree
-holds it. It then hands the place it reached
-to `erx_ns_bind`, which checks it as a cursor's place is
-checked and, under the namespace's write lock, places it again: the new
-entry takes the mount of the entry the place lies on then, and the
-place's names below that entry's point as its `root`. So a `root` is a
-place: names each walked as a directory, with no link among them, and a
+process: `erx_ns:bind/2,3` runs `erx_path` as `file`'s operations do,
+its walks answered by the release's NIF, the EROFS reader or
+`erx_file_remote` wherever they lie, so a link on the way is followed
+and `From` through a link roots the entry at the link's target. A `From`
+that ends in the empty root, or on a directory of the namespace above a
+mount point that no provider holds, is refused with `enoent`, since no
+entry's tree holds it. It then hands the place it reached to `erx_ns`'s
+process, which checks it as a place is checked and places it again on
+the table it changes: the new entry takes the provider of the entry the
+place lies on then, and the place's names below that entry's point as
+its `root`. A bind is thus the one change that reads two tables, the one
+its resolution held and the one it changes: a mount or unmount between
+them roots the new entry on whatever the namespace maps at the place
+then, as a bind made just after that change would, and its names, if
+that provider lacks them, answer `enoent` on the first walk. So a
+`root` is a place: names each walked as a directory, with no link among them, and a
 root name that a later rename takes away answers `enoent` on the next
 walk, never a walk elsewhere. A mount point, `To` here and in `mount`,
 is written as the plain names it is: it is absolute, empty names and a
@@ -1161,8 +1217,37 @@ rather than a directory to resolve.
 `erx_ns:mount(Pid, To, Options)` adds an entry for a grant's pid, with
 the tree and the rights its options name.
 `erx_ns:unmount(To)` removes the entry at exactly `To`; unmounting `/`
-fails. Each takes effect for the whole domain at once and changes nothing
-for any other domain.
+fails. Each takes effect for the whole domain at once, for every
+resolution that starts after it returns, and changes nothing for any
+other domain.
+
+**The table's one writer.** A runtime's table is one persistent term,
+which only `erx_ns`'s process writes: a registered process that takes
+each `bind`, `mount` and `unmount` in turn, checks it, builds the new
+table from the one the term holds and puts it, so two changes never
+lose each other, and a resolution reads the term without copying it or
+taking a lock. Until it writes a table the term is absent and
+`prim_file` reads the boot table, the domain's local entries: the
+release slice at `/` and each EROFS image where its release names it,
+both from the boot information, so `erl_prim_loader` loads a runtime's
+first modules, from the slice or an image, before any process of
+erXos's own has run; the runtime starts `erx_ns`'s process before it
+mounts the domain's facets. The changes themselves are pure functions
+over a table, which `erx_ns`'s process applies to the domain's term and a
+session's handler to the table of each program it starts.
+
+The process also monitors every grant pid its table holds. When one
+ends, it rewrites that entry's provider to `ended`, which answers `eio`
+to every request without sending one, and the entry stays until it is
+unmounted. A grant's pid that the server's runtime later gives another
+process therefore never receives a mounted path's requests, and a
+resolution that holds the older table and sends to the ended pid
+answers `eio` through the client's own monitor on the grant ([Erlang
+clients](#erlang-clients-prim_file-and-erx_file_remote)), so every
+operation on a path whose server ended answers `eio` whichever table
+names it. The monitors are the process's only state beyond the term;
+a restarted process reads the term and monitors its grants again, and
+one whose grant ended meanwhile answers `DOWN` at once.
 
 ### Narrowing for a program
 
@@ -1191,7 +1276,7 @@ Erlang state, held by the program's handler, and at the servers
 ([design-programs.md](design-programs.md#a-program-is-a-port)). A program
 started with `/data/logs` therefore has a handler holding a fid on
 `logs`, and reaches nothing above it whatever it asks, since the handler
-walks for it only the plain names `erx_ns_step` asks for, never `..`,
+walks for it only the plain names `erx_path` asks for, never `..`,
 and only from the program's own fids (F3, F9): a `..` at the top of the
 program's mount steps out in the program's namespace, to `/data`, which
 holds only `logs`, and never asks the server. The server sees the session's grant
@@ -1654,86 +1739,101 @@ object ([design-programs.md](design-programs.md#file-objects)).
 
 ### Erlang clients: `prim_file` and `erx_file_remote`
 
-`prim_file`'s NIF starts every path's resolution with `erx_ns_start`,
-naming the operation's `nameiop` and whether it follows a last link
-([Resolving a path](#resolving-a-path)), and steps it as far as the
-release file system takes it, within the same call. A path that the
-release serves to its end is served there. When an action falls on
-another provider, the NIF returns it, and the operation runs in the
-calling process: on an EROFS mount through `erx_erofs`, the EROFS reader,
-which answers the machine's walks and link reads on its image and returns
-OTP's file descriptor record with itself as the module for an open file
-([design-storage.md](design-storage.md#reading-erofs-images)); on a grant
-through `erx_file_remote`. An action on a grant is
-`{remote, {Pid, Tree, Rights}, {Point, Root, Names}, Next, Cursor}`. The
-second element is the grant as the action's entry reaches it, copied out
-under the namespace's lock with the rest: `Tree` is the tree the client
-attaches to, so two entries of one grant on two trees reach two trees,
-and `Rights` is the entry's `ro`, `rw` or `rx`, so a read-only bind of an
-`rw` grant reaches its client read-only and the client never sends a
-request that writes through it: every request the client sends passes one
-function, which checks it against the generated grammar of the file
-protocol and refuses, with `erofs` and sending nothing, one that the
-grammar's `writes/1` marks as writing through rights other than `rw`, as
-the grant's own funnel refuses it. The grammar, `erx_9p_grammar`, is
-preloaded with the client and holds each reply to its request. The third
-is where the action's names lie: `Point` is the entry's point, a
-namespace path such as `<<"/tmp">>`, `Root` the entry's root as names
-(`<<>>` for the tree's root), and `Names` the names to walk from the
-tree's root, `Root`'s first. `Next` is the action, `walk`, `readlink`,
-`target`, `{parent, Last}` or `top`, and `Cursor` the machine's cursor,
-a tuple of its text and counts, which the client hands back with the
-walk's or the link's reply to `prim_file:erx_step/2`, the NIF's step,
-for the next action. The client is the machine's executor: it performs
-each action, sends the operation with a target's or a parent's walk, and
-never reads a path's names itself. A resolution that a link leads onto
-the NIF's own providers ends with the namespace path it reached, a place
-and a last name, on which `prim_file` runs the operation as on any path
-the caller writes. `erx_file_remote` is preloaded,
-as `prim_file` and the EROFS reader are, and calls only BIFs and preloaded
-modules: whatever process calls `file` or `erl_prim_loader` on a server's
-path runs it, the code server included when a server's directory is on
-the code path, and a module the code server would have to load then halts
-the node.
+`prim_file` resolves every path with `erx_path` in the calling process,
+naming the operation's `nameiop` and FreeBSD's flags ([Resolving a
+path](#resolving-a-path)), over the table it reads from the namespace's
+persistent term and the working directory it reads from its NIF. Its
+callbacks and the action the resolver returns are dispatched on the
+entry's provider. On the release file system a walk is one call of
+`release_walk_nif(Names)`, which answers the kind of each name, and an
+action is the operation's own NIF call on the action's names, such as
+`read_file_nif(Names)`, which answers `enoent` or `enotdir` for a name on
+the way as a walk would; the release holds no links, so a path without
+`.` or `..` there costs one NIF call, as stock's does. Any process can
+call these NIFs with any term, so each decodes its list before the
+release's core sees it: a list of more than 256 names, or a name that
+is not a binary of 1 to 255 bytes of UTF-8 other than `.` and `..`
+without `/` or NUL, answers `einval`, and the decoder has a fuzz target
+of its own ([Verification](#verification-and-testing)). On an EROFS mount
+the operation runs through `erx_erofs`, the EROFS reader, which answers
+the resolver's walks and link reads on its image and returns OTP's file
+descriptor record with itself as the module for an open file
+([design-storage.md](design-storage.md#reading-erofs-images)). On a
+grant it runs through `erx_file_remote`. A grant entry's provider is
+`{grant, Pid, Tree}` with the entry's `rights`, as the table held them
+when the resolution started: `Tree` is the tree the client attaches to,
+so two entries of one grant on two trees reach two trees, and `rights`
+is the entry's `ro`, `rw` or `rx`, so a read-only bind of an `rw` grant
+reaches its client read-only and the client never sends a request that
+writes through it: every request the client sends passes one function,
+which checks it against the generated grammar of the file protocol and
+refuses, with `erofs` and sending nothing, one that the grammar's
+`writes/1` marks as writing through rights other than `rw`, as the
+grant's own funnel refuses it, and refuses with `einval`, sending
+nothing, a walk that names `.`, `..` or an empty name, so no walk a
+client sends carries one, whoever built it (F2, F3). The grammar,
+`erx_9p_grammar`, is preloaded with the client and holds each reply to
+its request. The client walks an action's names, whose first are the
+entry's `root` names, from a fid it attaches to the tree's root. The
+client is the resolver's executor:
+it performs each walk and link read the resolver asks for, sends the
+operation with a target's or a parent's walk, calls the resumption with
+the walk's reply when the operation answers `ebadf`, and never reads a
+path's names itself. A link that leads a resolution from a grant onto
+the release or an EROFS image leaves the resolver's next action on that
+entry, and `prim_file` runs the operation there, as on any path the
+caller writes. `erx_file_remote` and `erx_path` are preloaded, as
+`prim_file` and the EROFS reader are, and call only BIFs and preloaded
+modules: whatever process calls `file` or `erl_prim_loader` on a
+server's path runs them, the code server included when a server's
+directory is on the code path, and a module the code server would have
+to load then halts the node.
 
-**The working directory** is one namespace path per runtime, held in the
-NIF beside the namespace's table and starting at `/`, and it is a place:
-every name of it a directory that the resolution which set it reached.
-`erx_ns_start` starts every relative path from it. `set_cwd` resolves its
-path as `chdir` does, with `LOOKUP`, following a last link, to a
-directory. On the release file system the NIF checks what it reaches. On
-a grant, `erx_file_remote` asks `getattr` of the target: anything but a
-directory answers `enotdir`, a directory without the owner's search bit
-answers `eacces`, as the server checks the owner's bits for a walk, and a
-walk that stops answers as the walk does (`enoent` for a missing name).
-It then stores the place the resolution reached through
-`prim_file:erx_set_cwd/1`, which checks it as a cursor's place is checked
-and stores it under the namespace's write lock; `get_cwd` answers the
-stored place. So the working directory that `set_cwd("l")` sets, `l` a
-link to `d`, is `d`'s path, and `get_cwd` answers it, as FreeBSD's
-`getcwd` answers a directory's own path. The working directory holds no
-fid and no grant, only the path, and only the namespace turns it into a
-server, as for any path the caller writes. A mount change between the
-check and the store leaves the state the same change leaves just after
-the store. Once a grant's process ends, the paths of its entries, the
-working directory's among them, answer `eio`; once the entry is
-unmounted, they reach what the namespace maps at that path then, the
-release file system, a later mount with that mount's rights, or nothing
-(`enoent`), as the same absolute path would.
-So a working directory never reaches a server the namespace does not
-map at its path, and never keeps a server reachable past its unmount.
+**The working directory** is one place per runtime, held in `prim_file`'s
+NIF as one binary under a mutex, starting at `/`, which
+`erx_get_cwd_nif/0` copies out and `erx_set_cwd_nif/1` replaces, each in
+one call, and which only `prim_file:set_cwd/1` writes: every name of it
+a directory that the resolution which set it reached. It is not a
+persistent term because it changes often, OTP's `test_server` setting it
+for every test case, and each change of a persistent term costs a scan
+of every process ([Performance](#performance)); and not an ETS table,
+which would need an owner process that `erl_prim_loader` cannot wait for
+at boot and whose end would lose it. The resolver starts every relative path from it. `set_cwd`
+resolves its path as `chdir` does, with `LOOKUP`, following a last link,
+to a directory. On the release file system the walk's last kind tells
+what it reaches. On a grant, `erx_file_remote` asks `getattr` of the
+target: anything but a directory answers `enotdir`, a directory without
+the owner's search bit answers `eacces`, as the server checks the
+owner's bits for a walk, and a walk that stops answers as the walk does
+(`enoent` for a missing name). It then stores the place the resolution
+reached, as an absolute path, which the NIF refuses with `einval`
+unless it is plain names within the bounds of a place, since any
+process can call it; `get_cwd` answers the stored place. So the working directory
+that `set_cwd("l")` sets, `l` a link to `d`, is `d`'s path, and `get_cwd`
+answers it, as FreeBSD's `getcwd` answers a directory's own path. The
+working directory holds no fid and no grant, only the path, and only the
+namespace turns it into a server, as for any path the caller writes. A
+mount change between the check and the store leaves the state the same
+change leaves just after the store. Once a grant's process ends, the
+paths of its entries, the working directory's among them, answer `eio`;
+once the entry is unmounted, they reach what the namespace maps at that
+path then, the release file system, a later mount with that mount's
+rights, or nothing (`enoent`), as the same absolute path would. So a
+working directory never reaches a server the namespace does not map at
+its path, and never keeps a server reachable past its unmount beyond a
+resolution already under way ([Resolving a path](#resolving-a-path)).
 Error step 5 below finds the working directory through this path.
 
 * path operations (`read_file_info`, `list_dir`, `make_dir`, `delete`,
   `rename`, `make_link`, `make_symlink`, `read_link`, `read_file`,
-  `write_file`), at the machine's target or parent action, attach a fid
+  `write_file`), at the resolver's target or parent action, attach a fid
   of their own on the grant, walk from it into a second, new fid, act on the second and clunk both, the requests
   sent together, so each operation's fids are the calling process's from
   first to last ([Fid owners](#fid-owners)). The operation names only
   the walk's new fid, which exists only if every name was walked: after a
   walk that stops early, the operation finds no fid and fails with
-  `ebadf`, having changed nothing, and the client hands the walk's
-  reply to the machine, which answers its error or follows the link it
+  `ebadf`, having changed nothing, and the client calls the resumption with the walk's
+  reply, and the resolver answers its error or follows the link it
   stopped at. A walk in place would leave
   its fid on the last directory it reached, where a `delete` of
   `/tmp/missing/victim` sent with it would remove `/tmp/victim`; walking
@@ -1749,7 +1849,7 @@ Error step 5 below finds the working directory through this path.
   sends `lcreate`, which creates the file or
   opens the one already there in one step, so two processes opening one
   new name both succeed, as on UNIX; `lcreate`'s `eloop` hands the link to
-  the machine, which follows it, counted with the path's others
+  the resolver, which follows it, counted with the path's others
   ([Resolving a path](#resolving-a-path)), and a top answers as step 3 of
   the errors below says. It returns OTP's file
   descriptor record with `erx_file_remote` as its module, holding the
@@ -1792,34 +1892,31 @@ Error step 5 below finds the working directory through this path.
   operations into `{error, eio}`.
 
 A rename or a `make_link` resolves its two paths one after the other,
-the source or the existing path first, as FreeBSD's `kern_renameat` and
-`kern_linkat` look them up, each to its last action, and then places both
-again in one call, `prim_file:erx_pair/2` (`erx_ns_pair`), under one hold
-of the namespace's lock, so their request goes where one table maps both.
-Two paths on one grant's tree through one set of rights, whatever entries
-they pass, return `{remote, {Pid, Tree, Rights}, Place, OtherPlace}`,
-each place `{Point, Root, Names}` of its own entry, and `erx_file_remote`
-sends the two walks and the one request that takes both together; a walk
-that stops at a link goes back to its own path's machine, and the pair is
-placed again once both reach their last actions. A path on a grant paired
-with a path on another grant, another tree, other rights or a provider of
-the NIF returns `{error, exdev}`, as between two UNIX file systems,
-without asking either server. A rename whose source is an entry's top
-answers `ebusy` as soon as the source's resolution ends, before its
-destination is resolved, as `kern_renameat` answers before it looks up
-the destination, and one whose destination is a top answers `ebusy`
-once both are resolved, before the pair is placed (step 3 of the errors
-below). Two paths neither on
-a grant are the NIF's own providers', which are read-only.
+against one table read once, the source or the existing path first, as
+FreeBSD's `kern_renameat` and `kern_linkat` look them up, each to its
+last action, so their request goes where that one table maps both. Two
+last actions on entries of one grant, one tree and one set of rights,
+whatever entries they pass, go together: `erx_file_remote` sends the two
+walks and the one request that takes both; a walk that stops at a link
+goes to its own path's resumption, and the two are compared again once
+both reach their last actions. A path on a grant paired with a path on
+another grant, another tree, other rights or a local provider answers
+`{error, exdev}`, as between two UNIX file systems, without asking either
+server. A rename whose source is an entry's top answers `ebusy` as soon
+as the source's resolution ends, before its destination is resolved, as
+`kern_renameat` answers before it looks up the destination, and one whose
+destination is a top answers `ebusy` once both are resolved, before the
+two are compared (step 3 of the errors below). Two paths neither on a
+grant are the local providers', which are read-only.
 
-**Links and a trailing `/`.** The machine follows links as [Resolving a
+**Links and a trailing `/`.** The resolver follows links as [Resolving a
 path](#resolving-a-path) states, and the client only performs its walks
 and link reads: a walk that stops at a link, or ends on one the operation
-follows, goes back to `prim_file:erx_step/2` with its reply, and a link
-read is a walk to the link and its `readlink`, sent together on fids of
-the client's own. The operation then runs where the machine's next action
-lies: on the grant and with the rights of the entry the link's text
-reaches, or through prim_file on the NIF's own providers, so a link on a
+follows, goes to the resumption with its reply, and a link read is a walk
+to the link and its `readlink`, sent together on fids of the client's
+own. The operation then runs where the resolver's next action lies: on
+the grant and with the rights of the entry the link's text reaches, or
+on a local provider, so a link on a
 read-only bind that leads to a writable entry writes there, as a link
 between two UNIX mounts does, and leads nowhere the caller's namespace
 does not. A rename or a link whose two paths then lie apart answers
@@ -1828,7 +1925,7 @@ nothing that writes, before it answers `erofs`, so a link among them
 leads it to the entry it reaches and a missing directory answers first.
 An operation sent with a walk acts on the link's own fid when the walk
 ends on a link it would follow; a server answers `enotdir` for an
-operation that needs a directory there, the machine follows the link, and
+operation that needs a directory there, the resolver follows the link, and
 the client sends the operation again.
 
 A path written with a trailing `/` names a directory, as FreeBSD's
@@ -1850,7 +1947,7 @@ or replaces the directory a last link leads to; `make_symlink` and
 that creates answers for one as without the `/`, `eexist` when it is
 `exclusive` and `eisdir` otherwise; and `make_link`'s existing path is
 followed, must be a directory, and so answers `eperm` once the new name
-is free. The machine makes each of these checks with a walk of the
+is free. The resolver makes each of these checks with a walk of the
 last name (step 6 of [Resolving a path](#resolving-a-path)) before
 anything is sent that changes the tree.
 
@@ -1871,14 +1968,15 @@ UNIX host whose path resolution is FreeBSD's, the host's platform layer
 adjusting some of the system's errors after they happen (`efile_rename`,
 `efile_del_file` and `efile_del_dir` in `unix_prim_file.c`). A server
 answers with the atoms of Linux's own errors, as any 9P2000.L server
-does, the machine answers for the path as FreeBSD's `namei` does, and the
+does, the resolver answers for the path as FreeBSD's `namei` does, and the
 one translation lives here, applied in this order:
 
 1. `rename` whose source path, as the caller wrote it, is `"/"` answers
    `einval`, stock's own check for a failed rename of `/`, before any
-   other answer. prim_file's NIF decides it as it starts the source's
-   resolution, the one place where a path's text as written is read.
-2. The machine's answers stand for the path, as FreeBSD's `namei` gives
+   other answer. `prim_file` decides it before the source's resolution
+   starts, the one place outside the resolver where a path's text as
+   written is read.
+2. The resolver's answers stand for the path, as FreeBSD's `namei` gives
    them: `enoent` for a missing name or an empty link, `enotdir` for a
    name used as a directory that is not one, `file/.` and `file/..`
    included, `eloop` past 32 links, `einval` and `enametoolong` for a
@@ -1951,10 +2049,11 @@ time and an absent `mtime` the `atime`; `ctime` is never sent, since
 stock's `set_time` ignores it, and the server sets it.
 
 A session's handler is an Erlang client like any other: it resolves its
-program's path through the program's namespace with the NIF and acts
+program's path with `erx_path` over the program's table, a term in the
+handler's own state, and acts
 through `erx_file_remote`'s requests on the program's fids, so a
 program's file reaches the server by the same code as a `file:open/2` in
-the session, and its paths resolve by the same machine: a program's
+the session, and its paths resolve by the same resolver: a program's
 `open`, `chdir` and `getcwd` answer as `file:open/2`, `set_cwd` and
 `get_cwd` answer in the session, over the program's namespace.
 
@@ -2082,8 +2181,14 @@ display belongs to whatever displays a name under its source
   `which/1` (the mount and names a path resolves to, as
   `read_file_info` resolves it) and `list/0` (the table); each returns `ok` or `{error, Reason}`, with `einval` for a
   malformed path, `enoent` for a `From` that resolves to nothing, and
-  `system_limit` beyond 64 entries. A session's handler uses the same
-  module on each program's table.
+  `system_limit` beyond 64 entries. Its process is the one writer of the
+  domain's table; a session's handler applies the same pure changes to
+  each program's table.
+* **`erx_path`**, preloaded in every runtime: `resolve/6`, which
+  resolves one path against a table and a working directory through a
+  walk and a link-read callback and returns the last action with its
+  resumption ([Resolving a path](#resolving-a-path)). Its callers are
+  `prim_file`, `erx_ns:bind/2,3` and every session's handler.
 * **`erx_fs`**, the behaviour above, and
   `erx_fs:start_link(Module, Args, Rights)` to serve one grant of a tree's
   root to the server's own domain, and `start_link/4`, whose options name
@@ -2126,7 +2231,7 @@ Interaction with other subsystems:
 | Domains | requests are frames on the connection between client and server, to a grant pid the server exported to the client, each to a fresh alias; servers in the system domain stand behind facets ([design-domains.md](design-domains.md#facets)) |
 | System | the domain service builds namespaces and the facets they mount ([design-system.md](design-system.md#creating-a-domain)) |
 | Kernel | a session's shared object for a mapped file is an ordinary shared memory object of the session's budget, which the session grows, fills, maps into its programs' images and writes back from the pages `erx_mem_dirty` reports; its faults resolve from its own pages ([design-kernel.md](design-kernel.md#virtual-memory)) |
-| Runtime | `prim_file` resolves through the namespace; the release provider stays in the NIF, the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)), `erx_file_remote`, preloaded Erlang too, is the client of every file server, and each domain runs its own RAM file server for `/tmp` ([design-tmp.md](design-tmp.md)) |
+| Runtime | `prim_file` resolves through the namespace with `erx_path`, preloaded Erlang; the release provider stays in the NIF, the EROFS reader, preloaded Erlang, serves EROFS mounts ([design-runtime.md](design-runtime.md#files)), `erx_file_remote`, preloaded Erlang too, is the client of every file server, and each domain runs its own RAM file server for `/tmp` ([design-tmp.md](design-tmp.md)) |
 | Programs | a handler keeps each program's namespace, fids and descriptions, relays its requests and moves bytes through the data area; the session's mappers serve its programs' shared mappings ([design-programs.md](design-programs.md#the-handler)) |
 | Live machine | `/proc` and the session's export are `erx_fs` servers ([design-live.md](design-live.md#the-proc-tree)); the host link's bridge and the host-tree domain carry 9P2000.L to and from the host ([design-live.md](design-live.md#files-between-the-host-and-the-machine)) |
 | Storage | the storage services and the FAT server, in Erlang, serve the data partition's and FAT partitions' files through `erx_fs`, behind each principal's facet ([design-storage.md](design-storage.md)) |
@@ -2158,7 +2263,9 @@ table:
   working directory reaches the parent of its path; FreeBSD's tmpfs and
   macOS's `chdir` answer `enoent`. An entry the working directory lies
   under is unmounted like any other, where Linux's `umount` answers
-  `ebusy`;
+  `ebusy`, and so is an entry that a resolution under way has crossed,
+  the resolution finishing on the table it began with, where FreeBSD's
+  `unmount` answers `EBUSY` while a lookup holds a directory of it;
 * a rename between two grants, two trees or two sets of rights fails
   with `exdev`, where Linux also fails between two mounts of one tree;
 * every operation on a file whose server died fails with `eio`;
@@ -2205,7 +2312,7 @@ that hold them.
 | A 9P2000.L message at an edge that fails the codec | `erx_9p` | nothing | the bridge discards it and counts it | the edge's client sees no reply, as for a message lost on its transport |
 | A client over its bounds | `erx_fs` or the facet | its existing fids | none | `emfile` |
 | A program over its handler's bounds, or naming a file number it does not own | the handler | the program's existing files | none | `EMFILE` or `EBADF` |
-| A link loop or a chain over 32 links | the machine's count, in the cursor | nothing | none | `eloop` |
+| A link loop or a chain over 32 links | the resolver's count | nothing | none | `eloop` |
 | A slow medium | none: the request waits | the request at the server | none | a wait, as on a local file system; an interrupt flushes it |
 | A server dies, or a grant ends | the client's monitor on the grant, which the connection's end also fires | nothing at the server | the client marks its fids dead | `eio` on every open file of that grant; the mount stays, so a restarted service can be mounted again |
 | A client process ends | the grant's monitor on each fid owner, whose `DOWN` follows every request the owner sent ([Fid owners](#fid-owners)) | nothing | the grant clunks every fid the process owned, which releases their locks and, for an open file, the file's open | nothing |
@@ -2241,8 +2348,22 @@ can mark a domain's file protocol frames.
   all: a program's request is untrusted input to the session, checked
   against the program protocol's grammar and the program's own table. A
   path string from another domain, such as one inside a request to a
-  service, is untrusted and goes through `erx_ns_start` or the protocol's
-  name rules, never through string handling of its own.
+  service, is untrusted and goes through `erx_path` or the protocol's
+  name rules, never through string handling of its own. Inside a
+  runtime, every caller of `erx_path` is the domain's own code, which
+  already holds every grant its table names, so a path it crafts, a
+  table it hands the resolver or a resumption it forges reaches nothing
+  more; what crosses a trust boundary into the resolver, a link's text
+  from a server and a program's path through its handler, is checked as
+  [Resolving a path](#resolving-a-path) states, and a handler resolves
+  only over the program's own table and walks only from its fids (F3).
+* **A held table.** A resolution that outlives an unmount or a bind's
+  replacement still walks only the grant its old entry named, which the
+  domain still holds, from that entry's `root`, and for no longer than
+  that one resolution; a grant that has ended answers `eio`
+  ([Resolving a path](#resolving-a-path)). Only revoking the grant, which
+  is the server's and the system domain's, takes authority away; editing
+  a namespace does not.
 * **Authority.** F1 to F3 make the namespace no more than a view of
   exports and grants; F2 holds at the server, whatever a compromised
   client sends; F5 enforces read-only grants at the grant; F9 keeps every
@@ -2287,15 +2408,19 @@ since the session filled it, as a network file system's client does.
 Each test below names the failure seeded into it, which the test must
 report, so a passing run shows the code under test ran.
 
-* `erx_ns_step`: a fuzz target that builds a random model tree
+* `erx_path`: a fuzz target in Erlang, built and run on the host by
+  `make check-fuzz` for its budget, in the style of
+  `test/erlang/erx_file_remote_fuzz.erl`, that builds a random model tree
   (directories, files, and relative, absolute, empty and looping links),
   a random table over it (entries, binds with roots, a narrowed table
   with no `/`) and a working directory, and random paths of plain
   names, `.`, `..`, doubled and trailing `/`, each with a random
-  `nameiop` and `FOLLOW`. It runs the machine, answering its walks and
-  link reads from the model tree, and compares the outcome, the last
-  action's entry, names and kind or the error, with a reference model:
-  a direct transcription of FreeBSD's `vfs_lookup` over the same tree,
+  `nameiop`, `FOLLOW` and `WILLBEDIR`. It runs the resolver, answering
+  its walks and link reads from the model tree through the callbacks and
+  calling each resumption as an executor would, and compares the
+  outcome, the last action's entry, names and kind or the error, with a
+  reference model: a direct transcription into Erlang of FreeBSD's
+  `vfs_lookup` over the same tree,
   written from `sys/kern/vfs_lookup.c`, which keeps a current directory
   node with its parent, takes `..` through the node's parent, crosses
   an entry's top back through the node its mount point covers, stops at
@@ -2309,19 +2434,25 @@ report, so a passing run shows the code under test ran.
   `rename` for a last `..`, so FreeBSD answers one path differently by
   what its cache holds; the model takes the order of
   the cache lookup and the answers that rmdir(2), rename(2) and
-  unlink(2) document. The same target feeds raw cursors, raw replies
-  and the Erlang terms the NIF decodes them from, each refused or
-  stepped without a fault, and checks the properties above: no walk
-  names `.`, `..` or an empty name, every walk lies at or below its
-  entry's `root`, and a place never outgrows its bounds. Listings
-  across mounts have a property test of their own. Seeded: a machine
+  unlink(2) document. The same target feeds the resolver's untrusted
+  inputs raw: paths and link texts of arbitrary bytes, NUL, invalid
+  UTF-8, empty and over every bound among them, and walk replies longer
+  than their walks, each answered with an error and never a crash; it
+  changes the namespace's persistent term from inside a walk callback;
+  and it checks the properties above: no walk names `.`, `..` or an
+  empty name, every walk lies at or below its entry's `root`, a place
+  never outgrows its bounds, and every action names an entry of the
+  table the resolution was handed. Listings across mounts have a
+  property test of their own. Seeded: a resolver
   that removes a run's name on `..` before its walk, which
   `missing/..` catches; one that takes `..` before following the link
   ahead of it, which `link/..` catches; one that walks `..` past a
   bind's root to the server, which the walk property catches; one that
   answers a last `.` of `DELETE` before checking that the name before
   it is a directory, which `file/.` catches; one that takes a link's
-  text without checking it, which a text holding NUL catches.
+  text without checking it, which a text holding NUL catches; and one
+  that reads the namespace's term again at a link instead of the table
+  it was handed, which the change made inside a walk catches.
 * The executor in `erx_file_remote`, hosted against an `erx_fs` server
   whose tree holds links and binds: `..` after a link to another
   directory and to another entry; `x/..` and `x/.` with `x` a file, a
@@ -2333,13 +2464,34 @@ report, so a passing run shows the code under test ran.
   answering `exdev`; `del_dir("dlnk/")` with `dlnk` a link to an empty
   directory, which removes that directory, and `delete("dlnk/")`, which
   answers `eperm`; a rename of a bind's top, as source and as
-  destination, answering `ebusy`; and a bind whose `From` passes a
-  link, whose entry roots at the link's target. Seeded: a machine that
-  follows a last link only under `FOLLOW`, which the `del_dir` case
-  catches as `enotdir`; an executor that sends an operation with
-  a walk whose names still needed a check, which the `change_mode`
-  case catches as the mode changed; one that stores the path as
-  written as the working directory, which the `get_cwd` case catches.
+  destination, answering `ebusy`; a bind whose `From` passes a
+  link, whose entry roots at the link's target; an unmount made while a
+  resolution waits on a slow walk, which the resolution finishes on the
+  entry it began with while one started after the unmount answers as
+  the new table says; a grant ended while a resolution holds its entry,
+  which answers `eio`; and a walk of `..` handed straight to the
+  client's request function, which answers `einval` and sends nothing.
+  Seeded: a resolver that follows a last link only under `FOLLOW`, which
+  the `del_dir` case catches as `enotdir`; an executor that sends an
+  operation with a walk whose names still needed a check, which the
+  `change_mode` case catches as the mode changed; one that stores the
+  path as written as the working directory, which the `get_cwd` case
+  catches; and a request function without its refusal of `.` and `..`,
+  which the `..` case catches as a walk sent.
+* The release NIFs' decoder of name lists: a fuzz target that hands
+  `release_walk_nif` and the operations' NIFs arbitrary terms, lists of
+  257 names and names holding `/`, NUL, `.`, `..`, invalid UTF-8 or 256
+  bytes, each answered `einval` without reaching the core, under
+  AddressSanitizer. Seeded: a decoder without its count check, which the
+  257-name list catches.
+* Two source checks of [design.md](design.md#chokepoint-checks), each
+  with a seeded violation: only `erx_ns`'s process writes the
+  namespace's persistent term and only `prim_file:set_cwd/1` calls the
+  NIF that stores the working directory, which a `persistent_term:put/2`
+  of the table's key and a call of `erx_set_cwd_nif/1` added elsewhere in
+  `prim_file` each catch; and `erx_file_remote` sends a request only
+  from its one request function, which a send added to another of its
+  functions catches.
 * The frame profile and `erx_9p`: a fuzz target for the server's decoder,
   one for the client's and one for the codec, built for the host; every
   operation of the table has an encoding test, term to bytes and back; a
@@ -2553,7 +2705,7 @@ report, so a passing run shows the code under test ran.
   cases](design-tmp.md#verification) compare them. A listed case that
   agrees with stock fails the comparison, so `filelib_SUITE`'s `wildcard_one` and `wildcard_two`,
   which expect `..` after a link to name the target's parent, pass
-  without a row. Seeded: a machine that takes `..` before following the
+  without a row. Seeded: a resolver that takes `..` before following the
   link ahead of it, which both cases catch.
 * `liberx`'s file client: toybox's own tests for its file applets
   ([design-programs.md](design-programs.md)), and musl's `libc-test` file
@@ -2580,7 +2732,7 @@ sequential reads of 1 GiB from an Erlang process and from a program, and
 a `find` over 10,000 files on QEMU under HVF, against the same operations
 on a local mount, as the baseline.
 
-Resolving a path costs one walk for each run of names the machine asks
+Resolving a path costs one walk for each run of names the resolver asks
 for, and the last run is sent with the operation, so a path without `.`,
 `..` or links costs what walking its names costs, one round trip with the
 operation. A `.` or `..` after names already in the place, as `./x`,
@@ -2588,11 +2740,19 @@ operation. A `.` or `..` after names already in the place, as `./x`,
 after a name the path has not yet walked, as in `a/b/../c`, costs the
 walk of the run before it on its own, one round trip more. A link costs
 the walk that stops at it and the walk and `readlink` that read it, two
-round trips. Each step is a call of the NIF that takes the namespace's
-read lock once and checks a cursor of at most 8 KiB, and a path on the
-release file system takes all its steps within one call. These costs are
-on the [watch list](todo-performance.md) until `tools/erx bench fs`
-times them.
+round trips. The resolver itself runs in the calling process, over the
+table it reads in place from the persistent term: list work over at most
+256 names and 64 entries for each run it places, which a round trip to a
+server dwarfs. On the release file system, where no round trip hides it,
+a path without `.` or `..` costs one NIF call, the operation's own, as
+stock's does, and a run before a `.` or `..` one `release_walk_nif` call
+more. A mount, bind or unmount puts a new term, which costs a scan of
+every process of the runtime for references to the old one, as every
+replacement of a persistent term that is not an immediate value does; a
+`set_cwd` costs one NIF call and no scan, since the working directory
+is not a persistent term. These
+costs are on the [watch list](todo-performance.md) until `tools/erx
+bench fs` times them.
 
 A shared mapping costs, before it is installed, a read of the range it
 adds to the filled extent, at the speed of a program's sequential read
@@ -2613,8 +2773,8 @@ of the same bytes through a descriptor as the baseline, at
 ## Portability
 
 Nothing in this design is platform-specific: the protocol rides on
-frames, the codec on bytes, and the resolver is portable C17 built for the
-target and the host alike.
+frames, the codec on bytes, and the resolver is Erlang, the same module
+on the target and on the host.
 
 ## Dependencies
 
@@ -2685,7 +2845,34 @@ normalised one, to answer for a last `.` or `..` that normalising erased:
 a second view of each path, helpers that find its last name, a table of
 answers per operation, and a second resolution of the path without its
 last name. The place makes each of those the ordinary path through the
-machine.
+resolver.
+
+**The resolver in C17 behind a NIF.** A pure C17 step machine in
+`liberx` would take one step of a resolution at a time, under a
+read-write lock on a table held in C by `prim_file`'s NIF, and hand its
+state back between steps as a cursor of the place, the names still to
+read and the counts. It loses on what a maintainer must hold. The
+executor is Erlang whatever the resolver is, since a NIF cannot wait
+for a server's reply (**`prim_file` reaching servers from its NIF**,
+below), so every step
+would cross from Erlang into C and back: the cursor would be input that
+any process of the runtime could forge, needing checks of its own, a
+decoder from Erlang terms and a fuzz target for both; each step would
+copy its entry out under the lock; a walk in flight would need a count
+of its own, so that its reply is read against the walk that was sent
+when a mount or unmount came between two steps; a rename's two paths
+would need placing again together under one hold of the lock; and a
+chokepoint check would have to keep every other writer off the result
+the machine fills in. In Erlang the state between two names is a
+closure of the resolver's own, the table is a term one resolution holds
+from start to end, and a rename's two paths are two entries of one
+table, so each of those goes rather than being checked. Speed does not
+favour C: a resolution's own work is list operations over a table of at
+most 64 entries beside walks that cost a round trip each, and on the
+release file system, where nothing hides it, a path without `.` or `..`
+costs the one NIF call it costs in C. Nor does reuse: erXos's kernel
+never sees a path, and the session's handlers, which resolve programs'
+paths, are Erlang too.
 
 **Walking `..` at the server.** The client would hold a fid on the place
 and send `..` in its walks, which the grant answers from the fid's

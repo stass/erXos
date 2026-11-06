@@ -438,9 +438,10 @@ below it.
 The EROFS reader, `erx_erofs`, is Erlang, preloaded in the runtime image
 beside `prim_file`, so every domain has it and reads code from an EROFS
 image as early as from its release slice, without a release having to
-carry it. `prim_file`'s NIF resolves a path to an EROFS mount and returns
-`{erofs, Image, Names}`; the reader then serves the operation in the
-calling process, as `erx_file_remote` serves a grant
+carry it. `erx_path` resolves a path to an EROFS mount, an entry whose
+provider is `{erofs, Image}`, with the reader answering its walks and
+link reads; the reader then serves the operation of the resolver's last
+action in the calling process, as `erx_file_remote` serves a grant
 ([design-files.md](design-files.md#erlang-clients-prim_file-and-erx_file_remote)),
 so a slow read delays only its caller and reads of one image run in
 parallel.

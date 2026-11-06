@@ -446,8 +446,8 @@ it; git history is the record of completed work.
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
   `Erx::Release.differences` the comparison `test/integration/runtime_release_test.rb` runs over two hosted packs
   until then.
-* [Low] runtime, `erx_prim_file.c`: EROFS has no provider yet, so a path on it cannot arise; its row's
-  `image` field of `erx_ns_mount_t` ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
+* [Low] runtime, `prim_file`: EROFS has no provider yet, so a path on it cannot arise; its entry's
+  `{erofs, Image}` provider ([design-files.md](docs/design-files.md#namespaces)) arrives with it.
 * [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
   file of a grant has no implementation, so it raises `undef`.
 * [Medium] runtime, `otp/lib/kernel/src/file.erl`: `file`'s name calls (`copy`, `delete`,
@@ -562,6 +562,32 @@ it; git history is the record of completed work.
 * [Low] runtime, `prim_file_nif.h`: `efile_path_t` keeps an `erx_ns_result_t` whose `res_mount` still points
   into the namespace's table after the lock is released; nothing reads it, but holding only copied values
   (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
+  through `erx_ns_resolve` and `erx_ns_resolve_two` in the NIF, so `..` after a link names the link's own parent, a
+  rename or a link places each path by its whole resolved path, and a last `.` or `..` answers Linux's errors.
+  [Resolving a path](docs/design-files.md#resolving-a-path) resolves them physically in `erx_path`, preloaded Erlang
+  over a snapshot of the table, with FreeBSD's answers. About 1,100 to 1,300 lines to write, tests included, and
+  1,800 to delete, in four packages, each one commit with its own targeted tests; the last two land together after
+  one run of the full gates. (1) `erx_path`, its reference model of `vfs_lookup` and its Erlang fuzz and property
+  target under `make check-fuzz`, on the host alone, and `erx_path` added to the preload lists
+  (`otp/erts/preloaded/src/Makefile`, `otp/erts/emulator/Makefile.in`). (2) `erx_ns` as the table's one writer, a
+  registered process over a persistent term that monitors its grants and marks an ended one's entry `ended`, the boot
+  table of the release slice and its EROFS images as the term's default, the working directory as a checked binary
+  in `prim_file`'s NIF that only `set_cwd` writes, `erx_ns.erl` off `prim_file:erx_ns_*`, the two source checks of
+  [design.md](docs/design.md#chokepoint-checks) with their seeded violations, and the `erts-reads-no-index` rule moved
+  out of `tools/lib/erx/chokepoint_rules/ns.rb` (`test/host/gate_baseline_test.rb` counts both rules). (3) The release
+  provider: `release_walk_nif(Names)` and the operations' NIF calls on name lists, with the decoder's checks and its
+  fuzz target; delete `liberx/ns.c`, `include/erx/ns.h`, `tools/fuzz/ns_fuzz.c` with `tools/fuzz/ns_target.rb`, the
+  `ns-result-writes` rule, `prim_file_nif.c`'s `erx_resolve_nif` and `erx_ns_{mount,bind,unmount}_nif`, and
+  `erx_prim_file.c`'s table (`name_space`, `ns_lock`, `ns_watches`, `erx_ns_watch_table`, `efile_marshal_paths`,
+  `erx_copy_entry` and the `erx_ns_result_t` in `prim_file_nif.h`'s `efile_path_t`), move `erx_ns_fid_of` beside the
+  fid counter in `erx_prim_file.c`, and rework `tools/fuzz/release_fuzz.c`, `tools/fuzz/release_target.rb`,
+  `test/fixtures/release_fs_driver.c`, `test/host/release_fs_test.rb`, `sys/erxos/imports.txt` and the comments of
+  `include/erx/release.h`, `include/erx/release_fs.h` and `liberx/release.c` onto name lists. (4) The executor:
+  `prim_file`'s dispatch of actions by provider, `erx_file_remote` on actions and resumptions, its request function's
+  refusal of `.`, `..` and empty names, a rename's two paths on one table, and the working directory as a place;
+  delete `prim_file:erx_resolve/1` and `erx_file_remote`'s second view of the path (`with_links`, `through`, `follow`,
+  `link_path`, `joined`, `last_name`, `names` and their helpers), whose comments still cite Linux's answers, with the
+  cases of `test/erlang/erx_file_remote_fuzz.erl` and `tools/fuzz/erx_file_remote.rb` that fuzz them.
 * [Low] runtime, `erx_ns`: `which/1` and `list/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written.
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
