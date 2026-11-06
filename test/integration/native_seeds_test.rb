@@ -77,10 +77,10 @@ class NativeSeedsTest < Minitest::Test
 
   def run_suite(source, seed)
     case seed.suite
-    when :threads then Erx::NativeThreads::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
-    when :task then Erx::NativeTask::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
-    when :watchdog then Erx::NativeWatchdog::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
-    when :irq then Erx::NativeIrq::Run.new(root: ROOT, source: source).call(accels: %w[tcg], cpus: [seed.cpus], build: false)
+    when :threads then Erx::NativeThreads::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [seed.cpus], build: false)
+    when :task then Erx::NativeTask::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [seed.cpus], build: false)
+    when :watchdog then Erx::NativeWatchdog::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [seed.cpus], build: false)
+    when :irq then Erx::NativeIrq::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [seed.cpus], build: false)
     end
   end
 
@@ -89,8 +89,8 @@ class NativeSeedsTest < Minitest::Test
   # QEMU gate's roster leaves it to this target. It builds first: building the test kernel
   # on inputs newer than the last build deletes what the other seeds link against.
   def test_an_up_held_across_a_timed_down
-    ran = Erx::NativeSemaphoreRace::Run.new(root: ROOT).call(accels: %w[tcg], cpus: [4], build: true)
-    assert_equal %w[tcg-4cpu], ran.keys
+    ran = Erx::NativeSemaphoreRace::Run.new(root: ROOT).call(accels: %w[hvf], cpus: [4], build: true)
+    assert_equal %w[hvf-4cpu], ran.keys
   end
 
   SEEDS.each do |name, seed|
