@@ -7,15 +7,16 @@
  * The hosted backend of the kernel interface's log: one macOS process, which
  * is one space, runs the kernel's own dispatch and log cores and provides
  * their effects. Standard error is its console, and every record goes there
- * as it is written, as during a real kernel's boot. erx_hosted_log_sink is the
- * one writer of log bytes in this backend (the hosted-log-sink check). It receives
- * the lines erx_log_render made and text this backend built itself, never bytes a
- * caller of the function API supplied.
+ * as it is written, as during a real kernel's boot. erx_hosted_log_sink, through
+ * erx_hosted_log_put, is the one writer of log bytes in this backend (the
+ * hosted-log-sink check). It receives the lines erx_log_render made and text
+ * this backend built itself, never bytes a caller of the function API supplied.
  */
 
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -63,26 +64,77 @@ erx_effect_log_unlock(void)
 }
 
 /*
- * Writes one line, retrying a short write. A console that fails drops the
- * rest of the line, as the real early console drops a byte its UART will not
- * take: the record stays in the ring, and the caller's status does not depend
- * on the console. Standard error is a development tool's own console, so a
- * full pipe holding up the process is what a developer asked for.
+ * Writes bytes to standard error, retrying a short write, and says whether
+ * all of them went out. A console that fails drops the rest, as the real
+ * early console drops a byte its UART will not take: the record stays in the
+ * ring, and the caller's status does not depend on the console. Standard
+ * error is a development tool's own console, so a full pipe holding up the
+ * process is what a developer asked for.
  */
-static void
-erx_hosted_log_sink(const char *line, size_t length)
+static bool
+erx_hosted_log_put(const char *bytes, size_t length)
 {
 	ssize_t written;
 
 	while (length > 0) {
-		written = write(STDERR_FILENO, line, length);
+		written = write(STDERR_FILENO, bytes, length);
 		if (written < 0 && errno == EINTR)
 			continue;
 		if (written <= 0)
-			return;
-		line += written;
+			return (false);
+		bytes += written;
 		length -= (size_t)written;
 	}
+	return (true);
+}
+
+/*
+ * Whether standard error is a terminal, decided once: nothing in the
+ * process redirects it, and the check leaves errno as it found it.
+ */
+static pthread_once_t erx_hosted_log_once = PTHREAD_ONCE_INIT;
+static bool erx_hosted_log_terminal;
+
+static void
+erx_hosted_log_probe(void)
+{
+	int saved = errno;
+
+	erx_hosted_log_terminal = isatty(STDERR_FILENO) == 1;
+	errno = saved;
+}
+
+/*
+ * Writes one line in one write, so no other writer's bytes land inside it.
+ * On a terminal each newline goes out as CR-LF, as FreeBSD's kernel console
+ * writes it: the runtime's stdio puts the terminal in raw mode, where a bare
+ * newline would leave the next line starting mid-row. A pipe or a file gets
+ * the line's bytes unchanged. A rendered line fits the buffer whole; longer
+ * text goes out in buffer-sized pieces.
+ */
+static void
+erx_hosted_log_sink(const char *line, size_t length)
+{
+	char out[ERX_LOG_LINE_MAX + 2];
+	size_t used = 0;
+
+	(void)pthread_once(&erx_hosted_log_once, erx_hosted_log_probe);
+	if (!erx_hosted_log_terminal) {
+		(void)erx_hosted_log_put(line, length);
+		return;
+	}
+	for (size_t at = 0; at < length; at++) {
+		/* Room for the byte and the CR that may precede it. */
+		if (used + 2 > sizeof(out)) {
+			if (!erx_hosted_log_put(out, used))
+				return;
+			used = 0;
+		}
+		if (line[at] == '\n')
+			out[used++] = '\r';
+		out[used++] = line[at];
+	}
+	(void)erx_hosted_log_put(out, used);
 }
 
 void
