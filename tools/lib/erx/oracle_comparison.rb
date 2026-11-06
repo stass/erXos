@@ -26,6 +26,10 @@ module Erx
     # Every verdict, in the order the report lists them; only the last two pass.
     VERDICTS = %w[differs changed stale unresolved known same].freeze
     PASSING_VERDICTS = %w[known same].freeze
+    # Common Test's skip results, and the group configuration functions: a side
+    # that skipped a group's cases whole never ran its functions.
+    SKIPPED_STATUSES = %w[user_skip auto_skip].freeze
+    GROUP_CONFIG = %w[init_per_group end_per_group].freeze
 
     # One row of the table: the cases it names, the status erXos shows for
     # them and why that differs from stock. `group` is the group path,
@@ -232,14 +236,40 @@ module Erx
       keys = stock.cases.keys | erxos.cases.keys
       listed = keys.to_h { |key| [key, known.select { |row| row.covers?(key) }.max_by(&:specificity)] }
       rows = keys.map do |key|
-        row(key, stock: stock.cases.fetch(key, 'unknown'), erxos: erxos.cases.fetch(key, 'unknown'),
-                 listed: listed.fetch(key))
+        row(key, stock: status_of(stock, key), erxos: status_of(erxos, key), listed: listed.fetch(key))
       end
       finished = stock.state == 'complete' && erxos.state == 'complete'
       used = rows.zip(keys).filter_map { |row, key| listed.fetch(key) if %w[known changed unresolved].include?(row.verdict) }
       Result.new(stock: stock, erxos: erxos, runtime: runtime,
                  rows: rows + unused_rows(known, used: used, keys: keys, listed: listed, finished: finished))
     end
+
+    # What a side shows for a case: its recorded result, else, for a group
+    # configuration function the side never ran, the skip of the cases under
+    # that group, and otherwise unknown.
+    def status_of(side, key)
+      side.cases.fetch(key) { skipped_group_function(side, key) || 'unknown' }
+    end
+    private_class_method :status_of
+
+    # A side that skips a suite or a group whole runs none of its cases and
+    # none of its init_per_group or end_per_group. On a side that finished, a
+    # function with no record did not run, so when the side recorded cases
+    # under the group, in the same pass, and every one was skipped, the
+    # function was skipped with them, as Common Test skips a group's cases
+    # when its setup skips. A function with no recorded case under its group,
+    # or with one that ran, stays unknown, and so does every function of a
+    # side that lost events or was cut off, where a missing record shows
+    # nothing.
+    def skipped_group_function(side, key)
+      return unless side.state == 'complete' && GROUP_CONFIG.include?(key.testcase) && !key.group.empty?
+
+      under = side.cases.filter_map do |other, status|
+        status if other.suite == key.suite && other.attempt == key.attempt && other.group.first(key.group.size) == key.group
+      end
+      'auto_skip' if !under.empty? && under.all? { |status| SKIPPED_STATUSES.include?(status) }
+    end
+    private_class_method :skipped_group_function
 
     # The rows of the table for a suite that ran that account for no case:
     # an exact row naming no case either run reached, or a `*` row under

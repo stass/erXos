@@ -42,6 +42,14 @@ module Erx
     MARKER = '.erx-oracle-hosted'
     Outcome = Data.define(:result, :report)
 
+    # The runtime's command line. The code server lists every application under
+    # /lib itself, so a `-pa` for one would put its directory on the path twice;
+    # only the reporter, which is not under /lib, is added.
+    def self.erxos_command(beam:, archive:, suites:)
+      [beam, archive, '-noshell', '-pa', '/test/ct/reporter',
+       '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', ERXOS_WORK, *suites]
+    end
+
     def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', 'clang'))
       @root = File.realpath(root)
       @out = claim(out)
@@ -118,12 +126,10 @@ module Erx
     def run_erxos(tree, suites)
       archive = pack(tree)
       output = Runtime.output(root: @root)
-      paths = [*ErlangApps::APPLICATIONS, *OracleSuites::STOCK_APPLICATIONS].flat_map { |application| ['-pa', "/lib/#{application}/ebin"] }
       environment = Oracle::CLEAN_ERLANG_ENV.merge('ROOTDIR' => '/', 'BINDIR' => File.dirname(output.beam),
                                                   'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => nil,
                                                   'ERL_CRASH_DUMP_BYTES' => '0')
-      record = @suites.finished([output.beam, archive, '-noshell', *paths, '-pa', '/test/ct/reporter',
-                         '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', ERXOS_WORK, *suites],
+      record = @suites.finished(self.class.erxos_command(beam: output.beam, archive: archive, suites: suites),
                         name: 'erxos', deadline: @deadline, chdir: @out, env: environment,
                         output_limit: MAX_OUTPUT_BYTES)
       events = File.join(@out, 'erxos.events.jsonl')

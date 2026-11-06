@@ -245,6 +245,15 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # The oracle runs with ROOTDIR=/, where the library directory is "/lib": "//lib" would put
+  # every application there on the path a second time beside a -pa for it, and code_SUITE
+  # compares the path with what code:set_path/1 gives back, which is normalized.
+  def test_the_library_directory_of_a_root_of_slash_is_in_its_normal_form
+    assert_answers({ "code:lib_dir()." => %r{^"/lib"$},
+                     "[D || D <- code:get_path(), D =/= filename:join([D])]." => /^\[\]$/ },
+                   { "ROOTDIR" => "/" })
+  end
+
   # process_SUITE's spawn_request_link_parent_exit fills ETS tables to a peak of 1.6 GB on stock
   # OTP. Rows this size come from the pool's carriers, where a single huge binary would not.
   def test_a_workload_of_more_than_a_gigabyte_fits_the_pool
@@ -386,9 +395,9 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   # Types each expression at a prompt of one node and matches its answer, then halts.
-  def assert_answers(expected)
+  def assert_answers(expected, environment = {})
     Dir.mktmpdir('erx-hosted-home-') do |home|
-      spawn_shell(home) do |reader, writer, pid|
+      spawn_shell(home, environment) do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
         read_until(reader, transcript, /^1> /, deadline)

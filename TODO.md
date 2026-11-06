@@ -393,19 +393,19 @@ it; git history is the record of completed work.
   sendfile_SUITE alone reaches `enospc` too. A walk's hold that the grant never forgets (erx_fs_grant's `loose`
   set) or an open never clunked when its owner dies would keep each unlinked node's charge. The kernel group's
   erXos side runs one runtime per suite until this is fixed.
-* [Medium] hosted runtime, code path: `code:get_path()` lists every application given with `-pa` twice, once
-  before and once after `kernel` and `stdlib`, where stock lists each once, so code_SUITE's `set_path`, `add_path`
-  and `add_paths` fail on the deduplicated path `code:set_path/1` gives back. Find what adds the second copy.
-* [Medium] `tools/lib/erx/oracle_comparison.rb`: when a suite skips whole on erXos (the socket suites: `esock not
-  supported`), its `init_per_group` and `end_per_group` never run there and show as unknown, 371 unresolved rows
-  in the kernel group that no table row can claim. Derive a config function's status from the skip of the cases
-  under its group path on that side.
-* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 61 differing
-  and 25 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+* [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
+  for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
+  `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its
+  code_SUITE `set_path`, `add_path` and `add_paths` cases.
+* [Medium] `tools/lib/erx/oracle_comparison.rb` (`skipped_group_function`): a group function that erXos never
+  recorded shows as `auto_skip`, inferred from the skipped cases under its group, and the report prints it like
+  a status Common Test recorded. Give the inferred status its own name in the report and the table.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
+  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
   logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
   does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
-  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, and
-  the `changed` rows whose suite also shows another status. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
+  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

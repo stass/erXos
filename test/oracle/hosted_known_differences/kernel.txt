@@ -61,6 +61,7 @@ code_SUITE                   -        code_archive                 failed     ca
 code_SUITE                   -        code_archive2                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 code_SUITE                   -        on_load_embedded             failed     cannot run: file system; only /tmp is writable in Phase 1
 code_SUITE                   -        mult_embedded_flags          failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+code_SUITE                   -        dir_req                      failed     the case expects code:lib_dir() to be Root ++ "/lib", and erXos runs with the root "/", where that is "//lib" and the code server gives the normalized "/lib" that set_path and add_path need
 code_SUITE                   *        *                            user_skip  crypto is outside the shipped set (design-runtime.md), so the case skips
 erl_boot_server_SUITE        *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 erl_distribution_SUITE       -        nodenames                    failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
@@ -189,6 +190,8 @@ gen_tcp_misc_SUITE           inet_backend_default t_kernel_options             u
 gen_tcp_misc_SUITE           tickets  otp_18357                    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_socket_SUITE         *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_socket_SUITE         *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+gen_tcp_socket_SUITE         *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 gen_udp_SUITE                inet_backend_default send_to_empty                failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                inet_backend_default buffer_size                  failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                inet_backend_default binary_passive_recv          failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
@@ -271,6 +274,8 @@ logger_simple_h_SUITE        -        start_debug                  failed     ca
 logger_simple_h_SUITE        -        start_crash                  failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 logger_std_h_SUITE           -        rotate_on_start_compressed   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 net_SUITE                    *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+net_SUITE                    *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+net_SUITE                    *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 os_SUITE                     -        space_in_cwd                 failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 os_SUITE                     -        bad_command                  failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 os_SUITE                     -        unix_comment_in_command      failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
@@ -285,6 +290,14 @@ pg_SUITE                     *        *                            user_skip  ca
 sendfile_SUITE               *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 seq_trace_SUITE              *        *                            failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 socket_SUITE                 *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+socket_SUITE                 *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+socket_SUITE                 *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 socket_api_SUITE             *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+socket_api_SUITE             *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+socket_api_SUITE             *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 socket_traffic_SUITE         *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+socket_traffic_SUITE         *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+socket_traffic_SUITE         *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
 socket_ttest_SUITE           *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+socket_ttest_SUITE           *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
+socket_ttest_SUITE           *        end_per_group                auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run

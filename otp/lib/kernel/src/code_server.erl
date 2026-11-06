@@ -105,7 +105,7 @@ init(Ref, Parent, [Root,Mode]) ->
     IPath =
 	case Mode of
 	    interactive ->
-		LibDir = filename:append(Root, "lib"),
+		LibDir = filename:join(Root, "lib"),
 		{ok,Dirs} = erl_prim_loader:list_dir(LibDir),
 		Paths = make_path(LibDir, Dirs),
 		UserLibPaths = get_user_lib_dirs(),
@@ -1026,7 +1026,7 @@ lookup_name(Name, Db) ->
 %% Fetch a directory.
 %%
 do_dir(Root,lib_dir,_) ->
-    filename:append(Root, "lib");
+    filename:join(Root, "lib");
 do_dir(Root,root_dir,_) ->
     Root;
 do_dir(_Root,compiler_dir,NameDb) ->
