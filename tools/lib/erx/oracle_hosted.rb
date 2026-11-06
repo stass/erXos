@@ -13,6 +13,7 @@ require_relative 'output_directory'
 require_relative 'pack_tools'
 require_relative 'pack_wire'
 require_relative 'release'
+require_relative 'release_files'
 require_relative 'runner'
 require_relative 'runtime'
 
@@ -68,6 +69,16 @@ module Erx
       Outcome.new(result: result, report: report)
     end
 
+    # erXos's applications in the tree, as tree paths to the files they copy, each laid
+    # out as the system release lays it out (ReleaseFiles.application_layout) from the
+    # hosted build at otp.
+    def self.application_files(root:, otp:)
+      ERXOS_APPLICATIONS.flat_map do |application|
+        ReleaseFiles.application_layout(root: root, otp: otp, application: application)
+                    .map { |path, artifact| ["lib/#{application}/#{path}", artifact] }
+      end.to_h
+    end
+
     private
 
     # The output directory, created or reused only when it is empty or this
@@ -95,9 +106,8 @@ module Erx
       # boots it, so its bytes are only a placeholder.
       File.write(File.join(tree, 'root'), "a root image's place\n")
       FileUtils.cp(File.join(output.root, 'bootstrap/bin/start.boot'), File.join(prepare(tree, 'bin'), 'start.boot'))
-      ERXOS_APPLICATIONS.each do |application|
-        FileUtils.cp(Dir.glob(File.join(output.root, 'lib', application, 'ebin', '*.{beam,app}')),
-                     prepare(tree, 'lib', application, 'ebin'))
+      self.class.application_files(root: @root, otp: output.root).each do |path, source|
+        FileUtils.cp(source, File.join(prepare(tree, File.dirname(path)), File.basename(path)))
       end
       @suites.copy_stock_applications(prepare(tree, 'lib'), erl: installation.fetch('erl'))
       @suites.compile(reporter: prepare(tree, 'test/ct/reporter'), suite_directory: prepare(tree, 'test/ct/suites'),

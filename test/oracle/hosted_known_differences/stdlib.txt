@@ -182,101 +182,6 @@ tar_SUITE           -           streamed_extract                     failed    c
 zip_SUITE           *           *                                    auto_skip cannot run: init_per_suite starts os_mon, which erXos does not ship (design-runtime.md)
 zip_SUITE           -           init_per_suite                       failed    cannot run: init_per_suite starts os_mon, which erXos does not ship (design-runtime.md)
 
-# Bug: runtime_tools is kept by design-runtime.md but not built or shipped.
-gen_statem_SUITE    sys/format_status terminate_crash_format               failed    bug (TODO.md): runtime_tools, which design-runtime.md keeps, is not in the release; dbg is undefined
-ms_transform_SUITE  -           from_shell                           failed    bug (TODO.md): runtime_tools, which design-runtime.md keeps, is not in the release; dbg is undefined
-supervisor_SUITE    -           order_of_children                    failed    bug (TODO.md): runtime_tools, which design-runtime.md keeps, is not in the release; dbg is undefined
-
-# Bug: the release ships no include/ headers, so code compiled on erXos
-# cannot include_lib stdlib's qlc.hrl or ms_transform.hrl.
-erl_lint_SUITE      -           otp_5878                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           action_function                      failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           andalso_orelse                       failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           autoimported                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           basic_dbg                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           basic_ets                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           binary_bifs                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           bitsyntax                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           eep37                                failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           float_1_function                     failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           map_expr_in_head                     failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           map_exprs                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           map_pattern                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           multipass                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           no_warnings                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           old_guards                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           otp_14454                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           otp_16824                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           record_defaults                      failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           record_index                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           records                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           semicolon                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           top_match                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           unused_record                        failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-ms_transform_SUITE  -           warnings                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           -           manpage                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           compat      forward                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  append                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  cache                                failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  cache_list                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  cursor                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  eep37                                failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  eval                                 failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  eval_cache                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  eval_unique                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  filesort                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  filter                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  fold                                 failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  indices                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  info                                 failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  keysort                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  lookup1                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  lookup2                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  lookup_rec                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  nested_info                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  pre_fun                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  process_dies                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  skip_filters                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  sort                                 failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           evaluation  table                                failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_complex                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_filter                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_lookup                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_merge                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_option                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           join        join_sort                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform badarg                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform errors                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform exported_var                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform filter_var                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform fun_clauses                          failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform generator_vars                       failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform lc                                   failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform nested_qlc                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform nomatch                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform overridden_bif                       failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform pattern                              failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform single                               failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           parse_transform unused_var                           failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           table_impls dets                                 failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           table_impls ets                                  failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_11758                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_12946                            failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_5195                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_5644                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6038_bug                         failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6359                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6562                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6590                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6673                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6674                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_6964                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_7114                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_7232                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_7238                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_7552                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-qlc_SUITE           tickets     otp_7714                             failed    bug (TODO.md): the release ships no include/ headers; include_lib of qlc.hrl or ms_transform.hrl fails
-
 # Upstream bug: y2k_SUITE's tz_next_date returns its argument when local
 # time is UTC, as erXos's is; stock fails the same way under TZ=UTC.
 y2k_SUITE           -           date_1999_02_28                      failed    upstream bug (TODO.md): tz_next_date returns its argument when local time is UTC, as it is on erXos
@@ -298,7 +203,6 @@ edlin_expand_SUITE  -           filename_completion                  failed    b
 edlin_expand_SUITE  -           function_parameter_completion        failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 epp_SUITE           -           deterministic_include                failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 epp_SUITE           -           nondeterministic_include             failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
-erl_lint_SUITE      -           otp_5362                             failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 erl_pp_SUITE        attributes  import_export                        failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 escript_SUITE       -           archive_script                       failed    bug (TODO.md): unexplained; listed in the stdlib oracle item
 escript_SUITE       -           archive_script_file_access           failed    bug (TODO.md): unexplained; listed in the stdlib oracle item

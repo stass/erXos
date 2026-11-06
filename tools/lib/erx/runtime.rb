@@ -32,14 +32,14 @@ module Erx
     LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
-    # What a shell needs; it boots from the tracked bootstrap/bin/start.boot. OTP's
-    # `libs` and `start_scripts` targets are not usable: lib/tools's crashdump.erl
-    # includes public_key.hrl and erts/start_scripts needs lib/os_mon/vsn.mk, and
-    # the import excludes both.
-    APPLICATIONS = %w[kernel stdlib compiler].freeze
+    # What a shell needs, and runtime_tools, which docs/design-runtime.md keeps; it boots
+    # from the tracked bootstrap/bin/start.boot. OTP's `libs` and `start_scripts` targets
+    # are not usable: lib/tools's crashdump.erl includes public_key.hrl and
+    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both.
+    APPLICATIONS = %w[kernel stdlib compiler runtime_tools].freeze
     # otp/ tracks prebuilt beams with their sources' file times, so make could keep one
     # older than a source edit. These never enter the copy, and make compiles them.
-    BUILT_BEAMS = %w[kernel stdlib].map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }.freeze
+    BUILT_BEAMS = APPLICATIONS.map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }.freeze
     # What configure reads from otp/ besides the cross file: the templates it turns into
     # the makefiles and headers make reads, its scripts, the release's version, which
     # it writes into the makefiles, and otp_build, which runs it.
@@ -201,8 +201,10 @@ module Erx
       raise Error, "the emulator's build left no #{@output.beam}" unless File.file?(@output.beam)
     end
 
+    # An application's Erlang alone: runtime_tools's c_src holds the trace port drivers
+    # and the dyntrace NIF, which docs/design-runtime.md does not ship.
     def build_application(application, jobs:)
-      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}", 'opt', "TARGET=#{self.class::TARGET}"],
+      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/src", 'opt', "TARGET=#{self.class::TARGET}"],
                   name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
     end

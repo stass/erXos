@@ -182,20 +182,18 @@ it; git history is the record of completed work.
   `global:register_name` then fails with `noproc` (application_SUITE `failover`, `failover_comp`, `otp_2012`,
   `script_start`, `ensure_started`, `ensure_all_started`, `otp_16504`). Decide whether this stays an explained
   difference of the oracle's tables or whether `global` starts without a carrier, as stock's does.
-* [Medium] `tools/lib/erx/release_files.rb`, `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the release ships each
-  application's beams and `.app` but not its `include/` headers, so code compiled on erXos cannot
-  `include_lib("stdlib/include/qlc.hrl")` or `ms_transform.hrl`, though `compiler` ships. One case shows epp's include
-  error (erl_lint_SUITE `otp_5878`); qlc_SUITE's 62 and ms_transform_SUITE's 24 failures come from the suites' compile
-  helpers and are attributed to it by their shape: confirm when the headers ship.
-* [Medium] `tools/lib/erx/runtime.rb` (`APPLICATIONS`): `runtime_tools`, which design-runtime.md keeps, is neither built
-  nor shipped, so `dbg` is undefined (gen_statem_SUITE `terminate_crash_format`, supervisor_SUITE `order_of_children`,
-  ms_transform_SUITE `from_shell`).
+* [Medium] `tools/lib/erx/release_files.rb` (`OTP_APPLICATIONS`), `tools/lib/erx/native_runtime.rb`: the system
+  release, hosted and native, ships `kernel` and `stdlib` only. `compiler` and `runtime_tools`, which design-runtime.md
+  keeps, are built only by the hosted runtime and carried only by the oracle's hosted tree, so the target has the
+  headers but no compiler to read them, and no `dbg`. Decide how they join the release file: started, which starts
+  `runtime_tools`' `ttb_autostart` at boot, or load-only, which puts them on the boot script's code path alone; and
+  confirm the image's size and boot budgets take them.
 * [Medium] `tools/lib/erx/oracle_suites.rb`: suites are compiled on the host with a relative source path, and
   shell_docs_SUITE's `init_per_suite` recompiles itself with `c:c`, which finds no source on the guest, so the suite is
   auto-skipped on erXos. A harness bug: compile the suites with the guest path of their copied source.
 * [Medium] `test/oracle/hosted_known_differences/stdlib.txt`: stdlib differences not yet traced to a cause, each a row
-  citing this item: edlin_expand_SUITE `filename_completion`, `function_parameter_completion`; erl_lint_SUITE
-  `otp_5362`; erl_pp_SUITE `import_export`; escript_SUITE `archive_script`, `archive_script_file_access` (compilation
+  citing this item: edlin_expand_SUITE `filename_completion`, `function_parameter_completion`;
+  erl_pp_SUITE `import_export`; escript_SUITE `archive_script`, `archive_script_file_access` (compilation
   error); filename_SUITE `absname`, `absname_bin` (`enoent`),
   `t_basedir_xdg` (`HOME` is unset on the erXos side); qlc_SUITE `evaluator`; shell_SUITE `otp_5435`, `records`;
   stdlib_SUITE `app_test`; epp_SUITE `deterministic_include`, `nondeterministic_include`; rand_SUITE `doctests`;

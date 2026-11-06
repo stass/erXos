@@ -18,7 +18,8 @@ class RuntimeBuildTest < Minitest::Test
   # emulator's make leaves an executable, xref of the serving set answers with
   # serving_reached in its log, and each step's name is recorded.
   class RecordingRunner
-    attr_reader :steps, :relinked, :options
+    # The directories each application's make ran in, in order.
+    attr_reader :steps, :relinked, :options, :directories, :argvs
     attr_accessor :fail_step, :link_leaves_nothing, :serving_reached
 
     def initialize(output, log_dir:)
@@ -26,11 +27,15 @@ class RuntimeBuildTest < Minitest::Test
       @log_dir = log_dir
       @steps = []
       @options = {}
+      @directories = []
+      @argvs = {}
     end
 
     def run(argv, name:, **options)
       @steps << name
       @options[name] = options
+      @argvs[name] = argv
+      @directories << argv[argv.index('-C') + 1] if argv.first == 'gmake' && name != 'runtime-emulator'
       raise Erx::Error, "#{name} failed" if name == fail_step
 
       case name
@@ -132,6 +137,23 @@ class RuntimeBuildTest < Minitest::Test
     @runner.serving_reached -= %w[ets binary]
     error = assert_raises(Erx::Error) { build }
     assert_includes error.message, "is stale: missing ; extra binary; run"
+  end
+
+  # design-runtime.md keeps runtime_tools, so dbg is built with kernel, stdlib and
+  # compiler; only its Erlang is, since its c_src holds drivers the design does not ship.
+  def test_the_build_makes_runtime_tools_erlang_only
+    build
+    assert_includes @runner.steps, 'runtime-runtime_tools'
+    assert_equal %w[kernel stdlib compiler runtime_tools].map { |application| "lib/#{application}/src" },
+                 @runner.directories
+  end
+
+  # A tracked prebuilt beam in the copy could stay older than a source edit, so none of
+  # a built application's enters it.
+  def test_the_copy_leaves_out_every_built_applications_tracked_beams
+    build
+    excluded = @runner.argvs.fetch('runtime-copy').grep(/\A--exclude=/)
+    assert_equal Runtime::APPLICATIONS.map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }, excluded
   end
 
   def test_a_second_build_of_the_same_tree_does_not_configure_again
