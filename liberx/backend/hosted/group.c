@@ -104,12 +104,8 @@ group_report_main(void *unused)
 	(void)unused;
 	for (;;) {
 		const uint32_t parked = atomic_load_explicit(&group_status.parked, memory_order_relaxed);
-		uint32_t executors = 0;
+		const uint32_t executors = erx_group_status_executors(&group_status);
 
-		for (uint32_t slot = 0; slot < ERX_GROUP_EXECUTORS_MAX; slot++) {
-			if (atomic_load_explicit(&group_status.exec[slot].state, memory_order_relaxed) != ERX_EXEC_STATE_NONE)
-				executors++;
-		}
 		if (parked != last_parked || executors != last_executors) {
 			char line[64];
 

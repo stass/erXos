@@ -342,6 +342,12 @@ test_command_line(void)
 	check_args("erx.arg=", false, "erx.arg", false, false, 0);
 	check_args("erx.nothing=1", false, "erx.nothing", false, false, 0);
 	check_args("erx.", false, "erx.", false, false, 0);
+	check_args("erx.group_report=0", false, "erx.group_report", false, false, 0);
+	check_args("erx.group_report=", false, "erx.group_report", false, false, 0);
+	check_args("erx.group_report=11", false, "erx.group_report", false, false, 0);
+	CHECK(erx_boot_args_parse("erx.group_report=1", 18, &out) && out.group_report && !out.det,
+	    "erx.group_report=1 does not turn the report on alone");
+	CHECK(erx_boot_args_parse("erx.det=1", 9, &out) && !out.group_report, "erx.det=1 turns the group report on");
 
 	memcpy(line, "erx.arg=", head);
 	memset(line + head, 'x', ERX_BOOT_STRINGS_MAX - 1);
@@ -355,7 +361,7 @@ test_command_line(void)
 	CHECK(erx_boot_args_parse("quiet", 5, &out), "a boot loader's word is refused");
 
 	/* Every prefix of a line, at its exact length, so a reader past the end shows under ASan. */
-	const char *const whole = "a erx.arg=-S erx.watchdog=1,5,60 erx.det=1 b";
+	const char *const whole = "a erx.arg=-S erx.watchdog=1,5,60 erx.det=1 erx.group_report=1 b";
 	for (size_t length = 0; length <= strlen(whole); length++) {
 		char *copy = malloc(length == 0 ? 1 : length);
 

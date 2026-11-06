@@ -242,11 +242,22 @@ whatever a file holds. erXos's kernel checks each file at its first slice.
 
 `/chosen/bootargs` reaches the root through `erx_boot_handoff_view_t`'s `bootargs` and `bootargs_len`.
 `erx_boot_args_parse(bytes, length, out)` in `liberx/backend/fiasco/boot_args.c`, a pure function with a
-fuzz target, splits it on spaces and reads three kinds of word: `erx.watchdog=P,D,B`, through the
-existing `erx_watchdog_parse`; `erx.det=1`; and `erx.arg=WORD`, at most as many as fit the page's
+fuzz target, splits it on spaces and reads four kinds of word: `erx.watchdog=P,D,B`, through the
+existing `erx_watchdog_parse`; `erx.det=1`; `erx.group_report=1`; and `erx.arg=WORD`, at most as many as fit the page's
 strings. Other words are ignored, as a boot loader's may be there. A malformed `erx.` word, and an `erx.` word of no known kind, refuses the
 boot with a fixed reason. Bootstrap cuts the record at the last whole word, so a parser never sees half
 a word.
+
+`erx.group_report=1` is the native form of the hosted backend's `ERX_HOSTED_GROUP_REPORT`. Once the
+system's group exists, `liberx/backend/fiasco/park_report.c` starts a worker thread of the root that
+looks at the group's status page ten times a second and writes `erx: root task: group: parked N of M`
+to the console through `erx_fiasco_console_write` each time the count of parked executors or of
+executors changes. The thread only reads the page and sleeps; the line is fixed words and two numbers,
+so it needs no escape, and like a program's output it can fall between the bytes of the console
+driver's writes. The production image suite boots with it and waits for `parked N of N`, N the
+system's schedulers and dirty CPU schedulers, after the shell's banner and a line typed at the prompt
+that keeps one scheduler busy for half a second, so the report must show it wake and park again: M3's
+idle machine.
 
 ## The Phase 1 manifest check
 
@@ -1016,7 +1027,7 @@ the tests.
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |
-| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths, and each recorded window's base, size and line, against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line with the watchdog's numbers and the exact argument count, a boot with `erx.det=1 erx.arg=WORD` shows the watchdog off and one more argument, a boot with an unknown `erx.` word and a 256 MiB machine each end at the root's refusal, and a boot with a plain `erx.arg` word is answered at the serial console through `erx_pl011`: a sum, a line with a mistake rubbed out, and an output longer than the transmit FIFO; `production_image_test.rb` | a wrong device path, compatible or window, in that test, and a recorded base that is not its path's unit address on the host; a console driver that drops input or output: the console transcript stops; a misread `root_memory` or a lost `-append`: the manifest, watchdog and argument lines fail its transcript |
+| **Production image.** The QEMU gate's `production_image` suite: the platform record's device paths, and each recorded window's base, size and line, against QEMU's device tree, then the image packed through the manifest check boots to its ERTS line with the watchdog's numbers and the exact argument count, a boot with `erx.det=1 erx.arg=WORD` shows the watchdog off and one more argument, a boot with an unknown `erx.` word and a 256 MiB machine each end at the root's refusal, and a boot with a plain `erx.arg` word is answered at the serial console through `erx_pl011`: a sum, a line with a mistake rubbed out, and an output longer than the transmit FIFO, and a boot with `erx.group_report=1` reports every executor parked at the shell; `production_image_test.rb` | a wrong device path, compatible or window, in that test, and a recorded base that is not its path's unit address on the host; a console driver that drops input or output: the console transcript stops; a misread `root_memory` or a lost `-append`: the manifest, watchdog and argument lines fail its transcript |
 | **The manifest's C reader**: `tools/fuzz/manifest_fuzz.c`, each table of an accepted manifest read back to its count and no further | a row out of a table's range would abort it |
 | `make check-reproducible`: two builds of the production image, each clearing `build/runtime/native` first and packing into a directory of its own name, byte-identical in archive and bootable file. OTP and musl build at one path both times, so a path of theirs reaching an output does not show | a time, or a path under the two directories, reaching an output fails it |
 | **Function-API set** on both backends, refusals included | a refusal changed in one backend |
@@ -1032,7 +1043,7 @@ The last column of [the call table](#the-call-table) is this list.
 These differ from the native backend, and a caller must not depend on either side:
 
 * **A pthread can be an executor.** `erx_pthread_create_executor` claims a thread record and a slot in the creator, so no free slot is its `EAGAIN`, and a start wrapper's cleanup handler gives both back at a return, a `pthread_exit` or an `erx_thread_exit`. The body natively is musl's.
-* **A report of the group.** With `ERX_HOSTED_GROUP_REPORT` set, a thread looks at the status page ten times a second and the console gets a line each time the count of parked executors or of executors changes, so a test outside the process can read an idle sample.
+* **The group's report is an environment word.** With `ERX_HOSTED_GROUP_REPORT` set, a thread looks at the status page ten times a second and the console gets `erx: hosted: group: parked N of M` each time the count of parked executors or of executors changes, so a test outside the process can read an idle sample. Natively the same report is the kernel command line's `erx.group_report=1` ([The command line](#the-command-line)).
 * **The host's page is larger.** Apple Silicon's page is 16 KiB and the ABI's is 4 KiB. A host page's protection is the union of its pages', so a touch that must fault natively may succeed hosted when a neighbour in the same host page allows it, and a stray write to an uncommitted page beside a committed one survives its commit. A call's pages change together when it is whole, and a reserve without `ERX_VM_FIXED` starts on a host page, so unrelated ranges share none. A writable and an executable page that end one call in one host page cannot be represented, and end the process with a diagnostic. A decommitted page's bytes stay readable while a neighbour keeps its host page, and are cleaned before the page is next taken, under a brief write right on the whole host page, during which a neighbour's code cannot run.
 * **The pool is a count**, of 8 GiB, which OTP's own suites need part of, over a 64 GiB area. Nothing is touched until written, except the range table's index, which its start clears: 64 MiB.
 * **A report of runs.** With `ERX_HOSTED_VM_RUNS` set, the console gets a line each time a call changes the count of the range table's runs or of committed pages: the count, its high mark, the limit and the committed pages. `make check-runtime-hosted` prints it at `1>`.

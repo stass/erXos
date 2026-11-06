@@ -69,6 +69,19 @@ erx_backend_group_configure(const erx_utcb_t *utcb, _Atomic uint64_t *cpuset)
 	return (ERX_OK);
 }
 
+/* How many of the status page's slots hold an executor, parked or not: what a count of parked ones is out of. */
+static inline uint32_t
+erx_group_status_executors(const erx_group_stat_t *status)
+{
+	uint32_t executors = 0;
+
+	for (uint32_t slot = 0; slot < ERX_GROUP_EXECUTORS_MAX; slot++) {
+		if (atomic_load_explicit(&status->exec[slot].state, memory_order_relaxed) != ERX_EXEC_STATE_NONE)
+			executors++;
+	}
+	return (executors);
+}
+
 /* A CPU set no one configured reports as zero capacity: nothing is known of it. */
 static inline void
 erx_backend_group_report(erx_utcb_t *utcb, const erx_group_stat_t *status, const _Atomic uint64_t *cpuset)

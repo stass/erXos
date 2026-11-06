@@ -9,6 +9,7 @@
 #define ARGS_PREFIX		"erx."
 #define ARGS_WATCHDOG		"erx.watchdog="
 #define ARGS_DET		"erx.det="
+#define ARGS_GROUP_REPORT	"erx.group_report="
 #define ARGS_ARG		"erx.arg="
 #define ARGS_LEN(prefix)	(sizeof(prefix) - 1)
 
@@ -55,6 +56,13 @@ has_prefix(const char *word, size_t length, const char *prefix)
 	return (true);
 }
 
+/* Whether a switch's word, whose name with its = is head bytes long, is exactly that name and 1. */
+static bool
+is_switch_on(const char *word, size_t length, size_t head)
+{
+	return (length == head + 1 && word[head] == '1');
+}
+
 static bool
 refuse(erx_boot_args_t *out, const char *word, size_t length)
 {
@@ -95,9 +103,13 @@ erx_boot_args_parse(const char *bytes, size_t length, erx_boot_args_t *out)
 				return (refuse(out, word, word_len));
 			out->have_watchdog = true;
 		} else if (has_prefix(word, word_len, ARGS_DET)) {
-			if (word_len != ARGS_LEN(ARGS_DET) + 1 || word[ARGS_LEN(ARGS_DET)] != '1')
+			if (!is_switch_on(word, word_len, ARGS_LEN(ARGS_DET)))
 				return (refuse(out, word, word_len));
 			out->det = true;
+		} else if (has_prefix(word, word_len, ARGS_GROUP_REPORT)) {
+			if (!is_switch_on(word, word_len, ARGS_LEN(ARGS_GROUP_REPORT)))
+				return (refuse(out, word, word_len));
+			out->group_report = true;
 		} else if (has_prefix(word, word_len, ARGS_ARG)) {
 			const size_t head = ARGS_LEN(ARGS_ARG);
 

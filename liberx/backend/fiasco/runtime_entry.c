@@ -22,6 +22,7 @@
 #include "liberx/backend/core/boot_manifest.h"
 #include "liberx/backend/fiasco/boot_args.h"
 #include "liberx/backend/fiasco/group.h"
+#include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/runtime_entry.h"
@@ -86,6 +87,11 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 		return ("manifest: the system's share names no CPU this machine has");
 	if (erx_group_create(0, 0, &group) != ERX_OK)
 		return ("the system's group: the backend refused it");
+	if (boot_args->group_report) {
+		reason = erx_fiasco_park_report_start();
+		if (reason != NULL)
+			return (reason);
+	}
 	inputs.domain_id = SYSTEM_DOMAIN_ID;
 	inputs.flags = ERX_BOOT_ROOT | (boot_args->det ? ERX_BOOT_DET : 0);
 	inputs.pack_flags = handoff->flags;

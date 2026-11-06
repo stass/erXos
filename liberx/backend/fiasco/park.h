@@ -25,6 +25,13 @@ void		erx_fiasco_executor_release(uint32_t slot);
 /* The page the epochs are mirrored in: an executor reads them before its empty check. */
 const erx_group_stat_t *erx_fiasco_group_status(void);
 
+/*
+ * Starts the thread of park_report.c, which writes a line to the console each time the page's
+ * count of parked executors or of executors changes. The root's program calls it once, under
+ * erx.group_report=1. Returns NULL, or why it could not.
+ */
+const char	*erx_fiasco_park_report_start(void);
+
 /* The epoch advances and the longest parked wakes. */
 void		erx_fiasco_group_trigger(void);
 /* What the dispatcher runs for an object's delivery: it lists the object, then as a trigger. */

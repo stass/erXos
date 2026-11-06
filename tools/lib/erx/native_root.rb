@@ -59,7 +59,7 @@ module Erx
     SYSTEM = [*(RUNTIME - ["#{BACKEND}/root_mem.c"]), *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c",
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
-              "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c', 'liberx/ns.c'].freeze
+              "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c', 'liberx/ns.c'].freeze
     # The sources of SYSTEM that read musl's headers, which NativeRuntime's sysroot holds.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'

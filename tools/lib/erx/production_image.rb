@@ -229,6 +229,11 @@ module Erx
       # The suspender must outlive the suspension, which ends when it does.
       STOP_PET = 'erlang:suspend_process(whereis(erx_watchdog)),erlang:display(pet_stopped),timer:sleep(infinity).'
 
+      # The word that starts the group's report (park_report.c).
+      GROUP_REPORT_WORD = 'erx.group_report=1'
+      # A scheduler busy for half a second, five of the report's looks, whatever the machine's speed.
+      BUSY_EXPRESSION = 'Busy=fun Busy(T)->case erlang:monotonic_time(millisecond)>T of true->busy_done;' \
+                        "false->Busy(T) end end,Busy(erlang:monotonic_time(millisecond)+500).\r"
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name and the node flag with its name, before the page's words, and
@@ -278,6 +283,7 @@ module Erx
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
           console_boot(accel, count, built)
           parked_log_boot(accel, count, built)
+          idle_boot(accel, count, built)
           # This boot's transcript is its whole result: it raises if the refusal is missing.
           boot(accel, count, built, memory_mib: TOO_LITTLE_MEMORY_MIB, points: Run.refusal_checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
@@ -294,8 +300,7 @@ module Erx
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
         arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
-        share = source[/^share system\n(?:  .*\n)*?  cpuset (\d+)$/, 1].to_i
-        schedulers = (share & ((1 << cpus) - 1)).to_s(2).count('1')
+        count = schedulers(source, cpus: cpus)
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
@@ -303,9 +308,34 @@ module Erx
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
          point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
          point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60),
-         point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{schedulers} schedulers and #{schedulers} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
+         point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{count} schedulers and #{count} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
          SLOGAN,
          { name: 'release-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze].freeze
+      end
+
+      # Schedulers are one per CPU of the system's share on this machine.
+      def self.schedulers(manifest_source, cpus:)
+        share = manifest_source[/^share system\n(?:  .*\n)*?  cpuset (\d+)$/, 1].to_i
+        (share & ((1 << cpus) - 1)).to_s(2).count('1')
+      end
+      private_class_method :schedulers
+
+      # A machine at rest at the shell, with the group's report on: once the prompt is up, a
+      # line of the report says every executor parked. The report writes a line only when the
+      # counts change, and a fast machine may park everything before the banner, so the person
+      # at the console keeps one scheduler busy for half a second first: the report must then show it
+      # wake and every executor park again. The report writes beside the console driver, so the
+      # slogan and the banner are looked for anywhere in a line, and its line may follow the
+      # unended prompt.
+      def self.idle_checkpoints(cpus:, root:)
+        # Each scheduler and each dirty CPU scheduler holds an executor slot.
+        executors = 2 * schedulers(File.read(File.join(root, MANIFEST)), cpus: cpus)
+        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+         { name: 'release-slogan', pattern: %r{Erlang/OTP 29 }n, seconds: 240 }.freeze,
+         { name: 'release-shell', pattern: /Eshell V/n, seconds: 60, type: BUSY_EXPRESSION }.freeze,
+         # The report's bytes may fall inside the driver's, so the line is looked for at its end only.
+         { name: 'idle-parked', pattern: /erx: root task: group: parked #{executors} of #{executors}\r*\n\z/n,
+           seconds: EVAL_SECONDS }.freeze].freeze
       end
 
       # A person at the serial console. The first line is typed at the boot's development
@@ -448,6 +478,11 @@ module Erx
                                   points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
                                            { name: 'parked-at-end', pattern: /debug .*parked\\x09at\\x09end\r*\n\z/n,
                                              seconds: EVAL_SECONDS }.freeze])
+      end
+
+      def idle_boot(accel, count, built)
+        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.idle_checkpoints(cpus: count, root: @root),
+                                  command_line: [COMMAND_LINES[accel], GROUP_REPORT_WORD].compact.join(' '))
       end
 
       def judge_missed_pet(serial)

@@ -316,6 +316,13 @@ it; git history is the record of completed work.
   (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
   backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
   word, and a checkpoint of `parked N of N` at the shell.
+* [Medium] dependencies, `deps.lock` `tla-tools`: the pin names
+  `releases/download/v1.8.0/tla2tools.jar`, but tlaplus's v1.8.0 is a rolling
+  pre-release whose asset is replaced, so `make fetch` in a fresh tree fails with
+  "source SHA-256 mismatch: tla-tools" while older trees keep the pinned bytes. Pin
+  an immutable release, such as v1.7.4, or a copy whose bytes do not change, and
+  rerun `make check-tla` on it.
+
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.

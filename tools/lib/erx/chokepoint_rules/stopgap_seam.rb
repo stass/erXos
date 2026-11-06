@@ -56,6 +56,7 @@ module Erx
         liberx/backend/fiasco/page_pool.h
         liberx/backend/fiasco/park.c
         liberx/backend/fiasco/park.h
+        liberx/backend/fiasco/park_report.c
         liberx/backend/core/group_report.h
         liberx/backend/core/park_table.c
         liberx/backend/core/park_table.h
@@ -188,7 +189,7 @@ module Erx
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
                 "the root's memory effects' fixed refusals, the entropy banner line, the end path's crash frame, the service's and the reaper's fixed refusals, " \
-                "the memory, thread, crash, watchdog and interrupt transcripts, the debug log and the standard output of the root and of " \
+                "the memory, thread, crash, watchdog and interrupt transcripts, the group's report, the debug log and the standard output of the root and of " \
                 "a task, through the service, call it",
           design: "#{STOPGAP}#the-console",
           scope: ERXOS_C,
@@ -206,6 +207,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_task.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/thread.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/park_report.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_memory/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_threads/guest.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'test/guest/native_crash/guest.c', permits: /\Aerx_fiasco_console_write\z/),
