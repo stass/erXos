@@ -229,7 +229,8 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
-  # An open file's ipread_s32bu_p32bu and advise (file_SUITE's ipread and advise) in /tmp:
+  # An open file's ipread_s32bu_p32bu and advise (file_SUITE's ipread and advise), and a
+  # directory opened with [read, directory] (file_handle_info_basic_directory), in /tmp:
   # these pin what both answer. Any atom stands for infinity, as in stock's prim_file.
   TMP_HANDLES = {
     'tmp ipread' => '{ok,{5,24,<<"hello">>}}', 'tmp ipread exact' => '{ok,{5,24,<<"hello">>}}',
@@ -240,7 +241,12 @@ class RuntimePrimFileTest < Minitest::Test
     'tmp ipread closed' => '{error,einval}', 'tmp ipread delete' => 'ok',
     'tmp advise known' => '[ok,ok,ok,ok,ok,ok]', 'tmp advise unknown' => '{error,einval}',
     'tmp advise negative offset' => '{error,einval}', 'tmp advise negative length' => '{error,einval}',
-    'tmp advise closed' => '{error,einval}', 'tmp advise delete' => 'ok'
+    'tmp advise closed' => '{error,einval}', 'tmp advise delete' => 'ok',
+    'tmp dirfd info' => '{ok,directory,read_write}', 'tmp dirfd raw info' => '{ok,directory,read_write}',
+    'tmp dirfd read' => '{error,eisdir}', 'tmp dirfd close' => 'ok',
+    'tmp dirfd raw handle' => '{ok,directory,read_write}', 'tmp dirfd raw read' => '{error,eisdir}',
+    'tmp dirfd raw pread' => '{error,eisdir}', 'tmp dirfd raw close' => 'ok',
+    'tmp dirfd file' => '{error,enotdir}', 'tmp dirfd delete' => '{ok,ok}'
   }.freeze
 
   def test_tmp_open_file_handles
@@ -255,12 +261,17 @@ class RuntimePrimFileTest < Minitest::Test
   # Opens on the read-only release, as open(2) orders its checks: a directory opened to
   # write is eisdir, an exclusive open of a name that exists eexist, and a missing
   # directory or a file on the way enoent or enotdir, each before the read-only file
-  # system's erofs.
+  # system's erofs. A release directory opens with [read, directory] as a /tmp one does.
   RELEASE_OPENS = {
     'open dir write' => '{error,eisdir}', 'open dir/ write' => '{error,eisdir}',
     'open dir read_write' => '{error,eisdir}', 'open dir append' => '{error,eisdir}',
     'open dir exclusive' => '{error,eexist}', 'open file exclusive' => '{error,eexist}',
-    'open under missing' => '{error,enoent}', 'open under file' => '{error,enotdir}'
+    'open under missing' => '{error,enoent}', 'open under file' => '{error,enotdir}',
+    'open directory info' => '{ok,directory,read}', 'open directory raw info' => '{ok,directory,read}',
+    'open directory read' => '{error,eisdir}', 'open directory close' => 'ok',
+    'open directory raw handle' => '{ok,directory,read}', 'open directory raw read' => '{error,eisdir}',
+    'open directory raw pread' => '{error,eisdir}', 'open directory raw close' => 'ok',
+    'open directory file' => '{error,enotdir}'
   }.freeze
 
   def test_release_opens
@@ -317,7 +328,6 @@ class RuntimePrimFileTest < Minitest::Test
     assert_equal '{error,erofs}', release.fetch('pin write')
     %w[open_write open_new open_append make_dir delete del_dir rename make_link make_symlink
        write_file_info].each { |name| assert_equal '{error,erofs}', release.fetch("pin #{name}"), name }
-    assert_equal '{error,enotsup}', release.fetch('pin open_directory')
     assert_equal '{error,enotsup}', release.fetch('pin altname')
   end
 

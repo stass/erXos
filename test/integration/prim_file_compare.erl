@@ -294,7 +294,6 @@ pins("release") ->
                {make_link, prim_file:make_link(<<"a.txt">>, <<"l">>)},
                {make_symlink, prim_file:make_symlink(<<"a.txt">>, <<"s">>)},
                {write_file_info, prim_file:write_file_info(<<"a.txt">>, #file_info{mode = 8#600})},
-               {open_directory, prim_file:open(<<"sub">>, [read, directory])},
                {altname, prim_file:altname(<<"a.txt">>)}],
     [io:format("pin ~s\t~0tp~n", [Name, Result]) || {Name, Result} <- Refused],
     %% Modules came from the archive.
@@ -952,6 +951,7 @@ tmp(Prefix, Mode) ->
     tmp_ahead(At, Show),
     tmp_ipread(At, Show),
     tmp_advise(At, Show),
+    tmp_directory_handle(At, Show),
     tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
@@ -1086,9 +1086,44 @@ tmp_advise(At, Show) ->
     Show("advise closed", file:advise(Fd, 0, 0, normal)),
     Show("advise delete", file:delete(Name)).
 
+%% A directory opened with [read, directory] (file_SUITE's
+%% file_handle_info_basic_directory): the handle answers its file information, a read
+%% eisdir, and a file opened so enotdir.
+tmp_directory_handle(At, Show) ->
+    Dir = At(<<"dirfd">>),
+    ok = file:make_dir(Dir),
+    ok = file:write_file(At(<<"dirfd/f">>), <<"f">>),
+    directory_handle(Dir, Show, "dirfd"),
+    Show("dirfd file", closed(file:open(At(<<"dirfd/f">>), [read, directory]))),
+    Show("dirfd delete", {file:delete(At(<<"dirfd/f">>)), file:del_dir(Dir)}).
+
+directory_handle(Dir, Show, Step) ->
+    case file:open(Dir, [read, directory]) of
+        {ok, Fd} ->
+            Show(Step ++ " info", handle_type(file:read_file_info(Fd))),
+            Show(Step ++ " raw info", handle_type(file:read_file_info(Fd, [raw]))),
+            Show(Step ++ " read", file:read(Fd, 1)),
+            Show(Step ++ " close", file:close(Fd));
+        Refused ->
+            Show(Step ++ " open", Refused)
+    end,
+    case file:open(Dir, [raw, read, directory]) of
+        {ok, Raw} ->
+            Show(Step ++ " raw handle", handle_type(file:read_file_info(Raw))),
+            Show(Step ++ " raw read", file:read(Raw, 1)),
+            Show(Step ++ " raw pread", file:pread(Raw, 0, 1)),
+            Show(Step ++ " raw close", file:close(Raw));
+        RawRefused ->
+            Show(Step ++ " raw open", RawRefused)
+    end.
+
+handle_type({ok, #file_info{type = Type, access = Access}}) -> {ok, Type, Access};
+handle_type(Other) -> Other.
+
 %% Opens on the read-only release that open(2) refuses before it would meet the read-only
 %% file system: a directory opened to write answers eisdir, an exclusive open of a name
-%% that exists eexist, a name under a missing directory enoent, under a file enotdir.
+%% that exists eexist, a name under a missing directory enoent, under a file enotdir. A
+%% release directory opens with [read, directory] as a /tmp one does.
 release_opens(Prefix) ->
     At = fun(Name) -> <<Prefix/binary, "/corpus/", Name/binary>> end,
     Show = fun(Step, Result) -> io:format("open ~s\t~0tp~n", [Step, Result]) end,
@@ -1098,7 +1133,9 @@ release_opens(Prefix) ->
              {"file exclusive", <<"a.txt">>, [write, exclusive]},
              {"under missing", <<"missing/x">>, [write]},
              {"under file", <<"a.txt/x">>, [write]}],
-    [Show(Step, closed(file:open(At(Name), Modes))) || {Step, Name, Modes} <- Steps].
+    [Show(Step, closed(file:open(At(Name), Modes))) || {Step, Name, Modes} <- Steps],
+    directory_handle(At(<<"sub">>), Show, "directory"),
+    Show("directory file", closed(file:open(At(<<"a.txt">>), [read, directory]))).
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the

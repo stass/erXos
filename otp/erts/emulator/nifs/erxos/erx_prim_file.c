@@ -62,10 +62,16 @@
 #define ERX_FILE_MODE		(S_IFREG | 0444)
 #define ERX_DIRECTORY_MODE	(S_IFDIR | 0555)
 
+/*
+ * An open file or directory of the release. file indexes release_fs.files only when
+ * kind is ERX_RELEASE_FS_FILE: a directory, opened with [directory], has no entry of
+ * its own, and every read of it is EISDIR.
+ */
 typedef struct erx_efile {
-	efile_data_t	common;
-	uint32_t	file;
-	Sint64		position;
+	efile_data_t		common;
+	erx_release_fs_kind_t	kind;
+	uint32_t		file;
+	Sint64			position;
 } erx_efile_t;
 
 /* A local pid is an immediate term, so its word names it for as long as it lives. */
@@ -114,7 +120,8 @@ static posix_errno_t erx_find(const efile_path_t *, erx_release_fs_kind_t *,
 static posix_errno_t erx_find_existing(const efile_path_t *,
     erx_release_fs_kind_t *, uint32_t *);
 static posix_errno_t erx_write_refusal(const efile_path_t *, enum efile_modes_t);
-static Sint64 erx_copy_out(uint32_t, Sint64, SysIOVec *, int);
+static Sint64 erx_copy_out(erx_efile_t *, Sint64, SysIOVec *, int);
+static uint64_t erx_handle_size(const erx_efile_t *);
 static posix_errno_t erx_check_file(uint32_t);
 static void erx_fill_info(erx_release_fs_kind_t, uint64_t, efile_fileinfo_t *);
 
@@ -756,15 +763,18 @@ efile_open(const efile_path_t *path, enum efile_modes_t modes,
 	error = erx_find_existing(path, &kind, &file);
 	if (error != 0)
 		return (error);
-	if (kind == ERX_RELEASE_FS_DIRECTORY)
-		return ((modes & EFILE_MODE_DIRECTORY) != 0 ? ENOTSUP : EISDIR);
-	if ((modes & EFILE_MODE_DIRECTORY) != 0)
+	if (kind == ERX_RELEASE_FS_DIRECTORY && (modes & EFILE_MODE_DIRECTORY) == 0)
+		return (EISDIR);
+	if (kind == ERX_RELEASE_FS_FILE && (modes & EFILE_MODE_DIRECTORY) != 0)
 		return (ENOTDIR);
-	error = erx_check_file(file);
-	if (error != 0)
-		return (error);
+	if (kind == ERX_RELEASE_FS_FILE) {
+		error = erx_check_file(file);
+		if (error != 0)
+			return (error);
+	}
 	handle = (erx_efile_t *)enif_alloc_resource(nif_type, sizeof(*handle));
-	handle->file = file;
+	handle->kind = kind;
+	handle->file = kind == ERX_RELEASE_FS_FILE ? file : 0;
 	handle->position = 0;
 	EFILE_INIT_RESOURCE(&handle->common, modes);
 	*d = &handle->common;
@@ -789,9 +799,12 @@ efile_close(efile_data_t *d, posix_errno_t *error)
 	return (1);
 }
 
-/* offset is at least zero; past the end there is nothing to copy. */
+/*
+ * offset is at least zero; past the end there is nothing to copy. A directory reads
+ * as stock's read(2) of one answers: EISDIR.
+ */
 static Sint64
-erx_copy_out(uint32_t file, Sint64 offset, SysIOVec *iov, int iovlen)
+erx_copy_out(erx_efile_t *handle, Sint64 offset, SysIOVec *iov, int iovlen)
 {
 	const erx_release_fs_file_t *entry;
 	const uint8_t *data;
@@ -799,7 +812,11 @@ erx_copy_out(uint32_t file, Sint64 offset, SysIOVec *iov, int iovlen)
 	size_t count;
 	Sint64 total;
 
-	entry = &release_fs.files[file];
+	if (handle->kind != ERX_RELEASE_FS_FILE) {
+		handle->common.posix_errno = EISDIR;
+		return (-1);
+	}
+	entry = &release_fs.files[handle->file];
 	if ((uint64_t)offset >= entry->size)
 		return (0);
 	data = erx_release_addr() + entry->offset + (uint64_t)offset;
@@ -822,8 +839,9 @@ efile_readv(efile_data_t *d, SysIOVec *iov, int iovlen)
 	erx_efile_t *handle = (erx_efile_t *)d;
 	Sint64 count;
 
-	count = erx_copy_out(handle->file, handle->position, iov, iovlen);
-	handle->position += count;
+	count = erx_copy_out(handle, handle->position, iov, iovlen);
+	if (count > 0)
+		handle->position += count;
 	return (count);
 }
 
@@ -836,7 +854,7 @@ efile_preadv(efile_data_t *d, Sint64 offset, SysIOVec *iov, int iovlen)
 		d->posix_errno = EINVAL;
 		return (-1);
 	}
-	return (erx_copy_out(handle->file, offset, iov, iovlen));
+	return (erx_copy_out(handle, offset, iov, iovlen));
 }
 
 Sint64
@@ -858,6 +876,13 @@ efile_pwritev(efile_data_t *d, Sint64 offset, SysIOVec *iov, int iovlen)
 	return (-1);
 }
 
+/* A directory's size is 0, as read_file_info answers. */
+static uint64_t
+erx_handle_size(const erx_efile_t *handle)
+{
+	return (handle->kind == ERX_RELEASE_FS_FILE ? release_fs.files[handle->file].size : 0);
+}
+
 int
 efile_seek(efile_data_t *d, enum efile_seek_t seek, Sint64 offset, Sint64 *new_position)
 {
@@ -872,7 +897,7 @@ efile_seek(efile_data_t *d, enum efile_seek_t seek, Sint64 offset, Sint64 *new_p
 		base = handle->position;
 		break;
 	case EFILE_SEEK_EOF:
-		base = (Sint64)release_fs.files[handle->file].size;
+		base = (Sint64)erx_handle_size(handle);
 		break;
 	default:
 		d->posix_errno = EINVAL;
@@ -961,7 +986,7 @@ efile_read_handle_info(efile_data_t *d, efile_fileinfo_t *result)
 {
 	erx_efile_t *handle = (erx_efile_t *)d;
 
-	erx_fill_info(ERX_RELEASE_FS_FILE, release_fs.files[handle->file].size, result);
+	erx_fill_info(handle->kind, erx_handle_size(handle), result);
 	return (0);
 }
 

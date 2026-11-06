@@ -1616,7 +1616,8 @@ directory cannot exist, and nothing can disagree with the index.
 
 | `prim_file` call | Result |
 | --- | --- |
-| `read_file`, `open` for reading, `read`, `pread`, `position` | a file's bytes, from `release_addr` plus the entry's offset; a file's position is its handle's, under `prim_file`'s own per-file state; opening a directory is `eisdir` |
+| `read_file`, `open` for reading, `read`, `pread`, `position` | a file's bytes, from `release_addr` plus the entry's offset; a file's position is its handle's, under `prim_file`'s own per-file state; opening a directory is `eisdir`, and opening a file with `directory` `enotdir` |
+| `open` of a directory with `[read, directory]` | a handle whose `read_handle_info` answers the directory's information and whose reads answer `eisdir`, as a read of a directory descriptor does on stock |
 | `list_dir` | the next names, without `.` and `..` |
 | `close` | `ok`: it ends the handle and releases its NIF resource, as stock's `efile_close` does (`unix_prim_file.c:257`); `read_file` closes through it too (`prim_file_nif.c:1380`) |
 | `read_file_info`, `read_link_info`, `read_handle_info` | the same for all three: `read_handle_info`, which `read_file` asks first, answers for the handle's entry; `regular` mode `0444` or `directory` mode `0555`, carrying the type's bits as stock's `st_mode` does, `read` access, size, 0 for a directory, one link, owner, group and times 0, since an archive records none and a build is reproducible |
