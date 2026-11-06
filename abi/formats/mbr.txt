@@ -1,0 +1,25 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The master boot record and the extended boot record, the PC partition table's two
+# sector formats: a sector of 512 bytes whose last two bytes are the signature 0x55
+# 0xaa, with four 16-byte entries before it. An extended boot record has the master
+# boot record's shape; its first entry names a logical partition relative to the
+# record's own sector and its second the next record relative to the extended
+# partition's start. Every field is little-endian. The cylinder-head-sector fields are
+# a legacy encoding that LBA readers ignore.
+limit mbr_sector_size u32 512
+limit mbr_entries_offset u32 446
+limit mbr_entries u32 4
+limit mbr_signature_offset u32 510
+limit mbr_signature u16 0xaa55
+limit mbr_status_inactive u8 0x00
+limit mbr_type_empty u8 0x00
+
+# One entry of a master or extended boot record.
+layout erx_mbr_entry 1 wire_le 4 16
+  field status u8 0
+  field chs_first u8 1 count 3
+  field type u8 4
+  field chs_last u8 5 count 3
+  field lba_start u32 8
+  field lba_sectors u32 12

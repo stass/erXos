@@ -304,6 +304,30 @@ struct erx_rights {
 #define ERX_MANIFEST_STRINGS_MAX UINT32_C(4194304)
 #define ERX_MANIFEST_VERSION UINT16_C(1)
 #define ERX_MAPPINGS_MAX UINT32_C(65536)
+#define ERX_MBR_ENTRIES UINT32_C(4)
+#define ERX_MBR_ENTRIES_OFFSET UINT32_C(446)
+#define ERX_MBR_SECTOR_SIZE UINT32_C(512)
+#define ERX_MBR_SIGNATURE UINT16_C(43605)
+#define ERX_MBR_SIGNATURE_OFFSET UINT32_C(510)
+#define ERX_MBR_STATUS_INACTIVE UINT8_C(0)
+#define ERX_MBR_TYPE_EMPTY UINT8_C(0)
+#define ERX_MEDIUM_DATA_EBR UINT32_C(2246656)
+#define ERX_MEDIUM_DATA_SECTORS_MIN UINT32_C(262144)
+#define ERX_MEDIUM_DATA_START UINT32_C(2248704)
+#define ERX_MEDIUM_DATA_TYPE UINT8_C(131)
+#define ERX_MEDIUM_EXTENDED_START UINT32_C(2113536)
+#define ERX_MEDIUM_EXTENDED_TYPE UINT8_C(15)
+#define ERX_MEDIUM_LINK_TYPE UINT8_C(5)
+#define ERX_MEDIUM_RECORD_SECTORS UINT32_C(8192)
+#define ERX_MEDIUM_RECORD_START UINT32_C(2048)
+#define ERX_MEDIUM_RECORD_TYPE UINT8_C(14)
+#define ERX_MEDIUM_SLOT_A_START UINT32_C(16384)
+#define ERX_MEDIUM_SLOT_B_START UINT32_C(1064960)
+#define ERX_MEDIUM_SLOT_SECTORS UINT32_C(1048576)
+#define ERX_MEDIUM_SLOT_TYPE UINT8_C(12)
+#define ERX_MEDIUM_VAULT_SECTORS UINT32_C(131072)
+#define ERX_MEDIUM_VAULT_START UINT32_C(2115584)
+#define ERX_MEDIUM_VAULT_TYPE UINT8_C(131)
 #define ERX_MEM_ATTR_DEVICE UINT32_C(0)
 #define ERX_MEM_CONTIGUOUS_MAX UINT32_C(1048576)
 #define ERX_MEM_FLAGS_KNOWN UINT32_C(1)
@@ -1813,6 +1837,38 @@ _Static_assert(offsetof(erx_machine_page_t, watchdog_boot_s) ==
     ERX_MACHINE_PAGE_OFF_WATCHDOG_BOOT_S, "erx_machine_page.watchdog_boot_s offset");
 _Static_assert(offsetof(erx_machine_page_t, build_id) ==
     ERX_MACHINE_PAGE_OFF_BUILD_ID, "erx_machine_page.build_id offset");
+
+#define ERX_MBR_ENTRY_SIZE 16
+#define ERX_MBR_ENTRY_ALIGN 4
+#define ERX_MBR_ENTRY_OFF_STATUS 0
+#define ERX_MBR_ENTRY_OFF_CHS_FIRST 1
+#define ERX_MBR_ENTRY_OFF_TYPE 4
+#define ERX_MBR_ENTRY_OFF_CHS_LAST 5
+#define ERX_MBR_ENTRY_OFF_LBA_START 8
+#define ERX_MBR_ENTRY_OFF_LBA_SECTORS 12
+typedef struct erx_mbr_entry erx_mbr_entry_t;
+struct erx_mbr_entry {
+	_Alignas(4) uint8_t	status;
+	uint8_t	chs_first[3];
+	uint8_t	type;
+	uint8_t	chs_last[3];
+	uint32_t	lba_start;
+	uint32_t	lba_sectors;
+};
+_Static_assert(sizeof(erx_mbr_entry_t) == ERX_MBR_ENTRY_SIZE, "erx_mbr_entry size");
+_Static_assert(_Alignof(erx_mbr_entry_t) == ERX_MBR_ENTRY_ALIGN, "erx_mbr_entry alignment");
+_Static_assert(offsetof(erx_mbr_entry_t, status) ==
+    ERX_MBR_ENTRY_OFF_STATUS, "erx_mbr_entry.status offset");
+_Static_assert(offsetof(erx_mbr_entry_t, chs_first) ==
+    ERX_MBR_ENTRY_OFF_CHS_FIRST, "erx_mbr_entry.chs_first offset");
+_Static_assert(offsetof(erx_mbr_entry_t, type) ==
+    ERX_MBR_ENTRY_OFF_TYPE, "erx_mbr_entry.type offset");
+_Static_assert(offsetof(erx_mbr_entry_t, chs_last) ==
+    ERX_MBR_ENTRY_OFF_CHS_LAST, "erx_mbr_entry.chs_last offset");
+_Static_assert(offsetof(erx_mbr_entry_t, lba_start) ==
+    ERX_MBR_ENTRY_OFF_LBA_START, "erx_mbr_entry.lba_start offset");
+_Static_assert(offsetof(erx_mbr_entry_t, lba_sectors) ==
+    ERX_MBR_ENTRY_OFF_LBA_SECTORS, "erx_mbr_entry.lba_sectors offset");
 
 #define ERX_MF_BOOT_ORDER_SIZE 4
 #define ERX_MF_BOOT_ORDER_ALIGN 4

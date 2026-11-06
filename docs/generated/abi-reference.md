@@ -298,6 +298,30 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MANIFEST_STRINGS_MAX` | 4194304 |
 | `ERX_MANIFEST_VERSION` | 1 |
 | `ERX_MAPPINGS_MAX` | 65536 |
+| `ERX_MBR_ENTRIES` | 4 |
+| `ERX_MBR_ENTRIES_OFFSET` | 446 |
+| `ERX_MBR_SECTOR_SIZE` | 512 |
+| `ERX_MBR_SIGNATURE` | 43605 |
+| `ERX_MBR_SIGNATURE_OFFSET` | 510 |
+| `ERX_MBR_STATUS_INACTIVE` | 0 |
+| `ERX_MBR_TYPE_EMPTY` | 0 |
+| `ERX_MEDIUM_DATA_EBR` | 2246656 |
+| `ERX_MEDIUM_DATA_SECTORS_MIN` | 262144 |
+| `ERX_MEDIUM_DATA_START` | 2248704 |
+| `ERX_MEDIUM_DATA_TYPE` | 131 |
+| `ERX_MEDIUM_EXTENDED_START` | 2113536 |
+| `ERX_MEDIUM_EXTENDED_TYPE` | 15 |
+| `ERX_MEDIUM_LINK_TYPE` | 5 |
+| `ERX_MEDIUM_RECORD_SECTORS` | 8192 |
+| `ERX_MEDIUM_RECORD_START` | 2048 |
+| `ERX_MEDIUM_RECORD_TYPE` | 14 |
+| `ERX_MEDIUM_SLOT_A_START` | 16384 |
+| `ERX_MEDIUM_SLOT_B_START` | 1064960 |
+| `ERX_MEDIUM_SLOT_SECTORS` | 1048576 |
+| `ERX_MEDIUM_SLOT_TYPE` | 12 |
+| `ERX_MEDIUM_VAULT_SECTORS` | 131072 |
+| `ERX_MEDIUM_VAULT_START` | 2115584 |
+| `ERX_MEDIUM_VAULT_TYPE` | 131 |
 | `ERX_MEM_ATTR_DEVICE` | 0 |
 | `ERX_MEM_CONTIGUOUS_MAX` | 1048576 |
 | `ERX_MEM_FLAGS_KNOWN` | 1 |
@@ -1043,6 +1067,19 @@ Storage: `shared`. Prefix size: 4096. Alignment: 4096.
 | `watchdog_deadline_s` | `u32` | 40 | 1 |
 | `watchdog_boot_s` | `u32` | 44 | 1 |
 | `build_id` | `u8` | 48 | 8 |
+
+### `erx_mbr_entry_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `status` | `u8` | 0 | 1 |
+| `chs_first` | `u8` | 1 | 3 |
+| `type` | `u8` | 4 | 1 |
+| `chs_last` | `u8` | 5 | 3 |
+| `lba_start` | `u32` | 8 | 1 |
+| `lba_sectors` | `u32` | 12 | 1 |
 
 ### `erx_mf_boot_order_t`
 

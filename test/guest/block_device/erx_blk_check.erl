@@ -14,13 +14,23 @@
 %% disk back. A step that does not go as expected prints its "failed" line and the run goes
 %% on, so the harness names the first step that went wrong.
 %%
+%% medium/0 is the second boot's: the harness attaches a medium laid out by the ABI file's
+%% medium layout, and the module drives the block service's windows alone
+%% (erx_blk_service:window/1, erx_blk_window). It reports each window's length, the medium
+%% sector whose host pattern its first and last sectors hold, and the refusal of the sector
+%% past its end; it rewrites the data window's last sector with the guest's pattern of the
+%% medium sector it read there, and is refused a write past the vault's end. It does not
+%% know the layout: the harness checks the sectors it names against it.
+%%
 %% Each line goes to the console in one erlang:display_string/2 call, which reaches the
 %% console's sink, its driver, whole (docs/design-runtime.md, "The console and standard
 %% I/O"), so a kernel log line the console writes lands between two lines, never inside one.
 
 -module(erx_blk_check).
 
--export([main/0]).
+-export([main/0, medium/0]).
+
+-define(ROLES, [record, slot_a, slot_b, vault, data]).
 
 %% The disk the harness attaches and the sectors it expects written (BlockDevice::SECTORS
 %% and WRITE_SECTORS), and the patterns of tools/lib/erx/block_image.rb: each 512-byte
@@ -52,6 +62,76 @@ main() ->
             timer:sleep(?LOG_DRAIN_MS)
     end,
     line("done", []).
+
+-spec medium() -> ok.
+medium() ->
+    case call(fun erx_blk:info/0) of
+        {ok, #{capacity := Capacity}} ->
+            line("capacity ~b sectors", [Capacity]),
+            Windows = [{Role, call(fun() -> erx_blk_service:window(Role) end)} || Role <- ?ROLES],
+            case [{Role, Pid} || {Role, {ok, Pid}} <- Windows] of
+                Served when length(Served) =:= length(?ROLES) ->
+                    lists:foreach(fun window/1, Served),
+                    rewrite_last(proplists:get_value(data, Served)),
+                    refused_write(proplists:get_value(vault, Served));
+                _Refused ->
+                    line("no windows", []),
+                    timer:sleep(?LOG_DRAIN_MS)
+            end;
+        _NoDriver ->
+            line("no driver", []),
+            timer:sleep(?LOG_DRAIN_MS)
+    end,
+    line("done", []).
+
+window({Role, Window}) ->
+    Sectors = sectors(Window),
+    line("window ~s sectors ~b", [Role, Sectors]),
+    holds(Role, Window, 0),
+    holds(Role, Window, Sectors - 1),
+    case call(fun() -> erx_blk_window:read(Window, Sectors, 1) end) of
+        {error, erange} -> line("window ~s sector ~b refused", [Role, Sectors]);
+        _Other -> line("window ~s sector ~b failed", [Role, Sectors])
+    end.
+
+%% A window's length, or 0 when it does not answer, which fails every later step.
+sectors(Window) ->
+    case call(fun() -> erx_blk_window:info(Window) end) of
+        {ok, #{sectors := Sectors}} -> Sectors;
+        _Other -> 0
+    end.
+
+%% The medium sector whose host pattern a window's sector holds.
+holds(Role, Window, Sector) ->
+    case call(fun() -> erx_blk_window:read(Window, Sector, 1) end) of
+        {ok, Bytes = <<Tag:8/binary, Index:64/little, _/binary>>} when Tag =:= ?HOST_TAG ->
+            case Bytes =:= pattern(Index, ?HOST_TAG) of
+                true -> line("window ~s sector ~b holds host ~b", [Role, Sector, Index]);
+                false -> line("window ~s sector ~b holds other", [Role, Sector])
+            end;
+        {ok, _Other} -> line("window ~s sector ~b holds other", [Role, Sector]);
+        _Failed -> line("window ~s sector ~b failed", [Role, Sector])
+    end.
+
+rewrite_last(Window) ->
+    Last = sectors(Window) - 1,
+    Written = case call(fun() -> erx_blk_window:read(Window, Last, 1) end) of
+                  {ok, <<Tag:8/binary, Index:64/little, _/binary>>} when Tag =:= ?HOST_TAG ->
+                      call(fun() -> erx_blk_window:write(Window, Last, pattern(Index, ?GUEST_TAG)) end);
+                  Other ->
+                      Other
+              end,
+    case Written of
+        ok -> line("window data wrote sector ~b", [Last]);
+        _Failed -> line("window data wrote sector ~b failed", [Last])
+    end.
+
+refused_write(Window) ->
+    Sectors = sectors(Window),
+    case call(fun() -> erx_blk_window:write(Window, Sectors, pattern(0, ?GUEST_TAG)) end) of
+        {error, erange} -> line("window vault write sector ~b refused", [Sectors]);
+        _Other -> line("window vault write sector ~b failed", [Sectors])
+    end.
 
 read(Sector) ->
     case call(fun() -> erx_blk:read(Sector, 1) end) =:= {ok, pattern(Sector, ?HOST_TAG)} of

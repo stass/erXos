@@ -1,0 +1,30 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The boot medium's layout (docs/design-storage.md, "The boot medium's table"), in
+# 512-byte sectors, the one source of where each partition lies. The master boot
+# record at sector 0 names the boot-selection record's partition, slot A and slot B
+# in its first three entries and the extended partition in its fourth. The extended
+# partition starts with the vault's extended boot record, whose first entry names the
+# vault's partition and whose second names the data partition's extended boot record;
+# the data partition's record names the data partition alone. Every partition but the
+# data partition has a fixed start and length; the data partition has a fixed start
+# and runs from medium_data_sectors_min sectors to the medium's end, and the extended
+# partition ends where it ends. Every boundary is a multiple of 2048 sectors (1 MiB).
+# Every entry's status is mbr_status_inactive.
+limit medium_record_start u32 2048
+limit medium_record_sectors u32 8192
+limit medium_record_type u8 0x0e
+limit medium_slot_a_start u32 16384
+limit medium_slot_b_start u32 1064960
+limit medium_slot_sectors u32 1048576
+limit medium_slot_type u8 0x0c
+limit medium_extended_start u32 2113536
+limit medium_extended_type u8 0x0f
+limit medium_link_type u8 0x05
+limit medium_vault_start u32 2115584
+limit medium_vault_sectors u32 131072
+limit medium_vault_type u8 0x83
+limit medium_data_ebr u32 2246656
+limit medium_data_start u32 2248704
+limit medium_data_sectors_min u32 262144
+limit medium_data_type u8 0x83

@@ -932,7 +932,8 @@ reported as a durable checkpoint.
   driver's buffer pool;
   `{write, Sector, Bytes}`, answered `ok`; and `flush`, answered `ok` once
   the medium acknowledged it; each may answer `{error, eio}` for a device
-  error, `{error, erange}` for sectors outside the window, and
+  error, `{error, einval}` for a request that names no whole sectors,
+  `{error, erange}` for sectors outside the window, and
   `{error, erofs}` for a write on a trial boot outside the record's window.
   A window's pid reaches its client at the client domain's creation, with
   its other grants, or locally in the driver's own domain. Beneath the

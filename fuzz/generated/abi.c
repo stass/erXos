@@ -174,6 +174,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_lane_rec_decode(bytes, length, &value);
 	}
 	{
+		erx_mbr_entry_t value;
+		(void)erx_mbr_entry_decode(bytes, length, &value);
+	}
+	{
 		erx_mf_boot_order_t value;
 		(void)erx_mf_boot_order_decode(bytes, length, &value);
 	}

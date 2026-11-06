@@ -642,6 +642,10 @@ it; git history is the record of completed work.
   `enametoolong`, and every entry lies over one tree.
 * [Low] runtime, `erx_ns`: `which/1` and `list/0` of
   [design-files.md](docs/design-files.md#interfaces) are not written.
+* [Low] /tmp, `test/host/erx_ramfs_test.rb`: `test_seeded_fault_2_is_caught` expects the mutant to fail
+  `a_dead_owners_open_file_gives_back_what_it_held_test`, but under load (a full `make check`) the mutant runs into
+  EUnit's timeout in `wait_free/3` first and the case reads `*timed out*`, so the seeded-fault test fails though the
+  fault was caught; it passes run alone. Accept a timeout as caught, or bound `wait_free/3` below EUnit's timeout.
 * [Low] /tmp, `erx_ramfs_sup` under `kernel_safe_sup`
   ([design-tmp.md](docs/design-tmp.md#starting-and-mounting)): a crash of the tree process that recurs
   on every restart, such as one a request reproduces, passes `kernel_safe_sup`'s restart intensity, which
@@ -1931,8 +1935,33 @@ document's "residual risks accepted" paragraph.
 * [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
   `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that resets the
   device, `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
-* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:write/2` lets any process of
-  the system domain write any sector until windows serve clients.
+* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:read/2` and `erx_blk:write/2`
+  still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
+  their sectors, but nothing yet confines clients to them. The device service, which names each client's windows by
+  role and hands their pids out as grants (PW1), replaces `erx_blk_service:window/1`, which hands any role's window to
+  any caller, slot and record windows included.
+* [Medium] erx_blk_window: a window answers no `flush` (docs/design-storage.md, Interfaces); the driver negotiates no
+  `VIRTIO_BLK_F_FLUSH` and posts no flush request, so a file system cannot order its writes against the medium's cache.
+* [Medium] erx_blk_table, `tools/lib/erx/medium_image.rb`: the extended boot records' encoding (first entry relative
+  to its own record, link entry relative to the extended partition and spanning the next record and its partition) is
+  checked only by copies written from one reading of the format; list a `MediumImage` medium with an independent
+  reader (FreeBSD's `gpart` on an md device, or util-linux `sfdisk --json`) and compare every start and length.
+* [Medium] erx_blk_window, erx_blk_service: tested only by the QEMU suite's admitted medium. Host EUnit cases over a
+  stub `erx_blk` should cover the window's error mapping and argument checks, and the service's refused, no-device and
+  failed-read paths and its restart; a QEMU medium with one corrupted entry should show "blk: no windows".
+* [Low] erx_blk_window: a request that waits in a window's mailbox behind another client's stuck request can time
+  out at its caller and still be posted later, a second way into the timed-out-write item above.
+* [Low] abi/formats/mbr.txt: `erx_mbr_entry` declares alignment 4, but entries lie at 446 + 16i on the medium;
+  declare 1 if the generator accepts it, so no C reader casts a sector buffer to the struct.
+* [Low] erx_blk_table: a data partition past 2 TiB, which an MBR cannot describe, is refused as `{mbr, 4, sectors}`
+  rather than as a data length the table cannot hold.
+* [Low] erx_blk_window: a request for more sectors than one device request carries (`erx_blk_request:max_sectors/0`)
+  is refused with `einval` rather than split, so every client splits its own.
+* [Medium] abi/medium.txt: the medium layout's sizes (the record's partition 4 MiB, each slot 512 MiB, the vault's
+  partition 64 MiB, the data partition at least 128 MiB, every boundary on 1 MiB) are first choices, checked against
+  neither the slot images' sizes (the plan's decision gate on uncompressed slots) nor the Pi firmware's needs of the
+  record's and the slots' FAT partitions; the reset count's sector, which design-platforms.md puts beside the record,
+  and each slot's signature window are not in the layout yet.
 * [Low] erx_blk: `recover/2` answers held requests `broken` though they were never posted; they could be posted after
   the reset. An interrupt storm or a device that breaks its queue on every request costs a scheduler and a log line per
   reset, bounded by the device's rate (Phase 1 residual).

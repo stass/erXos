@@ -4158,6 +4158,104 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_mbr_entry"] = Layout.new(
+        name: "erx_mbr_entry".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 4,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "status".b,
+            type: types.fetch("u8"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "chs_first".b,
+            type: types.fetch("u8"),
+            offset: 1,
+            count: 3,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "type".b,
+            type: types.fetch("u8"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "chs_last".b,
+            type: types.fetch("u8"),
+            offset: 5,
+            count: 3,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "lba_start".b,
+            type: types.fetch("u32"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "lba_sectors".b,
+            type: types.fetch("u32"),
+            offset: 12,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_mf_boot_order"] = Layout.new(
         name: "erx_mf_boot_order".b,
         version: 1,
@@ -10361,6 +10459,7 @@ module Erx
           "erx_lane_rec".b,
           "erx_lane_rpage".b,
           "erx_machine_page".b,
+          "erx_mbr_entry".b,
           "erx_mf_boot_order".b,
           "erx_mf_extent".b,
           "erx_mf_introduction".b,
@@ -12153,6 +12252,150 @@ module Erx
             name: "mappings_max".b,
             value: 65536,
             type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mbr_entries".b => Constant.new(
+            name: "mbr_entries".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mbr_entries_offset".b => Constant.new(
+            name: "mbr_entries_offset".b,
+            value: 446,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mbr_sector_size".b => Constant.new(
+            name: "mbr_sector_size".b,
+            value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mbr_signature".b => Constant.new(
+            name: "mbr_signature".b,
+            value: 43605,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "mbr_signature_offset".b => Constant.new(
+            name: "mbr_signature_offset".b,
+            value: 510,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mbr_status_inactive".b => Constant.new(
+            name: "mbr_status_inactive".b,
+            value: 0,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "mbr_type_empty".b => Constant.new(
+            name: "mbr_type_empty".b,
+            value: 0,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_data_ebr".b => Constant.new(
+            name: "medium_data_ebr".b,
+            value: 2246656,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_data_sectors_min".b => Constant.new(
+            name: "medium_data_sectors_min".b,
+            value: 262144,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_data_start".b => Constant.new(
+            name: "medium_data_start".b,
+            value: 2248704,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_data_type".b => Constant.new(
+            name: "medium_data_type".b,
+            value: 131,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_extended_start".b => Constant.new(
+            name: "medium_extended_start".b,
+            value: 2113536,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_extended_type".b => Constant.new(
+            name: "medium_extended_type".b,
+            value: 15,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_link_type".b => Constant.new(
+            name: "medium_link_type".b,
+            value: 5,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_record_sectors".b => Constant.new(
+            name: "medium_record_sectors".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_record_start".b => Constant.new(
+            name: "medium_record_start".b,
+            value: 2048,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_record_type".b => Constant.new(
+            name: "medium_record_type".b,
+            value: 14,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_slot_a_start".b => Constant.new(
+            name: "medium_slot_a_start".b,
+            value: 16384,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_slot_b_start".b => Constant.new(
+            name: "medium_slot_b_start".b,
+            value: 1064960,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_slot_sectors".b => Constant.new(
+            name: "medium_slot_sectors".b,
+            value: 1048576,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_slot_type".b => Constant.new(
+            name: "medium_slot_type".b,
+            value: 12,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "medium_vault_sectors".b => Constant.new(
+            name: "medium_vault_sectors".b,
+            value: 131072,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_vault_start".b => Constant.new(
+            name: "medium_vault_start".b,
+            value: 2115584,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_vault_type".b => Constant.new(
+            name: "medium_vault_type".b,
+            value: 131,
+            type: types.fetch("u8"),
             description: nil
           ).freeze,
           "mem_attr_device".b => Constant.new(

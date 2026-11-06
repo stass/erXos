@@ -3,8 +3,10 @@
 
 %% The block driver's supervisor (docs/design-storage.md, "The block driver"): the device
 %% process, erx_blk, restarted after a crash and left stopped after a shutdown, which is how
-%% it ends on a device that refuses a reset. A machine without a disk starts no driver:
-%% erx_blk's init/1 returns ignore, and the supervisor holds nothing.
+%% it ends on a device that refuses a reset; then the partition process, erx_blk_service,
+%% which admits the partition table and holds the windows. A machine without a disk starts
+%% no device process: erx_blk's init/1 returns ignore, and the partition process serves no
+%% window.
 
 -module(erx_blk_sup).
 -behaviour(supervisor).
@@ -22,4 +24,10 @@ init([]) ->
                shutdown => 2000,
                type => worker,
                modules => [erx_blk]},
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device]}}.
+    Service = #{id => erx_blk_service,
+                start => {erx_blk_service, start_link, []},
+                restart => permanent,
+                shutdown => 2000,
+                type => worker,
+                modules => [erx_blk_service]},
+    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service]}}.

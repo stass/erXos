@@ -809,6 +809,30 @@ erx_lane_rec_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_mbr_entry_decode(const uint8_t *bytes, size_t length,
+    erx_mbr_entry_t *result)
+{
+	erx_mbr_entry_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_MBR_ENTRY_SIZE)
+		return (false);
+
+	value.status = bytes[0];
+	for (size_t index = 0; index < 3; index++) {
+		value.chs_first[index] = bytes[1 + index * 1];
+	}
+	value.type = bytes[4];
+	for (size_t index = 0; index < 3; index++) {
+		value.chs_last[index] = bytes[5 + index * 1];
+	}
+	value.lba_start = erx_abi_load_u32(bytes + 8);
+	value.lba_sectors = erx_abi_load_u32(bytes + 12);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_mf_boot_order_decode(const uint8_t *bytes, size_t length,
     erx_mf_boot_order_t *result)
 {

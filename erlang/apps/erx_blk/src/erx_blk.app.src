@@ -3,13 +3,16 @@
 
 %% The block device class's driver, over erx_device (docs/design-storage.md, "The block
 %% driver"): virtio-mmio's block device, whose record the root hands the system domain's
-%% ERTS (erx_device_record). erx_blk is the device process, erx_blk_request its pure core
-%% and erx_blk_write the one write path.
+%% ERTS (erx_device_record). erx_blk is the device process, erx_blk_request its pure core,
+%% erx_blk_write the one write path,
+%% erx_blk_service the partition process, erx_blk_table its pure core, and erx_blk_window
+%% a window of the block service.
 {application, erx_blk,
  [{description, "erXos block driver"},
   {vsn, "1"},
-  {modules, [erx_blk, erx_blk_app, erx_blk_request, erx_blk_sup, erx_blk_write]},
-  {registered, [erx_blk, erx_blk_sup]},
+  {modules, [erx_blk, erx_blk_app, erx_blk_request, erx_blk_service, erx_blk_sup, erx_blk_table,
+              erx_blk_window, erx_blk_write]},
+  {registered, [erx_blk, erx_blk_service, erx_blk_sup]},
   {applications, [kernel, stdlib, erx]},
   {mod, {erx_blk_app, []}},
   {env, []}]}.

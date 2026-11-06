@@ -63,14 +63,16 @@ module Erx
     # Reads each sector in expected, a map from sector index to the tag it must
     # hold, from the image at path, which has sectors sectors. Returns a
     # SectorResult per entry, in index order. A sector the file does not wholly
-    # contain is :out_of_range, however the file came to be short.
-    def check(path:, sectors:, expected:)
-      check_sectors(sectors)
+    # contain is :out_of_range, however the file came to be short. A sparse image
+    # that create did not make, such as MediumImage's, passes a larger max_sectors,
+    # the bound on its length; the check still reads only the sectors in expected.
+    def check(path:, sectors:, expected:, max_sectors: MAX_SECTORS)
+      check_sectors(sectors, max_sectors: max_sectors)
       unless expected.is_a?(Hash) && expected.size <= MAX_SECTORS && expected.keys.all?(Integer)
         raise Error, "a disk image check expects at most #{MAX_SECTORS} sectors, named by integers"
       end
 
-      open_image(path) do |size, input|
+      open_image(path, max_bytes: max_sectors * SECTOR_BYTES) do |size, input|
         expected.sort.map do |index, tag|
           SectorResult.new(index: index, status: sector_status(input, size: size, sectors: sectors, index: index, tag: tag))
         end
@@ -82,10 +84,10 @@ module Erx
       results.select { |result| result.status == status }.map(&:index)
     end
 
-    def check_sectors(sectors)
-      return if sectors.is_a?(Integer) && sectors.between?(1, MAX_SECTORS)
+    def check_sectors(sectors, max_sectors: MAX_SECTORS)
+      return if sectors.is_a?(Integer) && sectors.between?(1, max_sectors)
 
-      raise Error, "a disk image has 1 to #{MAX_SECTORS} sectors"
+      raise Error, "a disk image has 1 to #{max_sectors} sectors"
     end
     private_class_method :check_sectors
 
@@ -97,14 +99,14 @@ module Erx
     private_class_method :sector_status
 
     # Opens path for reading, and yields its size and the open file.
-    def open_image(path)
+    def open_image(path, max_bytes:)
       unless path.is_a?(String) && path.start_with?('/') && path.bytesize <= 4096 && !path.include?("\0")
         raise Error, 'a disk image path is absolute, short and holds no NUL'
       end
 
       File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |input|
         stat = input.stat
-        raise Error, "disk image is not a bounded regular file: #{path}" unless stat.file? && stat.size <= MAX_SECTORS * SECTOR_BYTES
+        raise Error, "disk image is not a bounded regular file: #{path}" unless stat.file? && stat.size <= max_bytes
 
         input.binmode
         yield stat.size, input

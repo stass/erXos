@@ -286,3 +286,6 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   16-descriptor queue holds at most five requests while the pool reserves sixteen 4113-byte buffers, and the odd stride
   lets buffers share cache lines. Two segments (header and sectors out or in, then the status) and a buffer size rounded
   to a cache line would double the requests in flight; settle it with `tools/erx bench` read throughput under HVF.
+* **One request in flight per window.** `erx_blk_window` answers one request at a time and waits on `erx_blk` for each,
+  so a file system on one window has one request at the device while the queue holds several. Settled by
+  `tools/erx bench` read throughput under HVF through one window against several clients of the device process.

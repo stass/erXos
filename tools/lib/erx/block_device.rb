@@ -10,6 +10,7 @@ require_relative 'bounded_file'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'medium_image'
 require_relative 'oracle'
 require_relative 'output_directory'
 require_relative 'production_image'
@@ -52,6 +53,27 @@ module Erx
   # sector I failed", and a guest whose driver did not start prints "blk: no driver"
   # and then "blk: done"; any line other than the above fails the suite. Other lines
   # the guest prints are not the test module's and are ignored.
+  #
+  # A second boot attaches a medium laid out by the ABI file's medium layout
+  # (medium_image.rb) and starts the test module's `medium` entry, which drives the
+  # block service's windows (erx_blk_service, erx_blk_window). For each window, in
+  # MediumImage::ROLES order, the lines are
+  #
+  #   blk: window R sectors N       the window on role R's partition has N sectors
+  #   blk: window R sector 0 holds host S
+  #   blk: window R sector N-1 holds host E
+  #                                 its first and last sectors hold the host's pattern
+  #                                 of the medium's sectors S and E, so the window maps
+  #                                 its sectors to the partition's, and only those
+  #   blk: window R sector N refused
+  #                                 a read past its end is refused with erange
+  #
+  # then "blk: window data wrote sector N-1", the data window's last sector rewritten
+  # with the guest's pattern of the medium sector it read there, "blk: window vault
+  # write sector N refused", a write past the vault's end refused with erange, and
+  # "blk: done". The harness then reads the medium back. medium_expected_lines holds
+  # the sequence; a failed step prints "failed" in its line, a sector that holds
+  # something else "holds other", and a guest without the service "blk: no windows".
   module BlockDevice
     SECTORS = 16
     TRANSPORT_VERSION = 2
@@ -69,6 +91,8 @@ module Erx
     GUEST_MODULE = 'erx_blk_check'
     GUEST_PATH = '/test/blk'
     GUEST_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'main'].freeze
+    MEDIUM_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'medium'].freeze
+    MEDIUM_NAME = 'medium.img'
     ERLC_DEADLINE = 120
     # The most serial text read back, and the most of a guest line quoted in a report.
     SERIAL_BYTES = 1 << 20
@@ -84,6 +108,47 @@ module Erx
        "blk: read sector #{SECTORS} refused",
        *WRITE_SECTORS.map { |index| "blk: wrote sector #{index}" },
        'blk: done']
+    end
+
+    # The lines of a good run of the medium boot.
+    def medium_expected_lines
+      windows = MediumImage.windows
+      ["blk: capacity #{MediumImage.sectors} sectors",
+       *windows.flat_map do |window|
+         ["blk: window #{window.role} sectors #{window.sectors}",
+          "blk: window #{window.role} sector 0 holds host #{window.start}",
+          "blk: window #{window.role} sector #{window.sectors - 1} holds host #{window.last}",
+          "blk: window #{window.role} sector #{window.sectors} refused"]
+       end,
+       "blk: window data wrote sector #{windows.find { |window| window.role == :data }.sectors - 1}",
+       "blk: window vault write sector #{windows.find { |window| window.role == :vault }.sectors} refused",
+       'blk: done']
+    end
+
+    # What the medium must hold after a good run: the host's pattern in every window's
+    # first and last sector but the data window's last, which the guest rewrote.
+    def medium_expected_tags
+      windows = MediumImage.windows
+      data_last = windows.find { |window| window.role == :data }.last
+      windows.flat_map { |window| [window.start, window.last] }
+             .to_h { |index| [index, index == data_last ? BlockImage::GUEST_TAG : BlockImage::HOST_TAG] }
+    end
+
+    # The sectors of the medium that are not as expected, or nil when all are.
+    def medium_image_difference(path)
+      results = BlockImage.check(path: path, sectors: MediumImage.sectors, expected: medium_expected_tags,
+                                 max_sectors: MediumImage::MAX_SECTORS)
+      wrong = results.reject { |result| result.status == :match }.map { |result| "#{result.index} #{result.status}" }
+      # The table's records too, byte for byte: the vault's refused write named the data
+      # record's sector. check has already found path a bounded regular file.
+      changed = File.open(path, File::RDONLY | File::NOFOLLOW) do |input|
+        input.binmode
+        MediumImage.records.reject { |sector, bytes| input.pread(bytes.bytesize, sector * BlockImage::SECTOR_BYTES) == bytes }
+      end
+      wrong += changed.keys.map { |sector| "#{sector} record" }
+      return if wrong.empty?
+
+      "medium sectors not as expected: #{wrong.join(', ')}"
     end
 
     # The driver's lines in the serial bytes, in order, without line endings, up to
@@ -104,9 +169,8 @@ module Erx
 
     # The first way the guest's lines differ from expected_lines, or nil. The
     # guest's text is quoted escaped and cut short.
-    def line_difference(bytes)
+    def line_difference(bytes, expected: expected_lines)
       actual = guest_lines(bytes)
-      expected = expected_lines
       index = (0...[actual.size, expected.size].max).find { |at| actual[at] != expected[at] }
       return if index.nil?
 
@@ -137,8 +201,8 @@ module Erx
 
     # The kernel command line of a boot under accel: the harness's words for it, then
     # one erx.arg word for each argument that starts the test module.
-    def command_line(accel)
-      [ProductionImage::Run::COMMAND_LINES[accel], *GUEST_ARGUMENTS.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
+    def command_line(accel, arguments: GUEST_ARGUMENTS)
+      [ProductionImage::Run::COMMAND_LINES[accel], *arguments.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
     end
 
     class Run
@@ -160,26 +224,47 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         image = test_image(fiasco)
-        accels.to_h { |accel| ["#{accel}-1cpu", run_one(accel, image)] }
+        accels.to_h { |accel| ["#{accel}-1cpu", run_one(accel, image) && run_medium(accel, image)] }
       end
 
       private
 
+      # The raw disk, driven through erx_blk itself.
       def run_one(accel, image)
-        directory = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/block-device',
-                                                                         "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"),
-                                            mode: 0o700)
+        directory = run_directory(accel)
         disk = BlockImage.create(directory: directory, name: DISK_NAME, sectors: SECTORS)
+        boot(accel, image, directory: directory, disk: disk, arguments: GUEST_ARGUMENTS,
+                           expected: BlockDevice.expected_lines) { BlockDevice.image_difference(disk) }
+      end
+
+      # The medium laid out by the ABI file, driven through the block service's windows.
+      def run_medium(accel, image)
+        directory = run_directory(accel)
+        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME)
+        boot(accel, image, directory: directory, disk: disk, arguments: MEDIUM_ARGUMENTS,
+                           expected: BlockDevice.medium_expected_lines) { BlockDevice.medium_image_difference(disk) }
+      end
+
+      def run_directory(accel)
+        OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/block-device',
+                                                             "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"),
+                                mode: 0o700)
+      end
+
+      # One boot with disk attached, judged by its lines and then by the block that
+      # reads the disk back.
+      def boot(accel, image, directory:, disk:, arguments:, expected:)
         serial = File.join(directory, 'serial.log')
         begin
           Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: MEMORY_MIB, directory: directory,
                                                      checkpoints: BlockDevice.checkpoints, disks: [QemuPlan::Disk.new(path: disk)],
-                                                     command_line: BlockDevice.command_line(accel))
+                                                     command_line: BlockDevice.command_line(accel, arguments: arguments))
         rescue TranscriptTimeout => error
           # A driver that fails stops printing before "blk: done": say which step.
-          raise Error, "block device on #{accel}: #{error.message}; #{BlockDevice.line_difference(read_serial(serial))}"
+          raise Error, "block device on #{accel}: #{error.message}; " \
+                       "#{BlockDevice.line_difference(read_serial(serial), expected: expected)}"
         end
-        problem = BlockDevice.line_difference(read_serial(serial)) || BlockDevice.image_difference(disk)
+        problem = BlockDevice.line_difference(read_serial(serial), expected: expected) || yield
         raise Error, "block device on #{accel}: #{problem}" if problem
 
         'passed'
