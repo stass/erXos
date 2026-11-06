@@ -457,6 +457,27 @@ struct erx_rights {
 #define ERX_USER_BASE_MIN UINT64_C(65536)
 #define ERX_UTCB_BRS UINT32_C(58)
 #define ERX_UTCB_BYTES_MAX UINT32_C(504)
+#define ERX_VIRTIO_BLK_CONFIG_CAPACITY_HIGH UINT32_C(1)
+#define ERX_VIRTIO_BLK_CONFIG_CAPACITY_LOW UINT32_C(0)
+#define ERX_VIRTIO_BLK_S_IOERR UINT8_C(1)
+#define ERX_VIRTIO_BLK_S_OK UINT8_C(0)
+#define ERX_VIRTIO_BLK_S_UNSUPP UINT8_C(2)
+#define ERX_VIRTIO_BLK_SECTOR_SIZE UINT32_C(512)
+#define ERX_VIRTIO_BLK_T_FLUSH UINT32_C(4)
+#define ERX_VIRTIO_BLK_T_IN UINT32_C(0)
+#define ERX_VIRTIO_BLK_T_OUT UINT32_C(1)
+#define ERX_VIRTIO_F_VERSION_1_BIT UINT32_C(0)
+#define ERX_VIRTIO_F_VERSION_1_WORD UINT32_C(1)
+#define ERX_VIRTIO_ID_BLOCK UINT32_C(2)
+#define ERX_VIRTIO_MMIO_MAGIC UINT32_C(1953655158)
+#define ERX_VIRTIO_MMIO_VERSION UINT32_C(2)
+#define ERX_VIRTQ_AVAIL_RING_ALIGN UINT32_C(2)
+#define ERX_VIRTQ_DESC_F_INDIRECT UINT16_C(4)
+#define ERX_VIRTQ_DESC_F_NEXT UINT16_C(1)
+#define ERX_VIRTQ_DESC_F_WRITE UINT16_C(2)
+#define ERX_VIRTQ_DESC_TABLE_ALIGN UINT32_C(16)
+#define ERX_VIRTQ_SIZE_MAX UINT32_C(32768)
+#define ERX_VIRTQ_USED_RING_ALIGN UINT32_C(4)
 #define ERX_VM_FIXED UINT32_C(1)
 #define ERX_VM_FLAGS_KNOWN UINT32_C(3)
 #define ERX_VM_NOREPLACE UINT32_C(2)
@@ -2384,6 +2405,82 @@ _Static_assert(offsetof(erx_kupage_t, utcb) ==
     ERX_KUPAGE_OFF_UTCB, "erx_kupage.utcb offset");
 _Static_assert(offsetof(erx_kupage_t, vcpu) ==
     ERX_KUPAGE_OFF_VCPU, "erx_kupage.vcpu offset");
+
+#define ERX_VIRTIO_BLK_REQ_HEADER_SIZE 16
+#define ERX_VIRTIO_BLK_REQ_HEADER_ALIGN 8
+#define ERX_VIRTIO_BLK_REQ_HEADER_OFF_TYPE 0
+#define ERX_VIRTIO_BLK_REQ_HEADER_OFF_RESERVED 4
+#define ERX_VIRTIO_BLK_REQ_HEADER_OFF_SECTOR 8
+typedef struct erx_virtio_blk_req_header erx_virtio_blk_req_header_t;
+struct erx_virtio_blk_req_header {
+	_Alignas(8) uint32_t	type;
+	uint32_t	reserved;
+	uint64_t	sector;
+};
+_Static_assert(sizeof(erx_virtio_blk_req_header_t) == ERX_VIRTIO_BLK_REQ_HEADER_SIZE, "erx_virtio_blk_req_header size");
+_Static_assert(_Alignof(erx_virtio_blk_req_header_t) == ERX_VIRTIO_BLK_REQ_HEADER_ALIGN, "erx_virtio_blk_req_header alignment");
+_Static_assert(offsetof(erx_virtio_blk_req_header_t, type) ==
+    ERX_VIRTIO_BLK_REQ_HEADER_OFF_TYPE, "erx_virtio_blk_req_header.type offset");
+_Static_assert(offsetof(erx_virtio_blk_req_header_t, reserved) ==
+    ERX_VIRTIO_BLK_REQ_HEADER_OFF_RESERVED, "erx_virtio_blk_req_header.reserved offset");
+_Static_assert(offsetof(erx_virtio_blk_req_header_t, sector) ==
+    ERX_VIRTIO_BLK_REQ_HEADER_OFF_SECTOR, "erx_virtio_blk_req_header.sector offset");
+
+#define ERX_VIRTQ_DESC_SIZE 16
+#define ERX_VIRTQ_DESC_ALIGN 8
+#define ERX_VIRTQ_DESC_OFF_ADDR 0
+#define ERX_VIRTQ_DESC_OFF_LEN 8
+#define ERX_VIRTQ_DESC_OFF_FLAGS 12
+#define ERX_VIRTQ_DESC_OFF_NEXT 14
+typedef struct erx_virtq_desc erx_virtq_desc_t;
+struct erx_virtq_desc {
+	_Alignas(8) uint64_t	addr;
+	uint32_t	len;
+	uint16_t	flags;
+	uint16_t	next;
+};
+_Static_assert(sizeof(erx_virtq_desc_t) == ERX_VIRTQ_DESC_SIZE, "erx_virtq_desc size");
+_Static_assert(_Alignof(erx_virtq_desc_t) == ERX_VIRTQ_DESC_ALIGN, "erx_virtq_desc alignment");
+_Static_assert(offsetof(erx_virtq_desc_t, addr) ==
+    ERX_VIRTQ_DESC_OFF_ADDR, "erx_virtq_desc.addr offset");
+_Static_assert(offsetof(erx_virtq_desc_t, len) ==
+    ERX_VIRTQ_DESC_OFF_LEN, "erx_virtq_desc.len offset");
+_Static_assert(offsetof(erx_virtq_desc_t, flags) ==
+    ERX_VIRTQ_DESC_OFF_FLAGS, "erx_virtq_desc.flags offset");
+_Static_assert(offsetof(erx_virtq_desc_t, next) ==
+    ERX_VIRTQ_DESC_OFF_NEXT, "erx_virtq_desc.next offset");
+
+#define ERX_VIRTQ_RING_HEAD_SIZE 4
+#define ERX_VIRTQ_RING_HEAD_ALIGN 2
+#define ERX_VIRTQ_RING_HEAD_OFF_FLAGS 0
+#define ERX_VIRTQ_RING_HEAD_OFF_IDX 2
+typedef struct erx_virtq_ring_head erx_virtq_ring_head_t;
+struct erx_virtq_ring_head {
+	_Alignas(2) uint16_t	flags;
+	uint16_t	idx;
+};
+_Static_assert(sizeof(erx_virtq_ring_head_t) == ERX_VIRTQ_RING_HEAD_SIZE, "erx_virtq_ring_head size");
+_Static_assert(_Alignof(erx_virtq_ring_head_t) == ERX_VIRTQ_RING_HEAD_ALIGN, "erx_virtq_ring_head alignment");
+_Static_assert(offsetof(erx_virtq_ring_head_t, flags) ==
+    ERX_VIRTQ_RING_HEAD_OFF_FLAGS, "erx_virtq_ring_head.flags offset");
+_Static_assert(offsetof(erx_virtq_ring_head_t, idx) ==
+    ERX_VIRTQ_RING_HEAD_OFF_IDX, "erx_virtq_ring_head.idx offset");
+
+#define ERX_VIRTQ_USED_ELEM_SIZE 8
+#define ERX_VIRTQ_USED_ELEM_ALIGN 4
+#define ERX_VIRTQ_USED_ELEM_OFF_ID 0
+#define ERX_VIRTQ_USED_ELEM_OFF_LEN 4
+typedef struct erx_virtq_used_elem erx_virtq_used_elem_t;
+struct erx_virtq_used_elem {
+	_Alignas(4) uint32_t	id;
+	uint32_t	len;
+};
+_Static_assert(sizeof(erx_virtq_used_elem_t) == ERX_VIRTQ_USED_ELEM_SIZE, "erx_virtq_used_elem size");
+_Static_assert(_Alignof(erx_virtq_used_elem_t) == ERX_VIRTQ_USED_ELEM_ALIGN, "erx_virtq_used_elem alignment");
+_Static_assert(offsetof(erx_virtq_used_elem_t, id) ==
+    ERX_VIRTQ_USED_ELEM_OFF_ID, "erx_virtq_used_elem.id offset");
+_Static_assert(offsetof(erx_virtq_used_elem_t, len) ==
+    ERX_VIRTQ_USED_ELEM_OFF_LEN, "erx_virtq_used_elem.len offset");
 
 typedef uint32_t erx_exec_state_t;
 

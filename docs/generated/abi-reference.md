@@ -451,6 +451,27 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_USER_BASE_MIN` | 65536 |
 | `ERX_UTCB_BRS` | 58 |
 | `ERX_UTCB_BYTES_MAX` | 504 |
+| `ERX_VIRTIO_BLK_CONFIG_CAPACITY_HIGH` | 1 |
+| `ERX_VIRTIO_BLK_CONFIG_CAPACITY_LOW` | 0 |
+| `ERX_VIRTIO_BLK_S_IOERR` | 1 |
+| `ERX_VIRTIO_BLK_S_OK` | 0 |
+| `ERX_VIRTIO_BLK_S_UNSUPP` | 2 |
+| `ERX_VIRTIO_BLK_SECTOR_SIZE` | 512 |
+| `ERX_VIRTIO_BLK_T_FLUSH` | 4 |
+| `ERX_VIRTIO_BLK_T_IN` | 0 |
+| `ERX_VIRTIO_BLK_T_OUT` | 1 |
+| `ERX_VIRTIO_F_VERSION_1_BIT` | 0 |
+| `ERX_VIRTIO_F_VERSION_1_WORD` | 1 |
+| `ERX_VIRTIO_ID_BLOCK` | 2 |
+| `ERX_VIRTIO_MMIO_MAGIC` | 1953655158 |
+| `ERX_VIRTIO_MMIO_VERSION` | 2 |
+| `ERX_VIRTQ_AVAIL_RING_ALIGN` | 2 |
+| `ERX_VIRTQ_DESC_F_INDIRECT` | 4 |
+| `ERX_VIRTQ_DESC_F_NEXT` | 1 |
+| `ERX_VIRTQ_DESC_F_WRITE` | 2 |
+| `ERX_VIRTQ_DESC_TABLE_ALIGN` | 16 |
+| `ERX_VIRTQ_SIZE_MAX` | 32768 |
+| `ERX_VIRTQ_USED_RING_ALIGN` | 4 |
 | `ERX_VM_FIXED` | 1 |
 | `ERX_VM_FLAGS_KNOWN` | 3 |
 | `ERX_VM_NOREPLACE` | 2 |
@@ -1279,6 +1300,45 @@ Storage: `shared`. Prefix size: 4096. Alignment: 4096.
 | --- | --- | ---: | ---: |
 | `utcb` | `erx_utcb` | 0 | 1 |
 | `vcpu` | `erx_vcpu` | 1024 | 1 |
+
+### `erx_virtio_blk_req_header_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `type` | `u32` | 0 | 1 |
+| `reserved` | `u32` | 4 | 1 |
+| `sector` | `u64` | 8 | 1 |
+
+### `erx_virtq_desc_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `addr` | `u64` | 0 | 1 |
+| `len` | `u32` | 8 | 1 |
+| `flags` | `u16` | 12 | 1 |
+| `next` | `u16` | 14 | 1 |
+
+### `erx_virtq_ring_head_t`
+
+Storage: `wire_le`. Prefix size: 4. Alignment: 2.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `flags` | `u16` | 0 | 1 |
+| `idx` | `u16` | 2 | 1 |
+
+### `erx_virtq_used_elem_t`
+
+Storage: `wire_le`. Prefix size: 8. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `id` | `u32` | 0 | 1 |
+| `len` | `u32` | 4 | 1 |
 
 ### `erx_fault_t`
 

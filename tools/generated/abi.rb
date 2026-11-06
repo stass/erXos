@@ -6075,6 +6075,216 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_virtio_blk_req_header"] = Layout.new(
+        name: "erx_virtio_blk_req_header".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "type".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u32"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "sector".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_virtq_desc"] = Layout.new(
+        name: "erx_virtq_desc".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "addr".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "len".b,
+            type: types.fetch("u32"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("u16"),
+            offset: 12,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "next".b,
+            type: types.fetch("u16"),
+            offset: 14,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_virtq_ring_head"] = Layout.new(
+        name: "erx_virtq_ring_head".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 2,
+        size: 4,
+        fields: [
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("u16"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "idx".b,
+            type: types.fetch("u16"),
+            offset: 2,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_virtq_used_elem"] = Layout.new(
+        name: "erx_virtq_used_elem".b,
+        version: 1,
+        storage: "wire_le".b,
+        alignment: 4,
+        size: 8,
+        fields: [
+          Field.new(
+            name: "id".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "len".b,
+            type: types.fetch("u32"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["exec_state"] = EnumType.new(
         name: "exec_state".b,
         base: types.fetch("u32"),
@@ -10174,6 +10384,10 @@ module Erx
           "erx_vcpu".b,
           "erx_utcb".b,
           "erx_kupage".b,
+          "erx_virtio_blk_req_header".b,
+          "erx_virtq_desc".b,
+          "erx_virtq_ring_head".b,
+          "erx_virtq_used_elem".b,
           "exec_state".b,
           "exit_kind".b,
           "fault_kind".b,
@@ -12856,6 +13070,132 @@ module Erx
           "utcb_bytes_max".b => Constant.new(
             name: "utcb_bytes_max".b,
             value: 504,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_config_capacity_high".b => Constant.new(
+            name: "virtio_blk_config_capacity_high".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_config_capacity_low".b => Constant.new(
+            name: "virtio_blk_config_capacity_low".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_s_ioerr".b => Constant.new(
+            name: "virtio_blk_s_ioerr".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "virtio_blk_s_ok".b => Constant.new(
+            name: "virtio_blk_s_ok".b,
+            value: 0,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "virtio_blk_s_unsupp".b => Constant.new(
+            name: "virtio_blk_s_unsupp".b,
+            value: 2,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "virtio_blk_sector_size".b => Constant.new(
+            name: "virtio_blk_sector_size".b,
+            value: 512,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_t_flush".b => Constant.new(
+            name: "virtio_blk_t_flush".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_t_in".b => Constant.new(
+            name: "virtio_blk_t_in".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_blk_t_out".b => Constant.new(
+            name: "virtio_blk_t_out".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_version_1_bit".b => Constant.new(
+            name: "virtio_f_version_1_bit".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_f_version_1_word".b => Constant.new(
+            name: "virtio_f_version_1_word".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_id_block".b => Constant.new(
+            name: "virtio_id_block".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_mmio_magic".b => Constant.new(
+            name: "virtio_mmio_magic".b,
+            value: 1953655158,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtio_mmio_version".b => Constant.new(
+            name: "virtio_mmio_version".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtq_avail_ring_align".b => Constant.new(
+            name: "virtq_avail_ring_align".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtq_desc_f_indirect".b => Constant.new(
+            name: "virtq_desc_f_indirect".b,
+            value: 4,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "virtq_desc_f_next".b => Constant.new(
+            name: "virtq_desc_f_next".b,
+            value: 1,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "virtq_desc_f_write".b => Constant.new(
+            name: "virtq_desc_f_write".b,
+            value: 2,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "virtq_desc_table_align".b => Constant.new(
+            name: "virtq_desc_table_align".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtq_size_max".b => Constant.new(
+            name: "virtq_size_max".b,
+            value: 32768,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "virtq_used_ring_align".b => Constant.new(
+            name: "virtq_used_ring_align".b,
+            value: 4,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

@@ -242,6 +242,22 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_runtime_limits_decode(bytes, length, &value);
 	}
 	{
+		erx_virtio_blk_req_header_t value;
+		(void)erx_virtio_blk_req_header_decode(bytes, length, &value);
+	}
+	{
+		erx_virtq_desc_t value;
+		(void)erx_virtq_desc_decode(bytes, length, &value);
+	}
+	{
+		erx_virtq_ring_head_t value;
+		(void)erx_virtq_ring_head_decode(bytes, length, &value);
+	}
+	{
+		erx_virtq_used_elem_t value;
+		(void)erx_virtq_used_elem_decode(bytes, length, &value);
+	}
+	{
 		erx_fault_t value;
 		(void)erx_fault_decode(bytes, length, &value);
 	}

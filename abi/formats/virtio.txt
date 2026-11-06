@@ -1,0 +1,52 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# virtio's split virtqueue and the virtio-mmio block device, from the OASIS
+# Virtual I/O Device (VIRTIO) Version 1.2 specification: sections 2.7 (split
+# virtqueues), 4.2.2 (the MMIO transport's values) and 5.2 (the block device).
+# Every field is little-endian, as a version 1 device requires.
+limit virtio_mmio_magic u32 0x74726976
+limit virtio_mmio_version u32 2
+limit virtio_id_block u32 2
+limit virtio_f_version_1_word u32 1
+limit virtio_f_version_1_bit u32 0
+limit virtq_size_max u32 32768
+limit virtq_desc_table_align u32 16
+limit virtq_avail_ring_align u32 2
+limit virtq_used_ring_align u32 4
+limit virtq_desc_f_next u16 1
+limit virtq_desc_f_write u16 2
+limit virtq_desc_f_indirect u16 4
+limit virtio_blk_sector_size u32 512
+limit virtio_blk_t_in u32 0
+limit virtio_blk_t_out u32 1
+limit virtio_blk_t_flush u32 4
+limit virtio_blk_s_ok u8 0
+limit virtio_blk_s_ioerr u8 1
+limit virtio_blk_s_unsupp u8 2
+limit virtio_blk_config_capacity_low u32 0
+limit virtio_blk_config_capacity_high u32 1
+
+# One entry of a queue's descriptor table.
+layout erx_virtq_desc 1 wire_le 8 16
+  field addr u64 0
+  field len u32 8
+  field flags u16 12
+  field next u16 14
+
+# The head of the available ring (the driver's) and of the used ring (the
+# device's); the ring's entries follow, then a trailing event word this
+# driver does not use, since it negotiates no VIRTIO_F_EVENT_IDX.
+layout erx_virtq_ring_head 1 wire_le 2 4
+  field flags u16 0
+  field idx u16 2
+
+# One entry of the used ring, written by the device.
+layout erx_virtq_used_elem 1 wire_le 4 8
+  field id u32 0
+  field len u32 4
+
+# The header a block request starts with, read by the device.
+layout erx_virtio_blk_req_header 1 wire_le 8 16
+  field type u32 0
+  field reserved u32 4
+  field sector u64 8

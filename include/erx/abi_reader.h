@@ -125,6 +125,14 @@ bool erx_regs_decode(const uint8_t *bytes, size_t length,
     erx_regs_t *result);
 bool erx_runtime_limits_decode(const uint8_t *bytes, size_t length,
     erx_runtime_limits_t *result);
+bool erx_virtio_blk_req_header_decode(const uint8_t *bytes, size_t length,
+    erx_virtio_blk_req_header_t *result);
+bool erx_virtq_desc_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_desc_t *result);
+bool erx_virtq_ring_head_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_ring_head_t *result);
+bool erx_virtq_used_elem_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_used_elem_t *result);
 bool erx_fault_decode(const uint8_t *bytes, size_t length,
     erx_fault_t *result);
 bool erx_crash_brief_decode(const uint8_t *bytes, size_t length,

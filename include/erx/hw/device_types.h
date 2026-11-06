@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ERX_DEVICE_REGISTERS_MAX 22u
+#define ERX_DEVICE_REGISTERS_MAX 24u
 #define ERX_DEVICE_FIELDS_MAX 99u
 
 typedef enum erx_device_access {

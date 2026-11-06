@@ -1876,7 +1876,7 @@ The C under it is `erx_device`, one module that exposes `liberx`'s
 DMA envelope and parses nothing a device wrote. Its register accesses are
 BIFs in ERTS, because a driver makes them one at a time and a BIF costs
 less than a NIF's entry and exit, and so is `erx_device:irq_ack/2`, made once per interrupt; the rest of the module
-is a NIF. Its pure decisions are `erx_device_core`, its effects `erx_device.c`, in plain C, under both. A device's record reaches
+is a NIF. Its pure decisions are `erx_device_core` and, for its queues, `erx_device_queue`; its effects are `erx_device.c`, in plain C, under both. A device's record reaches
 the driver from the device service over the system connection: the slots
 of its register windows, IRQ objects and DMA window or contiguous memory,
 its peripheral's name in the CMSIS-SVD source, whether it is

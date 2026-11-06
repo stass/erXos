@@ -6,6 +6,7 @@ include inspection.txt
 include services/console.txt
 include manifest.txt
 include formats/elf64.txt
+include formats/virtio.txt
 include kernel.txt
 include protocols/9p.txt
 

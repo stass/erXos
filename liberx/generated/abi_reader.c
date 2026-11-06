@@ -1133,6 +1133,73 @@ erx_runtime_limits_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_virtio_blk_req_header_decode(const uint8_t *bytes, size_t length,
+    erx_virtio_blk_req_header_t *result)
+{
+	erx_virtio_blk_req_header_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_VIRTIO_BLK_REQ_HEADER_SIZE)
+		return (false);
+
+	value.type = erx_abi_load_u32(bytes + 0);
+	value.reserved = erx_abi_load_u32(bytes + 4);
+	value.sector = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_virtq_desc_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_desc_t *result)
+{
+	erx_virtq_desc_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_VIRTQ_DESC_SIZE)
+		return (false);
+
+	value.addr = erx_abi_load_u64(bytes + 0);
+	value.len = erx_abi_load_u32(bytes + 8);
+	value.flags = erx_abi_load_u16(bytes + 12);
+	value.next = erx_abi_load_u16(bytes + 14);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_virtq_ring_head_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_ring_head_t *result)
+{
+	erx_virtq_ring_head_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_VIRTQ_RING_HEAD_SIZE)
+		return (false);
+
+	value.flags = erx_abi_load_u16(bytes + 0);
+	value.idx = erx_abi_load_u16(bytes + 2);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_virtq_used_elem_decode(const uint8_t *bytes, size_t length,
+    erx_virtq_used_elem_t *result)
+{
+	erx_virtq_used_elem_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_VIRTQ_USED_ELEM_SIZE)
+		return (false);
+
+	value.id = erx_abi_load_u32(bytes + 0);
+	value.len = erx_abi_load_u32(bytes + 4);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fault_decode(const uint8_t *bytes, size_t length,
     erx_fault_t *result)
 {
