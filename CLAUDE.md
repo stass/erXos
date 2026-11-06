@@ -487,8 +487,8 @@ scripts live in `~/erxos-scratch/tools/`.
   repository must be legally redistributable.
 * **Portability.** Apple Silicon macOS is the primary host, then Linux
   (AArch64, x86-64). erXos is cross-platform: AArch64 is the first
-  architecture, QEMU `virt` the first target, under both TCG and HVF, and
-  the Raspberry Pi 4 and then the Raspberry Pi 5 follow; other
+  architecture, QEMU `virt` the first target, and the Raspberry Pi 4 and
+  then the Raspberry Pi 5 follow; other
   architectures and platforms are ports, not redesigns. Keep
   architecture- and board-specific code behind the architecture and
   platform layers so ports stay mechanical. Generic designs, interfaces and
@@ -610,8 +610,10 @@ within about 20 percent of the length, write plain code.
   * **The funnel is checked differentially** against `binary_to_term/1`:
     every payload it accepts decodes to the same term.
   * **Architectural behavior follows the Arm Architecture Reference Manual**
-    and the QEMU `virt` documentation; a test that passes only on TCG or
-    only on HVF is a bug until explained.
+    and the QEMU `virt` documentation. QEMU's suites run under HVF; TCG
+    runs only the deterministic-mode transcript and a boot smoke test, and
+    Linux hosts are not tested until the plan reaches them. A failure seen
+    under one accelerator only is still a bug until explained.
   * **Replacing a stopgap is gated on parity.** The replacement is run
     differentially against the stopgap over the test corpus; every
     difference is a bug in the replacement, a documented improvement with a
