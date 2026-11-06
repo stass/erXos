@@ -1,0 +1,5 @@
+# A variable name must be one word.
+n=(a b)
+echo before
+echo $$n
+echo after

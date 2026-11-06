@@ -1,0 +1,4 @@
+# Lists of different lengths do not join.
+echo before
+echo (a b)^(c d e)
+echo after

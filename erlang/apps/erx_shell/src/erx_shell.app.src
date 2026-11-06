@@ -2,12 +2,14 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The command shell with rc's language (docs/design-shell.md): its tokenizer
-%% and its parser, pure functions from a line or script to a syntax tree.
+%% and its parser, pure functions from a line or script to a syntax tree,
+%% and its evaluator, which runs a tree through a runner it is handed.
 %% It starts nothing of its own.
 {application, erx_shell,
  [{description, "erXos command shell"},
   {vsn, "1"},
-  {modules, [erx_shell_lex,
+  {modules, [erx_shell_eval,
+             erx_shell_lex,
              erx_shell_parse]},
   {registered, []},
   {applications, [kernel, stdlib]},

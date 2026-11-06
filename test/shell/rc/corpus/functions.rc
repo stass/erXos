@@ -1,0 +1,30 @@
+# Functions, $*, local variables, shift and redefinition.
+fn greet { echo hello $* ($#*) }
+greet a b
+*=(top)
+greet
+echo star $*
+fn count { if(~ $#* 0) echo done; if not { echo $1; shift; count $* } }
+count 3 2 1
+x=global
+fn show { echo x is $x }
+x=local show
+echo $x
+fn fails { false }
+fails
+echo st $status
+fn greet { echo replaced }
+greet
+fn greet
+whatis greet
+echo st2 $status
+fn a b { echo ab $* }
+a 1
+b 2
+fn shifter { shift 2; echo $* }
+shifter 1 2 3 4
+fn shifter2 { shift 9; echo left $#* }
+shifter2 1 2
+fn status { echo $status }
+false
+status

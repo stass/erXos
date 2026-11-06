@@ -1,0 +1,5 @@
+# whatis of a function: rc prints the function's body, the evaluator
+# cannot (see DIFFERENCES in erx_shell_corpus_test.rb).
+fn f { echo one; echo two }
+whatis f
+echo st $status

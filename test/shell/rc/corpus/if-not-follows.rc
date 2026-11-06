@@ -1,0 +1,6 @@
+# rc refuses an `if not' that does not directly follow an `if' (see
+# DIFFERENCES in erx_shell_corpus_test.rb).
+if(false) echo a
+if not echo first
+if not echo second
+echo after

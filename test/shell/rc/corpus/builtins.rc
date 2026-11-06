@@ -1,0 +1,20 @@
+# eval, whatis, builtin and exit.
+x=(a 'b c' '' 'd=e')
+whatis x
+y=plain
+whatis y
+whatis eval exit
+whatis echo
+echo st $status
+whatis nosuch
+echo st2 $status
+eval echo evaluated
+eval 'y=(1 2)'
+echo $y
+eval echo '$#y'
+fn echo { builtin echo shadowed $* }
+echo hi
+builtin echo direct
+fn echo
+exit 'final word'
+echo never

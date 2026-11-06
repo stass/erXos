@@ -1,0 +1,5 @@
+# A null list in a concatenation ends the script.
+echo before
+x=()
+echo a^$x
+echo after

@@ -1,0 +1,2 @@
+# Parts join left to right, so the mismatch is found before the null list.
+echo (1 2)^(1 2 3)^()

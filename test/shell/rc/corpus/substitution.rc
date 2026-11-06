@@ -1,0 +1,17 @@
+# Command substitution, $ifs and the split word.
+x=`{echo a b c}
+echo $#x $x
+y=`{echo -n 'one  two'}
+echo $#y
+ifs=:
+z=`{echo -n a:b::c}
+echo $#z $z
+ifs=' 
+'
+w=`:{echo -n 1:2:3}
+echo $#w $w
+true
+v=`{false}
+echo st $status $#v
+e=`{echo -n}
+echo $#e

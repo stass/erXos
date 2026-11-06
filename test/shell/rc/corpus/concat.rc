@@ -1,0 +1,16 @@
+# Explicit carets, free carets and how lists of each length join.
+x=(a b c)
+y=(1 2 3)
+echo $x^$y
+echo $x^-
+echo pre^$x
+echo $x.c
+echo -$x-
+s=s
+echo $s$s ''^$s
+echo (a b)^(c d)
+echo ()^()
+echo `{echo q r}^z
+v=(only)
+echo $v^$y
+echo a^'b'^c

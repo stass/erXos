@@ -1,0 +1,2 @@
+# A fault inside a substitution (see DIFFERENCES in erx_shell_corpus_test.rb).
+x=`{ echo a^() }; echo bq $status

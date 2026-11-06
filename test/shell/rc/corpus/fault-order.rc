@@ -1,0 +1,3 @@
+# rc expands words right to left, so the rightmost fault comes first.
+n=(a b)
+echo $$n a^()

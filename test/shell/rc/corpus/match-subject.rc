@@ -1,0 +1,4 @@
+# A pattern character written unquoted in the subject of ~ (see DIFFERENCES
+# in erx_shell_corpus_test.rb).
+~ a* 'a*'; echo star-subject $status
+~ a* a*; echo star-both $status

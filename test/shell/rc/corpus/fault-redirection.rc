@@ -1,0 +1,3 @@
+# A redirection target must be one word.
+x=(a b)
+echo hi >$x

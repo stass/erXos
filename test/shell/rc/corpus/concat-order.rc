@@ -1,0 +1,3 @@
+# Every part of a word is evaluated, right to left, before any are joined:
+# the substitution writes before the null list faults.
+echo `{echo hi >[1=2]}^()^(x)

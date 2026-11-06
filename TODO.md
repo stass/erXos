@@ -1276,10 +1276,63 @@ it; git history is the record of completed work.
 `` `split{cmd} `` is accepted; a here document's body starts after the
 next newline, even inside braces, where plan9port may wait for the whole
 command; `>>{`, `<>{` and `>[2]{` are refused; and a NUL byte is a word
-byte, which the evaluator must refuse in a program's arguments. Add each
+byte, which the evaluator refuses in a program's arguments and a file
+name but hands the runner inside a variable's value, which a program's
+environment must leave out. Add each
 to the corpus and follow rc
   (`erlang/apps/erx_shell/src/erx_shell_lex.erl`,
   `erlang/apps/erx_shell/src/erx_shell_parse.erl`).
+* [Medium] shell, `=` inside a word: plan9port's rc (its hand-written
+  parser, which the oracle runs) takes `=` as a word after a command's
+  first word and inside a list, joined by free carets: `echo a=b x= =y`
+  prints `a=b x= =y` and `x=(p q=r)` assigns two words. erx_shell_parse
+  follows rc's yacc grammar and refuses both. Follow the hand-written
+  parser in the lexer's free carets and the parser, and add the cases to
+  the corpus (`erlang/apps/erx_shell/src/erx_shell_parse.erl`,
+  `test/shell/rc/corpus`).
+* [Medium] shell, `if not` that does not follow an `if`: rc refuses it
+  before running the unit, across units of one source too (``rc: file:line:
+  `if not' does not follow `if(...)'``); erx_shell_parse accepts it and
+  the evaluator runs it on the flag. Pinned as a difference by the
+  corpus's `if-not-follows.rc` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
+* [Low] shell, `whatis` of a function: rc prints `fn name {body}` as its
+  parser deparses the body; the evaluator has no printer of syntax trees
+  and says it cannot show the body, status `not supported`. Write the
+  printer, following rc's pcmd.c, and drop the corpus's pinned
+  difference `whatis-function.rc` (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Medium] shell, the evaluator's builtins to come: `.`, `cd`, `wait`
+  and `flag` (rc's), and `erl`, `within`, `jobs`, `fg`, `bg` and `kill`;
+  each is an effect, so each goes behind the runner of `erx_shell_eval`
+  with the command and job pieces of Track S. Until then their names
+  reach the runner as commands. `.` runs a file's units in the current
+  shell, which `{run, Argv, Vars}` cannot express: it needs a request that
+  reads the file for run_source/2; `flag`'s `-e`, `-x` and `-v` are
+  evaluator state, which the evaluator does not hold
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Medium] shell, here documents: rc substitutes a template's variables
+  when it reads the line (here.c), so a function's here document is fixed
+  at its definition and `x=new; cat <<EOF` sees the old `$x`; the
+  evaluator substitutes when it runs the redirection. Decide which the
+  design wants and record it in design-shell.md, give the fake runner a
+  `cat` that reads standard input, and add corpus cases
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Low] shell, the evaluator's smaller differences from rc, each to follow
+  rc or record with a corpus case: `shift -1` empties `$*` in rc and
+  shifts nothing here; `builtin builtin echo` runs a program `builtin` in
+  rc; after a syntax error rc's `$status` is the message alone (`syntax
+  error`), here the whole diagnostic; a copy's status is `1` in rc
+  (`@{exit foo}`, a faulting pipeline stage gives `1|`) and the copy's own
+  status here; and rc runs `fn sigexit` when the shell exits
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Low] shell, escaping the shell's own diagnostics: `whatis`'s `not
+  found` and a runner's fault text name what may come from a shared file
+  system and reach descriptor 2 raw, as in rc. Decide whether the runner
+  applies the line escaper to the shell's `{write, 2, _}` text
+  ([design-shell.md](docs/design-shell.md)).
+* [Low] shell, bodies handed to the runner: each turns the evaluator's
+  throws into values by hand (`apart` through run_unit/2, `with_redirs`);
+  build every body through one constructor that does it
+  (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
 * [Medium] shell, pipeline admission: each pipeline stage is admitted at
   its full `max_heap_size`, 16 MiB, against an eighth of the session's
   budget, so a 128 MiB session admits one stage and `ps | where | sort`

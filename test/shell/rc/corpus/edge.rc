@@ -1,0 +1,39 @@
+# Corners of the if-not flag, loops, matching and evaluation order.
+if(true) { if(false) echo inner }
+if not echo outer-not
+if(false) echo a
+if not { if(true) echo nested }
+for(i in) echo never
+echo empty-for $status
+x=(a b)
+~ $x 'a b'; echo joined $status
+switch($x){
+case 'a b'
+	echo whole-list
+}
+switch(''){
+case ''
+	echo empty-case
+}
+~ x '[x'; echo lone-bracket $status
+~ '[x' '[x'; echo lone-bracket2 $status
+~ a '?'; echo quoted-q $status
+~ ab a^'*'; echo quoted-star $status
+y=1
+y=2 z=$y echo $y $z
+echo after $y $#z
+k=()
+while(! ~ $#k 3) k=($k x)
+echo k $k
+eval 'if(false) echo e1'
+echo $#status
+x=(`{false} `{true}); echo order $status
+echo `{echo a >[1=2]} `{echo b >[1=2]}
+~ b [c-a]; echo r1 $status
+~ '[ab' [ab; echo r2 $status
+~ - [a-]; echo r3 $status
+~ '[' [; echo r4 $status
+q='a*b'; whatis q
+ifs=(: x)
+s=`{echo -n a:bxc}
+echo $#s

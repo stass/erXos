@@ -105,10 +105,13 @@ fetch:
 check-tla:
 	$(RUBY) tools/erx check-tla
 
-# The command shell's oracle: needs plan9port fetched (tools/erx fetch --source plan9port).
+# The command shell's oracle: needs plan9port fetched (tools/erx fetch --source plan9port);
+# the evaluator's corpus against it needs stock OTP built (make oracle-bootstrap).
 check-rc-oracle:
 	$(RUBY) tools/erx build rc-oracle
 	$(RUBY) test/integration/rc_oracle_test.rb
+	ERX_ERL=$(CURDIR)/build/oracle/jit/install/bin/erl ERX_ERLC=$(CURDIR)/build/oracle/jit/install/bin/erlc \
+		$(RUBY) test/integration/erx_shell_corpus_test.rb
 
 check-hw:
 	$(RUBY) tools/gen_hw.rb --check

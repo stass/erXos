@@ -1,0 +1,11 @@
+# Descriptor duplication and /dev/null around commands, blocks and functions.
+echo to-err >[1=2]
+{ echo block-err } >[1=2]
+fn f { echo from-f }
+f >[1=2]
+echo dropped >/dev/null
+{ echo also-dropped; echo again } >/dev/null
+x=before
+{ x=inside } >/dev/null
+echo $x
+echo kept

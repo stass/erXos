@@ -19,6 +19,19 @@ block a milestone's numbers.
   packing, since the manifest records its extent; the hosted pack uses only its length. Measure the
   added wall time of a production and a hosted build; if it matters, size the image without writing it
   twice, or cache it by the release's digest.
+* **[Medium] shell, the evaluator's heap per word of a list.** Under the 4 MiB heap limit the design
+  gives every evaluator, `k=(); while(! ~ $#k 5000) k=($k x)` is killed while a thousand iterations
+  fit (Homebrew's OTP 28 on macOS, `erx_shell_eval_tests`): each `k=($k x)` builds the whole list
+  again through per-word chunk lists, and the dead copies promoted to the old heap count until a
+  major collection. Measure peak `total_heap_size` against list length, and try a lower
+  `fullsweep_after` for evaluator processes and a path that skips the chunk lists for words that
+  come from values. Measure on the stock OTP 29.1.2 the gates use
+  (`build/oracle/jit/install`), not only on Homebrew's.
+* **[Medium] shell, `~` and `switch` on a long subject.** The evaluator's
+  matcher turns the subject into a list of characters for every pattern, so
+  under the 4 MiB evaluator heap `~ $x *b*` is killed on a 100 KB subject
+  while 50 KB passes. Measure peak heap against subject length, and match
+  over the binary with byte offsets and a pattern compiled once.
 * **[Low] drivers, the cost of a register access from Erlang.** `erx_device:read/2`
   and `write/3` are BIFs, each resolving a register's name and checking it in
   the generated table. Nothing has measured that against the access itself, a
