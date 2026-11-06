@@ -32,8 +32,10 @@ module Erx
     LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
-    # What a shell needs, and runtime_tools, which docs/design-runtime.md keeps; it boots
-    # from the tracked bootstrap/bin/start.boot. OTP's `libs` and `start_scripts` targets
+    # OTP's applications in the release, each built by both runtimes: what a shell needs,
+    # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
+    # loads without starting (ReleaseFiles::LOAD_ONLY). The build itself boots from the
+    # tracked bootstrap/bin/start.boot. OTP's `libs` and `start_scripts` targets
     # are not usable: lib/tools's crashdump.erl includes public_key.hrl and
     # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both.
     APPLICATIONS = %w[kernel stdlib compiler runtime_tools].freeze

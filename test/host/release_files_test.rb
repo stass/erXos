@@ -35,7 +35,7 @@ class ReleaseFilesTest < Minitest::Test
     @scratch = File.realpath(Dir.mktmpdir('erx-release-files-'))
     @otp = File.join(@scratch, 'otp')
     write(@otp, 'erts/vsn.mk', "VSN = 1.0\n")
-    applications = [*Erx::ReleaseFiles::APPLICATIONS, *Erx::OracleHosted::ERXOS_APPLICATIONS].uniq
+    applications = Erx::ReleaseFiles::APPLICATIONS
     applications.each do |application|
       write(@otp, "lib/#{application}/ebin/#{application}.app", "{application,#{application},[{vsn,\"#{VERSION}\"}]}.\n")
       write(@otp, "lib/#{application}/ebin/#{application}.appup", "{\"#{VERSION}\",[],[]}.\n")
@@ -77,6 +77,21 @@ class ReleaseFilesTest < Minitest::Test
       Dir.glob('*.hrl', base: File.join(ROOT, 'otp/lib', application, 'include')).each do |name|
         assert_includes paths, "system/lib/#{application}-#{VERSION}/include/#{name}"
       end
+    end
+  end
+
+  # The shell on erXos has c:c and dbg, as design-runtime.md keeps compiler and
+  # runtime_tools, but neither starts at boot: start type load puts each on the boot
+  # script's code path and loads its .app, and starts nothing, runtime_tools'
+  # ttb_autostart included.
+  def test_the_release_file_loads_compiler_and_runtime_tools_and_starts_neither
+    paths = entries.map { |entry| entry.fetch('path') }
+    assert_includes paths, "system/lib/compiler-#{VERSION}/ebin/compiler.app"
+    assert_includes paths, "system/lib/runtime_tools-#{VERSION}/ebin/dbg.beam"
+    release = File.read(File.join(@scratch, 'release/start.rel'))
+    %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
+    [*%w[kernel stdlib], *Erx::ErlangApps::APPLICATIONS].each do |application|
+      assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
   end
 

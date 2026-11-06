@@ -285,6 +285,15 @@ module Erx
       PROCESSES_EXPRESSION = '{processes,length(erlang:processes()),' \
                              "[N||N<-[#{SYSTEM_PROCESSES.join(',')}],not lists:member(whereis(N),erlang:processes())]," \
                              "erlang:system_info(emu_flavor)}.\r"
+      # The release loads compiler and runtime_tools and starts neither (ReleaseFiles::LOAD_ONLY):
+      # whether each is started, whether each is loaded, a module compiled from its forms and
+      # called, and dbg's tracer started and stopped.
+      LOAD_ONLY_EXPRESSION = '{ok,M,B}=compile:forms([{attribute,1,module,erx_probe},{attribute,1,export,[{f,0}]},' \
+                             '{function,1,f,0,[{clause,1,[],[],[{atom,1,compiled}]}]}]),' \
+                             'code:load_binary(M,"erx_probe",B),' \
+                             '{load_only,[lists:keymember(A,1,application:which_applications())||A<-[compiler,runtime_tools]],' \
+                             '[lists:keymember(A,1,application:loaded_applications())||A<-[compiler,runtime_tools]],' \
+                             "erx_probe:f(),element(1,dbg:tracer()),dbg:stop()}.\r"
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -370,8 +379,9 @@ module Erx
       # A person at the serial console. The first line is typed at the boot's development
       # warning, before the driver starts, so the FIFO holds it when the driver takes the UART. Each answer then
       # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
-      # the mistake is a syntax error, an output longer than any FIFO, a debug log record, and
-      # what erlang:processes() lists.
+      # the mistake is a syntax error, an output longer than any FIFO, a debug log record,
+      # what erlang:processes() lists, and a module compiled and a tracer started with
+      # compiler and runtime_tools loaded and neither started.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
@@ -391,7 +401,10 @@ module Erx
                        type: PROCESSES_EXPRESSION),
          # The echo of the line reads {processes,length, so only the answer matches.
          console_point('processes', /\A(?:[0-9]+> )?\{processes,[0-9]/n,
-                       whole: /\A(?:[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n)].freeze
+                       whole: /\A(?:[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n, type: LOAD_ONLY_EXPRESSION),
+         # The echo of the line starts {ok,M,B}=, so only the answer matches.
+         console_point('load-only', /\A(?:[0-9]+> )?\{load_only,/n,
+                       whole: /\A(?:[0-9]+> )?\{load_only,\[false,false\],\[true,true\],compiled,ok,ok\}\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the

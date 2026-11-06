@@ -12,16 +12,25 @@ require_relative 'runtime'
 
 module Erx
   # The system release's files as entries for Pack#build: the beams, application files
-  # and headers of `kernel`, `stdlib` and erXos's own applications (ErlangApps), with a
-  # start.boot of their own, as docs/design-runtime.md's Configuration starts them. The
+  # and headers of the OTP applications the runtime builds (Runtime::APPLICATIONS) and of
+  # erXos's own (ErlangApps), with a start.boot of their own that starts them, as
+  # docs/design-runtime.md's Configuration does, or only loads them (LOAD_ONLY). The
   # headers ship so that code compiled on erXos finds them through include_lib, as on
   # stock. The hosted archive (Release) and the native one (ProductionImage) both take
   # their files from here, each from its own build of the applications, and
   # `+deterministic` makes those builds the same bytes.
   class ReleaseFiles
-    OTP_APPLICATIONS = %w[kernel stdlib].freeze
     # In the release file's order, each after the applications it depends on.
-    APPLICATIONS = [*OTP_APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
+    APPLICATIONS = [*Runtime::APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
+    # Loaded, not started: the release file gives them start type load, so the boot
+    # script loads their .app files and puts them on the code path, and the shell has
+    # c:c and dbg, but nothing of theirs runs at boot. Started, runtime_tools would
+    # start runtime_tools_sup and its ttb_autostart.
+    LOAD_ONLY = %w[compiler runtime_tools].freeze
+    # A name here that the release does not ship would leave that application started.
+    raise Error, "LOAD_ONLY names what the release does not ship: #{LOAD_ONLY - APPLICATIONS}" unless
+      (LOAD_ONLY - APPLICATIONS).empty?
+
     NAME = 'erxos'
     BOOT_DEADLINE = 120
     # A file of the release: its path in the archive, the built file and what it came from.
@@ -122,7 +131,7 @@ module Erx
     # writes the boot script from the release file and the applications' own .app files.
     def boot_file
       release = File.join(@directory, 'start.rel')
-      applications = APPLICATIONS.map { |application| "{#{application},\"#{version(application)}\"}" }.join(',')
+      applications = APPLICATIONS.map { |application| release_entry(application) }.join(',')
       File.write(release, "{release,{\"#{NAME}\",\"1\"},{erts,\"#{erts_version}\"},[#{applications}]}.\n")
       paths = APPLICATIONS.map { |application| "\"#{File.join(@otp, 'lib', application, 'ebin')}\"" }.join(',')
       name = File.join(@directory, 'start')
@@ -133,6 +142,13 @@ module Erx
         File.join(@root, self.class.source_directory(application), 'src', "#{application}.app.src")
       end
       ReleaseFile.new(path: 'system/bin/start.boot', artifact: "#{name}.boot", sources: sources)
+    end
+
+    # An application's term in the release file: its name and version, and the start
+    # type load for one only loaded; the others take systools' default, permanent.
+    def release_entry(application)
+      term = "#{application},\"#{version(application)}\""
+      LOAD_ONLY.include?(application) ? "{#{term},load}" : "{#{term}}"
     end
 
     def file_entry(file)

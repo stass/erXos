@@ -220,7 +220,7 @@ jit_SUITE                 -                 named_labels                        
 list_bif_SUITE            -                 t_list_to_ext_pidportref                        failed     cannot run: no distribution; the case starts a peer node
 list_bif_SUITE            -                 t_list_to_port                                  failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
 map_SUITE                 main              t_gc_rare_map_overflow                          failed     cannot run: no distribution; the case starts a peer node
-map_SUITE                 main              t_tracing                                       failed     bug (TODO.md): runtime_tools, which design-runtime.md keeps, is not in the release; dbg is undefined
+map_SUITE                 main              t_tracing                                       failed     bug (TODO.md): dbg is undefined, though the oracle's tree carries runtime_tools; cause not traced
 match_spec_SUITE          -                 boxed_and_small                                 failed     cannot run: no distribution; the case starts a peer node
 match_spec_SUITE          -                 faulty_seq_trace                                failed     cannot run: no distribution; the case starts a peer node
 message_queue_data_SUITE  -                 basic                                           failed     cannot run: no distribution; the case starts a peer node

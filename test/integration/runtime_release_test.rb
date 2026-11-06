@@ -43,11 +43,14 @@ class RuntimeReleaseTest < Minitest::Test
     assert_includes paths, 'system/bin/start.boot'
     %w[kernel/ebin/kernel.app kernel/ebin/code_server.beam stdlib/ebin/stdlib.app stdlib/ebin/lists.beam
        erx/ebin/erx.app erx/ebin/erx_console.beam erx_files/ebin/erx_files.app erx_uart/ebin/erx_pl011.beam
-       erx_blk/ebin/erx_blk.app erx_blk/ebin/erx_blk_write.beam].each do |file|
+       erx_blk/ebin/erx_blk.app erx_blk/ebin/erx_blk_write.beam compiler/ebin/compile.beam
+       runtime_tools/ebin/dbg.beam].each do |file|
       application, rest = file.split('/', 2)
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end
-    assert_empty paths.grep(%r{/compiler}), 'the release holds what init needs and no more'
+    shipped = paths.filter_map { |path| path[%r{\Asystem/lib/([a-z_]+)-[^/]+/}, 1] }.uniq
+    assert_equal %w[compiler erx erx_blk erx_files erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
+                 'the release holds its applications and no more'
   end
 
   # Each of erXos's applications holds the modules of its sources and no other, and

@@ -32,7 +32,6 @@ module Erx
   # under `out`: the release tree and archive, both event streams, the
   # command logs and report.txt.
   class OracleHosted
-    ERXOS_APPLICATIONS = [*Runtime::APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
     # erXos's working directory: suites, logs and priv_dirs all live in /tmp.
     ERXOS_WORK = '/tmp/ct'
     MAX_OUTPUT_BYTES = 256 * 1024 * 1024
@@ -81,7 +80,7 @@ module Erx
     # out as the system release lays it out (ReleaseFiles.application_layout) from the
     # hosted build at otp.
     def self.application_files(root:, otp:)
-      ERXOS_APPLICATIONS.flat_map do |application|
+      ReleaseFiles::APPLICATIONS.flat_map do |application|
         ReleaseFiles.application_layout(root: root, otp: otp, application: application)
                     .map { |path, artifact| ["lib/#{application}/#{path}", artifact] }
       end.to_h

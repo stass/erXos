@@ -8,7 +8,6 @@ require_relative 'error'
 require_relative 'fiasco'
 require_relative 'musl'
 require_relative 'native_root'
-require_relative 'release_files'
 require_relative 'runtime'
 require_relative 'runtime_seam'
 
@@ -56,7 +55,7 @@ module Erx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
-      ReleaseFiles::OTP_APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
+      APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
       build_erlang_apps
       check_imports
       File.write(self.class.record_path(@output), digest)

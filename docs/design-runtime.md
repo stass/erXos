@@ -327,13 +327,17 @@ raising `badarg`, `heart` and `erl_boot_server` not started, and
 erXos's carrier, and otherwise stock but for the edits listed below, the
 hooks that start erXos's watchdog and console among them; `stdlib`
 unchanged; `compiler` and `runtime_tools`, the latter without its trace
-port drivers and its `dyntrace` NIF; `sasl` and `tools` where a
+port drivers and its `dyntrace` NIF, both loaded and not started: the
+release file gives each the start type `load`, so the boot script loads
+its `.app` and puts it on the code path, the shell has `c:c` and `dbg`,
+and nothing of either runs at boot, `runtime_tools`' `ttb_autostart`
+included; `sasl` and `tools` where a
 release asks for them. Each shipped application ships its beams, its
 `.app` and its `include/*.hrl` headers, so code compiled on erXos finds
 them through `include_lib` as on stock, and no `.appup`, since an update
 replaces a whole slot. erXos's own Erlang code is applications of its own
 under `erlang/apps/` ([design.md](design.md#repository-layout)), listed
-after `kernel` and `stdlib` in the release file: `erx`, the runtime's
+after OTP's applications in the release file: `erx`, the runtime's
 services (`erx_connections`, `erx_dist`, `erx_program`, `erx_device`,
 `erx_watchdog`, the console, the kernel log and the namespace); `erx_files`,
 the Erlang file servers; and one driver application per device class,

@@ -235,6 +235,21 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # The release loads compiler and runtime_tools without starting them
+  # (docs/design-runtime.md), so the shell compiles and traces while nothing of either runs.
+  def test_the_shell_compiles_and_traces_with_neither_application_started
+    assert_answers(
+      '[lists:keymember(A, 1, application:which_applications()) || A <- [compiler, runtime_tools]].' => /^\[false,false\]$/,
+      '[lists:keymember(A, 1, application:loaded_applications()) || A <- [compiler, runtime_tools]].' => /^\[true,true\]$/,
+      'whereis(runtime_tools_sup).' => /^undefined$/,
+      '{ok, Mod, Bin} = compile:forms([{attribute, 1, module, erx_probe}, {attribute, 1, export, [{f, 0}]}, ' \
+      '{function, 1, f, 0, [{clause, 1, [], [], [{atom, 1, compiled}]}]}]), ' \
+      'code:load_binary(Mod, "erx_probe", Bin), erx_probe:f().' => /^compiled$/,
+      'code:which(dbg).' => %r{^"/lib/runtime_tools-[0-9.]+/ebin/dbg\.beam"$},
+      '{ok, _} = dbg:tracer(), ok = dbg:stop(), dbg_done.' => /^dbg_done$/
+    )
+  end
+
   # Stock's code server dies on a root directory in its path, with no version to split from
   # its empty base name, and three of those stop the node. Here the working directory is "/".
   def test_the_root_directory_on_the_code_path_leaves_the_code_server_running
@@ -414,7 +429,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
-  # The fixture's BEAM, in base64: the release has no compiler, and the runtime's build needs the oracle.
+  # The fixture's BEAM, in base64, compiled on the host by the oracle's erlc, so the probe
+  # depends on nothing in the release but the loader it tests.
   def compiled_load_nif_probe
     Dir.mktmpdir('erx-hosted-probe-') do |directory|
       log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '-o', directory,

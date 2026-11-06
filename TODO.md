@@ -181,12 +181,9 @@ it; git history is the record of completed work.
   in the 160 MiB cap without `enospc`; so does the emulator group, run in three parts, and kernel's `file_SUITE` bench and
   `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
   reporter, on both sides) would bound it by the largest suite instead.
-* [Medium] `tools/lib/erx/release_files.rb` (`OTP_APPLICATIONS`), `tools/lib/erx/native_runtime.rb`: the system
-  release, hosted and native, ships `kernel` and `stdlib` only. `compiler` and `runtime_tools`, which design-runtime.md
-  keeps, are built only by the hosted runtime and carried only by the oracle's hosted tree, so the target has the
-  headers but no compiler to read them, and no `dbg`. Decide how they join the release file: started, which starts
-  `runtime_tools`' `ttb_autostart` at boot, or load-only, which puts them on the boot script's code path alone; and
-  confirm the image's size and boot budgets take them.
+* [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
+  with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
+  case, trace why `dbg` is not found, and fix it or reword the row with its cause.
 * [Medium] `tools/lib/erx/oracle_suites.rb`: suites are compiled on the host with a relative source path, and
   shell_docs_SUITE's `init_per_suite` recompiles itself with `c:c`, which finds no source on the guest, so the suite is
   auto-skipped on erXos. A harness bug: compile the suites with the guest path of their copied source.
