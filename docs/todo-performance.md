@@ -199,6 +199,10 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   it. Fixes on the table, cheapest first: keeping the table sorted by point length so placing stops at the first
   match; sending a `..` that follows a new name in the same walk, which the grant answers from its fid's record of the
   directories it came through, for walks that stay below the entry's `root` (design-files.md's Alternatives weighs it).
+  Every run retraces the place from the entry's top, so the names walked grow as runs times depth: a 4 KiB path of
+  255 names and then some 700 repeats of `/b/..`, with 32 link texts of the same shape, walks millions of names where
+  FreeBSD looks up tens of thousands. Measure that path's walk count and time; the fix is a walk from the fid the
+  last walk reached when the place only grew.
 * **A grant's step count over a whole fid path** (`erx_fs_grant:repath/3`, [design-files.md](design-files.md#serving-the-erx_fs-behaviour)): every new fid, walk in place and clunk counts or uncounts each step of the fid's path, so a clone of a fid at depth D costs D map updates where it cost none, and an end of a grant's owner costs the sum of its fids' depths. Measure: a clone and a clunk of fids at depths 1, 16 and 256 under `tools/erx bench`, against the same with only the steps that differ between the old and new paths counted.
 * **[Low] files, a scan of every process per namespace change** (`erx_ns`,
   [design-files.md](design-files.md#building-binding-and-mounting)): the table is a persistent term, so each `mount`,

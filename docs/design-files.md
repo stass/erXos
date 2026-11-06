@@ -886,8 +886,9 @@ operation and goes on from where the resolution stood.
                 | {top, entry()}     % the last name is a directory no request
                                      % to a parent can name
                 | {empty_root, place()}
-                                     % the place is a directory of the empty
-                                     % root, which no provider holds
+                                     % the target, or a create's existing
+                                     % last name, is a directory of the
+                                     % empty root, which no provider holds
                 | {error, posix()}.  % the resolution's answer
 -type resume() :: fun((reply()) -> action()).
 
@@ -903,7 +904,12 @@ operation together with the action's walk; when the walk stops before its
 last name or ends on a link the operation follows, the operation fails
 with `ebadf` and changes nothing ([Pipelined
 requests](#pipelined-requests)), and the caller calls the resumption with
-the walk's reply, which returns the next action. A resolution's state
+the walk's reply, which returns the next action. A parent's operation
+that meets a link at the last name, as `lcreate` answers `eloop` for an
+operation that follows it, reports it as one more kind, `link`, after the
+directory's, and the resumption follows the link. A resumption called
+with any other reply that the walk passed whole answers `eio`, since the
+operation, not the walk, ended the action. A resolution's state
 lives only in the resumption's closure, which the resolver made, so
 nothing a caller holds between two names needs a check of its own.
 
@@ -932,7 +938,8 @@ reads it, by matching its bytes:
   answers;
 * a walk's reply holds no more kinds than the names walked, `directory`
   for every kind but the last, and when it holds fewer kinds than names
-  it ends in an error or its last kind is not a directory; any other
+  it ends in an error or its last kind is not a directory, and when it
+  holds a directory for every name it ends `ok`; any other
   reply answers `eio`, as a reply that exceeds its request does.
 
 The table and the working directory are checked when they are written,
@@ -945,10 +952,13 @@ would refuse, and the resolver need not check them again.
 
 Two of FreeBSD's flags record what the text alone cannot.
 `TRAILINGSLASH` is set by a
-trailing `/` of the path or of any link's text the resolution reads and
-kept to its end, as `vfs_lookup` sets the flag again on each pass and
+trailing `/` of the path or of the text of a link that is the last name,
+and kept to its end, as `vfs_lookup` sets the flag again on each pass and
 nothing clears it, since a link's text takes the last name's place
-without the `/` that followed it. `WILLBEDIR` is given by the caller:
+without the `/` that followed it. A link before the last name sets
+nothing: its text is followed by the rest of the path, so a `/` ending
+the text ends no pass, and `l/f` with `l` a link to `d/` names `d/f`
+whatever `f` is. `WILLBEDIR` is given by the caller:
 true for `make_dir`, a program's `mkdir`, and a rename's destination when
 its source is a directory, as `kern_renameat` sets it from the source it
 has found.
@@ -983,9 +993,19 @@ The resolver reads a path's names in this order:
    prefixes lie in the **empty root** when they are `/` or a directory
    above an entry's point, a read-only directory that lists only the
    names leading to the points below it, and answer `enoent` otherwise.
-   A resolution whose last action falls on such a directory returns
+   A lookup whose target is such a directory, and a create whose last
+   name is one or whose last name is `.` or `..` there, returns
    `{empty_root, Place}`, which the caller answers itself as that
-   read-only directory, asking no provider.
+   read-only directory, asking no provider: a create answers as it
+   answers any existing directory, `eexist` for `make_dir` and `eisdir`
+   for `open`; a create whose last name there is an entry's mount point
+   ends at that entry's top. Any other create, delete or rename whose
+   last name lies in such a directory answers `erofs`, as FreeBSD answers
+   on a read-only mount: `vfs_cache_lookup` refuses the last name of
+   `DELETE` and `RENAME` before it looks the name up, so a missing name
+   and a mount point answer `erofs` too, and a missing name's `CREATE`
+   fails its write check ahead of the `TRAILINGSLASH` check, so
+   `make_dir("/new/")` and `open("/new/", [write])` both answer `erofs`.
 4. **Walking.** The resolver asks its `walk` callback for a walk, on
    that entry, of the place's names below its point and then the run's,
    from the entry's top: an attach and the entry's `root` names for a
@@ -1930,8 +1950,8 @@ the client sends the operation again.
 
 A path written with a trailing `/` names a directory, as FreeBSD's
 `vfs_lookup` takes it under `TRAILINGSLASH`: its last link is followed
-whatever the operation, the `/` holding through the link's text, and a
-link's text that ends in `/` sets it as the path's own `/` does; a last
+whatever the operation, the `/` holding through the link's text, and the
+text of a last link that ends in `/` sets it as the path's own `/` does; a last
 name that exists and is not a directory answers `enotdir`, whatever the
 operation; and a last name that does not exist may be made only as a
 directory, by `make_dir` or by a rename of a directory, any other
@@ -2413,8 +2433,10 @@ report, so a passing run shows the code under test ran.
   `test/erlang/erx_file_remote_fuzz.erl`, that builds a random model tree
   (directories, files, and relative, absolute, empty and looping links),
   a random table over it (entries, binds with roots, a narrowed table
-  with no `/`) and a working directory, and random paths of plain
-  names, `.`, `..`, doubled and trailing `/`, each with a random
+  with no `/`), each point a directory, reached without a link, of the
+  entries whose points lie above it, as a mount of FreeBSD's needs, and
+  a working directory, and random paths of plain names, `.`, `..`,
+  doubled and trailing `/`, each with a random
   `nameiop`, `FOLLOW` and `WILLBEDIR`. It runs the resolver, answering
   its walks and link reads from the model tree through the callbacks and
   calling each resumption as an executor would, and compares the
@@ -2602,8 +2624,9 @@ report, so a passing run shows the code under test ran.
   handler that walks the raw path, and one that sends a `..` at the
   program's top to the server, which the `..` cases catch.
 * The empty root: a program started with `/data/logs` alone, whose `ls /`
-  lists `data`, whose `cd /data` works and whose `open` of `/etc/passwd`
-  fails with `enoent`, and one started with no mount at all, as
+  lists `data`, whose `cd /data` works, whose `open` of `/etc/passwd`
+  fails with `enoent`, and whose `mkdir /new` fails with `erofs` and
+  `mkdir /data` with `eexist`, and one started with no mount at all, as
   `within -f inspect -- ps` starts it, whose every path but `/` fails with
   `enoent`.
 * The data area: a program with one slot whose two threads read at once,

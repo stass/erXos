@@ -10,7 +10,8 @@ require 'tmpdir'
 # docs/design-tmp.md): whatever process reaches a server's path runs it, the code server
 # included, and a module the code server would have to load then halts the node. The
 # generated erx_9p_grammar, which checks every request it sends and every reply, is
-# preloaded and held to the same rule. xref, on stock's emulator (ERX_ERL and ERX_ERLC,
+# preloaded and held to the same rule, as is erx_path, the resolver of every path, which
+# calls nothing but BIFs and the callbacks its caller hands it. xref, on stock's emulator (ERX_ERL and ERX_ERLC,
 # which make check supplies), lists each module's calls to other modules; each must be a
 # BIF or name a module of the preloaded Makefile's list. A seeded call to lists:usort/1
 # must be caught.
@@ -22,7 +23,8 @@ require 'tmpdir'
 class ErxFileRemoteTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = { 'erx_file_remote' => 'otp/erts/preloaded/src/erx_file_remote.erl',
-              'erx_9p_grammar' => 'otp/erts/preloaded/src/erx_9p_grammar.erl' }
+              'erx_9p_grammar' => 'otp/erts/preloaded/src/erx_9p_grammar.erl',
+              'erx_path' => 'otp/erts/preloaded/src/erx_path.erl' }
             .transform_values { |path| File.join(ROOT, path) }.freeze
   PRELOAD_MAKEFILE = File.join(ROOT, 'otp/erts/preloaded/src/Makefile')
   INCLUDES = %w[otp/lib/kernel/include erlang/apps/erx/include].map { |dir| File.join(ROOT, dir) }.freeze
@@ -47,7 +49,7 @@ class ErxFileRemoteTest < Minitest::Test
   LINKED = "linked(Grant, [{_, _, Names}, OtherPlace], [ExistingText, NewText]) ->\n"
   SEEDED_LINKED = "#{LINKED}    _ = split_last(names(Names)),\n".freeze
 
-  def test_both_modules_are_on_the_preload_list
+  def test_each_module_is_on_the_preload_list
     SOURCES.each_key { |name| assert_includes preloaded, name }
   end
 
@@ -62,6 +64,12 @@ class ErxFileRemoteTest < Minitest::Test
     calls = external_calls('erx_9p_grammar', File.read(SOURCES.fetch('erx_9p_grammar')))
     refute_empty calls, 'the calls were listed: xref lists no BIF, but the funs it calls'
     assert_empty forbidden(calls), forbidden(calls).map { |call| call.first(3).join(':') }.join("\n")
+  end
+
+  def test_the_resolver_calls_only_bifs_and_its_callbacks
+    # xref lists no BIF, so the callbacks, calls of fun values, are all it may list.
+    calls = external_calls('erx_path', File.read(SOURCES.fetch('erx_path')))
+    assert_equal [%w[$M_EXPR $F_EXPR]], calls.map { |call| call.first(2) }.uniq
   end
 
   def test_seeded_call_to_a_module_not_preloaded_is_caught
