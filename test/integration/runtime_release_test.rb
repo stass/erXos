@@ -42,7 +42,8 @@ class RuntimeReleaseTest < Minitest::Test
     paths = @table.map(&:first)
     assert_includes paths, 'system/bin/start.boot'
     %w[kernel/ebin/kernel.app kernel/ebin/code_server.beam stdlib/ebin/stdlib.app stdlib/ebin/lists.beam
-       erx/ebin/erx.app erx/ebin/erx_console.beam erx_files/ebin/erx_files.app erx_uart/ebin/erx_pl011.beam].each do |file|
+       erx/ebin/erx.app erx/ebin/erx_console.beam erx_files/ebin/erx_files.app erx_uart/ebin/erx_pl011.beam
+       erx_blk/ebin/erx_blk.app erx_blk/ebin/erx_blk_write.beam].each do |file|
       application, rest = file.split('/', 2)
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end

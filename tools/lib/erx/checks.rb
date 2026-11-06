@@ -5,6 +5,7 @@
 require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
+require_relative 'block_write_path'
 require_relative 'device_callers'
 require_relative 'ns_writers'
 require_relative 'origin'
@@ -121,6 +122,7 @@ module Erx
       check_json_parsing(own_sources)
       check_test_image_builders(own_sources)
       check_device_callers(listed)
+      check_block_write_path(listed)
       check_ns_writers(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
@@ -252,6 +254,13 @@ module Erx
           raise Error, "a test image is built only by #{TEST_IMAGE_BUILDER}: #{relative_path}:#{number}"
         end
       end
+    end
+
+    # Imports included, as for the device callers.
+    def check_block_write_path(listed)
+      sources = listed.select { |relative| BlockWritePath.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = BlockWritePath.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
     end
 
     # Imports included: a stock module edited to call erx_device is as much a violation.

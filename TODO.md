@@ -1910,3 +1910,19 @@ document's "residual risks accepted" paragraph.
 * [Medium] storage, `block_device` QEMU suite (`tools/lib/erx/qemu_suites/block_device.rb`): the suite reports its cell
   pending until the block driver prints the lines `tools/lib/erx/block_device.rb` defines; the driver's landing sets
   `Erx::BlockDevice::DRIVER_LANDED` and checks that its first HVF run passes.
+* [High] erx_blk, the block driver: the device process (`erlang/apps/erx_blk/src/erx_blk.erl`) has no test. It needs the
+  guest entry that prints the `blk:` lines of `tools/lib/erx/block_device.rb` (a test image through
+  `ProductionImage#build_test_image`, which `Checks::TEST_IMAGE_BUILDER` must then allow from the block device harness,
+  and the module started by an `erx.arg` `-run`), the transport version line added to that suite, and
+  `DRIVER_LANDED` set; and its backlog, reply and reset decisions moved into a pure module tested on the host.
+* [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
+  `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that resets the
+  device, `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
+* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:post/6`, and `erx_blk:write/2` lets any process of
+  the system domain write any sector until windows serve clients. The write-path check refuses the name
+  `ERX_VIRTIO_BLK_T_OUT`, not a hand-built header with type 1 or another type that writes (QEMU treats any type with bit 0
+  set as a write); making `erx_blk_write` the only caller of `erx_device:post/4` would hold it by construction, and
+  `docs/design.md`'s check by call graph should then agree with `docs/design-storage.md`.
+* [Low] erx_blk: `recover/2` answers held requests `broken` though they were never posted; they could be posted after
+  the reset. An interrupt storm or a device that breaks its queue on every request costs a scheduler and a log line per
+  reset, bounded by the device's rate (Phase 1 residual).

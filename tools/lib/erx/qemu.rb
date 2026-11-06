@@ -35,6 +35,12 @@ module Erx
     # QEMU's virtio-mmio transport offers the legacy interface (version 1) unless
     # told otherwise; the guest's driver supports version 2 only.
     DISK_TRANSPORT_ARGUMENTS = %w[-global virtio-mmio.force-legacy=false].freeze
+    # QEMU virt makes 32 virtio-mmio transports, 0x200 bytes apart from 0x0a000000, as
+    # buses virtio-mmio-bus.0 to .31 in address order, and hands a device with no bus
+    # named the free transport of highest address. The first disk is pinned to bus .31,
+    # at 0x0a003e00, which the development manifest names as the block device
+    # (config/manifest/qemu-virt-development.txt), and each next disk to the bus below.
+    LAST_TRANSPORT = 31
 
     # A raw disk image the guest sees as a virtio-blk device on the virtio-mmio
     # bus. Its path is absolute, so QEMU reads it as a file and never as a
@@ -95,7 +101,7 @@ module Erx
 
       drives = disks.each_with_index.flat_map do |disk, index|
         ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}",
-         '-device', "virtio-blk-device,drive=disk#{index}"]
+         '-device', "virtio-blk-device,drive=disk#{index},bus=virtio-mmio-bus.#{LAST_TRANSPORT - index}"]
       end
       DISK_TRANSPORT_ARGUMENTS + drives
     end

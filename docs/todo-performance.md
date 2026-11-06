@@ -281,3 +281,8 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Fixes on the table: parsing a run of short units in one child, or parsing a
   unit in the evaluator itself when its window is small enough that its worst
   heap fits the evaluator's spare heap.
+
+* **The block driver's request geometry.** `erx_blk` posts three segments per request (header, sectors, status), so its
+  16-descriptor queue holds at most five requests while the pool reserves sixteen 4113-byte buffers, and the odd stride
+  lets buffers share cache lines. Two segments (header and sectors out or in, then the status) and a buffer size rounded
+  to a cache line would double the requests in flight; settle it with `tools/erx bench` read throughput under HVF.

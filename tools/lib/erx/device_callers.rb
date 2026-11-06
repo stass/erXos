@@ -19,7 +19,7 @@ module Erx
   module DeviceCallers
     MODULE = 'erx_device'
     # Applications whose modules drive a device class.
-    DRIVER_APPLICATIONS = %w[erx_uart].freeze
+    DRIVER_APPLICATIONS = %w[erx_blk erx_uart].freeze
     SCOPE = %w[otp/**/*.{erl,hrl} erlang/**/*.{erl,hrl}].freeze
     SITES = ['erlang/apps/erx/src/erx_device.erl',
              *DRIVER_APPLICATIONS.map { |application| "erlang/apps/#{application}/**/*" }].freeze

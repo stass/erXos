@@ -158,7 +158,7 @@ commits by rewriting the record only once the trial is healthy.
 | **U1.** The slot the machine runs from, and the slot a failed trial falls back to, are never written | the slot writer allows a slot write only on `normal(C)` with the record naming `C`, and only to the other slot | a slot write allowed on any other boot value, or from a service's word | the exhaustive model of the update path |
 | **U2.** The record names only the slot first installed or a slot that passed a healthy trial | the slot writer rewrites the record only on `trial(S)` with the record naming the other slot, naming `S`, and the update service asks for that only once the trial is healthy; no other boot value, a firmware's fallback boot included, allows a record write | a record write on a normal boot | the exhaustive model, with every boot value against every record |
 | **U3.** After a power cut, a crash or a hang at any point, the machine boots the committed slot, or the spare once as a requested trial | the record changes only by one sector, the trial's request is one-shot, and a hang during a trial ends in the watchdog's reset; the firmware runs the watchdog from power-on on a board configured as [design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record) describes, and on a board without that configuration a trial whose firmware stage hangs, before the kernel's first decision, needs a power cycle | a multi-sector record; a request that survives the trial | the model with a power cut after every write; runs on each board |
-| **U4.** A trial boot writes nothing but the record and the reset count | the block driver's one write function refuses every write but the record window's and the reset count's while the boot value is `trial(_)`, reading the boot value from the machine page through its runtime | a second write path in the driver | the build check that the device NIF's write of a descriptor is reached only from the driver's one write function ([design.md](design.md#chokepoint-checks)), with a seeded violation; a QEMU test of every client's writes on a trial boot |
+| **U4.** A trial boot writes nothing but the record and the reset count | the block driver's one write function refuses every write but the record window's and the reset count's while the boot value is `trial(_)`, reading the boot value from the machine page through its runtime | a second write path in the driver | the build check that no module but the driver's one write function names the write request type, `ERX_VIRTIO_BLK_T_OUT` ([design.md](design.md#chokepoint-checks)), with a seeded violation; a QEMU test of every client's writes on a trial boot |
 | **U5.** Only a complete spare is ever tried | the update service asks for a trial only after the spare has passed the check against the update manifest in its manifest window, which runs at each normal boot and after each write and records nothing; the manifest is written last, so a spare whose write was cut short has no manifest that matches it | a recorded "complete" state; a trial requested from a service's word | the model with a power cut after every write of the spare; a QEMU test that cuts a spare's write short and finds no trial requested |
 
 U1 to U5 hold on a medium that writes a sector atomically and honours a
@@ -186,10 +186,12 @@ still write; a reply to a client in another domain crosses that client's
 lane as a frame.
 The device NIF parses nothing a device wrote: the Erlang processes do,
 with binary matching in supervised processes, so a malicious controller
-corrupts no memory. All of the driver's writes to the device go through
+corrupts no memory. All of the driver's writes to the medium go through
 one function, the driver's **write path**, which applies the trial rule
-(U4); a build check fails on any other reference to the NIF's write of a
-descriptor.
+(U4). The NIF posts reads and writes alike, so what marks a write is its
+request type: a build check (`tools/lib/erx/block_write_path.rb`) fails on
+any Erlang source but the write path, `erx_blk_write`, that names
+`ERX_VIRTIO_BLK_T_OUT`, the type's generated name.
 
 **The block service.** The window processes are the driver's face to
 every client, and together they are the block service: one window per

@@ -98,10 +98,10 @@ class QemuTest < Minitest::Test
     argv = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [DISK.new(path: '/run/a.img')])
     plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
     assert_equal plain, argv - ['-global', 'virtio-mmio.force-legacy=false', '-drive', 'file=/run/a.img,format=raw,if=none,id=disk0',
-                                '-device', 'virtio-blk-device,drive=disk0']
+                                '-device', 'virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.31']
     assert_includes argv.each_cons(2).to_a, ['-global', 'virtio-mmio.force-legacy=false']
     assert_includes argv.each_cons(2).to_a, ['-drive', 'file=/run/a.img,format=raw,if=none,id=disk0']
-    assert_includes argv.each_cons(2).to_a, ['-device', 'virtio-blk-device,drive=disk0']
+    assert_includes argv.each_cons(2).to_a, ['-device', 'virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.31']
     assert_equal 1, argv.count('-global')
   end
 
