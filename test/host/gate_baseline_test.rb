@@ -71,7 +71,7 @@ class GateBaselineTest < Minitest::Test
     'fiasco-symbols-in-backend' => 2, 'fiasco-vm-body-callers' => 1, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
     'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
     'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'map-core-opaque' => 3, 'map-records-private' => 6,
-    'erts-reads-no-index' => 1, 'ns-result-writes' => 2, 'object-leg' => 0,
+    'cwd-writer' => 0, 'erts-reads-no-index' => 1, 'ns-result-writes' => 2, 'ns-table-writer' => 0, 'object-leg' => 0,
     'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0,
     'sched-records-private' => 5, 'seam-only-from-glue' => 1, 'space-holds-callers' => 2, 'space-parent-callers' => 2,
     'space-records-private' => 6, 'vector-route' => 0

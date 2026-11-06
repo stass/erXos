@@ -1182,10 +1182,11 @@ copied(Source, Destination, Left, Done) ->
     end.
 
 %% The working directory is a namespace path (design-files.md, Erlang clients): set_cwd
-%% follows the path's links, as chdir does, and makes the namespace path of the directory
-%% it reaches the working directory, which prim_file's NIF resolves every relative path
-%% against. A path that a link led to the NIF's own providers is set there.
--spec set_cwd(grant(), place(), path()) -> ok | {error, posix()}.
+%% follows the path's links, as chdir does, and answers {cwd, Reached}, the namespace path
+%% of the directory it reaches, which prim_file:set_cwd/1 makes the working directory and
+%% its NIF resolves every relative path against. A path that a link led to the NIF's own
+%% providers is set there, by prim_file:set_cwd/1 again.
+-spec set_cwd(grant(), place(), path()) -> {cwd, text()} | ok | {error, posix()}.
 set_cwd(Grant, Place, Path) ->
     with_links(Grant, [Place], [text(Path)],
                fun(OnGrant, [Reached], [Text]) -> cwd_at(OnGrant, Reached, Text) end,
@@ -1198,7 +1199,7 @@ cwd_at(Grant, {_, _, Names} = Reached, Text) ->
     case act(Grant, [{names(Names), followed(Text)}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
         {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =/= ?ERX_P9_S_IFDIR -> {error, enotdir};
         {ok, #{mode := Mode}} when Mode band 8#100 =:= 0 -> {error, eacces};
-        {ok, _} -> prim_file:erx_set_cwd(namespace_path(Reached));
+        {ok, _} -> {cwd, namespace_path(Reached)};
         Other -> Other
     end.
 

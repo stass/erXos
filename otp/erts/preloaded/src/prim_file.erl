@@ -40,10 +40,10 @@
 
 -export([read_file/1, write_file/2]).
 
-%% erXos: the namespace's changes, for erx_ns, the runtime's fid counter, and the
-%% working directory on a grant, for erx_file_remote.
--export([erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1,
-         erx_tmp_limit/0, erx_set_cwd/1]).
+%% erXos: the namespace's table and its changes, for erx_ns, and the runtime's fid
+%% counter, for erx_file_remote.
+-export([erx_table/0, erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1,
+         erx_tmp_limit/0]).
 
 -export([read_link/1, read_link_all/1,
          read_link_info/1, read_link_info/2,
@@ -617,15 +617,13 @@ erx_fid() ->
 erx_tmp_limit() ->
     erx_tmp_limit_nif().
 
-%% erXos: makes an absolute namespace path, a name as set_cwd/1 takes, the working
-%% directory, checking nothing about what lies there; erx_file_remote:set_cwd/3 calls it
-%% once it found a directory on the path's grant (design-files.md, Erlang clients).
-erx_set_cwd(Path) ->
-    try
-        erx_set_cwd_nif(encode_path(Path))
-    catch
-        error:badarg -> {error, badarg}
-    end.
+%% erXos: the runtime's namespace table (design-files.md, Building, binding and
+%% mounting): the persistent term erx_ns's process alone writes, or until it writes one
+%% the boot table, the domain's local entries. These are the release slice at /, and
+%% each EROFS image where its release names it, of which the boot information names
+%% none yet.
+erx_table() ->
+    persistent_term:get(erx_ns, [#{point => [], provider => release, root => [], rights => ro}]).
 
 %% erXos: where one path lies, or the two of a rename or a link, as their operations
 %% would find them, acting on nothing: their remote term, local for the NIF's own
@@ -901,13 +899,19 @@ get_cwd() ->
     catch
         error:badarg -> {error, badarg}
     end.
+%% erXos: the working directory changes only here (design-files.md, Erlang clients). On
+%% the release the NIF finds a directory and stores it; on a grant erx_file_remote finds
+%% one and answers the place it reached, which erx_set_cwd_nif/1 checks and stores.
 set_cwd(Path) ->
     try
         case is_path_translatable(Path) of
             true ->
                 Encoded = encode_path(Path),
-                remote(set_cwd_nif(Encoded),
-                       fun(Grant, Place) -> erx_file_remote:set_cwd(Grant, Place, Encoded) end);
+                case remote(set_cwd_nif(Encoded),
+                            fun(Grant, Place) -> erx_file_remote:set_cwd(Grant, Place, Encoded) end) of
+                    {cwd, Reached} -> erx_set_cwd_nif(Reached);
+                    Answer -> Answer
+                end;
             false -> {error, no_translation}
         end
     catch

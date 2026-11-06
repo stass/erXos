@@ -16,17 +16,18 @@ module Erx
           seed: { 'liberx/seeded.c' => "void f(erx_ns_result_t *out) { out->res_names_length = 0; }\n",
                   'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(erx_ns_result_t *out) { out->res_path[0] = 0; }\n" }
         ),
-        Chokepoints::Forbidden.new(
-          name: 'erts-reads-no-index',
-          rule: 'ERTS learns the release only from erx_release_entry, so the index can stay unmapped behind it',
-          design: 'docs/design-runtime.md#files',
-          scope: Chokepoints::Scope.new(own: false, extra: ['otp/erts/emulator/nifs/erxos/**/*', 'otp/erts/emulator/sys/erxos/**/*']),
-          pattern: /\berx_pack_\w+/,
-          seed: { 'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_pack_entry_at(0, 0, 0); }\n" }
+        Chokepoints::Elsewhere.new(
+          name: 'ns-table-writer', rule: "only erx_ns's process writes the namespace's persistent term",
+          design: 'docs/design-files.md#building-binding-and-mounting', check: 'NsWriters, in Checks',
+          test: 'test/host/ns_writers_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'cwd-writer', rule: "only prim_file:set_cwd/1 calls the NIF that stores the working directory",
+          design: 'docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote', check: 'NsWriters, in Checks',
+          test: 'test/host/ns_writers_test.rb'
         )
       ],
-      unchecked_objects: %w[liberx/ns.c
-                            liberx/release.c liberx/release_fs.c]
+      unchecked_objects: %w[liberx/ns.c]
     )
   end
 end

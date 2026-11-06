@@ -1,0 +1,196 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% EUnit cases of erx_ns, the namespace table's one writer (design-files.md, Building,
+%% binding and mounting), run on stock's emulator over erx_ns_prim_stub: each change's
+%% checks and answers, the table the persistent term holds after it, the NIF table's
+%% change made with it and only when both accept, a grant's end, and a restart.
+
+-module(erx_ns_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+
+-define(RELEASE, #{point => [], provider => release, root => [], rights => ro}).
+
+%% Each case starts from the boot table, with a fresh process.
+ns_test_() ->
+    {foreach, fun start/0, fun stop/1,
+     [fun boot_table_until_a_change/0,
+      fun mount_adds_a_grant_entry_and_changes_the_nif_table/0,
+      fun mount_refusals/0,
+      fun bind_roots_at_the_place_from_reaches/0,
+      fun bind_of_a_relative_path_starts_at_the_working_directory/0,
+      fun bind_refusals/0,
+      fun unmount_removes_exactly_one_entry/0,
+      fun the_table_holds_at_most_64_entries/0,
+      fun a_nif_refusal_leaves_the_term_unchanged/0,
+      fun an_ended_grant_marks_every_entry_of_it_ended/0,
+      fun a_grant_ended_while_the_process_was_down_ends_on_restart/0,
+      fun a_malformed_request_answers_einval_and_changes_nothing/0]}.
+
+start() ->
+    persistent_term:erase(erx_ns),
+    {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
+    unlink(Ns),
+    Ns.
+
+stop(_Ns) ->
+    Ns = whereis(erx_ns),
+    exit(Ns, kill),
+    wait_down(Ns),
+    persistent_term:erase(erx_ns),
+    flush().
+
+table() -> erx_ns_prim_stub:erx_table().
+
+grant() -> spawn(fun() -> receive stop -> ok end end).
+
+%% The stub reports the NIF table's changes to the case's own process.
+reported() -> true = register(erx_ns_tests, self()).
+
+nif() ->
+    receive {nif, Change} -> Change after 1000 -> none end.
+
+boot_table_until_a_change() ->
+    ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
+    ?assertEqual([?RELEASE], table()).
+
+mount_adds_a_grant_entry_and_changes_the_nif_table() ->
+    reported(),
+    Grant = grant(),
+    ?assertEqual(ok, erx_ns:mount(Grant, <<"/tmp/">>, [{tree, <<"tmp">>}, rw])),
+    ?assertEqual([?RELEASE, #{point => [<<"tmp">>], provider => {grant, Grant, <<"tmp">>}, root => [],
+                              rights => rw}], persistent_term:get(erx_ns)),
+    ?assertEqual({mount, <<"/tmp">>, Grant, <<"tmp">>, rw}, nif()),
+    ?assertEqual(ok, erx_ns:mount(Grant, "/a//b", [{tree, <<"t">>}])),
+    ?assertMatch([_, _, #{point := [<<"a">>, <<"b">>], rights := ro}], table()).
+
+mount_refusals() ->
+    Grant = grant(),
+    ok = erx_ns:mount(Grant, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    Before = table(),
+    Long = binary:copy(<<"n">>, 256),
+    [?assertEqual({error, Reason}, erx_ns:mount(Pid, Point, Options))
+     || {Reason, Pid, Point, Options} <-
+            [{eexist, Grant, <<"/tmp/">>, [{tree, <<"tmp">>}]},
+             {einval, Grant, <<"/x">>, [{tree, <<"a/b">>}]},
+             {einval, Grant, <<"/x">>, [{tree, <<"..">>}]},
+             {einval, Grant, <<"/x">>, [{tree, <<>>}]},
+             {einval, Grant, <<"/x">>, []},
+             {einval, Grant, <<"/x">>, [{tree, <<"t">>}, rw, ro]},
+             {einval, Grant, <<"x">>, [{tree, <<"t">>}]},
+             {einval, Grant, <<"/a/../b">>, [{tree, <<"t">>}]},
+             {einval, Grant, <<"/a/./b">>, [{tree, <<"t">>}]},
+             {einval, Grant, <<"/a", 0, "b">>, [{tree, <<"t">>}]},
+             {einval, Grant, <<"/", 16#ff>>, [{tree, <<"t">>}]},
+             {einval, not_a_pid, <<"/x">>, [{tree, <<"t">>}]},
+             {enametoolong, Grant, <<"/", Long/binary>>, [{tree, <<"t">>}]},
+             {enametoolong, Grant, iolist_to_binary(lists:duplicate(257, <<"/n">>)), [{tree, <<"t">>}]}]],
+    ?assertEqual(Before, table()).
+
+bind_roots_at_the_place_from_reaches() ->
+    reported(),
+    Grant = grant(),
+    ok = erx_ns:mount(Grant, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    _ = nif(),
+    ?assertEqual(ok, erx_ns:bind(<<"/tmp/a/./c/../d">>, <<"/b">>, [ro])),
+    ?assertEqual({bind, <<"/tmp/a/d">>, <<"/b">>, true}, nif()),
+    ?assertEqual(ok, erx_ns:bind(<<"/lib/x">>, <<"/y">>)),
+    ?assertEqual(ok, erx_ns:bind(<<"/b/e">>, <<"/z">>)),
+    [_, _, Bound, Released, Again] = table(),
+    ?assertEqual(#{point => [<<"b">>], provider => {grant, Grant, <<"tmp">>}, root => [<<"a">>, <<"d">>],
+                   rights => ro}, Bound),
+    ?assertEqual(#{point => [<<"y">>], provider => release, root => [<<"lib">>, <<"x">>], rights => ro}, Released),
+    ?assertEqual(Bound#{point => [<<"z">>], root => [<<"a">>, <<"d">>, <<"e">>]}, Again).
+
+bind_of_a_relative_path_starts_at_the_working_directory() ->
+    {ok, Cwd} = file:get_cwd(),
+    ?assertEqual(ok, erx_ns:bind(<<"sub/..">>, <<"/here">>)),
+    [_, #{root := Root}] = table(),
+    ?assertEqual(unicode:characters_to_binary(Cwd), filename:join([<<"/">> | Root])).
+
+bind_refusals() ->
+    Before = table(),
+    [?assertEqual({error, Reason}, erx_ns:bind(From, To, Options))
+     || {Reason, From, To, Options} <-
+            [{einval, <<"/a">>, <<"/b">>, [rw]},
+             {eexist, <<"/a">>, <<"/">>, []},
+             {einval, <<"/a">>, <<"/b/..">>, []},
+             {einval, <<"/", 16#ff>>, <<"/b">>, []}]],
+    ?assertEqual(Before, table()),
+    %% A table without / places nothing outside its entries.
+    persistent_term:put(erx_ns, [#{point => [<<"d">>], provider => release, root => [], rights => ro}]),
+    ?assertEqual({error, enoent}, erx_ns:bind(<<"/e">>, <<"/d/f">>, [])).
+
+unmount_removes_exactly_one_entry() ->
+    reported(),
+    Grant = grant(),
+    ok = erx_ns:mount(Grant, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:bind(<<"/tmp">>, <<"/t">>),
+    _ = [nif(), nif()],
+    ?assertEqual({error, ebusy}, erx_ns:unmount(<<"/">>)),
+    ?assertEqual({error, ebusy}, erx_ns:unmount(<<"//">>)),
+    ?assertEqual({error, einval}, erx_ns:unmount(<<"/tmp/a">>)),
+    ?assertEqual({error, einval}, erx_ns:unmount(<<"tmp">>)),
+    ?assertEqual(ok, erx_ns:unmount(<<"/tmp/">>)),
+    ?assertEqual({unmount, <<"/tmp">>}, nif()),
+    ?assertMatch([#{point := [], provider := release}, #{point := [<<"t">>]}], table()).
+
+the_table_holds_at_most_64_entries() ->
+    [ok = erx_ns:bind(<<"/">>, <<"/", (integer_to_binary(N))/binary>>) || N <- lists:seq(2, 64)],
+    ?assertEqual(64, length(table())),
+    ?assertEqual({error, system_limit}, erx_ns:bind(<<"/">>, <<"/65">>)).
+
+a_nif_refusal_leaves_the_term_unchanged() ->
+    ?assertEqual({error, eexist}, erx_ns:mount(grant(), <<"/refused">>, [{tree, <<"t">>}])),
+    ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)).
+
+an_ended_grant_marks_every_entry_of_it_ended() ->
+    Grant = grant(),
+    Other = grant(),
+    ok = erx_ns:mount(Grant, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/b">>, [ro]),
+    ok = erx_ns:mount(Other, <<"/o">>, [{tree, <<"o">>}]),
+    Grant ! stop,
+    wait_down(Grant),
+    ?assertMatch([#{point := [], provider := release}, #{point := [<<"tmp">>], provider := ended, rights := rw},
+                  #{point := [<<"b">>], provider := ended, root := [<<"a">>]},
+                  #{point := [<<"o">>], provider := {grant, Other, <<"o">>}}], settled()),
+    %% The ended entry stays until it is unmounted, and a later mount at its point
+    %% after that holds the new grant.
+    ?assertEqual({error, eexist}, erx_ns:mount(Other, <<"/tmp">>, [{tree, <<"tmp">>}])),
+    ok = erx_ns:unmount(<<"/tmp">>),
+    ok = erx_ns:mount(Other, <<"/tmp">>, [{tree, <<"tmp">>}]),
+    ?assertMatch(#{provider := {grant, Other, <<"tmp">>}}, lists:last(table())).
+
+a_grant_ended_while_the_process_was_down_ends_on_restart() ->
+    Grant = grant(),
+    ok = erx_ns:mount(Grant, <<"/tmp">>, [{tree, <<"tmp">>}, rw]),
+    Ns = whereis(erx_ns),
+    exit(Ns, kill),
+    wait_down(Ns),
+    ?assertMatch([_, #{provider := {grant, Grant, _}}], table()),
+    Grant ! stop,
+    wait_down(Grant),
+    {ok, Again} = erx_ns:start_link(erx_ns_prim_stub),
+    unlink(Again),
+    ?assertMatch([#{point := [], provider := release}, #{point := [<<"tmp">>], provider := ended}], settled()).
+
+a_malformed_request_answers_einval_and_changes_nothing() ->
+    [?assertEqual({error, einval}, gen_server:call(erx_ns, Request))
+     || Request <- [nonsense, {mount, <<"/x">>, self(), bad}, {bind, 1, 2, []}, {unmount, {}},
+                    {mount, <<"/x">>, self(), [{tree, <<"t">>} | tail]}]],
+    ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
+    ?assert(is_process_alive(whereis(erx_ns))).
+
+%% The table once erx_ns has handled every message before this call.
+settled() ->
+    _ = sys:get_state(erx_ns),
+    table().
+
+wait_down(Pid) ->
+    Ref = monitor(process, Pid),
+    receive {'DOWN', Ref, process, Pid, _} -> ok after 5000 -> error(timeout) end.
+
+flush() ->
+    receive _ -> flush() after 0 -> ok end.

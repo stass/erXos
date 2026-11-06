@@ -548,18 +548,20 @@ it; git history is the record of completed work.
   rename or a link places each path by its whole resolved path, and a last `.` or `..` answers Linux's errors.
   [Resolving a path](docs/design-files.md#resolving-a-path) resolves them physically in `erx_path`, preloaded Erlang
   over a snapshot of the table, with FreeBSD's answers. `erx_path` is written and preloaded, with its EUnit cases,
-  its reference model of `vfs_lookup` and its fuzz target, but nothing calls it yet. Three packages remain, about
-  800 to 1,000 lines to write and 1,800 to delete, each one commit with its own targeted tests; the last two land
-  together after one run of the full gates. (1) `erx_ns` as the table's one writer, a
-  registered process over a persistent term that monitors its grants and marks an ended one's entry `ended`, the boot
-  table of the release slice and its EROFS images as the term's default, the working directory as a checked binary
-  in `prim_file`'s NIF that only `set_cwd` writes, `erx_ns.erl` off `prim_file:erx_ns_*`, the two source checks of
-  [design.md](docs/design.md#chokepoint-checks) with their seeded violations, and the `erts-reads-no-index` rule moved
-  out of `tools/lib/erx/chokepoint_rules/ns.rb` (`test/host/gate_baseline_test.rb` counts both rules). (2) The release
+  its reference model of `vfs_lookup` and its fuzz target, but nothing calls it yet. `erx_ns` is the table's one
+  writer, a registered process over the persistent term `erx_ns` that `prim_file:erx_table/0` reads with the boot
+  table as its default; until (3) switches resolution to the term, `erx_ns` makes each change on the NIF's table as
+  well and puts the term only when both accept it, and a bind's source is placed logically against the working
+  directory, as the NIF's table resolves it. The working directory is checked by `erx_set_cwd_nif/1`, which only
+  `prim_file:set_cwd/1` calls, but still lives in the NIF's table. Two packages remain, about 800 to 1,000 lines to
+  write and 1,800 to delete, each one commit with its own targeted tests, landing together after one run of the full
+  gates. The NIF's place check has no test of its refusals, since no Erlang caller but `set_cwd/1` can reach it: give
+  it one with the decoder's fuzz target of (2). The boot table holds no EROFS image, since the boot information
+  names none yet. (2) The release
   provider: `release_walk_nif(Names)` and the operations' NIF calls on name lists, with the decoder's checks and its
   fuzz target; delete `liberx/ns.c`, `include/erx/ns.h`, `tools/fuzz/ns_fuzz.c` with `tools/fuzz/ns_target.rb`, the
   `ns-result-writes` rule, `prim_file_nif.c`'s `erx_resolve_nif` and `erx_ns_{mount,bind,unmount}_nif`, and
-  `erx_prim_file.c`'s table (`name_space`, `ns_lock`, `ns_watches`, `erx_ns_watch_table`, `efile_marshal_paths`,
+  `erx_ns`'s mirror of each change onto it (`mirrored/2`), `erx_prim_file.c`'s table (`name_space`, `ns_lock`, `ns_watches`, `erx_ns_watch_table`, `efile_marshal_paths`,
   `erx_copy_entry` and the `erx_ns_result_t` in `prim_file_nif.h`'s `efile_path_t`), move `erx_ns_fid_of` beside the
   fid counter in `erx_prim_file.c`, and rework `tools/fuzz/release_fuzz.c`, `tools/fuzz/release_target.rb`,
   `test/fixtures/release_fs_driver.c`, `test/host/release_fs_test.rb`, `sys/erxos/imports.txt` and the comments of

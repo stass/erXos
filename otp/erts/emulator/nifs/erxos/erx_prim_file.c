@@ -106,6 +106,8 @@ static int erx_build_table(void);
 static posix_errno_t erx_ns_errno(erx_ns_status_t);
 static ERL_NIF_TERM erx_ns_answer(ErlNifEnv *, erx_ns_status_t);
 static int erx_inspect_path(ErlNifEnv *, ERL_NIF_TERM, ErlNifBinary *);
+static bool erx_utf8_valid(const uint8_t *, size_t);
+static bool erx_place_valid(const uint8_t *, size_t);
 static void erx_copy_entry(ErlNifEnv *, efile_path_t *);
 static ERL_NIF_TERM erx_text_term(ErlNifEnv *, const char *);
 static ERL_NIF_TERM erx_grant_term(ErlNifEnv *, const efile_path_t *);
@@ -621,28 +623,109 @@ efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
- * prim_file:erx_set_cwd_nif(Path): makes Path, an absolute namespace path, the
- * working directory, as erx_ns_resolve normalises it. It checks nothing about what
- * lies there: erx_file_remote:set_cwd/3 found a directory on the path's grant first.
- * The working directory is a path, resolved again at each use, so a mount change
- * between that check and this store leaves the state the same change would leave
- * just after it.
+ * No NUL, and well-formed UTF-8: no overlong form, surrogate or value past
+ * Unicode's end. It is liberx/ns.c's check, which goes with that table.
+ */
+static bool
+erx_utf8_valid(const uint8_t *bytes, size_t length)
+{
+	size_t cursor, count;
+	uint32_t point, minimum;
+
+	cursor = 0;
+	while (cursor < length) {
+		point = bytes[cursor++];
+		if (point == 0)
+			return (false);
+		if (point < 0x80)
+			continue;
+		if (point >= 0xc2 && point <= 0xdf) {
+			point &= 0x1f;
+			count = 1;
+			minimum = 0x80;
+		} else if (point >= 0xe0 && point <= 0xef) {
+			point &= 0x0f;
+			count = 2;
+			minimum = 0x800;
+		} else if (point >= 0xf0 && point <= 0xf4) {
+			point &= 0x07;
+			count = 3;
+			minimum = 0x10000;
+		} else {
+			return (false);
+		}
+		if (count > length - cursor)
+			return (false);
+		for (size_t index = 0; index < count; index++) {
+			if ((bytes[cursor] & 0xc0) != 0x80)
+				return (false);
+			point = (point << 6) | (bytes[cursor++] & 0x3f);
+		}
+		if (point < minimum || point > 0x10ffff ||
+		    (point >= 0xd800 && point <= 0xdfff))
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * Whether bytes are a place as the working directory holds one: `/` alone, or
+ * `/` and then names joined by single `/`, with no `/` at the end. Each name is
+ * 1 to ERX_NAME_MAX bytes of UTF-8 without NUL, other than `.` and `..`; there
+ * are at most ERX_NS_NAMES_MAX of them; and the whole is shorter than
+ * ERX_PATH_MAX, so it fits the store with its NUL.
+ */
+static bool
+erx_place_valid(const uint8_t *bytes, size_t length)
+{
+	size_t cursor, start, count, names;
+
+	if (length == 0 || length >= ERX_PATH_MAX || bytes[0] != '/' ||
+	    !erx_utf8_valid(bytes, length))
+		return (false);
+	names = 0;
+	cursor = 1;
+	while (cursor < length) {
+		start = cursor;
+		while (cursor < length && bytes[cursor] != '/')
+			cursor++;
+		count = cursor - start;
+		if (count == 0 || count > ERX_NAME_MAX ||
+		    (count == 1 && bytes[start] == '.') ||
+		    (count == 2 && bytes[start] == '.' && bytes[start + 1] == '.') ||
+		    ++names > ERX_NS_NAMES_MAX)
+			return (false);
+		/* A `/` that ends the place leaves an empty last name. */
+		if (cursor + 1 == length)
+			return (false);
+		cursor++;
+	}
+	return (true);
+}
+
+/*
+ * prim_file:erx_set_cwd_nif(Place): makes Place the working directory, which only
+ * prim_file:set_cwd/1 calls, with the place erx_file_remote:set_cwd/3 reached on a
+ * grant (design-files.md, Erlang clients). Any process can call it with any term,
+ * so anything but a binary holding a place as erx_place_valid states answers
+ * {error, einval} and changes nothing. It checks nothing about what lies there:
+ * the working directory is a path, resolved again at each use, so a mount change
+ * between set_cwd's check and this store leaves the state the same change would
+ * leave just after it.
  */
 ERL_NIF_TERM
 efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	erx_ns_result_t result;
-	erx_ns_status_t status;
-	ErlNifBinary path;
+	ErlNifBinary place;
 
-	if (argc != 1 || !erx_inspect_path(env, argv[0], &path) || path.data[0] != '/')
-		return (enif_make_badarg(env));
+	if (argc != 1 || !enif_inspect_binary(env, argv[0], &place) ||
+	    !erx_place_valid(place.data, place.size))
+		return (erx_ns_answer(env, ERX_NS_EINVAL));
 	enif_rwlock_rwlock(ns_lock);
-	status = erx_ns_resolve(&name_space, path.data, path.size - 1, &result);
-	if (status == ERX_NS_OK)
-		memcpy(name_space.cwd, result.res_path, result.res_path_length + 1);
+	memcpy(name_space.cwd, place.data, place.size);
+	name_space.cwd[place.size] = '\0';
 	enif_rwlock_rwunlock(ns_lock);
-	return (erx_ns_answer(env, status));
+	return (erx_ns_answer(env, ERX_NS_OK));
 }
 
 /* prim_file:erx_tmp_limit_nif(): the cap of the domain's /tmp, from its startup limits. */

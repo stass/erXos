@@ -18,7 +18,8 @@
 %% limitations under the License.
 %%
 %% Modified by erXos: kernel_sup starts erx_watchdog right after on_load, and
-%% kernel_safe_sup makes the domain's file version counter and starts /tmp.
+%% kernel_safe_sup makes the domain's file version counter and starts the namespace
+%% table's writer and /tmp.
 %%
 %% %CopyrightEnd%
 %%
@@ -254,8 +255,16 @@ init(safe) ->
     Pg = start_pg(),
 
     %% erXos: the domain's file version counter, once, before any file server
-    %% starts, then the domain's /tmp (design-tmp.md, Starting and mounting).
+    %% starts; the namespace table's one writer, before anything mounts
+    %% (design-files.md, Building, binding and mounting); then the domain's /tmp
+    %% (design-tmp.md, Starting and mounting).
     ok = erx_fs_version:init(),
+    Ns = #{id => erx_ns,
+           start => {erx_ns, start_link, []},
+           restart => permanent,
+           shutdown => 2000,
+           type => worker,
+           modules => [erx_ns]},
     Tmp = #{id => erx_ramfs_sup,
             start => {erx_ramfs_sup, start_link, []},
             restart => permanent,
@@ -263,7 +272,7 @@ init(safe) ->
             type => supervisor,
             modules => [erx_ramfs_sup]},
 
-    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Tmp]}}.
+    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp]}}.
 
 start_distribution() ->
     Rpc = #{id => rex,
