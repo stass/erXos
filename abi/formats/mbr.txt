@@ -16,7 +16,7 @@ limit mbr_status_inactive u8 0x00
 limit mbr_type_empty u8 0x00
 
 # One entry of a master or extended boot record.
-layout erx_mbr_entry 1 wire_le 4 16
+layout erx_mbr_entry wire_le 4 16
   field status u8 0
   field chs_first u8 1 count 3
   field type u8 4

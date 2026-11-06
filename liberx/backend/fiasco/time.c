@@ -18,7 +18,6 @@
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/time_table.h"
 
-#define TIME_PAGE_VERSION	1u
 /* An odd value is a write in progress, so the last write ends at the largest even one. */
 #define TIME_SEQ_LAST		(UINT64_MAX - 1)
 
@@ -33,7 +32,7 @@ erx_fiasco_time_init(void)
 	const uint64_t hz = erx_fiasco_counter_hz();
 	const erx_fiasco_time_scale_t scale = erx_fiasco_time_scale(hz);
 
-	atomic_store_explicit(&time_area.page.version, TIME_PAGE_VERSION, memory_order_relaxed);
+	atomic_store_explicit(&time_area.page.version, ERX_TIME_PAGE_VERSION, memory_order_relaxed);
 	atomic_store_explicit(&time_area.page.counter_hz, hz, memory_order_relaxed);
 	atomic_store_explicit(&time_area.page.mult, scale.mult, memory_order_relaxed);
 	atomic_store_explicit(&time_area.page.shift, scale.shift, memory_order_relaxed);

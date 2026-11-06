@@ -173,12 +173,12 @@ bytes crash_frame_begin 17 value 2d2d6572782d63726173682d626567696e
 bytes crash_frame_end 15 value 2d2d6572782d63726173682d656e64
 bytes abi_note_owner 6 value 6572586f7300
 bytes abi_note_section 13 value 2e6e6f74652e6572782e616269
-layout erx_abi_note 1 wire_le 4 24
+layout erx_abi_note wire_le 4 24
   field header erx_elf64_nhdr 0
   field owner abi_note_owner 12
   padding 18 2
   field abi_version u32 20
-layout erx_pack_header 2 wire_le 8 96
+layout erx_pack_header wire_le 8 96
   field magic pack_magic 0
   field version u32 8
   field flags pack_flags 12
@@ -191,7 +191,7 @@ layout erx_pack_header 2 wire_le 8 96
   field root_entry u32 52
   field build_id u8 56 count 8
   field index_hash u8 64 count 32
-layout erx_pack_entry 2 wire_le 8 64
+layout erx_pack_entry wire_le 8 64
   field path_off u32 0
   field path_len u16 4
   field kind entry_kind 6
@@ -200,20 +200,20 @@ layout erx_pack_entry 2 wire_le 8 64
   field data_size u64 16
   field manifest_off u64 24
   field file_hash u8 32 count 32
-layout erx_boot_locator 1 wire_le 8 32
+layout erx_boot_locator wire_le 8 32
   field magic boot_locator_magic 0
   field version u32 8
   field zero u32 12
   field archive_off u64 16
   field archive_size u64 24
-layout erx_image_segment 1 wire_le 8 40
+layout erx_image_segment wire_le 8 40
   field file_offset u64 0
   field mem_offset u64 8
   field file_size u64 16
   field mem_size u64 24
   field prot prot 32
   field flags seg_flags 36
-layout erx_image_manifest 1 wire_le 8 56
+layout erx_image_manifest wire_le 8 56
   field magic u32 0
   field version u16 4
   field nsegments u16 6
@@ -227,7 +227,7 @@ layout erx_image_manifest 1 wire_le 8 56
   field base_alignment u32 52
   tail segments erx_image_segment nsegments @image_segments_max
 
-layout erx_lane_hdr 1 shared 8 16
+layout erx_lane_hdr shared 8 16
   field wpos u64 0
   field need u64 8
   atomic wpos load acquire store release
@@ -238,7 +238,7 @@ layout erx_lane_hdr 1 shared 8 16
   owner need producer all
   visibility wpos release
   visibility need release
-layout erx_lane_rpage 1 shared 8 16
+layout erx_lane_rpage shared 8 16
   field rpos u64 0
   field wake u64 8
   atomic rpos load acquire store release
@@ -249,15 +249,15 @@ layout erx_lane_rpage 1 shared 8 16
   owner wake consumer all
   visibility rpos release
   visibility wake release
-layout erx_lane_rec 1 wire_le 8 16
+layout erx_lane_rec wire_le 8 16
   field len u32 0
   field kind u32 4
   field zero u64 8
-layout erx_frame_header 1 wire_le 4 8
+layout erx_frame_header wire_le 4 8
   field ctl_len u32 0
   field payload_len u32 4
 
-layout erx_runtime_limits 1 wire_le 8 64
+layout erx_runtime_limits wire_le 8 64
   field max_frame u32 0
   field max_message_heap u32 4
   field funnel_depth u32 8
@@ -271,7 +271,7 @@ layout erx_runtime_limits 1 wire_le 8 64
   field peer_held u64 48
   field peer_held_total u64 56
   zero reserved all
-layout erx_boot_connection 1 wire_le 8 48
+layout erx_boot_connection wire_le 8 48
   field side cap 0
   field peer_side cap 8
   field peer_bell cap 16
@@ -281,7 +281,7 @@ layout erx_boot_connection 1 wire_le 8 48
   field peer_node_len u32 36
   field out_size u32 40
   field in_size u32 44
-layout erx_boot_info 1 wire_le 8 272
+layout erx_boot_info wire_le 8 272
   field version u32 0
   field abi_version u32 4
   field domain_id u32 8
@@ -353,7 +353,7 @@ enum fiasco_call u32
   value time_set_wall 36
   value irq_unbind 37
 
-layout erx_group_report 1 wire_le 8 32
+layout erx_group_report wire_le 8 32
   field cpuset u64 0
   field used_ns u64 8
   field capacity_mcpu u32 16
@@ -361,7 +361,7 @@ layout erx_group_report 1 wire_le 8 32
   field ready u32 24
   field usage_known u32 28
 
-layout erx_fiasco_thread_create_request 1 wire_le 8 48
+layout erx_fiasco_thread_create_request wire_le 8 48
   field caller u64 0
   field budget u64 8
   field space u64 16
@@ -369,98 +369,98 @@ layout erx_fiasco_thread_create_request 1 wire_le 8 48
   field thread_class u64 32
   field index u64 40
 
-layout erx_fiasco_thread_start_request 1 wire_le 8 24
+layout erx_fiasco_thread_start_request wire_le 8 24
   field caller u64 0
   field thread u64 8
   field trampoline u64 16
 
-layout erx_fiasco_thread_set_affinity_request 1 wire_le 8 24
+layout erx_fiasco_thread_set_affinity_request wire_le 8 24
   field caller u64 0
   field thread u64 8
   field mask u64 16
 
-layout erx_fiasco_debug_log_request 1 wire_le 8 16
+layout erx_fiasco_debug_log_request wire_le 8 16
   field caller u64 0
   field len u64 8
 
-layout erx_fiasco_task_write_request 1 wire_le 8 16
+layout erx_fiasco_task_write_request wire_le 8 16
   field caller u64 0
   field len u64 8
 
 # erx_log_read: the window is the root's own memory, so only the root may ask.
-layout erx_fiasco_log_read_request 1 wire_le 8 32
+layout erx_fiasco_log_read_request wire_le 8 32
   field caller u64 0
   field cursor u64 8
   field window u64 16
   field size u64 24
 
-layout erx_fiasco_thread_reap_request 1 wire_le 8 16
+layout erx_fiasco_thread_reap_request wire_le 8 16
   field caller u64 0
   field thread u64 8
 
-layout erx_fiasco_vm_range_request 1 wire_le 8 24
+layout erx_fiasco_vm_range_request wire_le 8 24
   field caller u64 0
   field addr u64 8
   field size u64 16
 
-layout erx_fiasco_vm_flagged_request 1 wire_le 8 32
+layout erx_fiasco_vm_flagged_request wire_le 8 32
   field caller u64 0
   field addr u64 8
   field size u64 16
   field flags u64 24
 
-layout erx_fiasco_machine_end_request 1 wire_le 8 24
+layout erx_fiasco_machine_end_request wire_le 8 24
   field caller u64 0
   field res u64 8
   field how u64 16
 
-layout erx_fiasco_irq_create_request 1 wire_le 8 24
+layout erx_fiasco_irq_create_request wire_le 8 24
   field caller u64 0
   field kind u64 8
   field selector u64 16
 
-layout erx_fiasco_irq_bind_request 1 wire_le 8 32
+layout erx_fiasco_irq_bind_request wire_le 8 32
   field caller u64 0
   field irq u64 8
   field thread u64 16
   field record u64 24
 
-layout erx_fiasco_irq_request 1 wire_le 8 16
+layout erx_fiasco_irq_request wire_le 8 16
   field caller u64 0
   field irq u64 8
 
-layout erx_fiasco_time_set_wall_request 1 wire_le 8 16
+layout erx_fiasco_time_set_wall_request wire_le 8 16
   field caller u64 0
   field wall_ns u64 8
 
-layout erx_fiasco_mem_create_request 1 wire_le 8 32
+layout erx_fiasco_mem_create_request wire_le 8 32
   field caller u64 0
   field budget u64 8
   field size u64 16
   field flags u64 24
 
-layout erx_fiasco_mem_physical_request 1 wire_le 8 40
+layout erx_fiasco_mem_physical_request wire_le 8 40
   field caller u64 0
   field budget u64 8
   field base u64 16
   field size u64 24
   field attr u64 32
 
-layout erx_fiasco_mem_contiguous_request 1 wire_le 8 32
+layout erx_fiasco_mem_contiguous_request wire_le 8 32
   field caller u64 0
   field budget u64 8
   field size u64 16
   field limit u64 24
 
-layout erx_fiasco_mem_dma_request 1 wire_le 8 24
+layout erx_fiasco_mem_dma_request wire_le 8 24
   field caller u64 0
   field mem u64 8
   field offset u64 16
 
-layout erx_fiasco_entropy_read_request 1 wire_le 8 8
+layout erx_fiasco_entropy_read_request wire_le 8 8
   field caller u64 0
 
-layout erx_fiasco_entropy_add_request 1 wire_le 8 48
+layout erx_fiasco_entropy_add_request wire_le 8 48
   field caller u64 0
   field len u64 8
   field word0 u64 16
@@ -468,7 +468,7 @@ layout erx_fiasco_entropy_add_request 1 wire_le 8 48
   field word2 u64 32
   field word3 u64 40
 
-layout erx_fiasco_vm_map_request 1 wire_le 8 56
+layout erx_fiasco_vm_map_request wire_le 8 56
   field caller u64 0
   field space u64 8
   field addr u64 16
@@ -477,7 +477,7 @@ layout erx_fiasco_vm_map_request 1 wire_le 8 56
   field offset u64 40
   field prot u64 48
 
-layout erx_fiasco_space_create_request 1 wire_le 8 56
+layout erx_fiasco_space_create_request wire_le 8 56
   field caller u64 0
   field budget u64 8
   field parent u64 16
@@ -486,22 +486,22 @@ layout erx_fiasco_space_create_request 1 wire_le 8 56
   field flags u64 40
   field cap_limit u64 48
 
-layout erx_fiasco_image_map_request 1 wire_le 8 32
+layout erx_fiasco_image_map_request wire_le 8 32
   field caller u64 0
   field space u64 8
   field image u64 16
   field entry u64 24
 
-layout erx_fiasco_space_stop_request 1 wire_le 8 24
+layout erx_fiasco_space_stop_request wire_le 8 24
   field caller u64 0
   field space u64 8
   field status i64 16
 
-layout erx_fiasco_task_join_request 1 wire_le 8 16
+layout erx_fiasco_task_join_request wire_le 8 16
   field caller u64 0
   field task u64 8
 
-layout erx_fiasco_reply 1 wire_le 8 32
+layout erx_fiasco_reply wire_le 8 32
   field status i64 0
   field first u64 8
   field second u64 16

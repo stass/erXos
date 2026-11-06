@@ -31,7 +31,7 @@ enum probe_mode u32
   value fast 1
   value slow 2
 bytes probe_tag 3
-layout erx_utcb 1 shared 8 512
+layout erx_utcb shared 8 512
   field mr u64 0 count @msg_words
   field self u64 504
   atomic mr[] load acquire store release
@@ -42,13 +42,13 @@ layout erx_utcb 1 shared 8 512
   owner self kernel all
   visibility mr[] development
   visibility self internal
-layout probe_regs 1 wire_le 8 32
+layout probe_regs wire_le 8 32
   field pc u64 0
   field mode probe_mode 8
   field flags u16 12
   padding 14 2
   field gpr u64 16 count 2
-layout probe_grant 1 wire_le 8 8
+layout probe_grant wire_le 8 8
   field tag probe_tag 0
   padding 3 1
   field share i32 4

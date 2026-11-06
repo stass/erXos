@@ -30,7 +30,6 @@ module Erx
       ).freeze
       types["erx_arch_boot_header"] = Layout.new(
         name: "erx_arch_boot_header".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -205,7 +204,6 @@ module Erx
       ).freeze
       types["erx_boot_locator"] = Layout.new(
         name: "erx_boot_locator".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -338,7 +336,6 @@ module Erx
       ).freeze
       types["erx_boot_connection"] = Layout.new(
         name: "erx_boot_connection".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 48,
@@ -478,7 +475,6 @@ module Erx
       ).freeze
       types["erx_boot_root_extension"] = Layout.new(
         name: "erx_boot_root_extension".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 88,
@@ -646,7 +642,6 @@ module Erx
       ).freeze
       types["erx_msg_item"] = Layout.new(
         name: "erx_msg_item".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -804,7 +799,6 @@ module Erx
       ).freeze
       types["erx_pack_entry"] = Layout.new(
         name: "erx_pack_entry".b,
-        version: 2,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -930,7 +924,6 @@ module Erx
       ).freeze
       types["erx_cap_slot"] = Layout.new(
         name: "erx_cap_slot".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 64,
@@ -1083,7 +1076,6 @@ module Erx
       ).freeze
       types["erx_device_secret_page"] = Layout.new(
         name: "erx_device_secret_page".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 40,
@@ -1135,7 +1127,6 @@ module Erx
       ).freeze
       types["erx_elf64_dyn"] = Layout.new(
         name: "erx_elf64_dyn".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -1177,7 +1168,6 @@ module Erx
       ).freeze
       types["erx_elf64_ehdr"] = Layout.new(
         name: "erx_elf64_ehdr".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -1387,7 +1377,6 @@ module Erx
       ).freeze
       types["erx_elf64_nhdr"] = Layout.new(
         name: "erx_elf64_nhdr".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 12,
@@ -1443,7 +1432,6 @@ module Erx
       ).freeze
       types["erx_abi_note"] = Layout.new(
         name: "erx_abi_note".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 24,
@@ -1499,7 +1487,6 @@ module Erx
       ).freeze
       types["erx_elf64_phdr"] = Layout.new(
         name: "erx_elf64_phdr".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 56,
@@ -1625,7 +1612,6 @@ module Erx
       ).freeze
       types["erx_erofs_dirent"] = Layout.new(
         name: "erx_erofs_dirent".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 12,
@@ -1695,7 +1681,6 @@ module Erx
       ).freeze
       types["erx_erofs_inode_compact"] = Layout.new(
         name: "erx_erofs_inode_compact".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 32,
@@ -1849,7 +1834,6 @@ module Erx
       ).freeze
       types["erx_erofs_inode_extended"] = Layout.new(
         name: "erx_erofs_inode_extended".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -2031,7 +2015,6 @@ module Erx
       ).freeze
       types["erx_erofs_super_block"] = Layout.new(
         name: "erx_erofs_super_block".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 128,
@@ -2395,7 +2378,6 @@ module Erx
       ).freeze
       types["erx_erofs_xattr_ibody_header"] = Layout.new(
         name: "erx_erofs_xattr_ibody_header".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 12,
@@ -2437,7 +2419,6 @@ module Erx
       ).freeze
       types["erx_exec_stat"] = Layout.new(
         name: "erx_exec_stat".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 128,
@@ -2584,7 +2565,6 @@ module Erx
       ).freeze
       types["erx_group_stat"] = Layout.new(
         name: "erx_group_stat".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 8320,
@@ -2783,7 +2763,6 @@ module Erx
       ).freeze
       types["erx_fiasco_debug_log_request"] = Layout.new(
         name: "erx_fiasco_debug_log_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -2825,7 +2804,6 @@ module Erx
       ).freeze
       types["erx_fiasco_entropy_add_request"] = Layout.new(
         name: "erx_fiasco_entropy_add_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 48,
@@ -2923,7 +2901,6 @@ module Erx
       ).freeze
       types["erx_fiasco_entropy_read_request"] = Layout.new(
         name: "erx_fiasco_entropy_read_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 8,
@@ -2951,7 +2928,6 @@ module Erx
       ).freeze
       types["erx_fiasco_image_map_request"] = Layout.new(
         name: "erx_fiasco_image_map_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3021,7 +2997,6 @@ module Erx
       ).freeze
       types["erx_fiasco_irq_bind_request"] = Layout.new(
         name: "erx_fiasco_irq_bind_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3091,7 +3066,6 @@ module Erx
       ).freeze
       types["erx_fiasco_irq_create_request"] = Layout.new(
         name: "erx_fiasco_irq_create_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -3147,7 +3121,6 @@ module Erx
       ).freeze
       types["erx_fiasco_irq_request"] = Layout.new(
         name: "erx_fiasco_irq_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -3189,7 +3162,6 @@ module Erx
       ).freeze
       types["erx_fiasco_log_read_request"] = Layout.new(
         name: "erx_fiasco_log_read_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3259,7 +3231,6 @@ module Erx
       ).freeze
       types["erx_fiasco_machine_end_request"] = Layout.new(
         name: "erx_fiasco_machine_end_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -3315,7 +3286,6 @@ module Erx
       ).freeze
       types["erx_fiasco_mem_contiguous_request"] = Layout.new(
         name: "erx_fiasco_mem_contiguous_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3385,7 +3355,6 @@ module Erx
       ).freeze
       types["erx_fiasco_mem_create_request"] = Layout.new(
         name: "erx_fiasco_mem_create_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3455,7 +3424,6 @@ module Erx
       ).freeze
       types["erx_fiasco_mem_dma_request"] = Layout.new(
         name: "erx_fiasco_mem_dma_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -3511,7 +3479,6 @@ module Erx
       ).freeze
       types["erx_fiasco_mem_physical_request"] = Layout.new(
         name: "erx_fiasco_mem_physical_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 40,
@@ -3595,7 +3562,6 @@ module Erx
       ).freeze
       types["erx_fiasco_reply"] = Layout.new(
         name: "erx_fiasco_reply".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -3665,7 +3631,6 @@ module Erx
       ).freeze
       types["erx_fiasco_space_create_request"] = Layout.new(
         name: "erx_fiasco_space_create_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 56,
@@ -3777,7 +3742,6 @@ module Erx
       ).freeze
       types["erx_fiasco_space_stop_request"] = Layout.new(
         name: "erx_fiasco_space_stop_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -3833,7 +3797,6 @@ module Erx
       ).freeze
       types["erx_fiasco_task_join_request"] = Layout.new(
         name: "erx_fiasco_task_join_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -3875,7 +3838,6 @@ module Erx
       ).freeze
       types["erx_fiasco_task_write_request"] = Layout.new(
         name: "erx_fiasco_task_write_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -3917,7 +3879,6 @@ module Erx
       ).freeze
       types["erx_fiasco_thread_create_request"] = Layout.new(
         name: "erx_fiasco_thread_create_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 48,
@@ -4015,7 +3976,6 @@ module Erx
       ).freeze
       types["erx_fiasco_thread_reap_request"] = Layout.new(
         name: "erx_fiasco_thread_reap_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -4057,7 +4017,6 @@ module Erx
       ).freeze
       types["erx_fiasco_thread_set_affinity_request"] = Layout.new(
         name: "erx_fiasco_thread_set_affinity_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -4113,7 +4072,6 @@ module Erx
       ).freeze
       types["erx_fiasco_thread_start_request"] = Layout.new(
         name: "erx_fiasco_thread_start_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -4169,7 +4127,6 @@ module Erx
       ).freeze
       types["erx_fiasco_time_set_wall_request"] = Layout.new(
         name: "erx_fiasco_time_set_wall_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -4211,7 +4168,6 @@ module Erx
       ).freeze
       types["erx_fiasco_vm_flagged_request"] = Layout.new(
         name: "erx_fiasco_vm_flagged_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -4281,7 +4237,6 @@ module Erx
       ).freeze
       types["erx_fiasco_vm_map_request"] = Layout.new(
         name: "erx_fiasco_vm_map_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 56,
@@ -4393,7 +4348,6 @@ module Erx
       ).freeze
       types["erx_fiasco_vm_range_request"] = Layout.new(
         name: "erx_fiasco_vm_range_request".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -4449,7 +4403,6 @@ module Erx
       ).freeze
       types["erx_frame_header"] = Layout.new(
         name: "erx_frame_header".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 8,
@@ -4491,7 +4444,6 @@ module Erx
       ).freeze
       types["erx_group_report"] = Layout.new(
         name: "erx_group_report".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -4589,7 +4541,6 @@ module Erx
       ).freeze
       types["erx_lane_hdr"] = Layout.new(
         name: "erx_lane_hdr".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 16,
@@ -4641,7 +4592,6 @@ module Erx
       ).freeze
       types["erx_lane_rec"] = Layout.new(
         name: "erx_lane_rec".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -4697,7 +4647,6 @@ module Erx
       ).freeze
       types["erx_lane_rpage"] = Layout.new(
         name: "erx_lane_rpage".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 16,
@@ -4749,7 +4698,6 @@ module Erx
       ).freeze
       types["erx_machine_page"] = Layout.new(
         name: "erx_machine_page".b,
-        version: 1,
         storage: "shared".b,
         alignment: 4096,
         size: 4096,
@@ -4972,7 +4920,6 @@ module Erx
       ).freeze
       types["erx_mbr_entry"] = Layout.new(
         name: "erx_mbr_entry".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 16,
@@ -5070,7 +5017,6 @@ module Erx
       ).freeze
       types["erx_mf_boot_order"] = Layout.new(
         name: "erx_mf_boot_order".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 4,
@@ -5098,7 +5044,6 @@ module Erx
       ).freeze
       types["erx_mf_extent"] = Layout.new(
         name: "erx_mf_extent".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -5140,7 +5085,6 @@ module Erx
       ).freeze
       types["erx_mf_introduction"] = Layout.new(
         name: "erx_mf_introduction".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 8,
@@ -5182,7 +5126,6 @@ module Erx
       ).freeze
       types["erx_mf_liveness"] = Layout.new(
         name: "erx_mf_liveness".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 4,
@@ -5210,7 +5153,6 @@ module Erx
       ).freeze
       types["erx_mf_operation"] = Layout.new(
         name: "erx_mf_operation".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 4,
@@ -5238,7 +5180,6 @@ module Erx
       ).freeze
       types["erx_mf_shell_principal"] = Layout.new(
         name: "erx_mf_shell_principal".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 4,
@@ -5266,7 +5207,6 @@ module Erx
       ).freeze
       types["erx_mf_span"] = Layout.new(
         name: "erx_mf_span".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 8,
@@ -5308,7 +5248,6 @@ module Erx
       ).freeze
       types["erx_mf_str"] = Layout.new(
         name: "erx_mf_str".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 8,
@@ -5350,7 +5289,6 @@ module Erx
       ).freeze
       types["erx_mf_facet"] = Layout.new(
         name: "erx_mf_facet".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 80,
@@ -5532,7 +5470,6 @@ module Erx
       ).freeze
       types["erx_mf_lane_class"] = Layout.new(
         name: "erx_mf_lane_class".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -5588,7 +5525,6 @@ module Erx
       ).freeze
       types["erx_mf_partial_boot"] = Layout.new(
         name: "erx_mf_partial_boot".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -5644,7 +5580,6 @@ module Erx
       ).freeze
       types["erx_mf_runtime_limits"] = Layout.new(
         name: "erx_mf_runtime_limits".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 56,
@@ -5812,7 +5747,6 @@ module Erx
       ).freeze
       types["erx_mf_service"] = Layout.new(
         name: "erx_mf_service".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -5882,7 +5816,6 @@ module Erx
       ).freeze
       types["erx_mf_unit"] = Layout.new(
         name: "erx_mf_unit".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 24,
@@ -5952,7 +5885,6 @@ module Erx
       ).freeze
       types["erx_msgtag"] = Layout.new(
         name: "erx_msgtag".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 8,
@@ -6002,7 +5934,6 @@ module Erx
       ).freeze
       types["erx_regs"] = Layout.new(
         name: "erx_regs".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 272,
@@ -6072,7 +6003,6 @@ module Erx
       ).freeze
       types["erx_runtime_limits"] = Layout.new(
         name: "erx_runtime_limits".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -6254,7 +6184,6 @@ module Erx
       ).freeze
       types["erx_saved_thread"] = Layout.new(
         name: "erx_saved_thread".b,
-        version: 1,
         storage: "native".b,
         alignment: 16,
         size: 816,
@@ -6394,7 +6323,6 @@ module Erx
       ).freeze
       types["erx_time_page"] = Layout.new(
         name: "erx_time_page".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 48,
@@ -6547,7 +6475,6 @@ module Erx
       ).freeze
       types["erx_uframe"] = Layout.new(
         name: "erx_uframe".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 272,
@@ -6637,7 +6564,6 @@ module Erx
       ).freeze
       types["erx_vcpu"] = Layout.new(
         name: "erx_vcpu".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 336,
@@ -6798,7 +6724,6 @@ module Erx
       ).freeze
       types["erx_utcb"] = Layout.new(
         name: "erx_utcb".b,
-        version: 1,
         storage: "shared".b,
         alignment: 8,
         size: 1024,
@@ -6945,7 +6870,6 @@ module Erx
       ).freeze
       types["erx_kupage"] = Layout.new(
         name: "erx_kupage".b,
-        version: 1,
         storage: "shared".b,
         alignment: 4096,
         size: 4096,
@@ -6987,7 +6911,6 @@ module Erx
       ).freeze
       types["erx_virtio_blk_req_header"] = Layout.new(
         name: "erx_virtio_blk_req_header".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -7043,7 +6966,6 @@ module Erx
       ).freeze
       types["erx_virtq_desc"] = Layout.new(
         name: "erx_virtq_desc".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 16,
@@ -7113,7 +7035,6 @@ module Erx
       ).freeze
       types["erx_virtq_ring_head"] = Layout.new(
         name: "erx_virtq_ring_head".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 2,
         size: 4,
@@ -7155,7 +7076,6 @@ module Erx
       ).freeze
       types["erx_virtq_used_elem"] = Layout.new(
         name: "erx_virtq_used_elem".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 4,
         size: 8,
@@ -7240,7 +7160,6 @@ module Erx
       ).freeze
       types["erx_fault"] = Layout.new(
         name: "erx_fault".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 48,
@@ -7352,7 +7271,6 @@ module Erx
       ).freeze
       types["erx_crash_brief"] = Layout.new(
         name: "erx_crash_brief".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 120,
@@ -7562,7 +7480,6 @@ module Erx
       ).freeze
       types["erx_crash_record"] = Layout.new(
         name: "erx_crash_record".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 904,
@@ -7709,7 +7626,6 @@ module Erx
       ).freeze
       types["erx_log_record"] = Layout.new(
         name: "erx_log_record".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -7936,7 +7852,6 @@ module Erx
       ).freeze
       types["erx_mf_image"] = Layout.new(
         name: "erx_mf_image".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 136,
@@ -8156,7 +8071,6 @@ module Erx
       ).freeze
       types["erx_mf_domain"] = Layout.new(
         name: "erx_mf_domain".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 64,
@@ -8378,7 +8292,6 @@ module Erx
       ).freeze
       types["erx_mf_parameter"] = Layout.new(
         name: "erx_mf_parameter".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -8486,7 +8399,6 @@ module Erx
       ).freeze
       types["erx_mf_device"] = Layout.new(
         name: "erx_mf_device".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 80,
@@ -8736,7 +8648,6 @@ module Erx
       ).freeze
       types["erx_mf_window"] = Layout.new(
         name: "erx_mf_window".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 32,
@@ -8898,7 +8809,6 @@ module Erx
       ).freeze
       types["erx_boot_handoff"] = Layout.new(
         name: "erx_boot_handoff".b,
-        version: 4,
         storage: "wire_le".b,
         alignment: 8,
         size: 2408,
@@ -9136,7 +9046,6 @@ module Erx
       ).freeze
       types["erx_boot_info"] = Layout.new(
         name: "erx_boot_info".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 272,
@@ -9533,7 +9442,6 @@ module Erx
       ).freeze
       types["erx_pack_header"] = Layout.new(
         name: "erx_pack_header".b,
-        version: 2,
         storage: "wire_le".b,
         alignment: 8,
         size: 96,
@@ -9759,7 +9667,6 @@ module Erx
       ).freeze
       types["erx_image_segment"] = Layout.new(
         name: "erx_image_segment".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 40,
@@ -9857,7 +9764,6 @@ module Erx
       ).freeze
       types["erx_image_manifest"] = Layout.new(
         name: "erx_image_manifest".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 56,
@@ -10076,7 +9982,6 @@ module Erx
       ).freeze
       types["erx_share"] = Layout.new(
         name: "erx_share".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 48,
@@ -10230,7 +10135,6 @@ module Erx
       ).freeze
       types["erx_manifest"] = Layout.new(
         name: "erx_manifest".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 376,
@@ -10874,7 +10778,6 @@ module Erx
       ).freeze
       types["erx_mf_limits"] = Layout.new(
         name: "erx_mf_limits".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 160,
@@ -11070,7 +10973,6 @@ module Erx
       ).freeze
       types["erx_mf_principal"] = Layout.new(
         name: "erx_mf_principal".b,
-        version: 1,
         storage: "wire_le".b,
         alignment: 8,
         size: 80,
@@ -14316,6 +14218,12 @@ module Erx
           "thread_class_worker".b => Constant.new(
             name: "thread_class_worker".b,
             value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "time_page_version".b => Constant.new(
+            name: "time_page_version".b,
+            value: 1,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

@@ -41,7 +41,7 @@ limit virtio_blk_config_capacity_low u32 0
 limit virtio_blk_config_capacity_high u32 1
 
 # One entry of a queue's descriptor table.
-layout erx_virtq_desc 1 wire_le 8 16
+layout erx_virtq_desc wire_le 8 16
   field addr u64 0
   field len u32 8
   field flags u16 12
@@ -50,17 +50,17 @@ layout erx_virtq_desc 1 wire_le 8 16
 # The head of the available ring (the driver's) and of the used ring (the
 # device's); the ring's entries follow, then a trailing event word this
 # driver does not use, since it negotiates no VIRTIO_F_EVENT_IDX.
-layout erx_virtq_ring_head 1 wire_le 2 4
+layout erx_virtq_ring_head wire_le 2 4
   field flags u16 0
   field idx u16 2
 
 # One entry of the used ring, written by the device.
-layout erx_virtq_used_elem 1 wire_le 4 8
+layout erx_virtq_used_elem wire_le 4 8
   field id u32 0
   field len u32 4
 
 # The header a block request starts with, read by the device.
-layout erx_virtio_blk_req_header 1 wire_le 8 16
+layout erx_virtio_blk_req_header wire_le 8 16
   field type u32 0
   field reserved u32 4
   field sector u64 8

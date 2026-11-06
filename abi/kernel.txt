@@ -52,7 +52,7 @@ enum log_level u32
   value debug 4
 flags log_record_flags u32
   bit truncated 0
-layout erx_log_record 1 wire_le 8 32
+layout erx_log_record wire_le 8 32
   field seq u64 0
   field time_ns u64 8
   field level log_level 16
@@ -71,7 +71,7 @@ enum fault_kind u32
   value async_error 7
   value budget 8
   value exit 9
-layout erx_fault 1 wire_le 8 48
+layout erx_fault wire_le 8 48
   field kind fault_kind 0
   field cause u32 4
   field addr u64 8
@@ -79,7 +79,7 @@ layout erx_fault 1 wire_le 8 48
   field thread u64 24
   field space u64 32
   field status i64 40
-layout erx_crash_brief 1 wire_le 8 120
+layout erx_crash_brief wire_le 8 120
   field magic u64 0
   field version u32 8
   field length u32 12
@@ -96,18 +96,18 @@ layout erx_crash_brief 1 wire_le 8 120
   padding 68 4
   field fault erx_fault 72
 # The full form's text starts at this fixed prefix's generated size.
-layout erx_crash_record 1 wire_le 8 904
+layout erx_crash_record wire_le 8 904
   field header erx_crash_brief 0
   field regs erx_regs 120
   field frames u64 392 count 64
 
-layout erx_msgtag 1 wire_le 8 8
+layout erx_msgtag wire_le 8 8
   field raw u64 0
     bits words 0 5
     bits items 6 11
     bits protocol 16 63
   zero raw 0xf000
-layout erx_msg_item 1 wire_le 8 16
+layout erx_msg_item wire_le 8 16
   field desc u64 0
   field cap cap 8
 
@@ -134,7 +134,7 @@ enum exec_state u32
   value throttled 5
   value paused 6
 
-layout erx_exec_stat 1 shared 8 128
+layout erx_exec_stat shared 8 128
   field state u32 0
   field cpu u32 4
   field epoch u64 8
@@ -173,7 +173,7 @@ layout erx_exec_stat 1 shared 8 128
   owner run_ns kernel all
   visibility run_ns internal
 
-layout erx_group_stat 1 shared 8 8320
+layout erx_group_stat shared 8 8320
   field epoch u64 0
   field capacity u64 8
   field period_start_ns u64 16
@@ -222,7 +222,7 @@ layout erx_group_stat 1 shared 8 8320
   owner ready kernel all
   visibility ready internal
 
-layout erx_utcb 1 shared 8 1024
+layout erx_utcb shared 8 1024
   field mr u64 0 count @msg_words
   field self u64 504
   field bdr u64 512
@@ -259,7 +259,7 @@ layout erx_utcb 1 shared 8 1024
   visibility error release
   visibility reserved internal
   visibility user[] internal
-layout erx_vcpu 1 shared 8 336
+layout erx_vcpu shared 8 336
   field state u16 0
   field saved_state u16 2
   field sticky u16 4
@@ -297,12 +297,13 @@ layout erx_vcpu 1 shared 8 336
   visibility label release
   visibility entry development
   visibility user[] internal
-layout erx_kupage 1 shared 4096 4096
+layout erx_kupage shared 4096 4096
   field utcb erx_utcb 0
   field vcpu erx_vcpu 1024
   padding 1360 2736
 
-layout erx_time_page 1 shared 8 48
+limit time_page_version u32 1
+layout erx_time_page shared 8 48
   field seq u64 0
   field version u32 8
   padding 12 4
@@ -365,7 +366,7 @@ enum entropy_quality u32
 flags machine_flags u32
   bit det 0
   bit crash_found 1
-layout erx_machine_page 1 shared 4096 4096
+layout erx_machine_page shared 4096 4096
   field lease_deadline_ns u64 0
   field boot_value u32 8
   field boot_slot u32 12
@@ -439,7 +440,7 @@ enum device_secret_status u32
   value read_failed 4
 bytes device_secret_label 19 value 6572586f732064657669636520736563726574
 bytes sealing_secret_label 20 value 6572586f73207365616c696e6720736563726574
-layout erx_device_secret_page 1 shared 8 40
+layout erx_device_secret_page shared 8 40
   field status u32 0
   padding 4 4
   field secret u8 8 count 32
@@ -596,7 +597,7 @@ enum cap_slot_state u32
   value reserved 1
   value live 2
   value retired 3
-layout erx_cap_slot 1 shared 8 64
+layout erx_cap_slot shared 8 64
   private kernel/core/cap.c
   field object u64 0
   field generation u64 8
@@ -639,7 +640,7 @@ layout erx_cap_slot 1 shared 8 64
 # What bootstrap tells the kernel (docs/design-stopgap.md, "Boot handoff").
 # boot_value and boot_slot are the pair bootstrap derives from /chosen/bootloader,
 # under the machine page's rule for pairs.
-layout erx_boot_handoff 4 wire_le 8 2408
+layout erx_boot_handoff wire_le 8 2408
   field version u32 0
   field flags pack_flags 4
   field build_id u8 8 count 8

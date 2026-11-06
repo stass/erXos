@@ -50,10 +50,19 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_valid_fixed_layout_keeps_offsets
-    model = schema("layout sample 1 wire_le 8 16\n  field first u64 0\n  field second u32 8\n  padding 12 4\n")
+    model = schema("layout sample wire_le 8 16\n  field first u64 0\n  field second u32 8\n  padding 12 4\n")
     layout = model.types.fetch('sample')
     assert_equal 16, layout.size
     assert_equal [0, 8], layout.fields.map(&:offset)
+  end
+
+  # A record's version is the limit its writer stores and its reader checks;
+  # a layout line has no second version to disagree with it.
+  def test_layout_line_carries_no_version
+    error = assert_raises(Erx::ABI::SchemaError) do
+      schema("layout sample 1 wire_le 8 8\n  field first u64 0\n")
+    end
+    assert_match(/expected 4 fields for layout/, error.message)
   end
 
   def test_emitter_prefix_normalization_cannot_merge_constants
@@ -64,7 +73,7 @@ class AbiSchemaTest < Minitest::Test
 
   def test_constant_cannot_replace_a_generated_layout_alignment
     assert_raises(Erx::ABI::SchemaError) do
-      schema("limit sample_align u32 16\nlayout sample 1 wire_le 8 8\n  field value u64 0\n")
+      schema("limit sample_align u32 16\nlayout sample wire_le 8 8\n  field value u64 0\n")
     end
   end
 
@@ -93,23 +102,24 @@ class AbiSchemaTest < Minitest::Test
 
   def test_reader_helpers_share_the_emitted_symbol_inventory
     assert_raises(Erx::ABI::SchemaError) do
-      schema("layout abi_fail 1 wire_le 4 4\n  field value u32 0\n")
+      schema("layout abi_fail wire_le 4 4\n  field value u32 0\n")
     end
   end
 
   def test_by_value_depth_is_bounded_before_emission
-    body = "layout level0 1 wire_le 1 1\n  field byte u8 0\n"
+    body = "layout level0 wire_le 1 1\n  field byte u8 0\n"
     65.times do |index|
-      body += "layout level#{index + 1} 1 wire_le 1 1\n  field inner level#{index} 0\n"
+      body += "layout level#{index + 1} wire_le 1 1\n  field inner level#{index} 0\n"
     end
-    assert_raises(Erx::ABI::SchemaError) { schema(body) }
+    error = assert_raises(Erx::ABI::SchemaError) { schema(body) }
+    assert_match(/by-value type depth exceeds 64/, error.message)
   end
 
   def test_guard_requires_a_known_scalar_tag_in_the_same_record
     source = <<~ABI
       enum kind u32
         value selected 1
-      layout packet 1 wire_le 4 8
+      layout packet wire_le 4 8
         field tag kind 0
         field value u32 4
       reader check packet 8
@@ -122,13 +132,13 @@ class AbiSchemaTest < Minitest::Test
 
   def test_layout_members_are_local_identifiers
     assert_raises(Erx::ABI::SchemaError) do
-      schema("layout sample 1 wire_le 8 8\n  field parent.child u64 0\n")
+      schema("layout sample wire_le 8 8\n  field parent.child u64 0\n")
     end
   end
 
   def test_c_keyword_cannot_name_a_field
     assert_raises(Erx::ABI::SchemaError) do
-      schema("layout sample 1 wire_le 8 8\n  field return u64 0\n")
+      schema("layout sample wire_le 8 8\n  field return u64 0\n")
     end
   end
 
@@ -153,7 +163,7 @@ class AbiSchemaTest < Minitest::Test
     type space 1
       rights stop
       pass none
-    layout erx_utcb 1 shared 8 512
+    layout erx_utcb shared 8 512
       field mr u64 0 count @msg_words
       field self u64 504
       atomic mr[] load acquire store release
@@ -164,11 +174,11 @@ class AbiSchemaTest < Minitest::Test
       owner self kernel all
       visibility mr[] development
       visibility self internal
-    layout pair 1 wire_le 8 16
+    layout pair wire_le 8 16
       field low u64 0
       field high u32 8
       padding 12 4
-    layout tailed 1 wire_le 8 8
+    layout tailed wire_le 8 8
       field count u32 0
       padding 4 4
       tail items u64 count 4
@@ -353,8 +363,8 @@ class AbiSchemaTest < Minitest::Test
   # A capability inside an aggregate has no declared type or rights, so no
   # lookup could check it; only a whole `cap` argument enters the plan.
   def test_an_aggregate_argument_cannot_carry_a_capability
-    context = CALL_CONTEXT + "layout boxed 1 wire_le 8 8\n  field held cap 0\n" \
-                             "layout nested 1 wire_le 8 8\n  field inner boxed 0\n"
+    context = CALL_CONTEXT + "layout boxed wire_le 8 8\n  field held cap 0\n" \
+                             "layout nested wire_le 8 8\n  field inner boxed 0\n"
     assert_call_refused('  arg box boxed utcb mr[0]', /aggregate argument cannot carry a capability/, context: context)
     assert_call_refused('  arg box nested utcb mr[0]', /aggregate argument cannot carry a capability/, context: context)
     returned = call_model('  result box boxed utcb mr[0]', context: context)
@@ -388,7 +398,7 @@ class AbiSchemaTest < Minitest::Test
       'cap self 7' => /needs a slot, a kind/,
       "cap self 1 new_space\ncap other 3 new_space" => /run from 1 without a gap/,
       'cap self 2 new_space' => /run from 1 without a gap/,
-      "cap self 1 new_space\nlayout erx_boot_root_extension 1 wire_le 8 8\n  field a u64 0" => /duplicate definition/ }.each do |line, pattern|
+      "cap self 1 new_space\nlayout erx_boot_root_extension wire_le 8 8\n  field a u64 0" => /duplicate definition/ }.each do |line, pattern|
       error = assert_raises(Erx::ABI::SchemaError) { schema(context + line + "\n") }
       assert_match(pattern, error.message)
     end
@@ -435,10 +445,10 @@ class AbiSchemaTest < Minitest::Test
 
   def test_nested_projection_cannot_hide_development_leaf
     body = <<~ABI
-      layout inner 1 wire_le 8 8
+      layout inner wire_le 8 8
         field secret u64 0
         visibility secret development
-      layout outer 1 wire_le 8 8
+      layout outer wire_le 8 8
         field inner inner 0
       projection public_view outer release
         show inner
@@ -447,17 +457,17 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_public_projection_requires_explicit_leaf_visibility
-    body = "layout sample 1 wire_le 8 8\n  field value u64 0\nprojection public_view sample release\n  show value\n"
+    body = "layout sample wire_le 8 8\n  field value u64 0\nprojection public_view sample release\n  show value\n"
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
   def test_input_role_covers_nested_fields
     body = <<~ABI
-      layout inner 1 wire_le 4 4
+      layout inner wire_le 4 4
         field tag u32 0
         owner tag caller all
         input_mask tag caller all
-      layout outer 1 wire_le 4 4
+      layout outer wire_le 4 4
         field inner inner 0
       reader check outer 4
         source stranger
@@ -471,15 +481,15 @@ class AbiSchemaTest < Minitest::Test
 
   def test_wire_layout_cannot_embed_native_storage
     body = <<~ABI
-      layout inner 1 native 8 8
+      layout inner native 8 8
         field value u64 0
-      layout outer 1 wire_le 8 8
+      layout outer wire_le 8 8
         field inner inner 0
     ABI
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
-  PRIVATE = "layout erx_secret 1 native 8 16\n  private kernel/core/secret.c\n  field value u64 0\n  field other u64 8\n"
+  PRIVATE = "layout erx_secret native 8 16\n  private kernel/core/secret.c\n  field value u64 0\n  field other u64 8\n"
 
   # A private layout leaves the public header its tag, size and alignment;
   # its offsets, record and operations go to its own header alone.
@@ -488,7 +498,7 @@ class AbiSchemaTest < Minitest::Test
     secret = model.types.fetch('erx_secret')
     assert_equal ['kernel/core/secret.c', 'kernel/generated/secret_impl.h'], [secret.private_owner, secret.private_header]
     assert secret.private?
-    open = schema("layout open 1 native 8 8\n  field value u64 0\n").types.fetch('open')
+    open = schema("layout open native 8 8\n  field value u64 0\n").types.fetch('open')
     assert_equal [false, nil], [open.private?, open.private_header]
     public_header = Erx::ABI::CEmitter.header(model)
     assert_includes public_header, "#define ERX_SECRET_SIZE 16\n#define ERX_SECRET_ALIGN 8\n" \
@@ -500,7 +510,7 @@ class AbiSchemaTest < Minitest::Test
     assert_includes text, "#ifndef ERX_SECRET_IMPL_H\n#define ERX_SECRET_IMPL_H\n\n#include \"erx/abi.h\"\n"
     assert_includes text, "#define ERX_SECRET_OFF_OTHER 8\nstruct erx_secret {\n"
     assert_includes text, '_Static_assert(sizeof(erx_secret_t) == ERX_SECRET_SIZE, "erx_secret size");'
-    assert_empty Erx::ABI::CEmitter.private_headers(schema("layout open 1 native 8 8\n  field value u64 0\n"))
+    assert_empty Erx::ABI::CEmitter.private_headers(schema("layout open native 8 8\n  field value u64 0\n"))
   end
 
   # A private layout names one owner, a C source by a plain relative path.
@@ -508,16 +518,16 @@ class AbiSchemaTest < Minitest::Test
   # another party decodes, cannot be one.
   def test_a_private_layout_stays_out_of_every_public_declaration
     refusals = {
-      'wire storage' => "layout erx_secret 1 wire_le 8 8\n  private kernel/core/secret.c\n  field value u64 0\n",
-      'twice' => "layout erx_secret 1 native 8 8\n  private kernel/core/secret.c\n  private kernel/core/secret.c\n" \
+      'wire storage' => "layout erx_secret wire_le 8 8\n  private kernel/core/secret.c\n  field value u64 0\n",
+      'twice' => "layout erx_secret native 8 8\n  private kernel/core/secret.c\n  private kernel/core/secret.c\n" \
                  "  field value u64 0\n",
-      'no owner' => "layout erx_secret 1 native 8 8\n  private\n  field value u64 0\n",
-      'two owners' => "layout erx_secret 1 native 8 8\n  private kernel/core/a.c kernel/core/b.c\n  field value u64 0\n",
-      'a header owner' => "layout erx_secret 1 native 8 8\n  private kernel/core/secret.h\n  field value u64 0\n",
-      'an absolute owner' => "layout erx_secret 1 native 8 8\n  private /kernel/core/secret.c\n  field value u64 0\n",
-      'an escaping owner' => "layout erx_secret 1 native 8 8\n  private kernel/../secret.c\n  field value u64 0\n",
-      'embedded' => "#{PRIVATE}layout outer 1 native 8 16\n  field inner erx_secret 0\n",
-      'a tail' => "#{PRIVATE}layout outer 1 native 8 8\n  field count u32 0\n  padding 4 4\n" \
+      'no owner' => "layout erx_secret native 8 8\n  private\n  field value u64 0\n",
+      'two owners' => "layout erx_secret native 8 8\n  private kernel/core/a.c kernel/core/b.c\n  field value u64 0\n",
+      'a header owner' => "layout erx_secret native 8 8\n  private kernel/core/secret.h\n  field value u64 0\n",
+      'an absolute owner' => "layout erx_secret native 8 8\n  private /kernel/core/secret.c\n  field value u64 0\n",
+      'an escaping owner' => "layout erx_secret native 8 8\n  private kernel/../secret.c\n  field value u64 0\n",
+      'embedded' => "#{PRIVATE}layout outer native 8 16\n  field inner erx_secret 0\n",
+      'a tail' => "#{PRIVATE}layout outer native 8 8\n  field count u32 0\n  padding 4 4\n" \
                   "  tail items erx_secret count 4\n",
       'projected' => "#{PRIVATE}projection view erx_secret release\n  show value\n  show other\n"
     }
@@ -527,13 +537,13 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_reader_requires_wire_storage
-    body = "layout sample 1 native 8 8\n  field value u64 0\nreader check sample 8\n"
+    body = "layout sample native 8 8\n  field value u64 0\nreader check sample 8\n"
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
   def test_explicit_one_element_array_keeps_its_array_type
     body = <<~ABI
-      layout sample 1 shared 8 8
+      layout sample shared 8 8
         field ready u64 0 count 1
         atomic ready[] load acquire store release
         writer ready[] kernel
@@ -558,7 +568,7 @@ class AbiSchemaTest < Minitest::Test
   def test_signed_value_reference_is_not_treated_as_an_offset
     body = <<~ABI
       limit expected i32 -1
-      layout sample 1 wire_le 4 4
+      layout sample wire_le 4 4
         field value i32 0
       reader check sample 4
         value root.value @expected
@@ -569,7 +579,7 @@ class AbiSchemaTest < Minitest::Test
 
   def test_abi_version_is_available_to_reader_constraints
     body = <<~ABI
-      layout sample 1 wire_le 4 4
+      layout sample wire_le 4 4
         field version u32 0
       reader check sample 4
         value root.version @abi_version
@@ -578,7 +588,7 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_reader_path_components_are_immutable
-    body = "layout sample 1 wire_le 4 4\n  field version u32 0\nreader check sample 4\n  value root.version 1\n"
+    body = "layout sample wire_le 4 4\n  field version u32 0\nreader check sample 4\n  value root.version 1\n"
     path = schema(body).readers.first.rules.first.fetch(:path)
     assert path.fields.first.frozen?
   end
@@ -591,9 +601,9 @@ class AbiSchemaTest < Minitest::Test
 
   def test_whole_reader_rejects_tail_root_without_a_tail_consumer
     body = <<~ABI
-      layout item 1 wire_le 4 4
+      layout item wire_le 4 4
         field value u32 0
-      layout packet 1 wire_le 4 4
+      layout packet wire_le 4 4
         field count u32 0
         tail items item count 8
       reader packet_reader packet 36
@@ -605,9 +615,9 @@ class AbiSchemaTest < Minitest::Test
     body = <<~ABI
       flags options u32
         bit enabled 0
-      layout item 1 wire_le 4 4
+      layout item wire_le 4 4
         field flags options 0
-      layout packet 1 wire_le 4 8
+      layout packet wire_le 4 8
         field items item 0 count 2
       reader packet_reader packet 8
     ABI
@@ -633,16 +643,16 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_tail_members_cannot_use_c_keywords
-    body = "layout packet 1 wire_le 4 4\n  field count u32 0\n  tail return u32 count 8\n"
+    body = "layout packet wire_le 4 4\n  field count u32 0\n  tail return u32 count 8\n"
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
   def test_reader_table_names_are_local_and_cannot_replace_root_scope
     ['qualified.table', 'root'].each do |name|
       body = <<~ABI
-        layout item 1 wire_le 4 4
+        layout item wire_le 4 4
           field value u32 0
-        layout packet 1 wire_le 4 8
+        layout packet wire_le 4 8
           field offset u32 0
           field count u32 4
         reader check packet 12
@@ -654,12 +664,12 @@ class AbiSchemaTest < Minitest::Test
   end
 
   def test_qualified_reader_name_compiles_with_its_validated_c_spelling
-    model = schema("layout packet 1 wire_le 4 4\n  field value u32 0\nreader example.reader packet 4\n")
+    model = schema("layout packet wire_le 4 4\n  field value u32 0\nreader example.reader packet 4\n")
     compile_reader(model)
   end
 
   def test_tableless_reader_rejects_unknown_order_entries
-    body = "layout packet 1 wire_le 4 4\n  field value u32 0\nreader check packet 4\n"
+    body = "layout packet wire_le 4 4\n  field value u32 0\nreader check packet 4\n"
     assert_empty schema(body).readers.first.order
     error = assert_raises(Erx::ABI::SchemaError) { schema(body + "  order absent\n") }
     assert_includes error.message, 'table order must name every table exactly once'
@@ -667,7 +677,7 @@ class AbiSchemaTest < Minitest::Test
 
   def test_string_table_only_reader_compiles
     model = schema(<<~ABI)
-      layout packet 1 wire_le 4 8
+      layout packet wire_le 4 8
         field offset u32 0
         field size u32 4
       reader check packet 16

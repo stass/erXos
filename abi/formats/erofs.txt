@@ -36,7 +36,7 @@ limit erofs_s_iflnk u16 0xa000
 limit erofs_xattr_entry_size u32 4
 # The most blocks one erx_verity:read/3 call returns.
 limit verity_read_blocks_max u32 16
-layout erx_erofs_super_block 1 wire_le 8 128
+layout erx_erofs_super_block wire_le 8 128
   field magic u32 0
   field checksum u32 4
   field feature_compat u32 8
@@ -64,7 +64,7 @@ layout erx_erofs_super_block 1 wire_le 8 128
   field build_time u32 108
   field root_nid_8b u64 112
   padding 120 8
-layout erx_erofs_inode_compact 1 wire_le 4 32
+layout erx_erofs_inode_compact wire_le 4 32
   field i_format u16 0
   field i_xattr_icount u16 2
   field i_mode u16 4
@@ -76,7 +76,7 @@ layout erx_erofs_inode_compact 1 wire_le 4 32
   field i_uid u16 24
   field i_gid u16 26
   padding 28 4
-layout erx_erofs_inode_extended 1 wire_le 8 64
+layout erx_erofs_inode_extended wire_le 8 64
   field i_format u16 0
   field i_xattr_icount u16 2
   field i_mode u16 4
@@ -91,13 +91,13 @@ layout erx_erofs_inode_extended 1 wire_le 8 64
   field i_nlink u32 44
   padding 48 16
 # Entries sit 12 bytes apart, so the 64-bit nid is declared as its two words.
-layout erx_erofs_dirent 1 wire_le 4 12
+layout erx_erofs_dirent wire_le 4 12
   field nid_lo u32 0
   field nid_hi u32 4
   field nameoff u16 8
   field file_type u8 10
   padding 11 1
-layout erx_erofs_xattr_ibody_header 1 wire_le 4 12
+layout erx_erofs_xattr_ibody_header wire_le 4 12
   field h_name_filter u32 0
   field h_shared_count u8 4
   padding 5 7

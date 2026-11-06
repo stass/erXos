@@ -233,7 +233,7 @@ class BootPlaceTest < Minitest::Test
 
   # stdout_path's length sits after the 2048 bytes of bootargs, its 256 bytes after that,
   # then the boot value and its slot.
-  def record(version: 4, flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000',
+  def record(version: @codec.constant('boot_handoff_version'), flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000',
              stdout_length: stdout.bytesize, boot: [2, 1])
     bytes = [version, flags].pack('VV') + ("\x11".b * 8) + ("\x22".b * 32) + [start, size, 0, 0, 0, args.bytesize].pack('Q<4VV') + args.b
     bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV')
@@ -249,7 +249,7 @@ class BootPlaceTest < Minitest::Test
 
   def test_the_kernel_refuses_a_record_bootstrap_did_not_write
     assert_equal 'refused version', handoff("\0".b * @codec.layout_size('erx_boot_handoff'))
-    assert_equal 'refused version', handoff(record(version: 3))
+    assert_equal 'refused version', handoff(record(version: @codec.constant('boot_handoff_version') + 1))
     assert_equal 'refused flags', handoff(record(flags: 8))
     # A test image is a development build: its mark alone is refused.
     assert_equal 'refused flags', handoff(record(flags: 4))

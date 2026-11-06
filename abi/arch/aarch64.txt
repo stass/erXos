@@ -10,12 +10,12 @@ reg args x0,x1,x2,x3,x4,x5
 reg results x0,x1,x2
 reg preserved x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15,x16,x17,x18,x19,x20,x21,x22,x23,x24,x25,x26,x27,x28,x29,x30
 
-layout erx_regs 1 wire_le 8 272
+layout erx_regs wire_le 8 272
   field gpr u64 0 count 31
   field sp u64 248
   field pc u64 256
   field state u64 264
-layout erx_saved_thread 1 native 16 816
+layout erx_saved_thread native 16 816
   field gpr u64 0 count 31
   field sp u64 248
   field pc u64 256
@@ -26,7 +26,7 @@ layout erx_saved_thread 1 native 16 816
   field fp_control u32 800
   field fp_status u32 804
   padding 808 8
-layout erx_uframe 1 shared 8 272
+layout erx_uframe shared 8 272
   field gpr u64 0 count 31
   field sp u64 248
   field pc u64 256
@@ -52,7 +52,7 @@ layout erx_uframe 1 shared 8 272
 # right after it (design-arch-aarch64.md, Boot entry).
 limit arch_boot_locator_offset u32 64
 bytes arch_boot_magic 4 value 41524d64
-layout erx_arch_boot_header 1 wire_le 8 64
+layout erx_arch_boot_header wire_le 8 64
   field code0 u32 0
   field code1 u32 4
   field text_offset u64 8

@@ -77,13 +77,13 @@ enum mf_hash_algorithm u32
   value none 0
   value sha256 1
 
-layout erx_mf_span 1 wire_le 4 8
+layout erx_mf_span wire_le 4 8
   field offset u32 0
   field count u32 4
-layout erx_mf_str 1 wire_le 4 8
+layout erx_mf_str wire_le 4 8
   field offset u32 0
   field length u32 4
-layout erx_share 1 wire_le 8 48
+layout erx_share wire_le 8 48
   field quota_ns u64 0
   field period_ns u64 8
   field cpuset u64 16
@@ -95,7 +95,7 @@ layout erx_share 1 wire_le 8 48
   field ceiling urgency 41
   field flags group_flags 42
   padding 44 4
-layout erx_manifest 1 wire_le 8 376
+layout erx_manifest wire_le 8 376
   field magic u32 0
   field version u16 4
   field flags manifest_flags 6
@@ -141,7 +141,7 @@ layout erx_manifest 1 wire_le 8 376
   field partial_boot erx_mf_span 352
   field strings erx_mf_span 360
   field system_args erx_mf_str 368
-layout erx_mf_principal 1 wire_le 8 80
+layout erx_mf_principal wire_le 8 80
   field name erx_mf_str 0
   field memory u64 8
   field grant erx_share 16
@@ -149,7 +149,7 @@ layout erx_mf_principal 1 wire_le 8 80
   field names u32 68
   field default_limits u32 72
   field ceiling_limits u32 76
-layout erx_mf_domain 1 wire_le 8 64
+layout erx_mf_domain wire_le 8 64
   field name erx_mf_str 0
   field principal u32 8
   field kind mf_kind 12
@@ -164,7 +164,7 @@ layout erx_mf_domain 1 wire_le 8 64
   field args erx_mf_str 48
   field env erx_mf_str 56
   zero reserved all
-layout erx_mf_limits 1 wire_le 8 160
+layout erx_mf_limits wire_le 8 160
   field name erx_mf_str 0
   field memory u64 8
   field outer u64 16
@@ -179,7 +179,7 @@ layout erx_mf_limits 1 wire_le 8 160
   field peer_held u64 144
   field peer_held_total u64 152
   zero reserved all
-layout erx_mf_runtime_limits 1 wire_le 8 56
+layout erx_mf_runtime_limits wire_le 8 56
   field name erx_mf_str 0
   field max_frame u32 8
   field max_message_heap u32 12
@@ -192,18 +192,18 @@ layout erx_mf_runtime_limits 1 wire_le 8 56
   field processes u32 48
   field reserved u32 52
   zero reserved all
-layout erx_mf_lane_class 1 wire_le 8 16
+layout erx_mf_lane_class wire_le 8 16
   field name erx_mf_str 0
   field lane u32 8
   field reserved u32 12
   zero reserved all
-layout erx_mf_unit 1 wire_le 8 24
+layout erx_mf_unit wire_le 8 24
   field name erx_mf_str 0
   field holder u32 8
   field devices erx_mf_span 12
   field reserved u32 20
   zero reserved all
-layout erx_mf_device 1 wire_le 8 80
+layout erx_mf_device wire_le 8 80
   field selector mf_selector 0
   field role mf_device_role 4
   field path erx_mf_str 8
@@ -219,7 +219,7 @@ layout erx_mf_device 1 wire_le 8 80
   field placement_key erx_mf_str 56
   field base u64 64
   field size u64 72
-layout erx_mf_window 1 wire_le 8 32
+layout erx_mf_window wire_le 8 32
   field holder u32 0
   field device u32 4
   field role mf_window_role 8
@@ -228,13 +228,13 @@ layout erx_mf_window 1 wire_le 8 32
   field image u32 20
   field reserved u64 24
   zero reserved all
-layout erx_mf_service 1 wire_le 8 24
+layout erx_mf_service wire_le 8 24
   field name erx_mf_str 0
   field server u32 8
   field interface u32 12
   field reserved u64 16
   zero reserved all
-layout erx_mf_facet 1 wire_le 8 80
+layout erx_mf_facet wire_le 8 80
   field name erx_mf_str 0
   field grantee u32 8
   field service u32 12
@@ -248,9 +248,9 @@ layout erx_mf_facet 1 wire_le 8 80
   field queue u64 64
   field reserved u64 72
   zero reserved all
-layout erx_mf_operation 1 wire_le 4 4
+layout erx_mf_operation wire_le 4 4
   field operation u32 0
-layout erx_mf_parameter 1 wire_le 8 32
+layout erx_mf_parameter wire_le 8 32
   field key u32 0
   field kind mf_parameter_kind 4
   field scalar u64 8
@@ -258,10 +258,10 @@ layout erx_mf_parameter 1 wire_le 8 32
   field index u32 24
   field reserved u32 28
   zero reserved all
-layout erx_mf_introduction 1 wire_le 8 8
+layout erx_mf_introduction wire_le 8 8
   field from u32 0
   field to u32 4
-layout erx_mf_image 1 wire_le 8 136
+layout erx_mf_image wire_le 8 136
   field name erx_mf_str 0
   field device u32 8
   field format mf_image_format 12
@@ -276,16 +276,16 @@ layout erx_mf_image 1 wire_le 8 136
   field hash_algorithm mf_hash_algorithm 68
   field salt u8 72 count 32
   field root_hash u8 104 count 32
-layout erx_mf_extent 1 wire_le 8 16
+layout erx_mf_extent wire_le 8 16
   field slot_offset u64 0
   field length u64 8
-layout erx_mf_boot_order 1 wire_le 4 4
+layout erx_mf_boot_order wire_le 4 4
   field domain u32 0
-layout erx_mf_liveness 1 wire_le 4 4
+layout erx_mf_liveness wire_le 4 4
   field service u32 0
-layout erx_mf_shell_principal 1 wire_le 4 4
+layout erx_mf_shell_principal wire_le 4 4
   field principal u32 0
-layout erx_mf_partial_boot 1 wire_le 8 16
+layout erx_mf_partial_boot wire_le 8 16
   field name erx_mf_str 0
   field image u32 8
   field reserved u32 12

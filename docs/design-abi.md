@@ -87,7 +87,7 @@ The declaration forms are:
 | `enum NAME TYPE` | indented `value NAME INTEGER` members; every value explicit and distinct |
 | `flags NAME TYPE` | indented `bit NAME POSITION` members; every position explicit and distinct |
 | `bytes NAME LENGTH` | a fixed byte count, with an optional `value HEX_BYTES` constraint |
-| `layout NAME VERSION STORAGE ALIGN SIZE` | ordered fields; `STORAGE` is `wire_le`, `shared` or `native`; alignment and fixed prefix size are explicit |
+| `layout NAME STORAGE ALIGN SIZE` | ordered fields; `STORAGE` is `wire_le`, `shared` or `native`; alignment and fixed prefix size are explicit |
 | `variant NAME PREFIX TAG_FIELD TAG_ENUM MAX_BYTES` | a fixed prefix containing the tag and indented `case TAG BODY_LAYOUT` members; each body begins after the prefix |
 | `status NAME INTEGER DESCRIPTION` | a signed 32-bit result; zero is success and every error is negative |
 | `right NAME POSITION DESCRIPTION` | a distinct position 0 through 31 within the kernel's 32-bit `erx_rights_t` word |
@@ -493,8 +493,12 @@ The boot formats use these assignments:
 
 The image-protection values encode read, write and execute at bits 0, 1
 and 2, but the manifest field accepts only the three listed combinations.
-An unnamed bit is zero. Each versioned reader accepts its exact supported
-version, with a diagnostic on any other value. An ABI or format change
+An unnamed bit is zero. A versioned record's version is one `limit`
+constant whose name ends in `_version`, such as `pack_version` or
+`crash_version`; its writer stores that constant in the record's
+`version` field. A `layout` line has no version of its own. Each
+versioned reader accepts its exact supported version, with a diagnostic
+on any other value. An ABI or format change
 replaces the declarations and all consumers together; it adds no migration
 path or reader for an earlier erXos encoding.
 
@@ -1355,12 +1359,12 @@ checks every record's string reference against the named table.
 ```text
 abi 1
 include inspection.txt
-layout demo_header 1 wire_le 4 16
+layout demo_header wire_le 4 16
   field rows_off u32 0
   field rows_count u32 4
   field text_off u32 8
   field text_length u32 12
-layout demo_row 1 wire_le 4 8
+layout demo_row wire_le 4 8
   field name_off u32 0
   field name_length u32 4
 reader demo demo_header 1024
@@ -1384,7 +1388,7 @@ inside the same declaration set:
 
 ```text
 status retired -1 "the record has retired"
-layout demo_snapshot 1 shared 4 8
+layout demo_snapshot shared 4 8
   field seq u32 0
   field value u32 4
   atomic seq load acquire store release
@@ -1397,7 +1401,7 @@ layout demo_snapshot 1 shared 4 8
 projection demo_snapshot_public demo_snapshot release
   omit seq
   show value
-layout demo_elements 1 shared 8 24
+layout demo_elements shared 8 24
   field wall_delta i64 0
   field ready u64 8 count 2
   atomic wall_delta load acquire store release

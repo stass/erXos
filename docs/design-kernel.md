@@ -7735,7 +7735,7 @@ limit copy_max u32 1048576
 limit group_executors u32 64
 status wouldblock -14 "an executor made a call that would wait"
 bytes erx_pack_magic 8 value 4552585041434b00
-layout erx_pack_header 2 wire_le 8 96
+layout erx_pack_header wire_le 8 96
   field magic erx_pack_magic 0
   field version u32 8
   field flags u32 12
@@ -7983,8 +7983,9 @@ services and the runtimes), and no shim, second decoder or reader for an
 earlier version exists. Every format the kernel owns carries a version so
 that a mismatch fails loudly where it is used: the ABI version in image
 manifests and in the boot information page, `ERXPACK`'s version in the
-boot image, the layout versions of the ABI file. A runtime or service
-built for another ABI version is refused by `erx_image_map` with
+boot image, and the version constant each versioned record declares in
+the ABI file, such as the crash record's and the boot handoff record's.
+A runtime or service built for another ABI version is refused by `erx_image_map` with
 `ERX_ENOTSUP`, and a boot image of another `ERXPACK` version by the boot
 validator, each with a diagnostic and never misread. Nothing migrates:
 the kernel keeps no state across boots.

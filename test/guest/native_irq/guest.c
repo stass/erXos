@@ -409,9 +409,11 @@ check_time(void)
 	const uint64_t now = erx_time_monotonic_ns();
 	const uint64_t after = erx_fiasco_clock_ns();
 	uint64_t wall;
+	uint32_t version;
+	uint64_t hz;
 
-	if (atomic_load_explicit(&page->version, memory_order_relaxed) != 1 ||
-	    atomic_load_explicit(&page->counter_hz, memory_order_relaxed) != erx_fiasco_counter_hz())
+	if (!erx_time_page_version_load(page, &version) || version != ERX_TIME_PAGE_VERSION ||
+	    !erx_time_page_counter_hz_load(page, &hz) || hz != erx_fiasco_counter_hz())
 		fail("erx: irq: the time page's fields disagree FAILED\n");
 	if (now < before || now > after)
 		fail("erx: irq: the page's clock disagrees with the counter's FAILED\n");

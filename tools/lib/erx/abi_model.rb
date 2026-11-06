@@ -80,7 +80,7 @@ module Erx
     end
     Tail = Struct.new(:name, :type, :count_field, :maximum, :line,
                       keyword_init: true)
-    Layout = Struct.new(:name, :version, :storage, :alignment, :size,
+    Layout = Struct.new(:name, :storage, :alignment, :size,
                         :fields, :padding, :tail, :sequence, :private_owner,
                         :line, keyword_init: true) do
       # A private layout's members are its owner's alone: private_owner is
@@ -456,10 +456,9 @@ module Erx
       end
 
       def build_layout(declaration, types, constants)
-        arity(declaration.line, 6)
-        name, version, storage, alignment, size = declaration.args
+        arity(declaration.line, 5)
+        name, storage, alignment, size = declaration.args
         declaration.fail!('unknown layout storage') unless %w[wire_le shared native].include?(storage)
-        version = positive(version, declaration.line, maximum: 65535)
         alignment = power_of_two(alignment, declaration.line)
         size = positive(size, declaration.line, maximum: MAX_LAYOUT_SIZE)
         declaration.fail!('layout size is not aligned') unless (size % alignment).zero?
@@ -539,7 +538,7 @@ module Erx
         if tail && tail.type.is_a?(Layout) && tail.type.private?
           tail.line.fail!('a private layout cannot be embedded')
         end
-        Layout.new(name: name, version: version, storage: storage,
+        Layout.new(name: name, storage: storage,
                    alignment: alignment, size: size, fields: completed.freeze,
                    padding: padding.freeze, tail: tail, sequence: sequence,
                    private_owner: private_owner,
@@ -874,7 +873,7 @@ module Erx
 
         ordered = caps.sort_by { |_name, cap| cap.fetch(:slot) }
         lines = ordered.map { |name, cap| "  field #{name} cap #{(cap.fetch(:slot) - 1) * 8}\n" }
-        Syntax.parse("layout erx_boot_root_extension 1 wire_le 8 #{lines.size * 8}\n#{lines.join}".b,
+        Syntax.parse("layout erx_boot_root_extension wire_le 8 #{lines.size * 8}\n#{lines.join}".b,
                      path: '<the cap lines>')
       end
 

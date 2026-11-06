@@ -499,6 +499,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SPACE_JIT` | 1 |
 | `ERX_THREAD_CLASS_EXECUTOR` | 1 |
 | `ERX_THREAD_CLASS_WORKER` | 0 |
+| `ERX_TIME_PAGE_VERSION` | 1 |
 | `ERX_TLB_BY_ADDRESS_MAX` | 64 |
 | `ERX_URGENCY_MAX` | 63 |
 | `ERX_USER_BASE_MIN` | 65536 |

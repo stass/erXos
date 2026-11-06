@@ -1286,6 +1286,16 @@ to the corpus and follow rc
   parsing, and refuse each one from a public declaration to a private
   layout, so the property holds for any construct
   ([design-abi.md](docs/design-abi.md#source-grammar)).
+* [Medium] kernel ABI generator, `tools/lib/erx/abi_model.rb`: a
+  record's `version` field is tied to its `*_version` limit only by
+  naming, and the names differ (`erx_boot_info` uses `boot_version`,
+  `erx_image_manifest` uses `image_version`), so nothing refuses a
+  versioned layout without its constant or a writer that stores another
+  value. Add a layout member naming the field's constant (`value version
+  @time_page_version`, as `reader ... value root.version
+  @manifest_version` already does), have the generator emit the encoder's
+  store and the decoder's check from it, and refuse a `version` field
+  without one ([design-abi.md](docs/design-abi.md#numeric-assignment-and-versions)).
 * [Low] kernel ABI, status codes: `ERX_EDEAD` carries two meanings (a
   dropped caller and a dead target). Split it, or state why one code
   serves both

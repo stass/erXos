@@ -26,7 +26,7 @@ class AbiGenerationTest < Minitest::Test
     Dir.mktmpdir('erx-abi-invalid-') do |root|
       FileUtils.mkdir_p(File.join(root, 'abi'))
       File.write(File.join(root, 'abi/erx_abi.txt'), "abi 1\nlimit valid u32 7\ninclude late.txt\n")
-      File.write(File.join(root, 'abi/late.txt'), "layout malformed 1 wire_le 4 8\n  field missing no_type 0\n")
+      File.write(File.join(root, 'abi/late.txt'), "layout malformed wire_le 4 8\n  field missing no_type 0\n")
       error = assert_raises(Erx::ABI::SchemaError) do
         Erx::ABI::Generator.publish(Erx::ABI::Generator.plan(root: root, architecture: nil), root: root)
       end
@@ -84,7 +84,7 @@ class AbiGenerationTest < Minitest::Test
 
   def test_unordered_declaration_order_does_not_change_generated_bytes
     chunks = ["abi 1\n", "limit zeta u32 3\n", "limit alpha u64 8\n",
-              "layout outer 1 wire_le 4 4\n  field value inner 0\n",
+              "layout outer wire_le 4 4\n  field value inner 0\n",
               "scalar inner u32\n"]
     schemas = [chunks, chunks.reverse].map do |entries|
       Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(
@@ -166,9 +166,9 @@ class AbiGenerationTest < Minitest::Test
       abi 1
       scalar offset u32
       scalar count u32
-      layout item 1 wire_le 4 4
+      layout item wire_le 4 4
         field value u32 0
-      layout packet 1 wire_le 4 8
+      layout packet wire_le 4 8
         field rows_off offset 0
         field rows_count count 4
       reader check packet 16
