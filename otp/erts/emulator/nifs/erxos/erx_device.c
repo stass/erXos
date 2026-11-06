@@ -8,7 +8,6 @@
 #include "erx_device.h"
 
 #include <stdatomic.h>
-#include <string.h>
 #ifdef ERX_DEVICE_STAND_IN
 #include <stdlib.h>
 #endif
@@ -16,6 +15,7 @@
 #include "erx/hw/device_access.h"
 #include "erx/hw/device_owned.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/mem.h"
 
 /* The rings are virtio's little-endian layouts, written and read through their own types. */
 #if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
@@ -476,7 +476,7 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	if (queues_open == ERX_DEVICE_QUEUES_MAX)
 		return (ERX_ELIMIT);
 	record = &queues[queues_open];
-	memset(record, 0, sizeof(*record));
+	bzero(record, sizeof(*record));
 	if (!virtio_registers(device, &record->regs) ||
 	    get(device, record->regs.version) != ERX_VIRTIO_MMIO_VERSION)
 		return (ERX_ENOTSUP);
@@ -518,7 +518,7 @@ install_apply(queue_record_t *record)
 	put(device, regs->sel, record->index);
 	erx_device_queue_reset(&record->core);
 	/* The device has let the queue go, so nothing else reaches the rings now. */
-	memset((void *)(uintptr_t)record->rings, 0, record->layout.bytes);
+	bzero((void *)(uintptr_t)record->rings, record->layout.bytes);
 	put(device, regs->num, record->core.size);
 	write_address(device, regs->desc, record->ring_addrs[0]);
 	write_address(device, regs->driver, record->ring_addrs[1]);
@@ -639,7 +639,7 @@ apply_post(const queue_record_t *record, const erx_device_piece_t *pieces, const
 		const erx_device_desc_write_t *const desc = &plan->descs[step];
 
 		if (!pieces[step].device_writes)
-			memcpy(buffer + segments[step].offset, pieces[step].data, pieces[step].length);
+			bcopy(pieces[step].data, buffer + segments[step].offset, pieces[step].length);
 		table[desc->index].addr = desc->addr;
 		table[desc->index].len = desc->len;
 		table[desc->index].flags = desc->flags;
@@ -689,7 +689,7 @@ copy_out(const queue_record_t *record, const erx_device_completion_t *completion
 	uint32_t at = 0;
 
 	for (uint32_t range = 0; range < completion->range_count; range++) {
-		memcpy(bytes + at, buffer + completion->ranges[range].offset, completion->ranges[range].length);
+		bcopy(buffer + completion->ranges[range].offset, bytes + at, completion->ranges[range].length);
 		at += completion->ranges[range].length;
 	}
 }

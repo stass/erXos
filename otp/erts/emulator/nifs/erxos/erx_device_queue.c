@@ -7,9 +7,8 @@
 
 #include "erx_device_queue.h"
 
-#include <string.h>
-
 #include "erx/abi.h"
+#include "liberx/backend/core/mem.h"
 
 bool
 erx_device_queue_features(uint64_t wanted, uint64_t offered, uint64_t *accepted)
@@ -44,7 +43,7 @@ erx_device_queue_reset(erx_device_queue_t *queue)
 	const uint32_t size = queue->size, buffer_size = queue->buffer_size;
 	const uint64_t pool = queue->pool;
 
-	memset(queue, 0, sizeof(*queue));
+	bzero(queue, sizeof(*queue));
 	queue->size = size;
 	queue->buffer_size = buffer_size;
 	queue->pool = pool;
@@ -100,11 +99,11 @@ erx_device_queue_post(erx_device_queue_t *queue, const erx_device_segment_t *seg
 	    !segments_fit(segments, count, queue->buffer_size))
 		return (false);
 	/* Field by field over zeroed records, so no padding of the caller's reaches a completion. */
-	memset(&chain, 0, sizeof(chain));
+	bzero(&chain, sizeof(chain));
 	chain.posted = true;
 	chain.count = count;
 	chain.tag = tag;
-	memset(plan, 0, sizeof(*plan));
+	bzero(plan, sizeof(*plan));
 	index = queue->free_head;
 	/* Within the pool, whose last byte erx_device_queue_init checked is representable. */
 	buffer_addr = queue->pool + (uint64_t)index * queue->buffer_size;
@@ -170,7 +169,7 @@ release_chain(erx_device_queue_t *queue, uint32_t head)
 	queue->next[tail] = (uint16_t)queue->free_head;
 	queue->free_head = head;
 	queue->free_count += chain->count;
-	memset(chain, 0, sizeof(*chain));
+	bzero(chain, sizeof(*chain));
 }
 
 bool
@@ -187,7 +186,7 @@ erx_device_queue_complete(erx_device_queue_t *queue, uint32_t id, uint32_t lengt
 		return (false);
 	}
 	chain = &queue->chains[id];
-	memset(completion, 0, sizeof(*completion));
+	bzero(completion, sizeof(*completion));
 	completion->tag = chain->tag;
 	completion->buffer = id;
 	completion->length = length;

@@ -15,7 +15,7 @@ honest = [2, 1].pack('CC')
 setup = "\x03".b + [1023, 0].pack('vC')
 Erx::PackFuzz.declare_target(
   sources: ['otp/erts/emulator/nifs/erxos/erx_device_queue.c'],
-  includes: [*Erx::PackFuzz::INCLUDES, 'otp/erts/emulator/nifs/erxos'],
+  includes: [*Erx::PackFuzz::INCLUDES, '.', 'otp/erts/emulator/nifs/erxos'],
   seeds: {
     'request' => setup + request + honest + [4, 0, 513].pack('CCV'),
     'short' => setup + request + honest + [4, 0, 100].pack('CCV'),
