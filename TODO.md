@@ -222,7 +222,7 @@ it; git history is the record of completed work.
 * [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root writes no `erx_boot_info` page for a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff) says it does, and it seeds no `rng.c`.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
-  the host link's first consumer, M3.
+  the host link's first consumer, M4.
 * [Medium] stopgap, `tools/lib/erx/production_image.rb`: the root's link attributes `libl4sys.p.a`,
   `libsigma0.a` and the boot cores whole, under a license the recipe states, and its dependency
   files leave out Fiasco's and the compiler's headers. The boot cores are stated as BSD-2-Clause
