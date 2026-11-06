@@ -36,8 +36,8 @@ erx_release_is_under(const uint8_t *path, size_t length)
 }
 
 /*
- * Whether erx_ns_resolve can reach a path under the prefix: it refuses a longer
- * name or more names, and a release file no path resolves to must not bind.
+ * Whether a name list can name a path under the prefix: erx_release_fs_add_name
+ * refuses a longer name or more names, and a release file no path resolves to must not bind.
  * erx_pack_open has refused `.`, `..` and empty names, so each name counts.
  */
 static bool

@@ -1327,14 +1327,16 @@ tmp_erxos("release") ->
     unlink(Zero),
     exit(Zero, shutdown),
     %% Open after unlink: what a file holds is given back at its last close, and a
-    %% process that opens a file, removes it and is killed gives it back too.
+    %% process that opens a file, removes it and is killed gives it back too. The
+    %% grant answers a close when it hands the clunk to the file's owner, so the
+    %% charge comes back just after close returns, and both checks wait for it.
     Free = tmp_free(erx_ramfs),
     {ok, Gone} = file:open(<<"/tmp/held">>, [read, write, binary]),
     ok = file:delete(<<"/tmp/held">>),
     ok = file:write(Gone, binary:copy(<<7>>, 50000)),
     Show("held while open", tmp_free(erx_ramfs) < Free),
     ok = file:close(Gone),
-    Show("held after close", tmp_free(erx_ramfs) =:= Free),
+    Show("held after close", tmp_wait_free(erx_ramfs, Free, 100) =:= ok),
     Parent = self(),
     Killed = spawn(fun() ->
                            {ok, Fd} = file:open(<<"/tmp/held2">>, [read, write, binary]),
@@ -1351,7 +1353,6 @@ tmp_erxos("release") ->
     %% writers filling the tree stop at the cap together.
     {ok, Conc} = erx_ramfs_sup:start_link(?CONC_CAP, <<"/conc">>, erx_ramfs_conc),
     Show("concurrent renames", tmp_concurrent_renames()),
-    Show("concurrent stats", get(stats)),
     Show("concurrent fill", tmp_concurrent_fill()),
     unlink(Conc),
     exit(Conc, shutdown),
@@ -1443,7 +1444,6 @@ tmp_concurrent_renames() ->
     atomics:put(Stop, 1, 1),
     Counts = [receive {stats, S, Count} -> Count after ?HELPER_WAIT -> helper_silent({statter, S}) end
               || S <- Stats],
-    put(stats, lists:sum([N || {N, _} <- Counts])),
     %% Every rename took effect (a file written and renamed over b is gone from its own
     %% name), and b holds one renamer's whole content.
     {ok, Names} = file:list_dir(Dir),

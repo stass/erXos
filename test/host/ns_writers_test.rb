@@ -22,19 +22,13 @@ class NsWritersTest < Minitest::Test
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::NsWriters.violations(files).map(&:to_s)
     assert_match Erx::NsWriters::TABLE_WRITE, files.fetch(Erx::NsWriters::WRITER)
-    assert_match(/^\s+\{cwd, Reached\} -> erx_set_cwd_nif\(Reached\);/, files.fetch(PRIM_FILE))
+    assert_match(/^\s+\{ok, _Place\} -> erx_set_cwd_nif\(Reached\);/, files.fetch(PRIM_FILE))
   end
 
   # The design's seed: a put of the table's key added to prim_file.
   def test_a_put_or_erase_of_the_key_outside_erx_ns_fails
     text = "f(T) ->\n    persistent_term:put(erx_ns, T).\ng() -> persistent_term:erase( 'erx_ns' ).\n"
     assert_equal [['ns-table-writer', PRIM_FILE, 2], ['ns-table-writer', PRIM_FILE, 3]], found(PRIM_FILE => text)
-  end
-
-  def test_a_change_of_the_nif_table_outside_erx_ns_fails
-    text = "f(P) ->\n    prim_file:erx_ns_mount(<<\"/x\">>, P, <<\"t\">>, rw).\n"
-    assert_equal [['ns-table-writer', SERVICE, 2]], found(SERVICE => text)
-    assert_empty found(Erx::NsWriters::WRITER => text, PRIM_FILE => text)
   end
 
   def test_another_key_a_comment_and_a_read_pass

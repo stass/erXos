@@ -1,5 +1,5 @@
-%% Modified by erXos: a path on a file server's grant runs through erx_file_remote,
-%% and erx_ns reaches the namespace and the fid counter through the NIF.
+%% Modified by erXos: a path on the release reaches the NIF as its names, and a path on
+%% a file server's grant runs through erx_file_remote.
 %%
 %% %CopyrightBegin%
 %%
@@ -40,10 +40,9 @@
 
 -export([read_file/1, write_file/2]).
 
-%% erXos: the namespace's table and its changes, for erx_ns, and the runtime's fid
-%% counter, for erx_file_remote.
--export([erx_table/0, erx_ns_mount/4, erx_ns_bind/3, erx_ns_unmount/1, erx_fid/0, erx_resolve/1,
-         erx_tmp_limit/0]).
+%% erXos: the namespace's table, for erx_ns, and the runtime's fid counter and where a
+%% path lies, for erx_file_remote.
+-export([erx_table/0, erx_fid/0, erx_resolve/1, erx_tmp_limit/0]).
 
 -export([read_link/1, read_link_all/1,
          read_link_info/1, read_link_info/2,
@@ -64,6 +63,7 @@
 -export([copy/3, start/0]).
 
 -include("file_int.hrl").
+-include("generated/erx_abi.hrl").
 
 -type prim_file_ref() :: term().
 
@@ -80,13 +80,11 @@
        make_hard_link_nif/2, make_soft_link_nif/2, rename_nif/2,
        read_info_nif/2, set_permissions_nif/2, set_owner_nif/3, set_time_nif/4,
        read_link_nif/1, list_dir_nif/1, make_dir_nif/1, del_file_nif/1,
-       del_dir_nif/1, get_device_cwd_nif/1, set_cwd_nif/1, get_cwd_nif/0,
+       del_dir_nif/1, get_device_cwd_nif/1, get_cwd_nif/0,
        ipread_s32bu_p32bu_nif/3, read_file_nif/1,
        get_handle_nif/1, delayed_close_nif/1, altname_nif/1,
        file_desc_to_ref_nif/1,
-       erx_ns_mount_nif/4, erx_ns_bind_nif/3, erx_ns_unmount_nif/1, erx_fid_nif/0,
-       erx_tmp_limit_nif/0, erx_set_cwd_nif/1,
-       erx_resolve_nif/1, erx_resolve_nif/2]).
+       release_walk_nif/1, erx_fid_nif/0, erx_tmp_limit_nif/0, erx_set_cwd_nif/1]).
 
 -type prim_file_name() :: string() | unicode:unicode_binary().
 -type prim_file_name_error() :: 'error' | 'ignore' | 'warning'.
@@ -143,13 +141,16 @@ open(Name, Modes) ->
     %% The try/catch pattern seen here is used throughout the file to adhere to
     %% the public file interface, which has leaked through for ages because of
     %% "raw files."
-    try open_nif(encode_path(Name), Modes) of
-        {ok, Ref} -> {ok, make_fd(Modes, Ref)};
-        {remote, Grant, Place} -> erx_file_remote:open(Grant, Place, Modes, encode_path(Name));
-        {error, Reason} -> {error, Reason}
+    try
+        Encoded = encode_path(Name),
+        erx_at(Encoded, fun(Names) -> opened(open_nif(Names, Modes), Modes) end,
+               fun(Grant, Place) -> erx_file_remote:open(Grant, Place, Modes, Encoded) end)
     catch
         error:badarg -> {error, badarg}
     end.
+
+opened({ok, Ref}, Modes) -> {ok, make_fd(Modes, Ref)};
+opened({error, Reason}, _Modes) -> {error, Reason}.
 
 file_desc_to_ref(FileDescriptorId, Modes) ->
     try file_desc_to_ref_nif(FileDescriptorId) of
@@ -576,7 +577,7 @@ read_file(Filename) ->
     %% We're doing this operation in the NIF to avoid excessive rescheduling.
     try
         Encoded = encode_path(Filename),
-        remote(read_file_nif(Encoded),
+        erx_at(Encoded, fun read_file_nif/1,
                fun(Grant, Place) -> erx_file_remote:read_file(Grant, Place, Encoded) end)
     catch
         error:badarg -> {error, badarg}
@@ -584,28 +585,169 @@ read_file(Filename) ->
 read_file_nif(_Filename) ->
     erlang:nif_error(undef).
 
-%% erXos: a path on a file server's grant comes back from the NIF as
-%% {remote, Grant, Place}, Grant {Pid, Tree, Rights} as the path's mount entry
-%% holds it and Place {Point, Root, Names}, the entry's point and root and the path's
-%% names from the tree's root, the entry's root included, and the operation runs
-%% in this process through erx_file_remote (design-files.md, Erlang clients). A
-%% rename's or a hard link's two paths, when a grant holds either, come back as
-%% {remote, Grant, Place, OtherGrant, OtherPlace}, a path on the NIF's own providers
-%% as local and local. One provider takes both only when the two grants are equal,
-%% the same tree of the same server through the same rights; any other pair is exdev,
-%% as between two Unix file systems, and no server is asked.
-remote({remote, Grant, Place}, Operation) -> Operation(Grant, Place);
+%% erXos: where a path lies, read from the namespace's table and the working directory
+%% (design-files.md, Erlang clients). A path on the release answers {release, Names},
+%% its names from the release's top, and the operation is its NIF's call on them. A
+%% path on a file server's grant answers {remote, Grant, Place}, Grant {Pid, Tree,
+%% Rights} as the path's entry holds it and Place {Point, Root, Names}, the entry's
+%% point and root and the path's names from the tree's root, the entry's root's
+%% first, each as text, and the operation runs in this process through
+%% erx_file_remote. A path on a grant whose server ended answers eio.
+%%
+%% Until erx_path resolves every path (TODO.md, "paths resolve logically"), a path is
+%% placed here lexically, as the namespace's C table placed it: from the working
+%% directory when relative, empty names and . dropped, and .. dropping the name before
+%% it, or nothing at /. That placement and remote/2 go once erx_path places the paths.
+erx_at(Encoded, Local, Remote) ->
+    case erx_locate(Encoded) of
+        {release, Names} -> Local(Names);
+        {remote, Grant, Place} -> Remote(Grant, Place);
+        {error, _} = Error -> Error
+    end.
+
+%% A rename's or a hard link's two paths: on the release both, its NIF's call on
+%% their names; otherwise {remote, Grant, Place, OtherGrant, OtherPlace}, a path on
+%% the release as local and local, for remote/2. A refusal of either path comes
+%% before an ended server's eio, the first path's before the second's.
+erx_at_two(Encoded, OtherEncoded, Local) ->
+    case erx_locate_two(Encoded, OtherEncoded) of
+        [{release, Names}, {release, OtherNames}] -> Local(Names, OtherNames);
+        [{error, _} = Error, _] -> Error;
+        [_, {error, _} = Error] -> Error;
+        [First, Second] when First =:= ended; Second =:= ended -> {error, eio};
+        [First, Second] -> list_to_tuple([remote | erx_side(First) ++ erx_side(Second)])
+    end.
+
+erx_side({remote, Grant, Place}) -> [Grant, Place];
+erx_side({release, _Names}) -> [local, local].
+
+%% One provider takes a pair only when the two grants are equal, the same tree of the
+%% same server through the same rights; any other pair is exdev, as between two Unix
+%% file systems, and no server is asked.
 remote({remote, Grant, Place, Grant, OtherPlace}, Operation) -> Operation(Grant, Place, OtherPlace);
 remote({remote, _Grant, _Place, _OtherGrant, _OtherPlace}, _Operation) -> {error, exdev};
 remote(Result, _Operation) -> Result.
 
-%% erXos: the namespace's changes, for erx_ns, which checks their arguments.
-erx_ns_mount(Point, Pid, Tree, Rights) ->
-    erx_ns_mount_nif(encode_path(Point), Pid, Tree, Rights).
-erx_ns_bind(From, To, ReadOnly) ->
-    erx_ns_bind_nif(encode_path(From), encode_path(To), ReadOnly).
-erx_ns_unmount(Point) ->
-    erx_ns_unmount_nif(encode_path(Point)).
+erx_locate(Encoded) ->
+    case erx_place(Encoded) of
+        {ok, Place} -> erx_ended(erx_located(Place, erx_table()));
+        {error, _} = Error -> Error
+    end.
+
+erx_locate_two(Encoded, OtherEncoded) ->
+    case {erx_place(Encoded), erx_place(OtherEncoded)} of
+        {{ok, Place}, {ok, OtherPlace}} ->
+            Table = erx_table(),
+            [erx_located(Place, Table), erx_located(OtherPlace, Table)];
+        {{error, _} = Error, _} -> [Error, Error];
+        {_, {error, _} = Error} -> [Error, Error]
+    end.
+
+erx_ended(ended) -> {error, eio};
+erx_ended(Located) -> Located.
+
+%% The place an encoded path reaches: enametoolong past ERX_PATH_MAX bytes, for a name
+%% past ERX_NAME_MAX, past ERX_NS_NAMES_MAX names or for a place of ERX_PATH_MAX bytes
+%% with its NUL; enoent for an empty path; einval for one that is not UTF-8 or holds a
+%% NUL.
+erx_place(Encoded) ->
+    Text = binary:part(Encoded, 0, byte_size(Encoded) - 1),
+    Valid = binary:match(Text, <<0>>) =:= nomatch andalso unicode:characters_to_binary(Text, utf8) =:= Text,
+    if
+        byte_size(Text) > ?ERX_PATH_MAX -> {error, enametoolong};
+        Text =:= <<>> -> {error, enoent};
+        not Valid -> {error, einval};
+        true ->
+            {ok, Cwd} = case Text of
+                            <<"/", _/binary>> -> {ok, <<>>};
+                            _ -> get_cwd_nif()
+                        end,
+            Split = binary:split(Cwd, <<"/">>, [global]) ++ binary:split(Text, <<"/">>, [global]),
+            case erx_steps(Split, [], 0) of
+                {ok, Reversed} ->
+                    Place = lists:reverse(Reversed, []),
+                    case byte_size(erx_text(Place)) < ?ERX_PATH_MAX of
+                        true -> {ok, Place};
+                        false -> {error, enametoolong}
+                    end;
+                {error, _} = Error ->
+                    Error
+            end
+    end.
+
+erx_steps([], Names, _Count) -> {ok, Names};
+erx_steps([Name | Rest], Names, Count) when Name =:= <<>>; Name =:= <<".">> ->
+    erx_steps(Rest, Names, Count);
+erx_steps([<<"..">> | Rest], [], 0) -> erx_steps(Rest, [], 0);
+erx_steps([<<"..">> | Rest], [_ | Names], Count) -> erx_steps(Rest, Names, Count - 1);
+erx_steps([Name | _], _Names, Count) when byte_size(Name) > ?ERX_NAME_MAX; Count =:= ?ERX_NS_NAMES_MAX ->
+    {error, enametoolong};
+erx_steps([Name | Rest], Names, Count) -> erx_steps(Rest, [Name | Names], Count + 1).
+
+%% The place on the entry whose point is its longest prefix, with the names below the
+%% point added to the entry's root. The table always holds /, which erx_ns never
+%% unmounts, so every place has an entry. Like the rest of the bridge this calls only
+%% BIFs: read_file/1 reads the boot script before stdlib is loaded.
+erx_located(Place, Table) ->
+    {Below, #{root := Root} = Entry} = erx_holder(Table, Place, none),
+    Names = Root ++ Below,
+    Joined = erx_joined(Names),
+    case length(Names) =< ?ERX_NS_NAMES_MAX andalso byte_size(Joined) < ?ERX_PATH_MAX of
+        true -> erx_provided(Entry, Names, Joined);
+        false -> {error, enametoolong}
+    end.
+
+erx_provided(#{provider := release}, Names, _Joined) ->
+    {release, Names};
+erx_provided(#{provider := {grant, Pid, Tree}, point := Point, root := Root, rights := Rights}, _Names, Joined) ->
+    {remote, {Pid, Tree, Rights}, {erx_text(Point), erx_joined(Root), Joined}};
+erx_provided(#{provider := ended}, _Names, _Joined) ->
+    ended.
+
+%% A place as text, / and each name; and names joined by /.
+erx_text([]) -> <<"/">>;
+erx_text(Names) -> iolist_to_binary([[<<"/">>, Name] || Name <- Names]).
+erx_joined([]) -> <<>>;
+erx_joined([First | Rest]) -> iolist_to_binary([First | [[<<"/">>, Name] || Name <- Rest]]).
+
+%% The entry whose point is Place's longest prefix, with the names of Place below it.
+erx_holder([], _Place, Held) ->
+    Held;
+erx_holder([#{point := Point} = Entry | Rest], Place, Held) ->
+    case {erx_below(Point, Place), Held} of
+        {false, _} -> erx_holder(Rest, Place, Held);
+        {Below, {HeldBelow, _}} when length(Below) > length(HeldBelow) -> erx_holder(Rest, Place, Held);
+        {Below, _} -> erx_holder(Rest, Place, {Below, Entry})
+    end.
+
+%% The names of Place after Point, or false when Point is not a prefix of it.
+erx_below([], Place) -> Place;
+erx_below([Name | Point], [Name | Place]) -> erx_below(Point, Place);
+erx_below(_Point, _Place) -> false.
+
+%% The working directory set_cwd/1 would store, as {cwd, Place}, or the refusal: on
+%% the release, a place whose names all walk as directories; on a grant, the place
+%% erx_file_remote:set_cwd/3 reached.
+erx_cwd(Encoded) ->
+    case erx_place(Encoded) of
+        {ok, Place} ->
+            case erx_located(Place, erx_table()) of
+                {release, Names} -> erx_cwd_on_release(release_walk_nif(Names), Place);
+                {remote, Grant, At} -> erx_file_remote:set_cwd(Grant, At, Encoded);
+                ended -> {error, eio};
+                {error, _} = Error -> Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+erx_cwd_on_release({_Kinds, {error, Reason}}, _Place) -> {error, Reason};
+erx_cwd_on_release({Kinds, ok}, Place) ->
+    case lists:member(other, Kinds) of
+        true -> {error, enotdir};
+        false -> {cwd, erx_text(Place)}
+    end;
+erx_cwd_on_release({error, Reason}, _Place) -> {error, Reason}.
 
 %% erXos: one draw of the runtime's fid counter (design-files.md, Version and
 %% attach), for erx_file_remote.
@@ -626,33 +768,29 @@ erx_table() ->
     persistent_term:get(erx_ns, [#{point => [], provider => release, root => [], rights => ro}]).
 
 %% erXos: where one path lies, or the two of a rename or a link, as their operations
-%% would find them, acting on nothing: their remote term, local for the NIF's own
-%% providers, or the refusal. erx_file_remote asks it for the path a symbolic link
-%% leads to; a text the namespace cannot hold, such as a link's that is not UTF-8,
-%% answers einval, as the NIF refuses such a path.
+%% would find them, acting on nothing: their remote term, local on the release, or the
+%% refusal. erx_file_remote asks it for the path a symbolic link leads to; a text the
+%% namespace cannot hold, such as a link's that is not UTF-8, answers einval.
 erx_resolve(Paths) ->
     try
         case Paths of
-            [Path] -> erx_resolve_nif(encode_path(Path));
+            [Path] ->
+                erx_local(erx_locate(encode_path(Path)));
             [Path, OtherPath] ->
-                remote(erx_resolve_nif(encode_path(Path), encode_path(OtherPath)),
+                Release = fun(_Names, _OtherNames) -> local end,
+                remote(erx_at_two(encode_path(Path), encode_path(OtherPath), Release),
                        fun(Grant, Place, OtherPlace) -> {remote, Grant, Place, OtherPlace} end)
         end
     catch
         error:badarg -> {error, einval}
     end.
 
+erx_local({release, _Names}) -> local;
+erx_local(Located) -> Located.
+
+release_walk_nif(_Names) ->
+    erlang:nif_error(undef).
 erx_set_cwd_nif(_Path) ->
-    erlang:nif_error(undef).
-erx_ns_mount_nif(_Point, _Pid, _Tree, _Rights) ->
-    erlang:nif_error(undef).
-erx_ns_bind_nif(_From, _To, _ReadOnly) ->
-    erlang:nif_error(undef).
-erx_ns_unmount_nif(_Point) ->
-    erlang:nif_error(undef).
-erx_resolve_nif(_Path) ->
-    erlang:nif_error(undef).
-erx_resolve_nif(_Path, _OtherPath) ->
     erlang:nif_error(undef).
 erx_fid_nif() ->
     erlang:nif_error(undef).
@@ -681,7 +819,7 @@ read_link_all(Name) -> read_link_1(Name, true).
 
 read_link_1(Name, AcceptRawNames) ->
     Encoded = encode_path(Name),
-    try remote(read_link_nif(Encoded),
+    try erx_at(Encoded, fun read_link_nif/1,
                fun(Grant, Place) -> erx_file_remote:read_link(Grant, Place, Encoded) end) of
         {ok, RawName} -> translate_raw_name(RawName, AcceptRawNames);
         {error, Reason} -> {error, Reason}
@@ -701,7 +839,7 @@ list_dir_all(Name) -> list_dir_1(Name, false).
 
 list_dir_1(Name, SkipInvalid) ->
     Encoded = encode_path(Name),
-    try remote(list_dir_nif(Encoded),
+    try erx_at(Encoded, fun list_dir_nif/1,
                fun(Grant, Place) -> erx_file_remote:list_dir(Grant, Place, Encoded) end) of
         {ok, RawNames} -> list_dir_convert(RawNames, SkipInvalid, []);
         {error, Reason} -> {error, Reason}
@@ -750,7 +888,7 @@ read_link_info(Name, Opts) ->
 read_info_1(Name, FollowLinks, TimeType) ->
     try
         Encoded = encode_path(Name),
-        case remote(read_info_nif(Encoded, FollowLinks),
+        case erx_at(Encoded, fun(Names) -> read_info_nif(Names, FollowLinks) end,
                     fun(Grant, Place) ->
                             erx_file_remote:read_file_info(Grant, Place, FollowLinks, Encoded)
                     end) of
@@ -811,17 +949,19 @@ write_file_info_1(Filename, Info, TimeType) ->
 
         %% This is a bit ugly but we need to handle partial failures the same
         %% way the old driver did.
-        %% erXos: a path on a grant answers its first step with the grant,
-        %% and erx_file_remote sends the steps with the times worked out here.
-        case set_owner(EncodedName, Uid, Gid) of
+        %% erXos: on a grant erx_file_remote sends the steps with the times worked
+        %% out here.
+        case erx_locate(EncodedName) of
+            {release, Names} ->
+                throw_on_error(set_owner(Names, Uid, Gid)),
+                throw_on_error(set_permissions(Names, Modes)),
+                throw_on_error(set_time(Names, ATime, MTime, CTime));
             {remote, Grant, Place} ->
                 erx_file_remote:write_file_info(Grant, Place,
                                                 Info#file_info{atime = ATime, mtime = MTime},
                                                 EncodedName);
-            Owner ->
-                throw_on_error(Owner),
-                throw_on_error(set_permissions(EncodedName, Modes)),
-                throw_on_error(set_time(EncodedName, ATime, MTime, CTime))
+            {error, Failure} ->
+                throw(Failure)
         end
     catch
         throw:Reason -> {error, Reason};
@@ -850,8 +990,6 @@ set_time_nif(_Path, _ATime, _MTime, _CTime) ->
     erlang:nif_error(undef).
 
 throw_on_error(ok) -> ok;
-%% erXos: a mount made on the path after its first step was sent.
-throw_on_error({remote, _Grant, _Place}) -> throw(eio);
 throw_on_error({error, enotsup}) -> ok;
 throw_on_error({error, Reason}) -> throw(Reason).
 
@@ -900,17 +1038,21 @@ get_cwd() ->
         error:badarg -> {error, badarg}
     end.
 %% erXos: the working directory changes only here (design-files.md, Erlang clients). On
-%% the release the NIF finds a directory and stores it; on a grant erx_file_remote finds
-%% one and answers the place it reached, which erx_set_cwd_nif/1 checks and stores.
+%% the release its walk finds a directory, and on a grant erx_file_remote finds one and
+%% answers the place it reached; either is stored only once erx_path:cwd/1 reads it as a
+%% place, so a relative path is always read from one.
 set_cwd(Path) ->
     try
         case is_path_translatable(Path) of
             true ->
-                Encoded = encode_path(Path),
-                case remote(set_cwd_nif(Encoded),
-                            fun(Grant, Place) -> erx_file_remote:set_cwd(Grant, Place, Encoded) end) of
-                    {cwd, Reached} -> erx_set_cwd_nif(Reached);
-                    Answer -> Answer
+                case erx_cwd(encode_path(Path)) of
+                    {cwd, Reached} ->
+                        case erx_path:cwd(Reached) of
+                            {ok, _Place} -> erx_set_cwd_nif(Reached);
+                            error -> {error, einval}
+                        end;
+                    Answer ->
+                        Answer
                 end;
             false -> {error, no_translation}
         end
@@ -921,7 +1063,7 @@ set_cwd(Path) ->
 delete(Path) ->
     try
         Encoded = encode_path(Path),
-        remote(del_file_nif(Encoded),
+        erx_at(Encoded, fun del_file_nif/1,
                fun(Grant, Place) -> erx_file_remote:delete(Grant, Place, Encoded) end)
     catch
         error:badarg -> {error, badarg}
@@ -930,7 +1072,7 @@ delete(Path) ->
 rename(Source, Destination) ->
     try
         {EncodedSource, EncodedDestination} = {encode_path(Source), encode_path(Destination)},
-        remote(renamed_root(EncodedSource, rename_nif(EncodedSource, EncodedDestination)),
+        remote(renamed_root(EncodedSource, erx_at_two(EncodedSource, EncodedDestination, fun rename_nif/2)),
                fun(Grant, Place, OtherPlace) ->
                        erx_file_remote:rename(Grant, Place, OtherPlace,
                                               EncodedSource, EncodedDestination)
@@ -951,7 +1093,7 @@ renamed_root(_Source, Answer) -> Answer.
 make_dir(Path) ->
     try
         Encoded = encode_path(Path),
-        remote(make_dir_nif(Encoded),
+        erx_at(Encoded, fun make_dir_nif/1,
                fun(Grant, Place) -> erx_file_remote:make_dir(Grant, Place, Encoded) end)
     catch
         error:badarg -> {error, badarg}
@@ -959,7 +1101,7 @@ make_dir(Path) ->
 del_dir(Path) ->
     try
         Encoded = encode_path(Path),
-        remote(del_dir_nif(Encoded),
+        erx_at(Encoded, fun del_dir_nif/1,
                fun(Grant, Place) -> erx_file_remote:del_dir(Grant, Place, Encoded) end)
     catch
         error:badarg -> {error, badarg}
@@ -967,7 +1109,7 @@ del_dir(Path) ->
 make_link(Existing, New) ->
     try
         {EncodedExisting, EncodedNew} = {encode_path(Existing), encode_path(New)},
-        remote(make_hard_link_nif(EncodedExisting, EncodedNew),
+        remote(erx_at_two(EncodedExisting, EncodedNew, fun make_hard_link_nif/2),
                fun(Grant, Place, OtherPlace) ->
                        erx_file_remote:make_link(Grant, Place, OtherPlace,
                                                  EncodedExisting, EncodedNew)
@@ -978,7 +1120,7 @@ make_link(Existing, New) ->
 make_symlink(Existing, New) ->
     try
         {Target, EncodedNew} = {encode_path(Existing), encode_path(New)},
-        remote(make_soft_link_nif(Target, EncodedNew),
+        erx_at(EncodedNew, fun(Names) -> make_soft_link_nif(Target, Names) end,
                fun(Grant, Place) ->
                        erx_file_remote:make_symlink(Grant, Place, Target, EncodedNew)
                end)
@@ -1013,8 +1155,6 @@ del_file_nif(_Path) ->
 del_dir_nif(_Path) ->
     erlang:nif_error(undef).
 get_device_cwd_nif(_DevicePath) ->
-    erlang:nif_error(undef).
-set_cwd_nif(_Path) ->
     erlang:nif_error(undef).
 get_cwd_nif() ->
     erlang:nif_error(undef).

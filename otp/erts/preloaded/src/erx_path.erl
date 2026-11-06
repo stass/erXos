@@ -48,7 +48,7 @@ functions and the two callbacks, and reads no state but its arguments, so a
 table changed while it runs is not seen by it.
 """.
 
--export([resolve/6]).
+-export([resolve/6, cwd/1]).
 -export_type([name/0, place/0, entry/0, table/0, op/0, flags/0, kind/0,
               reply/0, callbacks/0, action/0, resume/0]).
 
@@ -118,6 +118,31 @@ resolve(Path, Op, #{follow := Follow, willbedir := WillBeDir}, Table, Cwd,
        Op =:= rename ->
     read(Path, Cwd, [], #st{op = Op, follow = Follow, willbedir = WillBeDir,
                             table = Table, callbacks = Callbacks}).
+
+-doc """
+Reads the text of a working directory as the place it names: `/` alone, or
+`/` and then plain names joined by single `/` with none after the last, at
+most `ERX_NS_NAMES_MAX` of them and the whole shorter than `ERX_PATH_MAX`
+bytes, so it fits with its NUL. Anything else, any other term included, is
+`error`. `prim_file:set_cwd/1` stores only a place this accepts, so the
+working directory every resolution starts from is one.
+""".
+-spec cwd(term()) -> {ok, place()} | error.
+cwd(<<"/">>) ->
+    {ok, []};
+cwd(<<"/", Names/binary>> = Text) when byte_size(Text) < ?ERX_PATH_MAX ->
+    Place = binary:split(Names, <<"/">>, [global]),
+    case text(Text) andalso length(Place) =< ?ERX_NS_NAMES_MAX andalso
+             [Name || Name <- Place, not plain(Name)] =:= [] of
+        true -> {ok, Place};
+        false -> error
+    end;
+cwd(_) ->
+    error.
+
+plain(Name) ->
+    Name =/= <<>> andalso Name =/= <<".">> andalso Name =/= <<"..">> andalso
+        byte_size(Name) =< ?ERX_NAME_MAX.
 
 %% Reads Text, the path or a link's, before Rest, the names still to read
 %% after it: from "/" when the text is absolute and from Place otherwise. A

@@ -1773,8 +1773,10 @@ the way as a walk would; the release holds no links, so a path without
 call these NIFs with any term, so each decodes its list before the
 release's core sees it: a list of more than 256 names, or a name that
 is not a binary of 1 to 255 bytes of UTF-8 other than `.` and `..`
-without `/` or NUL, answers `einval`, and the decoder has a fuzz target
-of its own ([Verification](#verification-and-testing)). On an EROFS mount
+without `/` or NUL, answers `einval`, as does a list whose names joined
+by `/` do not fit `ERX_PATH_MAX` bytes with a NUL, which bounds the
+decoder's buffer and which no place's names exceed; the decoder has a
+fuzz target of its own ([Verification](#verification-and-testing)). On an EROFS mount
 the operation runs through `erx_erofs`, the EROFS reader, which answers
 the resolver's walks and link reads on its image and returns OTP's file
 descriptor record with itself as the module for an open file
@@ -1813,7 +1815,10 @@ to load then halts the node.
 NIF as one binary under a mutex, starting at `/`, which
 `erx_get_cwd_nif/0` copies out and `erx_set_cwd_nif/1` replaces, each in
 one call, and which only `prim_file:set_cwd/1` writes: every name of it
-a directory that the resolution which set it reached. It is not a
+a directory that the resolution which set it reached. `set_cwd` stores
+only a text that `erx_path:cwd/1` reads as a place, `/` alone or plain
+names joined by single `/`, at most 256 of them and shorter than
+`ERX_PATH_MAX` bytes, so the NIF checks only that it fits. It is not a
 persistent term because it changes often, OTP's `test_server` setting it
 for every test case, and each change of a persistent term costs a scan
 of every process ([Performance](#performance)); and not an ETS table,

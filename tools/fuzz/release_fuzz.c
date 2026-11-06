@@ -6,9 +6,9 @@
 /*
  * erx_release_bind and erx_release_entry over an archive. The first input byte's
  * bit 0 recomputes the index hash, so mutations reach the checks behind it.
- * Every accepted entry must lie inside the archive and resolve through
- * erx_ns_resolve to its own name, so the limits of the bind and of the resolver
- * cannot drift apart. A refused archive names its check and lists nothing.
+ * Every accepted entry must lie inside the archive and its path must pass
+ * erx_release_fs_add_name name by name, so the limits of the bind and of the
+ * release NIFs' decoder cannot drift apart. A refused archive names its check and lists nothing.
  */
 
 #include <stddef.h>
@@ -18,7 +18,7 @@
 
 #include "blake3/blake3.h"
 #include "erx/abi_reader.h"
-#include "erx/ns.h"
+#include "erx/release_fs.h"
 #include "erx/pack.h"
 #include "erx/release.h"
 
@@ -49,23 +49,24 @@ fix_index(uint8_t *bytes, size_t length)
 static void
 check_entry(const erx_release_entry_t *entry, size_t length)
 {
-	static _Thread_local erx_ns_t ns;
-	static _Thread_local erx_ns_result_t out;
-	static _Thread_local uint8_t path[ERX_PATH_MAX];
+	static _Thread_local erx_release_fs_names_t names;
+	size_t start;
 
 	if (entry->offset > length || entry->size > length - entry->offset ||
-	    entry->path_length == 0 || entry->path_length >= sizeof(path))
+	    entry->path_length == 0 || entry->path_length >= sizeof(names.bytes))
 		abort();
-	ns.count = 1;
-	ns.mounts[0].kind = ERX_NS_RELEASE;
-	ns.mounts[0].point[0] = '/';
-	ns.mounts[0].root[0] = '/';
-	ns.cwd[0] = '/';
-	path[0] = '/';
-	memcpy(path + 1, entry->path, entry->path_length);
-	if (erx_ns_resolve(&ns, path, entry->path_length + 1, &out) != ERX_NS_OK ||
-	    out.res_names_length != entry->path_length ||
-	    memcmp(out.res_names, entry->path, entry->path_length) != 0)
+	names.count = 0;
+	names.length = 0;
+	start = 0;
+	for (size_t end = 0; end <= entry->path_length; end++) {
+		if (end < entry->path_length && entry->path[end] != '/')
+			continue;
+		if (!erx_release_fs_add_name(&names, entry->path + start, end - start))
+			abort();
+		start = end + 1;
+	}
+	if (names.length != entry->path_length ||
+	    memcmp(names.bytes, entry->path, entry->path_length) != 0)
 		abort();
 }
 

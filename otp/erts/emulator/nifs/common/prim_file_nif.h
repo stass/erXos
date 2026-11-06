@@ -121,33 +121,12 @@ typedef struct {
     ErlNifMonitor monitor;
 } efile_data_t;
 
-#include "erx/ns.h"
+#include "erx/release_fs.h"
 
-/** @brief erXos: a path's bytes and where the namespace resolved it, taken once,
- * under the namespace's lock, when the path is marshalled (erx_prim_file.c).
- * Nothing read from it after the lock is released points into the namespace's
- * table: result.res_mount is read only under the lock, and what the operation
- * needs of the mount entry is copied out beside it. */
-typedef struct {
-    ErlNifBinary bytes;        /* ends in its one NUL */
-    int on_mount;              /* 0 for the empty root above a narrowed namespace's mounts */
-    erx_ns_kind_t kind;        /* the mount's kind, when on_mount */
-    uint64_t server;           /* ERX_NS_SERVER: the entry's grant pid, 0 once it ended */
-    char tree[ERX_NAME_MAX + 1];       /* ERX_NS_SERVER: the entry's tree */
-    erx_ns_rights_t rights;    /* ERX_NS_SERVER: the entry's rights */
-    ERL_NIF_TERM point;        /* ERX_NS_SERVER: the entry's point, a namespace path */
-    ERL_NIF_TERM root;         /* ERX_NS_SERVER: the entry's root, as names */
-    ERL_NIF_TERM remote;       /* the answer, when marshalling answered EFILE_EREMOTE */
-    erx_ns_result_t result;
-} efile_path_t;
-
-/** @brief erXos: what marshalling answers for a path on a file server's grant.
- * The NIF then answers the first path's `remote` term, {remote, Grant, Place},
- * or {remote, Grant, Place, OtherPlace} for two paths, Grant being {Pid, Tree,
- * Rights} and a Place {Point, Root, Names}, and prim_file runs the operation
- * through erx_file_remote
- * (design-files.md, Erlang clients). */
-#define EFILE_EREMOTE (-1)
+/** @brief erXos: a path on the release, as its names from the release's top
+ * (erx_prim_file.c). prim_file has found where the path lies before any NIF
+ * here sees it, so no path is resolved below this point. */
+typedef erx_release_fs_names_t efile_path_t;
 
 /** @brief Prepares the layer once, when the NIF loads.
  *
@@ -158,12 +137,9 @@ int efile_load(ErlNifEnv *env);
  * namespace and is not resolved. */
 posix_errno_t efile_marshal_text(ErlNifEnv *env, ERL_NIF_TERM text, efile_path_t *result);
 
-/** @brief erXos: the namespace's changes, the runtime's fid counter and the
- * working directory on a grant
- * (erx_ns, design-files.md, Building, binding and mounting). */
-ERL_NIF_TERM efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
-ERL_NIF_TERM efile_ns_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
-ERL_NIF_TERM efile_ns_unmount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+/** @brief erXos: the release's walk, the runtime's fid counter, /tmp's cap and
+ * the store of the working directory (erx_prim_file.c). */
+ERL_NIF_TERM efile_release_walk_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
@@ -179,12 +155,6 @@ ERL_NIF_TERM efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM a
  * prim_file:internal_native2name for compatibility reasons. */
 posix_errno_t efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result);
 
-/** @brief erXos: marshals the two paths of a rename or a hard link under one
- * hold of the namespace's lock, so no change falls between them. Two paths
- * that do not lie on one grant's tree through one set of rights, where either
- * is on a grant, answer EXDEV without asking a server. */
-posix_errno_t efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
-                                  efile_path_t *first_result, efile_path_t *second_result);
 
 /** @brief Returns the underlying handle as an implementation-defined term.
  *

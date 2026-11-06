@@ -4,38 +4,23 @@
  */
 
 /*
- * prim_file's platform layer over the namespace (design-runtime.md, Files;
- * design-files.md, Erlang clients). Every path passes erx_ns_resolve once, when it
- * is marshalled. The one provider served here is the release file system,
- * read-only; a path on a file server's grant answers {remote, Grant, Place},
- * Grant being the entry's {Pid, Tree, Rights} and Place {Point, Root, Names}, the
- * entry's point and root and the path's names, and prim_file runs the operation in
- * the calling process through erx_file_remote. A
- * handle holds a file of the release and a position, under prim_file_nif.c's
- * per-file state, and no file descriptor exists anywhere in the layer.
+ * prim_file's platform layer for the release file system (design-runtime.md,
+ * Files; design-files.md, Erlang clients). prim_file finds where a path lies in
+ * Erlang, over the namespace's persistent term, and calls a NIF here only for a
+ * path on the release, handing it the path's names from the release's top as a
+ * list of binaries. Any process can call the NIFs with any term, so each list
+ * passes erx_release_fs_add_name, name by name, before the release's core sees
+ * it, and a list it refuses answers einval. release_walk_nif(Names) answers the
+ * kind of each name as erx_path's walk callback does. A handle holds a file of
+ * the release and a position, under prim_file_nif.c's per-file state, and no
+ * file descriptor exists anywhere in the layer.
  *
- * The namespace, its table and its working directory, is one per runtime, and
- * erx_ns's mount, bind and unmount change it at run time for every process at
- * once. One reader-writer lock, ns_lock, guards it, rather than swapping copies:
- * the table is about 530 KiB, too large to copy for each change, and a copy
- * swapped out could be freed only once its last reader is known to be done, a
- * second mechanism with nothing to gain while changes are rare. Under the read
- * lock, marshalling resolves a path and copies out all the operation needs (the
- * result, the mount's kind and the grant's pid, tree, rights, point and
- * root), so nothing a reader keeps points into the table, and a change made
- * after the lock is released cannot reach it. The two paths of a rename or a
- * link resolve under one hold of the lock, so both are answered from one table.
- *
- * Every grant pid in the table is watched by one monitor, all held by the one
- * resource ns_watcher. When the process ends, its entries keep their place and
- * answer eio until they are unmounted, so a pid the runtime later gives another
- * process never receives a mounted path's requests. The monitors follow from the
- * table: after each change, erx_ns_watch_table monitors each pid the table holds
- * and drops each monitor of a pid it no longer holds.
- *
- * The runtime's fid counter lives beside the namespace (design-files.md, Version
- * and attach): one 64-bit atomic, which a draw adds one to and keeps the low 32
- * bits of, drawing again for NOFID, so no process allocates fids.
+ * Two pieces of the runtime's state live here as well. The working directory is
+ * a place, `/` or `/a/b`, which prim_file:set_cwd/1 alone stores, having
+ * checked it, and every relative path reads; one reader-writer lock guards its
+ * bytes. The fid counter (design-files.md, Version and attach) is one 64-bit
+ * atomic, which a draw adds one to and keeps the low 32 bits of, drawing again
+ * for NOFID, so no process allocates fids.
  *
  * The table of release names is built once, when the NIF loads, and is immutable
  * afterwards, so its readers take no lock. The flags of file_checked guard no data.
@@ -54,9 +39,11 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "erx/ns.h"
+#include "erx/abi.h"
 #include "erx/release.h"
 #include "erx/release_fs.h"
+
+#include "erx_fid.h"
 
 /* As stock reports them: st_mode, with the type's bits. */
 #define ERX_FILE_MODE		(S_IFREG | 0444)
@@ -74,21 +61,9 @@ typedef struct erx_efile {
 	Sint64			position;
 } erx_efile_t;
 
-/* A local pid is an immediate term, so its word names it for as long as it lives. */
-_Static_assert(sizeof(ERL_NIF_TERM) <= sizeof(uint64_t), "a pid fits an entry's server");
-
-typedef struct erx_ns_watch {
-	uint64_t	server;
-	ErlNifMonitor	monitor;
-} erx_ns_watch_t;
-
-static erx_ns_t		name_space;
-static ErlNifRWLock	*ns_lock;
-/* Under ns_lock: at most one per entry, since each watches a pid an entry holds. */
-static erx_ns_watch_t	ns_watches[ERX_NS_MOUNTS_MAX];
-static uint32_t		ns_nwatches;
-static ErlNifResourceType *ns_watcher_type;
-static void		*ns_watcher;
+/* The working directory, NUL-terminated, under cwd_lock. */
+static char		cwd[ERX_PATH_MAX];
+static ErlNifRWLock	*cwd_lock;
 static erts_atomic64_t	fid_counter;
 static erx_release_fs_t	release_fs;
 /*
@@ -97,26 +72,8 @@ static erx_release_fs_t	release_fs;
  */
 static erts_atomic32_t	*file_checked;
 
-/* The atoms erx_ns:mount takes and a remote answer carries. */
-static const char *const rights_names[] = {
-	[ERX_NS_RO] = "ro", [ERX_NS_RW] = "rw", [ERX_NS_RX] = "rx"
-};
-
 static int erx_build_table(void);
-static posix_errno_t erx_ns_errno(erx_ns_status_t);
-static ERL_NIF_TERM erx_ns_answer(ErlNifEnv *, erx_ns_status_t);
-static int erx_inspect_path(ErlNifEnv *, ERL_NIF_TERM, ErlNifBinary *);
-static bool erx_utf8_valid(const uint8_t *, size_t);
-static bool erx_place_valid(const uint8_t *, size_t);
-static void erx_copy_entry(ErlNifEnv *, efile_path_t *);
-static ERL_NIF_TERM erx_text_term(ErlNifEnv *, const char *);
-static ERL_NIF_TERM erx_grant_term(ErlNifEnv *, const efile_path_t *);
-static ERL_NIF_TERM erx_place_term(ErlNifEnv *, const efile_path_t *);
-static ErlNifPid erx_pid_of(uint64_t);
-static bool erx_ns_holds(uint64_t);
-static void erx_ns_end_server(uint64_t);
-static void erx_ns_watch_table(ErlNifEnv *);
-static void erx_ns_down(ErlNifEnv *, void *, ErlNifPid *, ErlNifMonitor *);
+static ERL_NIF_TERM erx_error(ErlNifEnv *, const char *);
 static posix_errno_t erx_find(const efile_path_t *, erx_release_fs_kind_t *,
     uint32_t *);
 static posix_errno_t erx_find_existing(const efile_path_t *,
@@ -174,439 +131,83 @@ erx_build_table(void)
 int
 efile_load(ErlNifEnv *env)
 {
-	/* members counts dtor, stop and down: without it the down callback is not seen. */
-	ErlNifResourceTypeInit callbacks = { .down = erx_ns_down, .members = 3 };
-
-	name_space.count = 1;
-	name_space.mounts[0].kind = ERX_NS_RELEASE;
-	name_space.mounts[0].rights = ERX_NS_RO;
-	name_space.mounts[0].point[0] = '/';
-	name_space.mounts[0].root[0] = '/';
-	name_space.cwd[0] = '/';
+	(void)env;
+	cwd[0] = '/';
 	erts_atomic64_init_nob(&fid_counter, 0);
-	ns_lock = enif_rwlock_create("erx_prim_file_ns");
-	if (ns_lock == NULL)
-		return (-1);
-	ns_watcher_type = enif_init_resource_type(env, "erx_ns_watcher", &callbacks,
-	    ERL_NIF_RT_CREATE, NULL);
-	if (ns_watcher_type == NULL)
+	cwd_lock = enif_rwlock_create("erx_prim_file_cwd");
+	if (cwd_lock == NULL)
 		return (-1);
 	return (erx_build_table());
 }
 
-/* What erx_ns_resolve or erx_ns_resolve_two refuses a path with. */
-static posix_errno_t
-erx_ns_errno(erx_ns_status_t status)
-{
-	switch (status) {
-	case ERX_NS_OK:
-		return (0);
-	case ERX_NS_ENAMETOOLONG:
-		return (ENAMETOOLONG);
-	case ERX_NS_ENOENT:
-		return (ENOENT);
-	case ERX_NS_EEXIST:
-		return (EEXIST);
-	case ERX_NS_EBUSY:
-		return (EBUSY);
-	case ERX_NS_EINVAL:
-	case ERX_NS_ELIMIT:
-		break;
-	}
-	return (EINVAL);
-}
-
-/* A change's answer to erx_ns: ok, or {error, Reason}; a full table is system_limit. */
 static ERL_NIF_TERM
-erx_ns_answer(ErlNifEnv *env, erx_ns_status_t status)
+erx_error(ErlNifEnv *env, const char *reason)
 {
-	const char *reason = "einval";
-
-	switch (status) {
-	case ERX_NS_OK:
-		return (enif_make_atom(env, "ok"));
-	case ERX_NS_ENAMETOOLONG:
-		reason = "enametoolong";
-		break;
-	case ERX_NS_ENOENT:
-		reason = "enoent";
-		break;
-	case ERX_NS_EEXIST:
-		reason = "eexist";
-		break;
-	case ERX_NS_EBUSY:
-		reason = "ebusy";
-		break;
-	case ERX_NS_ELIMIT:
-		reason = "system_limit";
-		break;
-	case ERX_NS_EINVAL:
-		reason = "einval";
-		break;
-	}
 	return (enif_make_tuple2(env, enif_make_atom(env, "error"),
 	    enif_make_atom(env, reason)));
 }
 
-/* A path as prim_file encodes it: a binary ending in its one NUL. */
-static int
-erx_inspect_path(ErlNifEnv *env, ERL_NIF_TERM term, ErlNifBinary *path)
-{
-	return (enif_inspect_binary(env, term, path) && path->size > 0 &&
-	    path->data[path->size - 1] == '\0');
-}
-
-static ErlNifPid
-erx_pid_of(uint64_t server)
-{
-	ErlNifPid pid;
-
-	pid.pid = (ERL_NIF_TERM)server;
-	return (pid);
-}
-
 /*
- * Under ns_lock: copies out of the entry a resolved path reached all its
- * operation needs, so nothing read later points into the table. A refused path
- * reached no entry. The entry's point and root become terms here, for a remote
- * answer, as their text is in the table.
- */
-static void
-erx_copy_entry(ErlNifEnv *env, efile_path_t *path)
-{
-	const erx_ns_mount_t *mount = path->result.res_mount;
-
-	path->on_mount = mount != NULL;
-	path->kind = mount != NULL ? mount->kind : ERX_NS_RELEASE;
-	path->server = 0;
-	path->tree[0] = '\0';
-	path->rights = ERX_NS_RO;
-	path->point = 0;
-	path->root = 0;
-	if (mount != NULL && mount->kind == ERX_NS_SERVER) {
-		path->server = mount->server;
-		memcpy(path->tree, mount->tree, sizeof(path->tree));
-		path->tree[sizeof(path->tree) - 1] = '\0';
-		path->rights = mount->rights;
-		path->point = erx_text_term(env, mount->point);
-		path->root = erx_text_term(env, mount->root + 1);
-	}
-}
-
-/* A NUL-terminated text of the table as a binary, its NUL left out. */
-static ERL_NIF_TERM
-erx_text_term(ErlNifEnv *env, const char *text)
-{
-	ERL_NIF_TERM term;
-	size_t length;
-
-	length = strlen(text);
-	memcpy(enif_make_new_binary(env, length, &term), text, length);
-	return (term);
-}
-
-/* {Pid, Tree, Rights}: the grant as the path's entry reaches it, for erx_file_remote. */
-static ERL_NIF_TERM
-erx_grant_term(ErlNifEnv *env, const efile_path_t *path)
-{
-	ERL_NIF_TERM tree;
-	size_t length;
-
-	length = strlen(path->tree);
-	memcpy(enif_make_new_binary(env, length, &tree), path->tree, length);
-	return (enif_make_tuple3(env, (ERL_NIF_TERM)path->server, tree,
-	    enif_make_atom(env, rights_names[path->rights])));
-}
-
-/*
- * {Point, Root, Names}: where the path lies, for erx_file_remote. The entry maps the
- * namespace path Point to the tree's names Root ("" for the tree's root), and Names
- * are the path's names from the tree's root, Root's first, joined by `/`. A client
- * following a symbolic link expresses the link's directory as a namespace path with
- * them (design-files.md, Resolving a path).
- */
-static ERL_NIF_TERM
-erx_place_term(ErlNifEnv *env, const efile_path_t *path)
-{
-	ERL_NIF_TERM names;
-
-	memcpy(enif_make_new_binary(env, path->result.res_names_length, &names),
-	    path->result.res_names, path->result.res_names_length);
-	return (enif_make_tuple3(env, path->point, path->root, names));
-}
-
-/*
- * Marshalling resolves the path, and copies out under the lock all the
- * operation needs. A path on a grant answers {remote, Grant, Place}, or eio once
- * the grant's process has ended.
+ * A path on the release: its names from the release's top, a proper list of
+ * binaries, each checked as it is added. Anything else is EINVAL.
  */
 posix_errno_t
 efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result)
 {
-	erx_ns_status_t status;
+	ERL_NIF_TERM name, rest;
+	ErlNifBinary bytes;
 
-	if (!erx_inspect_path(env, path, &result->bytes))
-		return (EINVAL);
-	enif_rwlock_rlock(ns_lock);
-	status = erx_ns_resolve(&name_space, result->bytes.data, result->bytes.size - 1,
-	    &result->result);
-	erx_copy_entry(env, result);
-	enif_rwlock_runlock(ns_lock);
-	if (status != ERX_NS_OK)
-		return (erx_ns_errno(status));
-	if (!result->on_mount || result->kind != ERX_NS_SERVER)
-		return (0);
-	if (result->server == 0)
-		return (EIO);
-	result->remote = enif_make_tuple3(env, enif_make_atom(env, "remote"),
-	    erx_grant_term(env, result), erx_place_term(env, result));
-	return (EFILE_EREMOTE);
-}
-
-/*
- * A path of a pair as prim_file's remote/2 compares it: Grant and Place for a path on
- * a grant, `local` and `local` for one on the NIF's own providers.
- */
-static void
-erx_pair_terms(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *grant,
-    ERL_NIF_TERM *place)
-{
-	if (path->on_mount && path->kind == ERX_NS_SERVER) {
-		*grant = erx_grant_term(env, path);
-		*place = erx_place_term(env, path);
-	} else {
-		*grant = enif_make_atom(env, "local");
-		*place = *grant;
+	result->count = 0;
+	result->length = 0;
+	rest = path;
+	while (enif_get_list_cell(env, rest, &name, &rest)) {
+		if (!enif_inspect_binary(env, name, &bytes) ||
+		    !erx_release_fs_add_name(result, bytes.data, bytes.size))
+			return (EINVAL);
 	}
+	return (enif_is_empty_list(env, rest) ? 0 : EINVAL);
 }
 
-/* Whether a resolved path lies on a grant whose process has ended. */
-static bool
-erx_on_ended_grant(const efile_path_t *path)
-{
-	return (path->on_mount && path->kind == ERX_NS_SERVER && path->server == 0);
-}
-
-/*
- * Both paths resolve under one hold of the lock (erx_ns_resolve_two), so a mount
- * between them cannot split the pair. Two paths neither on a grant are the NIF's own
- * providers', and the operation runs here. Otherwise the first path's `remote` is
- * {remote, Grant, Place, OtherGrant, OtherPlace}, each path's grant and place or
- * `local` and `local` (erx_pair_terms), and prim_file decides whether one provider
- * takes both (design-files.md, Erlang clients); a path on a grant whose process has
- * ended answers eio, as one path does.
- */
-posix_errno_t
-efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
-    efile_path_t *first_result, efile_path_t *second_result)
-{
-	ERL_NIF_TERM first_grant, first_place, second_grant, second_place;
-	erx_ns_status_t status;
-
-	if (!erx_inspect_path(env, first, &first_result->bytes) ||
-	    !erx_inspect_path(env, second, &second_result->bytes))
-		return (EINVAL);
-	enif_rwlock_rlock(ns_lock);
-	status = erx_ns_resolve_two(&name_space, first_result->bytes.data,
-	    first_result->bytes.size - 1, second_result->bytes.data,
-	    second_result->bytes.size - 1, &first_result->result,
-	    &second_result->result);
-	erx_copy_entry(env, first_result);
-	erx_copy_entry(env, second_result);
-	enif_rwlock_runlock(ns_lock);
-	if (status != ERX_NS_OK)
-		return (erx_ns_errno(status));
-	if ((!first_result->on_mount || first_result->kind != ERX_NS_SERVER) &&
-	    (!second_result->on_mount || second_result->kind != ERX_NS_SERVER))
-		return (0);
-	if (erx_on_ended_grant(first_result) || erx_on_ended_grant(second_result))
-		return (EIO);
-	erx_pair_terms(env, first_result, &first_grant, &first_place);
-	erx_pair_terms(env, second_result, &second_grant, &second_place);
-	first_result->remote = enif_make_tuple5(env, enif_make_atom(env, "remote"),
-	    first_grant, first_place, second_grant, second_place);
-	return (EFILE_EREMOTE);
-}
-
+/* A symbolic link's text, which names nothing here: a binary ending in its one NUL. */
 posix_errno_t
 efile_marshal_text(ErlNifEnv *env, ERL_NIF_TERM text, efile_path_t *result)
 {
-	if (!erx_inspect_path(env, text, &result->bytes))
+	ErlNifBinary bytes;
+
+	result->count = 0;
+	result->length = 0;
+	if (!enif_inspect_binary(env, text, &bytes) || bytes.size == 0 ||
+	    bytes.data[bytes.size - 1] != '\0')
 		return (EINVAL);
-	result->on_mount = 0;
-	result->kind = ERX_NS_RELEASE;
-	result->server = 0;
-	result->tree[0] = '\0';
-	result->rights = ERX_NS_RO;
 	return (0);
 }
 
-/* Under ns_lock: whether an entry still names the grant. */
-static bool
-erx_ns_holds(uint64_t server)
-{
-	for (uint32_t index = 0; index < name_space.count; index++) {
-		if (name_space.mounts[index].kind == ERX_NS_SERVER &&
-		    name_space.mounts[index].server == server)
-			return (true);
-	}
-	return (false);
-}
-
-/* Under ns_lock, held for writing: the grant's entries answer eio from now on. */
-static void
-erx_ns_end_server(uint64_t server)
-{
-	for (uint32_t index = 0; index < name_space.count; index++) {
-		if (name_space.mounts[index].kind == ERX_NS_SERVER &&
-		    name_space.mounts[index].server == server)
-			name_space.mounts[index].server = 0;
-	}
-}
-
 /*
- * Under ns_lock, held for writing: one monitor for each pid the table holds and
- * none for any other. A pid that has already ended when it is first watched ends
- * its entries at once.
+ * prim_file:release_walk_nif(Names): the walk erx_path asks the release for,
+ * {Kinds, End}. Kinds holds `directory` for each leading name that is one, then
+ * `other` for a file among the names; End is {error, enoent} at a missing name
+ * and ok otherwise. A list the decoder refuses answers {error, einval}.
  */
-static void
-erx_ns_watch_table(ErlNifEnv *env)
-{
-	ErlNifMonitor monitor;
-	ErlNifPid pid;
-	uint64_t server;
-	uint32_t index;
-	int watching;
-	bool watched;
-
-	/*
-	 * The type takes its down callback only once the load has returned, so the one
-	 * watcher is made at the first change. It is held for the runtime's life:
-	 * dropping it would drop every monitor.
-	 */
-	if (ns_watcher == NULL)
-		ns_watcher = enif_alloc_resource(ns_watcher_type, 1);
-	for (index = 0; index < ns_nwatches;) {
-		if (erx_ns_holds(ns_watches[index].server)) {
-			index++;
-			continue;
-		}
-		/* A monitor that has already fired is gone, which is all this asks. */
-		(void)enif_demonitor_process(env, ns_watcher, &ns_watches[index].monitor);
-		ns_watches[index] = ns_watches[--ns_nwatches];
-	}
-	for (index = 0; index < name_space.count; index++) {
-		server = name_space.mounts[index].server;
-		if (name_space.mounts[index].kind != ERX_NS_SERVER || server == 0)
-			continue;
-		watched = false;
-		for (uint32_t other = 0; other < ns_nwatches && !watched; other++)
-			watched = ns_watches[other].server == server;
-		if (watched)
-			continue;
-		pid = erx_pid_of(server);
-		watching = enif_monitor_process(env, ns_watcher, &pid, &monitor);
-		if (watching < 0) {
-			/* No down callback: a fault of this file, which no input reaches. */
-			enif_fprintf(stderr, "prim_file: the namespace cannot watch its grants\n");
-			abort();
-		}
-		if (watching == 0) {
-			ns_watches[ns_nwatches++] = (erx_ns_watch_t){ .server = server,
-			    .monitor = monitor };
-		} else {
-			erx_ns_end_server(server);
-		}
-	}
-}
-
-/*
- * A grant's process ended: its entries stay, answering eio, until unmounted. Only
- * a monitor the table still holds counts, so a callback that waited for the lock
- * while the pid was unmounted and given to another process ends nothing.
- */
-static void
-erx_ns_down(ErlNifEnv *env, void *watcher, ErlNifPid *pid, ErlNifMonitor *monitor)
-{
-	(void)watcher;
-	enif_rwlock_rwlock(ns_lock);
-	for (uint32_t index = 0; index < ns_nwatches; index++) {
-		if (enif_compare_monitors(&ns_watches[index].monitor, monitor) == 0) {
-			erx_ns_end_server((uint64_t)pid->pid);
-			erx_ns_watch_table(env);
-			break;
-		}
-	}
-	enif_rwlock_rwunlock(ns_lock);
-}
-
-/* prim_file:erx_ns_mount_nif(Point, Pid, Tree, Rights), Rights one of ro, rw and rx. */
 ERL_NIF_TERM
-efile_ns_mount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+efile_release_walk_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	ErlNifBinary point, tree;
-	erx_ns_rights_t rights;
-	erx_ns_status_t status;
-	ErlNifPid pid;
-	char atom[3];
+	efile_path_t path;
+	erx_release_fs_kind_t stop;
+	ERL_NIF_TERM kinds, end, directory;
+	uint32_t passed;
 
-	if (argc != 4 || !erx_inspect_path(env, argv[0], &point) ||
-	    !enif_get_local_pid(env, argv[1], &pid) ||
-	    !enif_inspect_binary(env, argv[2], &tree) ||
-	    enif_get_atom(env, argv[3], atom, sizeof(atom), ERL_NIF_LATIN1) == 0)
-		return (enif_make_badarg(env));
-	for (rights = ERX_NS_RO; rights <= ERX_NS_RX; rights++) {
-		if (strcmp(atom, rights_names[rights]) == 0)
-			break;
-	}
-	if (rights > ERX_NS_RX)
-		return (enif_make_badarg(env));
-	enif_rwlock_rwlock(ns_lock);
-	status = erx_ns_mount(&name_space, point.data, point.size - 1,
-	    (uint64_t)enif_make_pid(env, &pid), tree.data, tree.size, rights);
-	if (status == ERX_NS_OK)
-		erx_ns_watch_table(env);
-	enif_rwlock_rwunlock(ns_lock);
-	return (erx_ns_answer(env, status));
-}
-
-/* prim_file:erx_ns_bind_nif(From, To, ReadOnly). */
-ERL_NIF_TERM
-efile_ns_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
-{
-	ErlNifBinary from, to;
-	erx_ns_status_t status;
-	char read_only[6];
-
-	if (argc != 3 || !erx_inspect_path(env, argv[0], &from) ||
-	    !erx_inspect_path(env, argv[1], &to) ||
-	    enif_get_atom(env, argv[2], read_only, sizeof(read_only), ERL_NIF_LATIN1) == 0 ||
-	    (strcmp(read_only, "true") != 0 && strcmp(read_only, "false") != 0))
-		return (enif_make_badarg(env));
-	enif_rwlock_rwlock(ns_lock);
-	status = erx_ns_bind(&name_space, from.data, from.size - 1, to.data,
-	    to.size - 1, strcmp(read_only, "true") == 0);
-	if (status == ERX_NS_OK)
-		erx_ns_watch_table(env);
-	enif_rwlock_rwunlock(ns_lock);
-	return (erx_ns_answer(env, status));
-}
-
-/* prim_file:erx_ns_unmount_nif(Point). */
-ERL_NIF_TERM
-efile_ns_unmount_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
-{
-	ErlNifBinary point;
-	erx_ns_status_t status;
-
-	if (argc != 1 || !erx_inspect_path(env, argv[0], &point))
-		return (enif_make_badarg(env));
-	enif_rwlock_rwlock(ns_lock);
-	status = erx_ns_unmount(&name_space, point.data, point.size - 1);
-	if (status == ERX_NS_OK)
-		erx_ns_watch_table(env);
-	enif_rwlock_rwunlock(ns_lock);
-	return (erx_ns_answer(env, status));
+	if (argc != 1 || efile_marshal_path(env, argv[0], &path) != 0)
+		return (erx_error(env, "einval"));
+	passed = erx_release_fs_walk(&release_fs, &path, &stop);
+	kinds = enif_make_list(env, 0);
+	if (stop == ERX_RELEASE_FS_FILE)
+		kinds = enif_make_list_cell(env, enif_make_atom(env, "other"), kinds);
+	directory = enif_make_atom(env, "directory");
+	for (uint32_t index = 0; index < passed; index++)
+		kinds = enif_make_list_cell(env, directory, kinds);
+	end = stop == ERX_RELEASE_FS_MISSING ? erx_error(env, "enoent") :
+	    enif_make_atom(env, "ok");
+	return (enif_make_tuple2(env, kinds, end));
 }
 
 /* prim_file:erx_fid_nif(): one draw of the runtime's fid counter. */
@@ -617,101 +218,20 @@ efile_fid_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 
 	(void)argc;
 	(void)argv;
-	while (!erx_ns_fid_of((uint64_t)erts_atomic64_inc_read_nob(&fid_counter), &fid))
+	while (!erx_fid_of((uint64_t)erts_atomic64_inc_read_nob(&fid_counter), &fid))
 		continue;
 	return (enif_make_uint(env, fid));
 }
 
 /*
- * No NUL, and well-formed UTF-8: no overlong form, surrogate or value past
- * Unicode's end. It is liberx/ns.c's check, which goes with that table.
- */
-static bool
-erx_utf8_valid(const uint8_t *bytes, size_t length)
-{
-	size_t cursor, count;
-	uint32_t point, minimum;
-
-	cursor = 0;
-	while (cursor < length) {
-		point = bytes[cursor++];
-		if (point == 0)
-			return (false);
-		if (point < 0x80)
-			continue;
-		if (point >= 0xc2 && point <= 0xdf) {
-			point &= 0x1f;
-			count = 1;
-			minimum = 0x80;
-		} else if (point >= 0xe0 && point <= 0xef) {
-			point &= 0x0f;
-			count = 2;
-			minimum = 0x800;
-		} else if (point >= 0xf0 && point <= 0xf4) {
-			point &= 0x07;
-			count = 3;
-			minimum = 0x10000;
-		} else {
-			return (false);
-		}
-		if (count > length - cursor)
-			return (false);
-		for (size_t index = 0; index < count; index++) {
-			if ((bytes[cursor] & 0xc0) != 0x80)
-				return (false);
-			point = (point << 6) | (bytes[cursor++] & 0x3f);
-		}
-		if (point < minimum || point > 0x10ffff ||
-		    (point >= 0xd800 && point <= 0xdfff))
-			return (false);
-	}
-	return (true);
-}
-
-/*
- * Whether bytes are a place as the working directory holds one: `/` alone, or
- * `/` and then names joined by single `/`, with no `/` at the end. Each name is
- * 1 to ERX_NAME_MAX bytes of UTF-8 without NUL, other than `.` and `..`; there
- * are at most ERX_NS_NAMES_MAX of them; and the whole is shorter than
- * ERX_PATH_MAX, so it fits the store with its NUL.
- */
-static bool
-erx_place_valid(const uint8_t *bytes, size_t length)
-{
-	size_t cursor, start, count, names;
-
-	if (length == 0 || length >= ERX_PATH_MAX || bytes[0] != '/' ||
-	    !erx_utf8_valid(bytes, length))
-		return (false);
-	names = 0;
-	cursor = 1;
-	while (cursor < length) {
-		start = cursor;
-		while (cursor < length && bytes[cursor] != '/')
-			cursor++;
-		count = cursor - start;
-		if (count == 0 || count > ERX_NAME_MAX ||
-		    (count == 1 && bytes[start] == '.') ||
-		    (count == 2 && bytes[start] == '.' && bytes[start + 1] == '.') ||
-		    ++names > ERX_NS_NAMES_MAX)
-			return (false);
-		/* A `/` that ends the place leaves an empty last name. */
-		if (cursor + 1 == length)
-			return (false);
-		cursor++;
-	}
-	return (true);
-}
-
-/*
- * prim_file:erx_set_cwd_nif(Place): makes Place the working directory, which only
- * prim_file:set_cwd/1 calls, with the place erx_file_remote:set_cwd/3 reached on a
- * grant (design-files.md, Erlang clients). Any process can call it with any term,
- * so anything but a binary holding a place as erx_place_valid states answers
- * {error, einval} and changes nothing. It checks nothing about what lies there:
- * the working directory is a path, resolved again at each use, so a mount change
- * between set_cwd's check and this store leaves the state the same change would
- * leave just after it.
+ * prim_file:erx_set_cwd_nif(Place): makes Place the working directory. Only
+ * prim_file:set_cwd/1 calls it, a source check holds it to that one caller, and
+ * set_cwd/1 has checked that Place is a place (design-files.md, Erlang clients).
+ * What is checked here is only what keeps the store in bounds: a binary shorter
+ * than the store, with room for its NUL. Nothing about what lies there is
+ * checked: the working directory is a path, resolved again at each use, so a
+ * mount change between set_cwd's check and this store leaves the state the same
+ * change would leave just after it.
  */
 ERL_NIF_TERM
 efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -719,13 +239,13 @@ efile_ns_set_cwd_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	ErlNifBinary place;
 
 	if (argc != 1 || !enif_inspect_binary(env, argv[0], &place) ||
-	    !erx_place_valid(place.data, place.size))
-		return (erx_ns_answer(env, ERX_NS_EINVAL));
-	enif_rwlock_rwlock(ns_lock);
-	memcpy(name_space.cwd, place.data, place.size);
-	name_space.cwd[place.size] = '\0';
-	enif_rwlock_rwunlock(ns_lock);
-	return (erx_ns_answer(env, ERX_NS_OK));
+	    place.size == 0 || place.size >= sizeof(cwd))
+		return (erx_error(env, "einval"));
+	enif_rwlock_rwlock(cwd_lock);
+	memcpy(cwd, place.data, place.size);
+	cwd[place.size] = '\0';
+	enif_rwlock_rwunlock(cwd_lock);
+	return (enif_make_atom(env, "ok"));
 }
 
 /* prim_file:erx_tmp_limit_nif(): the cap of the domain's /tmp, from its startup limits. */
@@ -741,11 +261,7 @@ efile_tmp_limit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 static posix_errno_t
 erx_find(const efile_path_t *path, erx_release_fs_kind_t *kind, uint32_t *file)
 {
-	if (!path->on_mount || path->kind != ERX_NS_RELEASE)
-		return (ENOTSUP);
-	*kind = erx_release_fs_lookup(&release_fs,
-	    (const uint8_t *)path->result.res_names,
-	    path->result.res_names_length, file);
+	*kind = erx_release_fs_lookup(&release_fs, path->bytes, path->length, file);
 	return (0);
 }
 
@@ -845,12 +361,12 @@ erx_write_refusal(const efile_path_t *path, enum efile_modes_t modes)
 	 * The missing name's directory: the names before its last "/", or the top, which
 	 * is always a directory. A file on the way would have answered NOT_DIRECTORY.
 	 */
-	parent_length = path->result.res_names_length;
-	while (parent_length > 0 && path->result.res_names[parent_length - 1] != '/')
+	parent_length = path->length;
+	while (parent_length > 0 && path->bytes[parent_length - 1] != '/')
 		parent_length--;
 	if (parent_length > 0)
 		parent_length--;	/* the "/" itself */
-	kind = erx_release_fs_lookup(&release_fs, (const uint8_t *)path->result.res_names,
+	kind = erx_release_fs_lookup(&release_fs, path->bytes,
 	    parent_length, &file);
 	return (kind == ERX_RELEASE_FS_DIRECTORY ? EROFS : ENOENT);
 }
@@ -1154,10 +670,10 @@ efile_list_dir(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *result)
 	if (kind == ERX_RELEASE_FS_FILE)
 		return (ENOTDIR);
 	list = enif_make_list(env, 0);
-	cursor = erx_release_fs_list_start(&release_fs, (const uint8_t *)path->result.res_names,
-	    path->result.res_names_length);
-	while (erx_release_fs_list_next(&release_fs, (const uint8_t *)path->result.res_names,
-	    path->result.res_names_length, &cursor, &name, &name_length)) {
+	cursor = erx_release_fs_list_start(&release_fs, path->bytes,
+	    path->length);
+	while (erx_release_fs_list_next(&release_fs, path->bytes,
+	    path->length, &cursor, &name, &name_length)) {
 		memcpy(enif_make_new_binary(env, name_length, &term), name, name_length);
 		list = enif_make_list_cell(env, term, list);
 	}
@@ -1166,8 +682,8 @@ efile_list_dir(ErlNifEnv *env, const efile_path_t *path, ERL_NIF_TERM *result)
 }
 
 /*
- * The release is read-only, and marshalling has resolved every path these are
- * given, so each meets EROFS; prim_file turns a rename's EROFS for a source
+ * The release is read-only, and prim_file has found every path these are given
+ * on it, so each meets EROFS; prim_file turns a rename's EROFS for a source
  * written `/` into einval (design-files.md, Errors, step 1).
  */
 posix_errno_t
@@ -1186,7 +702,7 @@ efile_make_hard_link(const efile_path_t *existing_path, const efile_path_t *new_
 	return (EROFS);
 }
 
-/* A symbolic link's target is its text, which marshalling does not resolve. */
+/* A symbolic link's target is its text, which names nothing here. */
 posix_errno_t
 efile_make_soft_link(const efile_path_t *existing_path, const efile_path_t *new_path)
 {
@@ -1221,29 +737,19 @@ efile_get_cwd(ErlNifEnv *env, ERL_NIF_TERM *result)
 {
 	size_t length;
 
-	enif_rwlock_rlock(ns_lock);
-	length = strlen(name_space.cwd);
-	memcpy(enif_make_new_binary(env, length, result), name_space.cwd, length);
-	enif_rwlock_runlock(ns_lock);
+	enif_rwlock_rlock(cwd_lock);
+	length = strlen(cwd);
+	memcpy(enif_make_new_binary(env, length, result), cwd, length);
+	enif_rwlock_runlock(cwd_lock);
 	return (0);
 }
 
+/* prim_file:set_cwd/1 walks the place itself and stores it with erx_set_cwd_nif/1. */
 posix_errno_t
 efile_set_cwd(const efile_path_t *path)
 {
-	erx_release_fs_kind_t kind;
-	posix_errno_t error;
-	uint32_t file;
-
-	error = erx_find_existing(path, &kind, &file);
-	if (error != 0)
-		return (error);
-	if (kind == ERX_RELEASE_FS_FILE)
-		return (ENOTDIR);
-	enif_rwlock_rwlock(ns_lock);
-	memcpy(name_space.cwd, path->result.res_path, path->result.res_path_length + 1);
-	enif_rwlock_rwunlock(ns_lock);
-	return (0);
+	(void)path;
+	return (ENOTSUP);
 }
 
 posix_errno_t

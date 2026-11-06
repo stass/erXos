@@ -15,9 +15,6 @@ module Erx
   # The check reads the Erlang sources that can enter a release, as DeviceCallers
   # does, with comments removed and strings kept. ns-table-writer refuses a
   # persistent_term:put or erase of the key erx_ns outside erx_ns.erl. cwd-writer
-  # also refuses a call of prim_file's bridge to its NIF's table, erx_ns_mount, erx_ns_bind
-  # or erx_ns_unmount, outside erx_ns.erl and prim_file.erl, so the NIF's table that
-  # today's resolution reads changes only with the term. cwd-writer
   # refuses the name erx_set_cwd_nif anywhere but in prim_file.erl's set_cwd
   # function, the NIF's own stub, and a Name/1 in an attribute such as -nifs. Like the
   # other text rules it catches a slip, not a key or a call built from pieces.
@@ -27,7 +24,6 @@ module Erx
     WRITER = 'erlang/apps/erx/src/erx_ns.erl'
     PRIM_FILE = 'otp/erts/preloaded/src/prim_file.erl'
     TABLE_WRITE = /persistent_term\s*:\s*(?:put|erase)\s*\(\s*'?erx_ns'?(?![A-Za-z0-9_@])/
-    NIF_TABLE_WRITE = /(?<![A-Za-z0-9_@])'?erx_ns_(?:mount|bind|unmount)'?(?![A-Za-z0-9_@])/
     CWD_NIF = /(?<![A-Za-z0-9_@])'?erx_set_cwd_nif'?(?![A-Za-z0-9_@])(?<arity>\s*\/\s*1)?/
     # A form starts at the first column: an attribute with -, a function clause with its
     # name.
@@ -54,10 +50,9 @@ module Erx
       return [] if path == WRITER
 
       writes = code.to_enum(:scan, TABLE_WRITE).map { Regexp.last_match.begin(0) }
-      writes += code.to_enum(:scan, NIF_TABLE_WRITE).map { Regexp.last_match.begin(0) } unless path == PRIM_FILE
       writes.sort.map do |offset|
         Violation.new(rule: 'ns-table-writer', path: path, line: code[0, offset].count("\n") + 1,
-                      detail: "only #{WRITER} writes the namespace's persistent term erx_ns and the NIF's table")
+                      detail: "only #{WRITER} writes the namespace's persistent term erx_ns")
       end
     end
 

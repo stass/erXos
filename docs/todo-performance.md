@@ -58,6 +58,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   hashes every module it loads. Hosted, the cost is small; on the target it is
   unmeasured, since no native release boots yet. Settled by boot to `1>` with and
   without the check under TCG, HVF and on the Pi 4.
+* **[Low] runtime, dirty-scheduler switches before a release path.** A relative path on the
+  release asks `get_cwd_nif` and then `release_walk_nif`, both dirty IO, before the operation's
+  own NIF, and `efile_path_t` is about 4 KiB on the C stack, two for a rename or link. Measure
+  `file:read_file_info/1` on a relative release path against an absolute one with
+  `tools/erx bench`, and check the dirty-IO thread stack size.
 * **[Medium] kernel, first-use hash of large boot image files.** The kernel
   checks each boot image file's BLAKE3 hash the first time it is mapped or
   read, once per file per boot, and runs BLAKE3's portable code because it

@@ -535,15 +535,8 @@ it; git history is the record of completed work.
   `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
   `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
   remove the hand step and the hashes to keep.
-* [Medium] runtime, `liberx/ns.c`, `erx_prim_file.c` and `erx_file_remote`: paths resolve on their text
-  through `erx_ns_resolve` and `erx_ns_resolve_two`, so `..` after a link names the link's own parent, a rename
-  or a link places each path by its whole resolved path, and a last `.` or `..` answers Linux's errors.
-  [Resolving a path](docs/design-files.md#resolving-a-path) resolves them physically, one name at a time,
-  through `erx_ns_start`, `erx_ns_step` and `erx_ns_pair`, with FreeBSD's answers; the chokepoint rule
-  `tools/lib/erx/chokepoint_rules/ns.rb`, the fuzz target `tools/fuzz/ns_fuzz.c` and
-  `test/fixtures/release_fs_driver.c` move with it, and `prim_file:erx_resolve/1` goes.
-* [Medium] runtime, `erx_file_remote` and `erx_ns_resolve_rename`: a rename re-resolved after a link
-  (`prim_file:erx_resolve/1`) goes through `erx_ns_resolve_two`, so a source that reaches `/` only through a link
+* [Medium] runtime, `erx_file_remote` and `prim_file`'s bridge: a rename re-resolved after a link
+  (`prim_file:erx_resolve/1`) goes through the bridge's `erx_at_two/3`, so a source that reaches `/` only through a link
   skips rename's einval, and the client's own top test (`NameList =:= []` in
   `renamed/3` and `remove/5`) misses a bind's top, whose names are its root's: a rename of `/x`, a
   read-write bind of `/tmp/a`, to `/tmp/c` moves `/tmp/a` where Linux answers `exdev`, and `rename`, `del_dir` and
@@ -556,7 +549,7 @@ it; git history is the record of completed work.
   whose root was removed elsewhere it makes the root again. Take the place's `Top` there too, ideally through
   one `parent(Place) -> {Dir, Name} | top` that every operation must answer, so `dir_of([])` cannot be reached.
 * [Medium] runtime, `erx_file_remote`: `parent/1` takes a place below its top to have more names
-  than its `Root` on the namespace's word (`liberx/ns.c`, `res_top`); the xref check proves only that
+  than its `Root` on the namespace's word (`prim_file:erx_located/2`); the xref check proves only that
   `split_last/1` has one caller, and `split_at/2` or `last_name/1` could still build a parent. A floor
   where requests are sent (no `mkdir`, `symlink`, `link`, `lcreate`, `unlinkat` or `renameat` on a
   directory walk shorter than the entry's `Root`, refused with `eio`) would make it hold by
@@ -572,44 +565,42 @@ it; git history is the record of completed work.
   a top onto a file, a missing destination directory and a read-only parent answer `ebusy` where Linux
   answers `eisdir`, `enotdir`, `enoent` and `erofs`. Apply step 3 after the checks Linux makes first, or
   record the order as a documented difference with a test.
-* [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
+* [Low] runtime, `prim_file:erx_at_two/3` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
   a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
   link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers
   `ebusy`, `rename("/tmp/x", "/tmp")` reaches the grant with an empty name where Linux answers `exdev`, and
   `rename("/tmp/missing/x", "/u/y")` answers `exdev` where Linux first finds the missing directory (`enoent`).
   Two entries of one grant, tree and rights also take a rename together where Linux answers `exdev` between
   two bind mounts. The /tmp oracle cases settle which rules the design states.
-* [Low] runtime, `prim_file_nif.h`: `efile_path_t` keeps an `erx_ns_result_t` whose `res_mount` still points
-  into the namespace's table after the lock is released; nothing reads it, but holding only copied values
-  (names, path and the entry's kind, server, tree and rights) would make that hold by construction.
 * [Medium] runtime, `prim_file` and `erx_file_remote`: paths resolve logically, with Linux's answers,
-  through `erx_ns_resolve` and `erx_ns_resolve_two` in the NIF, so `..` after a link names the link's own parent, a
-  rename or a link places each path by its whole resolved path, and a last `.` or `..` answers Linux's errors.
-  [Resolving a path](docs/design-files.md#resolving-a-path) resolves them physically in `erx_path`, preloaded Erlang
-  over a snapshot of the table, with FreeBSD's answers. `erx_path` is written and preloaded, with its EUnit cases,
-  its reference model of `vfs_lookup` and its fuzz target, but nothing calls it yet. `erx_ns` is the table's one
-  writer, a registered process over the persistent term `erx_ns` that `prim_file:erx_table/0` reads with the boot
-  table as its default; until (3) switches resolution to the term, `erx_ns` makes each change on the NIF's table as
-  well and puts the term only when both accept it, and a bind's source is placed logically against the working
-  directory, as the NIF's table resolves it. The working directory is checked by `erx_set_cwd_nif/1`, which only
-  `prim_file:set_cwd/1` calls, but still lives in the NIF's table. Two packages remain, about 800 to 1,000 lines to
-  write and 1,800 to delete, each one commit with its own targeted tests, landing together after one run of the full
-  gates. The NIF's place check has no test of its refusals, since no Erlang caller but `set_cwd/1` can reach it: give
-  it one with the decoder's fuzz target of (2). The boot table holds no EROFS image, since the boot information
-  names none yet. (2) The release
-  provider: `release_walk_nif(Names)` and the operations' NIF calls on name lists, with the decoder's checks and its
-  fuzz target; delete `liberx/ns.c`, `include/erx/ns.h`, `tools/fuzz/ns_fuzz.c` with `tools/fuzz/ns_target.rb`, the
-  `ns-result-writes` rule, `prim_file_nif.c`'s `erx_resolve_nif` and `erx_ns_{mount,bind,unmount}_nif`, and
-  `erx_ns`'s mirror of each change onto it (`mirrored/2`), `erx_prim_file.c`'s table (`name_space`, `ns_lock`, `ns_watches`, `erx_ns_watch_table`, `efile_marshal_paths`,
-  `erx_copy_entry` and the `erx_ns_result_t` in `prim_file_nif.h`'s `efile_path_t`), move `erx_ns_fid_of` beside the
-  fid counter in `erx_prim_file.c`, and rework `tools/fuzz/release_fuzz.c`, `tools/fuzz/release_target.rb`,
-  `test/fixtures/release_fs_driver.c`, `test/host/release_fs_test.rb`, `sys/erxos/imports.txt` and the comments of
-  `include/erx/release.h`, `include/erx/release_fs.h` and `liberx/release.c` onto name lists. (3) The executor:
-  `prim_file`'s dispatch of actions by provider, `erx_file_remote` on actions and resumptions, its request function's
-  refusal of `.`, `..` and empty names, a rename's two paths on one table, and the working directory as a place;
-  delete `prim_file:erx_resolve/1` and `erx_file_remote`'s second view of the path (`with_links`, `through`, `follow`,
-  `link_path`, `joined`, `last_name`, `names` and their helpers), whose comments still cite Linux's answers, with the
-  cases of `test/erlang/erx_file_remote_fuzz.erl` and `tools/fuzz/erx_file_remote.rb` that fuzz them.
+  so `..` after a link names the link's own parent, a rename or a link places each path by its whole resolved
+  path, and a last `.` or `..` answers Linux's errors. [Resolving a path](docs/design-files.md#resolving-a-path)
+  resolves them physically in `erx_path`, preloaded Erlang over a snapshot of the table, with FreeBSD's answers.
+  `erx_path` is written and preloaded, with its EUnit cases, its reference model of `vfs_lookup` and its fuzz
+  target, and the release provider takes name lists (`release_walk_nif/1` and the operations' NIFs, through the
+  decoder `erx_release_fs_add_name` and its fuzz target), but nothing calls `erx_path` yet: a bridge in
+  `prim_file` (`erx_at`, `erx_at_two`, `erx_locate`, `erx_place`, `erx_steps`, `erx_located`, `erx_provided`,
+  `erx_cwd`) places each path lexically over `erx_ns`'s term, as the deleted C table did, so the answers stay
+  today's. The boot table holds no EROFS image, since the boot information names none yet. One package remains,
+  one commit with its own targeted tests. (3) The executor:
+  `prim_file`'s dispatch of actions by provider, `erx_file_remote` on actions and resumptions, its request
+  function's refusal of `.`, `..` and empty names, a rename's two paths on one table, and the working directory
+  as a place; delete the bridge, `prim_file:erx_resolve/1` and `erx_file_remote`'s second view of the path
+  (`with_links`, `through`, `follow`, `link_path`, `joined`, `last_name`, `names` and their helpers), whose
+  comments still cite Linux's answers, with the cases of `test/erlang/erx_file_remote_fuzz.erl` and
+  `tools/fuzz/erx_file_remote.rb` that fuzz them.
+* [Medium] runtime, `prim_file`'s bridge: its lexical placement (`erx_place`, `erx_steps`, `erx_holder`,
+  `erx_below`, `erx_located`) has no test of its own, where the deleted C resolver had host tests and a fuzz
+  target, and it repeats `erx_ns:reached/1`, `step/2` and `holder/2`, which place a bind's source and check the
+  name limits later, so the two can drift. A rename's two relative paths read the working directory twice
+  (`erx_locate_two`), where the C table placed both under one lock. Package (3) deletes the bridge; if it waits,
+  move the placement into `erx_path` with EUnit cases and have both callers use it.
+* [Low] runtime, `tools/fuzz/release_names_fuzz.c`: the oracle does not check that an accepted name is valid
+  UTF-8, and walks only an empty release, so the walk's cursor past the first name is not fuzzed.
+* [Low] runtime, `erx_prim_file.c`: `efile_set_cwd` is dead since stock `set_cwd_nif` went;
+  `efile_ns_set_cwd_nif` keeps `ns` in its name; a symlink's text marshals to an empty name list, the
+  release top, so a future NIF that used it as a path would act on `/`; docs/design-files.md still names
+  `erx_get_cwd_nif/0` and a mutex where the code uses `get_cwd_nif` and an rwlock.
 * [Low] runtime, `erx_path.erl`: a run's names are checked against `ERX_NAME_MAX` before its earlier names are
   walked, so `missing/<256-byte name>` answers `enametoolong` where FreeBSD answers `enoent`; and a link's text
   is bounded against the names left to read rather than the bytes, so doubled slashes are not counted. Check

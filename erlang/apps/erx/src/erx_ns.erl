@@ -19,13 +19,6 @@
 %% restarted process reads the term and monitors its grants again, and one that ended
 %% meanwhile answers 'DOWN' at once.
 %%
-%% Until prim_file resolves through the term (TODO.md, "paths resolve logically"),
-%% today's resolution reads the table prim_file's NIF keeps. Each change that passes
-%% this module's checks is therefore made on the NIF's table as well, through
-%% prim_file:erx_ns_mount/4, erx_ns_bind/3 and erx_ns_unmount/1, and the term is put
-%% only when the NIF accepted it too, so both tables hold the same entries; each
-%% watches its grants itself. That bridge goes with the NIF's table.
-%%
 %% Each call answers ok or {error, Reason}: einval for a malformed path, place or
 %% option, a mount point holding . or .., or an unmount where no entry is; enametoolong
 %% beyond the bounds of a place; enoent for a source no entry holds; eexist for a point
@@ -59,8 +52,8 @@
 -type checked() :: {mount, [name()], pid(), name(), rights()}
                  | {bind, [name()], [name()], boolean()}
                  | {unmount, [name()]}.
-%% The module whose erx_table/0 reads the term and whose NIF table each change is
-%% mirrored to (prim_file, or a stub in the EUnit cases), and the monitor of each grant
+%% The module whose erx_table/0 reads the term (prim_file, or a stub in the EUnit
+%% cases), and the monitor of each grant
 %% pid the table holds, which follows from the table.
 -type state() :: #{prim := module(), monitors := #{pid() => reference()}}.
 
@@ -120,10 +113,7 @@ handle_call(Request, _From, #{prim := Prim} = State) ->
     Table = Prim:erx_table(),
     case checked(Request, Table) of
         {ok, Checked} ->
-            case mirrored(Prim, Checked) of
-                ok -> {reply, ok, put_table(applied(Checked, Table), State)};
-                {error, _} = Error -> {reply, Error, State}
-            end;
+            {reply, ok, put_table(applied(Checked, Table), State)};
         {error, _} = Error ->
             {reply, Error, State}
     end.
@@ -159,18 +149,6 @@ watched(Table, Monitors) ->
     Kept = maps:with(Pids, Monitors),
     maps:foreach(fun(_Pid, Monitor) -> demonitor(Monitor, [flush]) end, maps:without(Pids, Monitors)),
     maps:merge(maps:from_list([{Pid, monitor(process, Pid)} || Pid <- Pids, not is_map_key(Pid, Kept)]), Kept).
-
-%% The NIF's table takes the same change, given as the absolute paths it resolves.
-mirrored(Prim, Checked) ->
-    try
-        case Checked of
-            {mount, Point, Pid, Tree, Rights} -> Prim:erx_ns_mount(path(Point), Pid, Tree, Rights);
-            {bind, Place, Point, ReadOnly} -> Prim:erx_ns_bind(path(Place), path(Point), ReadOnly);
-            {unmount, Point} -> Prim:erx_ns_unmount(path(Point))
-        end
-    catch
-        error:badarg -> {error, einval}
-    end.
 
 %% The checks ----------------------------------------------------------------------
 
@@ -323,8 +301,8 @@ text(Name) when is_list(Name) ->
 text(_Name) ->
     throw(einval).
 
-%% The place a bind's source reaches, as the NIF's table resolves a path until erx_path
-%% does (TODO.md, "paths resolve logically"): a relative path starts at the working
+%% The place a bind's source reaches, as prim_file places a path until erx_path does
+%% (TODO.md, "paths resolve logically"): a relative path starts at the working
 %% directory, empty names and . are dropped, and .. drops the name before it, or nothing
 %% at /, and an empty path reaches nothing (enoent), as for any call. The process checks
 %% the place whatever its sender did here.

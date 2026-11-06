@@ -386,8 +386,11 @@ points below the directory, as for every server.
 or replacing the name leaves the node, its data and its charge, and
 reads, writes and `getattr` through the handle go on, with `nlink` 0.
 The clunk that leaves it with no opens frees it, whether its client sent
-it or the grant did at the end of the fid's owner, so a process that
-dies with a removed file open frees the file's charge
+it or the grant did at the end of the fid's owner. The grant answers a
+client's clunk when it hands it to the file's owner process, which runs
+it after the file's earlier requests, so the charge comes back just after
+`close` returns, not before it. Since the grant clunks a dead owner's
+fids, a process that dies with a removed file open frees the file's charge
 ([design-files.md](design-files.md#fid-owners)). A fid walked to a
 node keeps it the same way until the grant forgets it, so a removed
 node that an open or a fid still holds keeps its charge against the cap

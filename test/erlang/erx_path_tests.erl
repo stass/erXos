@@ -8,6 +8,7 @@
 
 -module(erx_path_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(LOOKUP, #{follow => true, willbedir => false}).
 -define(NOFOLLOW, #{follow => false, willbedir => false}).
@@ -225,3 +226,20 @@ a_malformed_link_read_is_eio_test() ->
                   read_link => fun(_, _) -> {ok, "text"} end},
     ?assertEqual({error, eio},
                  erx_path:resolve(<<"l/x/..">>, lookup, ?LOOKUP, full(), [], Callbacks)).
+
+%% The working directory's text is read as a place, and anything else refused, so
+%% prim_file:set_cwd/1 stores only a place.
+cwd_reads_only_a_place_test() ->
+    Long = binary:copy(<<"n">>, ?ERX_NAME_MAX),
+    ?assertEqual({ok, []}, erx_path:cwd(<<"/">>)),
+    ?assertEqual({ok, [<<"a">>, <<"b">>]}, erx_path:cwd(<<"/a/b">>)),
+    ?assertEqual({ok, [Long]}, erx_path:cwd(<<"/", Long/binary>>)),
+    ?assertEqual({ok, lists:duplicate(?ERX_NS_NAMES_MAX, <<"n">>)},
+                 erx_path:cwd(binary:copy(<<"/n">>, ?ERX_NS_NAMES_MAX))),
+    Refused = [<<>>, <<"a">>, <<"a/b">>, <<"/a/">>, <<"//a">>, <<"/a//b">>, <<"/.">>,
+               <<"/a/..">>, <<"/a/./b">>, <<"/a", 0, "b">>, <<"/", 16#ff>>,
+               <<"/", 16#ed, 16#a0, 16#80>>, <<"/", Long/binary, "n">>,
+               binary:copy(<<"/n">>, ?ERX_NS_NAMES_MAX + 1),
+               binary:copy(<<"/nnnnnnn">>, ?ERX_PATH_MAX div 8),
+               "/a", '/', [<<"/">>]],
+    ?assertEqual([], [Text || Text <- Refused, erx_path:cwd(Text) =/= error]).

@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
+
 /*
  * The release file system's pure core (design-runtime.md, Files): a view of a
  * sorted list of paths. A directory has no record of its own: `d` is one
@@ -37,7 +39,35 @@ typedef enum erx_release_fs_kind {
 	ERX_RELEASE_FS_NOT_DIRECTORY	/* a file used as a directory */
 } erx_release_fs_kind_t;
 
-/* names as erx_ns_resolve returns them; *file is set for ERX_RELEASE_FS_FILE. */
+/*
+ * A name list as the release's NIFs take it (design-files.md, Erlang clients):
+ * the names joined by `/`, with no leading `/` and no NUL, the top being the
+ * empty list. Any process can hand the NIFs any list, so each name passes
+ * erx_release_fs_add_name before the core below sees the list.
+ */
+typedef struct erx_release_fs_names {
+	uint32_t	 count;
+	size_t		 length;
+	uint8_t		 bytes[ERX_PATH_MAX];
+} erx_release_fs_names_t;
+
+/*
+ * Adds a name to the list, or refuses it and leaves the list as it was: the
+ * ERX_NS_NAMES_MAX + 1st name, a name that is not 1 to ERX_NAME_MAX bytes of
+ * UTF-8, `.` or `..`, or holds `/` or NUL, and a name the list's ERX_PATH_MAX
+ * bytes cannot hold, which no place's names fill.
+ */
+bool		erx_release_fs_add_name(erx_release_fs_names_t *, const uint8_t *,
+		    size_t);
+/*
+ * Walks the names from the top, as erx_path's walk callback answers
+ * (design-files.md, Resolving a path): returns how many leading names are
+ * directories, and sets *stop to the kind of the name after them, FILE or
+ * MISSING, or to DIRECTORY when every name is one.
+ */
+uint32_t	erx_release_fs_walk(const erx_release_fs_t *,
+		    const erx_release_fs_names_t *, erx_release_fs_kind_t *);
+/* names joined as a name list holds them; *file is set for ERX_RELEASE_FS_FILE. */
 erx_release_fs_kind_t erx_release_fs_lookup(const erx_release_fs_t *,
 	    const uint8_t *, size_t, uint32_t *);
 /* Where a listing of the directory `names` starts. */

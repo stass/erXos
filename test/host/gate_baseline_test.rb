@@ -42,13 +42,13 @@ class GateBaselineTest < Minitest::Test
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
     'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
-    'ns' => { seeds: 17, sources: %w[liberx/ns.c liberx/release_fs.c] },
     'map' => { seeds: 6, sources: %w[kernel/core/map.c] },
     'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
                                             kernel/crypto/blake3/blake3_portable.c] },
     'release' => { seeds: 16, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
                                          kernel/crypto/blake3/blake3_portable.c liberx/generated/abi_reader.c
-                                         liberx/ns.c liberx/release.c] },
+                                         liberx/release.c liberx/release_fs.c] },
+    'release_names' => { seeds: 12, sources: %w[liberx/release_fs.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                                      kernel/crypto/blake3/blake3_portable.c] },
     'manifest' => { seeds: 12, sources: %w[liberx/generated/abi_reader.c] },
@@ -71,7 +71,7 @@ class GateBaselineTest < Minitest::Test
     'fiasco-symbols-in-backend' => 2, 'fiasco-vm-body-callers' => 1, 'generated-files' => 0, 'glue-imports' => 0, 'grace-tracker-lock' => 0,
     'include-form' => 1, 'json-input' => 0, 'kernel-stack-proof' => 0, 'lane-pages-reader' => 4,
     'hosted-log-sink' => 2, 'log-format-literal' => 2, 'log-raw-private' => 3, 'map-core-opaque' => 3, 'map-records-private' => 6,
-    'cwd-writer' => 0, 'erts-reads-no-index' => 1, 'ns-result-writes' => 2, 'ns-table-writer' => 0, 'object-leg' => 0,
+    'cwd-writer' => 0, 'erts-reads-no-index' => 1, 'ns-table-writer' => 0, 'object-leg' => 0,
     'one-erx-trap' => 5, 'pmem-converter-sites' => 0, 'raw-allocator-sites' => 0,
     'sched-records-private' => 5, 'seam-only-from-glue' => 1, 'space-holds-callers' => 2, 'space-parent-callers' => 2,
     'space-records-private' => 6, 'vector-route' => 0

@@ -17,6 +17,7 @@ static bool erx_release_fs_is_file(const erx_release_fs_t *, const uint8_t *,
     size_t, uint32_t *);
 static bool erx_release_fs_below(const erx_release_fs_file_t *, const uint8_t *,
     size_t);
+static bool erx_release_fs_utf8_valid(const uint8_t *, size_t);
 
 /* A file's path against the key `key`, or `key/` when slash is set, by bytes. */
 static int
@@ -138,4 +139,99 @@ erx_release_fs_list_next(const erx_release_fs_t *fs, const uint8_t *names,
 	    erx_release_fs_below(&fs->files[*cursor], file->path, end))
 		(*cursor)++;
 	return (true);
+}
+
+/* No NUL, and well-formed UTF-8: no overlong form, surrogate or value past Unicode's end. */
+static bool
+erx_release_fs_utf8_valid(const uint8_t *bytes, size_t length)
+{
+	size_t cursor, count;
+	uint32_t point, minimum;
+
+	cursor = 0;
+	while (cursor < length) {
+		point = bytes[cursor++];
+		if (point == 0)
+			return (false);
+		if (point < 0x80)
+			continue;
+		if (point >= 0xc2 && point <= 0xdf) {
+			point &= 0x1f;
+			count = 1;
+			minimum = 0x80;
+		} else if (point >= 0xe0 && point <= 0xef) {
+			point &= 0x0f;
+			count = 2;
+			minimum = 0x800;
+		} else if (point >= 0xf0 && point <= 0xf4) {
+			point &= 0x07;
+			count = 3;
+			minimum = 0x10000;
+		} else {
+			return (false);
+		}
+		if (count > length - cursor)
+			return (false);
+		for (size_t index = 0; index < count; index++) {
+			if ((bytes[cursor] & 0xc0) != 0x80)
+				return (false);
+			point = (point << 6) | (bytes[cursor++] & 0x3f);
+		}
+		if (point < minimum || point > 0x10ffff ||
+		    (point >= 0xd800 && point <= 0xdfff))
+			return (false);
+	}
+	return (true);
+}
+
+bool
+erx_release_fs_add_name(erx_release_fs_names_t *names, const uint8_t *name,
+    size_t length)
+{
+	size_t needed;
+
+	if (names->count == ERX_NS_NAMES_MAX || length == 0 || length > ERX_NAME_MAX ||
+	    (length == 1 && name[0] == '.') ||
+	    (length == 2 && name[0] == '.' && name[1] == '.') ||
+	    !erx_release_fs_utf8_valid(name, length))
+		return (false);
+	for (size_t index = 0; index < length; index++) {
+		if (name[index] == '/')
+			return (false);
+	}
+	/* A `/` before every name but the first; a NUL's room stays, as for a place. */
+	needed = length + (names->count > 0 ? 1 : 0);
+	if (needed >= sizeof(names->bytes) - names->length)
+		return (false);
+	if (names->count > 0)
+		names->bytes[names->length++] = '/';
+	for (size_t index = 0; index < length; index++)
+		names->bytes[names->length++] = name[index];
+	names->count++;
+	return (true);
+}
+
+uint32_t
+erx_release_fs_walk(const erx_release_fs_t *fs, const erx_release_fs_names_t *names,
+    erx_release_fs_kind_t *stop)
+{
+	erx_release_fs_kind_t kind;
+	uint32_t passed, file;
+	size_t end;
+
+	/* Each name is looked up as the names up to it, which were all directories. */
+	end = 0;
+	for (passed = 0; passed < names->count; passed++) {
+		do
+			end++;
+		while (end < names->length && names->bytes[end] != '/');
+		kind = erx_release_fs_lookup(fs, names->bytes, end, &file);
+		if (kind != ERX_RELEASE_FS_DIRECTORY) {
+			*stop = kind;
+			return (passed);
+		}
+		end++;
+	}
+	*stop = ERX_RELEASE_FS_DIRECTORY;
+	return (passed);
 }
