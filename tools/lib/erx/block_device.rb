@@ -114,9 +114,6 @@ module Erx
     MEMORY_MIB = 512
     # Seconds the guest has, after its banner, to print the line "blk: done".
     GUEST_SECONDS = 120
-    # True once the block driver starts on the suite's disk and the test module prints
-    # the lines above; while it is false the suite reports its cell pending.
-    DRIVER_LANDED = true
     # The test module, the guest directory its beam is packed in, and the kernel command
     # line words that start it after the release.
     GUEST_SOURCE = 'test/guest/block_device/erx_blk_check.erl'

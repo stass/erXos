@@ -16,17 +16,12 @@ require_relative '../qemu_gate'
 # the first disagreement, which the gate reports as this suite failing. HVF at one CPU
 # is its one cell, which every boot must pass. check_qemu builds the kernel
 # before any suite runs, so this suite does not.
-#
-# Until the driver starts on the suite's disk, the suite reports its cell pending and
-# boots nothing; Erx::BlockDevice::DRIVER_LANDED says when it does.
 cells = Erx::QemuGate.suite_cells([1])
 Erx::QemuGate.declare_suite(
   cells: cells,
   run: lambda do |context|
-    next Erx::QemuGate.result(cells.to_h { |cell| [cell, 'pending'] }, notes: ['the block driver has not landed']) unless Erx::BlockDevice::DRIVER_LANDED
-
     run = Erx::BlockDevice::Run.new(root: context.root)
-    cells = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], jobs: context.jobs, build: false)
-    Erx::QemuGate.result(cells, notes: run.notes)
+    results = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], jobs: context.jobs, build: false)
+    Erx::QemuGate.result(results, notes: run.notes)
   end
 )
