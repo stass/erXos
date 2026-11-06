@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="erxos-logo.svg" alt="erXos" width="480">
+</p>
+
 # erXos
 
 What if every Erlang process were an operating-system process?
