@@ -268,9 +268,7 @@ source provenance and the ASCII rule. It checks every generated
 artifact: ABI, hardware, system registers and terminal tables. It runs
 the host tests, compares the generated text tables in Erlang with Ruby,
 and runs the native ELF and archive integrations. It never runs the full
-stock OTP suites and never downloads. M0 needs only the focused
-test-runner checks; the full reference suites are required before the
-ERTS port, not before early kernel work.
+stock OTP suites and never downloads.
 
 The slower gates run separately:
 
@@ -283,10 +281,7 @@ make check-tla
 
 * **Reproducibility** keeps both full `ERXPACK` structural test fixtures
   and a report under `build/reproducible/`, and checks their structure,
-  executable and provenance. Root startup and policy admission report
-  `unsupported`, and there are no child-plan instances. Production
-  packing refuses admission until M1 supplies the initial root's startup
-  and charge plan.
+  executable and provenance.
 * **Sanitizers** run the host C readers, the `ERXPACK` validator and the
   ELF planner under ASan and UBSan, and the generated atomic accessor
   test under TSan. A sanitizer report ends its command. ASan checks stack
@@ -348,8 +343,7 @@ The aggregate host oracle target stops at its first failed suite. To
 keep every outcome, run `tools/erx oracle run emulator`, `kernel` and
 `stdlib` one by one, each with `--docker-context` and `--flavour`.
 
-The guest demo checks the frozen Fiasco banner under the accelerator you
-name. It does not boot an admitted erXos image. Every command keeps its
+Every command keeps its
 logs and deadline records under `build/logs/`, and a failed test keeps
 its evidence. The [build design](docs/design-build.md) defines these
 boundaries.
