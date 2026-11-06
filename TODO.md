@@ -1068,6 +1068,14 @@ it; git history is the record of completed work.
   [design-system.md](docs/design-system.md#identifiers) defines
   ([design-shell.md](docs/design-shell.md),
   [design-programs.md](docs/design-programs.md#what-a-program-can-start)).
+* [Medium] shell and programs, what `/bin/sh` and `system()` mean for
+  ported programs: `system` and `popen` run `rc`, so a FreeBSD program
+  that calls `system("cmd 2>/dev/null")` or similar sh syntax breaks,
+  against the goal of running FreeBSD programs ported at the source
+  level; a POSIX sh exists only in the second tier. Decide before Track
+  S's programs part; the interactive shell stays rc
+  ([design-shell.md](docs/design-shell.md#rc-as-a-program),
+  [design-programs.md](docs/design-programs.md#toybox)).
 * [Medium] programs, signals to self: a signal a program sends itself has
   three delivery paths, so `killpg(getpgrp(), SIGTERM)` in the second tier
   can deliver twice. Make the handler the one path for every signal a
