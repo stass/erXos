@@ -4,12 +4,15 @@
 
 require 'digest'
 require 'tmpdir'
+require 'rbconfig'
+require_relative 'bench_guest'
 require_relative 'oracle'
 require_relative 'json_input'
 
 module Erx
   class Bench
-    WORKLOADS = { 'otp-pingpong' => 'pingpong', 'otp-spawn' => 'spawn' }.freeze
+    WORKLOADS = { 'otp-pingpong' => 'pingpong', 'otp-ring' => 'ring', 'otp-spawn' => 'spawn',
+                  'otp-switch' => 'switch' }.freeze
     FLAGS = %w[+S 1 +SDcpu 1 +SDio 1 +A 1 +sbwt none -noshell -noinput -boot no_dot_erlang].freeze
 
     def initialize(root:, runner: nil)
@@ -29,11 +32,7 @@ module Erx
       parent = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench'))
       directory = Dir.mktmpdir("#{name}-#{flavour}-", parent)
       @oracle.with_runtime(flavour) do |runtime|
-        source = File.join(directory, 'erx_otp_bench.erl')
-        FileUtils.copy_file(File.join(@root, 'bench/erx_otp_bench.erl'), source)
-        @runner.run([runtime.fetch('erlc'), '+warnings_as_errors', '+deterministic',
-                     '-o', directory, source], name: 'bench-compile', deadline: 30,
-                    env: Oracle::CLEAN_ERLANG_ENV)
+        source = compile(runtime, directory)
         expression = "io:format(\"~s~n\", [json:encode(erx_otp_bench:run(#{workload},#{iterations},#{samples}))]), halt()."
         argv = [runtime.fetch('erl'), *FLAGS, '-pa', directory, '-eval', expression]
         command = @runner.run(argv, name: "bench-#{name}-#{flavour}", deadline: 120,
@@ -56,7 +55,43 @@ module Erx
       end
     end
 
+    # The bench module's beam, compiled by the oracle's erlc: the guest loads these bytes.
+    def beam(flavour: 'emu')
+      @oracle.with_runtime(flavour) do |runtime|
+        directory = Dir.mktmpdir("beam-#{flavour}-", OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench')))
+        compile(runtime, directory)
+        File.binread(File.join(directory, 'erx_otp_bench.beam'))
+      end
+    end
+
+    # What stock OTP holds at a shell-less start, in the shape the guest's footprint line has.
+    def footprint(flavour: 'emu')
+      @oracle.with_runtime(flavour) do |runtime|
+        expression = "#{BenchGuest::FOOTPRINT_EXPRESSION.chomp(".")}, halt()."
+        command = @runner.run([runtime.fetch('erl'), *FLAGS, '-eval', expression], name: "bench-footprint-#{flavour}",
+                              deadline: 60, env: Oracle::CLEAN_ERLANG_ENV)
+        line = File.binread(command.fetch('log')).lines.find { |text| text.start_with?('G3FOOT ') }
+        raise Error, 'stock OTP printed no footprint line' unless line
+
+        { 'measurement' => JsonInput.parse(line.delete_prefix('G3FOOT ').b, max_bytes: 65_536, label: 'footprint'),
+          'runtime_flags' => FLAGS, 'oracle_build' => runtime.fetch('build'), 'command' => command }
+      end
+    end
+
+    # The host this runs on, as the first line of a report says it.
+    def host_description
+      "#{host_cpu}; #{RbConfig::CONFIG['host_os']}"
+    end
+
     private
+
+    def compile(runtime, directory)
+      source = File.join(directory, 'erx_otp_bench.erl')
+      FileUtils.copy_file(File.join(@root, 'bench/erx_otp_bench.erl'), source)
+      @runner.run([runtime.fetch('erlc'), '+warnings_as_errors', '+deterministic',
+                   '-o', directory, source], name: 'bench-compile', deadline: 30, env: Oracle::CLEAN_ERLANG_ENV)
+      source
+    end
 
     def validate_measurement(value, flavour:, samples:, iterations:, workload:)
       unless value.is_a?(Hash) && value['emu_flavor'] == flavour &&
@@ -83,10 +118,11 @@ module Erx
     end
 
     def definition(name)
-      if name == 'otp-pingpong'
-        '64-byte forward message and sequence reply; one worker start/stop per sample included'
-      else
-        'sequential process spawn, monitor and DOWN receipt'
+      case name
+      when 'otp-pingpong' then '64-byte forward message and sequence reply; one worker start/stop per sample included'
+      when 'otp-ring' then 'a token sent around 10,000 processes; per send, ring set-up and tear-down excluded'
+      when 'otp-switch' then 'two processes calling erlang:yield() alternately on one scheduler; per yield, one switch'
+      else 'sequential process spawn, monitor and DOWN receipt'
       end
     end
   end

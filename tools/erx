@@ -29,6 +29,7 @@ require_relative 'lib/erx/oracle_qemu'
 require_relative 'lib/erx/sanitizer_tests'
 require_relative 'lib/erx/test_pool'
 require_relative 'lib/erx/bench'
+require_relative 'lib/erx/bench_g3'
 require_relative 'lib/erx/toolchain_provenance'
 
 module Erx
@@ -433,7 +434,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
       0
     end
 
@@ -783,10 +784,24 @@ module Erx
         flags.on('--flavour NAME', %w[emu jit]) { |value| options[:flavour] = value }
         flags.on('--iterations N', Integer) { |value| options[:iterations] = value }
         flags.on('--samples N', Integer) { |value| options[:samples] = value }
+        flags.on('--image PATH', 'g3 only: boot this built image instead of building one') { |value| options[:image] = value }
+        flags.on('--accel NAME', %w[tcg hvf], 'g3 only: the guest accelerator') { |value| options[:accel] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      return bench_g3(options) if name == 'g3'
+
       report = Bench.new(root: ROOT).run(name, **options)
       Terminal.puts("native host benchmark: #{report.fetch('report')}")
+      0
+    end
+
+    # Gate G3: erXos under QEMU and stock OTP on this host (docs/research-g3-baseline.md).
+    def self.bench_g3(options)
+      raise OptionParser::MissingArgument, '--accel' unless options[:accel]
+
+      report = BenchG3.new(root: ROOT).run(accel: options.fetch(:accel), flavour: options.fetch(:flavour),
+                                      image: options[:image])
+      Terminal.puts("G3 benchmark (#{options.fetch(:accel)}): #{report.fetch('report')}")
       0
     end
 
