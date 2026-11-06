@@ -18,6 +18,12 @@ stock OTP and seeds a fault for each.
 -define(NOFID, 16#ffffffff).
 -define(O_RDWR, 2).
 -define(CAP, 1000000).
+%% How long a case waits for a reply or for a condition, in milliseconds. Each wait is
+%% short of the EUnit timeout that test/host/erx_ramfs_test.rb gives a case, and the waits
+%% along any one case's path add up to less, so a case that never sees what it waits for
+%% fails with its reason and is not timed out.
+-define(REPLY_BOUND, 30000).
+-define(CONDITION_BOUND, 10000).
 
 %% Fixtures --------------------------------------------------------------
 
@@ -48,7 +54,9 @@ second_grant(Grant) ->
     Second.
 
 %% A grant that ends while the request is out fails the case at once with the request, so
-%% that a grant that crashed on it is a failed case and not a timed out one.
+%% that a grant that crashed on it is a failed case and not a timed out one. The reply
+%% bound is generous, as the host may be starved of CPU for seconds; only a grant that is
+%% alive and silent reaches it.
 call(Grant, Request) ->
     call_as(Grant, self(), Request).
 
@@ -62,7 +70,7 @@ call_as(Grant, Sender, Request) ->
             Reply;
         {'DOWN', Monitor, process, Grant, Reason} ->
             erlang:error({grant_ended, Reason, Request})
-    after 2000 ->
+    after ?REPLY_BOUND ->
         erlang:error({no_reply, Request})
     end.
 
@@ -176,8 +184,8 @@ a_file_two_grants_hold_needs_both_to_let_go_test() ->
     ok = call(Grant, {clunk, 3}),
     ?assert(free(Grant) < Free),
     ?assertMatch({ok, #{nlink := 0}}, call(Second, {getattr, 3, 16#7ff})),
-    exit(Second, kill),
-    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    kill_and_wait(Second),
+    ?assertEqual(ok, wait_free(Grant, Free)),
     stop(Grant).
 
 %% Grammar on the local route ----------------------------------------------
@@ -203,17 +211,23 @@ callbacks_called_during(Fun) ->
     [1 = erlang:trace_pattern(P, true, [local]) || P <- Pattern],
     _ = erlang:trace(all, true, [call, {tracer, Self}]),
     try Fun() of
-        Result -> {Result, drain_calls([])}
+        Result -> {Result, drain_calls()}
     after
         _ = erlang:trace(all, false, [call]),
         [erlang:trace_pattern(P, false, [local]) || P <- Pattern]
     end.
 
-drain_calls(Seen) ->
+%% The calls traced so far. erlang:trace_delivered/1 answers once every trace message
+%% generated before the call has reached this process, so no wait on the clock decides what
+%% was seen. That covers each callback, as the grant makes them before it sends the reply
+%% that Fun waited for.
+drain_calls() ->
+    drain_calls(erlang:trace_delivered(all), []).
+
+drain_calls(Ref, Seen) ->
     receive
-        {trace, _, call, {erx_ramfs, Function, _}} -> drain_calls([Function | Seen])
-    after 50 ->
-        lists:reverse(Seen)
+        {trace, _, call, {erx_ramfs, Function, _}} -> drain_calls(Ref, [Function | Seen]);
+        {trace_delivered, all, Ref} -> lists:reverse(Seen)
     end.
 
 names_that_break_the_grammar_are_refused_before_a_callback_test() ->
@@ -264,12 +278,31 @@ free(Grant) ->
     {ok, #{bfree := Blocks, ffree := Nodes}} = call(Grant, {statfs, 1}),
     {Blocks, Nodes}.
 
-wait_free(_Grant, _Free, 0) ->
-    timeout;
-wait_free(Grant, Free, Tries) ->
+%% Ends Pid and returns once it is gone. The grants that monitored it learn of it a
+%% moment later, in an order nothing fixes, which wait_free/2 waits out.
+kill_and_wait(Pid) ->
+    Monitor = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Monitor, process, Pid, _} -> ok
+    after ?CONDITION_BOUND ->
+        erlang:error({not_killed, Pid})
+    end.
+
+%% Polls until statfs shows Free again and returns ok, or returns timeout after
+%% ?CONDITION_BOUND milliseconds.
+wait_free(Grant, Free) ->
+    wait_free(Grant, Free, erlang:monotonic_time(millisecond) + ?CONDITION_BOUND).
+
+wait_free(Grant, Free, Deadline) ->
     case free(Grant) of
-        Free -> ok;
-        _ -> timer:sleep(20), wait_free(Grant, Free, Tries - 1)
+        Free ->
+            ok;
+        _ ->
+            case erlang:monotonic_time(millisecond) < Deadline of
+                true -> timer:sleep(20), wait_free(Grant, Free, Deadline);
+                false -> timeout
+            end
     end.
 
 %% A process opens a file, removes it and writes it, then ends: the grant clunks its
@@ -285,6 +318,6 @@ a_dead_owners_open_file_gives_back_what_it_held_test() ->
     ok = As({unlinkat, 10, <<"f">>, 0}),
     {ok, 50000, _} = As({write, 11, 0, binary:copy(<<1>>, 50000)}),
     ?assert(free(Grant) < Free),
-    exit(Owner, kill),
-    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    kill_and_wait(Owner),
+    ?assertEqual(ok, wait_free(Grant, Free)),
     stop(Grant).

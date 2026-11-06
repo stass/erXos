@@ -20,6 +20,13 @@ class ErxRamfsTest < Minitest::Test
     #{APP}/erx_ramfs.erl #{APP}/erx_ramfs_core.erl
   ].freeze
   TESTS = 'test/erlang/erx_ramfs_tests.erl'
+  # EUnit's default allowance for a case is 5 seconds; each case gets this many times that.
+  # It exceeds the longest wait a case makes (?REPLY_BOUND and ?CONDITION_BOUND in the
+  # tests, which add up along a case), so a host starved of CPU is not read as a hang, and
+  # a seeded fault that is never cured still ends as "failed", not "timed out".
+  TIMEOUT_SCALE = 24
+  # Seconds for one EUnit run: every seeded fault may use its case's whole allowance.
+  RUN_DEADLINE = 600
 
   Fault = Data.define(:name, :file, :from, :to, :caught_by)
 
@@ -80,9 +87,10 @@ class ErxRamfsTest < Minitest::Test
       end
       compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')], strict: replaced.empty?)
       compile(work, [File.join(ROOT, TESTS)], strict: true)
-      Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+      Open3.capture2e('gtimeout', '-k', '10', RUN_DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
-                      'halt(case eunit:test(erx_ramfs_tests, [verbose]) of ok -> 0; _ -> 1 end)',
+                      "halt(case eunit:test(erx_ramfs_tests, [verbose, {scale_timeouts, #{TIMEOUT_SCALE}}]) " \
+                      'of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
   end
