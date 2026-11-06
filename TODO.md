@@ -480,7 +480,8 @@ it; git history is the record of completed work.
 * [Low] /tmp, `erx_ramfs_serving`: the serving set's `xref` closure follows only calls it can
   name, so a module a serving process reaches through `apply/3` or a fun value it was handed is
   not in it. Two seeded faults of [/tmp's verification](docs/design-tmp.md#verification) are not caught by
-  the hosted tests: the rename split into two steps (the client unlinks the destination, then renames)
+  the hosted tests (the concurrency case also does not run `erx_ramfs_core:check/1` afterwards, which
+  docs/design-tmp.md's Verification lists): the rename split into two steps (the client unlinks the destination, then renames)
   passes the concurrency case with 0 misses in 1,608 stats over 800 renames, so that case does not yet
   show it runs the interleaving it exists for (one scheduler may starve the statters; a case run with
   schedulers online or with the statters sending ahead of the renamers would settle it); and a grant that

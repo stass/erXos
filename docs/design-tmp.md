@@ -591,9 +591,9 @@ the code under test ran.
   `erx_file_remote` calls left out of the preload list, which halts the
   node with the error handler's message.
 * **Grammar on the local route.** Names with NUL, `/`, `.`, `..`, invalid
-  UTF-8, and of 255 and 256 bytes, and link texts of 4,095 and 4,096
-  bytes, sent to `/tmp`'s grant as local messages, each refused before a
-  callback. Seeded: a grant that skips the checks for a sender in its own
+  UTF-8, and of 256 bytes, and link texts of 4,096 bytes, sent to `/tmp`'s
+  grant as local messages, each refused before a callback; a name of 255
+  bytes and a link text of 4,095 bytes are accepted and made. Seeded: a grant that skips the checks for a sender in its own
   domain.
 * **OTP's suites.** `file_SUITE`, `filelib_SUITE` and a Common Test run
   writing its logs and `priv_dir` under `/tmp`, compared case by case

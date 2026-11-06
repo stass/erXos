@@ -20,7 +20,8 @@ stock OTP and seeds a fault for each.
 %% Fixtures --------------------------------------------------------------
 
 %% A tree and its grant, registered under a name of their own; the file version
-%% counter is the one the tests share.
+%% counter is the one the tests share. The tree is kept in the test process's
+%% dictionary under its grant, so that stop/1 ends both.
 start() ->
     ok = erx_fs_version:init(),
     Name = list_to_atom("erx_ramfs_test_" ++ integer_to_list(erlang:unique_integer([positive]))),
@@ -28,18 +29,30 @@ start() ->
     {ok, Grant} = erx_fs:start_link(erx_ramfs, Name, rw),
     unlink(Tree),
     unlink(Grant),
+    put({tree, Grant}, Tree),
     {ok, _} = attach(Grant, 1),
     Grant.
 
 stop(Grant) ->
-    exit(Grant, kill).
+    exit(Grant, kill),
+    exit(erase({tree, Grant}), kill).
 
+%% A grant that ends while the request is out fails the case at once with the request, so
+%% that a grant that crashed on it is a failed case and not a timed out one.
 call(Grant, Request) ->
+    call_as(Grant, self(), Request).
+
+call_as(Grant, Sender, Request) ->
     Alias = alias([reply]),
-    Grant ! {erx_9p, Alias, self(), Request},
+    Monitor = monitor(process, Grant),
+    Grant ! {erx_9p, Alias, Sender, Request},
     receive
-        {erx_9p, Alias, Reply} -> Reply
-    after 5000 ->
+        {erx_9p, Alias, Reply} ->
+            demonitor(Monitor, [flush]),
+            Reply;
+        {'DOWN', Monitor, process, Grant, Reason} ->
+            erlang:error({grant_ended, Reason, Request})
+    after 2000 ->
         erlang:error({no_reply, Request})
     end.
 
@@ -115,6 +128,8 @@ names_that_break_the_grammar_are_refused_before_a_callback_test() ->
                                         [{Name, call(Grant, Request)}
                                          || Name <- ?BAD_NAMES, Request <- named_requests(Name)]
                                 end),
+    %% A grant that answered by crashing is not a grant that refused.
+    ?assert(is_process_alive(Grant)),
     ?assertEqual([], [Reply || {_, Reply} <- Replies, element(1, Reply) =/= error]),
     ?assertEqual([], Called),
     %% Nothing was made.
@@ -165,11 +180,7 @@ a_dead_owners_open_file_gives_back_what_it_held_test() ->
     Grant = start(),
     Free = free(Grant),
     Owner = spawn(fun() -> receive never -> ok end end),
-    As = fun(Request) ->
-                 Alias = alias([reply]),
-                 Grant ! {erx_9p, Alias, Owner, Request},
-                 receive {erx_9p, Alias, Reply} -> Reply after 5000 -> erlang:error(no_reply) end
-         end,
+    As = fun(Request) -> call_as(Grant, Owner, Request) end,
     {ok, _} = As({attach, 10, ?NOFID, <<"user">>, <<"tmp">>, 0}),
     {ok, []} = As({walk, 10, 11, []}),
     {ok, _, _} = As({lcreate, 11, <<"f">>, ?O_RDWR, 8#644, 0}),

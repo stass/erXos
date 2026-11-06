@@ -53,7 +53,7 @@ class ErxRamfsTest < Minitest::Test
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit(fault.file => original.sub(fault.from) { fault.to })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
-      assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*(?:failed|timed out)\*/, output, fault.name)
+      assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*failed\*/, output, fault.name)
     end
   end
 
@@ -76,9 +76,9 @@ class ErxRamfsTest < Minitest::Test
   end
 
   def compile(work, paths, includes: [], strict:)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *(strict ? ['-Werror'] : []), '-pa', work,
+    output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERLC'), *(strict ? ['-Werror'] : []), '-pa', work,
                                      *includes.flat_map { |directory| ['-I', directory] }, '-o', work, *paths,
                                      stdin_data: '')
-    assert status.success?, output
+    assert status.success?, "erlc exit #{status.exitstatus} (124 is the deadline)\n#{output}"
   end
 end

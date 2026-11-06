@@ -156,7 +156,7 @@ class RuntimePrimFileTest < Minitest::Test
     'tmpx inode above' => 'true', 'tmpx old owners counted' => 'true', 'tmpx no old owner alive' => 'none',
     'tmpx held while open' => 'true', 'tmpx held after close' => 'true',
     'tmpx held while owner lives' => 'true', 'tmpx held after owner killed' => 'ok',
-    'tmpx concurrent renames' => '{0,true,800}', 'tmpx concurrent fill' => '{[enospc],true}',
+    'tmpx concurrent renames' => '{0,true,800,1,true}', 'tmpx concurrent fill' => '{[enospc],true,true}',
     'tmpx cwd path' => '{ok,"/tmp/seq/w"}', 'tmpx small cwd' => 'ok',
     'tmpx small cwd info' => '{ok,regular,60000,read_write,420,1}', 'tmpx small cwd ended' => '{error,eio}',
     'tmpx small cwd unmounted' => '{error,enoent}', 'tmpx small cwd kept' => '{ok,"/small"}'
@@ -671,9 +671,9 @@ class RuntimePrimFileTest < Minitest::Test
 
   def erlc(sources, outdir, includes)
     erlc = File.join(File.dirname(Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR)), 'erlc')
-    output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, erlc, *includes.flat_map { |dir| ['-I', dir] },
-                                     '-o', outdir, *sources, stdin_data: '')
-    assert status.success?, output
+    output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', '120', erlc,
+                                     *includes.flat_map { |dir| ['-I', dir] }, '-o', outdir, *sources, stdin_data: '')
+    assert status.success?, "erlc exit #{status.exitstatus} (124 is the deadline)\n#{output}"
   end
 
   def pack(tree, archive, directory, except: nil)

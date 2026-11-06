@@ -11,6 +11,13 @@
 
 -include_lib("kernel/include/file.hrl").
 
+%% How long the case waits for a helper process before it fails; well under the harness's
+%% own deadline, so a helper that died on a failed call fails the case with its name.
+-define(HELPER_WAIT, 30000).
+
+%% The size cap of the tree the concurrency cases share.
+-define(CONC_CAP, 200000).
+
 main([_, "seeded", Seed]) ->
     seeded(Seed),
     erlang:halt(0);
@@ -199,7 +206,7 @@ namespace("release") ->
     {Gone, Ref} = spawn_monitor(fun() -> receive stop -> ok end end),
     Show("mount gone", erx_ns:mount(Gone, <<"/gone">>, [{tree, <<"t">>}])),
     Gone ! stop,
-    receive {'DOWN', Ref, process, Gone, _} -> ok end,
+    receive {'DOWN', Ref, process, Gone, _} -> ok after ?HELPER_WAIT -> helper_silent(gone_exit) end,
     Show("gone", ended(<<"/gone/x">>, 100)),
     Show("unmount gone", erx_ns:unmount(<<"/gone">>)),
     Show("unmount bound", erx_ns:unmount(<<"/b">>)),
@@ -729,7 +736,8 @@ appends(Show) ->
                    Self ! {appended, Byte, own(Fd, Byte, 1000, 0)},
                    file:close(Fd)
            end) || Byte <- [$a, $b]],
-    Own = lists:sort([receive {appended, Byte, Count} -> {Byte, Count} end || _ <- [1, 2]]),
+    Own = lists:sort([receive {appended, Byte, Count} -> {Byte, Count} after ?HELPER_WAIT -> helper_silent(appender) end
+                      || _ <- [1, 2]]),
     {ok, Log} = prim_file:read_file(<<"/p/log">>),
     Show("appends", {Own, byte_size(Log)}),
     ok = erx_ns:unmount(<<"/p">>).
@@ -814,7 +822,7 @@ grant_gone(Show) ->
     {ok, Fd} = file:open(<<"/d/f">>, [raw, binary, read, write]),
     Monitor = erlang:monitor(process, Grant),
     exit(Grant, kill),
-    receive {'DOWN', Monitor, process, _, _} -> ok end,
+    receive {'DOWN', Monitor, process, _, _} -> ok after ?HELPER_WAIT -> helper_silent(grant_kill) end,
     Show("grant gone", {file:write(Fd, <<"x">>), file:read(Fd, 1), file:position(Fd, eof),
                         file:close(Fd)}),
     ok = erx_ns:unmount(<<"/d">>).
@@ -838,14 +846,23 @@ seeded(Seed) ->
         "unknown" -> unknown_at(Show)
     end.
 
+%% "none" is the unseeded run. A seed of another module has no client beam but is on the
+%% code path, so its directory must hold a beam; a seed that names nothing is an error and
+%% not an unseeded run.
+load_seeded_client("none") ->
+    ok;
 load_seeded_client(Seed) ->
-    case prim_file:read_file(<<"/test/seeded/", (list_to_binary(Seed))/binary, "/erx_file_remote.beam">>) of
+    Directory = <<"/test/seeded/", (list_to_binary(Seed))/binary>>,
+    case prim_file:read_file(<<Directory/binary, "/erx_file_remote.beam">>) of
         {ok, Beam} ->
             _ = code:unstick_mod(erx_file_remote),
             {module, erx_file_remote} = code:load_binary(erx_file_remote, "seeded", Beam),
             ok;
         {error, enoent} ->
-            ok
+            case prim_file:list_dir(Directory) of
+                {ok, [_ | _]} -> ok;
+                Other -> erlang:error({no_seed, Seed, Other})
+            end
     end.
 
 %% /tmp against stock (design-tmp.md, Verification, "Against stock OTP"): the same
@@ -1008,7 +1025,8 @@ tmp_appends(Path) ->
                      end
              end,
     [spawn(Writer(Byte)) || Byte <- [$a, $b]],
-    Own = [receive {appended, Byte, O} -> O end || Byte <- [$a, $b]],
+    Own = [receive {appended, Byte, O} -> O after ?HELPER_WAIT -> helper_silent({appender, Byte}) end
+           || Byte <- [$a, $b]],
     {ok, Bytes} = file:read_file(Path),
     {Own, byte_size(Bytes), lists:sort(maps:to_list(lists:foldl(fun(B, M) -> maps:update_with(B, fun(N) -> N + 1 end, 1, M) end, #{}, binary_to_list(Bytes))))}.
 
@@ -1035,7 +1053,7 @@ tmp_erxos("release") ->
     Down = monitor(process, Small),
     unlink(Small),
     exit(Small, shutdown),
-    receive {'DOWN', Down, process, Small, _} -> ok end,
+    receive {'DOWN', Down, process, Small, _} -> ok after ?HELPER_WAIT -> helper_silent(small_tree_exit) end,
     Show("small cwd ended", file:read_file_info(<<"a">>)),
     ok = erx_ns:unmount(<<"/small">>),
     Show("small cwd unmounted", file:read_file_info(<<"a">>)),
@@ -1064,16 +1082,16 @@ tmp_erxos("release") ->
                            Parent ! {written, self()},
                            receive never -> ok end
                    end),
-    receive {written, Killed} -> ok end,
+    receive {written, Killed} -> ok after ?HELPER_WAIT -> helper_silent(held_writer) end,
     Show("held while owner lives", tmp_free(erx_ramfs) < Free),
     exit(Killed, kill),
     Show("held after owner killed", tmp_wait_free(erx_ramfs, Free, 100)),
     %% A file written and renamed over b while others stat b: every stat finds b. Then
     %% writers filling the tree stop at the cap together.
-    {ok, Conc} = erx_ramfs_sup:start_link(200000, <<"/conc">>, erx_ramfs_conc),
+    {ok, Conc} = erx_ramfs_sup:start_link(?CONC_CAP, <<"/conc">>, erx_ramfs_conc),
     Show("concurrent renames", tmp_concurrent_renames()),
     Show("concurrent stats", get(stats)),
-    Show("concurrent fill", tmp_concurrent_fill(erx_ramfs_conc)),
+    Show("concurrent fill", tmp_concurrent_fill()),
     unlink(Conc),
     exit(Conc, shutdown),
     %% Restart: kill the tree process with a file open; the open file answers eio,
@@ -1123,7 +1141,7 @@ tmp_all_dead(Old, Tries) ->
     end.
 
 %% Eight processes each write a fresh file and rename it over b, while eight stat b.
-%% POSIX makes the rename atomic: no stat misses b. Returns {Misses, Stats, Renames}.
+%% POSIX makes the rename atomic: no stat misses b. Returns {Misses, StatsRan, RenamesDone, EntriesLeft, BWhole}.
 tmp_concurrent_renames() ->
     Dir = <<"/conc/r">>,
     B = <<Dir/binary, "/b">>,
@@ -1147,25 +1165,45 @@ tmp_concurrent_renames() ->
     Rename = fun(N) ->
                      fun() ->
                              Mine = <<Dir/binary, "/w", (integer_to_binary(N))/binary>>,
-                             [begin
-                                  ok = file:write_file(Mine, <<"new", N>>),
-                                  ok = file:rename(Mine, B)
-                              end || _ <- lists:seq(1, 100)],
-                             Parent ! {renamed, self()}
+                             Done = lists:foldl(fun(_, Count) ->
+                                                        case file:write_file(Mine, <<"new", N>>) of
+                                                            ok -> Count + renamed(Mine, B);
+                                                            {error, _} -> Count
+                                                        end
+                                                end, 0, lists:seq(1, 100)),
+                             Parent ! {renamed, self(), Done}
                      end
              end,
     %% Statters run at high priority so that they ask whenever a renamer waits.
     Stats = [spawn_opt(Stat, [{priority, high}]) || _ <- lists:seq(1, 8)],
     Renamers = [spawn(Rename(N)) || N <- lists:seq(1, 8)],
-    [receive {renamed, R} -> ok end || R <- Renamers],
+    Renames = [receive {renamed, R, Done} -> Done after ?HELPER_WAIT * 2 -> helper_silent({renamer, R}) end
+               || R <- Renamers],
     atomics:put(Stop, 1, 1),
-    Counts = [receive {stats, S, Count} -> Count end || S <- Stats],
+    Counts = [receive {stats, S, Count} -> Count after ?HELPER_WAIT -> helper_silent({statter, S}) end
+              || S <- Stats],
     put(stats, lists:sum([N || {N, _} <- Counts])),
-    {lists:sum([M || {_, M} <- Counts]), lists:sum([N || {N, _} <- Counts]) > 0, length(Renamers) * 100}.
+    %% Every rename took effect (a file written and renamed over b is gone from its own
+    %% name), and b holds one renamer's whole content.
+    {ok, Names} = file:list_dir(Dir),
+    Final = file:read_file(B),
+    Whole = lists:member(Final, [{ok, <<"new", N>>} || N <- lists:seq(1, 8)]),
+    {lists:sum([M || {_, M} <- Counts]), lists:sum([N || {N, _} <- Counts]) > 0, lists:sum(Renames),
+     length(Names), Whole}.
+
+%% 1 when the file at From was renamed over To, 0 when the rename failed.
+renamed(From, To) ->
+    case file:rename(From, To) of
+        ok -> 1;
+        {error, _} -> 0
+    end.
+
+helper_silent(Name) ->
+    erlang:error({helper_did_not_answer, Name}).
 
 %% Eight writers fill a tree whose cap is small: each ends with enospc, none crashes,
 %% and what is left is less than one more file.
-tmp_concurrent_fill(Name) ->
+tmp_concurrent_fill() ->
     Parent = self(),
     Fill = fun(N) ->
                    fun() ->
@@ -1181,9 +1219,28 @@ tmp_concurrent_fill(Name) ->
                    end
            end,
     Writers = [spawn(Fill(N)) || N <- lists:seq(1, 8)],
-    Ends = [receive {filled, W, Last} -> Last end || W <- Writers],
-    Tail = tmp_free(Name),
-    {lists:usort(Ends), Tail < 2}.
+    Ends = [receive {filled, W, Last} -> Last after ?HELPER_WAIT -> helper_silent({filler, W}) end || W <- Writers],
+    %% The tree charges a directory entry 64 bytes and its name's length, a node 256 bytes
+    %% and each started 4096-byte chunk of a file. What the entries cost, from the files'
+    %% sizes (a write refused for space leaves an empty file, which costs its entry and
+    %% node), never passes the cap, and leaves less than one more chunk free: a cap
+    %% checked before the others' writes landed overruns it, and a cap reached early
+    %% leaves more.
+    {ok, Names} = file:list_dir(<<"/conc">>),
+    Files = [unicode:characters_to_binary(N) || N <- Names, hd(unicode:characters_to_list(N)) =:= $f],
+    Cost = lists:sum([charge(File, filled_size(<<"/conc/", File/binary>>)) || File <- Files])
+        + charge(<<"r">>, 0) + charge(<<"b">>, 1),
+    Left = ?CONC_CAP - Cost,
+    io:format("tmpx concurrent fill cost\t~0tp~n", [{length(Files), Cost, Left}]),
+    {lists:usort(Ends), Cost =< ?CONC_CAP, Left < 4096}.
+
+filled_size(Path) ->
+    {ok, #file_info{size = Size}} = file:read_file_info(Path),
+    Size.
+
+%% What the tree charges for a file entry of this name and size.
+charge(Name, Size) ->
+    64 + byte_size(Name) + 256 + 4096 * ((Size + 4095) div 4096).
 
 %% Code from /tmp in a runtime whose first use of /tmp is the code server's: a path
 %% with /tmp on it, a module found nowhere (the code server lists /tmp and reads a missing
