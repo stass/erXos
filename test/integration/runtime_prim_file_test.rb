@@ -182,6 +182,28 @@ class RuntimePrimFileTest < Minitest::Test
     TMP_CWD.each { |step, want| assert_equal want, release[step], step }
   end
 
+  # Reads and writes past the client's 64 KiB unit (file_SUITE's segment_read and
+  # segment_write): a read answers every byte up to the end, as stock's does, and these
+  # pin what both answer.
+  TMP_LARGE = {
+    'tmp large write' => 'ok', 'tmp large read_file' => '{ok,262144,true}',
+    'tmp large read' => '{ok,262144,true}', 'tmp large read at eof' => 'eof',
+    'tmp large read past eof' => '{ok,192144,true}', 'tmp large pread' => '{ok,262144,true}',
+    'tmp large pread past eof' => '{ok,162144,true}',
+    'tmp large pread list' => '{ok,70000,192144,eof,true}', 'tmp large pwrite list' => 'ok',
+    'tmp large pwrite list back' => '{ok,262144,true}', 'tmp large segments' => '[ok]',
+    'tmp large segments back' => '{ok,262144,true}', 'tmp large delete' => '{ok,ok}'
+  }.freeze
+
+  def test_tmp_large_reads_and_writes
+    release = table(@fixture.release)
+    stock = table(@fixture.stock)
+    TMP_LARGE.each do |step, want|
+      assert_equal want, stock[step], "stock #{step}"
+      assert_equal want, release[step], step
+    end
+  end
+
   def test_tmp_serves_the_domain
     release = table(@fixture.release)
     TMP_ERXOS.each { |step, want| assert_equal want, release[step], step }

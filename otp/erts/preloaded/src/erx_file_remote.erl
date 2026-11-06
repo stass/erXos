@@ -693,19 +693,41 @@ read(Fd, Size) when is_integer(Size), Size >= 0 ->
 read(_, _) ->
     {error, badarg}.
 
-%% One request of at most a unit at Offset, which may answer fewer bytes than asked, as
-%% read(2) may; eof when the file has none there. Through a file not opened for reading,
-%% ebadf, as stock answers, sending nothing.
+%% Up to Size bytes at Offset, in requests of at most a unit each (design-files.md, Open
+%% files and offsets), until Size is read or a reply is shorter than its request, as at
+%% the end of the file: so a read of a regular file answers every byte up to its end, as
+%% stock's read(2) of one does, whatever the unit. eof when the file has none there. An
+%% error after some bytes answers those bytes, as read(2) answers a short count, and the
+%% next read meets it again. Through a file not opened for reading, ebadf, as stock
+%% answers, sending nothing.
 read_at(#{access := write}, _, _) ->
     {error, ebadf};
 read_at(_, Offset, _) when Offset < 0; Offset > ?OFFSET_MAX ->
     {error, einval};
-read_at(_, _, 0) ->
-    {ok, <<>>};
-read_at(#{grant := Grant, fid := Fid, unit := Unit}, Offset, Size) ->
-    case exchange(Grant, [{read, Fid, Offset, min(Size, Unit)}]) of
-        [{ok, <<>>}] -> eof;
-        [Reply] -> Reply
+read_at(File, Offset, Size) ->
+    case requested(File, Offset, Size, []) of
+        {ok, <<>>} when Size > 0 -> eof;
+        Read -> Read
+    end.
+
+%% Parts holds the replies so far, newest first, each a whole request's count. A reply
+%% longer than its request, which no server of erXos sends, answers eio; a request whose
+%% offset would pass 2^63 - 1 is not sent, and what was read is answered.
+requested(_, Offset, Size, Parts) when Size =:= 0; Offset > ?OFFSET_MAX ->
+    {ok, iolist_to_binary(lists:reverse(Parts, []))};
+requested(#{grant := Grant, fid := Fid, unit := Unit} = File, Offset, Size, Parts) ->
+    Count = min(Size, Unit),
+    case exchange(Grant, [{read, Fid, Offset, Count}]) of
+        [{ok, Data}] when byte_size(Data) =:= Count ->
+            requested(File, Offset + Count, Size - Count, [Data | Parts]);
+        [{ok, Data}] when byte_size(Data) < Count ->
+            {ok, iolist_to_binary(lists:reverse(Parts, [Data]))};
+        [{ok, _}] ->
+            {error, eio};
+        [{error, _} = Error] when Parts =:= [] ->
+            Error;
+        [{error, _}] ->
+            {ok, iolist_to_binary(lists:reverse(Parts, []))}
     end.
 
 %% The offset after a read; a server that sent bytes past 2^63 - 1 answers eio.

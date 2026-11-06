@@ -947,9 +947,61 @@ tmp(Prefix, Mode) ->
                {"victim kept", fun() -> file:read_link(At(<<"victim">>)) end},
                {"file kept", fun() -> file:read_file(At(<<"file">>)) end}],
     [Show(Step, Call()) || {Step, Call} <- Special],
+    tmp_large(At, Show),
     tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
+
+%% Reads and writes of more than the client's 64 KiB unit (design-files.md, Open files
+%% and offsets), as file_SUITE's segment_read and segment_write make them: a read of a
+%% regular file answers every byte it asks for up to the end, as stock's does, whatever
+%% the unit. Each step shows the sizes it got and whether the bytes are those written.
+%% The files are deleted again, so the listing after is unchanged.
+tmp_large(At, Show) ->
+    Big = At(<<"big">>),
+    Bin = << <<I:32>> || I <- lists:seq(0, 65535) >>,
+    Size = byte_size(Bin),
+    Same = fun({ok, Got}, Want) -> {ok, byte_size(Got), Got =:= Want};
+              (Other, _) -> Other
+           end,
+    {ok, W} = file:open(Big, [write, raw, binary]),
+    Show("large write", file:write(W, Bin)),
+    ok = file:close(W),
+    Show("large read_file", Same(file:read_file(Big), Bin)),
+    {ok, R} = file:open(Big, [read, raw, binary]),
+    Show("large read", Same(file:read(R, Size), Bin)),
+    Show("large read at eof", file:read(R, 1)),
+    {ok, _} = file:position(R, 70000),
+    Show("large read past eof", Same(file:read(R, Size), binary_part(Bin, 70000, Size - 70000))),
+    Show("large pread", Same(file:pread(R, 0, Size), Bin)),
+    Show("large pread past eof",
+         Same(file:pread(R, 100000, Size), binary_part(Bin, 100000, Size - 100000))),
+    Show("large pread list",
+         case file:pread(R, [{0, 70000}, {70000, 200000}, {Size, 10}]) of
+             {ok, [One, Two, Three]} ->
+                 {ok, byte_size(One), byte_size(Two), Three, <<One/binary, Two/binary>> =:= Bin};
+             Other ->
+                 Other
+         end),
+    ok = file:close(R),
+    %% Segmented writes: two pwrites in one call, each past the unit, then writes of a
+    %% unit and a byte more, each read back whole.
+    Copy = At(<<"copy">>),
+    {ok, P} = file:open(Copy, [write, raw, binary]),
+    Show("large pwrite list",
+         file:pwrite(P, [{100000, binary_part(Bin, 100000, Size - 100000)},
+                         {0, binary_part(Bin, 0, 100000)}])),
+    ok = file:close(P),
+    Show("large pwrite list back", Same(file:read_file(Copy), Bin)),
+    {ok, S} = file:open(Copy, [write, raw, binary]),
+    Pieces = [binary_part(Bin, Start, min(65537, Size - Start))
+              || Start <- lists:seq(0, Size - 1, 65537)],
+    Show("large segments", lists:usort([file:write(S, Piece) || Piece <- Pieces])),
+    ok = file:close(S),
+    {ok, V} = file:open(Copy, [read, raw, binary]),
+    Show("large segments back", Same(file:read(V, Size + 1), Bin)),
+    ok = file:close(V),
+    Show("large delete", {file:delete(Big), file:delete(Copy)}).
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the

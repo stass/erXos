@@ -586,7 +586,12 @@ another writer's requests may fall between, as over Linux's own 9P2000.L
 client; a request refused part way through such a write, with `enospc`
 say, leaves the requests before it written, and the caller gets the
 error with its offset advanced past what was written, as stock
-`prim_file` returns an error after a short write. A fid opened with
+`prim_file` returns an error after a short write. A caller's read
+larger than a unit is several requests too, sent until the count is
+read or a reply comes back shorter than its request, as at the end of
+the file, so a read of a regular file answers every byte up to its
+end, as stock's does; an error after some requests answers the bytes
+they read. A fid opened with
 9P2000.L's append flag writes at the file's end whatever its offset, a
 rule of erXos's servers rather than of the protocol, and a positioned
 write through it appends too, as Linux's `pwrite` does on a file opened
