@@ -178,7 +178,7 @@ it; git history is the record of completed work.
 * [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
   group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
   `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
-  in the 160 MiB cap without `enospc`; the emulator group is untried, and kernel's `file_SUITE` bench and
+  in the 160 MiB cap without `enospc`; so does the emulator group, run in three parts, and kernel's `file_SUITE` bench and
   `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
   reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `tools/lib/erx/release_files.rb` (`OTP_APPLICATIONS`), `tools/lib/erx/native_runtime.rb`: the system
@@ -205,8 +205,6 @@ it; git history is the record of completed work.
   with `einval`, with a regression test.
 * [Low] upstream, `otp/lib/stdlib/test/y2k_SUITE.erl`: `tz_next_date/1` returns its argument when local time equals UTC,
   so seven cases fail wherever the time zone is UTC, as erXos's is; stock passes only off UTC.
-* [Medium] `tools/erx oracle hosted`: OTP's emulator group is wired but not yet compared: its table,
-  `test/oracle/hosted_known_differences/emulator.txt`, holds no rows. Its run and classification is its own package.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
@@ -376,6 +374,19 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [High] hosted runtime, `liberx/backend/hosted`: `oracle hosted --suites emulator` dies of SIGBUS (signal 10) after
+  3059 s, at `signal_SUITE:copy_literal_area_signal_recv`, 1752 cases in; `signal_SUITE` alone passes that case, so the
+  fault needs the state of a long run, most likely memory the backend mapped and then could not back. Every later case
+  of the group is unresolved in a whole run, and the table's rows for them come from the group run in three parts.
+  Find the faulting access under `lldb`, with the whole group as the reproducer.
+* [Medium] `otp/erts/emulator/beam/erl_process.c`, hosted runtime: `statistics_SUITE:scheduler_wall_time_all` fails
+  where stock passes: under the case's full load one of 42 schedulers reports 0% wall time
+  (`{badmatch, {true, [100,100,100,100,0,...]}}`), so one scheduler never ran the load or its wall-time counter
+  missed it, perhaps a scheduler left parked in `erx_park`; `scheduler_SUITE` `few_low` and `equal_and_high_with_part_time_max` fail the same way (`low_min_ratio 0.0`).
+* [Low] `otp/erts/emulator/beam/erl_port_task.c`: `port_SUITE:mon_port_bad_remote_on_local` fails: `erlang:monitor(port, P)` of a fake remote port does not raise the exception stock raises. Unexplained.
+* [Low] `otp/erts/emulator/beam/erl_trace.c`, hosted runtime: `trace_call_count_SUITE:combo` fails in the
+  `dynamic_pre_post` group only, with a `badmatch` on trace messages that include `erlang:trace_info/2`'s own
+  call, `return_from` and `return_to`; the `legacy_pre_post` run of the same case passes. Unexplained.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;

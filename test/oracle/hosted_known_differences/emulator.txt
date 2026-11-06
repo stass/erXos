@@ -15,3 +15,360 @@
 # whose case agrees with stock is stale.
 #
 # suite        group  case                status     reason
+
+a_SUITE             -                       long_timers                                          failed     cannot run: no distribution; the case starts a peer node
+a_SUITE             -                       pollset_size                                         failed     ERTS has no poll set: liberx event sources replace erts_check_io, so check_io_debug answers badarg (design-runtime.md)
+alloc_SUITE         -                       cpool_opt                                            failed     cannot run: no distribution; the case starts a peer node
+alloc_SUITE         -                       erts_mmap                                            failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       display                                              failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       erl_bif_types                                        user_skip  cannot run: the release has no erts or dialyzer application directory to read BIF specs from
+bif_SUITE           -                       erl_crash_dump_bytes                                 failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       erlang_halt                                          failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       guard_bifs_in_erl_bif_types                          user_skip  cannot run: the release has no erts or dialyzer application directory to read BIF specs from
+bif_SUITE           -                       halt_flush_timeout                                   failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       improper_bif_stubs                                   failed     cannot run: the release has no erts or dialyzer application directory to read BIF specs from
+bif_SUITE           -                       min_max                                              failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+bif_SUITE           -                       node_1                                               failed     cannot run: no distribution; the case starts a peer node
+bif_SUITE           -                       shadow_comments                                      user_skip  cannot run: the release has no erts or dialyzer application directory to read BIF specs from
+bif_SUITE           -                       specs                                                failed     cannot run: the release has no erts or dialyzer application directory to read BIF specs from
+binary_SUITE        -                       bad_binary_to_term_2                                 failed     cannot run: no distribution; the case starts a peer node
+binary_SUITE        -                       bad_terms                                            failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+binary_SUITE        -                       big_binary_to_term                                   user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        -                       cmp_old_impl                                         user_skip  cannot run: no distribution; the case compares with a peer of OTP 28, which stock finds on the host PATH
+binary_SUITE        -                       copy_terms                                           failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+binary_SUITE        -                       ordering                                             failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+binary_SUITE        -                       t2b_system_limit                                     user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        -                       t_iolist_size_huge_bad_arg_list                      user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        -                       t_iolist_size_huge_list                              user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        -                       terms                                                failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_deep_short_lists                       user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_deep_tiny_lists                        user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_deep_trapping                          user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_shallow_short_lists                    user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_shallow_tiny_lists                     user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+binary_SUITE        iolist_size_benchmarks  t_iolist_size_shallow_trapping                       user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+bs_construct_SUITE  -                       bs_append_overflow                                   failed     cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+code_SUITE          -                       bad_beam_file                                        failed     cannot run: no distribution; the case starts a peer node
+code_SUITE          -                       fake_literals                                        failed     cannot run: no distribution; the case starts a peer node
+dirty_bif_SUITE     -                       dirty_heap_access                                    failed     cannot run: no distribution; the case starts a peer node
+dirty_bif_SUITE     -                       dirty_process_info                                   failed     cannot run: no distribution; the case starts a peer node
+dirty_bif_SUITE     -                       dirty_process_register                               failed     cannot run: no distribution; the case starts a peer node
+dirty_bif_SUITE     -                       dirty_process_trace                                  failed     cannot run: no distribution; the case starts a peer node
+dirty_bif_SUITE     -                       dirty_scheduler_exit                                 failed     cannot run: no distribution; the case starts a peer node
+distribution_SUITE  -                       atom_roundtrip                                       auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       contended_atom_cache_entry                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       contended_unicode_atom_cache_entry                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       creation_selection                                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       dist_entry_refc_race                                 auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       dist_parallel_send                                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       dyn_node_name_monitor                                auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       dyn_node_name_monitor_node                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       end_per_suite                                        auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       epmd_module                                          auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       exit_dist_fragments                                  auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       exit_to_busy                                         auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       group_leader                                         auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       hopeful_data_encoding                                auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       hopeful_export_fun_bug                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       huge_iovec                                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       init_per_suite                                       failed     cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       is_alive                                             auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       link_to_busy                                         auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       link_to_dead                                         auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       link_to_dead_new_node                                auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       lost_exit                                            auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       nil_roundtrip                                        auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       no_epmd                                              auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       nodes2                                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       optimistic_dflags                                    auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       ping                                                 auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       ref_port_roundtrip                                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       start_epmd_false                                     auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       stop_dist                                            auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       system_limit                                         auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  -                       unicode_atom_roundtrip                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  async_dist              async_dist_flag                                      auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  async_dist              async_dist_port_dctrlr                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  async_dist              async_dist_proc_dctrlr                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist                bad_dist_fragments                                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist                bad_dist_structure                                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_connection_id                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_control                                 auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_process_info                            auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_receive                                 auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_size                                    auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bad_dist_ext            bad_dist_ext_spawn_request_arg_list                  auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bulk_send               bulk_send_big                                        auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bulk_send               bulk_send_bigbig                                     auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  bulk_send               bulk_send_small                                      auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  dist_auto_connect       dist_auto_connect_never                              auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  dist_auto_connect       dist_auto_connect_once                               auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  local_send              local_send_big                                       auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  local_send              local_send_legal                                     auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  local_send              local_send_small                                     auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  message_latency         message_latency_large_exit2                          auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  message_latency         message_latency_large_link_exit                      auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  message_latency         message_latency_large_message                        auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  message_latency         message_latency_large_monitor_exit                   auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  trap_bif                trap_bif_1                                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  trap_bif                trap_bif_2                                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+distribution_SUITE  trap_bif                trap_bif_3                                           auto_skip  cannot run: no distribution; the suite tests distribution, and init_per_suite starts os_mon, which erXos does not ship
+driver_SUITE        -                       a_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       async_blast                                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       caller                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       consume_timeslice                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       driver_monitor                                       auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       driver_system_info_base_ver                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       driver_system_info_current_ver                       auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       driver_system_info_prev_ver                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       driver_unloaded                                      auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       env                                                  auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       erl_errno_id                                         auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       invalid_extended_marker_drv                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       io_ready_exit                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       larger_major_vsn_drv                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       larger_minor_vsn_drv                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       many_events                                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       missing_callbacks                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       otp_6602                                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       otp_6879                                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       otp_9302                                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       outputv_echo                                         auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       outputv_errors                                       auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       peek_non_existing_queue                              auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       poll_pipe                                            auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       queue_echo                                           auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       smaller_major_vsn_drv                                auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       smaller_minor_vsn_drv                                auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       thr_free_drv                                         auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       thr_msg_blast                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       thread_mseg_alloc_cache_clean                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       z_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        -                       zero_extended_marker_garb_drv                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_ready_async                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_ready_input                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_ready_input_async                           auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_ready_output                                auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_ready_output_async                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_timeout                                     auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        ioq_exit                ioq_exit_timeout_async                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        a_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        bad_fd_in_pollset                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        driver_select_use                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        end_per_group                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        fd_change                                            auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        init_per_group                                       failed     cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        lots_of_used_fds_on_boot                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        smp_select                                           auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        steal_control                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        use_fallback_pollset                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_set/polling        z_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     a_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     bad_fd_in_pollset                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     driver_select_use                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     end_per_group                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     fd_change                                            auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     init_per_group                                       failed     cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     lots_of_used_fds_on_boot                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     smp_select                                           auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     steal_control                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     use_fallback_pollset                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        poll_thread/polling     z_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 a_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 bad_fd_in_pollset                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 driver_select_use                                    auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 fd_change                                            auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 lots_of_used_fds_on_boot                             auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 smp_select                                           auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 steal_control                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 use_fallback_pollset                                 auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        polling                 z_test                                               auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        timer                   timer_cancel                                         auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        timer                   timer_change                                         auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        timer                   timer_delay                                          auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+driver_SUITE        timer                   timer_measure                                        auto_skip  cannot run: load at run time; the suite loads C drivers, and its init_per_testcase reads check_io_debug, which ERTS without a poll set lacks
+dump_SUITE          -                       exiting_dump                                         failed     cannot run: no distribution; the case starts a peer node
+dump_SUITE          -                       free_dump                                            failed     cannot run: no distribution; the case starts a peer node
+dump_SUITE          -                       heart_dump                                           failed     cannot run: no distribution; the case starts a peer node
+dump_SUITE          -                       heart_no_dump                                        failed     cannot run: no distribution; the case starts a peer node
+efile_SUITE         -                       iter_max_files                                       failed     cannot run: no distribution; the case starts a peer node
+erl_debugger_SUITE  stack_frames            test_stack_frames_returns_y_regs_controlled_by_size  user_skip  the hosted runtime runs the emulator, not the JIT: the system domain makes no code (design.md)
+erl_link_SUITE      -                       busy_dist_port_link                                  failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       busy_dist_port_monitor                               failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       dist_links                                           failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       dist_process_monitors                                failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       monitor_nodes                                        failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       otp_17127_dist_link_with_simultaneous_link_unlink    failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       otp_17127_dist_random                                failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       otp_5772_dist_link                                   failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       otp_5772_dist_monitor                                failed     cannot run: no distribution; the case starts a peer node
+erl_link_SUITE      -                       otp_7946                                             failed     cannot run: no distribution; the case starts a peer node
+erts_debug_SUITE    -                       alloc_blocks_size                                    failed     cannot run: no distribution; the case starts a peer node
+erts_debug_SUITE    -                       t_copy_shared                                        failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+exception_SUITE           -                 error_info                                      failed     cannot run: no distribution; the case starts a peer node
+fun_SUITE                 -                 fun_to_port                                     failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+fun_SUITE                 -                 ordering                                        failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+fun_SUITE                 -                 t_arity                                         failed     cannot run: no distribution; the case starts a peer node
+guard_SUITE               -                 type_tests                                      failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+hash_SUITE                -                 test_iovblockhash                               user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+hash_SUITE                -                 test_phash2_4GB_plus_bin                        user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+hello_SUITE               -                 hello                                           failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+jit_SUITE                 -                 end_per_suite                                   user_skip  the hosted runtime runs the emulator, not the JIT: the system domain makes no code (design.md)
+jit_SUITE                 -                 init_per_suite                                  user_skip  the hosted runtime runs the emulator, not the JIT: the system domain makes no code (design.md)
+jit_SUITE                 -                 jmsingle                                        user_skip  the hosted runtime runs the emulator, not the JIT: the system domain makes no code (design.md)
+jit_SUITE                 -                 named_labels                                    user_skip  the hosted runtime runs the emulator, not the JIT: the system domain makes no code (design.md)
+list_bif_SUITE            -                 t_list_to_ext_pidportref                        failed     cannot run: no distribution; the case starts a peer node
+list_bif_SUITE            -                 t_list_to_port                                  failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+map_SUITE                 main              t_gc_rare_map_overflow                          failed     cannot run: no distribution; the case starts a peer node
+map_SUITE                 main              t_tracing                                       failed     bug (TODO.md): runtime_tools, which design-runtime.md keeps, is not in the release; dbg is undefined
+match_spec_SUITE          -                 boxed_and_small                                 failed     cannot run: no distribution; the case starts a peer node
+match_spec_SUITE          -                 faulty_seq_trace                                failed     cannot run: no distribution; the case starts a peer node
+message_queue_data_SUITE  -                 basic                                           failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 demon_3                                         failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 demon_e_1                                       failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 demonitor_flush                                 failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 list_cleanup                                    failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 mixer                                           failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 mon_2                                           failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 mon_e_1                                         failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             -                 monitor_time_offset                             failed     cannot run: no distribution; the case starts a peer node
+monitor_SUITE             remove_monitor    remote_remove_monitor                           failed     cannot run: no distribution; the case starts a peer node
+native_record_SUITE       -                 dist                                            failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 cmp                                             failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+node_container_SUITE      -                 dist_entry_gc                                   failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 dist_link_refc                                  failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 dist_monitor_refc                               failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 ets_refc                                        failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+node_container_SUITE      -                 huge_ref                                        failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 iter_max_procs                                  failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 node_controller_refc                            failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 persistent_term                                 failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 port_wrap                                       failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+node_container_SUITE      -                 round_trip_eq                                   failed     cannot run: no distribution; the case starts a peer node
+node_container_SUITE      -                 term_to_binary_to_term_eq                       failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+persistent_term_SUITE     -                 init_restart                                    failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 bad_packet                                      failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 bad_port_messages                               failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 dying_port                                      failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 env                                             failed     cannot run: no distribution; the case starts a peer node
+port_SUITE                -                 exit_status_multi_scheduling_block              failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 huge_env                                        failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 iter_max_ports                                  failed     cannot run: no distribution; the case starts a peer node
+port_SUITE                -                 mon_port_bad_remote_on_local                    failed     bug (TODO.md): monitor(port, P) of a fake remote port does not raise the error stock raises
+port_SUITE                -                 mon_port_invalid_type                           failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+port_SUITE                -                 otp_4389                                        user_skip  cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 pipe_limit_env                                  failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 t_exit                                          failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                -                 unregister_name                                 failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_SUITE                options           eof                                             failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_bif_SUITE            port_info         port_info_os_pid                                failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+port_bif_SUITE            port_info         port_info_race                                  failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+process_SUITE             -                 command_line_max_heap_size                      failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             -                 dist_unlink_ack_exit_leak                       failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             -                 monitor_tag                                     failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             -                 spawn_huge_arglist                              failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             alias_bif                                       failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             demonitor_aliasmonitor                          failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             dist_frag_alias                                 failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             dist_frag_unaliased                             failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             down_aliasmonitor                               failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             monitor_alias                                   failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             monitor_time_offset_alias                       failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             alias             spawn_monitor_alias                             failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             otp_7738          otp_7738_resume                                 user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             otp_7738          otp_7738_suspended                              user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             otp_7738          otp_7738_waiting                                user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             process_info_bif  process_info_other_dist_msg                     failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             process_info_bif  process_info_parent                             failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             process_info_bif  process_info_smoke_all                          failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             processes_bif     processes_default_tab                           user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             processes_bif     processes_large_tab                             user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             processes_bif     processes_small_tab                             failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             processes_bif     processes_term_proc_list                        failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             processes_bif     processes_this_tab                              user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+process_SUITE             spawn_request     dist_spawn_arg_list_mixup                       failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     dist_spawn_monitor                              failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_against_new_node                          failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+process_SUITE             spawn_request     spawn_request_abandon_bif                       failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_bif                               failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_link_child_exit                   failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_link_parent_exit                  failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_link_parent_exit_compound_reason  failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_link_parent_exit_nodedown         failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+process_SUITE             spawn_request     spawn_request_monitor_child_exit                failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_monitor_demonitor                 failed     cannot run: no distribution; the case starts a peer node
+process_SUITE             spawn_request     spawn_request_reply_option                      failed     cannot run: no distribution; the case starts a peer node
+pseudoknot_SUITE          -                 test                                            failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+receive_SUITE             default           multi_recv_opt_cla                              failed     cannot run: no distribution; the case starts a peer node
+receive_SUITE             default           multi_recv_opt_clear_cla                        failed     cannot run: no distribution; the case starts a peer node
+receive_SUITE             priority          multi_recv_opt_cla                              failed     cannot run: no distribution; the case starts a peer node
+receive_SUITE             priority          multi_recv_opt_clear_cla                        failed     cannot run: no distribution; the case starts a peer node
+ref_SUITE                 -                 external_size                                   failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           -                 dirty_scheduler_threads                         failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           -                 equal_and_high_with_part_time_max               failed     bug (TODO.md): one scheduler of the hosted runtime runs none of the load (low_min_ratio 0.0)
+scheduler_SUITE         -                               few_low                                          failed     bug (TODO.md): one scheduler of the hosted runtime runs none of the load; fails in a whole run only
+scheduler_SUITE           -                 poll_threads                                    failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           -                 sched_poll                                      failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           -                 scheduler_suspend                               failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           -                 scheduler_threads                               failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           scheduler_bind    cpu_topology                                    failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           scheduler_bind    scheduler_bind_types                            failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           scheduler_bind    sct_cmd                                         failed     cannot run: no distribution; the case starts a peer node
+scheduler_SUITE           scheduler_bind    ssrct_cmd                                       failed     cannot run: no distribution; the case starts a peer node
+sensitive_SUITE           -                 t_process_display                               failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+signal_SUITE            -                  kill2killed                               failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            -                  monitor_named_order_remote                failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            -                  monitor_nodes_order                       failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+signal_SUITE            -                  xm_sig_order                              failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            priority_messages  priority_messages_alias_enable_disable    failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            priority_messages  priority_messages_hopefull_encoding       failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+signal_SUITE            priority_messages  priority_messages_link_enable_disable     failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            priority_messages  priority_messages_monitor_enable_disable  failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            priority_messages  priority_messages_old_nodes               failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+signal_SUITE            priority_messages  priority_messages_order                   failed     cannot run: no distribution; the case starts a peer node
+signal_SUITE            priority_messages  priority_messages_qmarkers                failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+smoke_test_SUITE        -                  boot_combo                                failed     cannot run: no distribution; the case starts a peer node
+statistics_SUITE        -                  msacc                                     failed     cannot run: socket; gen_tcp answers eprotonosupport (design-runtime.md)
+statistics_SUITE        -                  scheduler_wall_time_all                   failed     bug (TODO.md): under full load one scheduler of the hosted runtime reports 0% wall time
+statistics_SUITE        runtime            runtime_diff                              failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+statistics_SUITE        runtime            runtime_sanity                            failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+statistics_SUITE        runtime            runtime_update                            failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+statistics_SUITE        runtime            runtime_zero_diff                         failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+system_info_SUITE       -                  atom_limit                                failed     cannot run: no distribution; the case starts a peer node
+system_info_SUITE       -                  ets_limit                                 failed     cannot run: no distribution; the case starts a peer node
+time_SUITE              -                  local_to_univ                             failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+time_SUITE              -                  local_to_univ_utc                         failed     cannot run: no distribution; the case starts a peer node
+time_SUITE              -                  time_warp_modes                           failed     cannot run: no distribution; the case starts a peer node
+time_SUITE              -                  univ_to_local                             failed     cannot run: spawn port; open_port and os:cmd raise badarg (design-runtime.md)
+timer_bif_SUITE         -                  evil_timers                               failed     cannot run: no distribution; the case starts a peer node
+timer_bif_SUITE         -                  send_after_e                              failed     cannot run: no distribution; the case starts a peer node
+timer_bif_SUITE         -                  start_timer_e                             failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             dynamic_pre_post   dist_procs_trace                          failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             dynamic_pre_post   receive_trace                             failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             dynamic_pre_post   receive_trace_non_fetching_receiver       failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             dynamic_pre_post   receive_trace_priority_messages           failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             legacy_pre_post    dist_procs_trace                          failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             legacy_pre_post    receive_trace                             failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             legacy_pre_post    receive_trace_non_fetching_receiver       failed     cannot run: no distribution; the case starts a peer node
+trace_SUITE             legacy_pre_post    receive_trace_priority_messages           failed     cannot run: no distribution; the case starts a peer node
+trace_bif_SUITE         dynamic_pre_post   trace_bif                                 failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         dynamic_pre_post   trace_bif_local                           failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         dynamic_pre_post   trace_bif_return                          failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         dynamic_pre_post   trace_bif_timestamp                       failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         dynamic_pre_post   trace_bif_timestamp_local                 failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         legacy_pre_post    trace_bif                                 failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         legacy_pre_post    trace_bif_local                           failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         legacy_pre_post    trace_bif_return                          failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         legacy_pre_post    trace_bif_timestamp                       failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_bif_SUITE         legacy_pre_post    trace_bif_timestamp_local                 failed     statistics(runtime) raises notsup where CPU time is unsupported (design-runtime.md, edit 33)
+trace_call_count_SUITE  dynamic_pre_post   combo                                     failed     bug (TODO.md): in the dynamic_pre_post group, combo sees trace messages stock does not
+trace_session_SUITE     -                  destroy                                   failed     cannot run: the case takes a port from erlang:ports(), and the hosted runtime opens no ports
+trace_session_SUITE     -                  gc_multi_session                          failed     cannot run: no distribution; the case starts a peer node
+tuple_SUITE             -                  t_append_element_upper_boundry            user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+tuple_SUITE             -                  t_list_to_upper_boundry_tuple             user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+tuple_SUITE             -                  t_make_upper_boundry_tuple_2              user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
+unique_SUITE            -                  unique_monotonic_integer_white_box        failed     cannot run: no distribution; the case starts a peer node
+z_SUITE                 -                  leaked_processes                          failed     bug (TODO.md): the group ran in parts after the hosted SIGBUS, so a_SUITE's holder process is gone
+z_SUITE                 -                  node_container_refc_check                 failed     cannot run: no distribution; the case starts a peer node
+z_SUITE                 -                  pollset_size                              failed     ERTS has no poll set: liberx event sources replace erts_check_io, so check_io_debug answers badarg (design-runtime.md)
+z_SUITE                 -                  used_thread_specific_events               failed     bug (TODO.md): the group ran in parts after the hosted SIGBUS, so a_SUITE's holder process is gone
