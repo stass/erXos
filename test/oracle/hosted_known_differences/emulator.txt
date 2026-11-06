@@ -368,7 +368,7 @@ tuple_SUITE             -                  t_append_element_upper_boundry       
 tuple_SUITE             -                  t_list_to_upper_boundry_tuple             user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
 tuple_SUITE             -                  t_make_upper_boundry_tuple_2              user_skip  cannot run: os_mon, whose memsup reports system memory, is not in the release (design-runtime.md)
 unique_SUITE            -                  unique_monotonic_integer_white_box        failed     cannot run: no distribution; the case starts a peer node
-z_SUITE                 -                  leaked_processes                          failed     bug (TODO.md): the group ran in parts after the hosted SIGBUS, so a_SUITE's holder process is gone
+z_SUITE                 -                  leaked_processes                          failed     bug (TODO.md): the group ran in parts, so a_SUITE's holder process is gone
 z_SUITE                 -                  node_container_refc_check                 failed     cannot run: no distribution; the case starts a peer node
 z_SUITE                 -                  pollset_size                              failed     ERTS has no poll set: liberx event sources replace erts_check_io, so check_io_debug answers badarg (design-runtime.md)
-z_SUITE                 -                  used_thread_specific_events               failed     bug (TODO.md): the group ran in parts after the hosted SIGBUS, so a_SUITE's holder process is gone
+z_SUITE                 -                  used_thread_specific_events               failed     bug (TODO.md): the group ran in parts, so a_SUITE's holder process is gone

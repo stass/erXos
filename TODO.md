@@ -178,8 +178,8 @@ it; git history is the record of completed work.
 * [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
   group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
   `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
-  in the 160 MiB cap without `enospc`; so does the emulator group, run in three parts, and kernel's `file_SUITE` bench and
-  `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
+  in the 160 MiB cap without `enospc`. The emulator group, run in three parts, fits too; a whole run of it has not been
+  measured. Kernel's `file_SUITE` bench and `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
   reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
@@ -371,11 +371,13 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [High] hosted runtime, `liberx/backend/hosted`: `oracle hosted --suites emulator` dies of SIGBUS (signal 10) after
-  3059 s, at `signal_SUITE:copy_literal_area_signal_recv`, 1752 cases in; `signal_SUITE` alone passes that case, so the
-  fault needs the state of a long run, most likely memory the backend mapped and then could not back. Every later case
-  of the group is unresolved in a whole run, and the table's rows for them come from the group run in three parts.
-  Find the faulting access under `lldb`, with the whole group as the reproducer.
+* [Medium] `test/oracle/hosted_known_differences/emulator.txt`: the rows for the cases after `signal_SUITE` come from
+  the group run in three parts, and z_SUITE's `leaked_processes` and `used_thread_specific_events` fail only because
+  the split ends a_SUITE's holder process. Run the group whole on the hosted runtime and refresh those rows.
+* [Low] `otp/erts/emulator/beam/erl_proc_sig_queue.c` (`handle_cla`), reasoning only, not reproduced: if a process's
+  message queue switches to off-heap between `handle_cla` answering `need_gc` and the literal collection, an on-heap
+  message whose term refers to the literal area may be copied off heap with its literal pointers kept
+  (`copy_struct_litopt`), and so outlive the area. Probe it as `test/fixtures/literal_token_probe.erl` probes the token.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`, hosted runtime: `statistics_SUITE:scheduler_wall_time_all` fails
   where stock passes: under the case's full load one of 42 schedulers reports 0% wall time
   (`{badmatch, {true, [100,100,100,100,0,...]}}`), so one scheduler never ran the load or its wall-time counter
@@ -2036,8 +2038,8 @@ document's "residual risks accepted" paragraph.
 * [Low] erx_blk_window: a request for more sectors than one device request carries (`erx_blk_request:max_sectors/0`)
   is refused with `einval` rather than split, so every client splits its own.
 * [Medium] abi/medium.txt: the medium layout's sizes (the record's partition 4 MiB, each slot 512 MiB, the vault's
-  partition 64 MiB, the data partition at least 128 MiB, every boundary on 1 MiB) are first choices, checked against
-  neither the slot images' sizes (the plan's decision gate on uncompressed slots) nor the Pi firmware's needs of the
+  partition 64 MiB, the data partition at least 128 MiB, every boundary on 1 MiB) are settled, but not yet checked
+  against the slot images' sizes (the plan's decision gate on uncompressed slots) or the Pi firmware's needs of the
   record's and the slots' FAT partitions; the reset count's sector, which design-platforms.md puts beside the record,
   and each slot's signature window are not in the layout yet.
 * [Low] erx_blk: `recover/2` answers held requests `broken` though they were never posted; they could be posted after
