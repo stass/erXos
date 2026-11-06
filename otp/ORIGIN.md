@@ -20973,7 +20973,7 @@ Third-party notices remain in their original files.
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
-      "sha256": "9bb0d90f285654f4fd5a727cfb1308ead671435f2edb1fa6ade7a63416a7c447",
+      "sha256": "b3ad6532a3e93cc97eab66d809e58f3d7e555e47e11033b224f9564cff377fb2",
       "kind": "file",
       "non_ascii_lines": [
         "54329108c0ba0804feb6effbcd43f2e10250ce9dd57188d5a9129c7b5355d386",

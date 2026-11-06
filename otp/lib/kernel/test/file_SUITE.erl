@@ -1,3 +1,5 @@
+%% Modified by erXos: no_untranslatable_names/0 answers os on {unix, erxos}, whose
+%% file names, like macOS's, are UTF-8 only (design-files.md refuses any other name).
 %%
 %% %CopyrightBegin%
 %%
@@ -909,6 +911,7 @@ call_and_sort(Node, M, F, A) ->
 no_untranslatable_names() ->
     case os:type() of
 	{unix,darwin} -> os;
+	{unix,erxos} -> os;
 	{win32,_} -> os;
 	_ ->
             %% If we are using utf8only on zfs then we cannot create latin1 characters.
