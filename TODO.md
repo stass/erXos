@@ -580,6 +580,10 @@ it; git history is the record of completed work.
   walked, so `missing/<256-byte name>` answers `enametoolong` where FreeBSD answers `enoent`; and a link's text
   is bounded against the names left to read rather than the bytes, so doubled slashes are not counted. Check
   each name as it is reached and count the path's own bytes, or record both as differences.
+* [Low] runtime, `erx_path.erl`: on a read-only provider's entry, a create of a missing last name with a trailing
+  `/` (`open("new/")` with `O_CREAT`) answers `enoent` where FreeBSD answers `erofs` before the trailing-`/` check,
+  because the resolver does not know which entries are read-only. Give the table's entries their read-only flag,
+  as the empty root already answers `erofs`, or record it as a difference.
 * [Low] runtime, `erx_path.erl`: a parent's resumption accepts a reply whose kinds are all directories and that
   ends in an error, answering the error where the design says `eio`. Accept only the directory's kinds plus one
   `link`.
