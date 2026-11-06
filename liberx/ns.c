@@ -315,32 +315,91 @@ erx_ns_same_grant(const erx_ns_mount_t *a, const erx_ns_mount_t *b)
 	return (true);
 }
 
-erx_ns_status_t
-erx_ns_resolve_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
-    const uint8_t *second, size_t second_length, erx_ns_result_t *first_out,
-    erx_ns_result_t *second_out)
+/* Whether one provider takes both resolved paths (erx_ns_resolve_two). */
+static erx_ns_status_t
+erx_ns_pair(const erx_ns_result_t *first, const erx_ns_result_t *second)
 {
-	const erx_ns_mount_t *first_mount, *second_mount;
+	const erx_ns_mount_t *first_mount = first->res_mount;
+	const erx_ns_mount_t *second_mount = second->res_mount;
+
+	if ((erx_ns_on_grant(first_mount) || erx_ns_on_grant(second_mount)) &&
+	    !erx_ns_same_grant(first_mount, second_mount))
+		return (ERX_NS_EXDEV);
+	return (ERX_NS_OK);
+}
+
+/*
+ * Whether a path as written, resolved to result, is a rename's source that names
+ * `/` or the top of a mount or bind: its whole path is the entry's point, or `/`
+ * above the entries of a narrowed namespace, and its last written name is neither
+ * `.` nor `..`. A path of slashes alone has no last name and is `/`. The point,
+ * not the names, decides, since a bind's top has the names of its root.
+ */
+static bool
+erx_ns_renames_top(const uint8_t *path, size_t length, const erx_ns_result_t *result)
+{
+	const erx_ns_mount_t *mount = result->res_mount;
+	size_t end = length, start;
+
+	/* res_path is under the point, so a path of the point's length is the point. */
+	if (result->res_path_length !=
+	    (mount == NULL ? 1 : erx_ns_field_length(mount->point)))
+		return (false);
+	while (end > 0 && path[end - 1] == '/')
+		end--;
+	start = end;
+	while (start > 0 && path[start - 1] != '/')
+		start--;
+	if (end - start == 1 && path[start] == '.')
+		return (false);
+	if (end - start == 2 && path[start] == '.' && path[start + 1] == '.')
+		return (false);
+	return (true);
+}
+
+/*
+ * Both paths resolved, the first first; a refusal of either refuses both results.
+ * A rename checks its source's top between the resolution and the pairing.
+ */
+static erx_ns_status_t
+erx_ns_resolve_both(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
+    const uint8_t *second, size_t second_length, bool rename,
+    erx_ns_result_t *first_out, erx_ns_result_t *second_out)
+{
 	erx_ns_status_t status;
 
 	erx_ns_refuse(second_out);
 	status = erx_ns_resolve(ns, first, first_length, first_out);
 	if (status == ERX_NS_OK)
 		status = erx_ns_resolve(ns, second, second_length, second_out);
+	if (status == ERX_NS_OK && rename &&
+	    erx_ns_renames_top(first, first_length, first_out))
+		status = ERX_NS_EINVAL;
+	if (status == ERX_NS_OK)
+		status = erx_ns_pair(first_out, second_out);
 	if (status != ERX_NS_OK) {
 		erx_ns_refuse(first_out);
-		return (status);
+		erx_ns_refuse(second_out);
 	}
-	first_mount = first_out->res_mount;
-	second_mount = second_out->res_mount;
-	if (erx_ns_on_grant(first_mount) || erx_ns_on_grant(second_mount)) {
-		if (!erx_ns_same_grant(first_mount, second_mount)) {
-			erx_ns_refuse(first_out);
-			erx_ns_refuse(second_out);
-			return (ERX_NS_EXDEV);
-		}
-	}
-	return (ERX_NS_OK);
+	return (status);
+}
+
+erx_ns_status_t
+erx_ns_resolve_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
+    const uint8_t *second, size_t second_length, erx_ns_result_t *first_out,
+    erx_ns_result_t *second_out)
+{
+	return (erx_ns_resolve_both(ns, first, first_length, second, second_length,
+	    false, first_out, second_out));
+}
+
+erx_ns_status_t
+erx_ns_resolve_rename(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
+    const uint8_t *second, size_t second_length, erx_ns_result_t *first_out,
+    erx_ns_result_t *second_out)
+{
+	return (erx_ns_resolve_both(ns, first, first_length, second, second_length,
+	    true, first_out, second_out));
 }
 
 /*

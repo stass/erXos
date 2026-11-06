@@ -212,6 +212,23 @@ class ReleaseFsTest < Minitest::Test
     cases.keys.zip(lines.drop(5)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
   end
 
+  # A rename whose source names `/` or the top of a mount, its last written name a plain
+  # one, is einval, stock's answer for a rename of `/`, before the pair could be exdev; a
+  # last `.` or `..`, or a destination at a top, resolves as any other pair.
+  def test_a_rename_of_a_top_is_einval_before_exdev
+    exdev = [NS_EXDEV, nil, '', nil, '']
+    einval = [NS_EINVAL, nil, '', nil, '']
+    cases = { ['/', '/tmp/b'] => einval, ['/', '/etc'] => einval, ['//', '/etc'] => einval,
+              ['/tmp', '/u/b'] => einval, ['/tmp/', '/tmp/c'] => einval, ['/x', '/tmp/c'] => einval,
+              ['tmp', '/etc'] => einval, ['/tmp/.', '/u/b'] => exdev, ['/tmp/a/..', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
+              ['/tmp/b', '/u/b'] => exdev, ['/tmp/b', '/tmp'] => [NS_OK, 1, 'b', 1, ''],
+              ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'], ["/a\0", '/u/b'] => einval }
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), mount('/u', 7, 'u', RIGHTS_RW), bind('/tmp/a', '/x', false)] +
+                 cases.keys.map { |first, second| rename(first, second) })
+    assert_equal ['0'] * 3, lines.first(3)
+    cases.keys.zip(lines.drop(3)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
+  end
+
   # A draw keeps the counter's low 32 bits and skips NOFID, also past a wrap.
   def test_a_fid_is_the_low_32_bits_and_never_nofid
     values = [0, 1, 0xffff_fffe, 0xffff_ffff, 0x1_0000_0000, 0x1_0000_0005, 0x1_ffff_ffff, 0xffff_ffff_ffff_ffff]
@@ -373,6 +390,7 @@ class ReleaseFsTest < Minitest::Test
   def unmount(point) = "U #{hex(point.b)}"
   def query(path) = "Q #{hex(path.b)}"
   def two(first, second) = "T #{hex(first.b)} #{hex(second.b)}"
+  def rename(first, second) = "R #{hex(first.b)} #{hex(second.b)}"
 
   def pair(line)
     status, first_mount, first_names, second_mount, second_names = line.split(' ')

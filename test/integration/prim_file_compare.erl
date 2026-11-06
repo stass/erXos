@@ -232,6 +232,13 @@ two_paths(Show) ->
     Show("rename two", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/u/y">>) end)),
     Show("rename ro", Reached(fun() -> prim_file:rename(<<"/tmp/a/x">>, <<"/ro/y">>) end)),
     Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/lib/y">>) end)),
+    %% A rename whose source is "/" or the top of a mount is einval before it is exdev or
+    %% erofs; a last "." keeps the order of the other two-path refusals.
+    Show("rename root", Reached(fun() -> prim_file:rename(<<"/">>, <<"/tmp/y">>) end)),
+    Show("rename root local", Reached(fun() -> prim_file:rename(<<"/">>, <<"/lib/y">>) end)),
+    Show("rename mount top", Reached(fun() -> prim_file:rename(<<"/tmp/">>, <<"/u/y">>) end)),
+    Show("rename bind top", Reached(fun() -> prim_file:rename(<<"/ro">>, <<"/tmp/y">>) end)),
+    Show("rename mount dot", Reached(fun() -> prim_file:rename(<<"/tmp/.">>, <<"/u/y">>) end)),
     Show("link one", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/u/y">>) end)),
     Show("link two", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/tmp/y">>) end)),
     _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, false, []),
@@ -916,6 +923,9 @@ tmp(Prefix, Mode) ->
     Show("old handle", file:pread(Old, 0, 10)),
     Show("new name", file:read_file(At(<<"a">>))),
     ok = file:close(Old),
+    %% A rename of "/" answers einval, stock's own answer, before the release and /tmp's
+    %% grant could answer exdev.
+    Show("rename root", file:rename(<<"/">>, At(<<"arne">>))),
     Show("append", tmp_appends(At(<<"log">>))),
     %% Truncation through a read-only descriptor, and through a writable one after
     %% chmod 0444; write_file_info of what read_file_info answered.

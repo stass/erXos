@@ -192,7 +192,7 @@ efile_load(ErlNifEnv *env)
 	return (erx_build_table());
 }
 
-/* What erx_ns_resolve or erx_ns_resolve_two refuses a path with. */
+/* What erx_ns_resolve, erx_ns_resolve_two or erx_ns_resolve_rename refuses with. */
 static posix_errno_t
 erx_ns_errno(erx_ns_status_t status)
 {
@@ -366,15 +366,19 @@ efile_marshal_path(ErlNifEnv *env, ERL_NIF_TERM path, efile_path_t *result)
 	return (EFILE_EREMOTE);
 }
 
+typedef erx_ns_status_t erx_ns_two_t(const erx_ns_t *, const uint8_t *, size_t,
+    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
+
 /*
- * Both paths resolve under one hold of the lock (erx_ns_resolve_two), so a
- * mount between them cannot split the pair. Two paths on one grant answer
- * {remote, Grant, Place, OtherPlace} in the first path's `remote`; two paths
- * neither on a grant are the release file system's.
+ * Both paths resolve under one hold of the lock (erx_ns_resolve_two, or
+ * erx_ns_resolve_rename for a rename), so a mount between them cannot split
+ * the pair. Two paths on one grant answer {remote, Grant, Place, OtherPlace}
+ * in the first path's `remote`; two paths neither on a grant are the release
+ * file system's.
  */
-posix_errno_t
-efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
-    efile_path_t *first_result, efile_path_t *second_result)
+static posix_errno_t
+erx_marshal_two(ErlNifEnv *env, erx_ns_two_t *resolve, ERL_NIF_TERM first,
+    ERL_NIF_TERM second, efile_path_t *first_result, efile_path_t *second_result)
 {
 	erx_ns_status_t status;
 
@@ -382,7 +386,7 @@ efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
 	    !erx_inspect_path(env, second, &second_result->bytes))
 		return (EINVAL);
 	enif_rwlock_rlock(ns_lock);
-	status = erx_ns_resolve_two(&name_space, first_result->bytes.data,
+	status = resolve(&name_space, first_result->bytes.data,
 	    first_result->bytes.size - 1, second_result->bytes.data,
 	    second_result->bytes.size - 1, &first_result->result,
 	    &second_result->result);
@@ -391,7 +395,7 @@ efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
 	enif_rwlock_runlock(ns_lock);
 	if (status != ERX_NS_OK)
 		return (erx_ns_errno(status));
-	/* erx_ns_resolve_two answered OK, so either both are on the grant or neither. */
+	/* The pair resolved, so either both are on the grant or neither. */
 	if (!first_result->on_mount || first_result->kind != ERX_NS_SERVER)
 		return (0);
 	if (first_result->server == 0)
@@ -400,6 +404,23 @@ efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
 	    erx_grant_term(env, first_result), erx_place_term(env, first_result),
 	    erx_place_term(env, second_result));
 	return (EFILE_EREMOTE);
+}
+
+posix_errno_t
+efile_marshal_paths(ErlNifEnv *env, ERL_NIF_TERM first, ERL_NIF_TERM second,
+    efile_path_t *first_result, efile_path_t *second_result)
+{
+	return (erx_marshal_two(env, erx_ns_resolve_two, first, second,
+	    first_result, second_result));
+}
+
+posix_errno_t
+efile_marshal_rename_paths(ErlNifEnv *env, ERL_NIF_TERM source,
+    ERL_NIF_TERM destination, efile_path_t *source_result,
+    efile_path_t *destination_result)
+{
+	return (erx_marshal_two(env, erx_ns_resolve_rename, source, destination,
+	    source_result, destination_result));
 }
 
 posix_errno_t
