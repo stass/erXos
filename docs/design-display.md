@@ -414,6 +414,8 @@ devices.
 %%   containers: column, row, grid, scroll, stack
 %%   widgets:    label, button, checkbox, slider, input, list, image, spacer
 %% Common properties: key, width, height, weight, pad, align, visible, enabled, present.
+%% An image's encoded bytes are at most 48 KiB, so every operation fits one update on
+%% every display (design-web.md); a larger picture goes in a draw window.
 %% An on_* property holds a term the application chooses; the server sends it back
 %% as {ui, Window, Term, Detail} when the event fires.
 -type ui_event() :: {ui, Window :: reference(), Term :: term(), Detail :: term()}.

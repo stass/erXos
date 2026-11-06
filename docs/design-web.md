@@ -300,7 +300,7 @@ From the machine:
 | --- | --- | --- |
 | `welcome` | principal name, build identifier, the limits below | answers `hello` |
 | `update` | view, body | the view's answer to one `open` or `next` |
-| `ended` | view, reason (an atom's name, at most 255 bytes) | the view is over; the reason is the `Reason` of the inspector's or the tracer's `{error, Reason}` (`scope`, `no_facet` and the rest [Interfaces](design-live.md#erlang-in-every-domain) lists), or one of the web's own: `closed`, the view or what it shows ended; `busy`, a bound refused it; `too_large`, one record or one operation does not fit an update |
+| `ended` | view, reason (an atom's name, at most 255 bytes) | the view is over; the reason is the `Reason` of the inspector's or the tracer's `{error, Reason}` (`scope`, `no_facet` and the rest [Interfaces](design-live.md#erlang-in-every-domain) lists), or one of the web's own: `closed`, the view or what it shows ended; `busy`, a bound refused it; `too_large`, one record does not fit an update |
 | `bye` | reason | the connection is about to close: `mismatch`, `protocol`, `limit`, `logout`, `expired`, `shutdown` |
 
 An update's body is one of: `record`, a record (below); `entries`, a list
@@ -519,8 +519,8 @@ when sent and pending differ, it answers with the first operations of
 turn sent into pending, as many as fit one update, ending with `commit`
 when they are the last, and applies what it sent to sent. A long change
 thus reaches the browser over several updates, which the client keeps
-and applies at `commit`; an operation that alone does not fit, an image
-over the bound, ends the view `too_large`. So a reload, a reconnect and a
+and applies at `commit`; no operation of a valid tree exceeds one
+update, since `ui.txt` bounds an image's bytes. So a reload, a reconnect and a
 new tab are one case, attach, and a browser that falls behind receives
 the newest tree's difference, never a backlog.
 
@@ -1058,7 +1058,6 @@ table per platform.
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
 | an attribute type of the schema projects outside `datum()`'s bounds (tuple width, depth 8) | low | such values arrive printed | the generator checks every attribute type of `abi/inspection.txt` against `datum()` and refuses one that does not fit |
-| an `image` larger than one update | medium | its UI view ends `too_large` in the browser while a display shows it | decision 1 below |
 
 Decided by the owner: TLS on the network front end, with plain HTTP only
 where a development build's manifest lists it; the web domain as its own
@@ -1083,17 +1082,11 @@ library for the host tool's server; TypeScript for the client. And:
    lower case as rc's own variables are, which a login sets and a user
    changes as on Unix. `DISPLAY` would read as X's to a ported program
    that checks it.
-
-Decision for the owner, with a recommendation:
-
-1. **One operation per update.** An `image`'s bytes travel in one
-   operation, and an operation must fit one 64 KiB update. Either
-   `ui.txt` bounds an image's bytes so that every operation fits, 48 KiB,
-   and pictures larger than an icon go in a draw window beside the widget
-   window, as an application's own drawing does; or a larger image ends
-   the browser's view `too_large` while a display shows it.
-   Recommendation: the bound in `ui.txt`, so every valid tree renders on
-   every display.
+7. **One operation fits one update.** `ui.txt` bounds an `image`'s
+   encoded bytes at 48 KiB, so every operation of a valid tree fits one
+   64 KiB update and every valid tree renders on every display; a picture
+   larger than that goes in a draw window beside the widget window, as an
+   application's own drawing does.
 
 ## References
 
