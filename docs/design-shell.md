@@ -219,6 +219,27 @@ scripts is not the command shell's: toybox's own shell, which needs
 `fork`, runs as a program in the personality's second tier
 ([design-programs.md](design-programs.md#toybox)).
 
+The tokenizer and the parser, `erx_shell_lex` and `erx_shell_parse` in the
+`erx_shell` application, are pure functions from a source to a syntax tree
+or a diagnostic, and their types are the tree the evaluator walks. They
+follow plan9port rc's grammar in what binds to what. A diagnostic names a
+line and a column, counted in bytes from 1, and says what is wrong in fixed
+words without quoting the source. A source that ends where more input could
+complete it gives `incomplete` rather than `syntax`: an open quote, brace or
+`if(...)` condition, a here document with no terminator, a line continued
+at its end, or an `&&`, `|` or `if(...)` with nothing after it. The
+tokenizer reads a source as if it ended with a newline, so only constructs
+that may span lines can reach its end. The interactive layer then
+reads another line, and a script that ends that way fails as one that does
+not parse. The depth bound counts levels: `{...}`, `if`, `if not`, `for`,
+`while`, `switch`, `fn`, `!`, `@`, a redirection or an assignment written
+before a command, `(...)`, `$`, `$#`, `$"`, `` `{...} ``, `<{...}` and
+`>{...}` each
+hold what is inside them one level deeper. Sequences, `&&` and `||` chains,
+pipelines, `^` joins and a simple command's words are flat lists, so a long
+pipeline is not deep. No tree is deeper than its levels allow, so neither
+the parser nor anything that walks a tree recurses further.
+
 ### Commands
 
 A command name resolves in one **command namespace**, the same for the

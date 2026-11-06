@@ -304,6 +304,8 @@ module Erx
                    name: 'fuzz-erx-file-remote', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_path.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-path', deadline: 900, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_shell_parse.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-shell-parse', deadline: 1000, chdir: ROOT, env: environment)
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')

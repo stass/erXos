@@ -1,0 +1,14 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The command shell with rc's language (docs/design-shell.md): its tokenizer
+%% and its parser, pure functions from a line or script to a syntax tree.
+%% It starts nothing of its own.
+{application, erx_shell,
+ [{description, "erXos command shell"},
+  {vsn, "1"},
+  {modules, [erx_shell_lex,
+             erx_shell_parse]},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []}]}.

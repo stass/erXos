@@ -1091,6 +1091,27 @@ it; git history is the record of completed work.
   kernel capabilities pass as typed items. File access over 9P carries no
   such handle, its handles being 9P's fids
   ([design-live.md](docs/design-live.md#the-host-link)).
+* [High] shell, parse heap: parsing a 64 KiB source needs up to 32 MiB of
+  heap (64 KiB of `a|`; 24 MiB for `;`, `a ` or `x=y;`; measured on the
+  stock oracle emulator under `max_heap_size` with
+  `include_shared_binaries`), and the tree of 32,768 pipeline stages alone
+  outgrows the 4 MiB every evaluator gets, so a stage cannot parse every
+  source the parser must accept. Decide where a line or script is parsed
+  and with what heap: in the shell's own process, in a parse process
+  admitted against the stage allowance, or under a lower source bound. A
+  lazier token stream would roughly halve the need but not reach 4 MiB
+  ([design-shell.md](docs/design-shell.md#the-language)).
+* [Low] shell, parser choices to settle against plan9port's rc once its
+  oracle runs: `|[a=b]` is read as descriptor a of the left command to b of
+  the right one, which may be the reverse of rc's lex.c; an empty operand
+  of `|`, `&&` or `||` is refused, where rc's grammar takes one; and
+`` `split{cmd} `` is accepted; a here document's body starts after the
+next newline, even inside braces, where plan9port may wait for the whole
+command; `>>{`, `<>{` and `>[2]{` are refused; and a NUL byte is a word
+byte, which the evaluator must refuse in a program's arguments. Add each
+to the corpus and follow rc
+  (`erlang/apps/erx_shell/src/erx_shell_lex.erl`,
+  `erlang/apps/erx_shell/src/erx_shell_parse.erl`).
 * [Medium] shell, pipeline admission: each pipeline stage is admitted at
   its full `max_heap_size`, 16 MiB, against an eighth of the session's
   budget, so a 128 MiB session admits one stage and `ps | where | sort`

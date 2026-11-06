@@ -1,0 +1,524 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+-module(erx_shell_parse).
+-moduledoc """
+The command shell's parser: rc's grammar over erx_shell_lex's tokens, as a
+pure function from a line or script to its syntax tree
+(docs/design-shell.md, "The language").
+
+`parse/1` returns the program, the commands of the source in order, or the
+diagnostic of the first place the source does not parse; `format_error/1`
+renders a diagnostic as the `syntax error` line the shell prints. The tree
+is what the evaluator walks, so its shape is the types below. It follows
+plan9port's rc (its syntax.y) in what binds to what:
+
+* `&&` and `||` bind loosest, left to right, and are one flat `and_or`;
+  `|` binds tighter and is one flat `pipeline`. A newline may follow any
+  of the three.
+* `!`, `@`, a redirection written before a command and an assignment
+  written before one take everything up to the next `&&`, `||` or
+  separator, a pipeline included: `! a | b` negates the pipeline and
+  `x=1 a | b` gives the whole pipeline its `x`.
+* The body of `if`, `if not`, `for` and `while` is everything up to the
+  next separator, `&&` and `||` included, and may begin on the next line.
+* Within a word, `$`, `$#` and `$"` bind tighter than `^`, so `$a^b`
+  joins `$a` and `b`, and a subscript belongs to the `$` it follows.
+* A keyword starts a command only in a command's first place; elsewhere it
+  is a word, so `echo if` prints `if`. `in` and `not` cannot start one.
+* `case` written unquoted as the first word of a command directly in a
+  `switch` body starts an arm, and the body must begin with one.
+* `a=b` must stand first: `echo a=b` does not parse, as in rc.
+
+A diagnostic names the line and column of the first fault, the
+tokenizer's or the parser's, in fixed words. It is `incomplete` when only
+more lines could cure it, `too_long` over 64 KiB and `too_deep` when
+constructs nest more than 256 levels. Each of `{...}`, `if`, `if not`, `for`, `while`,
+`switch`, `fn`, `!`, `@`, a redirection or an assignment written before a
+command, `(...)`, `$`, `$#`, `$"`, `` `{...} ``, `<{...}` and `>{...}` is a level
+for what it holds; a redirection's or an assignment's own words, and the
+redirections after a `{...}`, stay at the level the construct is at. The
+rest, sequences, `and_or`, `pipeline`, `~`, simple commands and `^`, are
+flat lists, so the tree's depth is bounded by those levels and so is this
+parser's recursion.
+""".
+
+-export([parse/1, format_error/1]).
+
+-export_type([program/0, cmd/0, word/0, redir/0, pipe/0, diagnostic/0,
+              pos/0]).
+
+%% The bound on nesting (docs/design-shell.md, "Overview").
+-define(MAX_DEPTH, 256).
+
+-type program() :: [cmd()].
+-type cmd() ::
+        {simple, [word(), ...], [redir()]}
+      | {block, [cmd()], [redir()]}
+      | {background, cmd()}
+      | {pipeline, cmd(), [{pipe(), cmd()}, ...]}
+      | {and_or, cmd(), [{'and' | 'or', cmd()}, ...]}
+      | {'not' | subshell | if_not, body()}
+      | {redirect, redir(), body()}
+      | {assign, Name :: word(), Value :: word()}
+      | {local, Name :: word(), Value :: word(), cmd()}
+      | {'if' | while, Condition :: [cmd()], body()}
+      | {for, Var :: word(), {in, [word()]} | args, body()}
+      | {switch, Subject :: word(), [{'case', Patterns :: [word()], [cmd()]}]}
+      | {match, Subject :: word(), Patterns :: [word()]}
+      | {fn, Names :: [word()], [cmd()]}
+      | {fn_delete, Names :: [word()]}.
+%% What a prefix or a compound runs when nothing follows it.
+-type body() :: cmd() | empty.
+-type word() ::
+        {word | quoted, binary()}
+      | {concat, [word(), ...]}
+      | {var | count | flat, Name :: word()}
+      | {var_sub, Name :: word(), Index :: [word()]}
+      | {list, [word()]}
+      | {backquote, ifs | Split :: word(), [cmd()]}
+      | {pipefd, read | write, [cmd()]}.
+-type redir() ::
+        {write | append | read | rdwr, erx_shell_lex:fd(), word()}
+      | {here, erx_shell_lex:fd(), erx_shell_lex:doc()}
+      | {dup, To :: erx_shell_lex:fd(), From :: erx_shell_lex:fd()}
+      | {close, erx_shell_lex:fd()}.
+-type pipe() :: {Left :: erx_shell_lex:fd(), Right :: erx_shell_lex:fd()}.
+%% Why a source does not parse; a position is a line and a column.
+-type diagnostic() :: {syntax | incomplete, pos(), Message :: binary()}
+                    | {too_long, Bytes :: pos_integer()}
+                    | {too_deep, pos()}.
+-type pos() :: {Line :: pos_integer(), Column :: pos_integer()}.
+-type tokens() :: [erx_shell_lex:token()].
+-type depth() :: 0..?MAX_DEPTH.
+
+-doc "The program `Source` holds, or why it does not parse.".
+-spec parse(binary()) -> {ok, program()} | {error, diagnostic()}.
+parse(Source) ->
+    case erx_shell_lex:tokens(Source) of
+        {ok, Tokens} ->
+            try
+                {ok, program(Tokens)}
+            catch
+                throw:{?MODULE, At, {Kind, Message}} ->
+                    {error, {Kind, erx_shell_lex:position(Source, At), Message}};
+                throw:{?MODULE, At, too_deep} ->
+                    {error, {too_deep, erx_shell_lex:position(Source, At)}}
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc """
+The line the shell prints for a diagnostic. It holds only numbers and the
+diagnostic's fixed words, so it needs no escaping.
+""".
+-spec format_error(diagnostic()) -> binary().
+format_error({too_long, Bytes}) ->
+    iolist_to_binary(io_lib:format("syntax error: ~b bytes, over the limit of ~b",
+                                   [Bytes, erx_shell_lex:max_bytes()]));
+format_error({too_deep, Pos}) ->
+    at(Pos, iolist_to_binary(io_lib:format("nested deeper than ~b", [?MAX_DEPTH])));
+format_error({_, Pos, Message}) ->
+    at(Pos, Message).
+
+at({Line, Column}, Message) ->
+    iolist_to_binary(io_lib:format("syntax error at line ~b, column ~b: ~ts",
+                                   [Line, Column, Message])).
+
+-spec program(tokens()) -> program().
+program(Tokens) ->
+    case sequence(Tokens, 0, plain) of
+        {Cmds, [{eof, _, _}]} -> Cmds;
+        {_, [Token | _]} -> unexpected(Token)
+    end.
+
+%% Commands separated by `;`, `&` and newlines, up to a token that cannot
+%% start one, which the caller checks. In a switch arm a `case` ends it too.
+sequence(Tokens, D, Mode) ->
+    sequence(Tokens, D, Mode, []).
+
+sequence([{Separator, _, _} | Tokens], D, Mode, Acc)
+  when Separator =:= newline; Separator =:= ';'; Separator =:= '&' ->
+    sequence(Tokens, D, Mode, Acc);
+sequence([{word, _, <<"case">>}, {Next, _, _} | _] = Tokens, _D, arm, Acc)
+  when Next =/= caret ->
+    {lists:reverse(Acc), Tokens};
+sequence(Tokens, D, Mode, Acc) ->
+    case starts_command(Tokens) of
+        false ->
+            {lists:reverse(Acc), Tokens};
+        true ->
+            case command(Tokens, D) of
+                {Cmd, [{'&', _, _} | Rest]} ->
+                    sequence(Rest, D, Mode, [{background, Cmd} | Acc]);
+                {Cmd, [{Separator, _, _} | Rest]}
+                  when Separator =:= newline; Separator =:= ';' ->
+                    sequence(Rest, D, Mode, [Cmd | Acc]);
+                {Cmd, Rest} ->
+                    {lists:reverse(Acc, [Cmd]), Rest}
+            end
+    end.
+
+%% cmd && cmd || cmd ...
+command(Tokens, D) ->
+    {First, Rest} = pipeline(Tokens, D),
+    and_or(Rest, D, First, []).
+
+and_or([{Op, _, _} | Tokens], D, First, Acc) when Op =:= andand; Op =:= oror ->
+    {Next, Rest} = pipeline(operand(skip_newlines(Tokens)), D),
+    Logic = case Op of
+                andand -> 'and';
+                oror -> 'or'
+            end,
+    and_or(Rest, D, First, [{Logic, Next} | Acc]);
+and_or(Tokens, _D, First, []) ->
+    {First, Tokens};
+and_or(Tokens, _D, First, Acc) ->
+    {{and_or, First, lists:reverse(Acc)}, Tokens}.
+
+%% cmd | cmd |[2] cmd ...
+pipeline(Tokens, D) ->
+    {First, Rest} = unary(Tokens, D),
+    stages(Rest, D, First, []).
+
+stages([{pipe, _, Fds} | Tokens], D, First, Acc) ->
+    {Next, Rest} = unary(operand(skip_newlines(Tokens)), D),
+    stages(Rest, D, First, [{Fds, Next} | Acc]);
+stages(Tokens, _D, First, []) ->
+    {First, Tokens};
+stages(Tokens, _D, First, Acc) ->
+    {{pipeline, First, lists:reverse(Acc)}, Tokens}.
+
+operand([Token | _] = Tokens) ->
+    case starts_command(Tokens) of
+        true -> Tokens;
+        false -> fail(Token, <<"a command must follow">>)
+    end.
+
+%% One command of a pipeline: a prefix and what it applies to, a compound,
+%% or a simple command or assignment.
+unary([{keyword, At, '!'} | Tokens], D) ->
+    {Body, Rest} = prefixed(Tokens, enter(D, At)),
+    {{'not', Body}, Rest};
+unary([{keyword, At, '@'} | Tokens], D) ->
+    {Body, Rest} = prefixed(Tokens, enter(D, At)),
+    {{subshell, Body}, Rest};
+unary([{keyword, At, 'if'} | Tokens], D) ->
+    if_command(Tokens, enter(D, At));
+unary([{keyword, At, for} | Tokens], D) ->
+    for_command(Tokens, enter(D, At));
+unary([{keyword, At, while} | Tokens], D) ->
+    D1 = enter(D, At),
+    {Condition, Rest} = condition(Tokens, D1),
+    {Body, Rest1} = compound_body(Rest, D1),
+    {{while, Condition, Body}, Rest1};
+unary([{keyword, At, switch} | Tokens], D) ->
+    D1 = enter(D, At),
+    {Subject, Rest} = word(Tokens, D1),
+    {Arms, Rest1} = arms(expect('{', skip_newlines(Rest)), D1, []),
+    {{switch, Subject, Arms}, expect('}', Rest1)};
+unary([{keyword, At, fn} | Tokens], D) ->
+    D1 = enter(D, At),
+    case words(Tokens, D1) of
+        {Names, [{'{', _, _} | Rest]} ->
+            {Body, Rest1} = braced(Rest, D1),
+            {{fn, Names, Body}, Rest1};
+        {Names, Rest} ->
+            {{fn_delete, Names}, Rest}
+    end;
+unary([{keyword, _, '~'} | Tokens], D) ->
+    {Subject, Rest} = word(Tokens, D),
+    {Patterns, Rest1} = words(Rest, D),
+    {{match, Subject, Patterns}, Rest1};
+unary([{keyword, _, _} = Token | _], _D) ->
+    unexpected(Token);
+unary([{'{', At, _} | Tokens], D) ->
+    {Cmds, Rest} = braced(Tokens, enter(D, At)),
+    {Redirs, Rest1} = redirections(Rest, D, []),
+    {{block, Cmds, Redirs}, Rest1};
+unary([{_, At, _} | _] = Tokens, D) ->
+    case is_redirection(Tokens) of
+        true ->
+            {Redir, Rest} = redirection(Tokens, D),
+            {Body, Rest1} = prefixed(Rest, enter(D, At)),
+            {{redirect, Redir, Body}, Rest1};
+        false ->
+            simple(Tokens, D)
+    end.
+
+%% What `!`, `@` and a prefix apply to: the pipeline that follows, if any.
+prefixed(Tokens, D) ->
+    case starts_command(Tokens) of
+        true -> pipeline(Tokens, D);
+        false -> {empty, Tokens}
+    end.
+
+%% What `if`, `for` and `while` run: the command that follows, on this line
+%% or the next. At the end of the source more input could still supply it.
+compound_body(Tokens, D) ->
+    case skip_newlines(Tokens) of
+        [{eof, _, _} = Token] ->
+            fail(Token, <<"a command must follow">>);
+        Rest ->
+            case starts_command(Rest) of
+                true -> command(Rest, D);
+                false -> {empty, Rest}
+            end
+    end.
+
+if_command([{keyword, _, 'not'} | Tokens], D) ->
+    {Body, Rest} = compound_body(Tokens, D),
+    {{if_not, Body}, Rest};
+if_command(Tokens, D) ->
+    {Condition, Rest} = condition(Tokens, D),
+    {Body, Rest1} = compound_body(Rest, D),
+    {{'if', Condition, Body}, Rest1}.
+
+for_command(Tokens, D) ->
+    {Var, Rest} = word(expect('(', Tokens), D),
+    case Rest of
+        [{keyword, _, in} | Rest1] ->
+            {List, Rest2} = words(Rest1, D),
+            {Body, Rest3} = compound_body(expect(')', Rest2), D),
+            {{for, Var, {in, List}, Body}, Rest3};
+        _ ->
+            {Body, Rest1} = compound_body(expect(')', Rest), D),
+            {{for, Var, args, Body}, Rest1}
+    end.
+
+%% `(cmds)`, the condition of `if` and `while`.
+condition(Tokens, D) ->
+    {Cmds, Rest} = sequence(expect('(', Tokens), D, plain),
+    {Cmds, expect(')', Rest)}.
+
+%% The commands of a `{` already read, and what follows its `}`.
+braced(Tokens, D) ->
+    {Cmds, Rest} = sequence(Tokens, D, plain),
+    {Cmds, expect('}', Rest)}.
+
+%% A switch body: arms, each a `case` line and the commands up to the next.
+arms(Tokens, D, Acc) ->
+    case skip_separators(Tokens) of
+        [{word, _, <<"case">>}, {Next, _, _} = Following | Rest] when Next =/= caret ->
+            {Patterns, Rest1} = words([Following | Rest], D),
+            {Cmds, Rest2} = sequence(case_end(Rest1), D, arm),
+            arms(Rest2, D, [{'case', Patterns, Cmds} | Acc]);
+        [{'}', _, _} | _] = Rest ->
+            {lists:reverse(Acc), Rest};
+        [Token | _] when Acc =:= [] ->
+            fail(Token, <<"a switch body must begin with case">>);
+        [Token | _] ->
+            unexpected(Token)
+    end.
+
+case_end([{Separator, _, _} | Rest]) when Separator =:= newline; Separator =:= ';' ->
+    Rest;
+case_end([{'}', _, _} | _] = Rest) ->
+    Rest;
+case_end([Token | _]) ->
+    fail(Token, <<"a case takes only words">>).
+
+%% A command that starts with a word: an assignment if `=` follows it.
+simple(Tokens, D) ->
+    case word(Tokens, D) of
+        {Name, [{'=', At, _} | Rest]} ->
+            {Value, Rest1} = word(Rest, D),
+            case starts_command(Rest1) of
+                true ->
+                    {Body, Rest2} = pipeline(Rest1, enter(D, At)),
+                    {{local, Name, Value, Body}, Rest2};
+                false ->
+                    {{assign, Name, Value}, Rest1}
+            end;
+        {First, Rest} ->
+            arguments(Rest, D, [First], [])
+    end.
+
+arguments(Tokens, D, Words, Redirs) ->
+    case starts_word(Tokens) of
+        true ->
+            {Word, Rest} = word(Tokens, D),
+            arguments(Rest, D, [Word | Words], Redirs);
+        false ->
+            case is_redirection(Tokens) of
+                true ->
+                    {Redir, Rest} = redirection(Tokens, D),
+                    arguments(Rest, D, Words, [Redir | Redirs]);
+                false ->
+                    {{simple, lists:reverse(Words), lists:reverse(Redirs)}, Tokens}
+            end
+    end.
+
+redirections(Tokens, D, Acc) ->
+    case is_redirection(Tokens) of
+        true ->
+            {Redir, Rest} = redirection(Tokens, D),
+            redirections(Rest, D, [Redir | Acc]);
+        false ->
+            {lists:reverse(Acc), Tokens}
+    end.
+
+redirection([{redir, _, {Kind, Fd}} | Tokens], D) ->
+    {Target, Rest} = word(Tokens, D),
+    {{Kind, Fd, Target}, Rest};
+redirection([{heredoc, _, {Fd, Doc}} | Tokens], _D) ->
+    {{here, Fd, Doc}, Tokens};
+redirection([{dup, _, {To, From}} | Tokens], _D) ->
+    {{dup, To, From}, Tokens};
+redirection([{close, _, Fd} | Tokens], _D) ->
+    {{close, Fd}, Tokens}.
+
+%% Words up to the first token that cannot start one.
+words(Tokens, D) ->
+    words(Tokens, D, []).
+
+words(Tokens, D, Acc) ->
+    case starts_word(Tokens) of
+        true ->
+            {Word, Rest} = word(Tokens, D),
+            words(Rest, D, [Word | Acc]);
+        false ->
+            {lists:reverse(Acc), Tokens}
+    end.
+
+%% A word: parts joined by `^`, written or inserted.
+word([Token | _] = Tokens, D) ->
+    case starts_word(Tokens) of
+        true ->
+            {First, Rest} = part(Tokens, D),
+            concat(Rest, D, [First]);
+        false ->
+            fail(Token, <<"a word must follow">>)
+    end.
+
+concat([{caret, _, _} | [Token | _] = Tokens], D, Acc) ->
+    case starts_word(Tokens) of
+        true ->
+            {Part, Rest} = part(Tokens, D),
+            concat(Rest, D, [Part | Acc]);
+        false ->
+            fail(Token, <<"a word must follow '^'">>)
+    end;
+concat(Tokens, _D, [Single]) ->
+    {Single, Tokens};
+concat(Tokens, _D, Acc) ->
+    {{concat, lists:reverse(Acc)}, Tokens}.
+
+%% One part of a word; called only where starts_word/1 holds.
+part([{word, _, Text} | Tokens], _D) ->
+    {{word, Text}, Tokens};
+part([{quoted, _, Text} | Tokens], _D) ->
+    {{quoted, Text}, Tokens};
+part([{keyword, _, Keyword} | Tokens], _D) ->
+    {{word, atom_to_binary(Keyword)}, Tokens};
+part([{dollar, At, _} | Tokens], D) ->
+    D1 = enter(D, At),
+    case name(Tokens, D1) of
+        {Name, [{sub, _, _} | Rest]} ->
+            {Index, Rest1} = words(Rest, D1),
+            {{var_sub, Name, Index}, expect(')', Rest1)};
+        {Name, Rest} ->
+            {{var, Name}, Rest}
+    end;
+part([{Kind, At, _} | Tokens], D) when Kind =:= count; Kind =:= flat ->
+    {Name, Rest} = name(Tokens, enter(D, At)),
+    {{Kind, Name}, Rest};
+part([{backquote, At, _} | Tokens], D) ->
+    D1 = enter(D, At),
+    case Tokens of
+        [{'{', _, _} | Rest] ->
+            {Body, Rest1} = braced(Rest, D1),
+            {{backquote, ifs, Body}, Rest1};
+        _ ->
+            {Split, Rest} = word(Tokens, D1),
+            {Body, Rest1} = braced(expect('{', Rest), D1),
+            {{backquote, Split, Body}, Rest1}
+    end;
+part([{'(', At, _} | Tokens], D) ->
+    {Words, Rest} = words(Tokens, enter(D, At)),
+    {{list, Words}, expect(')', Rest)};
+part([{pipefd, At, Direction} | Tokens], D) ->
+    D1 = enter(D, At),
+    {Body, Rest} = braced(expect('{', Tokens), D1),
+    {{pipefd, Direction, Body}, Rest}.
+
+%% What `$`, `$#` and `$"` name: one part, never a joined word.
+name([Token | _] = Tokens, D) ->
+    case starts_word(Tokens) of
+        true -> part(Tokens, D);
+        false -> fail(Token, <<"a variable name must follow '$'">>)
+    end.
+
+starts_word([{Kind, _, _} | _]) ->
+    lists:member(Kind, [word, quoted, keyword, dollar, count, flat, backquote,
+                        '(', pipefd]).
+
+starts_command([{keyword, _, Keyword} | _]) ->
+    Keyword =/= in andalso Keyword =/= 'not';
+starts_command([{'{', _, _} | _]) ->
+    true;
+starts_command(Tokens) ->
+    starts_word(Tokens) orelse is_redirection(Tokens).
+
+is_redirection([{Kind, _, _} | _]) ->
+    lists:member(Kind, [redir, heredoc, dup, close]).
+
+skip_newlines([{newline, _, _} | Tokens]) -> skip_newlines(Tokens);
+skip_newlines(Tokens) -> Tokens.
+
+skip_separators([{Separator, _, _} | Tokens]) when Separator =:= newline; Separator =:= ';' ->
+    skip_separators(Tokens);
+skip_separators(Tokens) ->
+    Tokens.
+
+expect(Kind, [{Kind, _, _} | Tokens]) ->
+    Tokens;
+expect(Kind, [Token | _]) ->
+    fail(Token, <<"expected '", (atom_to_binary(Kind))/binary, "'">>).
+
+%% The level a construct at depth D holds its contents at.
+-spec enter(depth(), erx_shell_lex:offset()) -> depth().
+enter(D, At) when D >= ?MAX_DEPTH ->
+    throw({?MODULE, At, too_deep});
+enter(D, _Pos) ->
+    D + 1.
+
+unexpected(Token) ->
+    fail(Token, <<"unexpected ", (describe(Token))/binary>>).
+
+%% A fault at an error token is the tokenizer's, which comes first; one at
+%% the end could be cured by more lines, since the source ends with a
+%% newline and only constructs that span lines reach the end.
+-spec fail(erx_shell_lex:token(), binary()) -> no_return().
+fail({error, At, Fault}, _Message) ->
+    throw({?MODULE, At, Fault});
+fail({eof, At, _}, Message) ->
+    throw({?MODULE, At, {incomplete, Message}});
+fail({_, At, _}, Message) ->
+    throw({?MODULE, At, {syntax, Message}}).
+
+%% A token named in fixed words: a word's text is never shown.
+describe({word, _, _}) -> <<"word">>;
+describe({quoted, _, _}) -> <<"quoted word">>;
+describe({keyword, _, Keyword}) -> <<"'", (atom_to_binary(Keyword))/binary, "'">>;
+describe({eof, _, _}) -> <<"end of input">>;
+describe({newline, _, _}) -> <<"newline">>;
+describe({Kind, _, _}) when Kind =:= redir; Kind =:= heredoc; Kind =:= dup; Kind =:= close ->
+    <<"redirection">>;
+describe({pipefd, _, read}) -> <<"'<{'">>;
+describe({pipefd, _, write}) -> <<"'>{'">>;
+describe({Kind, _, _}) ->
+    Text = case Kind of
+               caret -> <<"^">>;
+               sub -> <<"(">>;
+               dollar -> <<"$">>;
+               count -> <<"$#">>;
+               flat -> <<"$\"">>;
+               backquote -> <<"`">>;
+               andand -> <<"&&">>;
+               oror -> <<"||">>;
+               pipe -> <<"|">>;
+               Punctuation -> atom_to_binary(Punctuation)
+           end,
+    <<"'", Text/binary, "'">>.
