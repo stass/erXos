@@ -171,24 +171,46 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/test/process_SUITE.erl`: `max_heap_size_test/5` fails with `{badmatch, noproc}` under a runner
   with no common_test, because `ct:log` delays its monitor past the process's death. It needs a run under `ct_run` to tell
   whether this is the runner alone.
-* [High] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 33554432`): a whole group does
-  not fit erXos's 32 MiB `/tmp`. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into `/tmp` before
-  the run, and Common Test's logs and each `priv_dir` stay there, so `oracle hosted --suites stdlib` ended after 249 cases
-  when the controller's `start_log_file` for `calendar_SUITE` got `enospc`, and every later case is unresolved. Copying
-  each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the reporter, on both
-  sides), or a test manifest with a larger `tmp` cap, is needed before stdlib, kernel and emulator can be compared;
-  cases that write more than the cap (zip_SUITE's zip64 group) then fail one by one, as "file system".
-* [Medium] `tools/erx oracle hosted`: OTP's emulator, kernel, stdlib and compiler groups are wired but not yet compared:
-  the four tables under `test/oracle/hosted_known_differences/` hold only file_SUITE's and filelib_SUITE's rows. Each
+* [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
+  group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
+  `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
+  in the 160 MiB cap without `enospc`; kernel and emulator are
+  untried. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
+  reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `otp/lib/kernel/src/kernel.erl`, `docs/design-runtime.md` (kernel_sup table): `rex`, `global_name_server` and
   `global_group` start only with a carrier, where stock starts them on every node, distributed or not; a local
   `global:register_name` then fails with `noproc` (application_SUITE `failover`, `failover_comp`, `otp_2012`,
   `script_start`, `ensure_started`, `ensure_all_started`, `otp_16504`). Decide whether this stays an explained
   difference of the oracle's tables or whether `global` starts without a carrier, as stock's does.
-* [Medium] `tools/erx oracle hosted`: OTP's emulator, kernel and stdlib groups are wired but not yet compared:
-  their tables under `test/oracle/hosted_known_differences/` hold only file_SUITE's and filelib_SUITE's rows. Each
-  group's run and classification is its own package, after the `/tmp` item above. Stock's wall-clock times on the
-  development host: kernel 5917 s, stdlib 3048 s, compiler 199 s.
+* [Medium] `tools/lib/erx/release_files.rb`, `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the release ships each
+  application's beams and `.app` but not its `include/` headers, so code compiled on erXos cannot
+  `include_lib("stdlib/include/qlc.hrl")` or `ms_transform.hrl`, though `compiler` ships. One case shows epp's include
+  error (erl_lint_SUITE `otp_5878`); qlc_SUITE's 62 and ms_transform_SUITE's 24 failures come from the suites' compile
+  helpers and are attributed to it by their shape: confirm when the headers ship.
+* [Medium] `tools/lib/erx/runtime.rb` (`APPLICATIONS`): `runtime_tools`, which design-runtime.md keeps, is neither built
+  nor shipped, so `dbg` is undefined (gen_statem_SUITE `terminate_crash_format`, supervisor_SUITE `order_of_children`,
+  ms_transform_SUITE `from_shell`).
+* [Medium] `tools/lib/erx/oracle_suites.rb`: suites are compiled on the host with a relative source path, and
+  shell_docs_SUITE's `init_per_suite` recompiles itself with `c:c`, which finds no source on the guest, so the suite is
+  auto-skipped on erXos. A harness bug: compile the suites with the guest path of their copied source.
+* [Medium] `test/oracle/hosted_known_differences/stdlib.txt`: stdlib differences not yet traced to a cause, each a row
+  citing this item: edlin_expand_SUITE `filename_completion`, `function_parameter_completion`; erl_lint_SUITE
+  `otp_5362`; erl_pp_SUITE `import_export`; escript_SUITE `archive_script`, `archive_script_file_access` (compilation
+  error); filename_SUITE `absname`, `absname_bin` (`enoent`),
+  `t_basedir_xdg` (`HOME` is unset on the erXos side); qlc_SUITE `evaluator`; shell_SUITE `otp_5435`, `records`;
+  stdlib_SUITE `app_test`; epp_SUITE `deterministic_include`, `nondeterministic_include`; rand_SUITE `doctests`;
+  gen_server_SUITE `handle_event_timeout` (failed in both runs, at load average about 86). ets_SUITE `smp_insert` and
+  gen_server_SUITE `handle_event_timeout_plain` passed in the full run and failed in the rerun, so they are not in the
+  table; rerun them on an idle host.
+* [Medium] `otp/erts/preloaded/src/prim_file.erl` (`read/2`) and the file server's read: `file:read(Fd, N)` with an
+  absurd N (file_sorter_SUITE `misc` reads a 2^128-1 length field) answers data or `eof` where stock answers `einval` or
+  `enomem`, so the case gets `premature_eof` instead of `bad_object`. Read the size path; refuse sizes past the limit
+  with `einval`, with a regression test.
+* [Low] upstream, `otp/lib/stdlib/test/y2k_SUITE.erl`: `tz_next_date/1` returns its argument when local time equals UTC,
+  so seven cases fail wherever the time zone is UTC, as erXos's is; stock passes only off UTC.
+* [Medium] `tools/erx oracle hosted`: OTP's emulator and kernel groups are wired but not yet compared: their tables
+  under `test/oracle/hosted_known_differences/` hold only file_SUITE's rows. Each group's run and classification is
+  its own package. Stock's wall-clock time for kernel on the development host: 5917 s.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
