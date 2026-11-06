@@ -2,12 +2,11 @@
   "version": 1,
   "inputs": {
     "abi/terminal.txt": "24097c22f87b8ad2a3b68e8c65864e2be2cc68f8cf9231dbd5387f4017c0dcbd",
-    "otp/ORIGIN.md": "3d09e900135c6015682f89c0552cc34fb02871b6fcba0b0c91a6b6b8c6e65bdf",
     "otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
     "otp/lib/stdlib/uc_spec/UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
     "tools/gen_terminal.rb": "1bbc76a53235a43685d6f1286cfca08ceda3cc5b29ae60eb2f08acd655abfe76",
-    "tools/lib/erx/terminal_generation.rb": "399d8c737ac29ba8a600af2abdd2ce7cd7f7975bd426fb139c34c23599637176",
-    "tools/lib/erx/terminal_rules.rb": "0d4d3b6a1f654e75bceef652d18b01db0a9c1992c7441914282db9a9f980f8cf"
+    "tools/lib/erx/terminal_generation.rb": "8ea718c22e9056a9f90a43547332351a9252a84da20bdfda3fae84255d3b4ac5",
+    "tools/lib/erx/terminal_rules.rb": "2ef2982a5c46b45d63471ee8b1ad09b338eab5a369f03d24e40dfe7c96d90bd9"
   },
   "outputs": [
     "abi/terminal_generated.json",

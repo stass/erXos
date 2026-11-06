@@ -14,6 +14,8 @@ module Erx
     OUTPUTS = %w[include/erx/terminal_ascii.h erlang/apps/erx/src/erx_text_tables.erl
                  tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
                  abi/terminal_generated.json].freeze
+    # The licence of the Unicode inputs, which every generated table declares.
+    LICENSE = 'Unicode-3.0'
     module_function
 
     def source(bytes)

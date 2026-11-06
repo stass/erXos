@@ -2,12 +2,18 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/terminal_generation'
 
 class TerminalGenerationTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
+  GENERATION_FILES = %w[abi/terminal.txt tools/gen_terminal.rb tools/lib/erx/terminal_generation.rb
+                        tools/lib/erx/terminal_rules.rb otp/lib/stdlib/uc_spec/UnicodeData.txt
+                        otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt].freeze
+  FIXTURE_REVIEW = { 'rules' => [], 'default_license' => 'Unicode-3.0',
+                     'default_evidence' => 'terminal generation fixture' }.freeze
 
   def self.output_plan
     @output_plan ||= Erx::TerminalRules.plan(root: ROOT)
@@ -141,5 +147,69 @@ class TerminalGenerationTest < Minitest::Test
       assert_equal 'keep existing output', File.binread(target)
       assert_empty Dir.children(outside)
     end
+  end
+
+  # ORIGIN.md lists every imported OTP file, so rebuilding any preloaded beam
+  # rewrites it. Only the import rows of the two Unicode inputs bear on the
+  # generated files, so a root whose ORIGIN.md differs elsewhere stays current.
+  def test_an_unrelated_origin_entry_leaves_the_record_current
+    Dir.mktmpdir('erx-terminal-origin-') do |directory|
+      plain = generation_root(File.join(directory, 'plain'))
+      wider = generation_root(File.join(directory, 'wider'),
+                              extra: { 'otp/lib/kernel/ebin/unrelated.beam' => 'rebuilt beam' })
+      refute_equal File.binread(File.join(plain, 'otp/ORIGIN.md')), File.binread(File.join(wider, 'otp/ORIGIN.md'))
+      Erx::TerminalRules.publish(Erx::TerminalRules.plan(root: plain), root: wider)
+      assert Erx::TerminalRules.check(Erx::TerminalRules.plan(root: wider), root: wider)
+    end
+  end
+
+  # Re-importing an input with different bytes changes what generation reads,
+  # so the record written from the old import is stale even though the tables
+  # come out the same (the added line is a comment and changes no interval).
+  # The same bytes edited in place carry the change notice that ORIGIN.md
+  # accepts, yet generation refuses them: it reads only imported bytes.
+  def test_a_reimported_input_makes_the_record_stale
+    properties = 'otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt'
+    version_line, *rest = File.binread(File.join(ROOT, properties)).lines
+    edited = [version_line, "# Modified by erXos: terminal generation fixture\n", *rest].join
+    Dir.mktmpdir('erx-terminal-reimport-') do |directory|
+      plain = generation_root(File.join(directory, 'plain'))
+      changed = generation_root(File.join(directory, 'changed'), extra: { properties => edited })
+      old_plan = Erx::TerminalRules.plan(root: plain)
+      new_plan = Erx::TerminalRules.plan(root: changed)
+      assert_equal old_plan.slice(*Erx::TerminalRules::OUTPUTS.take(3)), new_plan.slice(*Erx::TerminalRules::OUTPUTS.take(3))
+      Erx::TerminalRules.publish(old_plan, root: changed)
+      error = assert_raises(Erx::Error) { Erx::TerminalRules.check(new_plan, root: changed) }
+      assert_match(%r{\Aterminal generation drift: .*abi/terminal_generated\.json}, error.message)
+      File.binwrite(File.join(plain, properties), edited)
+      error = assert_raises(Erx::Error) { Erx::TerminalRules.plan(root: plain) }
+      assert_equal 'terminal input differs from its pinned OTP origin', error.message
+    end
+  end
+
+  # The generated files declare Unicode-3.0 themselves, so an input imported
+  # under any other licence is refused rather than relabelled.
+  def test_an_input_imported_under_another_license_is_refused
+    Dir.mktmpdir('erx-terminal-license-') do |directory|
+      root = generation_root(directory, review: FIXTURE_REVIEW.merge('default_license' => 'MIT'))
+      error = assert_raises(Erx::Error) { Erx::TerminalRules.plan(root: root) }
+      assert_equal 'terminal input differs from its pinned OTP origin', error.message
+    end
+  end
+
+  private
+
+  # A minimal tree generation can run in: its sources, the two Unicode inputs
+  # (extra adds files or replaces their bytes) and an OTP import recorded over
+  # exactly the otp/ files written.
+  def generation_root(root, extra: {}, review: FIXTURE_REVIEW)
+    GENERATION_FILES.to_h { |path| [path, File.binread(File.join(ROOT, path))] }.merge(extra).each do |path, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(root, path)))
+      File.binwrite(File.join(root, path), bytes)
+    end
+    Erx::Origin.new(root: File.join(root, 'otp'))
+               .write(repository: 'https://example.invalid/otp.git', revision: 'fixture',
+                      archive_sha256: '0' * 64, review: review)
+    root
   end
 end

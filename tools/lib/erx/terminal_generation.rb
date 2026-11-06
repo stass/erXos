@@ -19,7 +19,8 @@ module Erx
       inputs = model.fetch('input').to_h do |name, path|
         bytes = read_input(File.join(root, path), maximum: 8 * 1024 * 1024)
         record = origin.fetch('files')[path.delete_prefix('otp/')]
-        unless record && Digest::SHA256.hexdigest(bytes) == record.fetch('sha256')
+        unless record && Digest::SHA256.hexdigest(bytes) == record.fetch('sha256') &&
+               record.fetch('license') == LICENSE
           raise Error, 'terminal input differs from its pinned OTP origin'
         end
         [name, bytes]
@@ -32,12 +33,18 @@ module Erx
       notice = inputs.fetch('properties').lines.take_while { |line| line.start_with?('#') || line.strip.empty? }.join
                      .force_encoding(Encoding::UTF_8)
       input_hashes = model.fetch('input').to_h { |name, path| [path, Digest::SHA256.hexdigest(inputs.fetch(name))] }
-      provenance = { 'version' => 1, 'unicode' => model.fetch('unicode'), 'license' => 'Unicode-3.0',
+      provenance = { 'version' => 1, 'unicode' => model.fetch('unicode'), 'license' => LICENSE,
                      'origin' => 'otp/ORIGIN.md', 'inputs' => input_hashes,
                      'original_unicode_notice' => notice }
       files[OUTPUTS[3]] = JSON.pretty_generate(provenance, ascii_only: true) + "\n"
+      # The record names what the outputs are computed from. Of otp/ORIGIN.md
+      # generation uses only each input's import row, and the inputs loop
+      # refuses unless the row's sha256 equals the hash of the bytes read and
+      # its licence is the one the outputs declare, so the input hashes below
+      # pin everything it takes from there. Hashing the whole of ORIGIN.md
+      # would make every unrelated OTP rebuild look like drift.
       generators = %w[tools/lib/erx/terminal_rules.rb tools/lib/erx/terminal_generation.rb tools/gen_terminal.rb]
-      hashes = (generators + ['abi/terminal.txt', 'otp/ORIGIN.md']).to_h do |path|
+      hashes = (generators + ['abi/terminal.txt']).to_h do |path|
         [path, Digest::SHA256.file(File.join(root, path)).hexdigest]
       end.merge(input_hashes)
       files[OUTPUTS[4]] = JSON.pretty_generate('version' => 1, 'inputs' => hashes.sort.to_h,
