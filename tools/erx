@@ -131,8 +131,8 @@ module Erx
 
     # An integration test runs in `make check` unless it is excused here: these
     # rebuild the stopgap kernel, boot it under QEMU, need the stock OTP
-    # suites' runtime or need the hosted runtime built.
-    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_reporter qemu_gate_mutant runtime_console runtime_device runtime_hosted_smoke runtime_prim_file runtime_release].freeze
+    # suites' runtime, need the hosted runtime built or need plan9port fetched.
+    STANDALONE_INTEGRATION_TESTS = %w[fiasco_reproducible native_seeds oracle_reporter qemu_gate_mutant rc_oracle runtime_console runtime_device runtime_hosted_smoke runtime_prim_file runtime_release].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }
@@ -434,7 +434,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
       0
     end
 
@@ -464,6 +464,14 @@ module Erx
       report.violations.empty? ? 0 : 1
     end
 
+    # The command shell's oracle, plan9port's rc for this host, from the
+    # fetched pin (RcOracle::Build); prints only its path.
+    def self.build_rc_oracle
+      require_relative 'lib/erx/rc_oracle'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      RcOracle::Build.new(root: ROOT, runner: runner).call.rc
+    end
+
     # The hosted runtime and the release it boots, both of which `make check-runtime-hosted` reads.
     def self.build_runtime(jobs)
       built = Runtime.new(root: ROOT).build(jobs: jobs)
@@ -474,8 +482,8 @@ module Erx
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco runtime].include?(component)
-        raise OptionParser::InvalidArgument, 'build accepts fiasco or runtime'
+      unless %w[fiasco runtime rc-oracle].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime or rc-oracle'
       end
       jobs = 4
       parser = OptionParser.new do |options|
@@ -485,6 +493,7 @@ module Erx
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       path = case component
              when 'runtime' then build_runtime(jobs)
+             when 'rc-oracle' then build_rc_oracle
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")

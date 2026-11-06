@@ -10,7 +10,7 @@ DOCKER_CONTEXT ?=
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build run check check-sources status setup fetch check-tla check-hw generate-hw check-arch-terms
+.PHONY: all build run check check-sources status setup fetch check-tla check-rc-oracle check-hw generate-hw check-arch-terms
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
@@ -100,6 +100,11 @@ fetch:
 
 check-tla:
 	$(RUBY) tools/erx check-tla
+
+# The command shell's oracle: needs plan9port fetched (tools/erx fetch --source plan9port).
+check-rc-oracle:
+	$(RUBY) tools/erx build rc-oracle
+	$(RUBY) test/integration/rc_oracle_test.rb
 
 check-hw:
 	$(RUBY) tools/gen_hw.rb --check

@@ -1651,6 +1651,26 @@ document's "residual risks accepted" paragraph.
   them the layer should offer; programs brought in come from FreeBSD or
   are BSD-licensed where possible (CLAUDE.md, principle 5;
   [design-programs.md](docs/design-programs.md#the-posix-lite-personality)).
+* [Medium] shell, the rc oracle's corpus: import Byron Rakitzis's `trip.rc`
+  (zlib, `github.com/rakitzis/rc`, SHA-256 in
+  [research-boards-storage.md](docs/research-boards-storage.md#the-command-shells-oracle))
+  beside plan9port's `test.rc` in `test/shell/rc/`, pinned like any
+  source, with the cases for that implementation's extensions set apart;
+  build toybox for the host and put it first in the oracle's `$path`; and
+  compare the Erlang shell with `Erx::RcOracle` script by script
+  ([design-shell.md](docs/design-shell.md#verification-and-testing)).
+* [Low] shell, the rc oracle on Linux: `Erx::RcOracle::Build` links the
+  lib9 members rc pulls on macOS; check the list and the flags on Linux
+  hosts when the plan reaches them.
+* [Low] shell, the rc oracle runner's residuals (`tools/lib/erx/rc_oracle.rb`), for
+  trusted corpus scripts: rc stays in the operator's session, so a script
+  can open `/dev/tty`; a program that leaves rc's process group escapes the
+  kill at the end, and a writer killed mid-write can add bytes after it;
+  a script that replaces `sigexit` can write a status report itself; the
+  build inherits the host's compiler environment (`CPATH`, `SDKROOT`),
+  which its record does not hold; `TZ` and the umask come from the host;
+  and programs see `fn#sigexit` and `PLAN9`, which the comparison with the
+  Erlang shell must leave out.
 * [Medium] liberx, `erx` backend, `erx_utcb_self`: the generated trap
   wrappers of calls with UTCB parameters
   (`liberx/backend/erx/arch/aarch64/generated/calls.c`) reach the calling

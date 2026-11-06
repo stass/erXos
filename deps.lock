@@ -33,6 +33,17 @@
       "status": "permanent"
     },
     {
+      "id": "plan9port",
+      "kind": "git",
+      "version": "1f1396913fb5372408f442ed26933f5ae4b399cd",
+      "url": "https://github.com/9fans/plan9port.git",
+      "commit": "1f1396913fb5372408f442ed26933f5ae4b399cd",
+      "sha256": "13a993b331b95ca33e0e441f47a8da51f30d721ea9d8654d4dba12bb04bfe2f9",
+      "directory": "plan9port-1f13969",
+      "license": "MIT",
+      "status": "permanent"
+    },
+    {
       "id": "tla-tools",
       "kind": "file",
       "version": "1.7.4",
