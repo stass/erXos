@@ -38,6 +38,25 @@ class QemuTest < Minitest::Test
     assert_equal 'none', tcg.fetch(tcg.index('-monitor') + 1)
   end
 
+  def test_the_deterministic_word_counts_instructions_on_one_tcg_cpu
+    plan = { accel: 'tcg', image: 'image', serial: 'serial' }
+    argv = Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1 erx.arg=-deterministic')
+    assert_equal %w[-smp 1 -icount shift=0,sleep=off -rtc base=2026-01-01,clock=vm], argv[argv.index('-smp'), 6]
+    assert_includes argv.fetch(argv.index('-machine') + 1).split(','), 'dtb-randomness=off'
+    # Not a word of its own, by the guest's reading: a word's value, and a tab inside a word.
+    ['erx.watchdog=1,30,600 erx.arg=erx.det=1', "erx.arg=a\terx.det=1"].each do |line|
+      plain = Erx::QemuPlan.argv(**plan, accel: 'hvf', command_line: line)
+      refute_includes plain, '-icount'
+      refute_includes plain.fetch(plain.index('-machine') + 1), 'dtb-randomness'
+    end
+  end
+
+  def test_the_deterministic_word_refuses_hvf_and_more_cpus
+    plan = { image: 'image', serial: 'serial', command_line: 'erx.det=1' }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, accel: 'hvf') }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, accel: 'tcg', cpus: 4) }
+  end
+
   def test_a_serial_input_reads_a_path_and_still_logs_to_the_file
     plain = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial')
     typed = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'keys')

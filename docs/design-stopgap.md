@@ -869,7 +869,7 @@ power-loss design handles the reboot. `design-storage.md`'s rule, which remounts
 
 ## Deterministic mode
 
-`erx.det=1` is one CPU, TCG with instruction counting, the interpreter. The harness runs QEMU with `-smp 1` and `-icount sleep=off`. Fiasco's tick comes from
+`erx.det=1` is one CPU, TCG with instruction counting, the interpreter. The harness runs QEMU with `-smp 1`, `-icount shift=0,sleep=off` (without `shift`, `-icount` counts nothing), `-rtc base=2026-01-01,clock=vm`, so the real-time clock starts at a fixed date and runs on the instruction count, and the `virt` machine's `dtb-randomness=off`, so the device tree carries no random seeds; `Erx::QemuPlan` adds them exactly when the kernel command line carries `erx.det=1`, and refuses that word under HVF or on more than one CPU. Fiasco's tick comes from
 the architecture's generic timer, which instruction counting makes a function of the instructions executed; the time page, deadlines and entropy derive from
 that counter and the manifest's seed. ERTS runs one scheduler and the interpreter. The watchdog's step is off. The comparison starts at erXos's banner, or at the
 root's first line if Fiasco's own boot proves not deterministic, recorded as a stopgap difference.
@@ -1072,10 +1072,11 @@ The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line w
 
 The gate's `production_image` suite has run ERTS's interpreter as the root, `ERX_CLONE_EXECUTOR`'s path through `pthread_create.c` and `clone.c`, `l4_scheduler_info` as a CPU count, the release's files through `erx_prim_file` from the archive, `init`, `kernel_sup`'s children to `erx_console`'s banners, under TCG and HVF at 1 and 4 CPUs, and a release's pets, kept past the deadlines and then stopped, under both at 1 CPU.
 
+The same suite boots the image twice in deterministic mode to the shell and compares the two serial transcripts byte for byte from erXos's banner to the shell's line, which includes the counter Fiasco's timer reports; Fiasco's own boot, its delay calibration and timer setup included, gives the same bytes each time.
+
 **Later packages:**
 
 * `enif_send` from a dirty NIF's callback, and its report of a dead receiver: `erl_nif.c:883`.
-* Fiasco's boot is deterministic under instruction counting, with medium confidence: its delay calibration and timer setup are unread.
 * The size estimates: backend packages 1 to 6, 3,000 to 4,500 lines of C17; the musl port 1,000 to 2,000, of which threads and `malloc` measure 600; NIF glue about 500.
 
 ## Open decisions

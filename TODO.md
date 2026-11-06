@@ -209,9 +209,6 @@ it; git history is the record of completed work.
 * [Low] tooling, `test/oracle/erx_ct_oracle.erl`: the events reach the host through
   `io:put_chars` on standard_io, so a code point the device's encoding cannot carry would end
   the erXos run as crashed or unreadable instead of reporting its cases. Write the raw bytes.
-* [Low] tooling, `tools/lib/erx/qemu.rb`: the harness gives `erx.det=1` boots no `-icount`, and they
-  run under HVF and at any CPU count too, so `production_image`'s deterministic boot checks the
-  switch (watchdog off, the extra `erx.arg` word) and not deterministic mode's clock or transcript.
 * [Low] stopgap, `liberx/backend/fiasco/root.c`: a refused `erx.` word ends the boot with a fixed
   reason that names no word, though `erx_boot_args_parse` gives it in `refused`. Printing it needs
   the console's escaping function, as it is text from the boot loader.

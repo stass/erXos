@@ -20,6 +20,15 @@ module Erx
     # between the two and Ctrl-A X quits QEMU. For a person at a terminal,
     # never for a harness, which reads the line from a file.
     CONSOLE = :console
+    # The kernel command line's word for deterministic mode (docs/design-stopgap.md,
+    # "Deterministic mode"). A plan whose line carries it, split on spaces as the guest
+    # splits it, runs one CPU under TCG, which instruction counting makes single-threaded.
+    # The guest's every input is then the same at each boot: its clock counts the
+    # instructions executed (without shift, -icount counts nothing), its real-time clock
+    # starts at a fixed date and runs on that clock, and QEMU's device tree carries no
+    # random seeds.
+    DETERMINISTIC_WORD = 'erx.det=1'
+    DETERMINISTIC_ARGUMENTS = %w[-icount shift=0,sleep=off -rtc base=2026-01-01,clock=vm].freeze
 
     module_function
 
@@ -32,17 +41,22 @@ module Erx
       unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
         raise Error, 'guest memory must be between 128 and 4096 MiB'
       end
+      deterministic = command_line.to_s.split(/ /).include?(DETERMINISTIC_WORD)
+      if deterministic && (accel != 'tcg' || cpus != 1)
+        raise Error, 'deterministic mode runs one CPU under TCG'
+      end
       [image, *(serial == CONSOLE ? [] : [serial]), program].each do |value|
         raise Error, 'invalid QEMU path' unless value.is_a?(String) && !value.empty? && !value.include?("\0")
       end
 
       machine = 'virt-11.1,gic-version=3'
       machine += ',msi=gicv2m' if accel == 'tcg'
+      machine += ',dtb-randomness=off' if deterministic
       # `-monitor none` turns off only QEMU's default monitor; CONSOLE's
       # `mon:stdio` brings its own, multiplexed onto the serial line.
       [program, '-machine', machine, '-accel', accel,
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
-       '-smp', cpus.to_s, '-m', memory_mib.to_s,
+       '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
        '-no-reboot', *serial_arguments(serial, serial_input), '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(command_line ? ['-append', command_line] : [])].freeze

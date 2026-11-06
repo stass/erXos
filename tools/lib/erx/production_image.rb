@@ -9,6 +9,7 @@ require_relative 'abi'
 require_relative 'boot_file'
 require_relative 'build_inputs'
 require_relative 'crash_frame'
+require_relative 'deterministic_transcript'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'fiasco_provenance'
@@ -235,9 +236,8 @@ module Erx
         accels.product(cpus).to_h do |accel, count|
           points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
           full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+          deterministic(built) if accel == 'tcg' && count == 1
           if count == cpus.first
-            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE,
-                                      points: Run.checkpoints(built, root: @root, watchdog: 'off', cpus: count, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size))
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
                                       points: Run.command_line_refusal_checkpoints)
           end
@@ -333,6 +333,17 @@ module Erx
       private_class_method :point
 
       private
+
+      # Two boots in deterministic mode, to the shell, whose transcripts must be the same
+      # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG.
+      def deterministic(built)
+        points = Run.checkpoints(built, root: @root, watchdog: 'off', cpus: 1, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size)
+        first, second = Array.new(2) do
+          report = boot('tcg', 1, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE, points: points)
+          File.binread(report.fetch('serial_log'))
+        end
+        DeterministicTranscript.compare(first, second)
+      end
 
       # The pet at work: the machine outlives its deadlines, and once erx_watchdog stops being
       # scheduled it ends, with the watchdog's own crash record. Neither alone is the proof: a
