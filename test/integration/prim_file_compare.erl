@@ -1040,6 +1040,8 @@ tmp(Prefix, Mode) ->
     tmp_ahead(At, Show),
     tmp_ipread(At, Show),
     tmp_advise(At, Show),
+    tmp_prim_file_handle(At, Show),
+    tmp_archive(At, Show),
     tmp_directory_handle(At, Show),
     tmp_cwd(At, Mode, Show),
     tmp_bind_top(At, Mode, Show),
@@ -1175,6 +1177,48 @@ tmp_advise(At, Show) ->
     ok = file:close(Fd),
     Show("advise closed", file:advise(Fd, 0, 0, normal)),
     Show("advise delete", file:delete(Name)).
+
+%% prim_file's own operations on a descriptor its open returned (prim_file_SUITE's
+%% open1, pos1, truncate and the like, and prim_zip, which reads archives through
+%% prim_file): each answers as stock's does.
+tmp_prim_file_handle(At, Show) ->
+    Name = At(<<"primfd">>),
+    {ok, Fd} = prim_file:open(Name, [read, write, binary]),
+    Steps = [{"primfd write", fun() -> prim_file:write(Fd, <<"one\ntwo\n">>) end},
+             {"primfd position", fun() -> prim_file:position(Fd, bof) end},
+             {"primfd read", fun() -> prim_file:read(Fd, 4) end},
+             {"primfd read_line", fun() -> prim_file:read_line(Fd) end},
+             {"primfd pread", fun() -> prim_file:pread(Fd, 1, 2) end},
+             {"primfd pread list", fun() -> prim_file:pread(Fd, [{0, 3}, {4, 3}]) end},
+             {"primfd pwrite", fun() -> prim_file:pwrite(Fd, 0, <<"ONE">>) end},
+             {"primfd pwrite list", fun() -> prim_file:pwrite(Fd, [{4, <<"TWO">>}]) end},
+             {"primfd sync", fun() -> prim_file:sync(Fd) end},
+             {"primfd datasync", fun() -> prim_file:datasync(Fd) end},
+             {"primfd advise", fun() -> prim_file:advise(Fd, 0, 0, normal) end},
+             {"primfd handle info", fun() -> tmp_info(prim_file:read_handle_info(Fd)) end},
+             {"primfd position 3", fun() -> prim_file:position(Fd, 3) end},
+             {"primfd truncate", fun() -> prim_file:truncate(Fd) end},
+             {"primfd close", fun() -> prim_file:close(Fd) end},
+             {"primfd read closed", fun() -> prim_file:read(Fd, 1) end},
+             {"primfd contents", fun() -> prim_file:read_file(Name) end},
+             {"primfd delete", fun() -> prim_file:delete(Name) end}],
+    [Show(Step, raised(Call)) || {Step, Call} <- Steps].
+
+%% An archive in /tmp read through erl_prim_loader, which opens it with prim_zip
+%% (erl_prim_loader_SUITE's local_archive and virtual_dir_in_archive).
+tmp_archive(At, Show) ->
+    Archive = binary_to_list(At(<<"lib.ez">>)),
+    {ok, _} = zip:create(Archive, [{"lib/ebin/m.beam", <<"beam">>}], []),
+    Show("archive list_dir", raised(fun() -> erl_prim_loader:list_dir(Archive ++ "/lib") end)),
+    Show("archive read_file",
+         raised(fun() -> erl_prim_loader:read_file(Archive ++ "/lib/ebin/m.beam") end)),
+    Show("archive delete", {erl_prim_loader:purge_archive_cache(), file:delete(Archive)}).
+
+%% A call's result, or a raise as a term of its own, so the steps after it still run.
+raised(Call) ->
+    try Call()
+    catch Class:Reason -> {raised, Class, Reason}
+    end.
 
 %% A directory opened with [read, directory] (file_SUITE's
 %% file_handle_info_basic_directory): the handle answers its file information, a read

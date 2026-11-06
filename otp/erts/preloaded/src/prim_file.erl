@@ -63,6 +63,12 @@
 -define(ERX_NOFOLLOW, #{follow => false, willbedir => false}).
 -define(LARGEFILESIZE, (1 bsl 63)).
 
+%% erXos: open/2 answers for a file of a server (erx_file_remote) or of a mounted
+%% image (erx_erofs_file) with a descriptor naming that module. Each operation on an
+%% open file forwards such a descriptor to its module, as file does, so prim_file
+%% takes every descriptor its own open returns.
+-define(ERX_FILE(Module), (Module =:= erx_file_remote orelse Module =:= erx_erofs_file)).
+
 -export([copy/3, start/0]).
 
 -include("file_int.hrl").
@@ -189,6 +195,8 @@ file_desc_to_ref(FileDescriptorId, Modes) ->
 make_fd(Modes, FRef) ->
     #file_descriptor{module = ?MODULE, data = build_fd_data(Modes, FRef) }.
 
+close(#file_descriptor{module = Module} = Fd) when ?ERX_FILE(Module) ->
+    Module:close(Fd);
 close(Fd) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -197,6 +205,8 @@ close(Fd) ->
         error:badarg -> {error, badarg}
     end.
 
+read(#file_descriptor{module = Module} = Fd, Size) when ?ERX_FILE(Module) ->
+    Module:read(Fd, Size);
 read(Fd, Size) ->
     try
         #{ handle := FRef,
@@ -241,6 +251,8 @@ read_1(FRef, RBuf, RBufSz, RASz, RSz) when RBufSz =:= 0 ->
             {error, Reason}
     end.
 
+read_line(#file_descriptor{module = Module} = Fd) when ?ERX_FILE(Module) ->
+    Module:read_line(Fd);
 read_line(Fd) ->
     try
         #{ handle := FRef,
@@ -282,6 +294,8 @@ read_line_1(_FRef, RBuf, {ok, LFIndex}, _LineSize) ->
         Line -> {ok, Line}
     end.
 
+write(#file_descriptor{module = Module} = Fd, IOData) when ?ERX_FILE(Module) ->
+    Module:write(Fd, IOData);
 write(Fd, IOData) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -300,6 +314,8 @@ write_1(FRef, IOVec) ->
             {error, Reason}
     end.
 
+truncate(#file_descriptor{module = Module} = Fd) when ?ERX_FILE(Module) ->
+    Module:truncate(Fd);
 truncate(Fd) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -309,6 +325,8 @@ truncate(Fd) ->
         error:badarg -> {error, badarg}
     end.
 
+advise(#file_descriptor{module = Module} = Fd, Offset, Length, Advise) when ?ERX_FILE(Module) ->
+    Module:advise(Fd, Offset, Length, Advise);
 advise(Fd, Offset, Length, Advise) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -317,6 +335,8 @@ advise(Fd, Offset, Length, Advise) ->
         error:badarg -> {error, badarg}
     end.
 
+allocate(#file_descriptor{module = Module} = Fd, Offset, Length) when ?ERX_FILE(Module) ->
+    Module:allocate(Fd, Offset, Length);
 allocate(Fd, Offset, Length) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -325,6 +345,8 @@ allocate(Fd, Offset, Length) ->
         error:badarg -> {error, badarg}
     end.
 
+sync(#file_descriptor{module = Module} = Fd) when ?ERX_FILE(Module) ->
+    Module:sync(Fd);
 sync(Fd) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -333,6 +355,8 @@ sync(Fd) ->
         error:badarg -> {error, badarg}
     end.
 
+datasync(#file_descriptor{module = Module} = Fd) when ?ERX_FILE(Module) ->
+    Module:datasync(Fd);
 datasync(Fd) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -341,6 +365,8 @@ datasync(Fd) ->
         error:badarg -> {error, badarg}
     end.
 
+position(#file_descriptor{module = Module} = Fd, At) when ?ERX_FILE(Module) ->
+    Module:position(Fd, At);
 position(Fd, {cur, Offset}) ->
     try
         %% Adjust our current position according to how much we've read ahead.
@@ -371,6 +397,8 @@ position_1(Fd, Mark, Offset) ->
             seek_nif(FRef, Mark, Offset)
     end.
 
+pread(#file_descriptor{module = Module} = Fd, Offset, Size) when ?ERX_FILE(Module) ->
+    Module:pread(Fd, Offset, Size);
 pread(Fd, Offset, Size) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -379,6 +407,8 @@ pread(Fd, Offset, Size) ->
         error:badarg -> {error, badarg}
     end.
 
+pread(#file_descriptor{module = Module} = Fd, LocNums) when ?ERX_FILE(Module) ->
+    Module:pread(Fd, LocNums);
 pread(Fd, LocNums) ->
     try
         #{ handle := FRef } = get_fd_data(Fd),
@@ -405,6 +435,8 @@ pread_list(FRef, [{Offset, Size} | Rest], ResultList) ->
             {error, Reason}
     end.
 
+pwrite(#file_descriptor{module = Module} = Fd, Offset, IOData) when ?ERX_FILE(Module) ->
+    Module:pwrite(Fd, Offset, IOData);
 pwrite(Fd, Offset, IOData) ->
     try
         IOVec = erlang:iolist_to_iovec(IOData),
@@ -428,6 +460,8 @@ pwrite_plain(FRef, Offset, IOVec) ->
             {error, Reason}
     end.
 
+pwrite(#file_descriptor{module = Module} = Fd, LocBytes) when ?ERX_FILE(Module) ->
+    Module:pwrite(Fd, LocBytes);
 pwrite(Fd, LocBytes) ->
     try
         case get_fd_data(Fd) of
@@ -455,6 +489,8 @@ pwrite_list(FRef, [{Offset, IOData} | Rest], Successes) ->
         ok -> pwrite_list(FRef, Rest, Successes + 1)
     end.
 
+sendfile(#file_descriptor{module = Module} = Fd, Socket, Offset, Bytes, ChunkSize, Headers, Trailers, Flags) when ?ERX_FILE(Module) ->
+    Module:sendfile(Fd, Socket, Offset, Bytes, ChunkSize, Headers, Trailers, Flags);
 sendfile(Fd, Socket, Offset, Bytes, _ChunkSize, [], [], _Flags) ->
     %% There's a very nasty race in here; if we die just prior to duplicating
     %% the handle down in the sendfile call, it might get reused by something
@@ -494,6 +530,8 @@ internal_get_nif_resource(Fd) ->
                      Data :: iodata() | eof} |
                 eof |
                 {error, Reason :: atom()}.
+ipread_s32bu_p32bu(#file_descriptor{module = Module} = Fd, Offset, MaxSize) when ?ERX_FILE(Module) ->
+    Module:ipread_s32bu_p32bu(Fd, Offset, MaxSize);
 ipread_s32bu_p32bu(Fd, Offset, Infinity) when is_atom(Infinity) ->
     ipread_s32bu_p32bu(Fd, Offset, (1 bsl 31) - 1);
 ipread_s32bu_p32bu(Fd, Offset, MaxSize)
@@ -1022,7 +1060,9 @@ erx_link_access(Encoded) ->
     end.
 
 read_handle_info(Fd) ->
-  read_handle_info_1(Fd, local).
+    read_handle_info(Fd, []).
+read_handle_info(#file_descriptor{module = Module} = Fd, Opts) when ?ERX_FILE(Module) ->
+    Module:read_handle_info(Fd, Opts);
 read_handle_info(Fd, Opts) ->
   read_handle_info_1(Fd, proplist_get_value(time, Opts, local)).
 
