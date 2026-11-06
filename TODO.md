@@ -311,6 +311,15 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
+  parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
+  `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page
+  (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
+  backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
+  word, and a checkpoint of `parked N of N` at the shell.
+* [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
+  discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
+  strips debug information only. Check the lld link map's input members as well, which no stripping changes.
 * [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: an open file's owner process is one per grant, keyed by the node,
   where `docs/design-files.md` starts one per open file on any grant; a file open through two grants of one tree has
   two owners, so its requests are ordered against each other only by the tree. /tmp serves one grant per tree. Add

@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'interpreter_image'
 require_relative 'pack_provenance'
 
 module Erx
@@ -80,9 +81,13 @@ module Erx
     end
 
     # The system's root task, as the archive's boot/stopgap-root entry: SYSTEM over the
-    # archives that hold ERTS and musl, with the objects' debug information left out.
+    # archives that hold ERTS and musl, with the objects' debug information left out. It is
+    # the interpreter image, which this one link of it checks for JIT and C++ before
+    # anything packs it.
     def build_system(directory:, archives:)
-      build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: archives, strip_debug: true)
+      program = build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: archives, strip_debug: true)
+      InterpreterImage.check(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      program
     end
 
     # A root with nothing to run, as the archive's boot/stopgap-root entry.

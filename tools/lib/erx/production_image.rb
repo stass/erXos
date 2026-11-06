@@ -217,6 +217,14 @@ module Erx
       CONSOLE_LONG_BYTES = 20_000
       # A tab and an escape sequence in a debug log record, typed as byte values.
       LOG_AFTER_HANDOFF = %(erx_log:debug(<<"after",9,"handoff",27,"[1m">>).\r)
+      # Processes of the system domain, registered by name, that every booted release runs at
+      # the shell: init and the console as well as children of kernel_sup.
+      SYSTEM_PROCESSES = %w[init code_server file_server_2 erx_console erx_watchdog].freeze
+      # erlang:processes() at the shell: how many it lists, which of SYSTEM_PROCESSES it
+      # misses, and the emulator's flavour, emu for the interpreter image (docs/design-runtime.md, R10).
+      PROCESSES_EXPRESSION = '{processes,length(erlang:processes()),' \
+                             "[N||N<-[#{SYSTEM_PROCESSES.join(',')}],not lists:member(whereis(N),erlang:processes())]," \
+                             "erlang:system_info(emu_flavor)}.\r"
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -278,7 +286,8 @@ module Erx
       # A person at the serial console. The first line is typed at the boot's development
       # warning, before the driver starts, so the FIFO holds it when the driver takes the UART. Each answer then
       # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
-      # the mistake is a syntax error, an output longer than any FIFO, and a debug log record.
+      # the mistake is a syntax error, an output longer than any FIFO, a debug log record, and
+      # what erlang:processes() lists.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
@@ -294,12 +303,18 @@ module Erx
          console_point('long-answer', /\Aok\r*\n\z/n, type: LOG_AFTER_HANDOFF),
          # A record logged once the driver owns the UART: the console reads it and writes it
          # escaped, tab and escape byte as text, never as the bytes themselves.
-         console_point('log-after-handoff', /\A(?:[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n)].freeze
+         console_point('log-after-handoff', /\A(?:[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n,
+                       type: PROCESSES_EXPRESSION),
+         # The echo of the line reads {processes,length, so only the answer matches.
+         console_point('processes', /\A(?:[0-9]+> )?\{processes,[0-9]/n,
+                       whole: /\A(?:[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n)].freeze
       end
 
-      # A line of the console's transcript, and what the person types once it is seen.
-      def self.console_point(name, pattern, type: nil)
-        { name: name, pattern: pattern, seconds: EVAL_SECONDS, **(type ? { type: type } : {}) }.freeze
+      # A line of the console's transcript, what the person types once it is seen, and the
+      # whole line it must be, whose mismatch raises with the line.
+      def self.console_point(name, pattern, type: nil, whole: nil)
+        verify = whole && whole_line(whole, speaker: 'the console answered')
+        { name: name, pattern: pattern, seconds: EVAL_SECONDS, **{ type: type, verify: verify }.compact }.freeze
       end
       private_class_method :console_point
 
@@ -328,9 +343,15 @@ module Erx
 
       def self.point(name, pattern, whole, seconds: 30)
         { name: name, pattern: pattern, seconds: seconds,
-          verify: ->(text) { raise Error, "the root task reports #{text.inspect}" unless whole.match?(text) } }.freeze
+          verify: whole_line(whole, speaker: 'the root task reports') }.freeze
       end
       private_class_method :point
+
+      # A checkpoint's verifier: the line it selected must match whole, or it raises with the line.
+      def self.whole_line(whole, speaker:)
+        ->(text) { raise Error, "#{speaker} #{text.inspect}" unless whole.match?(text) }
+      end
+      private_class_method :whole_line
 
       private
 
