@@ -1622,10 +1622,11 @@ to the corpus and follow rc
   `format` and `hash_algorithm` each alone, so a malformed boot image can
   pair `erofs_verity` with hash algorithm `none` and zero tree fields, give
   `erofs_unchecked` a root hash, use format 2 in a release manifest, carry
-  extents past the slot, unaligned, unsorted or overlapping, or a window
-  whose `image` disagrees with its role. Express the format's rules as
-  reader rules in `abi/manifest.txt` and check extents against the slot in
-  one function the block service calls before it serves an image window.
+  unsorted or overlapping extents, or a window whose `image` disagrees with
+  its role. Express the format's rules as reader rules in
+  `abi/manifest.txt`. The block service checks only what it serves
+  (`erx_blk_image:place/2`): one extent of whole sectors inside the slot,
+  as long as the image's data.
 * [Low] storage, the slot's image area: the packer's extent check bounds an
   image by the whole slot, so an extent may cover the slot's FAT and
   bootable file; the images' start (128 MiB) and alignment (1 MiB) live in
@@ -1756,18 +1757,25 @@ document's "residual risks accepted" paragraph.
   places it inside the FAT's file; and the record partition holds the
   record's sector (`BootRecord.sector`) without the FAT whose
   `autoboot.txt` file is that sector, which the Raspberry Pi's firmware
-  needs and nothing on QEMU reads. The boot image's manifest records slot
-  A's EROFS image (`release`, format `erofs_unchecked`, its extent from
-  `ReleaseMedium.image`) and a read-only `verified_image` window on it, but
-  nothing at boot reads them: the root does not hand the system domain the
-  boot value and slot (the handoff carries them to the kernel's banner
-  alone), `erx_blk_service` derives windows from the medium layout only, so
-  it serves no window on the image, and the system domain mounts none, so
-  the guest still reads its release from the boot image alone. The EROFS
-  image holds a copy of the whole system release, its manifest excepted, and
-  the boot image holds the release too, until the boot from the medium decides which
-  releases leave the boot image
+  needs and nothing on QEMU reads. The EROFS image in the slot holds a copy
+  of the whole system release, its manifest excepted, which the system
+  domain mounts at `/images/release` and reads as files only, and the boot
+  image holds the release too, from which the system domain starts, until
+  the boot from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
+* [Low] storage, image windows (`erlang/apps/erx_blk/src/erx_blk_service.erl`):
+  a restart of the block service starts new windows, but the image mounts
+  made at boot (`mount_images/0`, a supervisor child that runs once) are not
+  made again, so `/images/NAME` answers `eio` until the next boot.
+* [Medium] storage, window rights (`erlang/apps/erx_blk/src/erx_blk_window.erl`):
+  a window is read-only because its role is `{image, _}`, not because it
+  carries the manifest window's `rights`; the slot windows over the same
+  sectors stay writable for any caller in the system domain. Carry `ro | rw`
+  from the manifest in the window and let a write require `rw`, so read-only
+  holds by construction (PW1's grants bring the per-client half).
+* [Low] storage, image names (`erx_blk_image:windows/2`): two images of one
+  name would start two windows of which the service keeps one; refuse the
+  second by name, or let the manifest's reader refuse duplicate image names.
 
 * [Low] storage, the boot-selection record (`abi/medium.txt`): the record and
   the reset count each have a MiB of their own, the layout's alignment taken as

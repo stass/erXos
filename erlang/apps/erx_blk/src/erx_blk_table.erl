@@ -28,7 +28,8 @@
 
 -include("generated/erx_abi.hrl").
 
--type role() :: record | slot_a | slot_b | vault | data.
+%% {image, Name} is a window on one of the booted slot's EROFS images (erx_blk_image).
+-type role() :: record | slot_a | slot_b | vault | data | {image, binary()}.
 %% A window: its role, its first sector on the medium and its length in sectors.
 -type window() :: {role(), non_neg_integer(), pos_integer()}.
 -type record_name() :: mbr | vault_ebr | data_ebr.

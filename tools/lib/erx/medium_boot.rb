@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest/md5'
 require 'fileutils'
 require_relative 'boot_record'
 require_relative 'error'
@@ -42,12 +43,38 @@ module Erx
     end
 
     # The production boot's checkpoints with the boot value's inserted: the kernel
-    # prints "erx: boot image build ..." and then "erx: boot value ...".
-    def checkpoints(points, choice)
+    # prints "erx: boot image build ..." and then "erx: boot value ...". At the shell the
+    # person reads a release file from the slot's EROFS image (image_checkpoints).
+    def checkpoints(points, choice, release:)
       at = points.index { |point| point.fetch(:name) == 'image-identity' }
       raise Error, 'the production checkpoints name no image-identity' unless at
+      raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)..]].freeze
+      shell, answer = image_checkpoints(points.last, release)
+      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1], shell, answer].freeze
+    end
+
+    # The release file the shell reads from the image: stdlib's lists module, many blocks long.
+    IMAGE_FILE = %r{\Asystem/lib/stdlib-[^/]+/ebin/lists\.beam\z}
+
+    # At the shell's banner, the person types an expression that waits for the block driver
+    # to have started, which is when its image mounts are made, and prints the MD5 of
+    # IMAGE_FILE as /images/release shows it, the system release's EROFS image in the slot
+    # (docs/design-stopgap.md, "Image windows"); it must be the MD5 of the file the
+    # packer put in the image. The echo of the line does not start {image_md5, so only
+    # the answer matches.
+    def image_checkpoints(shell, release)
+      entry = release.find { |candidate| IMAGE_FILE.match?(candidate.fetch('path')) }
+      raise Error, 'the release has no stdlib lists module to read from the image' unless entry
+
+      path = "/images/release/#{entry.fetch('path')}"
+      digest = Digest::MD5.file(entry.fetch('artifact')).hexdigest.upcase
+      expression = "application:ensure_all_started(erx_blk),case file:read_file(\"#{path}\") of " \
+                   "{ok,B}->{image_md5,binary:encode_hex(erlang:md5(B))};E->{image_md5,E} end.\r"
+      whole = /\A(?:[0-9]+> )?\{image_md5,<<"#{digest}">>\}\r*\n\z/n
+      [shell.merge(type: expression).freeze,
+       { name: 'image-md5', pattern: /\A(?:[0-9]+> )?\{image_md5,/n, seconds: 120,
+         verify: ->(text) { raise Error, "the shell read #{text.inspect} from the image" unless whole.match?(text) } }.freeze]
     end
 
     # Boots the production image from its release medium to the shell under HVF.
@@ -91,7 +118,7 @@ module Erx
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: WATCHDOG, cpus: count)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(accel: 'hvf', cpus: count, image: image, memory_mib: MEMORY_MIB, directory: File.join(directory, 'boot'),
-                 checkpoints: MediumBoot.checkpoints(points, choice), dtb: firmware_tree(count, image, disks, choice, directory),
+                 checkpoints: MediumBoot.checkpoints(points, choice, release: built.release), dtb: firmware_tree(count, image, disks, choice, directory),
                  disks: disks)
         'passed'
       end

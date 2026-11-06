@@ -16,6 +16,7 @@
 
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
+#include "erx/core/boot_pair.h"
 #include "erx/release.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
@@ -41,16 +42,18 @@ int	main(int, char **, char **);
 static const char	*release_read(const erx_boot_handoff_view_t *, erx_boot_manifest_t *);
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 console_uart_build(const erx_boot_console_t *);
+static size_t		 boot_build(erx_boot_pair_t);
+static size_t		 word_append(char *, size_t, size_t, const char *);
 static size_t		 console_uart_number(char *, uint64_t);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /*
- * The manifest's words, the console's, each device record's, then each erx.arg word, which
- * takes a byte and its NUL at the least.
+ * The manifest's words, the console's, the boot pair's, each device record's, then each erx.arg
+ * word, which takes a byte and its NUL at the least.
  */
-static erx_boot_words_t arg_words[2 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
+static erx_boot_words_t arg_words[3 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
 /* -erx console_uart BASE SIZE LINE: three numbers, each at most UINT64_MAX's 20 digits and its NUL. */
 #define CONSOLE_UART_NUMBER_MAX	(20 + 1)
 static const char console_uart_prefix[] = "-erx\0console_uart";
@@ -58,6 +61,9 @@ static char console_uart_words[sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NU
 _Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX,
     "the console words hold the prefix and three numbers");
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_DEVICE_WORDS_MAX];
+/* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
+static const char boot_prefix[] = "-erx\0boot";
+static char boot_words[sizeof(boot_prefix) + sizeof("unknown") + sizeof("none")];
 
 const erx_boot_info_t *
 erx_boot_info(void)
@@ -175,11 +181,11 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 }
 
 /*
- * The manifest's system_args, what its driver opens of the console's device entry, each device
- * record (docs/design-stopgap.md, "Device records"), then each erx.arg word of the kernel
- * command line, in its order. A plain word joins the flag before
- * it, which erx_pl011 expects. A manifest with no console entry has no such words, and the
- * driver's start then says why the console has none.
+ * The manifest's system_args, what its driver opens of the console's device entry, the boot
+ * value and slot of the handoff, each device record (docs/design-stopgap.md, "Device records"),
+ * then each erx.arg word of the kernel command line, in its order. A plain word joins the flag
+ * before it, which erx_pl011 expects. A manifest with no console entry has no such words, and
+ * the driver's start then says why the console has none.
  */
 static const char *
 gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *manifest, size_t *nargs)
@@ -187,11 +193,16 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	size_t cursor = 0;
 	const char *word;
 	size_t word_len;
+	size_t boot_length;
 
 	arg_words[(*nargs)++] = manifest->system_args;
 	if (manifest->console.size != 0)
 		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words,
 		    console_uart_build(&manifest->console) };
+	boot_length = boot_build(handoff->boot);
+	if (boot_length == 0)
+		return ("the handoff: a boot value or slot that has no name");
+	arg_words[(*nargs)++] = (erx_boot_words_t){ boot_words, boot_length };
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const size_t length = erx_boot_device_words(&manifest->devices[at], device_words[at], sizeof(device_words[at]));
 
@@ -205,6 +216,43 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 		arg_words[(*nargs)++] = (erx_boot_words_t){ word, word_len };
 	}
 	return (NULL);
+}
+
+/*
+ * Writes -erx boot VALUE SLOT into boot_words, by the names of include/erx/core/boot_pair.h
+ * (docs/design-stopgap.md, "Boot information"), and returns their whole length, the last NUL
+ * included, or 0 for a value or slot that has no name. The handoff's reader accepts only a
+ * valid pair, so a pair always has its names, and boot_words holds the longest two.
+ */
+static size_t
+boot_build(erx_boot_pair_t boot)
+{
+	const char *value = erx_boot_value_name(boot.value);
+	const char *slot = erx_boot_slot_name(boot.slot);
+	size_t used = sizeof(boot_prefix);
+
+	if (value == NULL || slot == NULL)
+		return (0);
+	for (size_t at = 0; at < used; at++)
+		boot_words[at] = boot_prefix[at];
+	used = word_append(boot_words, sizeof(boot_words), used, value);
+	if (used != 0)
+		used = word_append(boot_words, sizeof(boot_words), used, slot);
+	return (used);
+}
+
+/* NAME and its NUL at WORDS + USED, within SIZE bytes; returns the new length, or 0 if they do not fit. */
+static size_t
+word_append(char *words, size_t size, size_t used, const char *name)
+{
+	size_t at = 0;
+
+	do {
+		if (used + at == size)
+			return (0);
+		words[used + at] = name[at];
+	} while (name[at++] != '\0');
+	return (used + at);
 }
 
 /*

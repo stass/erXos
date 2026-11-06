@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest/md5'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
@@ -34,15 +35,42 @@ class MediumBootTest < Minitest::Test
   end
 
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
-    points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }]
-    merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64))
-    assert_equal %w[banner image-identity boot-value root-identity], merged.map { |point| point.fetch(:name) }
+    points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
+    merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release)
+    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5], merged.map { |point| point.fetch(:name) }
     verify = merged.fetch(2).fetch(:verify)
     assert_match Boot::BOOT_VALUE, "erx: boot value normal slot b\r\n"
     verify.call("erx: boot value normal slot b\r\n")
     ["erx: boot value normal slot a\n", "erx: boot value unknown slot none\n", "erx: boot value trial slot b\n"].each do |line|
       assert_raises(Erx::Error, line) { verify.call(line) }
     end
-    assert_raises(Erx::Error) { Boot.checkpoints([{ name: 'banner' }], Choice.new(slot: :a, offset: 0, length: 64)) }
+    assert_raises(Erx::Error) { Boot.checkpoints([{ name: 'banner' }], Choice.new(slot: :a, offset: 0, length: 64), release: release) }
+    assert_raises(Erx::Error) { Boot.checkpoints(points[0..2], Choice.new(slot: :a, offset: 0, length: 64), release: release) }
+  end
+
+  # The shell reads stdlib's lists module from /images/release, and only its packed MD5
+  # passes; a release without the module has nothing to read.
+  def test_the_shell_reads_a_release_file_from_the_image_and_must_print_its_md5
+    shell, answer = Boot.image_checkpoints({ name: 'release-shell', pattern: /\AEshell V/n }, release)
+    assert_match %r{file:read_file\("/images/release/system/lib/stdlib-7\.0/ebin/lists\.beam"\)}, shell.fetch(:type)
+    assert shell.fetch(:type).end_with?(".\r")
+    verify = answer.fetch(:verify)
+    hex = Digest::MD5.file(@lists).hexdigest.upcase
+    assert_match answer.fetch(:pattern), "2> {image_md5,<<\"#{hex}\">>}\r\n"
+    verify.call("2> {image_md5,<<\"#{hex}\">>}\r\n")
+    verify.call("{image_md5,<<\"#{hex}\">>}\n")
+    ["{image_md5,<<\"#{hex.downcase}\">>}\n", "{image_md5,{error,enoent}}\n", "{image_md5,<<\"00\">>}\n"].each do |line|
+      assert_raises(Erx::Error, line) { verify.call(line) }
+    end
+    assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'release-shell' }, release.take(1)) }
+  end
+
+  private
+
+  # Two release entries, the second the module the shell reads, whose bytes are this file's.
+  def release
+    @lists = __FILE__
+    [{ 'path' => 'system/lib/stdlib-7.0/ebin/lists.app', 'artifact' => __FILE__ },
+     { 'path' => 'system/lib/stdlib-7.0/ebin/lists.beam', 'artifact' => @lists }]
   end
 end

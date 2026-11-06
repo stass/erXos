@@ -10,13 +10,15 @@
 %%
 %% A request answers {ok, Bytes} for a read and ok for a write, or {error, Reason}: einval
 %% for a request that names no whole sectors or more than one device request carries
-%% (erx_blk_request:max_sectors/0), erange for one that leaves the window, erofs passed on
-%% from the write path, and eio for anything else the device process answered or a device
-%% process that did not answer. A window
+%% (erx_blk_request:max_sectors/0), erange for one that leaves the window, erofs for a write
+%% to an image window or passed on from the write path, and eio for anything else the device
+%% process answered or a device process that did not answer. A window
 %% answers one request at a time, in order.
 %%
 %% Every write goes through erx_blk:write/2 to the driver's one write path, erx_blk_write,
-%% which is where the trial rule (U4) applies to it; a window adds no rule of its own.
+%% which is where the trial rule (U4) applies to it. A window adds one rule of its own: a
+%% window of role {image, Name}, on an EROFS image (erx_blk_image), is read-only and sends
+%% no write to the device.
 
 -module(erx_blk_window).
 -behaviour(gen_server).
@@ -56,6 +58,9 @@ init(Window) ->
 handle_call({read, Sector, Count}, _From, Window) ->
     {reply, request(erx_blk_table:place(Window, Sector, Count), fun(First) -> erx_blk:read(First, Count) end),
      Window};
+%% An image window is read-only: a write to it is the client's erofs, and reaches no device.
+handle_call({write, _Sector, _Bytes}, _From, Window = {{image, _Name}, _Start, _Sectors}) ->
+    {reply, {error, erofs}, Window};
 handle_call({write, Sector, Bytes}, _From, Window) ->
     Placed = case sectors(Bytes) of
                  {ok, Count} -> erx_blk_table:place(Window, Sector, Count);

@@ -188,7 +188,7 @@ erx: entropy: quality: low, from the counter alone
 erx: root task: build 3a3f6f0136127701 index bd404218592d42c4da90518b49450cac83eab54a48424c046f56e79e52d42380 entries 231
 erx: root task: manifest root_memory 402653184 baseline 134217728 units 3 pool pages 111153
 erx: root task: watchdog 1,5,60
-erx: erts: erl_start runs, 28 arguments
+erx: erts: erl_start runs, 32 arguments
 erx: erts: 1 schedulers and 1 dirty CPU schedulers hold executor slots
 Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 

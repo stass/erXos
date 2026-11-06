@@ -4,7 +4,8 @@
 %% The block driver's supervisor (docs/design-storage.md, "The block driver"): the device
 %% process, erx_blk, restarted after a crash and left stopped after a shutdown, which is how
 %% it ends on a device that refuses a reset; then the partition process, erx_blk_service,
-%% which admits the partition table and holds the windows. A machine without a disk starts
+%% which admits the partition table and holds the windows; then the mounts of its image
+%% windows at /images/NAME and of the data window at /data. A machine without a disk starts
 %% no device process: erx_blk's init/1 returns ignore, and the partition process serves no
 %% window.
 
@@ -30,6 +31,13 @@ init([]) ->
                 shutdown => 2000,
                 type => worker,
                 modules => [erx_blk_service]},
+    %% /images/NAME: each image window of the service, mounted once; it starts no process.
+    Images = #{id => images,
+               start => {erx_blk_service, mount_images, []},
+               restart => temporary,
+               shutdown => brutal_kill,
+               type => worker,
+               modules => [erx_blk_service]},
     %% /data: littlefs on the data window (docs/design-stopgap.md, "littlefs in the
     %% system domain"), once the service holds the windows. It is not restarted.
     Data = #{id => erx_lfs_sup,
@@ -38,4 +46,4 @@ init([]) ->
              shutdown => infinity,
              type => supervisor,
              modules => [erx_lfs_sup]},
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Data]}}.
+    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Images, Data]}}.

@@ -214,7 +214,7 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `budget`, `space`, `group_ctl`, `group_stat`, `time_page`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*`, `erx_group_status` and `erx_clock_ns` find theirs with no handle, and no Phase 1 caller takes the rest | the same |
 | `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
 | node name | `system@` and the manifest's `host` | the same |
-| `args` | the manifest's `system_args`, the console's words and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
+| `args` | the manifest's `system_args`, the console's words, `-erx boot VALUE SLOT` ([image windows](#image-windows)) and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
 | `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
 | `hwcap`, `hwcap2` | 0, which claims no optional feature; the interpreter asks for none | the same |
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
@@ -892,6 +892,35 @@ and 64 bits), or the records of that role and peripheral are refused with a stat
 (`erx_device_record:find/3`, which has a fuzz target). The hosted entry adds no record,
 since a hosted runtime has no devices. More records than `ERX_BOOT_DEVICES_MAX` refuse
 the manifest at boot.
+
+### Image windows
+
+Phase 1 maps no machine page to the system domain, so the root hands its
+ERTS the boot value and slot as it hands it the device records: from the
+handoff, which bootstrap derived from `/chosen/bootloader`, it adds
+`-erx boot VALUE SLOT`, by the names of `include/erx/core/boot_pair.h`
+(`unknown none`, `normal a`, `trial b` and so on). The hosted entry adds
+none, which reads as unknown.
+
+Once the partition table is admitted, `erx_blk_service` reads the
+release's manifest (`/manifest`, the archive's `system/manifest`) with
+the generated reader, and its pure core, `erx_blk_image`, places each
+image the system domain holds a read-only `verified_image` window on in
+the booted slot: the image's one extent becomes a window of role
+`{image, Name}` on the slot's sectors from `slot_offset`, `length` bytes
+long, which must be whole sectors inside the slot and the image's
+`data_bytes`. A boot with no slot, an unknown boot, serves no image
+window, as the storage design requires; an image of another format, in
+more than one extent or outside the slot is refused by name in the
+kernel log, and the other images are served. An image window refuses
+every write with `erofs`.
+
+`erx_blk_sup`'s next child mounts each image window at `/images/NAME`
+with `erx_ns:mount({erofs, Window}, ...)`, read-only and unchecked, as
+the image's format says. `/images/` is Phase 1's place for the system
+domain's own images; the system domain still starts from the release in
+the boot image and reads the slot's image as files only, never as code
+([design-live.md](design-live.md#invariants) V5).
 
 ### The console
 

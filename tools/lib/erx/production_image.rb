@@ -280,8 +280,9 @@ module Erx
       # An erx. word of no known kind, which refuses the boot.
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name and the node flag with its name, before the page's words, and
-      # the five words of -erx console_uart, which the root adds to the manifest's.
-      ARGUMENTS_ALWAYS = 8
+      # the five words of -erx console_uart and the four of -erx boot VALUE SLOT, which the
+      # root adds to the manifest's.
+      ARGUMENTS_ALWAYS = 12
       # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
       # for the block unit's one device (docs/design-stopgap.md, "Device records").
       DEVICE_RECORD_WORDS = 8
