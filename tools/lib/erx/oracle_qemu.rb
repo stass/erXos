@@ -170,12 +170,17 @@ module Erx
     # guess. A module's name is case-sensitive, and the glob on a host whose
     # file system is not (macOS) also returns names differing in case
     # (common_test's ct_suite.erl and ct_SUITE.erl), so the name is compared.
+    # An application's emacs/ directory holds editor support that make never
+    # compiles into ebin (tools' emacs/tags.erl beside src/tags.erl), so it is
+    # no module source.
     def self.stock_source(source, application, path)
       tree = File.join(source, 'lib', application)
       candidates = case path
                    when %r{([^/]+)\.beam\z}
                      name = "#{Regexp.last_match(1)}.erl"
-                     Dir.glob(File.join(tree, '**', name)).select { |candidate| File.basename(candidate) == name }
+                     Dir.glob(File.join(tree, '**', name))
+                        .select { |candidate| File.basename(candidate) == name }
+                        .reject { |candidate| candidate.start_with?(File.join(tree, 'emacs', '')) }
                    when %r{\Aebin/([^/]+\.app(?:up)?)\z} then [File.join(tree, 'src', "#{Regexp.last_match(1)}.src")]
                    else [File.join(tree, path)]
                    end

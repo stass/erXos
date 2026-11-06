@@ -130,6 +130,13 @@ class OracleQemuTest < Minitest::Test
                  Erx::OracleQemu.stock_source(source, 'common_test', 'ebin/ct_SUITE.beam')
   end
 
+  # tools ships emacs/tags.erl, editor support make never compiles, beside src/tags.erl.
+  def test_an_applications_emacs_directory_holds_no_module_source
+    source = stock_tree(%w[lib/tools/src/tags.erl lib/tools/emacs/tags.erl])
+    assert_equal File.join(source, 'lib/tools/src/tags.erl'),
+                 Erx::OracleQemu.stock_source(source, 'tools', 'ebin/tags.beam')
+  end
+
   def test_a_stock_file_with_no_source_or_two_module_sources_is_refused
     source = stock_tree(%w[lib/sasl/src/twice.erl lib/sasl/test/twice.erl])
     error = assert_raises(Erx::Error) { Erx::OracleQemu.stock_source(source, 'sasl', 'ebin/twice.beam') }
