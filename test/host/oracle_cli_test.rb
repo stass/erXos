@@ -34,9 +34,7 @@ class OracleCliTest < Minitest::Test
 
     def run(suites, **options)
       @calls << [suites, options]
-      report = File.join(@directory, "report-#{@calls.size}.txt")
-      File.write(report, "result: #{@passing ? 'PASS' : 'FAIL'}\n")
-      Erx::OracleQemu::Outcome.new(result: Struct.new(:passed?).new(@passing), report: report, seconds: 12.4)
+      Erx::OracleQemu::Outcome.new(result: OracleCliTest.comparison(passing: @passing), report: 'unused', seconds: 12.4)
     end
   end
 
@@ -47,8 +45,9 @@ class OracleCliTest < Minitest::Test
       assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
       assert_includes output, 'oracle qemu hvf: passed'
       refute_includes output, 'oracle qemu tcg'
-      assert_includes output, "partial: the system domain runs #{Erx::OracleSuites::SUITES.keys.join(' and ')}"
-      assert_equal [[Erx::OracleSuites::SUITES.keys, { accel: 'hvf', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
+      assert_includes output, 'partial: the system domain runs kernel/file_SUITE and stdlib/filelib_SUITE'
+      assert_equal [[%w[file_SUITE], { accel: 'hvf', cpus: 1, jobs: 4 }], [%w[filelib_SUITE], { accel: 'hvf', cpus: 1, jobs: 4 }]],
+                   qemu.calls.grep(Array)
     end
   end
 
@@ -59,10 +58,10 @@ class OracleCliTest < Minitest::Test
       qemu = FakeQemu.new(directory, passing: true)
       run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf])
       run_cli('oracle', 'qemu', qemu_class: qemu)
-      check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }
-      assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf'), check
-      assert_equal File.join(Erx::ROOT, 'build/oracle-qemu'), plain
-      refute check.start_with?("#{plain}/")
+      check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }.values_at(0, -1)
+      assert_equal File.join(Erx::ROOT, 'build/check-oracle/hvf/kernel'), check
+      assert_equal File.join(Erx::ROOT, 'build/oracle-qemu/stdlib'), plain
+      refute check.start_with?(File.join(Erx::ROOT, 'build/oracle-qemu/'))
     end
   end
 
@@ -86,22 +85,22 @@ class OracleCliTest < Minitest::Test
 
   def test_qemu_refuses_an_unknown_suite_before_running
     qemu = FakeQemu.new('unused', passing: true)
-    status, output = run_cli('oracle', 'qemu', 'kernel_SUITE', qemu_class: qemu)
+    status, output = run_cli('oracle', 'qemu', '--suites', 'kernel/no_such_SUITE', qemu_class: qemu)
     assert_equal 2, status
-    assert_includes output, 'unknown suites: kernel_SUITE'
+    assert_includes output, 'kernel/no_such_SUITE is no group'
     assert_empty qemu.calls
   end
 
   def test_qemu_passes_its_options_and_prints_the_report
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: false)
-      status, output = run_cli('oracle', 'qemu', '--out', directory, '--accel', 'hvf', '--cpus', '4', 'file_SUITE',
+      status, output = run_cli('oracle', 'qemu', '--out', directory, '--accel', 'hvf', '--cpus', '4', '--suites', 'kernel/file_SUITE',
                                qemu_class: qemu)
       assert_equal 1, status
-      assert_includes output, 'result: FAIL'
-      assert_includes output, 'guest hvf 4 CPU, 12 s'
+      assert_includes output, 'overall: FAIL (kernel)'
+      assert_includes output, 'kernel: guest hvf 4 CPU, 12 s'
       assert_equal [['file_SUITE'], { accel: 'hvf', cpus: 4, jobs: 4 }], qemu.calls.last
-      assert_equal directory, qemu.calls.first.fetch(:out)
+      assert_equal File.join(directory, 'kernel'), qemu.calls.first.fetch(:out)
     end
   end
 
@@ -161,13 +160,12 @@ class OracleCliTest < Minitest::Test
     assert_equal [{ flavours: ['jit'], jobs: 4, clean: true }], calls
   end
 
-  # Stands in for OracleHosted: records how it was made and what it ran, and
-  # reports a comparison with one unlisted difference.
+  # Stands in for OracleHosted: records how each group's run was made and
+  # what it ran, and reports a comparison of one unlisted difference.
   class FakeHosted
     attr_reader :calls
 
-    def initialize(report)
-      @report = report
+    def initialize
       @calls = []
     end
 
@@ -178,27 +176,64 @@ class OracleCliTest < Minitest::Test
 
     def run(suites)
       @calls << suites
-      File.write(@report, "differs    a_SUITE b #1: stock passed, erXos failed, not in the table\nresult: FAIL\n")
-      Erx::OracleHosted::Outcome.new(result: Struct.new(:passed?).new(false), report: @report)
+      Erx::OracleHosted::Outcome.new(result: OracleCliTest.comparison(passing: false), report: 'unused')
     end
   end
 
+  # A comparison of one case that passes on stock and, unless `passing`,
+  # fails on erXos with no row of the table naming it.
+  def self.comparison(passing:)
+    key = Erx::OracleComparison::CaseKey.new(suite: 'a_SUITE', group: [], testcase: 'b', attempt: 1)
+    side = ->(status) { Erx::OracleComparison::Side.new(state: 'complete', cases: { key => status }) }
+    Erx::OracleComparison.compare(stock: side.call('passed'), erxos: side.call(passing ? 'passed' : 'failed'), known: [])
+  end
+
   def test_hosted_refuses_an_unknown_suite_before_running
-    hosted = FakeHosted.new('unused')
-    status, output = run_cli('oracle', 'hosted', 'kernel_SUITE', hosted_class: hosted)
+    hosted = FakeHosted.new
+    status, output = run_cli('oracle', 'hosted', '--suites', 'kernel/no_such_SUITE', hosted_class: hosted)
     assert_equal 2, status
-    assert_includes output, 'unknown suites: kernel_SUITE'
+    assert_includes output, 'kernel/no_such_SUITE is no group'
     assert_empty hosted.calls
   end
 
-  def test_hosted_prints_the_report_and_fails_with_the_comparison
+  def test_hosted_needs_a_suites_group_for_a_suite
+    hosted = FakeHosted.new
+    status, output = run_cli('oracle', 'hosted', '--suites', 'file_SUITE', hosted_class: hosted)
+    assert_equal 2, status
+    assert_includes output, 'file_SUITE is no group'
+    assert_empty hosted.calls
+  end
+
+  def test_the_combined_report_counts_every_group_and_names_the_failing_ones
+    results = { 'kernel' => OracleCliTest.comparison(passing: true), 'stdlib' => OracleCliTest.comparison(passing: false) }
+    report = Erx::OracleSuites.combined_report(results)
+    assert_match(/^== kernel\n/, report)
+    assert_match(/^all groups: differs 1, .* same 1\n/, report)
+    assert report.end_with?("overall: FAIL (stdlib)\n")
+  end
+
+  def test_the_selection_names_groups_suites_and_fast
+    root = File.expand_path('../..', __dir__)
+    assert_equal({ 'kernel' => %w[file_SUITE], 'stdlib' => %w[filelib_SUITE] },
+                 Erx::OracleSuites.select(%w[fast], root: root))
+    compiler = Erx::OracleSuites.select(%w[compiler stdlib/filelib_SUITE], root: root)
+    assert_equal %w[stdlib compiler], compiler.keys
+    assert_includes compiler.fetch('compiler'), 'bif_SUITE'
+    assert_equal %w[filelib_SUITE], compiler.fetch('stdlib')
+  end
+
+  def test_hosted_runs_each_group_in_its_own_directory_and_prints_the_combined_report
     Dir.mktmpdir do |directory|
-      hosted = FakeHosted.new(File.join(directory, 'report.txt'))
-      status, output = run_cli('oracle', 'hosted', '--out', directory, 'filelib_SUITE', hosted_class: hosted)
+      hosted = FakeHosted.new
+      status, output = run_cli('oracle', 'hosted', '--out', directory, '--suites', 'stdlib/filelib_SUITE,kernel/file_SUITE',
+                               hosted_class: hosted)
       assert_equal 1, status
       assert_includes output, 'differs    a_SUITE b #1'
-      assert_equal ['filelib_SUITE'], hosted.calls.last
-      assert_equal directory, hosted.calls.first.fetch(:out)
+      assert_includes output, 'overall: FAIL (kernel, stdlib)'
+      assert_equal [{ group: 'kernel', out: File.join(directory, 'kernel') }, ['file_SUITE'],
+                    { group: 'stdlib', out: File.join(directory, 'stdlib') }, ['filelib_SUITE']],
+                   hosted.calls.map { |call| call.is_a?(Hash) ? call.slice(:group, :out) : call }
+      assert File.file?(File.join(directory, 'report.txt'))
     end
   end
 end

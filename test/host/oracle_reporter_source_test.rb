@@ -7,12 +7,15 @@ require 'digest'
 require 'json'
 
 class OracleReporterSourceTest < Minitest::Test
-  def test_reporting_copy_only_adds_observations_to_pinned_controller
+  # The copy adds the reporting code and one guard, each between markers or
+  # on lines of their own, and removing them gives the pinned controller.
+  def test_reporting_copy_only_adds_observations_and_the_guard_to_pinned_controller
     directory = File.expand_path('../oracle/common_test', __dir__)
     record = JSON.parse(File.read(File.join(directory, '../reporter-source.json')))
     modified = File.binread(File.join(directory, 'test_server_ctrl.erl'))
     assert_equal record.fetch('reporting_sha256'), Digest::SHA256.hexdigest(modified)
     original = modified.sub(/\n%% erXos reporting support begin\.\n.*?%% erXos reporting support end\.\n/m, '')
+                       .sub(/\n%% erXos no-distribution guard begin\.\n.*?%% erXos no-distribution guard end\.\n/m, '')
     observers = original.lines.select { |line| line.match?(/\A\s*_ = catch erx_oracle_observer:/) }
     calls = original.lines.select { |line| line.match?(/\A\s*\{(?:ErxJob, ErxReporting|_, ErxReporting|_, ErxSpawned)\} = erx_report/) }
     assert_equal 6, observers.size

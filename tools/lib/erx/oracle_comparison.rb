@@ -27,10 +27,22 @@ module Erx
     VERDICTS = %w[differs changed stale unresolved known same].freeze
     PASSING_VERDICTS = %w[known same].freeze
 
-    # One row of the table: the case it names, the status erXos shows for it
-    # and why that differs from stock. `group` is the group path, outermost
-    # first, empty for a case outside every group.
-    KnownDifference = Data.define(:suite, :group, :testcase, :status, :reason)
+    # One row of the table: the cases it names, the status erXos shows for
+    # them and why that differs from stock. `group` is the group path,
+    # outermost first, empty for a case outside every group, or ANY for every
+    # path; `testcase` is a case's name or ANY for every case.
+    KnownDifference = Data.define(:suite, :group, :testcase, :status, :reason) do
+      def exact? = group != ANY && testcase != ANY
+
+      def covers?(key)
+        key.suite == suite && [ANY, key.group].include?(group) && [ANY, key.testcase].include?(testcase)
+      end
+
+      # Of the rows that cover a case, the one with a named case wins over
+      # one with a named group, which wins over a row naming neither.
+      def specificity = [testcase == ANY ? 0 : 2, group == ANY ? 0 : 1].sum
+    end
+    ANY = '*'
     # Which execution of which case: Common Test counts each case's runs
     # in its suite and group path from 1.
     CaseKey = Data.define(:suite, :group, :testcase, :attempt) do
@@ -39,9 +51,12 @@ module Erx
     end
     # One run: `state` is complete, timed_out, crashed, incomplete (with the count of
     # damaged event lines skipped, when there were any), "unreadable: why", or a state
-    # of the host that never ran the guest (qemu_failed: why, host_failed: why); `cases` maps each CaseKey to a status of STATUSES
-    # or UNRESOLVED_STATUSES.
-    Side = Data.define(:state, :cases)
+    # of the host that never ran the guest (qemu_failed: why, host_failed: why); `cases`
+    # maps each CaseKey to a status of STATUSES or UNRESOLVED_STATUSES; `seconds` is the
+    # run's wall-clock time, nil when no record of it exists.
+    Side = Data.define(:state, :cases, :seconds) do
+      def initialize(state:, cases:, seconds: nil) = super
+    end
     # One case's two statuses and its verdict. `attempt` is nil only for a
     # table row that names no case either run reached.
     Row = Data.define(:suite, :group, :testcase, :attempt, :stock, :erxos, :verdict, :reason) do
@@ -50,7 +65,8 @@ module Erx
     def name = [suite, *(group.join('/') unless group.empty?), testcase].map { |part| Terminal.escape(part) }.join(' ')
     end
 
-    Result = Data.define(:stock, :erxos, :rows) do
+    # `runtime` names the erXos side in the report, such as hosted or QEMU tcg.
+    Result = Data.define(:stock, :erxos, :rows, :runtime) do
       def passed? = stock.state == 'complete' && erxos.state == 'complete' && failing.empty?
 
       def failing = rows.reject { |row| PASSING_VERDICTS.include?(row.verdict) }
@@ -64,16 +80,18 @@ module Erx
                      .map { |row| "#{row.verdict.ljust(10)} #{OracleComparison.describe(row)}" }
         counts = VERDICTS.map { |verdict| "#{verdict} #{rows.count { |row| row.verdict == verdict }}" }
         summary = passed? ? 'PASS' : "FAIL (#{failing.size} cases, stock run #{stock.state}, erXos run #{erxos.state})"
-        [*listed, "stock run: #{stock.state}", "erXos run: #{erxos.state}", counts.join(', '),
+        times = "stock: #{OracleComparison.seconds(stock)}, erXos#{" (#{runtime})" if runtime}: #{OracleComparison.seconds(erxos)}"
+        [*listed, "stock run: #{stock.state}", "erXos run: #{erxos.state}", times, counts.join(', '),
          "result: #{summary}"].join("\n") << "\n"
       end
     end
 
-    # A row of the table: suite, group path or `-`, case, erXos's status and
-    # the reason, which is the rest of the line. Names are plain atoms, so a
-    # row names one case and no pattern can stand for several.
+    # A row of the table: suite, group path, `-` or `*`, case or `*`, erXos's
+    # status and the reason, which is the rest of the line. Names are plain
+    # atoms; `*` alone is the only pattern, standing for every group path
+    # (none included) or every case.
     NAME = '[a-z][A-Za-z0-9_]*'
-    ROW = %r{\A(?<suite>#{NAME}_SUITE)\s+(?<group>-|#{NAME}(?:/#{NAME})*)\s+(?<testcase>#{NAME})\s+
+    ROW = %r{\A(?<suite>#{NAME}_SUITE)\s+(?<group>-|\*|#{NAME}(?:/#{NAME})*)\s+(?<testcase>\*|#{NAME})\s+
              (?<status>\S+)\s+(?<reason>\S.*)\z}x
 
     # The line prefix of an event in output that carries other text too; the
@@ -150,8 +168,13 @@ module Erx
         raise Error, "#{where}: status #{match[:status]} is not one of #{STATUSES.join(', ')}"
       end
 
-      KnownDifference.new(suite: match[:suite], group: match[:group] == '-' ? [] : match[:group].split('/'),
-                          testcase: match[:testcase], status: match[:status], reason: match[:reason])
+      group = case match[:group]
+              when '-' then []
+              when ANY then ANY
+              else match[:group].split('/')
+              end
+      KnownDifference.new(suite: match[:suite], group: group, testcase: match[:testcase], status: match[:status],
+                          reason: match[:reason])
     end
     private_class_method :known_difference
 
@@ -163,9 +186,10 @@ module Erx
 
     # One run, from the event stream erx_oracle_events wrote and the state
     # of the command that ran it, with `detail`, the host's message for a
-    # state outside RUN_STATES. A stream that cannot be read yields no cases,
-    # so every case is unknown there.
-    def side(events:, command_state:, detail: nil, skipped: 0)
+    # state outside RUN_STATES, and `seconds`, the run's wall-clock time. A
+    # stream that cannot be read yields no cases, so every case is unknown
+    # there.
+    def side(events:, command_state:, detail: nil, skipped: 0, seconds: nil)
       report = OracleResults.read(xml: nil, events: events, command: { 'state' => command_state })
       cut_off = cut_off_status(command_state: command_state, skipped: skipped)
       cases = report.fetch('cases').to_h do |record|
@@ -176,9 +200,9 @@ module Erx
       end
       Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state, detail: detail,
                                 skipped: skipped),
-                cases: cases)
+                cases: cases, seconds: seconds)
     rescue Error => error
-      Side.new(state: "unreadable: #{error.message}", cases: {})
+      Side.new(state: "unreadable: #{error.message}", cases: {}, seconds: seconds)
     end
 
     # What an open case shows: the deadline or the crash that cut it off, or
@@ -203,36 +227,41 @@ module Erx
     private_class_method :run_state
 
     # Every case either run reached, in stock's order and then erXos's, and
-    # every table row of a suite that ran but naming no case either reached.
-    def compare(stock:, erxos:, known:)
-      table = known.to_h { |row| [[row.suite, row.group, row.testcase], row] }
+    # every table row of a suite that ran that accounts for no difference.
+    def compare(stock:, erxos:, known:, runtime: nil)
       keys = stock.cases.keys | erxos.cases.keys
+      listed = keys.to_h { |key| [key, known.select { |row| row.covers?(key) }.max_by(&:specificity)] }
       rows = keys.map do |key|
         row(key, stock: stock.cases.fetch(key, 'unknown'), erxos: erxos.cases.fetch(key, 'unknown'),
-                 listed: table[key.identity])
+                 listed: listed.fetch(key))
       end
       finished = stock.state == 'complete' && erxos.state == 'complete'
-      Result.new(stock: stock, erxos: erxos, rows: rows + unreached_rows(known, keys: keys, finished: finished))
+      used = rows.zip(keys).filter_map { |row, key| listed.fetch(key) if %w[known changed unresolved].include?(row.verdict) }
+      Result.new(stock: stock, erxos: erxos, runtime: runtime,
+                 rows: rows + unused_rows(known, used: used, keys: keys, listed: listed, finished: finished))
     end
 
-    # The rows of the table for a suite that ran that name no case either
-    # run reached. When both runs finished, the row is stale; otherwise a
-    # run may have stopped before the case, so nothing is known of it.
-    def unreached_rows(known, keys:, finished:)
-      reached = keys.to_set(&:identity)
+    # The rows of the table for a suite that ran that account for no case:
+    # an exact row naming no case either run reached, or a `*` row under
+    # which no case differs. When both runs finished, the row is stale;
+    # otherwise a run may have stopped before its cases, so nothing is known.
+    # An exact row whose case agrees with stock is already a stale row of the
+    # comparison.
+    def unused_rows(known, used:, keys:, listed:, finished:)
       suites = keys.to_set(&:suite)
-      unreached = known.select { |row| suites.include?(row.suite) && !reached.include?([row.suite, row.group, row.testcase]) }
-      unreached.map do |row|
+      claimed = used.to_set | listed.values.compact.select(&:exact?)
+      (known.select { |row| suites.include?(row.suite) } - claimed.to_a).map do |row|
         reason = if finished
-                   'the table names a case neither run reached: correct or delete the row'
+                   'the table names no case that differs: correct or delete the row'
                  else
-                   'neither run reached the case the table names'
+                   'neither run reached a case the table names'
                  end
-        Row.new(suite: row.suite, group: row.group, testcase: row.testcase, attempt: nil,
-                stock: 'unknown', erxos: 'unknown', verdict: finished ? 'stale' : 'unresolved', reason: reason)
+        Row.new(suite: row.suite, group: row.group == ANY ? [ANY] : row.group, testcase: row.testcase,
+                attempt: nil, stock: 'unknown', erxos: 'unknown', verdict: finished ? 'stale' : 'unresolved',
+                reason: reason)
       end
     end
-    private_class_method :unreached_rows
+    private_class_method :unused_rows
 
     def row(key, stock:, erxos:, listed:)
       suite, group, testcase, attempt = key.deconstruct
@@ -241,21 +270,26 @@ module Erx
                when 'differs' then 'not in the table'
                when 'stale' then "listed as #{listed.status}, but erXos agrees with stock: delete the row"
                when 'changed' then "listed as #{listed.status}: #{listed.reason}"
-               else listed&.reason
+               when 'known' then listed.reason
                end
       Row.new(suite: suite, group: group, testcase: testcase, attempt: attempt, stock: stock, erxos: erxos,
               verdict: verdict, reason: reason)
     end
     private_class_method :row
 
+    # A `*` row claims only the cases that differ, so a case it covers that
+    # agrees with stock is the same, where an exact row would be stale.
     def verdict(stock:, erxos:, listed:)
       return 'unresolved' unless STATUSES.include?(stock) && STATUSES.include?(erxos)
       return(stock == erxos ? 'same' : 'differs') unless listed
-      return 'stale' if stock == erxos
+      return(listed.exact? ? 'stale' : 'same') if stock == erxos
 
       erxos == listed.status ? 'known' : 'changed'
     end
     private_class_method :verdict
+
+    # A side's wall-clock time as the report prints it.
+    def seconds(side) = side.seconds ? "#{side.seconds.round} s" : 'unknown'
 
     # One row of the report, without its verdict.
     def describe(row)

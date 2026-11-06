@@ -66,7 +66,7 @@ module Erx
 
     Outcome = Data.define(:result, :report, :seconds)
 
-    def initialize(root:, out:, deadline:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
+    def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
                    qemu: 'qemu-system-aarch64')
       @root = File.realpath(root)
       @out = claim(out)
@@ -76,10 +76,10 @@ module Erx
       @qemu = qemu
       @runner = Runner.new(owner_root: @root, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
-      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline)
+      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group)
     end
 
-    # Runs `suites`, names from OracleSuites::SUITES, on stock and in the guest
+    # Runs `suites`, names of the group's suites (OracleSuites), on stock and in the guest
     # under `accel` with `cpus` CPUs, and compares them.
     def run(suites, accel:, cpus:, jobs: 4)
       table = @suites.known_differences
@@ -92,7 +92,7 @@ module Erx
         image = test_image(tree, compiled, fiasco: fiasco)
         [@suites.run_stock(tree, suites, erl: installation.fetch('erl')), *run_guest(image, suites, accel: accel, cpus: cpus)]
       end
-      result = OracleComparison.compare(stock: stock, erxos: erxos, known: table)
+      result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: "QEMU #{accel}")
       report = File.join(@out, 'report.txt')
       File.write(report, result.report)
       Outcome.new(result: result, report: report, seconds: seconds)
@@ -275,7 +275,7 @@ module Erx
       events = File.join(@out, 'erxos.events.jsonl')
       File.binwrite(events, printed.events)
       [OracleComparison.side(events: events, command_state: guest.state.name, detail: guest.state.message,
-                             skipped: printed.skipped),
+                             skipped: printed.skipped, seconds: guest.record['elapsed_seconds']),
        guest.record['elapsed_seconds']]
     end
 

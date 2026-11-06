@@ -225,10 +225,40 @@ class OracleComparisonTest < Minitest::Test
     assert_equal [%w[files open]], table.map(&:group)
   end
 
-  def test_the_checked_in_table_parses
-    path = File.expand_path('../oracle/hosted_known_differences.txt', __dir__)
-    table = Erx::OracleComparison.known_differences(text: File.read(path), source: path)
-    refute_empty table
+  def test_the_checked_in_tables_parse
+    paths = Dir.glob(File.expand_path('../oracle/hosted_known_differences/*.txt', __dir__))
+    assert_equal %w[compiler emulator kernel stdlib], paths.map { |path| File.basename(path, '.txt') }.sort
+    paths.each { |path| Erx::OracleComparison.known_differences(text: File.read(path), source: path) }
+  end
+
+  def test_the_report_names_each_sides_wall_clock_time_or_that_it_is_unknown
+    stock = Erx::OracleComparison::Side.new(state: 'complete', cases: {}, seconds: 41.4)
+    erxos = Erx::OracleComparison::Side.new(state: 'complete', cases: {})
+    report = Erx::OracleComparison.compare(stock: stock, erxos: erxos, known: [], runtime: 'hosted').report
+    assert_includes report.lines, "stock: 41 s, erXos (hosted): unknown\n"
+  end
+
+  def test_a_wildcard_row_claims_every_differing_case_it_covers
+    table = Erx::OracleComparison.known_differences(text: "fixture_SUITE * * failed one cause\n", source: 'x')
+    rows = Erx::OracleComparison.compare(stock: side('stock', STOCK), erxos: side('erxos', ERXOS), known: table)
+                                .rows.to_h { |row| [row.testcase, row.verdict] }
+    assert_equal({ 'same' => 'same', 'listed' => 'known', 'unlisted' => 'known', 'stale' => 'same',
+                   'changed' => 'changed', 'hung' => 'same' }, rows)
+  end
+
+  def test_the_row_naming_a_case_wins_over_a_wildcard
+    table = Erx::OracleComparison.known_differences(text: "fixture_SUITE - * user_skip all\n" \
+                                                          "fixture_SUITE - unlisted failed this one\n", source: 'x')
+    rows = Erx::OracleComparison.compare(stock: side('stock', STOCK), erxos: side('erxos', ERXOS), known: table)
+                                .rows.to_h { |row| [row.testcase, row.verdict] }
+    assert_equal %w[changed known known], rows.values_at('listed', 'unlisted', 'changed')
+  end
+
+  def test_a_wildcard_row_under_which_nothing_differs_is_stale
+    table = Erx::OracleComparison.known_differences(text: "fixture_SUITE other * failed gone\n", source: 'x')
+    result = Erx::OracleComparison.compare(stock: side('stock', STOCK), erxos: side('erxos', STOCK), known: table)
+    assert_equal [['stale', %w[other], '*']], result.rows.reject { |row| row.verdict == 'same' }
+                                                        .map { |row| [row.verdict, row.group, row.testcase] }
   end
 
   def test_a_row_naming_no_case_of_two_finished_runs_is_stale

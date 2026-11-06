@@ -426,13 +426,14 @@ module Erx
       end
       status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
       Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
-      Terminal.puts("partial: the system domain runs #{OracleSuites::SUITES.keys.join(' and ')}; OTP's emulator, kernel, " \
+      fast = OracleSuites::FAST.flat_map { |group, suites| suites.map { |suite| "#{group}/#{suite}" } }
+      Terminal.puts("partial: the system domain runs #{fast.join(' and ')}; OTP's emulator, kernel, " \
                     'stdlib and compiler groups and libc-test are not wired yet, so the check is not passed')
       status.zero? ? 2 : 1
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [SUITE...] | oracle qemu [SUITE...] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
       0
     end
 
@@ -569,8 +570,8 @@ module Erx
       return oracle_qemu(arguments, qemu_class: qemu_class) if action == 'qemu'
       unless %w[build run probe].include?(action)
         raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe [--docker-context NAME] [--flavour emu|jit] | ' \
-                                           'oracle hosted [--out DIR] [--deadline SECONDS] [SUITE...] | ' \
-                                           'oracle qemu [--out DIR] [--deadline SECONDS] [--accel tcg|hvf] [--cpus N] [SUITE...]'
+                                           'oracle hosted [--out DIR] [--deadline SECONDS] [--suites LIST] | ' \
+                                           'oracle qemu [--out DIR] [--deadline SECONDS] [--accel tcg|hvf] [--cpus N] [--suites LIST]'
       end
       suite = arguments.shift if action == 'run'
       options = { backend: 'linux', flavour: 'emu', jobs: 4, deadline: 14_400, clean: false }
@@ -615,49 +616,72 @@ module Erx
       result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
     end
 
-    # OTP's suites for /tmp under Common Test on the hosted runtime and on stock
-    # OTP, compared case by case against the table of known differences. The
-    # suites default to all of OracleHosted::SUITES; the exit is 0 only when
-    # the comparison passes.
+    # OTP's suite groups under Common Test on the hosted runtime and on stock
+    # OTP, compared case by case against each group's table of known
+    # differences. `--suites` names groups, `group/SUITE`s or `fast`, and
+    # defaults to `fast`; the exit is 0 only when every group's comparison
+    # passes.
     def self.oracle_hosted(arguments, hosted_class:)
-      out = File.join(ROOT, 'build/oracle-hosted')
-      deadline = 1800
+      options = { out: File.join(ROOT, 'build/oracle-hosted'), deadline: 1800, suites: ['fast'] }
       OptionParser.new do |flags|
-        flags.on('--out DIR', 'Directory for the trees, event streams, logs and report') { |value| out = value }
-        flags.on('--deadline SECONDS', Integer, 'Hard deadline of each run') { |value| deadline = value }
+        flags.on('--out DIR', 'Directory for the trees, event streams, logs and reports') { |value| options[:out] = value }
+        flags.on('--deadline SECONDS', Integer, 'Hard deadline of each run') { |value| options[:deadline] = value }
+        suites_option(flags, options)
       end.parse!(arguments)
-      unknown = arguments - OracleHosted::SUITES.keys
-      raise OptionParser::InvalidArgument, "unknown suites: #{unknown.join(' ')}" unless unknown.empty?
-      raise OptionParser::InvalidArgument, 'deadline must be between 60 and 86400 seconds' unless deadline.between?(60, 86_400)
-
-      suites = arguments.empty? ? OracleHosted::SUITES.keys : arguments.uniq
-      outcome = hosted_class.new(root: ROOT, out: out, deadline: deadline).run(suites)
-      File.read(outcome.report).each_line { |line| Terminal.puts(line.chomp) }
-      Terminal.puts("report: #{outcome.report}")
-      outcome.result.passed? ? 0 : 1
+      selection = oracle_selection(arguments, options)
+      oracle_groups(selection, out: options[:out]) do |group, suites, out|
+        hosted_class.new(root: ROOT, out: out, deadline: options[:deadline], group: group).run(suites).result
+      end
     end
 
     # The same suites in the system domain under QEMU, compared with stock OTP
-    # against the same table. The exit is 0 only when the comparison passes.
+    # against the same tables. The exit is 0 only when every group's
+    # comparison passes.
     def self.oracle_qemu(arguments, qemu_class:)
-      options = { out: File.join(ROOT, 'build/oracle-qemu'), deadline: 1800, accel: QemuGate::SUITE_ACCELERATOR, cpus: 1, jobs: 4 }
+      options = { out: File.join(ROOT, 'build/oracle-qemu'), deadline: 1800, accel: QemuGate::SUITE_ACCELERATOR, cpus: 1, jobs: 4,
+                  suites: ['fast'] }
       OptionParser.new do |flags|
-        flags.on('--out DIR', 'Directory for the tree, image, serial log, event streams and report') { |value| options[:out] = value }
+        flags.on('--out DIR', 'Directory for the trees, images, serial logs, event streams and reports') { |value| options[:out] = value }
         flags.on('--deadline SECONDS', Integer, 'Hard deadline of each run') { |value| options[:deadline] = value }
         flags.on('--accel NAME', %w[tcg hvf], 'Accelerator') { |value| options[:accel] = value }
         flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
+        suites_option(flags, options)
       end.parse!(arguments)
-      unknown = OracleSuites.unknown(arguments)
-      raise OptionParser::InvalidArgument, "unknown suites: #{unknown.join(' ')}" unless unknown.empty?
+      selection = oracle_selection(arguments, options)
+      oracle_groups(selection, out: options[:out]) do |group, suites, out|
+        outcome = qemu_class.new(root: ROOT, out: out, deadline: options[:deadline], group: group)
+                            .run(suites, accel: options[:accel], cpus: options[:cpus], jobs: options[:jobs])
+        Terminal.puts("#{group}: guest #{options[:accel]} #{options[:cpus]} CPU, #{outcome.seconds ? "#{outcome.seconds.round} s" : 'unknown'}")
+        outcome.result
+      end
+    end
+
+    def self.suites_option(flags, options)
+      flags.on('--suites LIST', Array, 'Groups, group/SUITEs or fast, comma-separated') { |value| options[:suites] = value }
+    end
+
+    # The groups and suites `options[:suites]` names, once the options are
+    # checked and no argument is left over.
+    def self.oracle_selection(arguments, options)
+      raise OptionParser::InvalidArgument, "unexpected arguments: #{arguments.join(' ')}" unless arguments.empty?
       raise OptionParser::InvalidArgument, 'deadline must be between 60 and 86400 seconds' unless options[:deadline].between?(60, 86_400)
 
-      suites = arguments.empty? ? OracleSuites::SUITES.keys : arguments.uniq
-      outcome = qemu_class.new(root: ROOT, out: options[:out], deadline: options[:deadline])
-                          .run(suites, accel: options[:accel], cpus: options[:cpus], jobs: options[:jobs])
-      File.read(outcome.report).each_line { |line| Terminal.puts(line.chomp) }
-      Terminal.puts("report: #{outcome.report}; guest #{options[:accel]} #{options[:cpus]} CPU, #{outcome.seconds ? "#{outcome.seconds.round} s" : 'unknown'}")
-      outcome.result.passed? ? 0 : 1
+      OracleSuites.select(options[:suites], root: ROOT)
+    rescue Error => error
+      raise OptionParser::InvalidArgument, error.message
+    end
+
+    # Runs each group of `selection` in turn, in `out/<group>`, through the
+    # block, which returns the group's comparison; then prints and writes the
+    # combined report. The exit is 0 only when every group passed.
+    def self.oracle_groups(selection, out:)
+      results = selection.to_h { |group, suites| [group, yield(group, suites, File.join(out, group))] }
+      report = File.join(FileUtils.mkdir_p(out).first, 'report.txt')
+      File.write(report, OracleSuites.combined_report(results))
+      File.read(report).each_line { |line| Terminal.puts(line.chomp) }
+      Terminal.puts("report: #{report}")
+      results.values.all?(&:passed?) ? 0 : 1
     end
 
     # The bootable file on the stopgap: good images in both forms under HVF, as

@@ -17,10 +17,10 @@ require_relative 'runner'
 require_relative 'runtime'
 
 module Erx
-  # `tools/erx oracle hosted`: OTP's suites for /tmp (design-tmp.md,
-  # Verification, "OTP's suites") under Common Test on erXos's hosted
-  # runtime, with the logs and every priv_dir under /tmp, and on stock OTP
-  # 29.1.2 on the host, then compared case by case by OracleComparison.
+  # `tools/erx oracle hosted`: one group of OTP's suites (OracleSuites)
+  # under Common Test on erXos's hosted runtime, with the logs and every
+  # priv_dir under /tmp, and on stock OTP 29.1.2 on the host, then compared
+  # case by case by OracleComparison.
   #
   # Both sides run the same compiled suites and the same reporter
   # (erx_ct_oracle, erx_oracle_events and the patched test_server_ctrl).
@@ -31,7 +31,6 @@ module Erx
   # under `out`: the release tree and archive, both event streams, the
   # command logs and report.txt.
   class OracleHosted
-    SUITES = OracleSuites::SUITES
     ERXOS_APPLICATIONS = [*Runtime::APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
     # erXos's working directory: suites, logs and priv_dirs all live in /tmp.
     ERXOS_WORK = '/tmp/ct'
@@ -42,17 +41,18 @@ module Erx
     MARKER = '.erx-oracle-hosted'
     Outcome = Data.define(:result, :report)
 
-    def initialize(root:, out:, deadline:, compiler: ENV.fetch('ERX_CLANG', 'clang'))
+    def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', 'clang'))
       @root = File.realpath(root)
       @out = claim(out)
       @deadline = deadline
       @compiler = compiler
       @runner = Runner.new(owner_root: @out, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
-      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline)
+      @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group)
     end
 
-    # Runs `suites`, names from SUITES, on both sides and compares them.
+    # Runs `suites`, names of the group's suites, on both sides and compares
+    # them.
     def run(suites)
       Runtime.check_current(root: @root)
       table = @suites.known_differences
@@ -62,7 +62,7 @@ module Erx
         fill_tree(tree, suites, installation: installation, common_test: File.join(oracle.source_path('jit'), 'lib/common_test'))
         [@suites.run_stock(tree, suites, erl: installation.fetch('erl')), run_erxos(tree, suites)]
       end
-      result = OracleComparison.compare(stock: stock, erxos: erxos, known: table)
+      result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: 'hosted')
       report = File.join(@out, 'report.txt')
       File.write(report, result.report)
       Outcome.new(result: result, report: report)
@@ -119,7 +119,8 @@ module Erx
       events = File.join(@out, 'erxos.events.jsonl')
       printed = OracleComparison.printed_events(BoundedFile.read(record.fetch('log'), maximum: MAX_OUTPUT_BYTES))
       File.binwrite(events, printed.events)
-      OracleComparison.side(events: events, command_state: record.fetch('state'), skipped: printed.skipped)
+      OracleComparison.side(events: events, command_state: record.fetch('state'), skipped: printed.skipped,
+                            seconds: record['elapsed_seconds'])
     end
 
     def pack(tree)

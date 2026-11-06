@@ -2743,7 +2743,7 @@ report, so a passing run shows the code under test ran.
   difference is one listed under [Compatibility](#compatibility-and-migration).
   Hosted, `tools/erx oracle hosted` compares them with stock OTP 29.1.2 on
   the development host; its list of known differences
-  (`test/oracle/hosted_known_differences.txt`) holds a case of `.`, `..`
+  (`test/oracle/hosted_known_differences/`) holds a case of `.`, `..`
   or links only where macOS answers otherwise than FreeBSD, its row
   naming FreeBSD's answer. The cases of the first bullet under
   [Compatibility](#compatibility-and-migration) are such cases, which no

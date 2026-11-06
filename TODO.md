@@ -171,6 +171,22 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/test/process_SUITE.erl`: `max_heap_size_test/5` fails with `{badmatch, noproc}` under a runner
   with no common_test, because `ct:log` delays its monitor past the process's death. It needs a run under `ct_run` to tell
   whether this is the runner alone.
+* [High] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 33554432`): a whole group does
+  not fit erXos's 32 MiB `/tmp`. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into `/tmp` before
+  the run, and Common Test's logs and each `priv_dir` stay there, so `oracle hosted --suites stdlib` ended after 249 cases
+  when the controller's `start_log_file` for `calendar_SUITE` got `enospc`, and every later case is unresolved. Copying
+  each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the reporter, on both
+  sides), or a test manifest with a larger `tmp` cap, is needed before stdlib, kernel and emulator can be compared;
+  cases that write more than the cap (zip_SUITE's zip64 group) then fail one by one, as "file system".
+* [Medium] `otp/lib/kernel/src/kernel.erl`, `docs/design-runtime.md` (kernel_sup table): `rex`, `global_name_server` and
+  `global_group` start only with a carrier, where stock starts them on every node, distributed or not; a local
+  `global:register_name` then fails with `noproc` (application_SUITE `failover`, `failover_comp`, `otp_2012`,
+  `script_start`, `ensure_started`, `ensure_all_started`, `otp_16504`). Decide whether this stays an explained
+  difference of the oracle's tables or whether `global` starts without a carrier, as stock's does.
+* [Medium] `tools/erx oracle hosted`: OTP's emulator, kernel, stdlib and compiler groups are wired but not yet compared:
+  the four tables under `test/oracle/hosted_known_differences/` hold only file_SUITE's and filelib_SUITE's rows. Each
+  group's run and classification is its own package, after the `/tmp` item above. Stock's wall-clock times on the
+  development host: kernel 5917 s, stdlib 3048 s.
 * [Low] `otp/erts/preloaded/src/erl_init.erl`: `if_loaded(prim_socket, ...)` is dead and stays until a preloaded rebuild.
 * [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet

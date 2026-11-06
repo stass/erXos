@@ -1,0 +1,30 @@
+# The known differences of `tools/erx oracle hosted` for OTP's kernel
+# suites: cases whose result on erXos's hosted runtime differs from stock
+# OTP 29.1.2's, each for a reason erXos's design states, a cause it
+# cannot run in Phase 1, or a bug that TODO.md names. Any other
+# difference fails the comparison, and so does a row that then accounts
+# for no difference, or whose cases show another status on erXos.
+#
+# One row per cause: suite, group path (outermost first, `/` between
+# groups), `-` outside every group or `*` for every path, the case or `*`
+# for every case, the Common Test status erXos shows (passed, failed,
+# user_skip or auto_skip) and the reason, which is the rest of the line.
+# Names are plain atoms; `*` is the only pattern. Of the rows covering a
+# case, one naming the case wins over one naming only its group path. A
+# `*` row claims only the cases that differ from stock; an exact row
+# whose case agrees with stock is stale.
+#
+# suite        group  case                status     reason
+
+# erXos runs no distribution in Phase 1 (design.md), and each of these
+# starts a peer node, which needs it.
+file_SUITE     -      otp_10852           failed     cannot run: no distribution; the case starts a peer node with +fnu
+file_SUITE     -      large_file          failed     cannot run: no distribution; the case runs in a peer node
+file_SUITE     -      large_write         failed     cannot run: no distribution; the case runs in a peer node
+
+# file:allocate/3 answers enotsup on erXos's files, so the case skips.
+file_SUITE     files  allocate_file_size  user_skip  file:allocate/3 answers enotsup
+
+# The case matches prim_file's descriptor internals, which erXos's files
+# do not share.
+file_SUITE     -      read_line_1         failed     the case inspects prim_file descriptor internals

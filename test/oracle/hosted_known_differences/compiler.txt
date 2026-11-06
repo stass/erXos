@@ -1,0 +1,17 @@
+# The known differences of `tools/erx oracle hosted` for OTP's compiler
+# suites: cases whose result on erXos's hosted runtime differs from stock
+# OTP 29.1.2's, each for a reason erXos's design states, a cause it
+# cannot run in Phase 1, or a bug that TODO.md names. Any other
+# difference fails the comparison, and so does a row that then accounts
+# for no difference, or whose cases show another status on erXos.
+#
+# One row per cause: suite, group path (outermost first, `/` between
+# groups), `-` outside every group or `*` for every path, the case or `*`
+# for every case, the Common Test status erXos shows (passed, failed,
+# user_skip or auto_skip) and the reason, which is the rest of the line.
+# Names are plain atoms; `*` is the only pattern. Of the rows covering a
+# case, one naming the case wins over one naming only its group path. A
+# `*` row claims only the cases that differ from stock; an exact row
+# whose case agrees with stock is stale.
+#
+# suite        group  case                status     reason

@@ -19,7 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: emit reporting-only case observations at their owner.
+%% Modified by erXos: emit reporting-only case observations at their owner; refuse a slave start without distribution.
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 -module(test_server_ctrl).
 -moduledoc false.
@@ -906,6 +906,14 @@ handle_call(get_target_info, _From, State) ->
 %%
 %% Starts a new node (slave or peer)
 
+
+%% erXos no-distribution guard begin.
+%% On a node without distribution, slave:start/5 exits not_alive inside
+%% this server; the case that asked gets the error, and the run goes on.
+handle_call({start_node, _Name, slave, _Options}, _From, State)
+  when node() =:= nonode@nohost ->
+    {reply,{{error,not_alive},undefined,undefined},State};
+%% erXos no-distribution guard end.
 handle_call({start_node, Name, Type, Options}, From, State) ->
     %% test_server_ctrl does gen_server:reply/2 explicitly
     test_server_node:start_node(Name, Type, Options, From,

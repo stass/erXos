@@ -367,7 +367,11 @@ prefix cannot certify later queued jobs, and a setup failure cannot disappear
 because no testcase started. Raw controller entrypoints without a sealed
 roster remain incomplete.
 
-Only reporting code differs from the pinned oracle: a checked-in copy of
+Only reporting code and one guard differ from the pinned oracle: on a node
+without distribution, as erXos's are in Phase 1, the controller answers a
+slave node start with `{error, not_alive}` to the case that asked, where
+stock's `slave:start/5` would exit inside the controller and end the whole
+run; a distributed node never reaches the guard. A checked-in copy of
 the controller retains its upstream licence and change notice, with original
 and modified hashes in its source record. The original archive remains
 unchanged. The guest checks those hashes before replacing that one file;
@@ -391,6 +395,26 @@ counted; a side with skipped lines is reported incomplete with that count,
 never complete and never unreadable, and its open cases show as unknown.
 A run killed at its deadline keeps every finished case with its result,
 and only the cases that were open show as timed out.
+
+`tools/erx oracle hosted` and `tools/erx oracle qemu` run OTP's
+`emulator`, `kernel`, `stdlib` and `compiler` suites on erXos, as a macOS
+process or in the system domain under QEMU, and on stock OTP 29.1.2 on
+the development host, and compare them case by case. Each group runs on
+its own, with its own compiled suites and helper modules, its two runs,
+its report and its table of known differences
+(`test/oracle/hosted_known_differences/<group>.txt`), because suite names
+repeat across groups; both erXos sides read the same tables, so a case
+that differs on one and not the other is a bug. `--suites` names groups,
+`group/SUITE`s or `fast`, the subset `make check-oracle-hosted` and
+`make check-oracle` run on every change. A table row
+names a suite, a group path, `-` or `*`, a case or `*`, the status erXos
+shows and the reason; a row naming a case wins over one naming only its
+group path. Each reason is an explained difference, a "cannot run" cause
+named as the plan's M3 names them, or a bug's `TODO.md` item. A `*` row
+claims only the cases that differ, so a case it covers that agrees with
+stock is the same; an exact row whose case agrees, and any row that
+accounts for no difference in two finished runs, is stale and fails the
+comparison, as does every unlisted difference and every unresolved case.
 
 Each controller observation receives a bounded acknowledgement from the
 writer before the controller announces completion, so the completed-run
