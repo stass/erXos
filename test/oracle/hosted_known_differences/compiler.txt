@@ -30,8 +30,10 @@ compile_SUITE      -  forms_2                  failed  cannot run: spawn port; o
 compile_SUITE      -  makedep                  failed  cannot run: the release ships no sources
 
 # The release ships each application's beams and .app file, not its
-# .appup (tools/lib/erx/release_files.rb), which the case reads.
-compile_SUITE      -  appup_test               failed  the release ships no .appup files (release_files.rb); erXos has no release upgrades
+# .appup (tools/lib/erx/release_files.rb), which the case reads. erXos
+# updates replace a whole slot and reboot (docs/design-storage.md, System
+# updates); no release_handler upgrade reads an .appup.
+compile_SUITE      -  appup_test               failed  the release ships no .appup files: updates replace a whole slot (design-storage.md)
 
 # crypto and public_key are outside the shipped set until the network
 # service (design-runtime.md, "crypto, ssl, ssh, inets and the rest").
