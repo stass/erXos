@@ -101,7 +101,7 @@ numbers are names; the table's order is the order.
 | Track H Hosted mode | the runtime runs as a Mac process under the sanitizers; from M5, domains and their connections run as Mac processes too | 3,000 lines of C17 | M0 | |
 | M3 The shell is the operating system | `1>` on the serial console, from ERTS in the system domain in user mode, started by the root task | 8,000 lines of C, 1,000 of Erlang | M1, track H | G3 |
 | M4 The machine is an object | save in the editor on the Mac, run in the machine; follow a process to its source; ERTS and backend events on one timeline, the kernel's row unsupported | 10,000 lines of Erlang, 3,000 of Ruby, 2,000 of C | M3 | |
-| M6 Immutable code, lasting data | the shell reads the release's files from a verified EROFS image on a QEMU disk; a file under `/data` survives a power cut; one flipped byte of an image fails only the reads of its block | estimated in the subsystems' design documents | M4 | |
+| M6 Immutable code, lasting data | the shell reads the release's files from an EROFS image on a QEMU disk; a file under `/data` survives a power cut | estimated in the subsystems' design documents | M4 | |
 | Track S The command shell and toybox | `ps \| where 'memory > 10000000'` in a shell with rc's language, in Phase 1; then `grep -r error /tmp/logs \| wc -l` through toybox's applets as ports of the session, and `within` confining a program to one grant, in Phase 2 | 6,000 lines of Erlang, 4,000 of C17 | M4 for the shell, M5 for programs | |
 | Track K erXos's kernel | the pilot, then the kernel, booting Phase 1's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the shared core exists; the pilot calibrates the figure | Phase 1 complete | GK1, GK2, GK3 |
 | M7 The stopgap leaves | erXos's kernel boots Phase 1's system and runs every test and benchmark it ran on the stopgap | integration | track K | GK3 |
@@ -113,7 +113,7 @@ numbers are names; the table's order is the order.
 | M9 A driver is an Erlang process | a driver process dies under load, its supervisor restarts it, and nobody notices | estimate: 3,000 lines of C17, 5,000 of Erlang | G6 | G9 |
 | M10 Users without a container runtime | two users, two domains, one runs out of memory or CPU alone | 4,000 lines of Erlang | M8, M9 | |
 | Track Q The second tier | toybox's `sh` runs a script with subshells, `vi` edits a file and `less` pages a log in a terminal session, and a dynamically linked program loads a library with `dlopen` | the programs' estimate in [design-programs.md](design-programs.md#performance), and the session's shared mappings, an estimated 3,000 lines of Erlang; the kernel's part is track K's | track P, M7 | GQ |
-| M11 Security closure | a release build without the development banner, on erXos's kernel, with an Erlang driver behind an IOMMU window | hardening | M10 | |
+| M11 Security closure | a release build without the development banner, on erXos's kernel, with an Erlang driver behind an IOMMU window; one flipped byte of an EROFS image fails only the reads of its block | hardening | M10 | |
 | M12 Storage, networking, boards | a Raspberry Pi 4 boots erXos from its SD card, keeps its files through power cuts, and takes a system update whose trial survives a power cut | estimated in the subsystems' design documents | M11 | G12, GN |
 | M13 erXos's F2FS | an installation brings erXos's F2FS, written in Erlang, to the Pi 4, whose files survive power cuts and a later update's failed trial and mount in Linux | estimated in its design document | M12 | G13 |
 | M14 erXos's network stack | M12's sessions run over erXos's own TCP/IP stack, written in Erlang, on both boards | estimated in its design document, within GN's decision | M12 | G14 |
@@ -1229,16 +1229,15 @@ Erlang renderer improves
 
 ## M6: Immutable code, lasting data
 
-**Goal.** The system's files come from immutable images checked block by
-block, and one practical store keeps data across power cuts, so the system
-is one a person can use.
+**Goal.** The system's files come from immutable images read through one
+block-checking funnel, and one practical store keeps data across power
+cuts, so the system is one a person can use. The funnel passes blocks
+through unchecked until M11 adds the hash check.
 
 **Demo.** A QEMU disk image holds a slot with the release's EROFS images
 and a data partition. Booted from it, the shell reads the release's files
 from the slot's EROFS image; a file written and synced under `/data` survives
-the guest's power cut and the next boot; and one byte flipped in the
-EROFS image fails the reads of its block with `eio` while every other file
-reads on.
+the guest's power cut and the next boot.
 
 **Scope.**
 
@@ -1258,15 +1257,16 @@ reads on.
   included, and its fuzz target
   ([design-storage.md](design-storage.md#data-model)).
 * **Immutable code and files.** The block client, a local call in the
-  system domain, the hash-checking reader with dm-verity's tree
-  format, and CRC-32C among the per-byte primitives, each with its fuzz
-  target ([design-runtime.md](design-runtime.md#per-byte-primitives));
+  system domain, `erx_verity:read/3` as the one funnel through which the
+  EROFS reader reads blocks, which passes them through unchecked until M11
+  adds the hash check inside it, and CRC-32C among the per-byte primitives,
+  with its fuzz target
+  ([design-runtime.md](design-runtime.md#per-byte-primitives));
   read-only images in the EROFS format, one per release: the EROFS reader
   in Erlang, preloaded in both runtime images, with its fuzz target;
-  upstream's `mkfs.erofs` as the packer's host tool, the packer's hash
-  trees, and the packer's disk image for QEMU, laid out by the ABI file's
-  medium layout; and `veritysetup`, Linux's EROFS driver and `fsck.erofs` as
-  the oracle in a Linux guest.
+  upstream's `mkfs.erofs` as the packer's host tool and the packer's disk
+  image for QEMU, laid out by the ABI file's medium layout; and Linux's
+  EROFS driver and `fsck.erofs` as the oracle in a Linux guest.
 * **One practical data store.** littlefs as the stopgap read-write file
   system behind `erx_fs`'s callback module, a NIF of the system domain that
   a worker process calls on a dirty scheduler while the volume's owner
@@ -1284,15 +1284,15 @@ reads on.
   ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record));
   the harness's trials follow with M12.
 
-**Exit criteria.** Every EROFS image the packer writes passes
-`veritysetup` and mounts in the Linux guest with the files the reader
-sees, and passes upstream's `fsck.erofs`; a block that fails its hash
-fails only the reads that touch it; a file synced under `/data` survives
+**Exit criteria.** Every EROFS image the packer writes mounts in the
+Linux guest with the files the reader sees, and passes upstream's
+`fsck.erofs`; every read of the EROFS reader goes through
+`erx_verity:read/3`, which a build check enforces with its seeded
+violation; a file synced under `/data` survives
 a power cut after the sync and the next boot, under TCG and HVF; the
 build check that only the driver's modules reference the device NIF
 passes, with its seeded violation; the partition-table parser, the EROFS reader, littlefs's
-images, the hash-checking reader and the per-byte primitives run their
-fuzz budgets clean.
+images and the per-byte primitives run their fuzz budgets clean.
 
 **Baseline.** M6 records the throughput and commit latency of the EROFS
 reader, of littlefs and of the block driver on QEMU with
@@ -1724,7 +1724,13 @@ through the QEMU suite; the external review; unconfined DMA refused unless
 configured, device by device, and each unconfined device in a domain of
 its own; hostile code in the sub-spaces of a domain holding `SPACES`, and
 a domain that churns sub-spaces
-([design-kernel.md](design-kernel.md#security)); credentials for
+([design-kernel.md](design-kernel.md#security)); the hash check of EROFS
+images: the packer's dm-verity version 1 hash tree for each image and the
+root hash, salt and data-block count in the manifest's `image` records,
+and the check inside `erx_verity:read/3`, the funnel M6 built, so the
+reader parses only blocks that passed their image's tree (E1), with the
+hash-checking reader's fuzz target
+([design-storage.md](design-storage.md#invariants)); credentials for
 principals: the vault in its first form, whose only credential is one
 passphrase slot per principal and whose only sealing backend is `none`,
 in its domain, without a crash area, created by the domain library with
@@ -1746,7 +1752,10 @@ signature's small verifier pinned and built
 ([design.md](design.md#dependencies)).
 
 **Exit criteria.** No open CRITICAL or HIGH finding; every residual risk
-either fixed or recorded in `TODO.md` as accepted, with its reason.
+either fixed or recorded in `TODO.md` as accepted, with its reason. Every
+EROFS image the packer writes passes `veritysetup`; one byte flipped in an
+image fails the reads of its block with `eio` while every other file reads
+on; the hash-checking reader runs its fuzz budget clean.
 
 Closure includes the receiving funnel and the services behind it: the
 hostile-runtime suite at the funnel of every runtime, ERTS and native,

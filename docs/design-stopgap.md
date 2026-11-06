@@ -259,7 +259,9 @@ shares its readers: a development manifest, full or partial boot, with the
 system domain alone. It accepts the records the system release's services need
 and refuses `domain`, `partial_boot`, `introduce`, `image` and `liveness` records with a
 diagnostic naming the milestone that brings them; an `image` record and a
-`verified_image` window wait for M6's hash tree sizing. QEMU `virt`'s record is
+`verified_image` window wait for the storage design's hash tree sizing. Phase 1's
+EROFS windows pass blocks through unchecked; the hash check is a stopgap
+residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
 manifest
 [config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt).

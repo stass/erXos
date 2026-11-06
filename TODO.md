@@ -1416,6 +1416,10 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
+* [Medium] storage, `erx_verity` (Phase 1): the EROFS reader reads blocks
+  unchecked until M11 adds the hash check inside `erx_verity:read/3`
+  ([design-storage.md](docs/design-storage.md), E1), so a swapped medium or a
+  flipped bit reaches the parser.
 * [Medium] system domain, the reset count
   ([design-system.md](docs/design-system.md)): any successful login clears the
   count, including a web login or a compromised display domain replaying a

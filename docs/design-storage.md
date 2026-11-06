@@ -1294,6 +1294,30 @@ in the domain that consumes the block, on the domain's own copy, or a
 driver's bug or compromise would be trusted with every release's
 integrity (ST-R1); N copies and N hashes for N domains are the price.
 
+**Per-file hash trees.** fs-verity and Fuchsia's blobfs keep one tree
+per file. The EROFS metadata the reader parses (superblock, inodes,
+directories) then needs a tree of its own, as composefs and Apple's
+signed system volume both add, and erXos updates whole slots, so sharing
+files between images gains nothing. One tree per image covers metadata
+and data with one root hash.
+
+**Whole-file fingerprints.** FreeBSD's and NetBSD's veriexec hash a
+whole file before it is used, which reads a multi-gigabyte file before
+its first page and cannot report one bad block.
+
+**An HMAC per sector.** FreeBSD's `geli -a` authenticates each sector,
+which needs a secret on the device and gives no protection against
+replaying an old sector.
+
+**Install-time checks only.** OSTree, Nix and OpenBSD's signify verify
+content when it is installed. They give nothing against a medium swapped
+later or against bit rot, which the tree catches at read time as `eio`.
+
+The manifest names each image as Android's AVB hashtree descriptor does:
+root hash, salt, block size, hash algorithm and data-block count, all
+fields of the `image` record
+([design-abi.md](design-abi.md)).
+
 ## Risks and open questions
 
 | Risk | Likelihood | Impact | Mitigation |

@@ -72,6 +72,11 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   current thread's FP state, hashes with NEON and restores it, as the only
   exception to K10's scan; or checking the largest files in `bootstrap`,
   which may use NEON.
+* **[Low] storage, the Pi 4 has no SHA-256 instructions.** `erx_verity`
+  checks EROFS blocks with SHA-256 in dm-verity's tree format, and the Pi 4's
+  Cortex-A72 lacks the Arm SHA-2 extension, so each block hashes in plain C.
+  Settled by `tools/erx bench fs` on the Pi 4, which decides whether BLAKE3,
+  already in the tree, is worth giving up `veritysetup` as the oracle.
 * **[Low] host tools, the packer hashes with BLAKE3's portable code.**
   `tools/host/pack_hash.c` builds the only BLAKE3 in the tree, its portable
   C ([origin](../kernel/crypto/blake3/ORIGIN.md)), though
