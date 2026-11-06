@@ -187,6 +187,63 @@ class LibcTestTest < Minitest::Test
     assert_nil(Erx::LibcTest.cause(%w[printf malloc t_printf]))
   end
 
+  def test_memfill_and_statvfs_are_needs
+    assert_equal('needs resource limits: t_memfill', Erx::LibcTest.cause(%w[t_memfill malloc]))
+    assert_equal('needs files: statvfs', Erx::LibcTest.cause(%w[statvfs]))
+  end
+
+  def result(name, state, detail = nil) = Erx::LibcTest::Result.new(name: name, state: state, detail: detail)
+
+  VERDICTS = <<~TABLE
+    # a comment
+    a/cancel  timed_out stopgap    blocked calls are not interrupted
+    a/regex   failed    upstream   musl's matcher
+    a/files   not_run   cannot-run needs files
+  TABLE
+
+  def test_the_checked_in_verdicts_parse_and_name_tests
+    root = File.expand_path('../..', __dir__)
+    verdicts = Erx::LibcTest.load_verdicts(root)
+    refute_empty(verdicts)
+    assert(verdicts.values.all? { |verdict| verdict.name.match?(Erx::LibcTest::TEST_NAME) })
+  end
+
+  def test_results_that_match_their_verdicts_agree
+    verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
+    results = [result('a/cancel', :timed_out), result('a/regex', :failed, 'exit status 1'),
+               result('a/files', :not_run, 'needs files: tmpfile'), result('a/plain', :passed)]
+    assert_empty(Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true))
+  end
+
+  def test_every_difference_from_a_verdict_is_reported
+    verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
+    results = [result('a/cancel', :passed), result('a/regex', :timed_out, 'still running'),
+               result('a/files', :not_run, 'the machine stopped before it: hung'), result('a/plain', :failed, 'exit status 1')]
+    problems = Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true)
+    assert_equal(4, problems.size, problems.inspect)
+    assert_match(%r{\Aa/files: not run because the machine stopped}, problems[2])
+  end
+
+  def test_an_unknown_result_never_agrees
+    problems = Erx::LibcTest.disagreements([result('a/plain', :unknown, 'x')], verdicts: {}, complete: false)
+    assert_equal(1, problems.size)
+  end
+
+  def test_a_verdict_for_no_test_is_stale_only_in_a_whole_run
+    verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
+    results = [result('a/cancel', :timed_out)]
+    assert_empty(Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: false))
+    assert_equal(2, Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true).size)
+  end
+
+  def test_a_malformed_verdict_is_refused
+    ['a/x passed upstream why', 'a/x failed guess why', 'a/x not_run upstream needs files',
+     'a/x failed cannot-run needs files', 'a/x not_run cannot-run the shell', 'A x failed upstream why', 'a/x failed',
+     "a/x failed upstream one\na/x failed upstream two"].each do |text|
+      assert_raises(Erx::Error, text) { Erx::LibcTest.parse_verdicts(text) }
+    end
+  end
+
   def test_parse_nm_reads_each_object
     text = "/x/a.o:\n                 U fopen\n                 U printf\n\n/x/b.o:\n\n/x/c.o:\n                 U fork\n"
     assert_equal({ '/x/a.o' => %w[fopen printf], '/x/b.o' => [], '/x/c.o' => %w[fork] }, Erx::LibcTest.parse_nm(text))

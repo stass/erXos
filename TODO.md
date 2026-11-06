@@ -381,32 +381,21 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/Makefile.in`: `erlang:system_info(compile_info)` answers `N/A` on erXos (edit 49 of
   `docs/design-runtime.md`), which no test pins until the oracle comparison runs.
 
-* [Medium] `libc-test` on native Fiasco, `tools/lib/erx/libc_test.rb`: the
-  first run through `tools/erx check-libc-test` under TCG at 4 CPUs passed 286,
-  failed 12, timed out 4 and did not run 42 (`~/erxos-history` `5ab1582`,
-  `libc-test/2026-11-04-tcg-4cpu`). Each failure needs a verdict against stock
-  musl before M3 closes; the classes below come from each test's output and
-  none has been checked.
-  * Cancellation of a running or blocked thread: `functional/pthread_cancel`
-    and `regression/pthread_cond_wait-cancel_ignored` fail on Phase 1 by a
-    documented difference: no signal interrupts a blocked call, so
-    `pthread_cancel` acts at the next cancellation point
-    ([design-stopgap.md](docs/design-stopgap.md)). The Phase 2 fix is the
-    thread `CONTROL` stop mapping in
-    [design-runtime.md](docs/design-runtime.md#the-c-library-seam); no
-    futex-specific interrupt is added.
-    offer.
-  * `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
-    under TCG, cause not found, so it is out of the canary set.
-  * Phase 1 lacks the call: `functional/pthread_mutex_pi` and the
-    priority-inheritance half of `functional/pthread_robust` (its
-    `FUTEX_LOCK_PI` probe reads `ENOSYS`), `regression/malloc-oom`,
-    `regression/statvfs`, and, inferred because they
-    print nothing, `regression/pthread_create-oom`, `regression/setenv-oom`.
-  * Likely musl or arithmetic: `functional/strptime`, `functional/strtold`,
-    `math/powf` (which could also be TCG), `math/yn`,
-    `regression/regex-backref-oob`, `regression/regexec-backref`.
-  * `musl/pleval` does not build: clang's `-Wparentheses` on the test's source.
+* [Medium] `libc-test` on native Fiasco, `tools/lib/erx/libc_test.rb`:
+  `regression/malloc-brk-fail` passes at 4 CPUs and runs past 60 s at 1 CPU
+  under TCG, cause not found, so it is out of the canary set, and
+  `check-libc-test tcg 1` would fail on it. Every test has a verdict at 4 CPUs
+  under TCG (`test/conformance/libc-test-verdicts.txt`; `~/erxos-history`
+  `f6d3e4a`, `libc-test/2026-11-05-tcg-4cpu`); runs at 1 CPU and under HVF
+  have not been held to the table.
+* [Low] musl, `musl/src/regex/regexec.c`, `src/math/powf.c`, `src/math/jn.c`:
+  upstream bugs that `libc-test` pins as `upstream` verdicts. A back
+  reference after a multibyte character compares the wrong bytes
+  (`regexec.c:785`, `regression/regex-backref-oob`), `\(.\{1,3\}\)\1` finds
+  no match in "foo" (`regression/regexec-backref`), `powf(x, 1)` raises
+  INEXACT with OVERFLOW or UNDERFLOW (`math/powf`), and `yn` is 3.2 ulp off
+  (`math/yn`). None is fixed on musl's master. Fix them in erXos's musl, or
+  take upstream's fixes when they land, and drop their verdict lines.
 * [Low] ERTS memory, `otp/erts/emulator/sys/common/erl_mmap.h`: stock turns off physical reservation, and with it the literal mapper, under `ADDRESS_SANITIZER`, and erXos's `erl_mmap` keeps it on. No ASan flavour of ERTS has run; settle whether literals stay in the mapper's range when one first does.
 * [Low] ERTS memory, `erl_mmap.h`, `beam/erl_alloc_util.c`: `erts_madvise_discard_advice` lost its definition, and its declaration and uses stay behind `HAVE_MADVISE`, which both cross-compile files pin off. Delete them.
 

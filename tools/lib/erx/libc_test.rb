@@ -32,7 +32,7 @@ module Erx
     BATCH_BYTES = 12 * 1024 * 1024
     TASK_SECONDS = 60
     # What the QEMU gate holds to passing: threads and robust mutexes, TLS, stdio and
-    # malloc. Every other test is check-libc-test's report, not a verdict.
+    # malloc. check-libc-test holds every test to its verdict (VERDICTS).
     CANARY = %w[functional/pthread_cond functional/pthread_mutex functional/pthread_tsd regression/pthread_once-deadlock
                 regression/pthread-robust-detach
                 functional/tls_init functional/tls_local_exec functional/tls_align
@@ -49,7 +49,7 @@ module Erx
                     mkstemps stat stat64 lstat fstat fstatat fstat64 unlink unlinkat remove rename mkdir rmdir opendir fdopendir
                     fdopen pipe pipe2 dup dup2 dup3 ftw nftw chdir getcwd read pread close lseek lseek64 fcntl flock
                     ftruncate truncate access faccessat utimensat futimens futimesat link symlink readlink t_fdfill
-                    glob realpath fileno],
+                    glob realpath fileno statvfs fstatvfs statfs fstatfs],
       'processes' => %w[fork vfork _Fork wait waitpid execv execve execvp execl execle execlp posix_spawn posix_spawnp popen
                         system daemon],
       'signals' => %w[signal sigaction raise kill killpg pthread_kill pthread_sigmask sigprocmask sigsuspend sigwait sigwaitinfo
@@ -57,13 +57,21 @@ module Erx
       'sockets' => %w[socket socketpair bind getaddrinfo getnameinfo gethostbyname],
       'shared objects' => %w[dlopen dlsym dlclose dladdr dl_iterate_phdr],
       'interprocess objects' => %w[shmget shmat msgget semget sem_open shm_open mq_open],
-      'resource limits' => %w[t_setrlim setrlimit getrlimit],
+      # t_memfill caps the data segment with t_setrlim(RLIMIT_DATA) before it exhausts memory.
+      'resource limits' => %w[t_setrlim t_memfill setrlimit getrlimit],
       'a wall clock' => %w[clock_settime settimeofday adjtime]
     }.freeze
 
     Result = Data.define(:name, :state, :detail) do
       def to_h = { name: name, state: state.to_s, detail: detail }
     end
+    # Why a test does not pass, as test/conformance/libc-test-verdicts.txt states it.
+    # A test the table does not name must pass.
+    VERDICTS = 'test/conformance/libc-test-verdicts.txt'
+    Verdict = Data.define(:name, :state, :kind, :reason)
+    VERDICT_STATES = %i[failed timed_out not_run].freeze
+    VERDICT_KINDS = %w[bug stopgap upstream cannot-run].freeze
+    VERDICT_LINE = /\A(?<name>\S+)\s+(?<state>\S+)\s+(?<kind>\S+)\s+(?<reason>\S.*)\z/
     Plan = Data.define(:runnable, :results)
     RUN_LINE = /\Aerx: libc-test: run (?<name>[A-Za-z0-9_.\/+-]+)\r?\z/n
     END_LINE = /\Aerx: libc-test: end (?<name>[A-Za-z0-9_.\/+-]+) (?:(?<how>status|other|launch-refused|join-refused) (?<value>-?[0-9]+)|(?<how>timeout|fault|no-program))\r?\z/n
@@ -169,6 +177,54 @@ module Erx
 
     def totals(results) = results.map(&:state).tally
 
+    # The verdict table, by name: one line per test that does not pass, as
+    # NAME STATE KIND REASON. A test not run is not run for a cause the plan
+    # names, so its REASON is that cause, as "needs files".
+    def parse_verdicts(text)
+      text.each_line(chomp: true).with_index(1).each_with_object({}) do |(line, number), verdicts|
+        next if line.strip.empty? || line.start_with?('#')
+
+        verdict = verdict_of(line, number: number)
+        raise Error, "libc-test verdicts line #{number}: #{verdict.name} is listed twice" if verdicts.key?(verdict.name)
+
+        verdicts[verdict.name] = verdict
+      end.freeze
+    end
+
+    def load_verdicts(root) = parse_verdicts(File.read(File.join(root, VERDICTS)))
+
+    def verdict_of(line, number:)
+      match = VERDICT_LINE.match(line)
+      raise Error, "libc-test verdicts line #{number}: not NAME STATE KIND REASON" unless match
+
+      verdict = Verdict.new(name: match[:name], state: match[:state].to_sym, kind: match[:kind], reason: match[:reason])
+      problem = if !verdict.name.match?(TEST_NAME) then 'names no test'
+                elsif !VERDICT_STATES.include?(verdict.state) then "has no state #{match[:state]}"
+                elsif !VERDICT_KINDS.include?(verdict.kind) then "has no kind #{verdict.kind}"
+                elsif (verdict.state == :not_run) != (verdict.kind == 'cannot-run') then 'pairs not_run with cannot-run only'
+                elsif verdict.state == :not_run && !verdict.reason.match?(/\Aneeds [a-z ]+\z/) then 'gives no cause the plan names'
+                end
+      raise Error, "libc-test verdicts line #{number}: #{verdict.name} #{problem}" if problem
+
+      verdict
+    end
+
+    # Each way the results differ from the verdicts. complete says the run
+    # covered every test, so a verdict for a test that no longer exists is stale.
+    def disagreements(results, verdicts:, complete:)
+      found = results.filter_map do |result|
+        verdict = verdicts[result.name]
+        expected = verdict ? verdict.state : :passed
+        if result.state != expected
+          "#{result.name}: #{result.state} (#{result.detail}), its verdict says #{expected}"
+        elsif expected == :not_run && !result.detail.to_s.start_with?("#{verdict.reason}:")
+          "#{result.name}: not run because #{result.detail}, its verdict says #{verdict.reason}"
+        end
+      end
+      stale = complete ? (verdicts.keys - results.map(&:name)).map { |name| "#{name}: has a verdict and is no test" } : []
+      found + stale
+    end
+
     # What keeps a canary run from passing: every test of it must pass, and no boot may leak.
     def canary_problems(totals:, pool_leaks:)
       [("the canary's results are #{totals}" unless totals == { passed: CANARY.size }),
@@ -176,8 +232,10 @@ module Erx
     end
 
     class Run
-      FLAGS = %w[--target=aarch64-none-elf -pipe -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wno-unused-function
-                 -Wno-missing-braces -Wno-unused -Wno-overflow -Wno-unknown-pragmas -fno-builtin -frounding-math -nostdinc
+      # -Wno-parentheses: clang refuses the chained comparison musl/pleval evaluates on purpose,
+      # where the gcc that libc-test's own build assumes only warns.
+      FLAGS =%w[--target=aarch64-none-elf -pipe -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wno-unused-function
+                 -Wno-parentheses -Wno-missing-braces -Wno-unused -Wno-overflow -Wno-unknown-pragmas -fno-builtin -frounding-math -nostdinc
                  -fno-stack-protector -mno-outline-atomics -Werror=implicit-function-declaration -Werror=implicit-int
                  -Werror=pointer-sign -Werror=pointer-arith].freeze
       COMMON = %w[fdfill memfill mtest path print rand setrlim utf8 vmfill].freeze
