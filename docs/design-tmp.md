@@ -597,7 +597,10 @@ the code under test ran.
   domain.
 * **OTP's suites.** `file_SUITE`, `filelib_SUITE` and a Common Test run
   writing its logs and `priv_dir` under `/tmp`, compared case by case
-  with stock by `make check-oracle`.
+  with stock OTP 29.1.2 on the host by `tools/erx oracle hosted`
+  (`make check-oracle-hosted`), the fast route on the hosted runtime;
+  a difference not in its table of known differences, each listed with
+  its reason, fails it. `make check-oracle` runs them on the target.
 
 The tree parses no bytes: names and payloads reach it only through
 `erx_fs`'s grammar, whose fuzz target feeds both local messages and

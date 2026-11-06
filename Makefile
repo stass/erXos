@@ -10,7 +10,7 @@ DOCKER_CONTEXT ?=
 .DEFAULT_GOAL := all
 
 .PHONY: all build run check check-sources status fetch check-tla check-hw generate-hw check-arch-terms
-.PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host bench
+.PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
@@ -135,6 +135,11 @@ oracle-build:
 
 check-oracle:
 	$(RUBY) tools/erx check-oracle
+
+# OTP's suites for /tmp on the hosted runtime and on stock OTP, compared
+# case by case (tools/erx oracle hosted); the fast route of check-oracle.
+check-oracle-hosted:
+	$(RUBY) tools/erx oracle hosted
 
 check-oracle-host:
 	$(RUBY) tools/erx oracle run emulator $(if $(strip $(DOCKER_CONTEXT)),--docker-context "$(DOCKER_CONTEXT)",) --flavour $(FLAVOUR) --jobs $(JOBS)

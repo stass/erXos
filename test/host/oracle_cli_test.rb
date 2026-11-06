@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'tmpdir'
 load File.expand_path('../../tools/erx', __dir__) unless defined?(Erx::CLI)
 
 class OracleCliTest < Minitest::Test
@@ -60,5 +61,46 @@ class OracleCliTest < Minitest::Test
     assert_equal 0, status
     assert_includes output, 'native stock OTP bootstrap jit ready'
     assert_equal [{ flavours: ['jit'], jobs: 4, clean: true }], calls
+  end
+
+  # Stands in for OracleHosted: records how it was made and what it ran, and
+  # reports a comparison with one unlisted difference.
+  class FakeHosted
+    attr_reader :calls
+
+    def initialize(report)
+      @report = report
+      @calls = []
+    end
+
+    def new(**options)
+      @calls << options
+      self
+    end
+
+    def run(suites)
+      @calls << suites
+      File.write(@report, "differs    a_SUITE b #1: stock passed, erXos failed, not in the table\nresult: FAIL\n")
+      Erx::OracleHosted::Outcome.new(result: Struct.new(:passed?).new(false), report: @report)
+    end
+  end
+
+  def test_hosted_refuses_an_unknown_suite_before_running
+    hosted = FakeHosted.new('unused')
+    status, output = run_cli('oracle', 'hosted', 'kernel_SUITE', hosted_class: hosted)
+    assert_equal 2, status
+    assert_includes output, 'unknown suites: kernel_SUITE'
+    assert_empty hosted.calls
+  end
+
+  def test_hosted_prints_the_report_and_fails_with_the_comparison
+    Dir.mktmpdir do |directory|
+      hosted = FakeHosted.new(File.join(directory, 'report.txt'))
+      status, output = run_cli('oracle', 'hosted', '--out', directory, 'filelib_SUITE', hosted_class: hosted)
+      assert_equal 1, status
+      assert_includes output, 'differs    a_SUITE b #1'
+      assert_equal ['filelib_SUITE'], hosted.calls.last
+      assert_equal directory, hosted.calls.first.fetch(:out)
+    end
   end
 end

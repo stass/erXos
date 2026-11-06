@@ -23,6 +23,7 @@ require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
 require_relative 'lib/erx/oracle_container'
+require_relative 'lib/erx/oracle_hosted'
 require_relative 'lib/erx/sanitizer_tests'
 require_relative 'lib/erx/test_pool'
 require_relative 'lib/erx/bench'
@@ -402,7 +403,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [SUITE...] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
       0
     end
 
@@ -509,11 +510,14 @@ module Erx
       0
     end
 
-    def self.oracle(input_arguments, native_class: Oracle, container_class: OracleContainer)
+    def self.oracle(input_arguments, native_class: Oracle, container_class: OracleContainer,
+                    hosted_class: OracleHosted)
       arguments = input_arguments.dup
       action = arguments.shift
+      return oracle_hosted(arguments, hosted_class: hosted_class) if action == 'hosted'
       unless %w[build run probe].include?(action)
-        raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe [--docker-context NAME] [--flavour emu|jit]'
+        raise OptionParser::InvalidArgument, 'usage: oracle build|run SUITE|probe [--docker-context NAME] [--flavour emu|jit] | ' \
+                                           'oracle hosted [--out DIR] [--deadline SECONDS] [SUITE...]'
       end
       suite = arguments.shift if action == 'run'
       options = { backend: 'linux', flavour: 'emu', jobs: 4, deadline: 14_400, clean: false }
@@ -556,6 +560,28 @@ module Erx
                end
       Terminal.puts("Linux host oracle: #{result.fetch('state')}; #{result.fetch('report')}")
       result.fetch('state') == 'completed' || result.fetch('state') == 'ready' ? 0 : 1
+    end
+
+    # OTP's suites for /tmp under Common Test on the hosted runtime and on stock
+    # OTP, compared case by case against the table of known differences. The
+    # suites default to all of OracleHosted::SUITES; the exit is 0 only when
+    # the comparison passes.
+    def self.oracle_hosted(arguments, hosted_class:)
+      out = File.join(ROOT, 'build/oracle-hosted')
+      deadline = 1800
+      OptionParser.new do |flags|
+        flags.on('--out DIR', 'Directory for the trees, event streams, logs and report') { |value| out = value }
+        flags.on('--deadline SECONDS', Integer, 'Hard deadline of each run') { |value| deadline = value }
+      end.parse!(arguments)
+      unknown = arguments - OracleHosted::SUITES.keys
+      raise OptionParser::InvalidArgument, "unknown suites: #{unknown.join(' ')}" unless unknown.empty?
+      raise OptionParser::InvalidArgument, 'deadline must be between 60 and 86400 seconds' unless deadline.between?(60, 86_400)
+
+      suites = arguments.empty? ? OracleHosted::SUITES.keys : arguments.uniq
+      outcome = hosted_class.new(root: ROOT, out: out, deadline: deadline).run(suites)
+      File.read(outcome.report).each_line { |line| Terminal.puts(line.chomp) }
+      Terminal.puts("report: #{outcome.report}")
+      outcome.result.passed? ? 0 : 1
     end
 
     # The bootable file on the stopgap: good images in both forms under each
