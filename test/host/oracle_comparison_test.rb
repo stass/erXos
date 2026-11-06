@@ -5,6 +5,7 @@
 require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
+require 'zlib'
 require_relative '../../tools/lib/erx/oracle_comparison'
 
 # The decisions of the hosted oracle's comparison, from small event streams
@@ -70,6 +71,70 @@ class OracleComparisonTest < Minitest::Test
     row = Erx::OracleComparison.compare(stock: side('stock', STOCK), erxos: erxos, known: known)
                                .rows.find { |candidate| candidate.testcase == 'hung' }
     assert_equal %w[crashed unresolved], [row.erxos, row.verdict]
+  end
+
+  # An event as the reporter prints it: a newline, the prefix, the JSON's
+  # length and CRC-32, the JSON and a closing newline.
+  def frame(json, eol: "\n")
+    format("\nerx-oracle-event %<length>d %<crc>08x %<json>s%<eol>s",
+           length: json.bytesize, crc: Zlib.crc32(json), json: json, eol: eol)
+  end
+
+  def streamed_side(output, command)
+    printed = Erx::OracleComparison.printed_events(output)
+    path = File.join(@directory, 'streamed.jsonl')
+    File.binwrite(path, printed.events)
+    [Erx::OracleComparison.side(events: path, command_state: command, skipped: printed.skipped), printed]
+  end
+
+  def erxos_statuses(erxos)
+    result = Erx::OracleComparison.compare(stock: side('stock', STOCK), erxos: erxos, known: known)
+    result.rows.to_h { |row| [row.testcase, row.erxos] }
+  end
+
+  def records(statuses) = events(statuses).map { |record| JSON.generate(record) }
+
+  # The streamed output of an erXos run killed mid-case: the events of the
+  # finished cases, a suite's own prints around them, and a last event the
+  # kill cut off in the middle.
+  def test_streamed_events_of_a_run_cut_off_mid_case_keep_every_finished_result
+    output = ["boot line\n", "a suite's print, unterminated", *records(ERXOS.merge('hung' => nil)).map { |json| frame(json) },
+              "\nerx-oracle-event 99 00000000 {\"event\":\"tc_do"].join
+    erxos, printed = streamed_side(output, 'timed_out')
+    assert_equal 0, printed.skipped
+    assert_equal({ 'same' => 'passed', 'listed' => 'failed', 'unlisted' => 'failed', 'stale' => 'passed',
+                   'changed' => 'user_skip', 'hung' => 'timed_out' }, erxos_statuses(erxos))
+    assert_equal 'timed_out', erxos.state
+  end
+
+  # A kernel line written into the middle of an event damages that one line.
+  def test_a_damaged_event_line_is_skipped_and_counted_not_fatal
+    lines = records(ERXOS)
+    index = lines.index { |json| json.include?('"case_finish"') && json.include?('"number":1,') }
+    damaged = frame(lines[index]).sub('"event"', "\"ev[kernel: panic]ent\"")
+    output = lines.each_with_index.map { |json, at| at == index ? damaged : frame(json) }.join
+    erxos, printed = streamed_side(output, 'succeeded')
+    assert_equal 1, printed.skipped
+    assert_equal 'incomplete: 1 damaged event lines skipped', erxos.state
+    statuses = erxos_statuses(erxos)
+    assert_equal 'unknown', statuses.fetch('same')
+    assert_equal 'passed', statuses.fetch('hung')
+  end
+
+  def test_a_serial_consoles_crlf_line_ends_are_accepted
+    output = records(ERXOS).map { |json| frame(json).gsub("\n", "\r\n") }.join
+    erxos, printed = streamed_side(output, 'succeeded')
+    assert_equal 0, printed.skipped
+    assert_equal 'complete', erxos.state
+    assert_equal ERXOS, erxos_statuses(erxos)
+  end
+
+  def test_only_whole_checked_lines_are_events
+    ok = frame('{"a":1}').lstrip
+    output = [ok, "not #{ok}", "erx-oracle-log x\n", "erx-oracle-event 7 00000000 {\"c\":3}\n", ok.chomp].join
+    printed = Erx::OracleComparison.printed_events(output)
+    assert_equal "{\"a\":1}\n", printed.events
+    assert_equal 1, printed.skipped
   end
 
   def test_a_case_one_side_never_reached_is_unknown

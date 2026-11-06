@@ -2,7 +2,19 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 -module(erx_oracle_events).
--moduledoc "Records Common Test completion and partial-run evidence for the host oracle.".
+-moduledoc """
+Records Common Test completion and partial-run evidence for the host oracle.
+
+Each event is appended to the file named by `ERX_ORACLE_EVENTS` and, as it
+happens, written to standard output as the raw bytes of one frame:
+`erx-oracle-event `, the JSON's length in bytes, its CRC-32 as eight hex
+digits, the JSON, and a newline, each separated by one space. A newline
+comes first, so the frame starts a line even after a suite's own
+unterminated print. The host skips and counts a line whose length or
+checksum is wrong. The bytes go through `erlang:display_string/2`, one
+write per event, not through the io server, so no encoding of the output
+device can refuse them.
+""".
 -behaviour(gen_event).
 
 -include("ct_event.hrl").
@@ -26,9 +38,17 @@ handle_event(Event, Device) ->
         Record ->
             Bytes = iolist_to_binary(json:encode(Record)),
             true = byte_size(Bytes) < 32768,
-            ok = file:write(Device, [Bytes, $\n])
+            ok = file:write(Device, [Bytes, $\n]),
+            true = erlang:display_string(stdout, frame(Bytes))
     end,
     {ok, Device}.
+
+%% One event on standard output. The prefix is the twin of EVENT_PREFIX in
+%% tools/lib/erx/oracle_comparison.rb, which finds and checks the frame.
+-spec frame(binary()) -> binary().
+frame(Json) ->
+    Crc = io_lib:format("~8.16.0b", [erlang:crc32(Json)]),
+    iolist_to_binary([$\n, "erx-oracle-event ", integer_to_list(byte_size(Json)), $\s, Crc, $\s, Json, $\n]).
 
 -doc "Acknowledges controller observations after writing their complete record.".
 -spec handle_call(term(), file:io_device()) ->

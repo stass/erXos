@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'zlib'
+
 require_relative 'error'
 require_relative 'oracle_results'
 
@@ -35,7 +37,8 @@ module Erx
       # The case whatever the attempt, as a table row names it.
       def identity = [suite, group, testcase]
     end
-    # One run: `state` is complete, timed_out, crashed, incomplete or
+    # One run: `state` is complete, timed_out, crashed, incomplete (with the count of
+    # damaged event lines skipped, when there were any) or
     # "unreadable: why"; `cases` maps each CaseKey to a status of STATUSES
     # or UNRESOLVED_STATUSES.
     Side = Data.define(:state, :cases)
@@ -73,7 +76,38 @@ module Erx
     ROW = %r{\A(?<suite>#{NAME}_SUITE)\s+(?<group>-|#{NAME}(?:/#{NAME})*)\s+(?<testcase>#{NAME})\s+
              (?<status>\S+)\s+(?<reason>\S.*)\z}x
 
+    # The line prefix of an event in output that carries other text too; the
+    # reporter's twin is the prefix in test/oracle/erx_oracle_events.erl.
+    EVENT_PREFIX = 'erx-oracle-event '
+    # An event line: the prefix, the JSON's length in bytes, its CRC-32 as
+    # eight lower-case hex digits, then the JSON, closed by "\n" or "\r\n".
+    EVENT_LINE = /\A#{EVENT_PREFIX}(?<length>\d+) (?<crc>\h{8}) (?<json>.*?)\r?\n\z/m
+    # The events found in a run's output, as one JSON line each, and how
+    # many lines claimed to be events but failed their length or checksum.
+    PrintedEvents = Data.define(:events, :skipped)
+
     module_function
+
+    # The events in `output`, a run's captured standard output. Other text is
+    # ignored, and so is a last line the run was cut off in, which no
+    # newline closes. A closed line that starts with EVENT_PREFIX and fails
+    # its frame is counted in `skipped`, never read.
+    def printed_events(output)
+      framed = output.b.lines.select { |line| line.start_with?(EVENT_PREFIX) && line.end_with?("\n") }
+      records = framed.map { |line| event_json(line) }
+      PrintedEvents.new(events: records.compact.map { |json| "#{json}\n" }.join, skipped: records.count(nil))
+    end
+
+    # The JSON of one framed line, or nil when its length or checksum is wrong.
+    def event_json(line)
+      frame = EVENT_LINE.match(line)
+      return unless frame
+      return unless frame[:json].bytesize == Integer(frame[:length], 10)
+      return unless Zlib.crc32(frame[:json]) == Integer(frame[:crc], 16)
+
+      frame[:json]
+    end
+    private_class_method :event_json
 
     # The table, from `text`; `source` names it in diagnostics. Blank lines
     # and lines starting with `#` are comments.
@@ -105,23 +139,35 @@ module Erx
     # One run, from the event stream erx_oracle_events wrote and the state
     # of the command that ran it (succeeded, failed or timed_out). A stream
     # that cannot be read yields no cases, so every case is unknown there.
-    def side(events:, command_state:)
+    def side(events:, command_state:, skipped: 0)
       report = OracleResults.read(xml: nil, events: events, command: { 'state' => command_state })
-      cut_off = command_state == 'timed_out' ? 'timed_out' : 'crashed'
+      cut_off = cut_off_status(command_state: command_state, skipped: skipped)
       cases = report.fetch('cases').to_h do |record|
         status = record.fetch('status')
         [CaseKey.new(suite: record.fetch('suite'), group: record.fetch('group'), testcase: record.fetch('testcase'),
                      attempt: record.fetch('attempt')),
          status == 'incomplete' ? cut_off : status]
       end
-      Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state), cases: cases)
+      Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state, skipped: skipped),
+                cases: cases)
     rescue Error => error
       Side.new(state: "unreadable: #{error.message}", cases: {})
     end
 
-    def run_state(complete:, command_state:)
+    # What an open case shows: the deadline or the crash that cut it off, or,
+    # when a run that ended well lost event lines, that its result is unknown.
+    def cut_off_status(command_state:, skipped:)
+      return 'timed_out' if command_state == 'timed_out'
+      return 'unknown' if command_state == 'succeeded' && skipped.positive?
+
+      'crashed'
+    end
+    private_class_method :cut_off_status
+
+    def run_state(complete:, command_state:, skipped:)
       return 'timed_out' if command_state == 'timed_out'
       return 'crashed' unless command_state == 'succeeded'
+      return "incomplete: #{skipped} damaged event lines skipped" if skipped.positive?
 
       complete ? 'complete' : 'incomplete'
     end

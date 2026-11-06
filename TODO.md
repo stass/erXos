@@ -199,16 +199,9 @@ it; git history is the record of completed work.
   `test/host/json_input_test.rb` inside the oracle's pinned image, which hid a two-day
   break under its older `json`. The oracle's `probe` operation should exercise a
   duplicate-key refusal there.
-* [Medium] tooling, `test/oracle/erx_ct_oracle.erl`: `tools/erx oracle hosted` gets erXos's
-  events only from what the node prints after `ct:run_test` returns, so a run that times out
-  or crashes shows every erXos case as unknown, and nothing shows which case hung. Let
-  `erx_oracle_events` also write each event to standard output as it happens on erXos.
 * [Medium] tooling, `tools/lib/erx/oracle_hosted.rb`: its hosted release (tree, placeholder
   root, pack rows, `PackWire`, runtime environment) is a second copy of
   `test/integration/runtime_prim_file_test.rb`'s. Extract one hosted-release builder that both use.
-* [Low] tooling, `test/oracle/erx_ct_oracle.erl`: the events reach the host through
-  `io:put_chars` on standard_io, so a code point the device's encoding cannot carry would end
-  the erXos run as crashed or unreadable instead of reporting its cases. Write the raw bytes.
 * [Low] stopgap, `liberx/backend/fiasco/root.c`: a refused `erx.` word ends the boot with a fixed
   reason that names no word, though `erx_boot_args_parse` gives it in `refused`. Printing it needs
   the console's escaping function, as it is text from the boot loader.

@@ -45,7 +45,6 @@ module Erx
     ERXOS_APPLICATIONS = [*Runtime::APPLICATIONS, *ErlangApps::APPLICATIONS].freeze
     # erXos's working directory: suites, logs and priv_dirs all live in /tmp.
     ERXOS_WORK = '/tmp/ct'
-    EVENT_PREFIX = 'erx-oracle-event '
     STOCK_NODE = 'erx_oracle_stock'
     MAX_OUTPUT_BYTES = 256 * 1024 * 1024
     ARCHIVE_BUDGET = 512 * 1024 * 1024
@@ -213,12 +212,9 @@ module Erx
                         name: 'erxos', deadline: @deadline, chdir: @out, env: environment,
                         output_limit: MAX_OUTPUT_BYTES)
       events = File.join(@out, 'erxos.events.jsonl')
-      File.binwrite(events, printed_events(BoundedFile.read(record.fetch('log'), maximum: MAX_OUTPUT_BYTES)))
-      OracleComparison.side(events: events, command_state: record.fetch('state'))
-    end
-
-    def printed_events(output)
-      output.b.each_line.filter_map { |line| line.delete_prefix(EVENT_PREFIX) if line.start_with?(EVENT_PREFIX) }.join
+      printed = OracleComparison.printed_events(BoundedFile.read(record.fetch('log'), maximum: MAX_OUTPUT_BYTES))
+      File.binwrite(events, printed.events)
+      OracleComparison.side(events: events, command_state: record.fetch('state'), skipped: printed.skipped)
     end
 
     # The record of a run judged by what it left rather than by its exit;

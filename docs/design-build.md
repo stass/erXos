@@ -377,6 +377,21 @@ missing observer evidence makes the report incomplete. Tests compare reporter
 enabled/disabled outcomes and actual peer-case logs, repeats, crashes,
 timetraps and pre-initialization skips.
 
+The reporter streams each event as it is recorded, as raw bytes on standard
+output, in one call that bypasses the io server so no device encoding can
+refuse it. The frame is a newline, the prefix `erx-oracle-event `, the
+JSON's length in bytes, its CRC-32 as eight lower-case hex digits, the
+JSON, and a closing newline, with one space between the fields. The
+leading newline makes the frame start a line even after a suite's own
+unterminated print. The host takes the complete lines that start with the
+prefix from output that may also carry a suite's prints or a console's boot
+lines, and accepts a closing `\r\n`. A last line the run was cut off in is
+ignored. A closed line whose length or checksum is wrong is skipped and
+counted; a side with skipped lines is reported incomplete with that count,
+never complete and never unreadable, and its open cases show as unknown.
+A run killed at its deadline keeps every finished case with its result,
+and only the cases that were open show as timed out.
+
 Each controller observation receives a bounded acknowledgement from the
 writer before the controller announces completion, so the completed-run
 event cannot overtake an accepted case record. Detailed arbitrary testcase

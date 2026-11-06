@@ -11,17 +11,15 @@ suites and their `_data` directories, to `WorkDir/suites`, so each
 `data_dir` is writable as it is in a stock checkout, and runs the named
 suites from there with Common Test's logs, and so every `priv_dir`, under
 `WorkDir/logs`. The events `erx_oracle_events` records go to
-`WorkDir/logs/events.jsonl`, which is then printed to standard output,
-one line per event, each after the prefix `erx-oracle-event `: on erXos
-`WorkDir` is under `/tmp`, which the host cannot read once the runtime
-is gone. The text log of each suite follows, each line after
+`WorkDir/logs/events.jsonl` and, as each happens, to standard output as one
+line after the prefix `erx-oracle-event `: on erXos `WorkDir` is under
+`/tmp`, which the host cannot read once the runtime is gone, and a run cut
+off by its deadline has still printed every finished case. The text log of each suite follows, each line after
 `erx-oracle-log `. The node then halts with 0; the comparison judges the
 run by its events, not by the exit status.
 """.
 
 -export([main/1]).
-
--define(PREFIX, "erx-oracle-event ").
 
 -spec main([string()]) -> no_return().
 main([SuiteDir, WorkDir | Suites]) ->
@@ -37,7 +35,6 @@ main([SuiteDir, WorkDir | Suites]) ->
                           {auto_compile, false},
                           {event_handler, erx_oracle_events}]),
     io:format("erx-oracle-result ~0p~n", [Result]),
-    print_lines(?PREFIX, Events),
     [print_lines("erx-oracle-log ", Log)
      || Log <- filelib:wildcard(filename:join(LogDir, "ct_run.*/*.logs/run.*/suite.log"))],
     erlang:halt(0).
