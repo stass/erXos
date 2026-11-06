@@ -217,8 +217,9 @@ namespace("release") ->
 
 %% A read-only bind of a writable grant reaches erx_file_remote read-only, with the
 %% grant's tree; a rename or a link reaches it only when both paths lie on one grant's
-%% tree through one set of rights, and is exdev otherwise, before any server is asked.
-%% erx_file_remote is traced, so each step shows what reached it, or none.
+%% tree through one set of rights, and is exdev otherwise (erofs where either lies read-only), once both paths are walked and
+%% before any server is asked to act. erx_file_remote is traced, so each step shows the
+%% first call that reached it, the source's walk for a rename or a link, or none.
 two_paths(Show) ->
     Reached = fun(Call) -> reached(Call) end,
     ok = erx_ns:mount(test_grant(), <<"/tmp">>, [{tree, <<"test">>}, rw]),
@@ -229,9 +230,9 @@ two_paths(Show) ->
     Show("ro bind", Reached(fun() -> prim_file:read_file_info(<<"/ro/c">>) end)),
     Show("rw mount", Reached(fun() -> prim_file:make_dir(<<"/tmp/c">>) end)),
     Show("rename one", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/tmp/a/y">>) end)),
-    Show("rename two", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/u/y">>) end)),
-    Show("rename ro", Reached(fun() -> prim_file:rename(<<"/tmp/a/x">>, <<"/ro/y">>) end)),
-    Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/x">>, <<"/lib/y">>) end)),
+    Show("rename two", Reached(fun() -> prim_file:rename(<<"/tmp/a">>, <<"/u/y">>) end)),
+    Show("rename ro", Reached(fun() -> prim_file:rename(<<"/tmp/a/f">>, <<"/ro/y">>) end)),
+    Show("rename local", Reached(fun() -> prim_file:rename(<<"/tmp/a">>, <<"/lib/y">>) end)),
     %% A rename whose source is "/" is einval before it is exdev or erofs; "//", a mount's
     %% or a bind's top and a last "." keep the order of the other two-path refusals.
     Show("rename root", Reached(fun() -> prim_file:rename(<<"/">>, <<"/tmp/y">>) end)),
@@ -432,7 +433,7 @@ remote("release") ->
     Show("ro symlink", prim_file:make_symlink(<<"f">>, <<"/r/g">>)),
     Show("ro write info", prim_file:write_file_info(<<"/r/f">>, #file_info{mode = 8#600})),
     Show("ro kept", {Info(<<"/t/f">>), Info(<<"/t/a">>)}),
-    Show("exdev rename", prim_file:rename(<<"/t/f">>, <<"/r/g">>)),
+    Show("rename onto read-only", prim_file:rename(<<"/t/f">>, <<"/r/g">>)),
     Show("exdev link", prim_file:make_link(<<"/t/f">>, <<"/r/g">>)),
     open_files(Show),
     Show("fids held", fids_held(Grant)),
@@ -442,7 +443,7 @@ remote("release") ->
     [ok = erx_ns:unmount(Point) || Point <- [<<"/r">>, <<"/t">>]],
     ok.
 
-%% A path written with a trailing "/" on a grant names a directory, as Linux's path
+%% A path written with a trailing "/" on a grant names a directory, as FreeBSD's path
 %% resolution has it, on a fresh tree mounted at /s: a last name that is not a directory
 %% answers enotdir, a link before the "/" is followed, and make_dir and del_dir act as
 %% they do without it.
@@ -506,7 +507,7 @@ links(Show) ->
     ok = prim_file:make_symlink(<<"/lib">>, <<"/s/rel">>),
     Show("link to the release", same(<<"/s/rel">>, <<"/lib">>)),
     Show("link to the release list", same_listing(<<"/s/rel">>, <<"/lib">>)),
-    Show("link out exdev", prim_file:rename(<<"/s/rel/x">>, <<"/s/y">>)),
+    Show("link out source missing", prim_file:rename(<<"/s/rel/x">>, <<"/s/y">>)),
     ok = prim_file:make_symlink(<<"missing">>, <<"/s/dangling">>),
     Show("link dangling", {Info(<<"/s/dangling">>), info(prim_file:read_link_info(<<"/s/dangling">>))}),
     ok = prim_file:make_symlink(<<"">>, <<"/s/empty">>),
@@ -525,7 +526,7 @@ links(Show) ->
                                  prim_file:read_link_info(<<"/s/a/x">>)}),
     Show("link delete not followed", {prim_file:make_symlink(<<"f">>, <<"/s/a/y">>), prim_file:delete(<<"/s/a/y">>),
                                       Info(<<"/s/f">>)}),
-    Show("link hard link not followed", {prim_file:make_link(<<"/s/l">>, <<"/s/l2">>),
+    Show("link hard link followed", {prim_file:make_link(<<"/s/l">>, <<"/s/l2">>),
                                          prim_file:read_link(<<"/s/l2">>)}),
     Show("link ro relative", prim_file:write_file_info(<<"/sr/l/f">>, #file_info{mode = 8#600})),
     Show("link ro absolute", prim_file:write_file_info(<<"/sr/abs">>, #file_info{mode = 8#600})),

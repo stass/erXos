@@ -1,74 +1,66 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The fuzz target of erx_file_remote's path handling (docs/design-files.md, Erlang
-%% clients, step 2): random paths of up to 24 pieces drawn from names, ".", "..", runs of
-%% "/" and bytes that are not names, some ending in the NUL prim_file's encoding adds, go
-%% through last_name/1, and random name lists through names/1. last_name/1 must not raise
-%% and must agree with a model that splits the text on "/" and keeps its non-empty
-%% pieces: the last name is the last piece, the rest is the text up to and including
-%% the "/" before it, or "." for a path of one name, and the path is slashed when a "/"
-%% follows its last name. names/1 must give back the list its
-%% joined text came from. The seed comes from make check-fuzz.
+%% The fuzz target of erx_file_remote's request function (docs/design-files.md, Erlang
+%% clients): batches of random walks of up to 20 names, drawn from plain names, ".",
+%% "..", empty names and names that are not UTF-8 or hold "/" or NUL, among stats and
+%% mkdirs, go through refused/2 under each set of rights. It must not raise and must
+%% agree with a model that reads each request in order: a walk that names ".", ".." or
+%% an empty name, or any name the grammar refuses, or more than ?ERX_P9_MAXWELEM names,
+%% and a mkdir of such a name, are einval; a write through rights other than rw is erofs;
+%% a batch with neither is sent (none). The seed comes from make check-fuzz.
 
 -module(erx_file_remote_fuzz).
 -export([run/1]).
 
--define(PATHS, 200000).
--define(PIECES, [<<"a">>, <<"bc">>, <<".">>, <<"..">>, <<"...">>, <<"/">>, <<"//">>,
-                 <<".a">>, <<"a.">>, <<255>>, <<"\\">>, <<" ">>]).
+-define(BATCHES, 100000).
+-define(NAMES, [<<"a">>, <<"bc">>, <<".">>, <<"..">>, <<"...">>, <<>>, <<"a/b">>, <<"a", 0>>,
+                <<255>>, <<".a">>, <<"a.">>, <<" ">>]).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    loop(?PATHS),
-    io:format("fuzz: ~b paths ok~n", [?PATHS]).
+    loop(?BATCHES),
+    io:format("fuzz: ~b batches ok~n", [?BATCHES]).
 
 loop(0) ->
     ok;
 loop(Left) ->
-    Text = iolist_to_binary([pick(?PIECES) || _ <- lists:seq(1, rand:uniform(25) - 1)]),
-    Encoded = case rand:uniform(2) of
-                  1 -> <<Text/binary, 0>>;
-                  2 -> Text
-              end,
-    check_last_name(Text, Encoded),
-    check_names([pick([<<"a">>, <<"bc">>, <<"...">>, <<"a.b">>]) || _ <- lists:seq(1, rand:uniform(6) - 1)]),
+    Batch = [request() || _ <- lists:seq(1, rand:uniform(3))],
+    Rights = pick([ro, rw, rx]),
+    Got = erx_file_remote:refused(Batch, Rights),
+    case model(Batch, Rights) of
+        Got -> ok;
+        Want -> erlang:error({refused, Batch, Rights, Got, Want})
+    end,
     loop(Left - 1).
 
-check_last_name(Text, Encoded) ->
-    Got = erx_file_remote:last_name(Encoded),
-    case model(Text) of
-        Got -> ok;
-        Want -> erlang:error({last_name, Encoded, Got, Want})
+request() ->
+    case rand:uniform(3) of
+        1 -> {walk, 1, 2, [pick(?NAMES) || _ <- lists:seq(1, rand:uniform(21) - 1)]};
+        2 -> {getattr, 1, 16#3fff};
+        3 -> {mkdir, 1, pick(?NAMES), 8#755, 0}
     end.
 
-%% The model: the pieces between slashes, empty ones dropped.
-model(Text) ->
-    case [Piece || Piece <- binary:split(Text, <<"/">>, [global]), Piece =/= <<>>] of
-        [] ->
-            {Text, <<>>, false};
-        Pieces ->
-            Last = lists:last(Pieces),
-            {rest(Text, Last), Last, binary:last(Text) =:= $/}
+model([], _) ->
+    none;
+model([Request | Batch], Rights) ->
+    case {valid(Request), writes(Request)} of
+        {false, _} -> einval;
+        {true, true} when Rights =/= rw -> erofs;
+        {true, _} -> model(Batch, Rights)
     end.
 
-%% The text up to and including the "/" before the last occurrence of Last that is
-%% followed only by slashes, or "." when no "/" precedes it.
-rest(Text, Last) ->
-    Trimmed = re:replace(Text, "/+$", "", [{return, binary}, dollar_endonly]),
-    Size = byte_size(Trimmed) - byte_size(Last),
-    <<Before:Size/binary, Last/binary>> = Trimmed,
-    case Before of
-        <<>> -> <<".">>;
-        _ -> Before
-    end.
+valid({walk, _, _, Names}) -> length(Names) =< 16 andalso lists:all(fun plain/1, Names);
+valid({getattr, _, _}) -> true;
+valid({mkdir, _, Name, _, _}) -> plain(Name).
 
-check_names(Names) ->
-    Joined = iolist_to_binary(lists:join(<<"/">>, Names)),
-    case erx_file_remote:names(Joined) of
-        Names -> ok;
-        Got -> erlang:error({names, Joined, Got})
-    end.
+writes({mkdir, _, _, _, _}) -> true;
+writes(_) -> false.
+
+plain(Name) ->
+    Name =/= <<>> andalso Name =/= <<".">> andalso Name =/= <<"..">> andalso
+        binary:match(Name, [<<"/">>, <<0>>]) =:= nomatch andalso
+        unicode:characters_to_binary(Name) =:= Name.
 
 pick(List) ->
     lists:nth(rand:uniform(length(List)), List).

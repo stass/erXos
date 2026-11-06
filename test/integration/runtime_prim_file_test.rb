@@ -36,10 +36,10 @@ class RuntimePrimFileTest < Minitest::Test
   RESOURCE_GROWTH_BYTES = 256 * 1024
 
   OPERATIONS = %w[read_file file_info link_info read_link list_dir handle set_cwd].freeze
-  # Lexical `.` and `..`: each path answers, on every operation, as the path beside it,
-  # where stock's stat refuses it with enotdir or enoent.
-  LEXICAL = { 'a.txt/.' => 'a.txt', 'a.txt/' => 'a.txt', 'a.txt/../sub/b.txt' => 'sub/b.txt',
-              'missing/../a.txt' => 'a.txt', 'missing/../sub/b.txt' => 'sub/b.txt' }.freeze
+  # `.` and `..` taken in the directory a resolution has reached, as FreeBSD's namei
+  # takes them: each path answers, on every operation, as stock's, which refuses it with
+  # enotdir or enoent.
+  DOTS = %w[a.txt/. a.txt/ a.txt/../sub/b.txt missing/../a.txt missing/../sub/b.txt].freeze
   # A name over the limit is refused before the walk finds `missing`, and macOS's own
   # path limit is 1,024 bytes where the design's is 4,096.
   Refused = Data.define(:stock, :release)
@@ -120,15 +120,9 @@ class RuntimePrimFileTest < Minitest::Test
 
   # /tmp against stock OTP in a fresh host directory (design-tmp.md, Verification, "Against
   # stock OTP"): every step agrees but those named here, each as [stock, release], a
-  # difference the design states (Differences from stock OTP) or one TODO.md records. A
-  # last `..` of a removal and a last `.` or `..` of a rename answer as Linux's
-  # (ENOTEMPTY, which prim_file answers as eexist, and EBUSY), where macOS answers einval.
-  TMP_DIFFERENCES = {
-    'tmp del_dir child/..' => ['{error,einval}', '{error,eexist}'],
-    'tmp del_dir other full' => ['{error,einval}', '{error,eexist}'],
-    'tmp rename child/..' => ['{error,einval}', '{error,ebusy}'],
-    'tmp rename to child/.' => ['{error,einval}', '{error,ebusy}']
-  }.freeze
+  # difference the design states (Differences from stock OTP) or one TODO.md records.
+  # None is named: macOS answers these paths as FreeBSD does.
+  TMP_DIFFERENCES = {}.freeze
 
   def test_tmp_agrees_with_stock_except_where_named
     release = table(@fixture.release).select { |key, _| key.start_with?('tmp ') }
@@ -306,17 +300,14 @@ class RuntimePrimFileTest < Minitest::Test
     TMP_ERXOS.each { |step, want| assert_equal want, release[step], step }
   end
 
-  # The design's sentence: `f/.` is `f`, where stock's stat answers enotdir.
-  def test_the_lexical_differences_are_pinned
+  # The design's sentence: `file/.` answers enotdir and `missing/..` enoent.
+  def test_dot_and_dot_dot_resolve_physically
     release = table(@fixture.release)
     stock = table(@fixture.stock)
-    LEXICAL.each do |path, same_as|
-      OPERATIONS.each do |operation|
-        assert_equal release.fetch(line_key(operation, same_as)), release.fetch(line_key(operation, path)),
-                     "#{operation} #{path}"
-      end
+    DOTS.product(OPERATIONS).each do |path, operation|
+      assert_equal stock.fetch(line_key(operation, path)), release.fetch(line_key(operation, path)),
+                   "#{operation} #{path}"
     end
-    assert_match(/\A\{ok,regular,6,read,/, release.fetch(line_key('file_info', 'a.txt/.')))
     assert_equal '{error,enotdir}', stock.fetch(line_key('file_info', 'a.txt/.'))
     assert_equal '{error,enotdir}', stock.fetch(line_key('file_info', 'a.txt/'))
     assert_equal '{error,enoent}', stock.fetch(line_key('file_info', 'missing/../a.txt'))
@@ -360,18 +351,20 @@ class RuntimePrimFileTest < Minitest::Test
       'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
       'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
       'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
-      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{<<"/ro">>,<<"a">>,<<"a/c">>},1,<<47,114,111,47,99,0>>]}',
-      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"c">>},<<47,116,109,112,47,99,0>>]}',
-      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"x">>},{<<"/tmp">>,<<>>,<<"a/y">>},<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
-      'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
-      'ns rename local' => '{{error,exdev},none}', 'ns rename root' => '{{error,einval},none}',
-      'ns rename root local' => '{{error,einval},none}', 'ns rename mount top' => '{{error,exdev},none}',
-      'ns rename bind top' => '{{error,exdev},none}', 'ns rename mount dot' => '{{error,exdev},none}',
-      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[{<<"/u">>,<<>>,<<"x">>},{<<"/u">>,<<>>,<<"y">>},<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
-      'ns link two' => '{{error,exdev},none}',
+      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{target,[<<"a">>,<<"c">>]},true]}',
+      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[{parent,[],<<"c">>}]}',
+      'ns rename one' => '{{error,enoent},walk,<<"test">>,rw,[[<<"x">>]]}',
+      'ns rename two' => '{{error,exdev},walk,<<"test">>,rw,[[<<"a">>]]}',
+      'ns rename ro' => '{{error,erofs},walk,<<"test">>,rw,[[<<"a">>,<<"f">>]]}',
+      'ns rename local' => '{{error,erofs},walk,<<"test">>,rw,[[<<"a">>]]}',
+      'ns rename root' => '{{error,einval},none}',
+      'ns rename root local' => '{{error,einval},none}', 'ns rename mount top' => '{{error,ebusy},none}',
+      'ns rename bind top' => '{{error,ebusy},none}', 'ns rename mount dot' => '{{error,einval},none}',
+      'ns link one' => '{{error,enoent},walk,<<"u">>,rw,[[<<"x">>]]}',
+      'ns link two' => '{{error,enoent},walk,<<"u">>,rw,[[<<"x">>]]}',
       'ns rename to bind top' => '{error,ebusy}', 'ns del_dir bind top' => '{error,ebusy}',
-      'ns delete bind top' => '{error,ebusy}',
-      'ns rename from bind top' => '{{error,ebusy},rename,<<"test">>,rw,[{<<"/x">>,<<"a">>,<<"a">>},{<<"/tmp">>,<<>>,<<"d">>},<<47,120,0>>,<<47,116,109,112,47,100,0>>]}',
+      'ns delete bind top' => '{error,eperm}',
+      'ns rename from bind top' => '{{error,ebusy},none}',
       'ns bind top kept' => FILE }.each do |step, want|
       assert_equal want, release.fetch(step), step
     end
@@ -385,8 +378,8 @@ class RuntimePrimFileTest < Minitest::Test
   # and the cases of design-tmp.md's verification that need no stock OTP): each path
   # operation, the error steps in order, the #file_info{} fields, a read-only entry's
   # erofs before anything is sent, exdev, no fid left behind, hostile replies, paths
-  # written with a trailing "/" (Linux's answers) and symbolic links followed within the
-  # grant and out of it, to 40 links.
+  # written with a trailing "/" and symbolic links followed within the grant and out of
+  # it, to 32 links, all with FreeBSD's answers.
   REMOTE = {
     'info dir' => DIRECTORY, 'info file' => FILE, 'info root' => DIRECTORY,
     'info missing' => '{error,enoent}', 'info past a file' => '{error,enotdir}',
@@ -399,15 +392,15 @@ class RuntimePrimFileTest < Minitest::Test
     'make dir missing dotdot' => '{error,enoent}', 'make dir root' => '{error,eexist}',
     'del dir full' => '{error,eexist}', 'del dir dot' => '{error,einval}',
     'del dir missing dot' => '{error,enoent}', 'del dir file dot' => '{error,enotdir}',
-    'del dir dotdot' => '{error,eexist}', 'del dir root' => '{error,ebusy}', 'del dir file' => '{error,enotdir}',
+    'del dir dotdot' => '{error,einval}', 'del dir root' => '{error,ebusy}', 'del dir file' => '{error,enotdir}',
     'del dir' => 'ok', 'del dir gone' => '{error,enoent}',
     'delete file dot' => '{error,enotdir}', 'delete dir dot' => '{error,eperm}', 'delete dir' => '{error,eperm}',
-    'delete root' => '{error,ebusy}', 'symlink' => 'ok', 'symlink made' => '{ok,"f"}',
+    'delete root' => '{error,eperm}', 'symlink' => 'ok', 'symlink made' => '{ok,"f"}',
     'delete victim' => '{error,enoent}', 'victim kept' => '{ok,"f"}', 'delete link' => 'ok',
     'link deleted' => '{error,enoent}', 'symlink dot' => '{error,eexist}',
     'symlink missing dotdot' => '{error,enoent}', 'symlink root' => '{error,eexist}',
     'rename' => 'ok', 'renamed' => "{{error,enoent},#{DIRECTORY}}", 'rename missing' => '{error,enoent}',
-    'rename from dot' => '{error,ebusy}', 'rename to dot' => '{error,ebusy}',
+    'rename from dot' => '{error,einval}', 'rename to dot' => '{error,enoent}',
     'rename missing dot' => '{error,enoent}', 'rename root' => '{error,ebusy}',
     'link' => 'ok', 'linked' => "{#{FILE},#{FILE}}", 'link dot' => '{error,eexist}',
     'link missing to dot' => '{error,enoent}', 'link missing' => '{error,enoent}',
@@ -417,30 +410,30 @@ class RuntimePrimFileTest < Minitest::Test
     'ro info' => CHANGED, 'ro make dir' => '{error,erofs}', 'ro del dir' => '{error,erofs}',
     'ro delete' => '{error,erofs}', 'ro rename' => '{error,erofs}', 'ro link' => '{error,erofs}',
     'ro symlink' => '{error,erofs}', 'ro write info' => '{error,erofs}', 'ro kept' => "{#{CHANGED},#{DIRECTORY}}",
-    'exdev rename' => '{error,exdev}', 'exdev link' => '{error,exdev}', 'fids held' => '0',
+    'rename onto read-only' => '{error,erofs}', 'exdev link' => '{error,exdev}', 'fids held' => '0',
 'slash info file' => '{error,enotdir}', 'slash info dir' => DIRECTORY, 'slash link info' => DIRECTORY,
 'slash link info of a file' => '{error,enotdir}', 'slash read link' => '{error,einval}',
 'slash list file' => '{error,enotdir}', 'slash write info' => '{error,enotdir}',
 'slash delete file' => '{error,enotdir}', 'slash delete missing' => '{error,enoent}',
-'slash delete dir' => '{error,eperm}', 'slash delete link' => '{error,enotdir}',
+'slash delete dir' => '{error,eperm}', 'slash delete link' => '{error,eperm}',
 'slash kept' => "{#{FILE},#{LINK}}", 'slash make dir' => 'ok', 'slash made dir' => DIRECTORY,
-'slash del dir file' => '{error,enotdir}', 'slash del dir link' => '{error,enotdir}',
-'slash rename file' => '{error,enotdir}', 'slash rename to' => '{error,enotdir}',
+'slash del dir file' => '{error,enotdir}', 'slash del dir link' => '{error,eexist}',
+'slash rename file' => '{error,enotdir}', 'slash rename to' => '{error,enoent}',
 'slash rename missing' => '{error,enoent}', 'slash rename dir' => 'ok',
 'slash renamed dir' => "{{error,enoent},#{DIRECTORY}}", 'slash del dir' => 'ok',
-'slash symlink new' => '{error,enoent}', 'slash symlink existing' => '{error,eexist}',
+'slash symlink new' => '{error,enoent}', 'slash symlink existing' => '{error,enotdir}',
 'slash hard link new' => '{error,enoent}', 'slash hard link existing' => '{error,enotdir}',
 'slash nothing made' => '{{error,enoent},{error,enoent}}', 'slash fids held' => '0',
 'link relative' => DIRECTORY, 'link relative through' => FILE, 'link relative list' => '{ok,["b","f"]}',
 'link absolute' => FILE, 'link absolute read' => '{ok,"/s/a/f"}', 'link info' => LINK,
 'link in a bind' => FILE, 'link above a bind' => "{#{FILE},{error,enoent}}",
-'link to the release' => 'true', 'link to the release list' => 'true', 'link out exdev' => '{error,exdev}',
+'link to the release' => 'true', 'link to the release list' => 'true', 'link out source missing' => '{error,enoent}',
 'link dangling' => "{{error,enoent},{ok,symlink,none,#{0o120777}}}", 'link empty' => '{error,enoent}',
-'link loop' => '{{error,eloop},{error,eloop},{error,eloop}}', 'link forty' => FILE,
+'link loop' => '{{error,eloop},{error,eloop},{error,eloop}}', 'link forty' => '{error,eloop}',
 'link forty one' => '{error,eloop}', 'link make dir through' => "{ok,#{DIRECTORY}}",
 'link rename through' => "{ok,#{DIRECTORY}}", 'link del dir through' => 'ok',
 'link delete through' => '{ok,ok,{error,enoent}}', 'link delete not followed' => "{ok,ok,#{FILE}}",
-'link hard link not followed' => '{ok,{ok,"a"}}', 'link ro relative' => '{error,erofs}',
+'link hard link followed' => '{{error,eperm},{error,enoent}}', 'link ro relative' => '{error,erofs}',
 'link ro absolute' => 'ok', 'link ro absolute written' => "{ok,regular,0,read_write,#{0o100600}}",
 'link ro delete' => '{error,erofs}', 'link fids held' => '0',
     'link ro to writable' => "{ok,#{DIRECTORY},ok,{error,enoent}}", 'link sixteenth name' => "{ok,regular,0,read_write,#{0o100600}}",
@@ -471,7 +464,7 @@ class RuntimePrimFileTest < Minitest::Test
     'open missing' => '{error,enoent}', 'open a directory' => '{error,eisdir}', 'open a directory as one' => 'ok',
     'open through a link' => 'ok', 'open exclusive existing' => '{error,eexist}', 'open exclusive new' => 'ok',
     'open exclusive a link' => '{error,eexist}', 'create in missing' => '{error,enoent}',
-    'create slashed' => '{error,eisdir}', 'create a directory' => '{error,eisdir}', 'create the root' => '{error,eisdir}',
+    'create slashed' => '{error,enoent}', 'create a directory' => '{error,eisdir}', 'create the root' => '{error,eisdir}',
     'ro open read' => 'ok', 'ro open write' => '{error,erofs}', 'ro create' => '{error,erofs}',
     'ro create in missing' => '{error,enoent}', 'ro exclusive' => '{error,eexist}',
     'ro truncate' => '{{error,einval},{error,ebadf}}', 'ro unchanged' => '{ok,<<"x">>}', 'io server' => '{{ok,"x"},ok}',
@@ -584,7 +577,7 @@ class RuntimePrimFileTest < Minitest::Test
   # What the pins above answer for; every other line must agree with stock.
   def named?(key)
     _operation, hexadecimal = key.split(' ', 2)
-    named = LEXICAL.keys + LIMITS.keys + [NOT_UTF8]
+    named = LIMITS.keys + [NOT_UTF8]
     named.any? { |path| line_key('', path).strip == hexadecimal }
   end
 
@@ -676,15 +669,7 @@ class RuntimePrimFileTest < Minitest::Test
   RAMFS = 'erlang/apps/erx_files/src/erx_ramfs.erl'
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
   TMP_SEEDS = [
-    TmpSeed.new(name: 'tmp-enotempty', source: CLIENT, mode: 'tmp-seeded', caught: ['tmp del dir full'],
-                passages: [["        {error, Full} when Full =:= enotempty; Full =:= eexist -> working_directory_step(Path);\n",
-                            "        {error, eexist} -> working_directory_step(Path);\n"]]),
-    TmpSeed.new(name: 'tmp-dot-first', source: CLIENT, mode: 'tmp-seeded', caught: ['tmp del_dir missing/.'],
-                passages: [["        true -> on_ok(directory(Rest), Special(Last));\n",
-                            "        true -> Special(Last);\n"]]),
-    TmpSeed.new(name: 'tmp-dot-text', source: CLIENT, mode: 'tmp-seeded',
-                caught: ['tmp delete file/.', 'tmp file kept'],
-                passages: [["special_name(<<\".\">>) -> true;\n", "special_name(<<\".\">>) -> false;\n"]]),
+
     TmpSeed.new(name: 'tmp-setattr-node', source: CORE, mode: 'tmp-seeded', caught: ['tmp truncate 0444'],
                 passages: [["        {Ino, Access, _} = Handle,\n        {ok, Ino, N, {open, Access}}\n",
                             "        {Ino, _Access, _} = Handle,\n        {ok, Ino, N, node}\n"]]),
@@ -698,10 +683,11 @@ class RuntimePrimFileTest < Minitest::Test
                             "        {ok, _} ->\n            Next = case get(counter) of undefined -> 1000000; C -> C + 1 end,\n" \
                             "            put(counter, Next),\n            erx_ramfs_core:step(Request, Next, time_ns(), Tree);\n"]]),
     TmpSeed.new(name: 'cold-unpreloaded-client-call', source: CLIENT, mode: 'cold', caught: ['halted'],
-                passages: [["read_file(Grant, Place, Path) ->\n", "read_file(Grant, Place, Path) ->\n    _ = base64:encode(<<>>),\n"],
-                           ["list_dir(Grant, Place, Path) ->\n", "list_dir(Grant, Place, Path) ->\n    _ = base64:encode(<<>>),\n"],
-                           ["read_file_info(Grant, Place, FollowLinks, Path) ->\n",
-                            "read_file_info(Grant, Place, FollowLinks, Path) ->\n    _ = base64:encode(<<>>),\n"]])
+                passages: [["read_file(Grant, Where) ->\n", "read_file(Grant, Where) ->\n    _ = base64:encode(<<>>),\n"],
+                           ["list_dir(Grant, {target, Names}) ->\n",
+                            "list_dir(Grant, {target, Names}) ->\n    _ = base64:encode(<<>>),\n"],
+                           ["read_file_info(Grant, {target, Names}, Follow) ->\n",
+                            "read_file_info(Grant, {target, Names}, Follow) ->\n    _ = base64:encode(<<>>),\n"]])
   ].freeze
 
   public

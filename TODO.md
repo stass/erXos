@@ -527,74 +527,18 @@ it; git history is the record of completed work.
 * [Medium] runtime, `erx_file_remote`: the server's replies, the client's untrusted input, have hand-written
   hostile cases in `test/integration/prim_file_compare.erl` but no fuzz target; the fuzz target covers the
   caller's path text only.
-* [Low] runtime, `erx_file_remote`: a chained walk (over 16 names) whose last qid is a link answers the next
-  walk's `enotdir`; `list_dir` opens without `O_DIRECTORY`; a partial walk answers `enoent` for any refusal;
+* [Low] runtime, `test/integration/runtime_prim_file_test.rb`: no seeded fault shows the /tmp transcript
+  catches a missing turn of the error steps (`enotempty` to `eexist`, `einval` and `eisdir` to `eperm`),
+  which live in preloaded `prim_file`, which a seed cannot replace after boot; and none shows it catches an
+  executor that never hands a stopped walk to its resumption. Seed `erx_file_remote:passed/2` to answer
+  `true`, and the turns through a hosted build of their own, or name the transcript lines that cover them.
+* [Low] runtime, `erx_file_remote`: `list_dir` opens without `O_DIRECTORY`; a partial walk answers `enoent` for any refusal;
   negative times answer `einval`; an empty symlink target is sent; a listing may hold up to 2^20 names of
   255 bytes; the xref check exempts every call through a variable.
 * [Low] build, `otp/erts/preloaded/ebin`: the preloaded beams erXos changes (`prim_file`, `erx_9p_grammar`,
   `erx_file_remote`) are compiled by hand with the oracle's `erlc` and checked in, each recorded in
   `otp/ORIGIN.md`; building them from source in the runtime build, under `make check-reproducible`, would
   remove the hand step and the hashes to keep.
-* [Medium] runtime, `erx_file_remote` and `prim_file`'s bridge: a rename re-resolved after a link
-  (`prim_file:erx_resolve/1`) goes through the bridge's `erx_at_two/3`, so a source that reaches `/` only through a link
-  skips rename's einval, and the client's own top test (`NameList =:= []` in
-  `renamed/3` and `remove/5`) misses a bind's top, whose names are its root's: a rename of `/x`, a
-  read-write bind of `/tmp/a`, to `/tmp/c` moves `/tmp/a` where Linux answers `exdev`, and `rename`, `del_dir` and
-  `delete` of `/tmp/l/x` with `/tmp/l -> /` and `/x` a bind act on the bind's root. Let the place term carry
-  the namespace's own top decision; `renamed/3`'s `{<<"/">>, _}` clause is then dead.
-* [Medium] runtime, `erx_file_remote`: `make/4`, `open_on/4` and `linked/3` still decide a tree's root from
-  the names (`NameList =:= []`), so at a bind's top, whose names are its root's, `make_dir`, a creating
-  `open`, `make_symlink` and `make_link`'s new name act on the bind root's parent on the server, outside the
-  entry: on a read-only bind `make_dir` answers `erofs` where Linux answers `eexist`, and on a writable bind
-  whose root was removed elsewhere it makes the root again. Take the place's `Top` there too, ideally through
-  one `parent(Place) -> {Dir, Name} | top` that every operation must answer, so `dir_of([])` cannot be reached.
-* [Medium] runtime, `erx_file_remote`: `parent/1` takes a place below its top to have more names
-  than its `Root` on the namespace's word (`prim_file:erx_located/2`); the xref check proves only that
-  `split_last/1` has one caller, and `split_at/2` or `last_name/1` could still build a parent. A floor
-  where requests are sent (no `mkdir`, `symlink`, `link`, `lcreate`, `unlinkat` or `renameat` on a
-  directory walk shorter than the entry's `Root`, refused with `eio`) would make it hold by
-  construction; with a `-type parent()` and specs under dialyzer for the helpers that take one.
-* [Low] runtime, `erx_file_remote`: `parent/1` holds by construction (`with_links/6` refuses with `eio` a
-  place whose `Names` do not begin with its `Root`), but a directory walk built elsewhere with `split_at/2` or
-  `last_name/1` is not floored at `Root`. A floor where requests are sent (no `mkdir`, `symlink`, `link`,
-  `lcreate`, `unlinkat` or `renameat` on a walk shorter than the entry's `Root`, refused with `eio`) would cover
-  every builder; with a `-type parent()` and specs under dialyzer for the helpers that take one.
-* [Low] runtime, `erx_file_remote` and [design-files.md](docs/design-files.md#errors) step 3: `ebusy` for a
-  mount's or bind's top comes before errors Linux reports first: `delete` of a directory top answers `ebusy`
-  where Linux's `unlink` answers `eisdir` (stock `eperm`), and a rename onto a directory top in the same mount,
-  a top onto a file, a missing destination directory and a read-only parent answer `ebusy` where Linux
-  answers `eisdir`, `enotdir`, `enoent` and `erofs`. Apply step 3 after the checks Linux makes first, or
-  record the order as a documented difference with a test.
-* [Low] runtime, `prim_file:erx_at_two/3` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
-  a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
-  link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers
-  `ebusy`, `rename("/tmp/x", "/tmp")` reaches the grant with an empty name where Linux answers `exdev`, and
-  `rename("/tmp/missing/x", "/u/y")` answers `exdev` where Linux first finds the missing directory (`enoent`).
-  Two entries of one grant, tree and rights also take a rename together where Linux answers `exdev` between
-  two bind mounts. The /tmp oracle cases settle which rules the design states.
-* [Medium] runtime, `prim_file` and `erx_file_remote`: paths resolve logically, with Linux's answers,
-  so `..` after a link names the link's own parent, a rename or a link places each path by its whole resolved
-  path, and a last `.` or `..` answers Linux's errors. [Resolving a path](docs/design-files.md#resolving-a-path)
-  resolves them physically in `erx_path`, preloaded Erlang over a snapshot of the table, with FreeBSD's answers.
-  `erx_path` is written and preloaded, with its EUnit cases, its reference model of `vfs_lookup` and its fuzz
-  target, and the release provider takes name lists (`release_walk_nif/1` and the operations' NIFs, through the
-  decoder `erx_release_fs_add_name` and its fuzz target), but nothing calls `erx_path` yet: a bridge in
-  `prim_file` (`erx_at`, `erx_at_two`, `erx_locate`, `erx_place`, `erx_steps`, `erx_located`, `erx_provided`,
-  `erx_cwd`) places each path lexically over `erx_ns`'s term, as the deleted C table did, so the answers stay
-  today's. The boot table holds no EROFS image, since the boot information names none yet. One package remains,
-  one commit with its own targeted tests. (3) The executor:
-  `prim_file`'s dispatch of actions by provider, `erx_file_remote` on actions and resumptions, its request
-  function's refusal of `.`, `..` and empty names, a rename's two paths on one table, and the working directory
-  as a place; delete the bridge, `prim_file:erx_resolve/1` and `erx_file_remote`'s second view of the path
-  (`with_links`, `through`, `follow`, `link_path`, `joined`, `last_name`, `names` and their helpers), whose
-  comments still cite Linux's answers, with the cases of `test/erlang/erx_file_remote_fuzz.erl` and
-  `tools/fuzz/erx_file_remote.rb` that fuzz them.
-* [Medium] runtime, `prim_file`'s bridge: its lexical placement (`erx_place`, `erx_steps`, `erx_holder`,
-  `erx_below`, `erx_located`) has no test of its own, where the deleted C resolver had host tests and a fuzz
-  target, and it repeats `erx_ns:reached/1`, `step/2` and `holder/2`, which place a bind's source and check the
-  name limits later, so the two can drift. A rename's two relative paths read the working directory twice
-  (`erx_locate_two`), where the C table placed both under one lock. Package (3) deletes the bridge; if it waits,
-  move the placement into `erx_path` with EUnit cases and have both callers use it.
 * [Low] runtime, `tools/fuzz/release_names_fuzz.c`: the oracle does not check that an accepted name is valid
   UTF-8, and walks only an empty release, so the walk's cursor past the first name is not fuzzed.
 * [Low] runtime, `erx_prim_file.c`: `efile_set_cwd` is dead since stock `set_cwd_nif` went;

@@ -18,12 +18,6 @@ file_SUITE     -      large_file          failed     cannot run: no distribution
 file_SUITE     -      large_write         failed     cannot run: no distribution; the case runs in a peer node
 filelib_SUITE  -      find_source_otp     failed     cannot run: no distribution; the case starts a peer node without ERL_LIBS
 
-# Paths resolve `.` and `..` on their text, not through symbolic links
-# (design-files.md, "Resolution is lexical and clamped"), and these expect
-# `..` after a link to name the link target's parent.
-filelib_SUITE  -      wildcard_one        failed     `..` resolves on the text of the path (design-files.md), not through the link
-filelib_SUITE  -      wildcard_two        failed     `..` resolves on the text of the path (design-files.md), not through the link
-
 # file:allocate/3 answers enotsup on erXos's files, so the case skips.
 file_SUITE     files  allocate_file_size  user_skip  file:allocate/3 answers enotsup
 
