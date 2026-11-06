@@ -1446,10 +1446,18 @@ Error step 5 below finds the working directory through this path.
   through the link, counted with the path's others
   ([Resolving a path](#resolving-a-path)). It returns OTP's file
   descriptor record with `erx_file_remote` as its module, holding the
-  grant, the fid, the opening process and an `atomics` array holding the
-  offset and whether the file is closed, so `file:read/2`, `file:pwrite/3`, `file:position/2` and
+  grant, the fid, the opening process, an `atomics` array holding the
+  offset and whether the file is closed, and a read buffer, so `file:read/2`, `file:pwrite/3`, `file:position/2` and
   `file:close/1` dispatch to it as they dispatch to `prim_file` for local
-  files. The opening process owns the fid, so the file closes when that
+  files. The read buffer is stock's: a file opened with `read_ahead`
+  reads that much more than asked and answers later reads from what it
+  read, even after another file has written over those bytes, and
+  `read_line` buffers as stock's does; `position`, `write`, `pwrite` and
+  `truncate` empty it, and the offset is always the next byte the caller
+  has not read; stock's `pwrite` empties its buffer but leaves its
+  descriptor's offset past the bytes read ahead, so that its next read
+  skips them, which erXos's does not. One read answers at most
+  0x7ffff000 bytes, as Linux's `read(2)` does. The opening process owns the fid, so the file closes when that
   process ends, and a call from any other process fails with
   `error(not_on_controlling_process)`, as stock `prim_file`'s
   `get_fd_data/1` fails it. A write sets the offset by the rule of [Open

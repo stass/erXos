@@ -948,6 +948,7 @@ tmp(Prefix, Mode) ->
                {"file kept", fun() -> file:read_file(At(<<"file">>)) end}],
     [Show(Step, Call()) || {Step, Call} <- Special],
     tmp_large(At, Show),
+    tmp_ahead(At, Show),
     tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
@@ -1002,6 +1003,44 @@ tmp_large(At, Show) ->
     Show("large segments back", Same(file:read(V, Size + 1), Bin)),
     ok = file:close(V),
     Show("large delete", {file:delete(Big), file:delete(Copy)}).
+
+%% The read-ahead buffer, as file_SUITE's read_ahead uses it: a read through a file
+%% opened with read_ahead answers what the buffer holds, a write through another file
+%% since included; position, write and truncate empty it, and the offset is the one the
+%% reads moved to, whatever the buffer holds. read_line buffers as stock's does, without
+%% read_ahead too. The files are deleted again.
+tmp_ahead(At, Show) ->
+    Name = At(<<"ahead">>),
+    {ok, W} = file:open(Name, [raw, write]),
+    ok = file:write(W, ["asdfghjkl", "asdfghjkl"]),
+    {ok, R} = file:open(Name, [raw, read, read_ahead]),
+    Show("ahead read", file:read(R, 9)),
+    ok = file:pwrite(W, 9, "qwertyuio"),
+    Show("ahead cached", file:read(R, 9)),
+    Show("ahead at end", file:read(R, 1)),
+    Show("ahead position", file:position(R, {cur, -9})),
+    Show("ahead after position", file:read(R, 9)),
+    ok = file:close(R),
+    {ok, Sized} = file:open(Name, [raw, read, {read_ahead, 4}, binary]),
+    Show("ahead sized", [file:read(Sized, 3), file:read(Sized, 3), file:read(Sized, 20)]),
+    ok = file:close(Sized),
+    {ok, RW} = file:open(Name, [raw, read, write, read_ahead, binary]),
+    Show("ahead read rw", file:read(RW, 3)),
+    Show("ahead write rw", file:write(RW, <<"XYZ">>)),
+    Show("ahead offset rw", file:position(RW, cur)),
+    Show("ahead read after write", file:read(RW, 3)),
+    Show("ahead truncate", file:truncate(RW)),
+    ok = file:close(RW),
+    Show("ahead file", file:read_file(Name)),
+    ok = file:write_file(Name, <<"one\ntwo\r\nthree">>),
+    {ok, L} = file:open(Name, [raw, read, binary]),
+    Show("ahead line", file:read_line(L)),
+    ok = file:pwrite(W, 4, "TWO"),
+    Show("ahead line cached", [file:read_line(L), file:read_line(L), file:read_line(L)]),
+    Show("ahead line position", file:position(L, cur)),
+    ok = file:close(L),
+    ok = file:close(W),
+    Show("ahead delete", file:delete(Name)).
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the

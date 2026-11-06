@@ -102,6 +102,12 @@
 %% The largest offset, a file's size included, as off_t holds it.
 -define(OFFSET_MAX, 16#7fffffffffffffff).
 -define(U64_MAX, 16#ffffffffffffffff).
+%% Stock prim_file's read-ahead for a bare read_ahead option, and the least one read of
+%% read_line asks for.
+-define(READ_AHEAD, 65536).
+-define(LINE_READ, 256).
+%% The most one read answers, as Linux's read(2) caps a count at MAX_RW_COUNT.
+-define(READ_MAX, 16#7ffff000).
 
 %% Reading -----------------------------------------------------------------
 
@@ -554,7 +560,18 @@ open_mode(Modes) ->
         bor flag(has(exclusive, Modes), ?ERX_P9_O_EXCL)
         bor flag(has(sync, Modes), ?ERX_P9_O_SYNC),
     #{access => Access, flags => Flags, append => Append, directory => has(directory, Modes),
-      type_check => not has(skip_type_check, Modes)}.
+      type_check => not has(skip_type_check, Modes), ahead => ahead(Modes)}.
+
+%% How far a read reads ahead, as stock's build_fd_data reads the modes: the last
+%% read_ahead option, 64 KiB for a bare one, none without one. A size that is not a
+%% count reads none ahead.
+ahead(Modes) -> ahead(Modes, 0).
+
+ahead([read_ahead | Modes], _) -> ahead(Modes, ?READ_AHEAD);
+ahead([{read_ahead, Size} | Modes], _) when is_integer(Size), Size >= 0 -> ahead(Modes, Size);
+ahead([{read_ahead, _} | Modes], _) -> ahead(Modes, 0);
+ahead([_ | Modes], Size) -> ahead(Modes, Size);
+ahead(_, Size) -> Size.
 
 access_flag(read) -> 0;
 access_flag(write) -> ?ERX_P9_O_WRONLY;
@@ -646,7 +663,7 @@ described({ok, Fid, {Type, _, _}, _}, Grant, #{directory := false, type_check :=
   when Type band ?ERX_P9_QTDIR =/= 0 ->
     _ = exchange(Grant, [{clunk, Fid}]),
     {error, eisdir};
-described({ok, Fid, _, Iounit}, Grant, #{access := Access, append := Append}) ->
+described({ok, Fid, _, Iounit}, Grant, #{access := Access, append := Append, ahead := Ahead}) ->
     Unit = case Iounit of
                0 -> ?ERX_P9_IO_MAX;
                _ -> min(Iounit, ?ERX_P9_IO_MAX)
@@ -654,7 +671,8 @@ described({ok, Fid, _, Iounit}, Grant, #{access := Access, append := Append}) ->
     Cells = atomics:new(?CELLS, [{signed, false}]),
     {ok, #file_descriptor{module = ?MODULE,
                           data = #{grant => Grant, fid => Fid, owner => self(), cells => Cells,
-                                   access => Access, append => Append, unit => Unit}}};
+                                   access => Access, append => Append, unit => Unit,
+                                   ahead => Ahead, buffer => prim_buffer:new()}}};
 described(Other, _, _) ->
     Other.
 
@@ -678,12 +696,22 @@ close(Fd) ->
 
 %% Reading --------------------------------------------------------------------
 
-%% Reads from the offset and moves it past what was read.
+%% The read buffer. The offset in the cells is the caller's: the next byte read/2 or
+%% read_line/1 answers. The buffer holds the bytes from that offset on as an earlier read
+%% fetched them, the bytes read ahead, so a read answers them however the file has
+%% changed since, as stock's read-ahead does, and only the owning process, which alone
+%% passes on_open, touches it. position/2, write/2, pwrite/2,3 and truncate/1 empty it,
+%% as stock's do, and leave the offset where the caller's reads moved it, so no byte is
+%% lost or answered twice.
+
+%% Reads from the offset and moves it past what was read: what the buffer holds first,
+%% then a read of the rest plus the read-ahead size, the excess kept,
+%% as stock's read_1 reads.
 -spec read(#file_descriptor{}, non_neg_integer()) -> {ok, binary()} | eof | {error, posix()}.
 read(Fd, Size) when is_integer(Size), Size >= 0 ->
     on_open(Fd, fun(#{cells := Cells} = File) ->
                         Offset = atomics:get(Cells, ?OFFSET),
-                        case read_at(File, Offset, Size) of
+                        case buffered(File, Offset, Size) of
                             {ok, Data} = Read ->
                                 on_ok(moved_past(Cells, Offset + byte_size(Data)), Read);
                             Other ->
@@ -693,19 +721,55 @@ read(Fd, Size) when is_integer(Size), Size >= 0 ->
 read(_, _) ->
     {error, badarg}.
 
+%% A write-only file answers ebadf before the buffer is looked at, a read of no bytes
+%% included, which read_at would not reach.
+buffered(#{access := write}, _, _) ->
+    {error, ebadf};
+buffered(#{buffer := Buffer} = File, Offset, Size) ->
+    case prim_buffer:size(Buffer) of
+        Held when Held >= Size ->
+            {ok, prim_buffer:read(Buffer, Size)};
+        Held ->
+            fetched(File, Offset + Held, Size - Held, prim_buffer:read(Buffer, Held))
+    end.
+
+%% Need bytes at Offset after the Head the buffer held. eof or an error after a Head
+%% answers the Head, which the caller's offset then moves past.
+fetched(#{buffer := Buffer, ahead := Ahead} = File, Offset, Need, Head) ->
+    case read_at(File, Offset, Need + Ahead) of
+        {ok, Data} when byte_size(Data) > Need ->
+            {First, Rest} = split_binary(Data, Need),
+            prim_buffer:write(Buffer, [Rest]),
+            {ok, <<Head/binary, First/binary>>};
+        {ok, Data} ->
+            {ok, <<Head/binary, Data/binary>>};
+        _ when Head =/= <<>> ->
+            {ok, Head};
+        Other ->
+            Other
+    end.
+
+%% Act on an open file once its buffer is empty, which leaves the offset at the next byte
+%% the caller has not read: for the calls that move the offset or change the file.
+emptied(Fd, Act) ->
+    on_open(Fd, fun(#{buffer := Buffer} = File) ->
+                        prim_buffer:wipe(Buffer),
+                        Act(File)
+                end).
+
 %% Up to Size bytes at Offset, in requests of at most a unit each (design-files.md, Open
 %% files and offsets), until Size is read or a reply is shorter than its request, as at
 %% the end of the file: so a read of a regular file answers every byte up to its end, as
 %% stock's read(2) of one does, whatever the unit. eof when the file has none there. An
 %% error after some bytes answers those bytes, as read(2) answers a short count, and the
-%% next read meets it again. Through a file not opened for reading, ebadf, as stock
+%% next read meets it again. One call reads at most ?READ_MAX bytes. Through a file not opened for reading, ebadf, as stock
 %% answers, sending nothing.
 read_at(#{access := write}, _, _) ->
     {error, ebadf};
 read_at(_, Offset, _) when Offset < 0; Offset > ?OFFSET_MAX ->
     {error, einval};
 read_at(File, Offset, Size) ->
-    case requested(File, Offset, Size, []) of
+    case read_in_units(File, Offset, min(Size, ?READ_MAX), []) of
         {ok, <<>>} when Size > 0 -> eof;
         Read -> Read
     end.
@@ -713,13 +777,13 @@ read_at(File, Offset, Size) ->
 %% Parts holds the replies so far, newest first, each a whole request's count. A reply
 %% longer than its request, which no server of erXos sends, answers eio; a request whose
 %% offset would pass 2^63 - 1 is not sent, and what was read is answered.
-requested(_, Offset, Size, Parts) when Size =:= 0; Offset > ?OFFSET_MAX ->
+read_in_units(_, Offset, Size, Parts) when Size =:= 0; Offset > ?OFFSET_MAX ->
     {ok, iolist_to_binary(lists:reverse(Parts, []))};
-requested(#{grant := Grant, fid := Fid, unit := Unit} = File, Offset, Size, Parts) ->
+read_in_units(#{grant := Grant, fid := Fid, unit := Unit} = File, Offset, Size, Parts) ->
     Count = min(Size, Unit),
     case exchange(Grant, [{read, Fid, Offset, Count}]) of
         [{ok, Data}] when byte_size(Data) =:= Count ->
-            requested(File, Offset + Count, Size - Count, [Data | Parts]);
+            read_in_units(File, Offset + Count, Size - Count, [Data | Parts]);
         [{ok, Data}] when byte_size(Data) < Count ->
             {ok, iolist_to_binary(lists:reverse(Parts, [Data]))};
         [{ok, _}] ->
@@ -772,28 +836,36 @@ read_each(_, _, _) ->
 
 %% The bytes up to and including the next "\n", a "\r\n" given as "\n" as stock gives
 %% it, or the rest of the file before its end; eof at the end. The offset moves past the
-%% line as the file holds it.
+%% line as the file holds it. As stock's read_line_1, it looks in the buffer first and
+%% appends reads of at least ?LINE_READ bytes, or the read-ahead if more, until the buffer
+%% holds a "\n" or the file ends, and the bytes after the line stay buffered.
 -spec read_line(#file_descriptor{}) -> {ok, binary()} | eof | {error, posix()}.
 read_line(Fd) ->
-    on_open(Fd, fun(#{cells := Cells} = File) -> line(File, atomics:get(Cells, ?OFFSET), <<>>) end).
+    on_open(Fd, fun(#{cells := Cells, buffer := Buffer} = File) ->
+                        line(File, atomics:get(Cells, ?OFFSET),
+                             prim_buffer:find_byte_index(Buffer, $\n))
+                end).
 
-line(#{cells := Cells, unit := Unit} = File, Offset, Seen) ->
-    case read_at(File, Offset + byte_size(Seen), Unit) of
+%% The third argument is prim_buffer:find_byte_index's answer for a "\n" in the buffer.
+line(#{buffer := Buffer, ahead := Ahead} = File, Offset, not_found) ->
+    Held = prim_buffer:size(Buffer),
+    case read_at(File, Offset + Held, max(?LINE_READ, Ahead)) of
         {ok, Data} ->
-            case binary:match(Data, <<"\n">>) of
-                {At, 1} ->
-                    Line = <<Seen/binary, (binary_part(Data, 0, At + 1))/binary>>,
-                    on_ok(moved_past(Cells, Offset + byte_size(Line)), {ok, without_cr(Line)});
-                nomatch ->
-                    line(File, Offset, <<Seen/binary, Data/binary>>)
-            end;
-        eof when Seen =:= <<>> ->
+            prim_buffer:write(Buffer, [Data]),
+            line(File, Offset, prim_buffer:find_byte_index(Buffer, $\n));
+        eof when Held =:= 0 ->
             eof;
         eof ->
-            on_ok(moved_past(Cells, Offset + byte_size(Seen)), {ok, Seen});
+            taken(File, Offset, prim_buffer:read(Buffer, Held));
         Error ->
             Error
-    end.
+    end;
+line(#{buffer := Buffer} = File, Offset, {ok, At}) ->
+    taken(File, Offset, prim_buffer:read(Buffer, At + 1)).
+
+%% A line taken from the buffer: the offset moves past it as the file holds it.
+taken(#{cells := Cells}, Offset, Line) ->
+    on_ok(moved_past(Cells, Offset + byte_size(Line)), {ok, without_cr(Line)}).
 
 without_cr(Line) when byte_size(Line) >= 2 ->
     case binary_part(Line, byte_size(Line) - 2, 2) of
@@ -840,7 +912,7 @@ contents(File, Offset, Size, Parts) ->
 %% Writes at the offset, which moves past each request's bytes as it is answered.
 -spec write(#file_descriptor{}, iodata()) -> ok | {error, posix()}.
 write(Fd, Bytes) ->
-    on_open(Fd, fun(#{cells := Cells} = File) ->
+    emptied(Fd, fun(#{cells := Cells} = File) ->
                         written(File, atomics:get(Cells, ?OFFSET), Bytes,
                                 fun(Offset) -> atomics:put(Cells, ?OFFSET, Offset) end)
                 end).
@@ -848,7 +920,7 @@ write(Fd, Bytes) ->
 %% A positioned write leaves the offset where it was, whatever the reply.
 -spec pwrite(#file_descriptor{}, integer(), iodata()) -> ok | {error, posix()}.
 pwrite(Fd, Offset, Bytes) when is_integer(Offset) ->
-    on_open(Fd, fun(File) -> written(File, Offset, Bytes, fun(_) -> ok end) end);
+    emptied(Fd, fun(File) -> written(File, Offset, Bytes, fun(_) -> ok end) end);
 pwrite(_, _, _) ->
     {error, badarg}.
 
@@ -856,7 +928,7 @@ pwrite(_, _, _) ->
 -spec pwrite(#file_descriptor{}, [{integer(), iodata()}]) ->
           ok | {error, {non_neg_integer(), posix()}}.
 pwrite(Fd, Positions) ->
-    on_open(Fd, fun(File) -> write_each(File, Positions, 0) end).
+    emptied(Fd, fun(File) -> write_each(File, Positions, 0) end).
 
 write_each(_, [], _) ->
     ok;
@@ -927,7 +999,7 @@ size_of(#{grant := Grant, fid := Fid}) ->
 %% to a place from 0 to 2^63 - 1, else einval.
 -spec position(#file_descriptor{}, term()) -> {ok, non_neg_integer()} | {error, posix()}.
 position(Fd, At) ->
-    on_open(Fd, fun(File) -> moved(File, At) end).
+    emptied(Fd, fun(File) -> moved(File, At) end).
 
 moved(File, Mark) when Mark =:= bof; Mark =:= cur; Mark =:= eof ->
     moved(File, {Mark, 0});
@@ -953,7 +1025,7 @@ base(_, _) -> {error, badarg}.
 %% ftruncate answers, sending nothing.
 -spec truncate(#file_descriptor{}) -> ok | {error, posix()}.
 truncate(Fd) ->
-    on_open(Fd, fun(#{access := read}) ->
+    emptied(Fd, fun(#{access := read}) ->
                         {error, einval};
                    (#{grant := Grant, fid := Fid, cells := Cells}) ->
                         Size = (unset())#{valid := ?ERX_P9_SETATTR_VALID_SIZE,

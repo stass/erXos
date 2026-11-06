@@ -430,6 +430,18 @@ it; git history is the record of completed work.
   file into a local one could stop early and still answer `{ok, N}`. Unreachable today
   (the `/tmp` server answers whole units and the release tree is read-only). Either the
   loop reads until `eof` or `erx_file_remote` fills each read.
+* [Medium] runtime, `erx_file_remote`: the read buffer's differences from stock have no pins in
+  `prim_file_compare`'s `tmp_ahead`: a `pwrite` through the read-ahead file itself (stock then skips the
+  bytes read ahead, an upstream bug to record), an error after buffered bytes (erXos answers the bytes,
+  stock the error), and a `{read_ahead, X}` that is not a count (erXos reads none ahead, stock's read
+  raises). Unpinned paths too: read-only, write-only and append files with `read_ahead`, a `pread` then
+  a `read`, a line longer than 256 bytes and the read-ahead. A server that answers every request in full
+  makes one read hold up to 0x7ffff000 bytes in the caller's heap.
+* [Low] runtime, `erx_file_remote`: the read buffer agrees with the offset only because every call that
+  moves the offset other than the reads goes through `emptied/2`; keeping the buffer's start offset in
+  the cells would make it hold by construction. A read whose new offset passes 2^63 - 1 answers eio
+  after the buffer has changed, leaving it out of step. `read_file` flattens a large file twice
+  (`read_in_units` and `contents`), about three times its size at peak.
 * [Medium] runtime, `erx_file_remote`: `read_file` keeps up to the size a server's `getattr` answers and
   `read_line` reads until a server sends a `"\n"`, so a hostile server can make the caller, perhaps the code
   server, hold as much as it sends until the node dies; stock fails such a size up front with `enomem`. A

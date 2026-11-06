@@ -204,6 +204,31 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
+  # The read-ahead buffer (file_SUITE's read_ahead): reads answer what it holds, a later
+  # write through another file notwithstanding, and position, write and truncate empty it
+  # at the offset the reads reached. read_line buffers as stock's does.
+  TMP_AHEAD = {
+    'tmp ahead read' => '{ok,"asdfghjkl"}', 'tmp ahead cached' => '{ok,"asdfghjkl"}',
+    'tmp ahead at end' => 'eof', 'tmp ahead position' => '{ok,9}',
+    'tmp ahead after position' => '{ok,"qwertyuio"}',
+    'tmp ahead sized' => '[{ok,<<"asd">>},{ok,<<"fgh">>},{ok,<<"jklqwertyuio">>}]',
+    'tmp ahead read rw' => '{ok,<<"asd">>}', 'tmp ahead write rw' => 'ok',
+    'tmp ahead offset rw' => '{ok,6}', 'tmp ahead read after write' => '{ok,<<"jkl">>}',
+    'tmp ahead truncate' => 'ok', 'tmp ahead file' => '{ok,<<"asdXYZjkl">>}',
+    'tmp ahead line' => '{ok,<<"one\\n">>}',
+    'tmp ahead line cached' => '[{ok,<<"two\\n">>},{ok,<<"three">>},eof]',
+    'tmp ahead line position' => '{ok,14}', 'tmp ahead delete' => 'ok'
+  }.freeze
+
+  def test_tmp_read_ahead
+    release = table(@fixture.release)
+    stock = table(@fixture.stock)
+    TMP_AHEAD.each do |step, want|
+      assert_equal want, stock[step], "stock #{step}"
+      assert_equal want, release[step], step
+    end
+  end
+
   def test_tmp_serves_the_domain
     release = table(@fixture.release)
     TMP_ERXOS.each { |step, want| assert_equal want, release[step], step }
