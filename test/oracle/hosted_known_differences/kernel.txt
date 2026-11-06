@@ -306,10 +306,10 @@ logger_std_h_SUITE           -        crash_std_h_to_file          failed     ca
 logger_std_h_SUITE           -        crash_std_h_to_disk_log      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 
 # Each makes a boot script with systools before it starts its peers.
-application_SUITE            -        script_start                 failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
-application_SUITE            distr_changed distr_changed_tc1            failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
-application_SUITE            distr_changed distr_changed_tc2            failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
-global_SUITE                 -        global_groups_change         failed     systools:make_script answers error: the oracle's release boots OTP's bootstrap start.boot, whose kernel and stdlib versions are not the shipped .app files' (TODO.md); past it the case starts peer nodes, which need distribution
+application_SUITE            -        script_start                 failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
+application_SUITE            distr_changed distr_changed_tc1            failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
+application_SUITE            distr_changed distr_changed_tc2            failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
+global_SUITE                 -        global_groups_change         failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
 
 # No network stack in Phase 1: cases that skip where their suite's other
 # cases fail, and group functions.

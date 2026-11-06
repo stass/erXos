@@ -86,6 +86,35 @@ module Erx
       end.to_h
     end
 
+    # The tree's start_clean boot script, made as OTP's build makes its own
+    # bin/start_clean.script: OTP's release template start_clean.rel.src from the build
+    # at otp, its %<NAME>_VSN% filled in with the build's OTP release and ERTS version and
+    # each application's version from the tree's own .app file, given to systools on the
+    # stock emulator `erl` with the build's flags, no_warn_sasl and otp_build. So it
+    # starts kernel and stdlib, reads .erlang as stock's does, and finds each application
+    # at $ROOT/lib/<name>/ebin, where the tree holds it. systools writes into
+    # `directory`; the result is the boot script's path. The system's own boot script
+    # (ReleaseFiles) would start erXos's services as well; erXos's applications reach the
+    # code path through /lib.
+    def self.write_boot_script(tree:, otp:, erl:, runner:, directory:)
+      template = File.read(File.join(otp, 'erts/start_scripts/start_clean.rel.src'))
+      applications = template.scan(/%([A-Z]+)_VSN%/).flatten.uniq.map(&:downcase) - %w[sys erts]
+      versions = { 'sys' => otp_release(otp), 'erts' => ReleaseFiles.erts_version(otp),
+                   **applications.to_h { |name| [name, ReleaseFiles.app_version(ebin(tree, name), name)] } }
+      release = template.gsub(/%([A-Z]+)_VSN%/) { versions.fetch(Regexp.last_match(1).downcase) }
+      ReleaseFiles.make_boot_script(erl: erl, directory: directory, release: release, runner: runner,
+                                    paths: applications.map { |name| ebin(tree, name) }, layout: :build, dot_erlang: true)
+    end
+
+    # The OTP release the build at otp is, as its OTP_VERSION's major number: what OTP's
+    # build fills into the start scripts' release names.
+    def self.otp_release(otp)
+      File.read(File.join(otp, 'OTP_VERSION'))[/\A(\d+)\./, 1] or raise Error, "#{otp}/OTP_VERSION names no release"
+    end
+
+    def self.ebin(tree, application) = File.join(tree, 'lib', application, 'ebin')
+    private_class_method :otp_release, :ebin
+
     private
 
     # The output directory, created or reused only when it is empty or this
@@ -112,10 +141,12 @@ module Erx
       # The pack format requires an image entry; the hosted runtime never
       # boots it, so its bytes are only a placeholder.
       File.write(File.join(tree, 'root'), "a root image's place\n")
-      FileUtils.cp(File.join(output.root, 'bootstrap/bin/start.boot'), File.join(prepare(tree, 'bin'), 'start.boot'))
       self.class.application_files(root: @root, otp: output.root).each do |path, source|
         FileUtils.cp(source, File.join(prepare(tree, File.dirname(path)), File.basename(path)))
       end
+      boot = self.class.write_boot_script(tree: tree, otp: output.root, erl: installation.fetch('erl'),
+                                          runner: @runner, directory: prepare(@out, 'boot'))
+      FileUtils.cp(boot, File.join(prepare(tree, 'bin'), 'start.boot'))
       @suites.copy_stock_applications(prepare(tree, 'lib'), erl: installation.fetch('erl'))
       @suites.compile(reporter: prepare(tree, 'test/ct/reporter'), suite_directory: prepare(tree, 'test/ct/suites'),
                       suites: suites, erlc: installation.fetch('erlc'), common_test: common_test)

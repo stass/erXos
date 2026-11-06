@@ -473,15 +473,15 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/oracle_comparison.rb` (`skipped_group_function`): a group function that erXos never
   recorded shows as `auto_skip`, inferred from the skipped cases under its group, and the report prints it like
   a status Common Test recorded. Give the inferred status its own name in the report and the table.
-* [Medium] `tools/lib/erx/oracle_hosted.rb` (`fill_tree`): the oracle's release boots OTP's tracked
-  `bootstrap/bin/start.boot`, whose application specifications carry the bootstrap's versions (kernel 11.0.3, stdlib
-  8.0.4) where the shipped `.app` files say 11.0.4 and 8.1.1. So `application:which_applications()` reports versions
-  the release does not hold, and `systools:make_script` on a release file built from them answers `error`
-  (`no_valid_version`): application_SUITE `script_start`, `distr_changed_tc1` and `distr_changed_tc2` and global_SUITE
-  `global_groups_change` fail there (kernel.txt), before they reach their peers. Boot the tree from a boot script made
-  from the tree's own `.app` files, as `ReleaseFiles#boot_file` makes the system's (not the system's own, which starts
-  erXos's services), and rerun every group, since all of them boot through it; those four cases then fail at their
-  peers, and their rows take the peer reason.
+* [Medium] `test/oracle/hosted_known_differences/*.txt`: every group's rows come from runs that booted the oracle's
+  tree from OTP's `bootstrap/bin/start.boot`, whose kernel and stdlib versions (11.0.3, 8.0.4) are not the shipped
+  ones (11.0.4, 8.1.1). The tree boots its own start_clean (`OracleHosted.write_boot_script`); rerun every group and
+  refresh its table. The kernel.txt rows of application_SUITE `script_start`, `distr_changed_tc1` and
+  `distr_changed_tc2` and global_SUITE `global_groups_change` give the old boot script as their cause, which no
+  longer holds; their cause is unknown until the rerun.
+* [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
+  whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
+  compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
 * [Medium] `/tmp` (`erx_file_remote`, `erx_ramfs`): a `prim_file:read_file` racing a `prim_file:rename` that replaces
   its name answered `enoent` at the 1,848th of up to 4,999 reads (prim_file_SUITE `read_file_rename_race`, kernel.txt). A rename
   replaces its target atomically, so a reader sees the old file or the new one. Find whether the client's walk and

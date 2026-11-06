@@ -90,6 +90,44 @@ module Erx
       File.join('otp/lib', application)
     end
 
+    # The version an application's .app file in ebin names.
+    def self.app_version(ebin, application)
+      text = File.read(File.join(ebin, "#{application}.app"))
+      text[/\{vsn,\s*"([^"]+)"\}/, 1] or raise Error, "#{application}.app names no version"
+    end
+
+    # The ERTS version of the OTP build at otp.
+    def self.erts_version(otp)
+      File.read(File.join(otp, 'erts/vsn.mk'))[/^VSN\s*=\s*(\S+)/, 1] or raise Error, 'erts/vsn.mk names no version'
+    end
+
+    # OTP's own generator: systools:make_script, run by the stock emulator at `erl`,
+    # writes start.script and start.boot into `directory` from `release`, a release
+    # file's text, and the .app files of the applications it names, found in `paths` and
+    # then on the stock emulator's own code path; the result is the boot script's path.
+    # `layout: :build` writes each application's code path as $ROOT/lib/<name>/ebin, as
+    # OTP's own build tree and bootstrap scripts lay applications out (systools' internal
+    # otp_build flag); the default is a release's $ROOT/lib/<name>-<version>/ebin.
+    # `dot_erlang: true` keeps the boot's read of .erlang, as stock's start_clean does.
+    # systools takes `*` in a path as a wildcard, so a path holding one is refused. The
+    # generator itself boots without reading the developer's .erlang.
+    def self.make_boot_script(erl:, directory:, release:, paths:, runner:, layout: :release, dot_erlang: false)
+      wild = paths.select { |path| path.include?('*') }
+      raise Error, "systools would take * in #{wild.join(', ')} as a wildcard" unless wild.empty?
+
+      File.write(File.join(directory, 'start.rel'), release)
+      name = File.join(directory, 'start')
+      flags = [*{ release: [], build: ['otp_build'] }.fetch(layout), *('no_dot_erlang' unless dot_erlang), 'no_warn_sasl']
+      options = ["{path,[#{paths.map { |path| erlang_string(path) }.join(',')}]}", *flags]
+      expression = "ok=systools:make_script(#{erlang_string(name)},[#{options.join(',')}]),halt()."
+      runner.run([erl, '-boot', 'no_dot_erlang', '-noshell', '-noinput', '-eval', expression],
+                 name: 'release-boot-script', deadline: BOOT_DEADLINE, chdir: directory, env: Oracle::CLEAN_ERLANG_ENV)
+      "#{name}.boot"
+    end
+
+    # A text as an Erlang string literal, its backslashes and quotes escaped.
+    def self.erlang_string(text) = "\"#{text.gsub(/[\\"]/) { |character| "\\#{character}" }}\""
+
     private
 
     # A header is its own source; a built file names the one it is compiled from.
@@ -117,31 +155,23 @@ module Erx
       [found]
     end
 
+    def version(application) = self.class.app_version(File.join(@otp, 'lib', application, 'ebin'), application)
 
-    def version(application)
-      text = File.read(File.join(@otp, 'lib', application, 'ebin', "#{application}.app"))
-      text[/\{vsn,\s*"([^"]+)"\}/, 1] or raise Error, "#{application}.app names no version"
-    end
+    def erts_version = self.class.erts_version(@otp)
 
-    def erts_version
-      File.read(File.join(@otp, 'erts/vsn.mk'))[/^VSN\s*=\s*(\S+)/, 1] or raise Error, 'erts/vsn.mk names no version'
-    end
-
-    # OTP's own generator: systools on the stock host build of the same release, which
-    # writes the boot script from the release file and the applications' own .app files.
+    # The system's boot script: its release file names every application, and the stock
+    # host build's systools writes the script from it (ReleaseFiles.make_boot_script).
     def boot_file
-      release = File.join(@directory, 'start.rel')
       applications = APPLICATIONS.map { |application| release_entry(application) }.join(',')
-      File.write(release, "{release,{\"#{NAME}\",\"1\"},{erts,\"#{erts_version}\"},[#{applications}]}.\n")
-      paths = APPLICATIONS.map { |application| "\"#{File.join(@otp, 'lib', application, 'ebin')}\"" }.join(',')
-      name = File.join(@directory, 'start')
-      expression = "ok=systools:make_script(\"#{name}\",[{path,[#{paths}]},no_dot_erlang,no_warn_sasl]),halt()."
-      @runner.run([@oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), '-noshell', '-noinput', '-eval', expression],
-                  name: 'release-boot-script', deadline: BOOT_DEADLINE, chdir: @directory, env: Oracle::CLEAN_ERLANG_ENV)
+      paths = APPLICATIONS.map { |application| File.join(@otp, 'lib', application, 'ebin') }
+      boot = self.class.make_boot_script(
+        erl: @oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), directory: @directory, runner: @runner, paths: paths,
+        release: "{release,{\"#{NAME}\",\"1\"},{erts,\"#{erts_version}\"},[#{applications}]}.\n"
+      )
       sources = APPLICATIONS.map do |application|
         File.join(@root, self.class.source_directory(application), 'src', "#{application}.app.src")
       end
-      ReleaseFile.new(path: 'system/bin/start.boot', artifact: "#{name}.boot", sources: sources)
+      ReleaseFile.new(path: 'system/bin/start.boot', artifact: boot, sources: sources)
     end
 
     # An application's term in the release file: its name and version, and the start
