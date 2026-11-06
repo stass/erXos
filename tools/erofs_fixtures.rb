@@ -33,6 +33,9 @@ module ErofsFixtures
     'lz4' => %w[-zlz4],
     'chunked' => %w[--chunksize=4096]
   }.freeze
+  # The images whose features the reader does not implement, and the error its mount
+  # answers for each; the EROFS oracle (Erx::ErofsOracle) expects exactly these refusals.
+  REFUSED = { 'lz4' => 'enotsup', 'chunked' => 'enotsup' }.freeze
 
   # A regular file's bytes are a function of its size and seed, which the Erlang side
   # recomputes: byte i is (i * 7 + seed) mod 256.

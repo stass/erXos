@@ -93,6 +93,8 @@ module Erx
         bench(command_arguments, **collaborators)
       when 'check-libc-test'
         check_libc_test(command_arguments)
+      when 'check-erofs-oracle'
+        check_erofs_oracle(command_arguments, **collaborators)
       when 'check-oracle'
         check_oracle(command_arguments, **collaborators)
       when '--help', '-h', nil
@@ -350,7 +352,7 @@ module Erx
 
     def self.fuzz_ruby(runner:, environment:, seconds:, seed:)
       %w[test/fuzz/abi.rb test/fuzz/qemu_transcript.rb test/fuzz/cli_status.rb tools/fuzz/oracle_results.rb tools/fuzz/crash_frame.rb
-         tools/fuzz/boot_record.rb].each do |path|
+         tools/fuzz/boot_record.rb tools/fuzz/erofs_manifest.rb].each do |path|
         runner.run([RbConfig.ruby, File.join(ROOT, path), '--seconds', seconds.to_s, '--seed', seed.to_s],
                    name: "fuzz-#{File.basename(path, '.rb').tr('_', '-')}", deadline: seconds + 30,
                    chdir: ROOT, env: environment)
@@ -459,8 +461,49 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | pack [--medium] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | gates | pack [--medium] | status | setup [--jobs N]')
       0
+    end
+
+    # Runs the EROFS oracle (ErofsOracle) over the reader's fixture images and, with
+    # --release, over the release's EROFS image that `pack --medium` printed.
+    def self.check_erofs_oracle(arguments)
+      release = nil
+      accel = 'hvf'
+      OptionParser.new do |flags|
+        flags.on('--release PATH') { |value| release = File.expand_path(value) }
+        flags.on('--accel NAME', %w[hvf tcg]) { |value| accel = value }
+      end.parse!(arguments)
+      no_arguments(arguments)
+      require_relative 'lib/erx/erofs_oracle'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      images = ErofsOracle.fixtures(ROOT)
+      images['release'] = ErofsOracle::Image.new(path: release, refusal: nil) if release
+      outcomes = with_test_runtime(runner: runner) do |environment|
+        ErofsOracle.new(root: ROOT, runner: runner, environment: environment).call(images, accel: accel)
+      end
+      outcomes.each { |outcome| erofs_oracle_report(outcome) }
+      return 1 unless outcomes.all?(&:passed?)
+      unless release
+        Terminal.puts('erofs oracle: partial: the release image was not checked (pass --release with the EROFS ' \
+                      'image `tools/erx pack --medium` prints), so the check is not passed')
+        return 1
+      end
+      0
+    end
+
+    def self.erofs_oracle_report(outcome)
+      head = "erofs oracle: #{outcome.name}: "
+      if !outcome.passed?
+        seen = outcome.files ? "Linux saw #{outcome.files} files" : 'Linux did not mount it'
+        Terminal.puts("#{head}FAILED; fsck.erofs passed; #{seen}")
+        outcome.problems.each { |problem| Terminal.puts("  #{problem}") }
+      elsif outcome.refusal
+        Terminal.puts("#{head}fsck.erofs passed; Linux mounts it with #{outcome.files} files; " \
+                      "the reader refuses it (#{outcome.refusal}), as the fixture expects")
+      else
+        Terminal.puts("#{head}fsck.erofs passed; Linux and the reader agree on #{outcome.files} files")
+      end
     end
 
     def self.no_arguments(arguments)

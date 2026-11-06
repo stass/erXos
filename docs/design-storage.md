@@ -315,7 +315,7 @@ exchange:
   independent oracle in the Linux guest that is F2FS's oracle:
   `veritysetup` checks each image's tree, Linux's EROFS driver mounts it,
   and its view of the files is compared with the reader's; upstream's
-  `fsck.erofs` also checks each image. Images are uncompressed: the
+  `fsck.erofs`, the host's, also checks each image. Images are uncompressed: the
   boards' media have room for uncompressed slots, an estimate that a
   decision gate of [plan.md](plan.md#decision-gates) checks against the
   slot images' sizes, and LZ4's decompressor, whose library is
@@ -1181,11 +1181,20 @@ cases.
 erXos's F2FS is checked by Linux's F2FS driver and `fsck.f2fs` in a Linux
 guest and by the power-cut harness ([Read-write
 storage](#read-write-storage)); the EROFS reader, on images that
-`mkfs.erofs` writes, by `veritysetup`, Linux's EROFS driver and
-`fsck.erofs` in the same guest, the reader running on the host's stock OTP
-over the image's file and in a domain under QEMU; the FAT server by
+`mkfs.erofs` writes, by `veritysetup` and Linux's EROFS driver in the same
+guest and by the host's `fsck.erofs`, the reader running on the host's stock
+OTP over the image's file and in a domain under QEMU; the FAT server by
 Linux's `vfat` driver and `fsck.fat` there, on images each side writes for
-the other. Fuzz targets cover the partition table with its two extended
+the other. `tools/erx check-erofs-oracle` runs the EROFS comparison over the
+reader's fixtures and, with `--release`, the release's image: QEMU boots the
+guest with each image as a read-only virtio disk and no network device, the
+guest's init script walks each mount and prints every file's path, `stat`
+fields and SHA-256 or link text, paths and link texts in hex, on its serial
+console, the reader prints the same lines for the same images, and the two
+are compared file by file. The guest's console is untrusted input to the
+host: its parser bounds every line and field, refuses a malformed or
+truncated transcript whole, and has its fuzz target, and a difference names
+a file only through the terminal's escaping. Fuzz targets cover the partition table with its two extended
 boot records, EROFS, F2FS, FAT and littlefs images, the hash-checking
 reader, the driver's completion decoder, update manifests, the
 boot-selection record and the QEMU harness's slot parser, each built for

@@ -628,6 +628,12 @@ it; git history is the record of completed work.
   claiming more blocks than the window holds fails later as a read failure, not at mount as malformed; the
   fixtures pack every file with one owner, mode and time (`--all-root`, `-T 0`), so no case checks the
   owner, mode-bit and mtime offsets against `mkfs.erofs` with other values.
+* [Medium] test, EROFS oracle (`tools/lib/erx/linux_guest.rb`, `tools/erx check-erofs-oracle`): the Linux
+  guest holds Debian's cloud kernel and static busybox only. It has no `veritysetup`, so no image's hash
+  tree is checked by Linux's dm-verity, and the cloud kernel has no F2FS, so the F2FS oracle needs another
+  pinned kernel (Debian's generic arm64 one is the candidate to check) with f2fs-tools, and the FAT oracle
+  dosfstools. The comparison takes mtime in whole seconds (busybox `stat`), and the release's image is
+  checked only when `--release` names it, so `make check-erofs-oracle` alone covers the fixtures.
 * [Medium] runtime, `otp/erts/preloaded/src/erx_file_remote.erl`: `file:ipread_s32bu_p32bu/3` on an open
   file of a grant has no implementation, so it raises `undef`.
 * [Medium] runtime, `otp/lib/kernel/src/file.erl`: `file`'s name calls (`copy`, `delete`,

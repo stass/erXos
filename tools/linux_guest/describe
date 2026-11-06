@@ -1,0 +1,40 @@
+#!/bin/busybox sh
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Prints the manifest entry (tools/lib/erx/erofs_manifest.rb) of each path under
+# the mount point /mnt that find -exec passes it: the path from the image's root and
+# a link's text in hex, so every byte of a name survives the console, the stat
+# fields, and a regular file's SHA-256.
+
+hex() {
+	hexdump -v -e '/1 "%02x"'
+}
+
+for path; do
+	name=${path#/mnt}
+	name=$(printf '%s' "${name:-/}" | hex)
+	if meta=$(stat -c '%f %s %u %g %h %Y %i' "$path" 2> /dev/null); then
+		if [ -L "$path" ]; then
+			# readlink ends the text with exactly one newline, 0a in hex.
+			text=$(readlink "$path" 2> /dev/null | hex)
+			case $text in
+			?*0a) data="link:${text%0a}" ;;
+			*) data=error:readlink ;;
+			esac
+		elif [ -d "$path" ]; then
+			data=-
+		elif [ -f "$path" ]; then
+			if sum=$(sha256sum 2> /dev/null < "$path"); then
+				data="sha256:${sum%% *}"
+			else
+				data=error:read
+			fi
+		else
+			data=-
+		fi
+		echo "erx-erofs: entry $name $meta $data"
+	else
+		echo "erx-erofs: entry $name 0 0 0 0 0 0 0 error:stat"
+	fi
+done
