@@ -37,7 +37,8 @@
 -opaque device() :: non_neg_integer().
 -type register_name() :: atom() | {atom(), non_neg_integer()}.
 -type window() :: {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
--type spec() :: #{peripheral := atom(), window := window(), lines := [non_neg_integer()]}.
+-type spec() :: #{peripheral := atom(), window := window(), lines := [non_neg_integer()],
+                  dma_memory => non_neg_integer()}.
 -opaque queue() :: non_neg_integer().
 -type segment() :: {out, binary()} | {in, pos_integer()}.
 
@@ -48,7 +49,8 @@ init() ->
 %% a restarted driver finds what its predecessor had, and the same window with anything
 %% else is `{error, ebusy}`. Spec is what the device service
 %% hands a driver, which does not look inside it: the peripheral's name in the SVD source,
-%% its register window and its lines' selectors. A hosted runtime has no devices, so
+%% its register window and its lines' selectors, and for a device that does DMA the bytes of
+%% memory the boot reserves for it (erx_device_record). A hosted runtime has no devices, so
 %% `{physical, _, _}` is `{error, enotsup}` there, and `stand_in` gives plain memory and
 %% software lines for tests; natively `stand_in` is `{error, enotsup}`.
 -spec open(spec()) -> {ok, device()} | {error, atom() | {status, integer()}}.

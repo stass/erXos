@@ -9,6 +9,27 @@
 #define NODE_PREFIX		"system@"
 #define NODE_PREFIX_LENGTH	(sizeof(NODE_PREFIX) - 1)
 
+/*
+ * The kinds of device the system domain's ERTS drives, one row each: a device of a unit the
+ * system domain holds, at a device-tree path, whose role and compatible string are a row's,
+ * becomes a device record with the row's names. Which transport is which device is the
+ * platform record's and the manifest's to say, so the selection is by configuration and
+ * touches no register: only erx_device reads a device, and a driver's first reads, of the
+ * transport's magic, version and device id, find whether a disk is behind it. A second
+ * kind is one more row. The console is not a row: two UARTs share its role and
+ * compatible string, and machine.console names which one (console_read).
+ */
+typedef struct device_kind {
+	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
+	const char	*compatible;	/* the platform record's compatible string */
+	const char	*role_word;	/* the record's ROLE */
+	const char	*peripheral;	/* the record's PERIPHERAL, as the CMSIS-SVD source names it */
+} device_kind_t;
+
+static const device_kind_t device_kinds[] = {
+	{ ERX_MF_DEVICE_ROLE_BLOCK, "virtio,mmio", "block", "virtio_mmio" },
+};
+
 /* erx_manifest_open checked every string against the table, so these reads stay inside it. */
 static const uint8_t *
 string_at(const erx_manifest_view_t *view, const erx_mf_str_t *string)
@@ -44,6 +65,91 @@ string_equal(const erx_manifest_view_t *view, const erx_mf_str_t *left, const er
 			return (false);
 	}
 	return (true);
+}
+
+static bool
+string_is(const erx_manifest_view_t *view, const erx_mf_str_t *string, const char *text)
+{
+	const uint8_t *const bytes = string_at(view, string);
+	uint32_t at = 0;
+
+	for (; at < string->length; at++) {
+		if (text[at] == '\0' || bytes[at] != (uint8_t)text[at])
+			return (false);
+	}
+	return (text[at] == '\0');
+}
+
+static const device_kind_t *
+device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device)
+{
+	if (device->selector != ERX_MF_SELECTOR_DT)
+		return (NULL);
+	for (size_t at = 0; at < sizeof(device_kinds) / sizeof(device_kinds[0]); at++) {
+		if (device->role == device_kinds[at].role && string_is(view, &device->compatible, device_kinds[at].compatible))
+			return (&device_kinds[at]);
+	}
+	return (NULL);
+}
+
+/*
+ * A unit's device span is a file offset to its first record and a count, as every span is
+ * (docs/design-abi.md, "slice"); *first is that record's index in the device table. False
+ * for a span off a record boundary or past the table, which erx_manifest_open refuses, so
+ * this is a second check, not the first.
+ */
+static bool
+unit_first_device(const erx_manifest_view_t *view, const erx_mf_unit_t *unit, uint32_t *first)
+{
+	const erx_mf_span_t table = view->header.devices;
+	uint32_t offset;
+
+	if (unit->devices.offset < table.offset)
+		return (false);
+	offset = unit->devices.offset - table.offset;
+	if (offset % ERX_MF_DEVICE_SIZE != 0 || unit->devices.count > table.count ||
+	    offset / ERX_MF_DEVICE_SIZE > table.count - unit->devices.count)
+		return (false);
+	*first = offset / ERX_MF_DEVICE_SIZE;
+	return (true);
+}
+
+/*
+ * The device records of the units the system domain holds, in the order of the device
+ * table. The manifest is the one source of which domain holds a device, and a unit's
+ * holder is the only place that says so (docs/design-abi.md, "Devices and partition
+ * windows"). Returns NULL, or the check that refused the manifest: a unit or device the
+ * reader cannot read, or more records than ERX_BOOT_DEVICES_MAX.
+ */
+static const char *
+devices_read(const erx_manifest_view_t *view, erx_boot_manifest_t *result)
+{
+	erx_mf_device_t device;
+	erx_mf_unit_t unit;
+	uint32_t first;
+
+	result->device_count = 0;
+	for (uint32_t at = 0; at < view->header.units.count; at++) {
+		if (!erx_manifest_units_at(view, at, &unit) || !unit_first_device(view, &unit, &first))
+			return ("units");
+		if (unit.holder != ERX_MF_NONE)
+			continue;
+		for (uint32_t index = first; index < first + unit.devices.count; index++) {
+			const device_kind_t *kind;
+
+			if (!erx_manifest_devices_at(view, index, &device))
+				return ("devices");
+			if ((kind = device_kind(view, &device)) == NULL)
+				continue;
+			if (result->device_count == ERX_BOOT_DEVICES_MAX)
+				return ("device_records");
+			result->devices[result->device_count++] = (erx_boot_device_t){
+				.role = kind->role_word, .peripheral = kind->peripheral, .base = device.base,
+				.size = device.size, .line = device.line, .dma_memory = device.dma_memory,
+			};
+		}
+	}
+	return (NULL);
 }
 
 static erx_boot_console_t
@@ -104,6 +210,8 @@ erx_boot_manifest_read(const uint8_t *bytes, size_t length, erx_boot_manifest_t 
 		.foreign_atoms = limits.foreign_atoms,
 		.processes = limits.processes,
 	};
+	if ((*reason = devices_read(&view, result)) != NULL)
+		return (false);
 	result->console = console_read(&view);
 	result->console_path = (erx_boot_words_t){
 		(const char *)string_at(&view, &view.header.console), view.header.console.length
@@ -121,4 +229,46 @@ erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *stdout
 			return (false);
 	}
 	return (true);
+}
+
+/* TEXT and its NUL at words + *used, or false, writing nothing, when they do not fit. */
+static bool
+word_put(char *words, size_t capacity, size_t *used, const char *text)
+{
+	size_t length = 0;
+
+	while (text[length] != '\0')
+		length++;
+	if (length >= capacity - *used)
+		return (false);
+	for (size_t at = 0; at <= length; at++)
+		words[(*used)++] = text[at];
+	return (true);
+}
+
+static bool
+number_put(char *words, size_t capacity, size_t *used, uint64_t value)
+{
+	char digits[sizeof("18446744073709551615")];
+	size_t at = sizeof(digits) - 1;
+
+	digits[at] = '\0';
+	do {
+		digits[--at] = (char)('0' + value % 10);
+		value /= 10;
+	} while (value != 0);
+	return (word_put(words, capacity, used, digits + at));
+}
+
+size_t
+erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "device") &&
+	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
+	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
+	    number_put(words, capacity, &used, device->line) && number_put(words, capacity, &used, device->dma_memory))
+		return (used);
+	return (0);
 }

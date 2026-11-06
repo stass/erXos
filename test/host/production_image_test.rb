@@ -185,7 +185,8 @@ class ProductionImageTest < Minitest::Test
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
     system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
     refute_equal 0, system_args
-    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS
+    # The manifest has one block unit, so the root adds one device record.
+    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS + Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }

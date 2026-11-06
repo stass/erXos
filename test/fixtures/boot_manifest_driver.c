@@ -12,7 +12,8 @@
 /*
  * Reads a manifest from the file named by its one argument and prints what the boot
  * page takes from it, or the check that refused it. boot_manifest_test.rb compares this
- * with the manifest's source.
+ * with the manifest's source. Each device record is printed with its words, NULs as spaces,
+ * and what erx_boot_device_words returns given exactly their room and one byte less.
  */
 int
 main(int argc, char **argv)
@@ -39,6 +40,20 @@ main(int argc, char **argv)
 	    manifest.limits.funnel_depth, manifest.limits.exports, (unsigned long long)manifest.limits.tmp,
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
+	printf("devices %zu\n", manifest.device_count);
+	for (size_t at = 0; at < manifest.device_count; at++) {
+		const erx_boot_device_t *device = &manifest.devices[at];
+		char words[ERX_BOOT_DEVICE_WORDS_MAX];
+		const size_t length = erx_boot_device_words(device, words, sizeof(words));
+
+		printf("device %s %s %llu %llu %u %llu words", device->role, device->peripheral,
+		    (unsigned long long)device->base, (unsigned long long)device->size, device->line,
+		    (unsigned long long)device->dma_memory);
+		for (size_t byte = 0; byte < length; byte++)
+			putchar(words[byte] == '\0' ? ' ' : words[byte]);
+		printf("exact %d short %zu\n", length != 0 && erx_boot_device_words(device, words, length) == length,
+		    length == 0 ? 0 : erx_boot_device_words(device, words, length - 1));
+	}
 	if (argc == 3)
 		printf("console %.*s matches %d\n", (int)manifest.console_path.length,
 		    manifest.console_path.bytes,

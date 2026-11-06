@@ -3,7 +3,7 @@
 
 %% erXos's runtime services (docs/design-runtime.md): the console and hosted mode's
 %% console driver, the kernel log, the namespace, the watchdog's petter, a driver's view
-%% of its device, and the modules tools/gen_abi.rb and tools/gen_terminal.rb generate.
+%% of its device and its device record, and the modules tools/gen_abi.rb and tools/gen_terminal.rb generate.
 %% It starts nothing of its own: kernel's hooks start the watchdog and the namespace's
 %% writer (kernel.erl) and the console (user_sup.erl), and the boot script's code path
 %% finds their modules here.
@@ -12,6 +12,7 @@
   {vsn, "1"},
   {modules, [erx_console,
              erx_device,
+             erx_device_record,
              erx_log,
              erx_manifest,
              erx_ns,

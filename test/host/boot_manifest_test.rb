@@ -88,6 +88,38 @@ class BootManifestTest < Minitest::Test
     RUNTIME_LIMIT_FIELDS.map { |field| values.fetch(field) }
   end
 
+  # The device records (docs/design-stopgap.md, "Device records"): the one device of a unit
+  # the system domain holds whose role and compatible string are a row of device_kinds, with
+  # the platform record's window, line and DMA memory. The console and host-link UARTs are
+  # no row, so they give none.
+  def test_the_block_unit_gives_the_one_device_record
+    output, status = read(admitted)
+    assert status.success?, output
+    assert_includes output, "devices 1\n"
+    assert_includes output, "device block virtio_mmio 167788032 512 79 2097152 " \
+                            "words-erx device block virtio_mmio 167788032 512 79 2097152 exact 1 short 0\n"
+  end
+
+  # A missing disk is a normal state: a manifest with no block unit reads, and has no record.
+  def test_a_manifest_without_the_block_unit_has_no_device_record
+    source = @source.sub(/^unit block\n(?:  .*\n)*/, '').gsub(/^window \w+\n(?:  .*\n)*/, '')
+    refute_equal @source, source
+    output, status = read(admitted(source))
+    assert status.success?, output
+    assert_includes output, "devices 0\n"
+    refute_match(/^device /, output)
+  end
+
+  # The record's peripheral is a name the device NIF's table has, from the CMSIS-SVD source.
+  def test_each_record_names_a_generated_peripheral
+    output, status = read(admitted)
+    assert status.success?, output
+    table = File.read(File.join(ROOT, 'include/erx/hw/device_table.h'))
+    peripherals = output.scan(/^device \S+ (\S+) /).flatten
+    refute_empty peripherals
+    peripherals.each { |name| assert_includes table, %(.name = "#{name}"), name }
+  end
+
   def test_a_manifest_with_no_system_args_gives_no_words
     output, status = read(admitted(@source.sub(/^  system_args .*\n/, '')))
     assert status.success?, output

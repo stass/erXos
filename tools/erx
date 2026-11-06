@@ -294,6 +294,8 @@ module Erx
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_pl011_console_uart.rb'), '--seed',
                     options.fetch(:seed).to_s],
                    name: 'fuzz-erx-pl011-console-uart', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_device_record.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-device-record', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_9p_grammar.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-9p-grammar', deadline: 660, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_ramfs_core.rb'), '--seed', options.fetch(:seed).to_s],

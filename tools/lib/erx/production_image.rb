@@ -267,6 +267,9 @@ module Erx
       # The program's name and the node flag with its name, before the page's words, and
       # the five words of -erx console_uart, which the root adds to the manifest's.
       ARGUMENTS_ALWAYS = 8
+      # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
+      # for the block unit's one device (docs/design-stopgap.md, "Device records").
+      DEVICE_RECORD_WORDS = 8
       # What a plain erx.arg word used to break: it joins the last flag's arguments.
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
       # An output longer than any FIFO, so the driver writes it through the transmit check.
@@ -319,7 +322,8 @@ module Erx
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
-        arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
+        records = source.scan(/^unit block$/).size * DEVICE_RECORD_WORDS
+        arguments = ARGUMENTS_ALWAYS + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code
 

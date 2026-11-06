@@ -210,7 +210,7 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `budget`, `space`, `group_ctl`, `group_stat`, `time_page`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*`, `erx_group_status` and `erx_clock_ns` find theirs with no handle, and no Phase 1 caller takes the rest | the same |
 | `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
 | node name | `system@` and the manifest's `host` | the same |
-| `args` | the manifest's `system_args`, then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
+| `args` | the manifest's `system_args`, the console's words and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
 | `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
 | `hwcap`, `hwcap2` | 0, which claims no optional feature; the interpreter asks for none | the same |
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
@@ -852,9 +852,38 @@ A root fault, the root's own stop and `erx_machine_end` reach it on the service,
    (`platform_control_object.cpp:88`). Under `-no-reboot` this ends QEMU. If the call returns, the thread sleeps until the harness's
    deadline.
 
+### Device records
+
+The root hands the system domain's ERTS a record of each device it drives, as it hands it
+the console's words: for each device of a unit the system domain holds, at a device-tree
+path, whose role and compatible string are a row of the kinds table in
+`liberx/backend/core/boot_manifest.c`, it adds `-erx device ROLE PERIPHERAL BASE SIZE LINE
+DMA_MEMORY`. ROLE and PERIPHERAL are the row's names, PERIPHERAL the peripheral's name in
+the CMSIS-SVD source that `erx_device` opens it as; the numbers, in decimal, are the
+manifest's device entry: its register window, its interrupt line and the DMA memory the
+platform reserves for it. The one row is QEMU `virt`'s block transport: role `block`,
+compatible `virtio,mmio`, peripheral `virtio_mmio`. A second kind of device is one more
+row.
+
+Which of QEMU's 32 virtio-mmio transports is the disk is configuration: the platform
+record names the transport `/virtio_mmio@a003e00`, the one QEMU gives the first virtio
+device of the command line, and the manifest's unit says who holds it. The root reads no
+register to choose, since only `erx_device` touches a device's registers; the driver's
+first reads of the transport, its magic, version and device id, say whether a disk is
+behind it. A manifest with no such unit has no record, and a machine with no disk boots
+the same, with nothing for the block driver to drive.
+
+A driver finds its records with `erx_device_record:find(Role, Peripheral)`, which returns
+each as a spec for `erx_device:open/1`, with `dma_memory` beside the window and line, and
+`{ok, []}` when there is none. Words after the four numbers are not the record's. Each number must be decimal within its field (64, 64, 32
+and 64 bits), or the records of that role and peripheral are refused with a stated reason
+(`erx_device_record:find/3`, which has a fuzz target). The hosted entry adds no record,
+since a hosted runtime has no devices. More records than `ERX_BOOT_DEVICES_MAX` refuse
+the manifest at boot.
+
 ### The console
 
-The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64 and 32 bits), and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). A plain `erx.arg` word that joins either list of arguments is ignored.
+The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64 and 32 bits), and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the

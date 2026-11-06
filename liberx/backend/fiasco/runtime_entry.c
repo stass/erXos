@@ -46,14 +46,18 @@ static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_h
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
-/* The manifest's words, then each erx.arg word, which takes a byte and its NUL at the least. */
-static erx_boot_words_t arg_words[2 + ERX_BOOT_STRINGS_MAX / 2];
+/*
+ * The manifest's words, the console's, each device record's, then each erx.arg word, which
+ * takes a byte and its NUL at the least.
+ */
+static erx_boot_words_t arg_words[2 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
 /* -erx console_uart BASE SIZE LINE: three numbers, each at most UINT64_MAX's 20 digits and its NUL. */
 #define CONSOLE_UART_NUMBER_MAX	(20 + 1)
 static const char console_uart_prefix[] = "-erx\0console_uart";
 static char console_uart_words[sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX];
 _Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX,
     "the console words hold the prefix and three numbers");
+static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_DEVICE_WORDS_MAX];
 
 const erx_boot_info_t *
 erx_boot_info(void)
@@ -171,8 +175,9 @@ release_read(const erx_boot_handoff_view_t *handoff, erx_boot_manifest_t *manife
 }
 
 /*
- * The manifest's system_args, what its driver opens of the console's device entry, then each
- * erx.arg word of the kernel command line, in its order. A plain word joins the flag before
+ * The manifest's system_args, what its driver opens of the console's device entry, each device
+ * record (docs/design-stopgap.md, "Device records"), then each erx.arg word of the kernel
+ * command line, in its order. A plain word joins the flag before
  * it, which erx_pl011 expects. A manifest with no console entry has no such words, and the
  * driver's start then says why the console has none.
  */
@@ -187,6 +192,13 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	if (manifest->console.size != 0)
 		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words,
 		    console_uart_build(&manifest->console) };
+	for (size_t at = 0; at < manifest->device_count; at++) {
+		const size_t length = erx_boot_device_words(&manifest->devices[at], device_words[at], sizeof(device_words[at]));
+
+		if (length == 0)
+			return ("a device record: its words outgrow ERX_BOOT_DEVICE_WORDS_MAX");
+		arg_words[(*nargs)++] = (erx_boot_words_t){ device_words[at], length };
+	}
 	while (erx_boot_args_next_arg(handoff->bootargs, handoff->bootargs_len, &cursor, &word, &word_len)) {
 		if (*nargs == sizeof(arg_words) / sizeof(arg_words[0]))
 			return ("the kernel command line: more erx.arg words than the page holds");
