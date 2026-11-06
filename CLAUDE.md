@@ -41,6 +41,7 @@ These shape every design and change; the rules below apply them.
    the source level, is a goal, but not at the expense of the other
    principles; full POSIX compliance is not the bar. Programs brought in
    from elsewhere come from FreeBSD or are BSD-licensed where possible.
+   Where Unix systems differ and erXos must choose, it follows FreeBSD.
 
 ## Collaboration
 
