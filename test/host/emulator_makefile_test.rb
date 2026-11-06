@@ -15,6 +15,8 @@ require 'tmpdir'
 class EmulatorMakefileTest < Minitest::Test
   MAKEFILE_IN = File.expand_path('../../otp/erts/emulator/Makefile.in', __dir__)
   STAMP_RULE = /^\$\(ERTS_LIB\):/
+  # The runtime builds whose build_environment is make's environment.
+  BUILD_ENVIRONMENTS = %w[tools/lib/erx/runtime.rb tools/lib/erx/native_runtime.rb].freeze
   # What make would otherwise read from the test's environment: an outer make's
   # flags and jobserver (MAKEFLAGS, MFLAGS, MAKELEVEL), extra flags (GNUMAKEFLAGS),
   # extra makefiles (MAKEFILES) and a replacement for the recursive $(MAKE) (MAKE).
@@ -61,6 +63,19 @@ class EmulatorMakefileTest < Minitest::Test
     before = File.mtime(beam)
     make_emulator
     assert_equal before, File.mtime(beam)
+  end
+
+  # Every $(ERX_...) variable the makefile reads and does not assign itself is one
+  # both runtime builds put in make's environment. A name neither sets expands to
+  # nothing without a word from make, and `-I$(NAME)/include` then searches /include.
+  def test_every_erx_variable_the_makefile_reads_is_set_by_both_builds
+    makefile = File.read(MAKEFILE_IN)
+    read = makefile.scan(/\$\((ERX_[A-Z0-9_]+)\)/).flatten.uniq
+    assigned = makefile.scan(/^(ERX_[A-Z0-9_]+)[ \t]*[:?+]?=/).flatten
+    BUILD_ENVIRONMENTS.each do |file|
+      set = File.read(File.expand_path("../../#{file}", __dir__)).scan(/'(ERX_[A-Z0-9_]+)' =>/).flatten
+      assert_empty read - assigned - set, "#{file}'s build environment does not set what #{MAKEFILE_IN} reads"
+    end
   end
 
   private

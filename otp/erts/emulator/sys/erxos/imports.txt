@@ -30,7 +30,7 @@ erx_vm_decommit erx_vm_map erx_vm_release erx_vm_reserve
 [iso_c]
 abort atoi bsearch calloc exit free malloc memchr memcmp memcpy memmove memset
 qsort realloc sprintf sscanf strchr strcmp strcpy strerror
-strlen strncmp strstr strtod strtol
+strcspn strlen strncmp strspn strstr strtod strtol
 
 [stdio]
 fflush flockfile fprintf funlockfile fwrite setvbuf
@@ -96,6 +96,12 @@ erx_watchdog_pet
 # that may use these for a host terminal.
 [only_erx_stdio_nif]
 cfmakeraw fcntl ioctl pipe poll sigaction tcgetattr tcsetattr
+
+# erx_littlefs_nif.c alone, the block callbacks of /data's littlefs volume: each waits
+# for the volume's owner to answer until a deadline on the clock musl's timed waits
+# read, and a directory entry's name is measured within its buffer.
+[only_erx_littlefs_nif]
+clock_gettime pthread_cond_timedwait strnlen
 
 # Stock callers not yet traced: each caller goes with its layer, or the name joins
 # the design's list with a reason.

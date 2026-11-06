@@ -87,6 +87,59 @@ class BlockDeviceTest < Minitest::Test
     refute_match last.fetch(:pattern), "blk: wrote sector 7\r\n"
   end
 
+  def test_the_power_cut_lines_are_the_documented_sequence
+    assert_equal ['blk: data unsynced written', 'blk: data synced 10000 bytes', 'blk: done'], Device.write_expected_lines
+    synced, unsynced, done = Device.read_expected_lines
+    # The digest the guest's erlang:md5/1 printed for its own content.
+    assert_equal 'blk: data synced 10000 bytes md5 bbf1c77538f97ceeb1e03126edaa3594', synced
+    assert_kind_of Regexp, unsynced
+    assert_equal 'blk: done', done
+    assert_equal 'erx.arg=-pa erx.arg=/test/blk erx.arg=-run erx.arg=erx_blk_check erx.arg=data_write',
+                 Device.command_line('hvf', arguments: Device::WRITE_ARGUMENTS)
+    assert_equal 'erx.arg=-pa erx.arg=/test/blk erx.arg=-run erx.arg=erx_blk_check erx.arg=data_read',
+                 Device.command_line('hvf', arguments: Device::READ_ARGUMENTS)
+  end
+
+  def test_the_power_cut_content_is_the_guests
+    content = Device.data_content(1)
+    assert_equal 10_000, content.bytesize
+    assert_equal [1, 2, 250, 0, 1], content.bytes.values_at(0, 1, 249, 250, 251)
+  end
+
+  # An unsynced file absent or cut short passes, and the outcome is read back for the
+  # run's notes; bytes nobody wrote, a failure to read it, or a synced file that
+  # differs do not pass.
+  def test_any_unsynced_outcome_passes_and_is_reported
+    synced = Device.read_expected_lines.first
+    ['absent', '0 bytes prefix', '4096 bytes prefix'].each do |outcome|
+      log = good_log([synced, "blk: data unsynced #{outcome}", 'blk: done'])
+      assert_nil Device.line_difference(log, expected: Device.read_expected_lines), outcome
+      assert_equal outcome, Device.unsynced_outcome(log)
+    end
+    other = good_log([synced, 'blk: data unsynced 10000 bytes other', 'blk: done'])
+    assert_match(/line 2: .*got "blk: data unsynced 10000 bytes other"/, Device.line_difference(other, expected: Device.read_expected_lines))
+    failed = good_log([synced, 'blk: data unsynced failed', 'blk: done'])
+    assert_match(/line 2: expected a line matching .*, got "blk: data unsynced failed"/,
+                 Device.line_difference(failed, expected: Device.read_expected_lines))
+    assert_nil Device.unsynced_outcome(failed)
+    lost = good_log(['blk: data synced 10000 bytes md5 00000000000000000000000000000000', 'blk: data unsynced absent', 'blk: done'])
+    assert_match(/line 1: expected "blk: data synced 10000 bytes md5 bbf1/, Device.line_difference(lost, expected: Device.read_expected_lines))
+    assert_match(/line 1: .*got "blk: data synced failed"/,
+                 Device.line_difference(good_log(['blk: data synced failed', 'blk: data unsynced absent', 'blk: done']),
+                                        expected: Device.read_expected_lines))
+  end
+
+  def test_a_first_boot_that_did_not_sync_is_a_difference
+    log = good_log(['blk: data unsynced written', 'blk: data synced failed', 'blk: done'])
+    assert_match(/line 2: .*got "blk: data synced failed"/, Device.line_difference(log, expected: Device.write_expected_lines))
+    assert_nil Device.line_difference(good_log(Device.write_expected_lines), expected: Device.write_expected_lines)
+  end
+
+  def test_a_missing_unsynced_line_is_a_difference
+    log = good_log([Device.read_expected_lines.first, 'blk: done'])
+    assert_match(/line 2: expected a line matching .*, got "blk: done"/, Device.line_difference(log, expected: Device.read_expected_lines))
+  end
+
   def finished_image(directory, write: Device::WRITE_SECTORS)
     path = Image.create(directory: directory, name: 'disk.img', sectors: Device::SECTORS)
     File.open(path, 'r+b') { |file| write.each { |index| file.pwrite(Image.pattern(index, tag: Image::GUEST_TAG), index * 512) } }

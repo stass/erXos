@@ -64,7 +64,9 @@ module Erx
   #   blk: window R sector N-1 holds host E
   #                                 its first and last sectors hold the host's pattern
   #                                 of the medium's sectors S and E, so the window maps
-  #                                 its sectors to the partition's, and only those
+  #                                 its sectors to the partition's, and only those; the
+  #                                 data window has no "sector 0" line, since /data's
+  #                                 littlefs volume formats over its first block at boot
   #   blk: window R sector N refused
   #                                 a read past its end is refused with erange
   #
@@ -74,6 +76,36 @@ module Erx
   # "blk: done". The harness then reads the medium back. medium_expected_lines holds
   # the sequence; a failed step prints "failed" in its line, a sector that holds
   # something else "holds other", and a guest without the service "blk: no windows".
+  #
+  # The power cut, M6's exit criterion (docs/plan.md): a fresh medium, two boots on it.
+  # The first starts the module's `data_write`, which reaches /data's littlefs volume
+  # (erx_lfs) through the file module, and prints
+  #
+  #   blk: data unsynced written    it opened /data/unsynced and wrote DATA_BYTES bytes,
+  #                                 data_content(1), with neither sync nor close
+  #   blk: data synced 10000 bytes  it opened /data/synced, wrote data_content(0) and
+  #                                 file:sync returned ok
+  #   blk: done
+  #
+  # and a process that never ends holds both files open, so nothing closes them. The
+  # harness kills QEMU as soon as it reads "blk: done": that is the power cut. The second
+  # boot, on the same medium, starts `data_read`, which prints
+  #
+  #   blk: data synced 10000 bytes md5 H
+  #                                 /data/synced read back is DATA_BYTES bytes with the
+  #                                 MD5 digest H of data_content(0), which the harness
+  #                                 computes itself
+  #   blk: data unsynced R          what is left of the unsynced file: "absent", or "N
+  #                                 bytes prefix" when its N bytes begin data_content(1),
+  #                                 or "N bytes other" when they do not; littlefs keeps
+  #                                 no part of an unsynced write, so "absent" and "N
+  #                                 bytes prefix" pass and the run's notes say which it
+  #                                 saw, and "other", bytes nobody wrote, fails
+  #   blk: done
+  #
+  # A step that fails prints "failed" in its line. Killing QEMU loses what the guest has
+  # not yet handed the device, not what the device completed into the host's page cache
+  # (TODO.md, the block service's flush).
   module BlockDevice
     SECTORS = 16
     TRANSPORT_VERSION = 2
@@ -93,6 +125,14 @@ module Erx
     GUEST_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'main'].freeze
     MEDIUM_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'medium'].freeze
     MEDIUM_NAME = 'medium.img'
+    WRITE_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'data_write'].freeze
+    READ_ARGUMENTS = ['-pa', GUEST_PATH, '-run', GUEST_MODULE, 'data_read'].freeze
+    # The length of each power-cut file: far past littlefs's inline limit, an eighth of a
+    # block, so the synced file's data lives in blocks of its own.
+    DATA_BYTES = 10_000
+    # The second boot's report on the unsynced file: any outcome but bytes nobody wrote
+    # passes (header).
+    UNSYNCED_LINE = /\Ablk: data unsynced (?:absent|\d+ bytes prefix)\z/n
     ERLC_DEADLINE = 120
     # The most serial text read back, and the most of a guest line quoted in a report.
     SERIAL_BYTES = 1 << 20
@@ -116,7 +156,7 @@ module Erx
       ["blk: capacity #{MediumImage.sectors} sectors",
        *windows.flat_map do |window|
          ["blk: window #{window.role} sectors #{window.sectors}",
-          "blk: window #{window.role} sector 0 holds host #{window.start}",
+          *("blk: window #{window.role} sector 0 holds host #{window.start}" unless window.role == :data),
           "blk: window #{window.role} sector #{window.sectors - 1} holds host #{window.last}",
           "blk: window #{window.role} sector #{window.sectors} refused"]
        end,
@@ -125,13 +165,34 @@ module Erx
        'blk: done']
     end
 
+    # The power-cut files' content: DATA_BYTES bytes, byte I holding (I + seed) mod 251.
+    def data_content(seed) = (0...DATA_BYTES).map { |index| (index + seed) % 251 }.pack('C*')
+
+    # The lines of a good first power-cut boot, cut on its last.
+    def write_expected_lines
+      ['blk: data unsynced written', "blk: data synced #{DATA_BYTES} bytes", 'blk: done']
+    end
+
+    # The lines of a good second power-cut boot; one is a pattern every outcome that passes matches.
+    def read_expected_lines
+      ["blk: data synced #{DATA_BYTES} bytes md5 #{Digest::MD5.hexdigest(data_content(0))}", UNSYNCED_LINE, 'blk: done']
+    end
+
+    # What the second boot saw of the unsynced file, as its line says it, or nil.
+    def unsynced_outcome(bytes)
+      line = guest_lines(bytes).find { |guest| UNSYNCED_LINE.match?(guest) }
+      line&.delete_prefix('blk: data unsynced ')
+    end
+
     # What the medium must hold after a good run: the host's pattern in every window's
-    # first and last sector but the data window's last, which the guest rewrote.
+    # first and last sector but the data window's last, which the guest rewrote, and its
+    # first, which /data's littlefs volume formatted over.
     def medium_expected_tags
       windows = MediumImage.windows
-      data_last = windows.find { |window| window.role == :data }.last
+      data = windows.find { |window| window.role == :data }
       windows.flat_map { |window| [window.start, window.last] }
-             .to_h { |index| [index, index == data_last ? BlockImage::GUEST_TAG : BlockImage::HOST_TAG] }
+             .reject { |index| index == data.start }
+             .to_h { |index| [index, index == data.last ? BlockImage::GUEST_TAG : BlockImage::HOST_TAG] }
     end
 
     # The sectors of the medium that are not as expected, or nil when all are.
@@ -167,14 +228,19 @@ module Erx
       (0...SECTORS).to_h { |index| [index, WRITE_SECTORS.include?(index) ? BlockImage::GUEST_TAG : BlockImage::HOST_TAG] }
     end
 
-    # The first way the guest's lines differ from expected_lines, or nil. The
-    # guest's text is quoted escaped and cut short.
+    # The first way the guest's lines differ from expected, or nil. An expected line
+    # is a string the guest's must equal or a pattern it must match. The guest's text
+    # is quoted escaped and cut short.
     def line_difference(bytes, expected: expected_lines)
       actual = guest_lines(bytes)
-      index = (0...[actual.size, expected.size].max).find { |at| actual[at] != expected[at] }
+      index = (0...[actual.size, expected.size].max).find { |at| !line_matches?(expected[at], actual[at]) }
       return if index.nil?
 
       "driver line #{index + 1}: expected #{quote(expected[index])}, got #{quote(actual[index])}"
+    end
+
+    def line_matches?(expected, actual)
+      expected.is_a?(Regexp) ? !actual.nil? && expected.match?(actual) : expected == actual
     end
 
     # The sectors of the image that are not as expected, or nil when all are.
@@ -188,6 +254,7 @@ module Erx
 
     def quote(line)
       return 'no line' if line.nil?
+      return "a line matching #{line.source}" if line.is_a?(Regexp)
 
       %("#{Terminal.escape(line.byteslice(0, QUOTE_BYTES))}")
     end
@@ -212,6 +279,7 @@ module Erx
         @runner = runner
         @compiler = compiler
         @linker = linker
+        @notes = []
       end
 
       # Boots the development image under each accelerator with one disk, then judges
@@ -224,8 +292,11 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         image = test_image(fiasco)
-        accels.to_h { |accel| ["#{accel}-1cpu", run_one(accel, image) && run_medium(accel, image)] }
+        accels.to_h { |accel| ["#{accel}-1cpu", run_one(accel, image) && run_medium(accel, image) && run_power_cut(accel, image)] }
       end
+
+      # What the runs saw that passes either way: the unsynced file's outcome.
+      def notes = @notes.dup.freeze
 
       private
 
@@ -243,6 +314,21 @@ module Erx
         disk = MediumImage.create(directory: directory, name: MEDIUM_NAME)
         boot(accel, image, directory: directory, disk: disk, arguments: MEDIUM_ARGUMENTS,
                            expected: BlockDevice.medium_expected_lines) { BlockDevice.medium_image_difference(disk) }
+      end
+
+      # The power cut: a fresh medium, a boot that writes and syncs a file under /data and
+      # is killed on its last line, and a boot on the same medium that reads it back. Each
+      # boot keeps its serial log in a directory of its own beside the medium.
+      def run_power_cut(accel, image)
+        directory = run_directory(accel)
+        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME)
+        boot(accel, image, directory: File.join(directory, 'write'), disk: disk, arguments: WRITE_ARGUMENTS,
+                           expected: BlockDevice.write_expected_lines) { nil }
+        boot(accel, image, directory: File.join(directory, 'read'), disk: disk, arguments: READ_ARGUMENTS,
+                           expected: BlockDevice.read_expected_lines) { nil }
+        outcome = BlockDevice.unsynced_outcome(read_serial(File.join(directory, 'read', 'serial.log')))
+        @notes << "#{accel}: the unsynced file after the power cut: #{outcome}"
+        'passed'
       end
 
       def run_directory(accel)

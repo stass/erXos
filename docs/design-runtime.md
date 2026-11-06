@@ -2389,9 +2389,10 @@ same check reads the native image's calls to `__erx_syscall` and fails on a
 number the seam refuses, except a closed list of pairs of number and musl function
 that musl copes with, each with its reason: `mremap` in `realloc`, `__map_file`'s
 calls, `exit`'s `ppoll` and `clock_gettime`'s `gettimeofday`. A number the disassembly
-cannot read is closed by the name check. The objects of `erx_output.c` and, in the
-hosted image alone, `erx_stdio_nif.c` are each read against a list of their own,
-the `only_` sections of `imports.txt`.
+cannot read is closed by the name check. An object with an `only_<object>` section of
+`imports.txt` is read against that list as well, so a name one object needs, such as
+`write` for `erx_output.c` or the timed wait of `erx_littlefs_nif.c`'s block
+callbacks, reaches no other.
 
 **How each refused call ends.** A probe linked an unmodified interpreter
 `beam.smp` against the Phase 1 seam: 60 refused call names, plus an `unknown`

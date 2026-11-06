@@ -376,11 +376,6 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [High] storage, `/data` (`erlang/apps/erx_files/src/erx_lfs.erl`): M6's exit criterion has
-  no QEMU test yet. A data suite (or a case of `tools/lib/erx/block_device.rb`) writes and
-  syncs a file under `/data`, lets the harness kill QEMU after the sync line, boots again on
-  the same disk under HVF and reads the file back. The host test's `synced_file_survives_a_cut`
-  covers the same path over a RAM window only.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;
@@ -403,6 +398,10 @@ it; git history is the record of completed work.
   so `erx_lfs` answers littlefs's sync at once. A write is answered once the device has
   completed it, which holds across a QEMU kill but not across a power cut on a medium with a
   write cache.
+* [Low] storage, `erx_littlefs_nif.c`: `deadline_after` ignores `clock_gettime`'s result, and
+  the hosted build's `CLOCK_REALTIME` is the wall clock, so a clock step fails a block wait
+  or stretches it. Waiting with `erx_umtx_wait` against an `erx_clock_ns` deadline fixes both
+  and empties `imports.txt`'s `[only_erx_littlefs_nif]`.
 * [Medium] storage, `erx_lfs`: a mount that reports `LFS_ERR_CORRUPT` formats the partition,
   blank blocks or not: one metadata pair whose copies both fail their checksum, or a cycle
   in the list, wipes the volume rather than refusing it, and the log says only "mounted".

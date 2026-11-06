@@ -17,10 +17,19 @@
 %% medium/0 is the second boot's: the harness attaches a medium laid out by the ABI file's
 %% medium layout, and the module drives the block service's windows alone
 %% (erx_blk_service:window/1, erx_blk_window). It reports each window's length, the medium
-%% sector whose host pattern its first and last sectors hold, and the refusal of the sector
-%% past its end; it rewrites the data window's last sector with the guest's pattern of the
+%% sector whose host pattern its first and last sectors hold (the data window's last only:
+%% /data's littlefs volume formats over its first block at boot), and the refusal of the
+%% sector past its end; it rewrites the data window's last sector with the guest's pattern of the
 %% medium sector it read there, and is refused a write past the vault's end. It does not
 %% know the layout: the harness checks the sectors it names against it.
+%%
+%% data_write/0 and data_read/0 are the power cut's two boots on one fresh medium, through
+%% the file module and /data's littlefs volume. data_write opens /data/unsynced and writes
+%% it, then writes /data/synced and syncs it; it neither syncs nor closes either file, and
+%% a process that never ends holds both, so no close reaches the volume before the harness
+%% kills QEMU on "blk: done". data_read reads both files back and reports the synced one's
+%% size and MD5 digest, which the harness compares with its own, and what is left of the
+%% unsynced one, which nothing promises.
 %%
 %% Each line goes to the console in one erlang:display_string/2 call, which reaches the
 %% console's sink, its driver, whole (docs/design-runtime.md, "The console and standard
@@ -28,7 +37,7 @@
 
 -module(erx_blk_check).
 
--export([main/0, medium/0]).
+-export([main/0, medium/0, data_write/0, data_read/0]).
 
 -define(ROLES, [record, slot_a, slot_b, vault, data]).
 
@@ -47,6 +56,11 @@
 %% the guest on "blk: done", so a run without a driver waits for a few polls first and
 %% the serial log holds the reason.
 -define(LOG_DRAIN_MS, 500).
+%% The power cut's files (BlockDevice::DATA_BYTES and data_content): DATA_BYTES bytes, byte
+%% I holding (I + Seed) rem 251, seed 0 for the synced file and 1 for the unsynced one.
+-define(DATA_BYTES, 10000).
+-define(SYNCED, "/data/synced").
+-define(UNSYNCED, "/data/unsynced").
 
 -spec main() -> ok.
 main() ->
@@ -84,10 +98,80 @@ medium() ->
     end,
     line("done", []).
 
+-spec data_write() -> ok.
+data_write() ->
+    Parent = self(),
+    {Holder, Monitor} = spawn_monitor(fun() -> hold(Parent) end),
+    receive
+        {Holder, written} -> ok;
+        {'DOWN', Monitor, process, Holder, _} -> timer:sleep(?LOG_DRAIN_MS)
+    end,
+    line("done", []).
+
+%% Writes both files, tells data_write, and then holds them open, without sync or close,
+%% until the power cut: the holder's end would close them.
+hold(Parent) ->
+    write_files(),
+    Parent ! {self(), written},
+    receive after infinity -> ok end.
+
+%% A step that fails prints its line and the next one runs, so the harness names it.
+write_files() ->
+    Unsynced = open_write(?UNSYNCED, 1),
+    line(case Unsynced of {ok, _} -> "data unsynced written"; _ -> "data unsynced failed" end, []),
+    Synced = case open_write(?SYNCED, 0) of
+                 {ok, File} -> file:sync(File);
+                 Failed -> Failed
+             end,
+    case Synced of
+        ok -> line("data synced ~b bytes", [?DATA_BYTES]);
+        _ -> line("data synced failed", [])
+    end.
+
+open_write(Path, Seed) ->
+    case file:open(Path, [write, binary]) of
+        {ok, File} ->
+            case file:write(File, data_content(Seed)) of
+                ok -> {ok, File};
+                Failed -> Failed
+            end;
+        Failed ->
+            Failed
+    end.
+
+-spec data_read() -> ok.
+data_read() ->
+    case file:read_file(?SYNCED) of
+        {ok, Synced} ->
+            line("data synced ~b bytes md5 ~s", [byte_size(Synced), binary:encode_hex(erlang:md5(Synced), lowercase)]);
+        _Failed ->
+            line("data synced failed", []),
+            timer:sleep(?LOG_DRAIN_MS)
+    end,
+    case file:read_file(?UNSYNCED) of
+        {ok, Unsynced} ->
+            Kept = byte_size(Unsynced) =< ?DATA_BYTES andalso
+                Unsynced =:= binary:part(data_content(1), 0, byte_size(Unsynced)),
+            line("data unsynced ~b bytes ~s", [byte_size(Unsynced), case Kept of true -> "prefix"; false -> "other" end]);
+        {error, enoent} ->
+            line("data unsynced absent", []);
+        _Other ->
+            line("data unsynced failed", []),
+            timer:sleep(?LOG_DRAIN_MS)
+    end,
+    line("done", []).
+
+data_content(Seed) ->
+    << <<((Index + Seed) rem 251)>> || Index <- lists:seq(0, ?DATA_BYTES - 1) >>.
+
 window({Role, Window}) ->
     Sectors = sectors(Window),
     line("window ~s sectors ~b", [Role, Sectors]),
-    holds(Role, Window, 0),
+    %% /data's littlefs volume formats the data window at boot, over its first block.
+    case Role of
+        data -> ok;
+        _ -> holds(Role, Window, 0)
+    end,
     holds(Role, Window, Sectors - 1),
     case call(fun() -> erx_blk_window:read(Window, Sectors, 1) end) of
         {error, erange} -> line("window ~s sector ~b refused", [Role, Sectors]);
