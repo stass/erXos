@@ -8,12 +8,14 @@ EUnit tests of /tmp's grant over the real tree (docs/design-tmp.md, Verification
 it, a stat that a rename over its name falls inside, a stopped walk, ".." from a removed
 directory, a removed file freed by its last fid's clunk and a file two grants hold, and
 the "Grammar on the local route" case, names and link texts at and past their limits sent
-to the grant as local messages and refused before any callback. The tree is `erx_ramfs`
+to the grant as local messages and refused before any callback, and statfs back at its
+start after every way a file gives up its space. The tree is `erx_ramfs`
 under `erx_fs`, as `erx_ramfs_sup` starts them. test/host/erx_ramfs_test.rb runs these on
 stock OTP and seeds a fault for each.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(NOFID, 16#ffffffff).
 -define(O_RDWR, 2).
@@ -321,3 +323,86 @@ a_dead_owners_open_file_gives_back_what_it_held_test() ->
     kill_and_wait(Owner),
     ?assertEqual(ok, wait_free(Grant, Free)),
     stop(Grant).
+
+%% Space comes back ----------------------------------------------------------
+
+%% setattr's attributes with only the size set.
+size_attr(Size) ->
+    #{valid => ?ERX_P9_SETATTR_VALID_SIZE, mode => 0, uid => 0, gid => 0, size => Size,
+      atime_sec => 0, atime_nsec => 0, mtime_sec => 0, mtime_nsec => 0}.
+
+%% Every way a file's bytes are given back, one after another on one tree: a
+%% file walked, clunked and removed; one truncated through an unopened fid,
+%% through an open one and by an open with O_TRUNC, each truncation giving its
+%% chunks back at once; one renamed over; and one open in a process that is
+%% killed. statfs's free blocks and nodes come back to their start each time
+%% the last name goes. A clunk of an open fid reaches the tree from the file's
+%% own process, so the counts are awaited rather than read once.
+every_way_of_letting_go_gives_the_space_back_test() ->
+    Grant = start(),
+    Free = free(Grant),
+    Data = binary:copy(<<7>>, 50000),
+    %% Written, walked, clunked and removed.
+    make_data_file(Grant, <<"a">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"a">>]}),
+    ok = call(Grant, {clunk, 3}),
+    ok = call(Grant, {unlinkat, 1, <<"a">>, 0}),
+    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    %% An empty file's own cost, against which each truncation is measured.
+    make_file(Grant, 1, <<"b">>, 2),
+    Empty = settled_free(Grant),
+    ok = call(Grant, {unlinkat, 1, <<"b">>, 0}),
+    %% Truncated to 0 through an unopened fid.
+    make_data_file(Grant, <<"b">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"b">>]}),
+    ok = call(Grant, {setattr, 3, size_attr(0)}),
+    ?assertEqual(ok, wait_free(Grant, Empty, 100)),
+    ok = call(Grant, {clunk, 3}),
+    %% Written and truncated to 0 through an open fid.
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"b">>]}),
+    {ok, _, _} = call(Grant, {lopen, 3, ?O_RDWR}),
+    {ok, 50000, _} = call(Grant, {write, 3, 0, Data}),
+    ok = call(Grant, {setattr, 3, size_attr(0)}),
+    ok = call(Grant, {clunk, 3}),
+    ?assertEqual(ok, wait_free(Grant, Empty, 100)),
+    %% Written, then opened with O_TRUNC.
+    make_data_file(Grant, <<"b">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"b">>]}),
+    {ok, _, _} = call(Grant, {lopen, 3, ?O_RDWR bor ?ERX_P9_O_TRUNC}),
+    ok = call(Grant, {clunk, 3}),
+    ?assertEqual(ok, wait_free(Grant, Empty, 100)),
+    ok = call(Grant, {unlinkat, 1, <<"b">>, 0}),
+    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    %% Renamed over, and the survivor removed.
+    make_data_file(Grant, <<"c">>, 2),
+    make_data_file(Grant, <<"d">>, 2),
+    ok = call(Grant, {renameat, 1, <<"c">>, 1, <<"d">>}),
+    ok = call(Grant, {unlinkat, 1, <<"d">>, 0}),
+    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    %% Opened, written and walked by a process that is killed with its file
+    %% open, then removed.
+    Owner = spawn(fun() -> receive never -> ok end end),
+    As = fun(Request) -> call_as(Grant, Owner, Request) end,
+    {ok, _} = As({attach, 10, ?NOFID, <<"user">>, <<"tmp">>, 0}),
+    {ok, []} = As({walk, 10, 11, []}),
+    {ok, _, _} = As({lcreate, 11, <<"e">>, ?O_RDWR, 8#644, 0}),
+    {ok, 50000, _} = As({write, 11, 0, Data}),
+    {ok, [_]} = As({walk, 10, 12, [<<"e">>]}),
+    exit(Owner, kill),
+    ok = call(Grant, {unlinkat, 1, <<"e">>, 0}),
+    ?assertEqual(ok, wait_free(Grant, Free, 100)),
+    stop(Grant).
+
+%% statfs's free counts once two reads 20 ms apart agree, so that the clunks
+%% of open fids sent before have reached the tree.
+settled_free(Grant) ->
+    settled_free(Grant, free(Grant), 100).
+
+settled_free(_Grant, Seen, 0) ->
+    Seen;
+settled_free(Grant, Seen, Tries) ->
+    timer:sleep(20),
+    case free(Grant) of
+        Seen -> Seen;
+        Now -> settled_free(Grant, Now, Tries - 1)
+    end.

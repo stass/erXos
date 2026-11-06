@@ -82,9 +82,13 @@ class ErxFsTest < Minitest::Test
               to: "writes({lcreate, _, _, _, _, _}) ->\n    false;",
               caught_by: 'lcreate_is_refused_whatever_its_flags_test'),
     Fault.new(name: 'a refused remove keeps its fid', file: GRANT,
-              from: 'refused_remove({remove, Fid}, Grant) -> end_fid_if_held(Fid, Grant);',
-              to: 'refused_remove({remove, Fid}, Grant) -> element(1, {Grant, fun end_fid_if_held/2, Fid});',
+              from: 'end_fid_whatever_the_outcome({remove, Fid}, Grant) -> end_fid_if_held(Fid, Grant);',
+              to: 'end_fid_whatever_the_outcome({remove, Fid}, Grant) -> element(1, {Grant, fun end_fid_if_held/2, Fid});',
               caught_by: 'refused_remove_still_clunks_its_fid_test'),
+    Fault.new(name: 'a refused clunk keeps its fid', file: GRANT,
+              from: 'end_fid_whatever_the_outcome({clunk, Fid}, Grant) -> end_fid_if_held(Fid, Grant);',
+              to: 'end_fid_whatever_the_outcome({clunk, Fid}, Grant) -> element(1, {Grant, fun end_fid_if_held/2, Fid});',
+              caught_by: 'in_flight_bound_test'),
     Fault.new(name: 'the version counter wraps', file: VERSION,
               from: "draw(_, ?LAST) ->\n    {error, eio};",
               to: "draw(Counter, ?LAST) ->\n    {ok, atomics:add_get(Counter, 1, 1)};",
@@ -144,12 +148,12 @@ class ErxFsTest < Minitest::Test
               to: 'failed(Other) when element(1, Other) =:= error -> {error, eio}.',
               caught_by: 'answers_with_a_state_are_eio_in_the_grant_test'),
     Fault.new(name: 'a reply the grammar rejects keeps the grant its operation built', file: GRANT,
-              from: 'false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}',
-              to: 'false -> {{error, eio}, refused_remove(Request, element(1, {Built, tree_holds(Built, Before)}))}',
+              from: 'false -> {{error, eio}, tree_holds(Built, Before)}',
+              to: 'false -> {{error, eio}, element(1, {Built, tree_holds(Built, Before)})}',
               caught_by: 'malformed_qids_change_nothing_test'),
     Fault.new(name: "a rejected reply undoes a remove's clunk", file: GRANT,
-              from: 'false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}',
-              to: 'false -> {{error, eio}, element(2, {fun refused_remove/2, tree_holds(Built, Before)})}',
+              from: 'Ended = end_fid_whatever_the_outcome(Request, Grant),',
+              to: 'Ended = element(1, {Grant, fun end_fid_whatever_the_outcome/2, Request}),',
               caught_by: 'rejected_remove_still_clunks_its_fid_test'),
     Fault.new(name: "a rejected lcreate leaves the tree's handle open", file: GRANT,
               from: "                            _ = Module:clunk(Handle, Fs),\n" \
@@ -214,7 +218,7 @@ class ErxFsTest < Minitest::Test
         File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
       end
       compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')])
-      compile(work, TESTS.map { |test| File.join(ROOT, test) })
+      compile(work, TESTS.map { |test| File.join(ROOT, test) }, includes: [File.join(ROOT, 'erlang/apps/erx/include')])
       # A grant a seeded fault crashes would print a crash report into the middle of
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',

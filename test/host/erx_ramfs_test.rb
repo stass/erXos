@@ -86,7 +86,7 @@ class ErxRamfsTest < Minitest::Test
         File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
       end
       compile(work, paths, includes: [File.join(ROOT, 'erlang/apps/erx/include')], strict: replaced.empty?)
-      compile(work, [File.join(ROOT, TESTS)], strict: true)
+      compile(work, [File.join(ROOT, TESTS)], includes: [File.join(ROOT, 'erlang/apps/erx/include')], strict: true)
       Open3.capture2e('gtimeout', '-k', '10', RUN_DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
                       "halt(case eunit:test(erx_ramfs_tests, [verbose, {scale_timeouts, #{TIMEOUT_SCALE}}]) " \

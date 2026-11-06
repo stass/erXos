@@ -168,7 +168,7 @@ handle_frame(Frame, Grant) ->
         drop ->
             drain(count_refusal(Grant));
         {refuse, Alias, Posix, Request} ->
-            finish(Alias, Request, {error, Posix}, refused_remove(Request, Grant));
+            finish(Alias, Request, {error, Posix}, Grant);
         {admit, Alias, Owner, Request} ->
             admit(Alias, Owner, Request, Grant)
     end.
@@ -304,7 +304,7 @@ packed_entry(Name) ->
 Counts `Request`, sent to `Alias`, as in flight until `complete/3` answers it:
 the hook for a request whose answer comes from outside the grant's step. A
 request admitted while 64 are in flight, flushes waiting on them included,
-fails with `emfile`.
+fails with `emfile`; a clunk or a remove refused there still ends its fid.
 """.
 -spec defer(reference(), tuple(), grant()) -> grant().
 defer(Alias, Request, Grant) ->
@@ -356,9 +356,14 @@ decode(Frame, #grant{client = Client, rights = Rights}) ->
             end
     end.
 
-%% A remove clunks its fid whatever the outcome, a refusal included.
-refused_remove({remove, Fid}, Grant) -> end_fid_if_held(Fid, Grant);
-refused_remove(_, Grant) -> Grant.
+%% A remove and a clunk end their fid whatever the outcome, a refusal included,
+%% as clunk(5) and remove(5) say: a fid a refused clunk kept would keep its
+%% file, and the space the file holds, for as long as its owner lives.
+%% finish/5 applies it to every answer, so no refusal path can skip it; when
+%% dispatch already ended the fid it changes nothing.
+end_fid_whatever_the_outcome({remove, Fid}, Grant) -> end_fid_if_held(Fid, Grant);
+end_fid_whatever_the_outcome({clunk, Fid}, Grant) -> end_fid_if_held(Fid, Grant);
+end_fid_whatever_the_outcome(_, Grant) -> Grant.
 
 %% An alias names one request in flight: a request sent to an alias that a
 %% deferred request still holds is refused, since the client could not tell
@@ -367,13 +372,13 @@ refused_remove(_, Grant) -> Grant.
 %% request takes a slot.
 admit(Alias, _, Request, #grant{pending = Pending} = Grant)
   when is_map_key(Alias, Pending) ->
-    finish(Alias, Request, {error, einval}, refused_remove(Request, Grant));
+    finish(Alias, Request, {error, einval}, Grant);
 admit(Alias, _, {flush, OldTag} = Request, #grant{pending = Pending} = Grant)
   when not is_map_key(OldTag, Pending) ->
     finish(Alias, Request, ok, Grant);
 admit(Alias, _, Request, #grant{in_flight = InFlight} = Grant)
   when InFlight >= ?IN_FLIGHT_MAX ->
-    finish(Alias, Request, {error, emfile}, refused_remove(Request, Grant));
+    finish(Alias, Request, {error, emfile}, Grant);
 admit(Alias, _, {flush, OldTag}, #grant{pending = Pending, in_flight = InFlight} = Grant) ->
     #{OldTag := #pending{flushes = Flushes} = Record} = Pending,
     Waiting = Record#pending{flushes = [Alias | Flushes]},
@@ -417,7 +422,7 @@ to_file(Alias, Request, Node, Call, #grant{files = Files} = Grant) ->
 %% answers its reply with the grant it would leave (Built), and only a reply
 %% the check accepts keeps it. A reply the check rejects reaches the client
 %% as eio and keeps the grant as it was before the request (Before), its
-%% effects included, as a refusal does: a remove still clunks its fid.
+%% effects included, as a refusal does; a remove or a clunk still ends its fid.
 %% Every qid the grant records travels in the reply that records it (attach,
 %% walk, lcreate), so a callback's malformed answer, a qid included, leaves
 %% no fid, open or file process behind. Callers of finish/4 have nothing to
@@ -428,11 +433,12 @@ finish(Alias, Request, Reply, Grant) ->
 finish(Alias, Request, Reply, Built, Before) ->
     {Checked, Grant} = case accepted(Request, Reply) of
                            true -> {Reply, Built};
-                           false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}
+                           false -> {{error, eio}, tree_holds(Built, Before)}
                        end,
+    Ended = end_fid_whatever_the_outcome(Request, Grant),
     Grant1 = case Checked of
-                 {error, _} -> count_refusal(Grant);
-                 _ -> Grant
+                 {error, _} -> count_refusal(Ended);
+                 _ -> Ended
              end,
     {Effects, Grant2} = drain(Grant1),
     {Effects ++ [{reply, Alias, Checked}], Grant2}.

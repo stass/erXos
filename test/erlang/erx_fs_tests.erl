@@ -17,6 +17,7 @@ test/host/erx_fs_test.rb runs these on stock OTP and seeds a fault for each.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(NOFID, 16#ffffffff).
 -define(TREE, <<"test">>).
@@ -301,6 +302,33 @@ fid_flood_stops_at_the_pool_test() ->
     wait_for_monitors(Grant, 1),
     stop(Grant).
 
+%% A clunk of an open fid refused at the in-flight bound, or sent to an alias a
+%% deferred request holds, still ends the fid and sends its file process the
+%% file's last clunk, so the tree's open, and the space the file keeps, goes.
+refused_clunk_of_an_open_fid_ends_its_open_test() ->
+    {_, Core1} = core_frame(core(rw), {attach, 1, ?NOFID, <<"user">>, ?TREE, 0}),
+    {_, Core2} = core_frame(Core1, {walk, 1, 2, []}),
+    {[{start_file, Node, _, _}, {reply, _, {ok, _, 0}}], Core3} =
+        core_frame(Core2, {lcreate, 2, <<"n">>, ?ERX_P9_O_RDWR, 8#644, 0}),
+    Tag = make_ref(),
+    Process = self(),
+    Core4 = erx_fs_grant:file_started(Node, Process, Tag, Core3),
+    Deferred = [make_ref() || _ <- lists:seq(1, 64)],
+    Full = lists:foldl(fun(Alias, Core) -> erx_fs_grant:defer(Alias, {getattr, 1, 0}, Core) end,
+                       Core4, Deferred),
+    %% At the bound; fid 1 stays with its owner, so the owner keeps its monitor.
+    {[{run, Process, Tag, {last_clunk, _}}, {reply, _, {error, emfile}}], Bound} =
+        core_frame(Full, {clunk, 2}),
+    ?assertMatch(#{fids := 1, owners := 1, files := 0, in_flight := 64}, erx_fs_grant:info(Bound)),
+    %% Sent to an alias still in flight.
+    [Held | _] = Deferred,
+    {[{run, Process, Tag, {last_clunk, _}}, {reply, Held, {error, einval}}], Aliased} =
+        erx_fs_grant:handle_frame({erx_9p, Held, self(), {clunk, 2}}, Full),
+    ?assertMatch(#{fids := 1, files := 0}, erx_fs_grant:info(Aliased)),
+    %% A refused clunk of a fid the grant does not hold ends nothing.
+    {[{reply, _, {error, emfile}}], Unheld} = core_frame(Full, {clunk, 9}),
+    ?assertMatch(#{fids := 2, files := 1}, erx_fs_grant:info(Unheld)).
+
 %% The in-flight bound and flush, on the pure core: requests answered outside
 %% the grant's step come with open files, so the core's hooks stand in here.
 in_flight_bound_test() ->
@@ -315,6 +343,9 @@ in_flight_bound_test() ->
     %% A refused remove still clunks its fid.
     {[{demonitor, _}, {reply, _, {error, emfile}}], Core3} = core_frame(Core2, {remove, 1}),
     ?assertMatch(#{fids := 0, owners := 0, in_flight := 64}, erx_fs_grant:info(Core3)),
+    %% So does a refused clunk: a clunk ends its fid even when refused.
+    {[{demonitor, _}, {reply, _, {error, emfile}}], Clunked} = core_frame(Core2, {clunk, 1}),
+    ?assertMatch(#{fids := 0, owners := 0, in_flight := 64}, erx_fs_grant:info(Clunked)),
     [First | _] = Deferred,
     {Effects, Core4} = erx_fs_grant:complete(First, {error, ebadf}, Core2),
     ?assertEqual([{reply, First, {error, ebadf}}], Effects),

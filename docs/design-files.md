@@ -744,7 +744,10 @@ every program of the session.
 At every server, each grant holds at most its **pool** of fids, 4,096 by
 default, which the server's policy may set for each grant; at most 64
 requests in flight; and at most 256 locks. A request beyond a bound fails
-with `emfile` or waits in the client, never at the server. A name is valid
+with `emfile` or waits in the client, never at the server. A `clunk` or
+`remove` that is refused, at a bound or otherwise, still ends its fid, as
+clunk(5) and remove(5) say, so a refused clunk never keeps a file, and the
+space it holds, for as long as its owner runs. A name is valid
 UTF-8 without NUL or `/` and at most 255 bytes; a walk holds at most 16
 names, a symbolic link's text at most 4,095 bytes, an extended attribute's
 value at most 65,536 bytes. A session's handlers draw their programs'
@@ -1491,8 +1494,7 @@ other client's request can come between its parts:
   it does not write while the tree has no `write`
   callback or the grant is `ro` or `rx` (`erofs`, F5); dispatch takes
   only what the funnel admitted, so no path reaches a callback with a
-  writing request on a read-only grant. A refused `remove` still clunks
-  its fid. `erx_fs` then checks the bounds, maps fids to nodes, and
+  writing request on a read-only grant. `erx_fs` then checks the bounds, maps fids to nodes, and
   refuses with `enotdir` a request whose directory fid (such as the
   one of `mkdir`, both of `renameat`, or the fid of `readdir`) names a
   node whose qid is not a directory, so no callback is handed a file or a link as a
