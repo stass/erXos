@@ -156,10 +156,13 @@ Third-party components are allowed when they pay for themselves.
   its origin (repository, release or commit, and the SHA-256 of what was
   imported) in an `ORIGIN.md` beside it.
 * **Code used unmodified stays out of the tree.** It is fetched at a pinned
-  version, verified against a pinned SHA-256, and built out of tree.
+  version, verified against a pinned SHA-256, or, for npm packages, against
+  the integrity hashes of a checked-in pnpm lockfile and installed offline
+  from the fetched store, and built out of tree.
 * **Permanent dependencies.** Prefer mature, maintained components with a C
   or Erlang API and permissive licenses (ISC, BSD, MIT, Apache-2.0). A
-  permanent copyleft dependency needs explicit agreement first.
+  browser-side dependency of the web client may have a TypeScript API
+  instead. A permanent copyleft dependency needs explicit agreement first.
 * Record every dependency, with its purpose, license and status (`permanent`
   or `stopgap`), in the dependency table of [docs/design.md](docs/design.md).
 * External tools are invoked as subprocesses, never linked: the compilers
@@ -175,8 +178,13 @@ Third-party components are allowed when they pay for themselves.
     operation: the boot entry, exception vectors, context switch, and
     sequences the architecture prescribes.
   * Ruby for host tooling: build orchestration, image packing, the QEMU
-    harness, test runners, generators, benchmarks, and the host console and
-    upload client. Ruby never runs on the target.
+    harness, test runners (except the web client's own), generators,
+    benchmarks, and the host console and upload client. Ruby never runs on
+    the target.
+  * TypeScript for the web client of [design-web.md](docs/design-web.md),
+    because the browser runs only JavaScript. Its own tests and fuzz
+    harness run under Node and Playwright. TypeScript never runs on the
+    target or in host tooling.
   * `make`, minimal POSIX shell and linker scripts for build glue.
   * Inherited code keeps its languages and may be edited: OTP's BeamAsm JIT
     and asmjit (C++) with OTP's Perl generators and autoconf machinery, and
@@ -432,7 +440,8 @@ scripts live in `~/erxos-scratch/tools/`.
     service's own grant, so what one domain can make another spend is
     bounded and declared.
 * **Text from untrusted sources** (domains, devices, the network, uploaded
-  artifacts) reaches the kernel log, the console and the host terminal only
+  artifacts) reaches a sink that shows text (the kernel log, a console
+  line, the host terminal, a window or widget, and the browser) only
   through that sink's one escaping function. Raw control characters on a
   terminal are an attack (ANSI and OSC escape injection) on the operator's
   host, so the escaping covers C0 and C1 controls, bidirectional overrides,
@@ -446,8 +455,9 @@ scripts live in `~/erxos-scratch/tools/`.
   Ruby generator checked into the tree.
 * **Chokepoints are build checks.** Every rule of the form "only X may do
   Y" is enforced by a check that fails the build on a new site, and every
-  check has a test proving it catches a violation. For example: only the
-  console driver's sink writes bytes to a console; only listed functions execute system-register
+  check has a test proving it catches a violation. For example: only a
+  console line's own sink (the UART driver's, a terminal window's
+  emulator) writes bytes to that line; only listed functions execute system-register
   instructions or inline assembly; kernel allocation goes only through the
   budget-charging funnel; the kernel executes no FP or SIMD instruction;
   data holds no code pointer outside an allowlist; only `erx_cap_slot_clear`
@@ -491,7 +501,7 @@ scripts live in `~/erxos-scratch/tools/`.
   The why-and-when belongs in commit messages, which are read in temporal
   context.
 * **erXos-authored source files and generated output are ASCII-only.** This
-  covers `.c`, `.h`, `.S`, `.erl`, `.hrl`, `.rb`, linker scripts, build files
+  covers `.c`, `.h`, `.S`, `.erl`, `.hrl`, `.rb`, `.ts`, `.tsx`, linker scripts, build files
   and shell scripts; `make check` fails on any byte > 0x7f in erXos-authored
   code or generated output. Imported upstream text keeps its original
   copyright names, notices and comments; erXos-authored additions are ASCII.
@@ -624,8 +634,15 @@ within about 20 percent of the length, write plain code.
   the boot-selection record, the harness's slot parser, the pipe ring and
   record checks, the pipe reader page, the pipe protocol frames, the
   line discipline's input and `termios` checks, the tty's messages between
-  domains, the per-byte primitives, and the host tool's
-  decoder. Fuzz targets build the same sources for the host;
+  domains, the per-byte primitives, the host tool's decoder, the draw
+  protocol decoder and its C twin, the image `Y` decoder, the `wctl`
+  grammar, the terminal emulator's control sequences and OSC 8 links, the
+  widget tree validator and every `ui.txt` reader, the input event
+  validator, virtio-gpu responses and virtio-input events, the touch,
+  keypad and encoder parsers, the web protocol codecs (Erlang and
+  TypeScript), the host tool's HTTP and WebSocket reader, and the HTTP and
+  WebSocket parsing of the web front end's server (cowboy, cowlib, ranch)
+  as the front end uses it. Fuzz targets build the same sources for the host;
   `make check-fuzz` runs each for its configured budget.
 * **`make check-oracle`** runs OTP's suites on erXos and on stock OTP
   29.1.2 on the development host and compares them case by case, and runs
