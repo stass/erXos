@@ -1402,29 +1402,25 @@ document's "residual risks accepted" paragraph.
 
 * [Medium] display, design-live's console: The console section of
   [design-live.md](docs/design-live.md#the-console) describes one line, the
-  UART. [design-display.md](docs/design-display.md) offers terminal windows
-  as further lines through `offer_line`; rewrite the section for several
-  live lines, each connecting one session, and add `offer_line` to
-  `abi/services/console.txt` with its implementation.
+  UART. [design-display.md](docs/design-display.md#terminal-windows)
+  offers terminal windows as further lines through `offer_line`; rewrite
+  the section for several lines, the UART one of them, each with its own
+  menu, login and connected session, before track D's desktop part of
+  [plan.md](docs/plan.md#track-d-windows-widgets-and-the-web) starts.
+  The rewrite waits on four decisions the designs leave open: whether the
+  console's log lines and the system runtime's `erlang:display_string/2`,
+  `erlang:display/1` and `standard_error` reach the UART alone or every
+  line (the kernel's early console is the UART by design); whether a
+  session holding the system-shell facet may connect at an offered line,
+  where the display domain sees and can inject its bytes; what a
+  development build shows first on a new terminal window, where the UART
+  shows `root`'s system shell; and whether connecting a session already
+  connected at another line is refused or moves it.
 * [Low] display, plan9port compatibility: check against plan9port's source
   that acme and sam allocate no screens and reach the screen image only
   through `libdraw`'s `getwindow`, as
   [design-display.md](docs/design-display.md#compatibility-and-migration)
   assumes.
-* [Medium] web, the host-link front end: build the web client under
-  `web/`, `abi/protocols/web.txt` and its generated codecs, the web domain
-  with `erx_web_conn`, the session's `erx_web_line` and the browser
-  renderer, the host link's `web` facet and `tools/erx web`, as
-  [design-web.md](docs/design-web.md) describes.
-* [Medium] web, the network front end: cowboy over TLS in the web domain,
-  `erx_web_login` and its cookies, and the manifest check's refusal of the
-  web's development paths in release builds
-  ([design-web.md](docs/design-web.md#the-network-front-end)).
-* [Low] build, ASCII check: `Erx::SourceText` (`tools/lib/erx/source_text.rb`)
-  does not list `.ts` and `.tsx`, so the web client's sources and their
-  generated files escape the ASCII check that
-  [design-web.md](docs/design-web.md#chokepoints) relies on; add both
-  suffixes with a seeded non-ASCII `.ts` file in the check's test.
 
 * [Low] POSIX-lite personality, FreeBSD programs: survey what FreeBSD
   programs ported at the source level need beyond the planned layer

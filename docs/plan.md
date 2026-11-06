@@ -89,8 +89,8 @@ Ground rules:
 
 The plan has two phases. Phase 1, M0, M1, track H, M3, M4, M6 and the
 shell of track S, brings the system up on the stopgap Fiasco. Phase 2,
-track K, M7, M2, M5, the programs of track S, track P, M8 to M14 and
-track Q, builds erXos's kernel, switches to it at parity over Phase 1's
+track K, M7, M2, M5, the programs of track S, track P, track D, M8 to
+M14 and track Q, builds erXos's kernel, switches to it at parity over Phase 1's
 system, and adds everything that needs a guarantee on it alone. Milestone
 numbers are names; the table's order is the order.
 
@@ -108,6 +108,7 @@ numbers are names; the table's order is the order.
 | M2 The execution contract holds | a native test domain and a hostile domain share four CPUs by grants; no wakeup is lost; a blocking call from an executor is refused | 4,000 lines of C17 | M7 | G2 |
 | M5 A wall around some processes | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain under load and watch everything it held come back; a hostile runtime attacks a neighbour's funnel for ten minutes without effect; kill the system domain and read its crash record after the reset | 9,000 lines of C17, 6,000 of Erlang | M2 | G5 |
 | Track P The POSIX-lite personality | a Unix program recompiled unchanged pipes, polls, spawns children and takes `SIGINT` | 10,000 to 15,000 lines of C | track S's programs | GP, then G6 after its first part |
+| Track D Windows, widgets and the web | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser and on a QEMU `virt` desktop whose terminal windows run the shell; a Raspberry Pi 4 kiosk | estimated per part before it starts; the designs give no figure | M5 and track S's programs for the web over the host link; M9 for the desktop; later parts track P, track Q, M10 to M12 | GW, GD |
 | M8 Cooperation earns its place | the ladder from plain threads to full cooperation, measured on seven workloads, with each feature kept or dropped by its numbers | 4,000 lines of C17 and C | G6 | G8 |
 | M9 A driver is an Erlang process | a driver process dies under load, its supervisor restarts it, and nobody notices | estimate: 3,000 lines of C17, 5,000 of Erlang | G6 | G9 |
 | M10 Users without a container runtime | two users, two domains, one runs out of memory or CPU alone | 4,000 lines of Erlang | M8, M9 | |
@@ -135,6 +136,11 @@ The order reaches a usable system first:
 * Everything after that lands the same way: the cooperation features,
   drivers with the storage domain, users, the second tier, the security
   closure, and then the boards, storage and networking.
+* The display and the web follow the domains and the session domain, off
+  the critical path: first a browser on the developer's host over the
+  host link, which needs no device on the machine, then, once M9 gives
+  domains their devices, a desktop on QEMU `virt` with terminal windows,
+  and last the boards' panels and the network front end.
 * Storage, networking and the boards stand on littlefs and lwIP first;
   erXos's F2FS and erXos's network stack, both written in Erlang, then
   replace them, one at a time, each at parity. A prototype of the packet
@@ -998,6 +1004,214 @@ defaults, the handler's batching, whether the pipe server keeps one ring
 per write end, and whether a program's start needs a cheaper path than
 one kernel call per object.
 
+## Track D: Windows, widgets and the web
+
+**Goal.** A browser, a desktop on QEMU `virt` and a panel on a board as
+displays of the running system: one widget interface on all three,
+terminal windows as console lines, and typed values as presentations
+([design-display.md](design-display.md), [design-web.md](design-web.md)).
+
+**Demo.** On the Mac, `tools/erx web` shows in a browser the inspector's
+records, `/proc`, the kernel log and a trace of a QEMU guest that has no
+network and no display device, every typed value a link; an Erlang
+application opens the same user interface term on the `web` display and on
+a QEMU `virt` desktop, where a terminal window runs the shell with job
+control; a click on a pid that `ps` printed in that terminal inserts it
+into the command line; a Raspberry Pi 4 kiosk boots into one full-screen
+application, takes touch input and turns its panel off when idle.
+
+**Scope.** Seven parts, each ending in its own exit criteria. The first
+slice needs no device: a browser on the developer's host over the host
+link, which every QEMU guest already has. The pure cores the parts use
+build for the host and are written and tested there, with their fuzz
+targets, ahead of the part that integrates them
+([design-display.md](design-display.md#verification-and-testing)):
+
+* the draw protocol's state machine `erx_draw_core` and its generated
+  decoder `erx_draw_codec`, with a C decoder of the same messages;
+* `erx_memdraw`, the pixel primitives of 9front's `libmemdraw`, with the
+  decoder of image(6)'s compressed pixels (the `Y` decoder) and
+  `erx_draw_ref`, a slow Erlang reference that is their oracle;
+* the screen's composition `erx_screen_core` and the two window policies
+  `erx_wm_rio` and `erx_wm_single`;
+* the terminal's state machine `erx_vt`;
+* the widget tree's validator `erx_ui_schema` and its difference
+  `erx_ui_diff`, over `abi/formats/ui.txt`;
+* `erx_present`'s canonical texts over the inspection schema;
+* `abi/protocols/web.txt` with its generated Erlang and TypeScript codecs.
+
+In this track W1 to W8 name design-web's invariants and G1 to G7
+design-display's, not the plan's gates or E-S1's workloads. Parts that
+land after M11 repeat M11's closure over what they add.
+
+1. **The web over the host link**, after M5 and track S's programs, which
+   bring the domain service and the session domain a browser's views run
+   in. The web domain, a configured domain of the development manifest,
+   with the connection core `erx_web_conn`; the session's `erx_web_line`,
+   whose views fetch records, the kernel log and traces through the
+   session's own inspect and trace facets; the host link's `web` facet,
+   bound to `root`'s session, with the manifest check's refusal of it in a
+   release manifest; `tools/erx web` with its loopback server, token,
+   cookie and `Origin` checks and its WebSocket relay; the client under
+   `web/`, built by `make web` offline from the store `tools/erx fetch`
+   fills, with the generated escape, `MachineText`, `hrefOf` and the
+   content security policy; the client's chokepoint checks, and the ASCII
+   check over its `.ts` and `.tsx` sources
+   ([design-web.md](design-web.md#the-host-tools-front-end)).
+2. **Widgets on the web**, after part 1. The display service of
+   `abi/services/display.txt` and its generated dispatch; `erx_ui`, which
+   opens a user interface on the display its options name or on the
+   session's `display` variable; display facets, minted when the system
+   domain introduces a session to a display, the web's display facet
+   named `web`; `erx_ui_server` with the browser renderer; the readers of
+   `ui.txt`'s binary form in Erlang and TypeScript
+   ([design-web.md](design-web.md#uis-the-browser-renderer),
+   [design-display.md](design-display.md#choosing-a-display)).
+3. **A desktop on QEMU `virt`**, after M9, whose device service gives a
+   domain other than the system domain its devices, over virtio-pci behind
+   the IOMMU. The display domain with `erx_winfs`, one `erx_window` per
+   window, `erx_screen` and the overlapping policy with its menu; the
+   virtio-gpu and virtio-input drivers in Erlang over the device NIF; the
+   manifest check's refusal of an unconfined DMA device in the display
+   domain; the session's grant on the window tree and the handler's
+   binding of one window's directory into a program's namespace;
+   `/snarf`; the terminal emulator `erx_term` as a console line, through
+   the console service's `offer_line` and the manifest's `console_line`
+   parameter, which needs design-live's console section rewritten for
+   several lines first; the inspector's windows under `[domains, Id]` and
+   `/proc`
+   ([design-display.md](design-display.md#windows-and-the-window-system),
+   [design-display.md](design-display.md#terminal-windows)).
+4. **Widgets and presentations on the desktop**, after parts 2 and 3. A
+   widget server per window in the display domain with the Erlang
+   renderer, glyphs from plan9port's `fixed` fonts; presentations at a
+   terminal: `erx_render`'s links at a tty that declares `links`, the link
+   parser in `erx_vt`, and the input context from the command catalog's
+   `-erx_args` ([design-display.md](design-display.md#presentations)).
+5. **Plan 9's programs**, after part 3 and track P's first part; 9term
+   and acme's `win` after track Q's pseudo-terminals. plan9port's
+   `libdraw` with Plan 9's file connection in place of `devdraw`'s pipe,
+   and acme, sam and 9term, imported as erXos's code with an origin file
+   ([design-display.md](design-display.md#compatibility-and-migration)).
+6. **Kiosks and panels**, after part 4 and M12's boards. The single
+   policy with its service chord and service terminal; LVGL as a native
+   program in a sub-space of the display domain behind `erx_ui_renderer`,
+   with the generated C reader of its operations; the firmware framebuffer
+   driver of the Raspberry Pi; a panel on a serial bus; touch, encoder and
+   keypad drivers, and the `events` operation for an input device in
+   another domain, such as the devices domain; low power, with the panel
+   off when idle ([design-display.md](design-display.md#kiosks-and-glasses)).
+7. **The web on the network**, after part 2, M10's logins, M11's vault
+   and M12's network service with TLS. cowboy over TLS in the web domain;
+   `erx_web_login`, its cookies and a session per login; the manifest
+   check's refusal of plain HTTP in a release build
+   ([design-web.md](design-web.md#the-network-front-end)).
+
+**Exit criteria, the web over the host link.** Random messages of every
+kind round-trip between the Erlang and the TypeScript codecs, both
+carrying one hash, and a client of another build is refused at `hello`;
+the fuzz targets of `erx_web_proto`, the TypeScript decoder, the escape and
+the host tool's HTTP and WebSocket reader run their budgets clean; the
+client's `/proc` and `erx:` encoders and its presentation path table agree
+with `erx_procfs`'s and `erx_present`'s over the generated corpus; the
+attributed-text corpus renders in Chromium as text, with no element
+created, `tsc --noEmit` fails on a seeded component that renders a
+`MachineText`, and the content security policy blocks a seeded inline
+script and a seeded `eval` (W2, W3); each of W4's refusals holds against
+its seeded server; every URL form, and a reconnect with a trace page
+open, starts no trace (W6); `unknown`, `timeout` and `partial` values show
+their tokens, a stopped guest marks every view stale, and a log ring's
+overrun shows a gap with its count (W7); the seventeenth view, the
+sixty-fifth line view and the fifth connection of a line are each
+refused, a client that never sends `next` gets one update per view while
+the web domain holds under 1 MiB for it, and a record that changed 100
+times while the client paused arrives once (W8); a release manifest that
+lists the host link's `web` facet fails the manifest check; `make web`
+twice with the network disabled gives byte-identical files; each
+chokepoint check catches its seeded violation; the end-to-end tests run
+`tools/erx web` against a QEMU guest under TCG and HVF.
+
+**Exit criteria, widgets on the web.** A user interface attached,
+detached, changed and re-attached shows the newest tree,
+`apply(delta(A, B), A) == B` over random trees, and a tree whose
+difference exceeds one update arrives over several and applies at
+`commit`; `erx_ui:open/1` with no display facet answers `{error,
+no_display}` at once and opens on the display its options name, a stopped
+web domain sends each opener `{ui_down, Window, display_down}`, and
+closing every browser ends no user interface; scrolling, focus and
+selection in the browser send nothing to the machine; a `secret` input's
+text appears in no counter, log, trace or crash report; the `ui.txt`
+readers' fuzz targets run their budgets clean.
+
+**Exit criteria, the desktop.** `erx_draw_core` explored exhaustively,
+where a seeded skip of the quota check fails; the draw decoder's fuzz
+target and its differential test against the C decoder; `erx_memdraw`
+agrees with `erx_draw_ref` pixel for pixel over random operations, also
+under ASan and UBSan with rectangles far outside every image; the `Y`
+decoder's fuzz target; `erx_screen_core` explored exhaustively, and G2's
+hosted runs under TSan and ASan; a seventeenth dirty rectangle yields one
+bounding box and a `mouse` queue past 4 KiB drops its oldest record; G1's
+tests across connections, sessions and a narrowed program; a window's end
+frees its images, measured by the domain's budget; the `wctl` grammar's
+fuzz target; the policies' property tests; `erx_vt` explored, fuzzed and
+compared with a host terminal emulator's screen over a corpus that
+includes `vttest`'s core; V1's byte test of design-live with a terminal
+window in place of the serial line; the virtio-gpu response and
+virtio-input event parsers' fuzz targets; the framebuffer copy under UBSan
+at its bounds; screenshots through QEMU's monitor equal the reference
+images under TCG and HVF; a crash of the display driver, of `erx_screen`,
+of a window process and of a terminal emulator each loses only what that
+party owned (design-display's requirement 10 and failure table); a
+release manifest that gives the display domain an unconfined DMA device
+fails the manifest check; each chokepoint check catches its seeded
+violation.
+
+**Exit criteria, widgets and presentations on the desktop.** The parity
+test runs one corpus of trees and input sequences through the Erlang and
+the browser renderers and finds the same events, values and nodes;
+`parse(Type, text(Type, Value)) == Value` for every type of the schema;
+links appear only at a tty that declares `links`; the link parser's fuzz
+target runs its budget clean; the input context highlights exactly the
+types the catalog declares for the command typed; G4's `no_facet` test,
+where a seeded facet call in the emulator is caught by the source check;
+G7's status tests through a widget tree; `erx_ui_schema`'s fuzz target
+over trees from another domain, with a tree carrying more fresh atoms than
+`foreign_atoms` dropped and counted.
+
+**Exit criteria, Plan 9's programs.** acme and sam open, edit and save a
+file in their windows under TCG and HVF, and 9term runs the command shell
+over a pseudo-terminal; the display domain refuses no draw message they
+send.
+
+**Exit criteria, kiosks and panels.** The single policy shows at most one
+window and never delivers the service chord to the application; the parity
+test passes through LVGL; the fuzz targets of the C reader, the touch,
+keypad and encoder parsers and the `events` validator run their budgets
+clean; a panel driver passes against a model of its command set on the
+host; G6's idle test at the driver; a Raspberry Pi 4 kiosk boots into the
+application its manifest names.
+
+**Exit criteria, the web on the network.** Two principals logged in
+through cowboy each see their own `/proc` snapshots and `ended scope` for
+the other's domains (W1); one scripted client through the host tool and
+through cowboy receives byte-identical messages (W5); a logout ends only
+its own session; the seventeenth login is refused; a release manifest that
+allows plain HTTP fails the manifest check.
+
+**Gate GW, with part 1.** Measures a record view's round trip over the
+host tool's front end, for the machine's record and a 1,000-child listing,
+under TCG and HVF and over a 115,200-baud UART host link. Decides whether
+whole records stay on the wire or the protocol gains a record difference
+([design-web.md](design-web.md#risks-and-open-questions)).
+
+**Gate GD, first with part 6.** Measures the Erlang renderer's
+difference, layout and drawing time per frame on a 240 by 240 panel
+against LVGL's, on the same panel, with the parity test passing through
+both. Decides whether LVGL leaves the panels; while it does not, LVGL
+stays behind the renderer behaviour and the gate is measured again as the
+Erlang renderer improves
+([design-display.md](design-display.md#risks-and-open-questions)).
+
 ## M6: Immutable code, lasting data
 
 **Goal.** The system's files come from immutable images checked block by
@@ -1784,6 +1998,8 @@ replacement of lwIP.
 | G5 | M5 | E-D1 to E-D4 (`tools/erx bench xdomain-pingpong`, `xdomain-throughput`, `xdomain-stall`, `domain-lifecycle`); full E-S2; BeamAsm's speedup and footprint in an ordinary domain; translation time at a domain's start | `lane` and the manifest's `system_lane`, the producer's wait rule, encoding straight into the lane; the funnel's allowance per step; the manifest's `system_queue` and the death path's batching; the busy limit and the facets' limits; no kernel object per lightweight process; the ahead-of-time roster's triggers |
 | GP | track P | a program's start (`tools/erx bench spawn`) against its budget and `posix_spawn` on Linux; the `make`-shaped workload and `tools/erx bench pipe`, hosted and under HVF | the channel's and data area's defaults; the handler's batching; one ring per write end; whether a program's start needs a cheaper path |
 | G6 | after track P's first part | the system on erXos's kernel: an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; a program's start; isolation beside hostile domains; the EROFS reader's, littlefs's and the block driver's throughput and commit latency on QEMU (`tools/erx bench fs`, `blk`) against M6's baseline | whether the system meets the design's budgets before M8 and M9 build on it; G5's lane defaults and the facets' limits confirmed or revised |
+| GW | track D's part 1 | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under TCG and HVF and over a 115,200-baud UART host link | whether whole records stay on the wire or the web protocol gains a record difference |
+| GD | track D's part 6 | the Erlang renderer's frame time on a 240 by 240 panel against LVGL's on the same panel; the parity test through both | whether LVGL leaves the panels |
 | G8 | M8 | E-S1 (the ladder C0 to C2), E-S3 to E-S9 | default cooperation features; time slice, grace and period; capacity rules; the shared services' sizing rule and whether a service needs a child group per client class |
 | G9 | M9 | interrupt-to-handler latency per device class (`tools/erx bench irq`), ring throughput against sDDF's figures, `tools/erx bench blk`, the network driver's packet rate, MSIs under HVF | completion batching per device class; virtio-pci over virtio-mmio; each row of the driver table, which alone admits a native shim |
 | GQ | track Q | `fork` of 10, 100 and 1,000 MiB against Linux in a guest; a dynamically linked program's start against a static one's; the fill and the write-back cost of the session's shared mappings, files of 64 KiB to 1 GiB, with `tools/erx bench mmap`, against descriptor reads and writes; on CPUs with hardware dirty-bit management, the fold of dirty bits into the object's stored marks at `munmap` and `exec` over large shared mappings, with `tools/erx bench mmap` | whether `fork` grows a copy-on-write path; whether the shared mappings' fill and write-back points meet the corpus |
@@ -1815,6 +2031,7 @@ interpreter, within a frame's cost across a connection).
 | A host link holding every facet | session facet tables | M10, M11 |
 | littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from track S's programs | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, through an installation that creates both partitions afresh |
 | lwIP, the network stack, a NIF in the network domain | the network service's interface | M14, by erXos's network stack, in Erlang, at G14 |
+| LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured with track D's part 6 |
 
 The stopgap carries the rows of the backend's table in
 [design-stopgap.md](design-stopgap.md#the-call-table), each in full, with
@@ -1835,6 +2052,9 @@ Phase 2:  track K (GK1 pilot, GK2 kernel) --> M7 --> M2 --> M5 --> track S (prog
                                                                                                                     |
                                                          M8 --> M10 --> M11 --> M12 --> M13, M14 <------------------+
                                                          M9 ----^
+          track D: M5 + track S (programs) --> part 1, web over the host link --> part 2, widgets on the web --> part 7, the web on the network (after M10, M11, M12)
+                   M9 --> part 3, desktop --> part 4, widgets on the desktop --> part 6, kiosks (after M12)
+                                          +-> part 5, Plan 9's programs (after track P's first part; 9term after track Q)
 ```
 
 * Phase 1's critical path runs through M1, M3, M4 and M6; track H runs
@@ -1844,9 +2064,16 @@ Phase 2:  track K (GK1 pilot, GK2 kernel) --> M7 --> M2 --> M5 --> track S (prog
   programs and track P's first part to G6, then M8, M10, M11 and M12; M9
   runs beside M8; track Q follows track P; M13 and M14 run side by side
   after M12.
+* Track D runs beside Phase 2's critical path from track S's programs
+  on; no milestone needs it. Its first part, the browser over the host
+  link, needs no device and comes first; the desktop follows M9, and its
+  later parts wait for the milestones that bring their programs, boards,
+  logins and network.
 * Host-buildable code (the C17 cores, the funnel and the lane reader, the
   domain library's plans, the device NIF's envelope, the pipe core,
-  `erx_etf`) and its fuzz targets are written and tested on the host
+  `erx_etf`, the draw core and codec, `erx_memdraw`, the terminal state
+  machine, the widget tree's schema and difference, the web protocol's
+  codecs) and its fuzz targets are written and tested on the host
   ahead of the milestone that integrates it.
 
 ## First pull requests
