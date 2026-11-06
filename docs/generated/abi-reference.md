@@ -339,6 +339,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MEDIUM_RECORD_TYPE` | 14 |
 | `ERX_MEDIUM_SLOT_A_START` | 16384 |
 | `ERX_MEDIUM_SLOT_B_START` | 1064960 |
+| `ERX_MEDIUM_SLOT_BOOT_START` | 8192 |
 | `ERX_MEDIUM_SLOT_SECTORS` | 1048576 |
 | `ERX_MEDIUM_SLOT_TYPE` | 12 |
 | `ERX_MEDIUM_VAULT_SECTORS` | 131072 |

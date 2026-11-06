@@ -1729,6 +1729,24 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] storage, the release medium for QEMU (`tools/lib/erx/medium_image.rb`,
+  `tools/erx pack --medium`): its slots and the boot-selection record's
+  partition hold no FAT: the bootable file lies at `medium_slot_boot_start`
+  after 4 MiB of zeros, where
+  [design-platforms.md](docs/design-platforms.md#slots-and-the-boot-selection-record)
+  places it inside the FAT's file; and the record partition is zeros: the
+  record's two encodings, its sector inside the partition and the reset
+  count's sector are not yet fixed, and the QEMU harness's slot parser,
+  which reads them, defines them with the packer's writer of them. Slot A's
+  EROFS image extents (`ReleaseMedium.slot_plan`) are not yet recorded in
+  the boot image's manifest, whose image windows refuse until the hash
+  tree sizing lands; recording them moves the EROFS image's writing ahead
+  of `pack` inside `ProductionImage#assemble`, since the boot image then
+  carries its extent and root hash. The EROFS image holds a copy of the
+  whole system release, which the boot image also holds, until the boot
+  from the medium decides which releases leave the boot image
+  ([design-storage.md](docs/design-storage.md#data-model)).
+
 * [High] logging: a central system log service that every source writes
   to, with routing to the UART and other readers and per-reader access,
   needs its design; it replaces the console's role as the kernel log's

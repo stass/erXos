@@ -296,9 +296,11 @@ exchange:
   ([design-live.md](design-live.md#invariants) V5).
 
   The packer writes each image with upstream's `mkfs.erofs`, a host tool
-  fetched at a pinned release and hash, built out of tree and run as a
-  subprocess, with a fixed timestamp (`-T` with `--all-time`), a fixed
-  UUID (`-U`), every file owned by root (`--all-root`), 4 KiB blocks
+  at the pinned release erofs-utils 1.9.4, installed on the host (through
+  Homebrew on macOS), refused at any other version and run as a
+  subprocess, from a staging tree whose modes the packer sets, with a fixed
+  timestamp (`-T` with `--all-time`), a UUID fixed by the image's name
+  (`-U`), every file owned by root (`--all-root`), 4 KiB blocks
   (`-b 4096`, since `mkfs.erofs` otherwise takes the host's page size, 16 KiB
   on Apple Silicon), no extended attributes (`-x -1`, so a host's own
   attributes never reach an image or make two builds differ) and no compression,
@@ -899,7 +901,11 @@ describes for each platform. Every platform meets one contract:
   never reads;
 * each slot is one partition holding what the firmware loads, the kernel
   and the boot image, followed by the EROFS images at offsets that the
-  boot image records with their hash trees' layouts, and its signature
+  boot image records with their hash trees' layouts; the packer starts the
+  first image at a fixed offset of the slot, 128 MiB, beyond room for the
+  bootable file, and each next one at the next MiB after it, so the
+  offsets depend on the images alone and are known before the boot image
+  that records them is packed; and its signature
   and manifest windows at offsets the medium layout fixes, so a slot image is
   the same bytes in either slot, the update writes it raw, and no domain
   on the target parses the slot's file system to boot or to update;

@@ -854,7 +854,8 @@ guest again as the firmware would, also counts the consecutive ends whose
 final line follows a crash record and stops a run that passes the
 configured number as a reset loop, so a test never loops however the
 guest's count behaves. The packer places the bootable file of
-every slot at an offset the medium layout fixes, inside the FAT's file, so
+every slot at an offset the medium layout fixes (`medium_slot_boot_start`
+of `abi/medium.txt`), inside the FAT's file, so
 the harness finds them without parsing FAT; it checks every size it reads
 against the slot's bounds, in one parser with a fuzz target, since a guest
 may have written the slot. It learns that a trial was asked for from the

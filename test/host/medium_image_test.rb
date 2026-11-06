@@ -25,7 +25,7 @@ class MediumImageTest < Minitest::Test
 
   def test_the_medium_is_sparse_and_holds_the_layouts_table
     Dir.mktmpdir('erx-medium-') do |directory|
-      path = Medium.create(directory: directory, name: 'medium.img')
+      path = Medium.create(directory: directory, name: 'medium.img', pieces: Medium.probes(Medium::DATA_SECTORS))
       assert_equal Medium.sectors * 512, File.size(path)
       windows = Medium.windows.to_h { |window| [window.role, window] }
       data_end = windows[:data].start + windows[:data].sectors
@@ -45,11 +45,11 @@ class MediumImageTest < Minitest::Test
 
   def test_a_medium_is_never_written_over_a_file_or_through_a_link
     Dir.mktmpdir('erx-medium-') do |directory|
-      Medium.create(directory: directory, name: 'medium.img')
-      assert_raises(Erx::Error) { Medium.create(directory: directory, name: 'medium.img') }
+      Medium.create(directory: directory, name: 'medium.img', pieces: Medium.probes(Medium::DATA_SECTORS))
+      assert_raises(Erx::Error) { Medium.create(directory: directory, name: 'medium.img', pieces: Medium.probes(Medium::DATA_SECTORS)) }
       File.symlink(File.join(directory, 'elsewhere'), File.join(directory, 'link.img'))
-      assert_raises(Erx::Error) { Medium.create(directory: directory, name: 'link.img') }
-      assert_raises(Erx::Error) { Medium.create(directory: directory, name: '../medium.img') }
+      assert_raises(Erx::Error) { Medium.create(directory: directory, name: 'link.img', pieces: {}) }
+      assert_raises(Erx::Error) { Medium.create(directory: directory, name: '../medium.img', pieces: {}) }
     end
   end
 
@@ -70,7 +70,7 @@ class MediumImageTest < Minitest::Test
   def test_the_medium_after_a_good_run_is_as_expected_and_a_missed_write_is_reported
     data = Medium.windows.find { |window| window.role == :data }
     Dir.mktmpdir('erx-medium-') do |directory|
-      path = Medium.create(directory: directory, name: 'medium.img')
+      path = Medium.create(directory: directory, name: 'medium.img', pieces: Medium.probes(Medium::DATA_SECTORS))
       assert_equal "medium sectors not as expected: #{data.last} differ", Device.medium_image_difference(path)
       File.open(path, 'r+b') { |file| file.pwrite(Image.pattern(data.last, tag: Image::GUEST_TAG), data.last * 512) }
       assert_nil Device.medium_image_difference(path)

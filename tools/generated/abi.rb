@@ -13317,6 +13317,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "medium_slot_boot_start".b => Constant.new(
+            name: "medium_slot_boot_start".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "medium_slot_sectors".b => Constant.new(
             name: "medium_slot_sectors".b,
             value: 1048576,

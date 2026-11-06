@@ -367,8 +367,11 @@ module Erx
       end
     end
 
-    # Builds Fiasco and packs the production image into a fresh directory of build/.
+    # Builds Fiasco and packs the production image into a fresh directory of build/; with
+    # --medium, also the release medium for QEMU that holds it (ReleaseMedium).
     def self.pack(arguments)
+      medium = false
+      OptionParser.new { |flags| flags.on('--medium') { medium = true } }.parse!(arguments)
       no_arguments(arguments)
       require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
@@ -378,9 +381,20 @@ module Erx
       fiasco.build(jobs: 4)
       parent = File.join(ROOT, 'build/production-image')
       OutputDirectory.prepare(root: ROOT, path: parent)
-      built = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
-                             .build(directory: Dir.mktmpdir('image-', parent))
+      image = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
+      directory = Dir.mktmpdir('image-', parent)
+      unless medium
+        built = image.build(directory: directory)
+        Terminal.puts("production image: #{built.single}; root_startup: #{built.report.fetch('manifest').fetch('root_startup')}")
+        return 0
+      end
+
+      built, written = image.build_medium(directory: directory)
       Terminal.puts("production image: #{built.single}; root_startup: #{built.report.fetch('manifest').fetch('root_startup')}")
+      extents = written.slot.images.map do |extent|
+        "#{extent.file.name} at slot byte #{extent.slot_offset}, #{extent.file.length} bytes"
+      end
+      Terminal.puts("release medium: #{written.path}; EROFS image: #{written.erofs}; #{extents.join('; ')}")
       0
     end
 
@@ -444,7 +458,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | pack [--medium] | status | setup [--jobs N]')
       0
     end
 

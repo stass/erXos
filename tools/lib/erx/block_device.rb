@@ -311,7 +311,7 @@ module Erx
       # The medium laid out by the ABI file, driven through the block service's windows.
       def run_medium(accel, image)
         directory = run_directory(accel)
-        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME)
+        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
         boot(accel, image, directory: directory, disk: disk, arguments: MEDIUM_ARGUMENTS,
                            expected: BlockDevice.medium_expected_lines) { BlockDevice.medium_image_difference(disk) }
       end
@@ -321,7 +321,7 @@ module Erx
       # boot keeps its serial log in a directory of its own beside the medium.
       def run_power_cut(accel, image)
         directory = run_directory(accel)
-        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME)
+        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
         boot(accel, image, directory: File.join(directory, 'write'), disk: disk, arguments: WRITE_ARGUMENTS,
                            expected: BlockDevice.write_expected_lines) { nil }
         boot(accel, image, directory: File.join(directory, 'read'), disk: disk, arguments: READ_ARGUMENTS,

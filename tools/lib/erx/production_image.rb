@@ -23,6 +23,7 @@ require_relative 'pack_provenance'
 require_relative 'pack_tools'
 require_relative 'qemu'
 require_relative 'release_files'
+require_relative 'release_medium'
 require_relative 'runner'
 
 module Erx
@@ -49,8 +50,9 @@ module Erx
     Archive = Data.define(:path, :label, :license, :status, :notice)
 
     # flags are the archive header's, as the kernel's banner line reports them; test_code
-    # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made.
-    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :flags, :test_code, :report)
+    # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made. release
+    # is the system release's entries, which the release medium's EROFS image holds.
+    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :flags, :test_code, :report, :release)
 
     # What a test image adds to the system release (OracleQemu): entries for Pack#build,
     # each with its receipt, the files those receipts name, and the imported trees their
@@ -93,6 +95,13 @@ module Erx
       assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false)
     end
 
+    # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
+    # directory, which must be clean.
+    def build_medium(directory:)
+      built = build(directory: directory)
+      [built, ReleaseMedium.write(built: built, directory: built_directory(built), runner: @runner)]
+    end
+
     # The production image with test code added to its system release, marked in its
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
@@ -132,12 +141,13 @@ module Erx
 
       Built.new(single: single, archive: archive, first_stage: @fiasco.image_path,
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),
-                flags: flags, test_code: marked, report: report)
+                flags: flags, test_code: marked, report: report, release: release)
     end
     private :assemble
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
-    # packed into a clean directory of its own name. A path under those directories that
+    # packed into a clean directory of its own name with its release medium, compared
+    # part by part by SHA-256, read as a stream. A path under those directories that
     # reached an output shows; OTP and musl build at one path both times, so a path of
     # theirs does not. Fiasco's own assembly has its own test
     # (test/integration/fiasco_reproducible_test.rb); both builds here pack its one result.
@@ -145,13 +155,15 @@ module Erx
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a reproducibility check needs a clean directory' unless Dir.empty?(directory)
 
-      first, second = %w[first second].map do |name|
+      (first, first_medium), (second, second_medium) = %w[first second].map do |name|
         @runtime.clean
-        build(directory: File.join(directory, name))
+        build_medium(directory: File.join(directory, name))
       end
-      differing = %i[archive single].reject { |part| File.binread(first.public_send(part)) == File.binread(second.public_send(part)) }
+      first_digests = digests(first, first_medium)
+      second_digests = digests(second, second_medium)
+      differing = first_digests.keys.reject { |part| first_digests.fetch(part) == second_digests.fetch(part) }
       report = { 'kind' => 'production_image_reproducibility', 'byte_identical' => differing.empty?,
-                 'differing' => differing.map(&:to_s), 'first' => digests(first), 'second' => digests(second),
+                 'differing' => differing, 'first' => first_digests, 'second' => second_digests,
                  'manifest' => first.report.fetch('manifest') }
       path = File.join(directory, 'result.json')
       File.write(path, JSON.pretty_generate(report) + "\n")
@@ -718,9 +730,14 @@ module Erx
       { 'path' => path.delete_prefix("#{@root}/"), 'sha256' => Digest::SHA256.file(path).hexdigest }
     end
 
-    def digests(built)
-      { 'archive_sha256' => Digest::SHA256.file(built.archive).hexdigest,
-        'single_sha256' => Digest::SHA256.file(built.single).hexdigest }
+    def digests(built, medium)
+      { 'archive_sha256' => built.archive, 'single_sha256' => built.single,
+        'release_erofs_sha256' => medium.erofs, 'medium_sha256' => medium.path }
+        .transform_values { |path| Digest::SHA256.file(path).hexdigest }
     end
+
+    # The directory a build packed into, as OutputDirectory.prepare resolved it: the real
+    # path, which may differ from the spelling its caller passed.
+    def built_directory(built) = File.dirname(built.archive)
   end
 end

@@ -6,6 +6,7 @@
 require 'fileutils'
 require 'open3'
 require 'tmpdir'
+require_relative 'lib/erx/erofs_image'
 
 # Writes the EROFS reader's fixture images (test/fixtures/erofs) with the host's
 # mkfs.erofs, the packer's tool, from one tree this script declares, and the tree's
@@ -23,7 +24,8 @@ require 'tmpdir'
 module ErofsFixtures
   ROOT = File.expand_path('..', __dir__)
   OUT = File.join(ROOT, 'test/fixtures/erofs')
-  PACKER = %w[-b 4096 -T 0 --all-time -U 6572786f-732d-6572-6f66-732d74657374 --all-root -x -1].freeze
+  # The packer's own options (Erx::ErofsImage::PACKER) and the fixtures' fixed UUID.
+  PACKER = [*Erx::ErofsImage::PACKER, '-U', '6572786f-732d-6572-6f66-732d74657374'].freeze
   IMAGES = {
     'compact' => [],
     'extended' => %w[-E force-inode-extended --root-xattr-isize=64],
