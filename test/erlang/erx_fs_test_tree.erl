@@ -27,14 +27,17 @@ name left is `enoent`. A handle is `{Ino, Access, Append}`: a read through
 one opened only for writing, a write through one opened only for reading
 and a size change through one not opened for writing are refused, and a
 write through an append handle lands at the file's end and answers there.
-Flags are Linux's, as 9P2000.L carries them. The tree has no `fsync`.
+Flags are Linux's, as 9P2000.L carries them. The tree has no `fsync`. A
+write ending past 1 MiB, or a size change past it, answers `efbig`; a size
+change of a directory answers `eisdir` and of a link `einval`, as Linux
+answers them.
 
 With `{observer, Pid}` in its arguments, every callback first sends
 `{tree_call, Callback}` to `Pid`, so a test can show a request never reached
 the tree. A walk of ".." crashes the grant: erx_fs must answer ".." itself.
 
-With `{cap, Bytes}`, a write that would leave a file larger than `Bytes`
-answers `enospc` and writes nothing, as a full tree answers.
+With `{cap, Bytes}`, a write ending past `Bytes` answers `enospc` and writes
+nothing, as a full tree answers.
 """.
 
 -behaviour(erx_fs).
@@ -56,6 +59,8 @@ answers `enospc` and writes nothing, as a full tree answers.
 -define(DT_DIR, 4).
 -define(DT_REG, 8).
 -define(DT_LNK, 10).
+%% The largest file the tree keeps; a write past it answers efbig.
+-define(FILE_MAX, 1 bsl 20).
 
 -doc """
 The tree above, in a process linked to the caller; `Args` may hold
@@ -199,10 +204,12 @@ write({Ino, _, Append}, Offset, Bytes, Fs) ->
                                         true -> byte_size(Data);
                                         false -> Offset
                                     end,
-                               Data1 = spliced(Data, At, Bytes),
-                               case byte_size(Data1) > Cap of
-                                   true -> {{error, enospc}, T};
-                                   false -> {{ok, byte_size(Bytes), At}, put_node(Ino, Node#{data := Data1}, T)}
+                               End = At + byte_size(Bytes),
+                               if
+                                   End > ?FILE_MAX -> {{error, efbig}, T};
+                                   End > Cap -> {{error, enospc}, T};
+                                   true -> {{ok, byte_size(Bytes), At},
+                                            put_node(Ino, Node#{data := spliced(Data, At, Bytes)}, T)}
                                end
                        end).
 
@@ -324,6 +331,12 @@ setattr({node, Ino}, #{valid := Valid, mode := Mode, size := Size}, Fs) ->
     change(Fs, fun(T) ->
                           case node(Ino, T) of
                               gone -> {error, enoent};
+                              #{} when Valid band ?ATTR_SIZE =/= 0, Size > ?FILE_MAX ->
+                                  {error, efbig};
+                              #{kind := directory} when Valid band ?ATTR_SIZE =/= 0 ->
+                                  {error, eisdir};
+                              #{kind := symlink} when Valid band ?ATTR_SIZE =/= 0 ->
+                                  {error, einval};
                               Node ->
                                   Node1 = case Valid band ?ATTR_MODE of
                                               0 -> Node;
