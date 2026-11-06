@@ -367,11 +367,14 @@ prefix cannot certify later queued jobs, and a setup failure cannot disappear
 because no testcase started. Raw controller entrypoints without a sealed
 roster remain incomplete.
 
-Only reporting code and one guard differ from the pinned oracle: on a node
+Only reporting code and three guards differ from the pinned oracle. On a node
 without distribution, as erXos's are in Phase 1, the controller answers a
-slave node start with `{error, not_alive}` to the case that asked, where
-stock's `slave:start/5` would exit inside the controller and end the whole
-run; a distributed node never reaches the guard. A checked-in copy of
+node start (`start_node`) with `{error, not_alive}` to the case that asked,
+where stock's `slave:start/5` would exit inside the controller and end the
+whole run; it answers `is_release_available` with `false` and `find_release`
+with `not_available`, because an old release runs only as a node this one
+starts, and the search for one would also fail inside the controller on a
+system with no PATH. A distributed node never reaches a guard. A checked-in copy of
 the controller retains its upstream licence and change notice, with original
 and modified hashes in its source record. The original archive remains
 unchanged. The guest checks those hashes before replacing that one file;
