@@ -256,9 +256,10 @@ a word.
 system's group exists, `liberx/backend/fiasco/park_report.c` starts a worker thread of the root that
 looks at the group's status page ten times a second and writes `erx: root task: group: parked N of M`
 to the console through `erx_fiasco_console_write` each time the count of parked executors or of
-executors changes. The thread only reads the page and sleeps; the line is fixed words and two numbers,
-so it needs no escape, and like a program's output it can fall between the bytes of the console
-driver's writes. The production image suite boots with it and waits for `parked N of N`, N the
+executors changes. The thread only reads the page and sleeps. Both backends' reporters build the
+line with `erx_group_report_line` (`liberx/backend/core/group_report.h`), each under its own head;
+it is fixed words and two numbers, so it needs no escape, and like a program's output it can fall
+between the bytes of the console driver's writes. The production image suite boots with it and waits for `parked N of N`, N the
 system's schedulers and dirty CPU schedulers, after the shell's banner and a line typed at the prompt
 that keeps one scheduler busy for half a second, so the report must show it wake and park again: M3's
 idle machine.
@@ -1098,6 +1099,7 @@ the tests.
 | **Detached loop**, the `native_threads` suite: range and index return; the pool's count is steady | range omitted: the count falls |
 | `pthread_cond_broadcast` with 64 waiters, one mutex held at a time | the next waiter's barrier left locked: the deadline fires |
 | **Park**, `test/host/fiasco_park_test.rb`, exhaustive over two executors, two objects, three events and two timeouts, with each up landing on its own, and TSan over real threads; on QEMU, the `native_threads` suite, a trigger between the empty check and the park, a turn with two executors on two CPUs, and a timeout racing a wake | the epoch comparison removed: a lost wake. An up to a slot not listed: a stale count. The epoch comparison removed on QEMU: the case's park never returns |
+| **Group report**, `test/host/group_report_test.rb`, the executor count over a status page, and the report line both backends write (`erx_group_report_line` in `liberx/backend/core/group_report.h`) at zero and the largest counts, in a buffer of exactly its size and in one a byte short | an empty slot counted, or the last slot skipped: a wrong count. No room kept for the NUL: a write past the buffer. A count one digit short: a wrong line |
 | Affinity to each CPU, read back: the `native_threads` suite pins a thread of raised priority to each CPU in turn while a probe counts on every CPU, and only that CPU's probe stops | mask ignored: every CPU but the first shows the wrong probe stopping |
 | **A second task**, the QEMU gate's `native_task` suite: a program from the boot image, built through `elf_plan.c`, commits memory and creates a thread through the service, writes code through a JIT object's read-write alias and runs it through the read-execute alias, then rewrites the page on one CPU and runs it on each other CPU in turn, 2,000 times each, with a status of 0. On HVF this also exercises cache maintenance, as coverage, since no omission is sure to show. A write in the read-execute alias and a run in the read-write alias each end the task with a crash frame the suite reads back, and the machine continues. Each IRQ call from the task is `ERX_ENOTSUP` | RW alias mapped RX: the write faults, and the case's status is not 0. The range table's own seeds, in `fiasco_vm_test.rb`, catch an index that ignores the label. Without the IRQ refusal, the `irq_refused` case's status is 80 |
 | **`libc-test` canary**, the QEMU gate's `native_libc_canary` suite: `Erx::LibcTest::CANARY`, about ten programs covering threads and robust mutexes, TLS, stdio and `malloc`, each as a task through the same runner as `tools/erx check-libc-test`; each must pass and no boot may leak the pool. The whole of `libc-test` is `tools/erx check-libc-test`, held to its verdict table ([musl's own tests](#musls-own-tests)) | a test that does not pass, or is not run: `canary_problems` refuses the totals, in `test/host/libc_test_test.rb` |

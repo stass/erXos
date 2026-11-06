@@ -10,9 +10,14 @@
  * erx_group_configure and erx_group_info over a caller's UTCB, the same on both backends
  * (docs/design-stopgap.md, "Interrupts and readiness"). Of a grant only the CPU set is
  * kept; the report's usage says it is not measured, and its counts are the status page's.
+ *
+ * It also holds the reporters' console line, apart from erx_group_info's report: the
+ * executors a status page holds, and erx_group_report_line, the "parked N of M" line both
+ * backends write under erx.group_report=1 and ERX_HOSTED_GROUP_REPORT.
  */
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -80,6 +85,89 @@ erx_group_status_executors(const erx_group_stat_t *status)
 			executors++;
 	}
 	return (executors);
+}
+
+/* The largest count, UINT32_MAX, in decimal digits. */
+#define ERX_GROUP_REPORT_DIGITS_MAX	10u
+/*
+ * The bytes a report line needs after a head, its NUL included: the head, "parked ", the
+ * parked count, " of ", the executor count and the newline. The head must be a string
+ * literal, which the pasting below enforces: a pointer's size would give a buffer too small.
+ */
+#define ERX_GROUP_REPORT_LINE_SIZE(head) \
+	(sizeof("" head "") - 1 + sizeof("parked  of \n") - 1 + 2 * ERX_GROUP_REPORT_DIGITS_MAX + 1)
+
+/* Writes value's decimal digits to the start of digits, most significant first, and returns how many. */
+static inline size_t
+erx_group_report_decimal(char digits[static ERX_GROUP_REPORT_DIGITS_MAX], uint32_t value)
+{
+	char reversed[ERX_GROUP_REPORT_DIGITS_MAX];
+	size_t count = 0;
+
+	do {
+		reversed[count++] = (char)('0' + value % 10);
+		value /= 10;
+	} while (value != 0);
+	for (size_t index = 0; index < count; index++)
+		digits[index] = reversed[count - 1 - index];
+	return (count);
+}
+
+static inline size_t
+erx_group_report_length(const char *text)
+{
+	size_t length = 0;
+
+	while (text[length] != '\0')
+		length++;
+	return (length);
+}
+
+/*
+ * The group report's line, "<head>parked <parked> of <executors>\n", NUL-terminated in
+ * line's size bytes; it returns the line's length without the NUL. A line that does not
+ * fit writes only an empty string, when size allows one, and returns 0. The reporters on
+ * both backends write it each time a count changes (docs/design-stopgap.md, "The command
+ * line"); the head is theirs and the rest fixed words and digits, so it needs no escape.
+ */
+static inline size_t
+erx_group_report_line(char *line, size_t size, const char *head, uint32_t parked, uint32_t executors)
+{
+	char parked_digits[ERX_GROUP_REPORT_DIGITS_MAX];
+	char executors_digits[ERX_GROUP_REPORT_DIGITS_MAX];
+	const size_t head_length = erx_group_report_length(head);
+	const size_t parked_length = erx_group_report_decimal(parked_digits, parked);
+	const size_t executors_length = erx_group_report_decimal(executors_digits, executors);
+	const struct {
+		const char *text;
+		size_t length;
+	} pieces[] = {
+		{ head, head_length },
+		{ "parked ", sizeof("parked ") - 1 },
+		{ parked_digits, parked_length },
+		{ " of ", sizeof(" of ") - 1 },
+		{ executors_digits, executors_length },
+		{ "\n", 1 },
+	};
+	const size_t count = sizeof(pieces) / sizeof(pieces[0]);
+	size_t length = 0;
+	size_t used = 0;
+
+	for (size_t piece = 0; piece < count; piece++) {
+		if (__builtin_add_overflow(length, pieces[piece].length, &length))
+			length = SIZE_MAX;
+	}
+	if (length >= size) {
+		if (size > 0)
+			line[0] = '\0';
+		return (0);
+	}
+	for (size_t piece = 0; piece < count; piece++) {
+		for (size_t index = 0; index < pieces[piece].length; index++)
+			line[used++] = pieces[piece].text[index];
+	}
+	line[used] = '\0';
+	return (used);
 }
 
 /* A CPU set no one configured reports as zero capacity: nothing is known of it. */

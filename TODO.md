@@ -525,6 +525,12 @@ it; git history is the record of completed work.
   (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
   backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
   word, and a checkpoint of `parked N of N` at the shell.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
+  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
+  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
+  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.

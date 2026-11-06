@@ -14,7 +14,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -28,6 +27,7 @@
 #define IRQ_HANDLE_BASE	UINT64_C(0x20000)
 /* How often ERX_HOSTED_GROUP_REPORT looks at the status page. */
 #define GROUP_REPORT_US	100000u
+#define GROUP_REPORT_HEAD	"erx: hosted: group: "
 
 _Static_assert(ERX_NO_EXECUTOR_SLOT == ERX_BACKEND_PARK_NO_SLOT, "what erx_executor_slot answers on a worker");
 
@@ -107,9 +107,9 @@ group_report_main(void *unused)
 		const uint32_t executors = erx_group_status_executors(&group_status);
 
 		if (parked != last_parked || executors != last_executors) {
-			char line[64];
+			char line[ERX_GROUP_REPORT_LINE_SIZE(GROUP_REPORT_HEAD)];
 
-			(void)snprintf(line, sizeof(line), "erx: hosted: group: parked %u of %u\n", parked, executors);
+			(void)erx_group_report_line(line, sizeof(line), GROUP_REPORT_HEAD, parked, executors);
 			erx_hosted_note(line);
 			last_parked = parked;
 			last_executors = executors;
