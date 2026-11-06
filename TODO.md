@@ -21,6 +21,10 @@ it; git history is the record of completed work.
   workload it names, and remove each item once a recorded number settles
   it: the kernel's portable-code hash of large boot image files at first
   use, the eager FP switch, and Phase 1's one service thread.
+* [Medium] benchmarks (`tools/erx bench g3`, [research-g3-baseline.md](docs/research-g3-baseline.md)):
+  repeat the G3 run for HVF and TCG on a quiet host, since the first run was
+  taken at a load average of 44 to 55, and find why stock OTP on the host
+  is slower than the guest at the same four operations under HVF.
 
 ## Stopgap replacements
 

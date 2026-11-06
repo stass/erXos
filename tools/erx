@@ -779,30 +779,42 @@ module Erx
     def self.bench(input_arguments)
       arguments = input_arguments.dup
       name = arguments.shift
-      options = { flavour: 'emu', iterations: 10_000, samples: 7 }
+      options = {}
       OptionParser.new do |flags|
         flags.on('--flavour NAME', %w[emu jit]) { |value| options[:flavour] = value }
-        flags.on('--iterations N', Integer) { |value| options[:iterations] = value }
-        flags.on('--samples N', Integer) { |value| options[:samples] = value }
+        flags.on('--iterations N', Integer, 'host benchmarks only') { |value| options[:iterations] = value }
+        flags.on('--samples N', Integer, 'host benchmarks only') { |value| options[:samples] = value }
         flags.on('--image PATH', 'g3 only: boot this built image instead of building one') { |value| options[:image] = value }
         flags.on('--accel NAME', %w[tcg hvf], 'g3 only: the guest accelerator') { |value| options[:accel] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+      inapplicable = name == 'g3' ? %i[iterations samples] : %i[image accel]
+      refused = inapplicable.select { |option| options.key?(option) }
+      unless refused.empty?
+        raise OptionParser::InvalidArgument, "#{refused.map { |option| "--#{option}" }.join(', ')} do not apply to bench #{name}"
+      end
       return bench_g3(options) if name == 'g3'
 
-      report = Bench.new(root: ROOT).run(name, **options)
+      report = Bench.new(root: ROOT).run(name, flavour: options.fetch(:flavour, 'emu'),
+                                         iterations: options.fetch(:iterations, 10_000),
+                                         samples: options.fetch(:samples, 7))
       Terminal.puts("native host benchmark: #{report.fetch('report')}")
       0
     end
 
-    # Gate G3: erXos under QEMU and stock OTP on this host (docs/research-g3-baseline.md).
+    # Gate G3: erXos under QEMU and on stock OTP on this host (docs/research-g3-baseline.md).
+    # The report is written however far the guest got; the exit status is nonzero unless every
+    # workload was measured.
     def self.bench_g3(options)
       raise OptionParser::MissingArgument, '--accel' unless options[:accel]
 
-      report = BenchG3.new(root: ROOT).run(accel: options.fetch(:accel), flavour: options.fetch(:flavour),
-                                      image: options[:image])
+      report = BenchG3.new(root: ROOT).run(accel: options.fetch(:accel), flavour: options.fetch(:flavour, 'emu'),
+                                           image: options[:image])
       Terminal.puts("G3 benchmark (#{options.fetch(:accel)}): #{report.fetch('report')}")
-      0
+      statuses = report.fetch('comparison').map { |workload, entry| "#{workload} #{entry.fetch('status')}" }
+      Terminal.puts("G3 workloads: #{statuses.join(', ')}")
+      report.fetch('complete') ? 0 : 1
     end
 
     def self.status(arguments, directories: Dir)

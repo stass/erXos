@@ -8,18 +8,30 @@ separate history repository, `~/erxos-history`, at
 [plan.md](plan.md#m3-the-shell-is-the-operating-system); W1 is defined in
 [design-scheduler.md](design-scheduler.md) (E-S1).
 
+## Validity
+
+The run behind the tables below was taken while the host was busy: the load
+average was 44 to 55 on 16 CPUs. Its HVF and TCG numbers are therefore not a
+valid baseline, and neither are the ratios or the comparison with stock OTP
+drawn from them. They show only that the harness produces numbers. Both
+accelerators will be measured again on a quiet host, and this report replaced
+by that run. The report written by `tools/erx bench g3` records
+`sysctl -n vm.loadavg` before and after the guest and before and after the
+stock side (`host_load` in `result.json`), so a later report states how busy
+the host was.
+
 ## Conditions
 
 | Item | Value |
 | --- | --- |
-| Host | Apple M3 Max (16 CPUs), macOS 27.0.1, nothing else running |
+| Host | Apple M3 Max (16 CPUs), macOS 27.0.1, at a load average of 44 to 55 (see Validity) |
 | Accelerators | HVF and TCG, two separate runs; their numbers are never compared with each other |
 | QEMU | 11.1.3, `virt-11.1`, `-cpu host` under HVF, 1 CPU, 512 MiB |
 | Guest | the development boot image (`tools/erx bench g3`), interpreter emulator (`emu`), one scheduler, ERTS from OTP 29.1.2 in the system domain |
 | Guest compiler | Homebrew clang 23.1.3; ERTS flags `-O2 -g -D__erxos__ -DERX_TRACE_START` (C and C++), target `aarch64-none-elf` with `-fno-stack-protector -mno-outline-atomics`; full flag lines in each `result.json` (`erts_build_flags`) |
 | Baseline | stock OTP 29.1.2, `emu` flavour, native on the host, built by Apple clang 21.0.0 (the oracle build, receipt in `result.json`), run with `+S 1 +SDcpu 1 +SDio 1 +A 1 +sbwt none -noshell -noinput -boot no_dot_erlang` |
 | Workload source | `bench/erx_otp_bench.erl`, the same beam bytes on both sides (the guest loads them through the shell) |
-| Size | HVF: 10,000 iterations, 7 samples; TCG: 1,000 iterations, 3 samples; the ring gets ten times the iterations. The stock side uses the same sizes as the guest of that run |
+| Size | HVF: 10,000 iterations, 7 samples; TCG: 1,000 iterations, 3 samples; the ring is asked for ten times the iterations as sends, which the module rounds down to whole rounds of 10,001 sends, at least one (HVF: 9 rounds, 90,009 sends; TCG: 1 round, 10,001 sends). The stock side uses the same sizes as the guest of that run |
 
 Each cell is the median of the samples, in nanoseconds per operation, with the
 smallest and largest sample in parentheses. Ratio is guest over stock, so
@@ -28,7 +40,8 @@ below 1 means erXos takes less time.
 ## W1 (same-domain, entirely inside one ERTS)
 
 Operations: pingpong is one 64-byte message and its reply; ring is one send in
-a ring of 10,000 processes (set-up and tear-down excluded); spawn is a spawn,
+a ring of 10,000 processes (set-up and tear-down excluded; a measurement's
+`operations` is the sends it made, not its `iterations`); spawn is a spawn,
 monitor and DOWN receipt; switch is one `erlang:yield()` with two processes
 alternating on one scheduler.
 
@@ -51,13 +64,9 @@ TCG (correctness-grade; the guest's instructions are emulated):
 | switch | 773 (746-795) | 924 (880-1113) | 0.84 |
 
 The stock numbers are well above the guest's under HVF, which is not what one
-expects of the same emulator on the same CPU. The cause is not investigated.
-The stock `switch` cost is stable across `+sbwt` settings (about 700 to 1200 ns
-in a spot check) and does not look like noise or load. Treat the HVF ratios as
-"stock on macOS, as built here, is slow at these four operations", not as a
-claim that erXos's ERTS is faster. The stock numbers may carry a macOS cost
-(scheduler loop or I/O polling on each yield) that the guest has no
-equivalent of.
+expects of the same emulator on the same CPU. The cause is not known, and the
+run was taken at a high load average (see Validity), so these ratios support no
+conclusion about either side until the run is repeated on a quiet host.
 
 ## Boot time to the shell
 
@@ -71,7 +80,7 @@ every 50 ms, so each value has about that resolution.
 | HVF | 0.11 | 0.21 | 0.27 |
 | TCG | 0.16 | 1.26 | 1.37 |
 
-## Footprint at the idle shell
+## Footprint at shell start
 
 `erlang:memory()` in the system domain, read by the first line typed at the
 shell, before the bench beam is loaded. Bytes.
@@ -88,7 +97,7 @@ shell, before the bench beam is loaded. Bytes.
 | loaded modules | 123 | 124 | 105 |
 
 The stock run has no shell (`-noshell`) and a different module set, so its
-rows describe a bare ERTS and kernel, not the same idle state.
+rows describe a bare ERTS and kernel, not the same state.
 
 ## Not measured
 
@@ -102,8 +111,12 @@ rows describe a bare ERTS and kernel, not the same idle state.
 * **The JIT flavour.** The guest is the interpreter, so the baseline is stock
   `emu`. The stock `jit` flavour was not compared.
 * **Multi-CPU guests.** W1 is one scheduler; `+S` greater than 1 was not run.
-* **Run-to-run variation.** One run per accelerator; the spread is the
-  samples within it.
+* **Run-to-run variation.** One run per accelerator, at a high load average;
+  the spread is the samples within it.
+* **Clock agreement beyond an upper bound.** The report checks that the guest's
+  timed total fits inside the host time between checkpoints, which catches a
+  guest clock that runs fast and cannot catch one that runs slow. The guest's
+  clock unit (`native_time_unit_hz`) is in its footprint line.
 
 ## Reproducing
 
@@ -113,5 +126,9 @@ tools/erx bench g3 --accel tcg
 ```
 
 Each builds the development image (or boots `--image PATH`), runs the guest,
-then runs stock OTP at the guest's sizes and writes
-`build/bench/g3-<accel>-*/result.json`.
+then runs stock OTP at the guest's sizes on the same compiled beam and
+writes `build/bench/g3-<accel>-*/result.json`. Each workload there is
+`measured`, `timed_out`, `missing` or `rejected` (a check refused it, with the
+reason), and the command exits nonzero unless all four were measured. With
+`--image` the compiler and flags are recorded as unknown, because they describe
+the tree and not the image.

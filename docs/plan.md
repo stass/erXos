@@ -616,8 +616,9 @@ grammar, which feeds both local messages and frames to `erx_fs`, and of
 **Gate G3.** Measures: W1 of E-S1 (same-domain ping-pong and ring, spawn,
 switch) against stock OTP 29.1.2 on the host; footprint; boot time to the
 shell. Decides: the baseline every later change is measured against.
-The first numbers are in [research-g3-baseline.md](research-g3-baseline.md);
-`tools/erx bench g3 --accel hvf|tcg` reproduces them.
+The first run, taken at a high load average and so not yet a valid baseline, is
+in [research-g3-baseline.md](research-g3-baseline.md); `tools/erx bench g3 --accel
+hvf|tcg` measures it again.
 
 ## M4: The machine is an object
 

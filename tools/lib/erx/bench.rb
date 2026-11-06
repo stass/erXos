@@ -6,6 +6,8 @@ require 'digest'
 require 'tmpdir'
 require 'rbconfig'
 require_relative 'bench_guest'
+require_relative 'bench_guest_log'
+require_relative 'bench_measurement'
 require_relative 'oracle'
 require_relative 'json_input'
 
@@ -13,6 +15,10 @@ module Erx
   class Bench
     WORKLOADS = { 'otp-pingpong' => 'pingpong', 'otp-ring' => 'ring', 'otp-spawn' => 'spawn',
                   'otp-switch' => 'switch' }.freeze
+    # The bench module compiled once: stock OTP runs it with -pa on directory and the guest
+    # loads bytes, so both measure the one file whose digest the report records.
+    Beam = Data.define(:directory, :source, :bytes, :sha256)
+
     FLAGS = %w[+S 1 +SDcpu 1 +SDio 1 +A 1 +sbwt none -noshell -noinput -boot no_dot_erlang].freeze
 
     def initialize(root:, runner: nil)
@@ -21,7 +27,8 @@ module Erx
       @oracle = Oracle.new(root: @root, runner: @runner)
     end
 
-    def run(name, flavour: 'emu', iterations: 10_000, samples: 7)
+    # With beam, stock OTP runs that compiled module instead of compiling its own.
+    def run(name, flavour: 'emu', iterations: 10_000, samples: 7, beam: nil)
       workload = WORKLOADS[name]
       raise Error, "unsupported benchmark: #{name}" unless workload
       unless iterations.is_a?(Integer) && iterations.between?(1, 1_000_000) &&
@@ -32,21 +39,22 @@ module Erx
       parent = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench'))
       directory = Dir.mktmpdir("#{name}-#{flavour}-", parent)
       @oracle.with_runtime(flavour) do |runtime|
-        source = compile(runtime, directory)
+        beam ||= compile(runtime, directory)
         expression = "io:format(\"~s~n\", [json:encode(erx_otp_bench:run(#{workload},#{iterations},#{samples}))]), halt()."
-        argv = [runtime.fetch('erl'), *FLAGS, '-pa', directory, '-eval', expression]
+        argv = [runtime.fetch('erl'), *FLAGS, '-pa', beam.directory, '-eval', expression]
         command = @runner.run(argv, name: "bench-#{name}-#{flavour}", deadline: 120,
                               env: Oracle::CLEAN_ERLANG_ENV)
         bytes = File.binread(command.fetch('log'), 1024 * 1024 + 1)
         raise Error, 'benchmark result exceeds byte bound' if bytes.bytesize > 1024 * 1024
         measurement = JsonInput.parse(bytes, max_bytes: 1024 * 1024, label: 'benchmark result')
-        validate_measurement(measurement, flavour: flavour, samples: samples,
-                             iterations: iterations, workload: workload)
+        BenchMeasurement.validate(measurement, flavour: flavour, samples: samples,
+                                  iterations: iterations, workload: workload)
         report = { 'name' => name, 'kind' => 'host-baseline', 'accelerator' => 'native',
                    'qemu' => 'not applicable: host OTP process', 'baseline' => 'stock OTP 29.1.2',
                    'runtime_flags' => FLAGS, 'oracle_build' => runtime.fetch('build'),
                    'host_cpu' => host_cpu,
-                   'workload_source_sha256' => Digest::SHA256.file(source).hexdigest,
+                   'workload_source_sha256' => Digest::SHA256.file(beam.source).hexdigest,
+                   'beam_sha256' => beam.sha256,
                    'definition' => definition(name), 'measurement' => measurement,
                    'command' => command }
         path = File.join(directory, 'result.json')
@@ -55,13 +63,10 @@ module Erx
       end
     end
 
-    # The bench module's beam, compiled by the oracle's erlc: the guest loads these bytes.
-    def beam(flavour: 'emu')
-      @oracle.with_runtime(flavour) do |runtime|
-        directory = Dir.mktmpdir("beam-#{flavour}-", OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench')))
-        compile(runtime, directory)
-        File.binread(File.join(directory, 'erx_otp_bench.beam'))
-      end
+    # The bench module's beam, compiled by the oracle's erlc.
+    def compile_beam(flavour: 'emu')
+      parent = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/bench'))
+      @oracle.with_runtime(flavour) { |runtime| compile(runtime, Dir.mktmpdir("beam-#{flavour}-", parent)) }
     end
 
     # What stock OTP holds at a shell-less start, in the shape the guest's footprint line has.
@@ -70,10 +75,7 @@ module Erx
         expression = "#{BenchGuest::FOOTPRINT_EXPRESSION.chomp(".")}, halt()."
         command = @runner.run([runtime.fetch('erl'), *FLAGS, '-eval', expression], name: "bench-footprint-#{flavour}",
                               deadline: 60, env: Oracle::CLEAN_ERLANG_ENV)
-        line = File.binread(command.fetch('log')).lines.find { |text| text.start_with?('G3FOOT ') }
-        raise Error, 'stock OTP printed no footprint line' unless line
-
-        { 'measurement' => JsonInput.parse(line.delete_prefix('G3FOOT ').b, max_bytes: 65_536, label: 'footprint'),
+        { 'measurement' => BenchGuestLog.parse_footprint(File.binread(command.fetch('log'))),
           'runtime_flags' => FLAGS, 'oracle_build' => runtime.fetch('build'), 'command' => command }
       end
     end
@@ -83,6 +85,18 @@ module Erx
       "#{host_cpu}; #{RbConfig::CONFIG['host_os']}"
     end
 
+    # The host's load average as the host states it, for a report to say how busy the host was.
+    def load_average
+      if RUBY_PLATFORM.include?('darwin')
+        command = @runner.run(['sysctl', '-n', 'vm.loadavg'], name: 'bench-loadavg', deadline: 10)
+        File.read(command.fetch('log')).strip
+      elsif File.file?('/proc/loadavg')
+        File.binread('/proc/loadavg', 4096).strip
+      else
+        'unknown'
+      end
+    end
+
     private
 
     def compile(runtime, directory)
@@ -90,17 +104,8 @@ module Erx
       FileUtils.copy_file(File.join(@root, 'bench/erx_otp_bench.erl'), source)
       @runner.run([runtime.fetch('erlc'), '+warnings_as_errors', '+deterministic',
                    '-o', directory, source], name: 'bench-compile', deadline: 30, env: Oracle::CLEAN_ERLANG_ENV)
-      source
-    end
-
-    def validate_measurement(value, flavour:, samples:, iterations:, workload:)
-      unless value.is_a?(Hash) && value['emu_flavor'] == flavour &&
-             value['iterations'] == iterations && value['workload'] == workload &&
-             value['samples'] == samples && value['ns_per_operation'].is_a?(Array) &&
-             value.fetch('ns_per_operation').size == samples &&
-             value.fetch('ns_per_operation').all? { |sample| sample.is_a?(Numeric) && sample.finite? && sample >= 0 }
-        raise Error, 'benchmark result does not match its requested workload'
-      end
+      bytes = File.binread(File.join(directory, 'erx_otp_bench.beam'))
+      Beam.new(directory: directory, source: source, bytes: bytes, sha256: Digest::SHA256.hexdigest(bytes))
     end
 
     def host_cpu

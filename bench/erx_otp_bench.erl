@@ -15,20 +15,36 @@ run(Name, Iterations, Samples) ->
     workload(Name, min(Iterations, 1000)),
     Values = [sample(Name, Iterations) || _ <- lists:seq(1, Samples)],
     #{workload => atom_to_binary(Name, utf8), iterations => Iterations,
-      samples => Samples, ns_per_operation => Values,
+      operations => operations(Name, Iterations), samples => Samples,
+      ns_per_operation => Values, beam_md5 => beam_md5(),
       emu_flavor => atom_to_binary(erlang:system_info(emu_flavor), utf8),
       schedulers => erlang:system_info(schedulers_online),
       wordsize => erlang:system_info(wordsize)}.
 
+%% The timed operations in one sample, which ns_per_operation divides by. A ring
+%% asked for Hops sends runs whole rounds of ring_sends() sends, at least one, so it
+%% sends fewer than asked; a switch is two processes yielding.
+operations(ring, Hops) -> ring_rounds_for(Hops) * ring_sends();
+operations(switch, Yields) -> 2 * Yields;
+operations(_, Iterations) -> Iterations.
+
+ring_sends() -> ?RING_SIZE + 1.
+
+ring_rounds_for(Hops) -> max(1, Hops div ring_sends()).
+
+%% The md5 of the loaded code, which says two runtimes measured the same beam.
+beam_md5() ->
+    binary:encode_hex(?MODULE:module_info(md5), lowercase).
+
 %% A ring builds its processes before the clock starts: a sample is the rounds.
 sample(ring, Hops) ->
-    Rounds = max(1, Hops div (?RING_SIZE + 1)),
+    Rounds = ring_rounds_for(Hops),
     Head = ring_start(?RING_SIZE),
     Start = erlang:monotonic_time(nanosecond),
     ring_rounds(Head, Rounds),
     Elapsed = erlang:monotonic_time(nanosecond) - Start,
     ring_stop(Head),
-    Elapsed / (Rounds * (?RING_SIZE + 1));
+    Elapsed / (Rounds * ring_sends());
 sample(switch, Yields) ->
     Start = erlang:monotonic_time(nanosecond),
     workload(switch, Yields),
@@ -52,7 +68,7 @@ workload(spawn, Iterations) ->
     spawn_loop(Iterations);
 workload(ring, Hops) ->
     Head = ring_start(?RING_SIZE),
-    ring_rounds(Head, max(1, Hops div (?RING_SIZE + 1))),
+    ring_rounds(Head, ring_rounds_for(Hops)),
     ring_stop(Head);
 workload(switch, Yields) ->
     Yielders = [spawn_monitor(fun() -> yield_loop(Yields) end)
