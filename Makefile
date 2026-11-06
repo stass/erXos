@@ -9,7 +9,7 @@ DOCKER_CONTEXT ?=
 
 .DEFAULT_GOAL := all
 
-.PHONY: all build run check check-sources status fetch check-tla check-hw generate-hw check-arch-terms
+.PHONY: all build run check check-sources status setup fetch check-tla check-hw generate-hw check-arch-terms
 .PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
@@ -90,6 +90,9 @@ check-boot-image:
 
 status:
 	$(RUBY) tools/erx status
+
+setup:
+	$(RUBY) tools/erx setup --jobs $(JOBS)
 
 fetch:
 	$(RUBY) tools/erx fetch $(if $(strip $(DOCKER_CONTEXT)),--docker-context "$(DOCKER_CONTEXT)",)

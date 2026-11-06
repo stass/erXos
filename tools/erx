@@ -9,6 +9,7 @@ require_relative 'lib/erx/runner'
 require_relative 'lib/erx/release'
 require_relative 'lib/erx/output_directory'
 require_relative 'lib/erx/dependencies'
+require_relative 'lib/erx/setup'
 require_relative 'lib/erx/tla'
 require_relative 'lib/erx/fiasco'
 require_relative 'lib/erx/runtime'
@@ -57,6 +58,8 @@ module Erx
         pack(command_arguments, **collaborators)
       when 'status'
         status(command_arguments, **collaborators)
+      when 'setup'
+        setup(command_arguments, **collaborators)
       when 'fetch'
         fetch(command_arguments, **collaborators)
       when 'check-tla'
@@ -515,6 +518,23 @@ module Erx
       Terminal.puts("#{options.fetch(:accel)}: #{report.fetch('state')}; #{report.fetch('serial_log')}")
       0
     end
+
+# Everything a fresh worktree needs before its gates run; steps whose
+# output is already valid are skipped. Takes no network path: sources
+# come from `make fetch` or from ERX_SOURCE_CACHE, verified by hash.
+def self.setup(input_arguments, setup_class: Setup)
+  arguments = input_arguments.dup
+  jobs = 4
+  parser = OptionParser.new do |options|
+    options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
+  end
+  parser.parse!(arguments)
+  raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+
+  ran = setup_class.new(root: ROOT, jobs: jobs).call
+  Terminal.puts(ran.empty? ? 'setup: nothing to do' : "setup: ran #{ran.join(', ')}")
+  0
+end
 
     def self.fetch(input_arguments)
       arguments = input_arguments.dup

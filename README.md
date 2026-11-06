@@ -278,6 +278,31 @@ export PATH=/opt/homebrew/bin:$PATH
 
 For another installation, adjust the paths.
 
+## Fresh worktree
+
+A new checkout or git worktree needs its sources, the stock OTP oracle and
+the native runtime built before `make check` can run. One command does it:
+
+```sh
+ERX_SOURCE_CACHE=/path/to/other/checkout/build/third_party make setup
+```
+
+`make setup` (`tools/erx setup --jobs N`) runs, in order: the pinned
+`otp`, `musl` and `arm-registers` sources, the JIT oracle
+(`make oracle-bootstrap`), the `emu` oracle, and
+`tools/erx build runtime`. A step whose output is already valid is
+skipped, so a second run does nothing. Each build runs under a deadline
+with its own log in `build/logs/`.
+
+It never downloads. `ERX_SOURCE_CACHE` names another checkout's
+`build/third_party`; the archives in the `downloads` directory beside it
+are copied only after their SHA-256 matches `deps.lock`. Without it, the
+sources must already be there from `make fetch`. It does not fetch
+`tla-tools` or the oracle image: only `make check-tla` uses the first,
+and the native oracle does not use the second. If `ERX_CLANG` or `ERX_LLD`
+is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
+`/opt/homebrew/bin/ld.lld`; export them yourself for later commands.
+
 ## Fetch, bootstrap and check
 
 Only `make fetch` downloads anything. Name your local Docker context, and

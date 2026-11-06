@@ -113,6 +113,26 @@ module Erx
       end
     end
 
+# Takes a source archive from another checkout's downloads directory, but
+# only if its bytes match the pinned SHA-256; nothing unverified is kept.
+# An archive already present is left alone.
+def adopt(source_id, from:)
+  source = sources.find { |entry| entry.fetch('id') == source_id }
+  raise Error, "unknown source: #{source_id}" unless source && source.fetch('kind') != 'oci'
+
+  archive = archive_path(source)
+  return archive if File.file?(archive)
+
+  OutputDirectory.prepare(root: @root, path: File.dirname(archive))
+  Dir.mktmpdir('.adopt-', File.dirname(archive)) do |directory|
+    temporary = File.join(directory, 'source')
+    copy_bounded(from, destination: temporary)
+    verify(source, archive: temporary)
+    File.rename(temporary, archive)
+  end
+  archive
+end
+
     def archive_for(id)
       source = sources.find { |entry| entry.fetch('id') == id }
       raise Error, "unknown source: #{id}" unless source
