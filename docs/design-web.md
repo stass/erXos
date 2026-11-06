@@ -1079,8 +1079,12 @@ library for the host tool's server; TypeScript for the client. And:
    with no pixel or layout parity; presentation state stays in the
    browser; parity tests compare meaning. Mirroring the native display in
    the browser is left out.
+6. **The default display's name** is the environment variable `display`,
+   lower case as rc's own variables are, which a login sets and a user
+   changes as on Unix. `DISPLAY` would read as X's to a ported program
+   that checks it.
 
-Decisions for the owner, each with a recommendation:
+Decision for the owner, with a recommendation:
 
 1. **One operation per update.** An `image`'s bytes travel in one
    operation, and an operation must fit one 64 KiB update. Either
@@ -1090,10 +1094,6 @@ Decisions for the owner, each with a recommendation:
    the browser's view `too_large` while a display shows it.
    Recommendation: the bound in `ui.txt`, so every valid tree renders on
    every display.
-2. **The default display's name.** The default is the environment
-   variable `display`, lower case as rc's own variables are, which a login
-   sets and a user changes as on Unix. `DISPLAY` would read as X's to a
-   ported program that checks it. Recommendation: `display`.
 
 ## References
 
