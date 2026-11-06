@@ -95,8 +95,9 @@ module Erx
 
     # The production image with test code added to its system release, marked in its
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
-    # refuses it in any build but a development one. Only OracleQemu calls it, which the
-    # source check holds (Checks::TEST_IMAGE_BUILDER).
+    # refuses it in any build but a development one. Only the QEMU harnesses that boot
+    # test code, OracleQemu and BlockDevice, call it, which the source check holds
+    # (Checks::TEST_IMAGE_BUILDERS).
     def build_test_image(directory:, added:)
       raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
 

@@ -180,15 +180,15 @@ hold(From, Op, State = #state{waiting = Waiting}) ->
         false -> {reply, {error, busy}, State}
     end.
 
-%% One post, of a read through erx_blk_request or a write through erx_blk_write, the one
-%% write path. A posted request waits in pending under its tag for its completion.
+%% One post, of a read or a write, through erx_blk_write, the one module that posts and so
+%% the one write path. A posted request waits in pending under its tag for its completion.
 post(From, Op, State = #state{dev = Dev, queue = Queue, capacity = Capacity, tag = Tag, pending = Pending}) ->
     {Posted, Request} =
         case Op of
             {read, Sector, Count} ->
-                {read_post(Dev, Queue, Tag, Sector, Count, Capacity), {read, Count}};
+                {erx_blk_write:read(Dev, Queue, Tag, Sector, Count, Capacity), {read, Count}};
             {write, Sector, Data} ->
-                {erx_blk_write:post(Dev, Queue, Tag, Sector, Data, Capacity), write}
+                {erx_blk_write:write(Dev, Queue, Tag, Sector, Data, Capacity), write}
         end,
     case Posted of
         ok -> {posted, State#state{tag = (Tag + 1) band 16#ffffffffffffffff,
@@ -196,12 +196,6 @@ post(From, Op, State = #state{dev = Dev, queue = Queue, capacity = Capacity, tag
         {error, full} -> full;
         {error, broken} -> broken;
         {error, Reason} -> {refused, Reason}
-    end.
-
-read_post(Dev, Queue, Tag, Sector, Count, Capacity) ->
-    case erx_blk_request:read_segments(Sector, Count, Capacity) of
-        {ok, Segments} -> erx_device:post(Dev, Queue, Tag, Segments);
-        Refused -> Refused
     end.
 
 %% Every completion the device has returned, each answered with what decode/2 makes of its

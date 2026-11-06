@@ -174,7 +174,7 @@ class ProductionImageTest < Minitest::Test
   end
 
   # The production entry point takes no additions: only the test entry point adds test
-  # code, and the source check holds its one caller (Checks::TEST_IMAGE_BUILDER).
+  # code, and the source check holds its callers (Checks::TEST_IMAGE_BUILDERS).
   def test_the_production_build_takes_no_additions
     production = Erx::ProductionImage.instance_method(:build).parameters
     refute_includes production.map(&:last), :added

@@ -9,7 +9,7 @@ require 'tmpdir'
 # Runs test/erlang/erx_blk_request_tests.erl, the EUnit cases of the block driver's pure
 # core, against erx_blk_request and erx_blk_write compiled from source on stock's emulator
 # (ERX_ERL and ERX_ERLC, which make check supplies). erx_blk_write names erx_device only
-# in post/6, which the cases do not call, so they need no hosted build.
+# in post/4, which the cases do not reach, so they need no hosted build.
 class ErxBlkRequestTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[erlang/apps/erx_blk/src/erx_blk_request.erl erlang/apps/erx_blk/src/erx_blk_write.erl

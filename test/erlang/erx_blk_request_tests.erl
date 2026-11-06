@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% EUnit cases of the block driver's pure core: erx_blk_request's checks, headers and
-%% decoding of what the device wrote, and the segments of erx_blk_write's one write path.
+%% decoding of what the device wrote, and the segments erx_blk_write, the one module that posts, builds.
 %% test/host/erx_blk_request_test.rb runs them on stock's emulator.
 
 -module(erx_blk_request_tests).
@@ -44,20 +44,20 @@ buffer_size_test() ->
 
 read_segments_test_() ->
     [?_assertEqual({ok, [{out, <<0:32/little, 0:32/little, 3:64/little>>}, {in, 2 * ?SECTOR}, {in, 1}]},
-                   erx_blk_request:read_segments(3, 2, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_request:read_segments(16, 1, 16)),
-     ?_assertEqual({error, bad_count}, erx_blk_request:read_segments(0, 0, 16))].
+                   erx_blk_write:read_segments(3, 2, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_write:read_segments(16, 1, 16)),
+     ?_assertEqual({error, bad_count}, erx_blk_write:read_segments(0, 0, 16))].
 
 write_segments_test_() ->
     Data = binary:copy(<<"w">>, ?SECTOR),
     [?_assertEqual({ok, [{out, <<1:32/little, 0:32/little, 7:64/little>>}, {out, Data}, {in, 1}]},
-                   erx_blk_write:segments(7, Data, 16)),
-     ?_assertEqual({error, out_of_range}, erx_blk_write:segments(16, Data, 16)),
-     ?_assertEqual({error, bad_count}, erx_blk_write:segments(0, <<>>, 16)),
-     ?_assertEqual({error, bad_count}, erx_blk_write:segments(0, <<0>>, 16)),
-     ?_assertEqual({error, bad_count}, erx_blk_write:segments(0, [Data], 16)),
+                   erx_blk_write:write_segments(7, Data, 16)),
+     ?_assertEqual({error, out_of_range}, erx_blk_write:write_segments(16, Data, 16)),
+     ?_assertEqual({error, bad_count}, erx_blk_write:write_segments(0, <<>>, 16)),
+     ?_assertEqual({error, bad_count}, erx_blk_write:write_segments(0, <<0>>, 16)),
+     ?_assertEqual({error, bad_count}, erx_blk_write:write_segments(0, [Data], 16)),
      ?_assertEqual({error, bad_count},
-                   erx_blk_write:segments(0, binary:copy(Data, erx_blk_request:max_sectors() + 1), 1 bsl 20))].
+                   erx_blk_write:write_segments(0, binary:copy(Data, erx_blk_request:max_sectors() + 1), 1 bsl 20))].
 
 decode_read_test_() ->
     Data = binary:copy(<<"r">>, 2 * ?SECTOR),

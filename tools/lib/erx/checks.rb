@@ -5,8 +5,8 @@
 require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
-require_relative 'block_write_path'
 require_relative 'device_callers'
+require_relative 'device_posters'
 require_relative 'ns_writers'
 require_relative 'origin'
 require_relative 'runner'
@@ -66,15 +66,16 @@ module Erx
 
     # ProductionImage#build adds nothing to the system release; its test entry point adds
     # test code and marks the archive (ERX_PACK_TEST_CODE). This check enforces two things
-    # only: that only the oracle's QEMU run calls that entry point, and that no other
+    # only: that only the QEMU harnesses that boot test code, the oracle's run and the
+    # block device suite's, call that entry point, and that no other
     # source passes a literal true for the packer's test keyword. It does not prove that every image carrying
     # test code is marked; other packers carry unmarked test code (TODO.md). So no Ruby
-    # source under tools/, except the module that defines the entry point and that one
-    # caller, may match TEST_IMAGE_ENTRY: the entry point's name, in a call, a symbol or
+    # source under tools/, except the module that defines the entry point and those
+    # callers, may match TEST_IMAGE_ENTRY: the entry point's name, in a call, a symbol or
     # a comment, or a literal true for the packer's test_code keyword. The check reads
     # lines, as the JSON check does, so it catches a slip, not a name assembled from
     # pieces. Tests outside tools/ may name either.
-    TEST_IMAGE_BUILDER = 'tools/lib/erx/oracle_qemu.rb'
+    TEST_IMAGE_BUILDERS = %w[tools/lib/erx/oracle_qemu.rb tools/lib/erx/block_device.rb].freeze
     TEST_IMAGE_DEFINER = 'tools/lib/erx/production_image.rb'
     TEST_IMAGE_ENTRY = /\bbuild_test_image\b|\btest_code:\s*true\b/
 
@@ -122,7 +123,7 @@ module Erx
       check_json_parsing(own_sources)
       check_test_image_builders(own_sources)
       check_device_callers(listed)
-      check_block_write_path(listed)
+      check_device_posters(listed)
       check_ns_writers(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
@@ -244,22 +245,22 @@ module Erx
     end
 
     def check_test_image_builders(own_sources)
-      allowed = [TEST_IMAGE_BUILDER, TEST_IMAGE_DEFINER]
+      allowed = [*TEST_IMAGE_BUILDERS, TEST_IMAGE_DEFINER]
       own_sources.each do |relative_path|
         next unless relative_path.start_with?('tools/') && !allowed.include?(relative_path)
         path = File.join(@root, relative_path)
         next unless ruby_source?(path)
         File.binread(path).each_line.with_index(1) do |line, number|
           next unless TEST_IMAGE_ENTRY.match?(line)
-          raise Error, "a test image is built only by #{TEST_IMAGE_BUILDER}: #{relative_path}:#{number}"
+          raise Error, "a test image is built only by #{TEST_IMAGE_BUILDERS.join(' and ')}: #{relative_path}:#{number}"
         end
       end
     end
 
     # Imports included, as for the device callers.
-    def check_block_write_path(listed)
-      sources = listed.select { |relative| BlockWritePath.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = BlockWritePath.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+    def check_device_posters(listed)
+      sources = listed.select { |relative| DevicePosters.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = DevicePosters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

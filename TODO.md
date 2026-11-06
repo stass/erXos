@@ -281,7 +281,7 @@ it; git history is the record of completed work.
   `test_code:` defaults to false. The by-construction fix is to derive the header bit from
   per-entry test flags in the packer (ORed into the header, checked against the entries by
   `erx_index_check`); every packer then marks its test image, and the lexical
-  `test-image-builder` check (`Checks::TEST_IMAGE_BUILDER`) can go.
+  `test-image-builder` check (`Checks::TEST_IMAGE_BUILDERS`) can go.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
   the host link's first consumer, M4.
@@ -1907,22 +1907,29 @@ document's "residual risks accepted" paragraph.
   `tools/erx bench`. Decide whether ERTS's `perf` support and
   `erlang:statistics` use it. Replaces the stopgap's direct user access
   (Stopgap replacements above).
-* [Medium] storage, `block_device` QEMU suite (`tools/lib/erx/qemu_suites/block_device.rb`): the suite reports its cell
-  pending until the block driver prints the lines `tools/lib/erx/block_device.rb` defines; the driver's landing sets
-  `Erx::BlockDevice::DRIVER_LANDED` and checks that its first HVF run passes.
-* [High] erx_blk, the block driver: the device process (`erlang/apps/erx_blk/src/erx_blk.erl`) has no test. It needs the
-  guest entry that prints the `blk:` lines of `tools/lib/erx/block_device.rb` (a test image through
-  `ProductionImage#build_test_image`, which `Checks::TEST_IMAGE_BUILDER` must then allow from the block device harness,
-  and the module started by an `erx.arg` `-run`), the transport version line added to that suite, and
-  `DRIVER_LANDED` set; and its backlog, reply and reset decisions moved into a pure module tested on the host.
+* [High] erx_blk, the block driver: under QEMU `virt` (HVF) with the `block_device` suite's disk on
+  `virtio-mmio-bus.31`, `erx_device:open/1` answers `{error, einval}` for the block record
+  (`window => {physical, 16#0a003e00, 512}`, `lines => [79]`, `dma_memory => 2097152`), so `erx_blk:init/1` returns
+  `ignore` and the suite's test module prints `blk: no driver`. A virtio-mmio slot is 0x200 bytes and not
+  page-aligned; the suspected cause is the NIF's or the backend's physical window refusing an unaligned base. The fix
+  needs a failing host test first, then the suite's HVF run passing, and then `Erx::BlockDevice::DRIVER_LANDED` set
+  (`tools/lib/erx/block_device.rb`), which turns the suite on. The NIF logs the failure only at debug level, which
+  the console does not show; `erx_blk:init/1`'s refusal reason should reach the console.
+* [Medium] erx_blk, `tools/lib/erx/device_posters.rb`: the rule "only `erx_blk_write` calls `erx_device:post/4`" is
+  tree-wide, but every virtio driver will post; once a second poster joins `SITES`, the write path's argument also
+  needs "only `erx_blk` opens a block record", which no check holds. Scope the rule per device class. Rename
+  `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`). The check is lexical: a
+  module name held in a variable or a macro escapes it, where the BEAM call-graph check the design once named would
+  see the macro form.
+* [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
+  (`erlang/apps/erx_blk/src/erx_blk.erl`, `submit/3`, `resume/1`, `recover/2`) are tested only end to end, by the
+  `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are
+  tested on the host.
 * [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
   `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that resets the
   device, `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
-* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:post/6`, and `erx_blk:write/2` lets any process of
-  the system domain write any sector until windows serve clients. The write-path check refuses the name
-  `ERX_VIRTIO_BLK_T_OUT`, not a hand-built header with type 1 or another type that writes (QEMU treats any type with bit 0
-  set as a write); making `erx_blk_write` the only caller of `erx_device:post/4` would hold it by construction, and
-  `docs/design.md`'s check by call graph should then agree with `docs/design-storage.md`.
+* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:write/2` lets any process of
+  the system domain write any sector until windows serve clients.
 * [Low] erx_blk: `recover/2` answers held requests `broken` though they were never posted; they could be posted after
   the reset. An interrupt storm or a device that breaks its queue on every request costs a scheduler and a log line per
   reset, bounded by the device's rate (Phase 1 residual).

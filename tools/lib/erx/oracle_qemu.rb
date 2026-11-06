@@ -28,8 +28,9 @@ module Erx
   # stock's Common Test and SASL, the reporter and the compiled suites added
   # to the release under /lib and /test/ct, through ProductionImage#build_test_image,
   # which marks its archive (ERX_PACK_TEST_CODE) so the kernel banner says so and the
-  # boot transcript checks that line. Checks::TEST_IMAGE_BUILDER holds that this file
-  # alone calls that entry point, so no production image carries test code. The
+  # boot transcript checks that line. Checks::TEST_IMAGE_BUILDERS holds that this file
+  # and the block device suite's harness alone call that entry point, so no
+  # production image carries test code. The
   # kernel command line's erx.arg words hand the system domain's ERTS
   # `-run erx_ct_oracle main`, which runs the suites from /tmp/ct and halts, and the
   # halt ends the machine.

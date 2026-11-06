@@ -5,7 +5,7 @@
 %% device wrote, and random requests through its checks. Whatever arrives, decode/2
 %% returns ok, {ok, Data} or {error, Reason} with Reason one of the fixed shapes, and agrees
 %% with reference/2, which judges the bytes by their size and last byte alone; range/3 and
-%% erx_blk_write:segments/3 agree with a reference of plain comparisons. Sizes cluster at
+%% erx_blk_write:write_segments/3 agree with a reference of plain comparisons. Sizes cluster at
 %% the boundaries (empty, one short, exact, one long), so every path is common. The seed
 %% comes from make check-fuzz.
 
@@ -103,7 +103,7 @@ check_range() ->
         Other -> error({range_disagrees, Sector, Count, Capacity, Other})
     end,
     Data = binary:copy(<<0>>, max(0, Count) * ?SECTOR),
-    case {erx_blk_write:segments(Sector, Data, Capacity), Expected} of
+    case {erx_blk_write:write_segments(Sector, Data, Capacity), Expected} of
         {{ok, _}, ok} -> ok;
         {Same, Same} -> ok;
         {{error, bad_count}, {error, bad_count}} -> ok;

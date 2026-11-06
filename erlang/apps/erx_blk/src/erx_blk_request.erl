@@ -8,9 +8,9 @@
 %% erx_blk_request_fuzz.erl).
 %%
 %% A request is virtio's (section 5.2.6 of the specification): a 16-byte header the device
-%% reads, then the sectors it reads or writes, then one status byte it writes. A read's
-%% segments for erx_device:post/4 are built here; a write's are built by erx_blk_write, the
-%% driver's one write path, with range/3.
+%% reads, then the sectors it reads or writes, then one status byte it writes. Its segments
+%% are built and posted by erx_blk_write, the one module that posts and so the driver's one
+%% write path, with range/3.
 %%
 %% Everything the device wrote is untrusted. decode/2 takes the bytes erx_device:complete/2
 %% copied out of the pool, of any size, and returns the request's result or a reason built
@@ -18,7 +18,7 @@
 
 -module(erx_blk_request).
 
--export([identify/3, capacity/2, range/3, read_segments/3, decode/2]).
+-export([identify/3, capacity/2, range/3, decode/2]).
 -export([max_sectors/0, buffer_size/0]).
 
 -export_type([request/0, reason/0]).
@@ -66,24 +66,6 @@ range(Sector, Count, Capacity) when Sector + Count > Capacity ->
     {error, out_of_range};
 range(_Sector, _Count, _Capacity) ->
     ok.
-
-%% A read's header, laid out as abi/formats/virtio.txt's erx_virtio_blk_req_header: type,
-%% a reserved word and the first sector. erx_blk_write lays out a write's.
-read_header(Sector) ->
-    <<?ERX_VIRTIO_BLK_T_IN:32/little, 0:32/little, Sector:64/little>>.
-
-%% A read of Count sectors from Sector: the header out, the sectors and the status in.
--spec read_segments(term(), term(), non_neg_integer()) ->
-          {ok, [erx_device:segment()]} | {error, out_of_range | bad_count}.
-read_segments(Sector, Count, Capacity) ->
-    case range(Sector, Count, Capacity) of
-        ok ->
-            {ok, [{out, read_header(Sector)},
-                  {in, Count * ?ERX_VIRTIO_BLK_SECTOR_SIZE},
-                  {in, ?STATUS_BYTES}]};
-        Refused ->
-            Refused
-    end.
 
 %% The result of a request from the bytes the device wrote into its in segments, end to end
 %% and cut at the length it reported. A read must have written every sector and the status;

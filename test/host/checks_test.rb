@@ -125,13 +125,15 @@ class ChecksTest < Minitest::Test
     end
   end
 
-  # Only the oracle's QEMU run builds a test image; the production image module defines
+  # Only the QEMU harnesses that boot test code, the oracle's run and the block device
+  # suite's, build a test image; the production image module defines
   # the entry point. The identifier anywhere else in host tooling, as a call, a symbol for
   # send or method, or in a comment, fails the check, as does a literal true for Pack's
   # test_code keyword; tests outside tools/ may name either.
-  def test_only_the_oracle_builds_a_test_image
+  def test_only_the_qemu_harnesses_build_a_test_image
     write('tools/lib/erx/production_image.rb', "def build_test_image(directory:, added:)\nend\n")
     write('tools/lib/erx/oracle_qemu.rb', "image.build_test_image(directory: d, added: a)\n")
+    write('tools/lib/erx/block_device.rb', "image.build_test_image(directory: d, added: a)\n")
     write('tools/lib/erx/gate.rb', "image.build(directory: d)\n# builds no build_test_images\n")
     write('test/host/production_image_test.rb', "image.build_test_image(directory: d, added: a)\n")
     write('tools/notes.txt', "build_test_image is documented here\n")
@@ -144,7 +146,7 @@ class ChecksTest < Minitest::Test
       original = File.exist?(File.join(@root, relative)) ? File.binread(File.join(@root, relative)) : nil
       path = write(relative, source)
       error = assert_raises(Erx::Error) { checks.run }
-      assert_equal 'a test image is built only by tools/lib/erx/oracle_qemu.rb: ' \
+      assert_equal 'a test image is built only by tools/lib/erx/oracle_qemu.rb and tools/lib/erx/block_device.rb: ' \
                    "#{relative}:#{source.lines.size}", error.message
       original ? File.binwrite(path, original) : File.unlink(path)
     end

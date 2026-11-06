@@ -32,9 +32,16 @@ module Erx
           test: 'test/host/device_callers_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'test-image-builder', rule: "only the oracle's QEMU run calls the production image's test entry point, and no " \
-                                            "other tools source passes a literal true for the packer's test keyword",
-          design: "#{STOPGAP}#the-production-image", check: 'Checks::TEST_IMAGE_BUILDER',
+          name: 'device-posters', rule: "only the block driver's one write path, erx_blk_write, calls erx_device:post/4, " \
+                                        'and it builds every request it posts',
+          design: 'docs/design-storage.md#data-model', check: 'DevicePosters, in Checks',
+          test: 'test/host/device_posters_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'test-image-builder', rule: "only the oracle's QEMU run and the block device suite's harness call the " \
+                                            "production image's test entry point, and no other tools source passes a " \
+                                            "literal true for the packer's test keyword",
+          design: "#{STOPGAP}#the-production-image", check: 'Checks::TEST_IMAGE_BUILDERS',
           test: 'test/host/checks_test.rb'
         ),
         Chokepoints::Elsewhere.new(

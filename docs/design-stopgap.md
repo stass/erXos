@@ -329,11 +329,12 @@ kernel's banner prints `test image: carries test code` after the development war
 and the image's `Built` record reports the bit read back from the archive header. The
 production boot check refuses an image with the bit and requires the kernel's
 `erx: boot image build` line to report the archive's own identity and flags. The
-source check (`Checks::TEST_IMAGE_BUILDER`, the `test-image-builder` chokepoint rule)
+source check (`Checks::TEST_IMAGE_BUILDERS`, the `test-image-builder` chokepoint rule)
 fails the build when Ruby under `tools/` other than `ProductionImage` itself and
-`OracleQemu`, the oracle's QEMU run, names the test entry point or hands the packer
-a literal true for its `test_code` keyword; the oracle's boot transcript checks the
-banner's test-image line;
+the two QEMU harnesses that boot test code, `OracleQemu`, the oracle's run, and
+`BlockDevice`, the block device suite's, names the test entry point or hands the
+packer a literal true for its `test_code` keyword; each harness's boot transcript
+checks the banner's test-image line;
 `test/host/checks_test.rb` seeds its violations.
 
 | Archive entry | Kind | What it is |

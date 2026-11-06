@@ -18,12 +18,12 @@ class BlockDeviceTest < Minitest::Test
 
   def test_the_expected_lines_are_the_documented_sequence
     lines = Device.expected_lines
-    assert_equal 'blk: capacity 16 sectors', lines.first
-    assert_equal 'blk: read sector 0 ok', lines[1]
-    assert_equal 'blk: read sector 15 ok', lines[16]
-    assert_equal 'blk: read sector 16 refused', lines[17]
+    assert_equal ['blk: transport version 2', 'blk: capacity 16 sectors'], lines.first(2)
+    assert_equal 'blk: read sector 0 ok', lines[2]
+    assert_equal 'blk: read sector 15 ok', lines[17]
+    assert_equal 'blk: read sector 16 refused', lines[18]
     assert_equal ['blk: wrote sector 3', 'blk: wrote sector 7', 'blk: done'], lines.last(3)
-    assert_equal 21, lines.size
+    assert_equal 22, lines.size
   end
 
   def test_a_good_log_has_no_difference_and_other_lines_are_ignored
@@ -36,22 +36,39 @@ class BlockDeviceTest < Minitest::Test
     assert_nil Device.line_difference(good_log([*Device.expected_lines, 'blk: stray']))
   end
 
-  def test_the_driver_is_not_landed_so_the_suite_is_pending
+  def test_the_driver_does_not_start_yet_so_the_suite_is_pending
     refute Device::DRIVER_LANDED
+  end
+
+  def test_a_wrong_transport_version_or_no_driver_is_a_difference
+    old = Device.expected_lines.map { |line| line.sub('transport version 2', 'transport version 1') }
+    assert_equal 'driver line 1: expected "blk: transport version 2", got "blk: transport version 1"',
+                 Device.line_difference(good_log(old))
+    assert_match(/line 1: .*got "blk: no driver"/, Device.line_difference(good_log(['blk: no driver', 'blk: done'])))
+  end
+
+  # The test module reaches the guest only in a test image: the boot checks the banner's
+  # test-image line, and the kernel command line starts the module from its directory.
+  def test_the_boot_is_a_test_image_that_runs_the_test_module
+    names = Device.checkpoints.map { |point| point.fetch(:name) }
+    assert_includes names, Erx::Qemu::TEST_IMAGE_BANNER.fetch(:name)
+    assert_equal 'erx.arg=-pa erx.arg=/test/blk erx.arg=-run erx.arg=erx_blk_check erx.arg=main', Device.command_line('hvf')
+    assert_equal "#{Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')} erx.arg=-pa", Device.command_line('tcg')[/\A\S+ \S+/]
+    assert File.file?(File.expand_path("../../#{Device::GUEST_SOURCE}", __dir__))
   end
 
   def test_a_missing_line_names_the_first_difference
     missing = Device.expected_lines - ['blk: read sector 5 ok']
-    assert_equal 'driver line 7: expected "blk: read sector 5 ok", got "blk: read sector 6 ok"', Device.line_difference(good_log(missing))
-    assert_match(/line 21: expected "blk: done", got no line/, Device.line_difference(good_log(Device.expected_lines[0...-1])))
+    assert_equal 'driver line 8: expected "blk: read sector 5 ok", got "blk: read sector 6 ok"', Device.line_difference(good_log(missing))
+    assert_match(/line 22: expected "blk: done", got no line/, Device.line_difference(good_log(Device.expected_lines[0...-1])))
     assert_match(/line 1: expected .*, got no line/, Device.line_difference('nothing'))
   end
 
   def test_a_failure_line_an_extra_line_and_a_reordering_are_differences
     failed = Device.expected_lines.map { |line| line == 'blk: wrote sector 7' ? 'blk: wrote sector 7 failed' : line }
-    assert_match(/line 20: .*got "blk: wrote sector 7 failed"/, Device.line_difference(good_log(failed)))
-    swapped = Device.expected_lines.dup.tap { |lines| lines[2], lines[3] = lines[3], lines[2] }
-    assert_match(/line 3: /, Device.line_difference(good_log(swapped)))
+    assert_match(/line 21: .*got "blk: wrote sector 7 failed"/, Device.line_difference(good_log(failed)))
+    swapped = Device.expected_lines.dup.tap { |lines| lines[3], lines[4] = lines[4], lines[3] }
+    assert_match(/line 4: /, Device.line_difference(good_log(swapped)))
   end
 
   def test_guest_text_in_a_report_is_escaped_and_cut_short
