@@ -387,6 +387,25 @@ it; git history is the record of completed work.
   report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;
   store it on `Step`. `ERX_SOURCE_CACHE` names `build/third_party` but setup reads the sibling
   `build/downloads` (`archive_directory`); name the directory actually read.
+* [High] `erlang/apps/erx_files` (`/tmp`): space of deleted or truncated files does not come back. After
+  disk_log_SUITE alone the files left under `/tmp/ct` total 2.4 MB, yet the same runtime then fills the 160 MiB cap
+  during file_SUITE (`enospc` at the controller's `start_minor_log_file`); file_SUITE alone fits 32 MiB, and
+  sendfile_SUITE alone reaches `enospc` too. A walk's hold that the grant never forgets (erx_fs_grant's `loose`
+  set) or an open never clunked when its owner dies would keep each unlinked node's charge. The kernel group's
+  erXos side runs one runtime per suite until this is fixed.
+* [Medium] hosted runtime, code path: `code:get_path()` lists every application given with `-pa` twice, once
+  before and once after `kernel` and `stdlib`, where stock lists each once, so code_SUITE's `set_path`, `add_path`
+  and `add_paths` fail on the deduplicated path `code:set_path/1` gives back. Find what adds the second copy.
+* [Medium] `tools/lib/erx/oracle_comparison.rb`: when a suite skips whole on erXos (the socket suites: `esock not
+  supported`), its `init_per_group` and `end_per_group` never run there and show as unknown, 371 unresolved rows
+  in the kernel group that no table row can claim. Derive a config function's status from the skip of the cases
+  under its group path on that side.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 61 differing
+  and 25 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
+  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, and
+  the `changed` rows whose suite also shows another status. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

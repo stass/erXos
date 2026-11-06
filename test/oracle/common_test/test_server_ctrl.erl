@@ -19,7 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: emit reporting-only case observations at their owner; refuse a slave start and find no old release without distribution.
+%% Modified by erXos: emit reporting-only case observations at their owner; refuse a node start and find no old release without distribution.
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 -module(test_server_ctrl).
 -moduledoc false.
@@ -909,8 +909,10 @@ handle_call(get_target_info, _From, State) ->
 
 %% erXos no-distribution guard begin.
 %% On a node without distribution, slave:start/5 exits not_alive inside
-%% this server; the case that asked gets the error, and the run goes on.
-handle_call({start_node, _Name, slave, _Options}, _From, State)
+%% this server and a peer start fails its gen_tcp:listen/2 match there (no
+%% sockets on erXos), either of which would end the run; the case that
+%% asked gets not_alive instead, and the run goes on.
+handle_call({start_node, _Name, _Type, _Options}, _From, State)
   when node() =:= nonode@nohost ->
     {reply,{{error,not_alive},undefined,undefined},State};
 %% An old release runs only as a node this one starts, so without
