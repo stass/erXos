@@ -51,11 +51,11 @@ The [architecture](docs/design.md), the [roadmap](docs/plan.md) and the
 ## Architecture
 
 erXos stands on the shoulders of giants, and adds what none of them had.
-From Erlang/OTP it takes processes and supervision; from L4 and Fiasco,
-the kernel. EROS and Genode taught it to account for resources; Plan 9
-and Inferno, namespaces, files, the shell and graphics. QNX showed how
-UNIX can sit on a microkernel, Genera how a whole machine can stay open
-to inspection, and Psyche, Barrelfish and Akaros how a kernel and a
+From *Erlang/OTP* it takes processes and supervision; from *L4* and *Fiasco*,
+the kernel. *EROS* and *Genode* taught it to account for resources; *Plan 9*
+and *Inferno*, namespaces, files, the shell and graphics. *QNX* showed how
+UNIX can sit on a microkernel, *Genera* how a whole machine can stay open
+to inspection, and *Psyche*, *Barrelfish* and *Akaros* how a kernel and a
 runtime can share the CPUs.
 
 What is new is how the pieces meet. The Erlang process becomes the
@@ -69,14 +69,14 @@ pixels. The [overview](docs/overview.md) tells the longer story.
 * **A capability microkernel.** The kernel knows threads, memory,
   capabilities and interrupts. It knows nothing of Erlang. Everything
   else runs in user mode, the runtimes included. erXos's own kernel
-  follows L4 and Fiasco, with lessons from seL4 and Zircon. Until it is
+  follows *L4* and *Fiasco*, with lessons from *seL4* and *Zircon*. Until it is
   written, a near-stock Fiasco stands in behind the same interface.
   ([kernel](docs/design-kernel.md), [stopgap](docs/design-stopgap.md))
 * **Two-level scheduling, one CPU authority.** The kernel grants CPU time
   to groups of threads. Each runtime schedules its processes on the
   threads its group pays for, without a kernel call. The kernel enforces
-  every grant and never calls back into a runtime's scheduler. Psyche,
-  Akaros and Barrelfish showed the way; scheduler activations, long
+  every grant and never calls back into a runtime's scheduler. *Psyche*,
+  *Akaros* and *Barrelfish* showed the way; *scheduler activations*, long
   abandoned, showed what to avoid.
   ([scheduler](docs/design-scheduler.md))
 * **Domains: a wall around some processes.** A domain is an address
@@ -85,17 +85,17 @@ pixels. The [overview](docs/overview.md) tells the longer story.
   processes always have. But a domain reaches another's process only if
   that process's runtime exported it, so a forged pid reaches nothing.
   A crashed domain looks like a dead node. Think of Erlang distribution
-  inside one machine, with Safe Erlang's pids as capabilities.
+  inside one machine, with *Safe Erlang*'s pids as capabilities.
   ([domains](docs/design-domains.md))
 * **A budget for everything.** Every kernel allocation is charged to a
   budget carved from its parent's. Delete the budget, and everything
   charged to it goes too, so ending a domain is one operation. Users get
-  memory quotas and a CPU share without a container runtime. EROS's
-  space banks are the model, with Genode's quotas.
+  memory quotas and a CPU share without a container runtime. *EROS*'s
+  space banks are the model, with *Genode*'s quotas.
   ([budgets](docs/design-kernel.md#budgets),
   [resource policy](docs/design-system.md#resource-policy))
 * **Private namespaces, one file protocol.** This comes straight from
-  Plan 9. Each domain sees files through its own table of file servers.
+  *Plan 9*. Each domain sees files through its own table of file servers.
   There is no global root, so a path is the visible face of a
   capability. Every file server, from storage to `/proc` and `/dev`,
   speaks 9P2000.L. ([files](docs/design-files.md),
@@ -103,7 +103,7 @@ pixels. The [overview](docs/overview.md) tells the longer story.
 * **Drivers are Erlang processes.** A driver is a supervised process over
   a thin device shim. Kill the network driver mid-transfer. Its
   supervisor resets the device and restarts it, and the shell never
-  notices. HydrOS and Midori took the same view.
+  notices. *HydrOS* and *Midori* took the same view.
   ([drivers](docs/design-system.md#drivers),
   [device shim](docs/design-runtime.md#the-device-nif))
 * **Storage in Erlang.** Releases ship as read-only EROFS images, checked
@@ -111,18 +111,31 @@ pixels. The [overview](docs/overview.md) tells the longer story.
   goes to a spare slot and commits only after a healthy trial boot. A
   bug in a file system crashes a process, not the machine.
   ([storage](docs/design-storage.md))
-* **The live machine.** This is Genera's legacy. One inspector shows
+* **The live machine.** This is *Genera*'s legacy. One inspector shows
   CPUs, kernel objects, domains, budgets and processes as live records,
   and tags each value with who reported it. Tracing follows processes,
   messages between domains and kernel events. Code loads hot from the
   shell or from your laptop. ([live machine](docs/design-live.md))
-* **Display, widgets and the web.** A display serves windows as files. A
-  program draws with Plan 9's draw protocol. An Erlang application
-  describes its interface as a term and receives events as messages. A
-  terminal keeps shell output linked to the values behind it, as
-  Genera's dynamic windows did. A browser is just one more display.
-  ([display](docs/design-display.md), [web](docs/design-web.md))
-* **UNIX on the surface.** As on QNX and Plan 9, UNIX is how the system
+* **Windows are files.** A display serves each window as a directory of
+  files, as *Plan 9*'s *rio* does. A program finds its window at
+  `/dev/draw` and draws with *Plan 9*'s draw protocol. A terminal is a
+  window too, and keeps shell output linked to the values behind it, as
+  *Genera*'s dynamic windows did. The same window system runs a desktop
+  of overlapping windows, or a kiosk, a dashboard or a pair of smart
+  glasses with one full-screen window. ([display](docs/design-display.md))
+* **One interface, every medium.** An Erlang application never draws. It
+  describes its interface as a term: a tree that says what the widgets
+  are, what they hold and which events they raise. When its state
+  changes, it sends the new tree, and events come back as messages. It
+  holds no widget handles and issues no widget commands.
+  ([widgets](docs/design-display.md#widget-trees))
+* **Same stream, different medium.** Every display gets the same stream
+  of widget changes and sends back the same events. Each renders it in
+  its own idiom: a screen as pixels, a panel as *LVGL* widgets, a browser
+  as a web page. Nothing is mirrored. One application, unchanged, looks
+  native on a touch panel and in a browser tab.
+  ([web](docs/design-web.md))
+* **UNIX on the surface.** As on *QNX* and *Plan 9*, UNIX is how the system
   looks, not what it is built on. The command shell speaks rc's language
   and pipes live Erlang records between commands. Toybox supplies the
   familiar tools. Native programs run on a POSIX-lite layer over musl,
@@ -131,7 +144,7 @@ pixels. The [overview](docs/overview.md) tells the longer story.
   [pipes](docs/design-pipes.md))
 * **Declarative where it is simpler.** One system manifest says what the
   machine runs. The build checks it and packs it into the boot image, an
-  idea taken from Barrelfish and the BOOM project. The kernel ABI and the
+  idea taken from *Barrelfish* and the *BOOM* project. The kernel ABI and the
   hardware registers each have one source, and every header and accessor
   is generated from it. ([manifest](docs/design-system.md#the-manifest),
   [ABI](docs/design-abi.md), [generation](docs/design-generation.md))
@@ -176,22 +189,37 @@ erx: erts: 1 schedulers and 1 dirty CPU schedulers hold executor slots
 Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 
 Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
+
+% Which applications are running? Besides kernel and stdlib:
+% the UART driver, the file servers and the runtime services.
 1> [{A, element(2, application:get_key(A, description))} || {A, _, _} <- application:which_applications()].
 [{erx_uart,"erXos UART drivers"},
  {erx_files,"erXos file servers"},
  {erx,"erXos runtime services"},
  {stdlib,"ERTS  CXC 138 10"},
  {kernel,"ERTS  CXC 138 10"}]
+
+% Write a file to /tmp, served by a RAM file system written in
+% Erlang, and read it back.
 2> file:write_file("/tmp/hello.txt", <<"hello from erXos\n">>), file:read_file("/tmp/hello.txt").
 {ok,<<"hello from erXos\n">>}
+
+% Start a process that divides by zero, and catch its crash
+% with a monitor. The shell carries on.
 3> {_, Ref} = spawn_monitor(fun() -> 1 / erlang:list_to_integer("0") end), receive {'DOWN', Ref, process, _, {Reason, _}} -> {crashed, Reason} end.
 =ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
 Error in process <0.103.0> with exit value:
 {badarith,[{erlang,'/',[1,0],[{error_info,#{module => erl_erts_errors}}]}]}
 
 {crashed,badarith}
+
+% Define a ring: N processes, each passing a counted-down
+% token to the next, until it reaches zero.
 4> Ring = fun(N, Laps) -> Last = lists:foldl(fun(_, Next) -> spawn(fun Loop() -> receive 0 -> Next ! 0; T -> Next ! T - 1, Loop() end end) end, self(), lists:seq(1, N)), Alive = erlang:system_info(process_count), Last ! N * Laps, (fun Wait() -> receive 0 -> ok; T -> Last ! T - 1, Wait() end end)(), io:format("~b processes alive; one token went round a ring of ~b, ~b messages~n", [Alive, N, N * Laps]) end.
 #Fun<erl_eval.41.130099583>
+
+% Run it: 50,000 processes alive at once, one token,
+% a million messages.
 5> Ring(50000, 20).
 50039 processes alive; one token went round a ring of 50000, 1000000 messages
 ok
