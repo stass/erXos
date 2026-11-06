@@ -5,19 +5,24 @@
 # (tools/lib/erx/libc_test.rb, docs/design-stopgap.md "musl's own tests").
 # One test per line:
 #
-#   NAME STATE KIND REASON
+#   NAME STATE KIND [at=PLACES] REASON
 #
 # STATE is the result the test must have: failed, timed_out or not_run. A
-# test not listed must pass. tools/erx check-libc-test fails on any result
-# that differs from its line, so a test that starts to pass, or fails in a
-# new way, needs its line changed or removed.
+# test not listed must pass. A failed line pins at= PLACES, the FILE:LINE of
+# libc-test's source that each of the test's error lines names, sorted and
+# comma-separated. tools/erx check-libc-test fails on any result that
+# differs from its line: a test that starts to pass, ends another way, or
+# reports a failure at a place its line does not list needs its line
+# changed or removed. A failed test that reports a new failure at a place
+# already listed is not caught. A timed_out line is held to the timeout and
+# a not_run line to its cause.
 #
 # KIND says why:
 #   bug         a bug in erXos's code, with its TODO.md item in REASON
 #   stopgap     a documented difference of the Phase 1 stopgap, which
 #               erXos's kernel removes; REASON names where it is documented
-#   upstream    musl or libc-test itself, the same on stock musl on Linux;
-#               REASON cites it
+#   upstream    musl's or libc-test's own code; REASON cites the source
+#               that behaves so
 #   cannot-run  Phase 1's musl refuses what the test's own object calls with
 #               ENOSYS, so the run's plan does not start it; REASON is the
 #               plan's cause, which the check holds the result to
@@ -29,20 +34,20 @@
 # call the target is blocked in (design-stopgap.md, the seam's table; the
 # kernel's form is design-runtime.md "Thread cancellation").
 functional/pthread_cancel                    timed_out stopgap    a thread blocked in a call is not interrupted by pthread_cancel: design-stopgap.md
-regression/pthread_cond_wait-cancel_ignored  failed    stopgap    a thread blocked in pthread_cond_wait is not interrupted by pthread_cancel: design-stopgap.md
+regression/pthread_cond_wait-cancel_ignored  failed    stopgap    at=pthread_cond_wait-cancel_ignored.c:52 a thread blocked in pthread_cond_wait is not interrupted by pthread_cancel: design-stopgap.md
 
 # The seam's futex has no priority inheritance: FUTEX_LOCK_PI reads ENOSYS
 # (design-stopgap.md, the futex row); erXos's umtx grows it
 # (design-kernel.md "The interface grows from FreeBSD's design").
-functional/pthread_mutex_pi                  failed    stopgap    PTHREAD_PRIO_INHERIT is refused with ENOSYS: design-stopgap.md futex row
-functional/pthread_robust                    failed    stopgap    its priority-inheritance half is refused with ENOSYS; the robust half passes: design-stopgap.md futex row
+functional/pthread_mutex_pi                  failed    stopgap    at=pthread_mutex_pi.c:108,pthread_mutex_pi.c:42,pthread_mutex_pi.c:87 PTHREAD_PRIO_INHERIT is refused with ENOSYS: design-stopgap.md futex row
+functional/pthread_robust                    failed    stopgap    at=pthread_robust.c:43 its priority-inheritance half is refused with ENOSYS; the robust half passes: design-stopgap.md futex row
 
-# musl's own behaviour, the same on Linux.
-functional/strptime                          failed    upstream   musl fced99e makes %s parse-only and %z take only +hhmm (src/time/strptime.c, case 's' and 'z'); libc-test wants more
-math/powf                                    failed    upstream   musl's powf has no exact case for y == 1 and raises INEXACT with OVERFLOW or UNDERFLOW (src/math/powf.c:175-184); the same under TCG and HVF
-math/yn                                      failed    upstream   musl's yn, from FreeBSD's e_jn.c, is 3.2 ulp off at yn(6, 0x1.8c5db097f7442p-1) (src/math/jn.c:271); the same under TCG and HVF
-regression/regex-backref-oob                 failed    upstream   musl's TRE matcher compares a back reference from str_byte - 1, one byte back, so after a multibyte character it compares the wrong bytes (src/regex/regexec.c:785); unfixed through master
-regression/regexec-backref                   failed    upstream   musl's TRE matcher finds no match of \(.\{1,3\}\)\1 in "foo" or "aababa" (back references, src/regex/regexec.c:774-803); unfixed through master
+# musl's own behaviour.
+functional/strptime                          failed    upstream   at=strptime.c:36,strptime.c:47 musl fced99e makes %s parse-only and %z take only +hhmm (src/time/strptime.c, case 's' and 'z'); libc-test wants more
+math/powf                                    failed    upstream   at=powf.h:103,powf.h:530,powf.h:533,powf.h:719,powf.h:722 musl's powf has no exact case for y == 1 and raises INEXACT with OVERFLOW or UNDERFLOW (src/math/powf.c:175-184)
+math/yn                                      failed    upstream   at=yn.h:9 musl's yn, from FreeBSD's e_jn.c, is 3.2 ulp off at yn(6, 0x1.8c5db097f7442p-1) (src/math/jn.c:271)
+regression/regex-backref-oob                 failed    upstream   at=regex-backref-oob.c:35 musl's TRE matcher compares a back reference from str_byte - 1, one byte back, so after a multibyte character it compares the wrong bytes (src/regex/regexec.c:785); unfixed through master
+regression/regexec-backref                   failed    upstream   at=regexec-backref.c:14,regexec-backref.c:15,regexec-backref.c:17,regexec-backref.c:23,regexec-backref.c:24,regexec-backref.c:26 musl's TRE matcher finds no match of \(.\{1,3\}\)\1 in "foo" or "aababa" (back references, src/regex/regexec.c:774-803); unfixed through master
 
 # What Phase 1 does not offer a test task.
 functional/dlopen                            not_run   cannot-run needs shared objects

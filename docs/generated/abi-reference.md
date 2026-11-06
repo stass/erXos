@@ -21,6 +21,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_ELF_MACHINE` | 183 |
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
+| `ERX_BOOT_FLAGS_KNOWN` | 7 |
 | `ERX_BOOT_HANDOFF_VERSION` | 3 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
 | `ERX_BOOT_KERNEL_ALIGN` | 2097152 |
@@ -115,10 +116,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ENOTSUP` | -12 |
 | `ERX_ENTROPY_BYTES_MAX` | 256 |
 | `ERX_ENTROPY_CREDIT` | 1 |
+| `ERX_ENTROPY_FLAGS_KNOWN` | 1 |
 | `ERX_ENTROPY_QUALITY_FIXED` | 3 |
 | `ERX_ENTROPY_QUALITY_GOOD` | 1 |
 | `ERX_ENTROPY_QUALITY_WEAK` | 2 |
 | `ERX_ENTRY_FILE` | 1 |
+| `ERX_ENTRY_FLAGS_KNOWN` | 3 |
 | `ERX_ENTRY_IMAGE` | 2 |
 | `ERX_ENTRY_SEAL` | 2 |
 | `ERX_ENTRY_SYSTEM` | 1 |
@@ -183,6 +186,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_GROUP_DEPTH_MAX` | 8 |
 | `ERX_GROUP_EXECUTORS` | 64 |
 | `ERX_GROUP_EXECUTORS_MAX` | 64 |
+| `ERX_GROUP_FLAGS_KNOWN` | 15 |
 | `ERX_GROUP_HINTS` | 1 |
 | `ERX_GROUP_PLACE` | 8 |
 | `ERX_GROUP_STATUS` | 4 |
@@ -219,6 +223,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_HR_TRIGGER` | 67108864 |
 | `ERX_HR_WRITE` | 64 |
 | `ERX_IMAGE_FIXED` | 1 |
+| `ERX_IMAGE_FLAGS_KNOWN` | 3 |
 | `ERX_IMAGE_JIT` | 2 |
 | `ERX_IMAGE_MAGIC` | 1230524997 |
 | `ERX_IMAGE_SEGMENTS_MAX` | 8 |
@@ -274,13 +279,16 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_LOG_LEVEL_INFO` | 3 |
 | `ERX_LOG_LEVEL_WARNING` | 2 |
 | `ERX_LOG_RATE_BYTES` | 16384 |
+| `ERX_LOG_RECORD_FLAGS_KNOWN` | 1 |
 | `ERX_LOG_RECORD_TRUNCATED` | 1 |
 | `ERX_LOG_RING_BYTES` | 65536 |
 | `ERX_LOG_TEXT_MAX` | 2112 |
 | `ERX_MACHINE_CRASH_FOUND` | 2 |
 | `ERX_MACHINE_DET` | 1 |
+| `ERX_MACHINE_FLAGS_KNOWN` | 3 |
 | `ERX_MANIFEST_BYTES_MAX` | 16777216 |
 | `ERX_MANIFEST_DEVELOPMENT` | 1 |
+| `ERX_MANIFEST_FLAGS_KNOWN` | 3 |
 | `ERX_MANIFEST_MAGIC` | 1297633861 |
 | `ERX_MANIFEST_MODE_DEVELOPMENT` | 1 |
 | `ERX_MANIFEST_MODE_PARTIAL` | 3 |
@@ -292,7 +300,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MAPPINGS_MAX` | 65536 |
 | `ERX_MEM_ATTR_DEVICE` | 0 |
 | `ERX_MEM_CONTIGUOUS_MAX` | 1048576 |
+| `ERX_MEM_FLAGS_KNOWN` | 1 |
 | `ERX_MEM_JIT` | 1 |
+| `ERX_MF_DEVICE_FLAGS_KNOWN` | 1 |
 | `ERX_MF_DEVICE_HOSTILE` | 1 |
 | `ERX_MF_DEVICE_ROLE_BLOCK` | 5 |
 | `ERX_MF_DEVICE_ROLE_CONFIGURATION` | 3 |
@@ -303,10 +313,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MF_DMA_CONFINED` | 1 |
 | `ERX_MF_DMA_NONE` | 0 |
 | `ERX_MF_DMA_UNCONFINED` | 2 |
+| `ERX_MF_DOMAIN_FLAGS_KNOWN` | 3 |
 | `ERX_MF_DOMAIN_REQUIRED` | 1 |
 | `ERX_MF_DOMAIN_RESCUE` | 2 |
 | `ERX_MF_HASH_ALGORITHM_SHA256` | 1 |
 | `ERX_MF_IMAGE_FORMAT_EROFS_VERITY` | 1 |
+| `ERX_MF_LIMITS_FLAGS_KNOWN` | 1 |
 | `ERX_MF_LIMITS_SPACES` | 1 |
 | `ERX_MF_NONE` | 4294967295 |
 | `ERX_MF_PARAMETER_BOOLEAN` | 3 |
@@ -322,6 +334,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MF_SELECTOR_DT` | 1 |
 | `ERX_MF_SELECTOR_PCI` | 2 |
 | `ERX_MF_SERVICE` | 1 |
+| `ERX_MF_WINDOW_RIGHTS_KNOWN` | 3 |
 | `ERX_MF_WINDOW_RIGHTS_READ` | 1 |
 | `ERX_MF_WINDOW_RIGHTS_WRITE` | 2 |
 | `ERX_MF_WINDOW_ROLE_BOOT_SELECTION` | 3 |
@@ -349,6 +362,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_P9_GETATTR_MASK_GEN` | 4096 |
 | `ERX_P9_GETATTR_MASK_GID` | 8 |
 | `ERX_P9_GETATTR_MASK_INO` | 256 |
+| `ERX_P9_GETATTR_MASK_KNOWN` | 16383 |
 | `ERX_P9_GETATTR_MASK_MODE` | 1 |
 | `ERX_P9_GETATTR_MASK_MTIME` | 64 |
 | `ERX_P9_GETATTR_MASK_NLINK` | 2 |
@@ -380,6 +394,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_P9_SETATTR_VALID_ATIME_SET` | 128 |
 | `ERX_P9_SETATTR_VALID_CTIME` | 64 |
 | `ERX_P9_SETATTR_VALID_GID` | 4 |
+| `ERX_P9_SETATTR_VALID_KNOWN` | 511 |
 | `ERX_P9_SETATTR_VALID_MODE` | 1 |
 | `ERX_P9_SETATTR_VALID_MTIME` | 32 |
 | `ERX_P9_SETATTR_VALID_MTIME_SET` | 256 |
@@ -390,9 +405,11 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_P9_XATTR_MAX` | 65536 |
 | `ERX_PACK_DEVELOPMENT` | 1 |
 | `ERX_PACK_ENTRIES_MAX` | 65536 |
+| `ERX_PACK_FLAGS_KNOWN` | 7 |
 | `ERX_PACK_HASH_SIZE` | 32 |
 | `ERX_PACK_PATH_MAX` | 4096 |
 | `ERX_PACK_STRINGS_MAX` | 4194304 |
+| `ERX_PACK_TEST_CODE` | 4 |
 | `ERX_PACK_UNCONFINED_DMA` | 2 |
 | `ERX_PACK_VERSION` | 2 |
 | `ERX_PAGE_SIZE` | 4096 |
@@ -420,10 +437,12 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SEAL_DEVICE` | 1 |
 | `ERX_SEAL_NONE` | 0 |
 | `ERX_SEAL_TPM` | 2 |
+| `ERX_SEG_FLAGS_KNOWN` | 1 |
 | `ERX_SEG_GUARDED` | 1 |
 | `ERX_SLICE_MAX_US` | 50000 |
 | `ERX_SLICE_MIN_US` | 500 |
 | `ERX_SPACE_DEPTH_MAX` | 64 |
+| `ERX_SPACE_FLAGS_KNOWN` | 1 |
 | `ERX_SPACE_JIT` | 1 |
 | `ERX_THREAD_CLASS_EXECUTOR` | 1 |
 | `ERX_THREAD_CLASS_WORKER` | 0 |
@@ -433,6 +452,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_UTCB_BRS` | 58 |
 | `ERX_UTCB_BYTES_MAX` | 504 |
 | `ERX_VM_FIXED` | 1 |
+| `ERX_VM_FLAGS_KNOWN` | 3 |
 | `ERX_VM_NOREPLACE` | 2 |
 | `ERX_WATCHDOG_BOOT_DEFAULT` | 60 |
 | `ERX_WATCHDOG_BOOT_MAX` | 600 |

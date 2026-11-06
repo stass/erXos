@@ -125,6 +125,32 @@ class ChecksTest < Minitest::Test
     end
   end
 
+  # Only the oracle's QEMU run builds a test image; the production image module defines
+  # the entry point. The identifier anywhere else in host tooling, as a call, a symbol for
+  # send or method, or in a comment, fails the check, as does a literal true for Pack's
+  # test_code keyword; tests outside tools/ may name either.
+  def test_only_the_oracle_builds_a_test_image
+    write('tools/lib/erx/production_image.rb', "def build_test_image(directory:, added:)\nend\n")
+    write('tools/lib/erx/oracle_qemu.rb', "image.build_test_image(directory: d, added: a)\n")
+    write('tools/lib/erx/gate.rb', "image.build(directory: d)\n# builds no build_test_images\n")
+    write('test/host/production_image_test.rb', "image.build_test_image(directory: d, added: a)\n")
+    write('tools/notes.txt', "build_test_image is documented here\n")
+    assert checks.run
+    { 'tools/lib/erx/gate.rb' => "image.build(directory: d)\nimage.build_test_image(directory: d, added: a)\n",
+      'tools/erx' => "#!/usr/bin/env ruby\nimage.public_send(:build_test_image, directory: d, added: a)\n",
+      'tools/lib/erx/qemu_suites/boot.rb' => "# reuses build_test_image\n",
+      'tools/lib/erx/gate_pack.rb' => "pack.build(entries: e, output: o, test_code: false)\n" \
+                                      "pack.build(entries: e, output: o, test_code: true)\n" }.each do |relative, source|
+      original = File.exist?(File.join(@root, relative)) ? File.binread(File.join(@root, relative)) : nil
+      path = write(relative, source)
+      error = assert_raises(Erx::Error) { checks.run }
+      assert_equal 'a test image is built only by tools/lib/erx/oracle_qemu.rb: ' \
+                   "#{relative}:#{source.lines.size}", error.message
+      original ? File.binwrite(path, original) : File.unlink(path)
+    end
+    assert checks.run
+  end
+
   def test_ignored_files_and_agent_worktrees_are_not_source_inputs
     write('.gitignore', "/build/\n/.claude/\n")
     write('build/fiasco/inputs/uart.h', "/* \xc3\xa9 */\n".b)

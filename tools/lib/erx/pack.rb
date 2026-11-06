@@ -35,13 +35,15 @@ module Erx
 
     # An entry names an artifact plus its trusted build receipt. Generated
     # manifest and notices entries belong to this funnel and cannot be supplied.
+    # test_code marks the archive a test image (PackWire#write).
     def build(entries:, root_path:, build_kind:, platform:, artifacts:,
-              manifest_source:, output:, budget: DEFAULT_BUDGET)
+              manifest_source:, output:, budget: DEFAULT_BUDGET, test_code: false)
       require_relative 'manifest'
       unless budget.is_a?(Integer) && budget.between?(1, 512 * 1024 * 1024)
         raise Error, 'invalid pack host budget'
       end
       raise Error, 'invalid pack build kind' unless %w[development release].include?(build_kind)
+      raise Error, 'invalid pack test-code mark' unless [true, false].include?(test_code)
       destination = File.expand_path(output)
       directory = OutputDirectory.prepare(root: @output_root, path: File.dirname(destination))
       destination = File.join(directory, File.basename(destination))
@@ -80,7 +82,7 @@ module Erx
         end
         temporary = File.join(workspace, 'image.pack')
         write(rows, root_entry: root_entry, build_kind: build_kind,
-              path: temporary, budget: budget)
+              path: temporary, budget: budget, test_code: test_code)
         @checker.run([temporary], runner: @runner, name: 'pack-check', deadline: 300)
         hash = Digest::SHA256.file(temporary).hexdigest
         size = File.size(temporary)
@@ -184,10 +186,10 @@ module Erx
       raise Error, 'pack strings exceed their bound' if strings_size > @codec.constant('pack_strings_max')
     end
 
-    def write(rows, root_entry:, build_kind:, path:, budget:)
+    def write(rows, root_entry:, build_kind:, path:, budget:, test_code:)
       File.open(path, 'w+b', 0o600) do |output|
         PackWire.new(codec: @codec, hasher: @hasher).write(rows: rows, root_entry: root_entry, build_kind: build_kind,
-                                                         output: output, budget: budget)
+                                                         output: output, budget: budget, test_code: test_code)
         output.flush
         output.fsync
       end

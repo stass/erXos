@@ -32,6 +32,12 @@ module Erx
           test: 'test/host/device_callers_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'test-image-builder', rule: "only the oracle's QEMU run builds a test image, the one image that " \
+                                            'carries test code',
+          design: "#{STOPGAP}#the-production-image", check: 'Checks::TEST_IMAGE_BUILDER',
+          test: 'test/host/checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )

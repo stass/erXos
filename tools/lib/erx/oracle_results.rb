@@ -397,7 +397,8 @@ module Erx
     private_class_method :decimal
 
     def read_bounded(path, limit:)
-      bytes = File.binread(path, limit + 1)
+      # binread returns nil, not "", for an empty file.
+      bytes = File.binread(path, limit + 1).to_s
       raise Error, "oracle report exceeds byte bound: #{path}" if bytes.bytesize > limit
       bytes
     end

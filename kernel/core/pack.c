@@ -403,7 +403,9 @@ erx_index_check(const uint8_t *bytes, size_t length, erx_blake3_ctx_t *hasher,
 	    header->entries_off != ERX_PACK_HEADER_SIZE ||
 	    header->strings_size > ERX_PACK_STRINGS_MAX ||
 	    header->root_entry >= header->nentries ||
-	    (header->flags & ~(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA)) != 0)
+	    (header->flags & ~ERX_PACK_FLAGS_KNOWN) != 0 ||
+	    ((header->flags & ERX_PACK_TEST_CODE) != 0 &&
+	    (header->flags & ERX_PACK_DEVELOPMENT) == 0))
 		return (erx_pack_fail(error, UINT32_MAX, "header_values"));
 	if (__builtin_mul_overflow((uint64_t)header->nentries,
 	    (uint64_t)ERX_PACK_ENTRY_SIZE, &table_bytes) ||

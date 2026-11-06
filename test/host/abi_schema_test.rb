@@ -614,6 +614,16 @@ class AbiSchemaTest < Minitest::Test
     assert_raises(Erx::ABI::SchemaError) { schema(body) }
   end
 
+  # A reader refuses an unknown bit by masking with the one generated constant, so a bit
+  # added to the declaration is accepted everywhere at once.
+  def test_flags_declare_the_mask_of_their_known_bits
+    body = "flags options_flags u32\n  bit enabled 0\n  bit spare 3\n"
+    known = schema(body).constants.fetch('options_flags_known')
+    assert_equal 0b1001, known.value
+    assert_equal 'u32', known.type.name
+    assert_raises(Erx::ABI::SchemaError) { schema("#{body}enum options_kind u8\n  value flags_known 1\n") }
+  end
+
   def test_debug_log_is_bounded_by_utcb_message_bytes
     root = File.expand_path('../..', __dir__)
     model = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))

@@ -2928,7 +2928,8 @@ output, so a change of algorithm is a change of version.
 header, 96 bytes, at offset 0
   u8[8]   magic          "ERXPACK\0"
   u32     version        2: this layout, hashed with BLAKE3
-  u32     flags          ERX_PACK_DEVELOPMENT, ERX_PACK_UNCONFINED_DMA; others zero
+  u32     flags          ERX_PACK_DEVELOPMENT, ERX_PACK_UNCONFINED_DMA, ERX_PACK_TEST_CODE
+                         (only beside ERX_PACK_DEVELOPMENT); others zero
   u64     total_size     bytes of the archive, a multiple of 4,096
   u32     nentries       1 .. 65,536
   u32     entry_size     64
@@ -7929,7 +7930,12 @@ arithmetic.
 The boot image carries the build's flags: `ERX_PACK_DEVELOPMENT`, which
 puts `development build: trusted code only` in the banner, and
 `ERX_PACK_UNCONFINED_DMA`, which lets a release build create memory for
-unconfined devices.
+unconfined devices, and `ERX_PACK_TEST_CODE`, which marks a test image, one
+whose system release carries test code, and puts `test image: carries test
+code` in the banner after the development warning. Only a development build
+may carry it: the archive check and the kernel's acceptance of the handoff
+refuse it on any other, and refuse every bit outside `ERX_PACK_FLAGS_KNOWN`,
+the mask the ABI generator emits for each flags type.
 
 ### Interaction with other subsystems
 

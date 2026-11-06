@@ -46,6 +46,8 @@ Erx_handoff::banner()
 
   if (view.development)
     printf("development build: trusted code only\n");
+  if (view.test_code)
+    printf("test image: carries test code\n");
   printf("erx: boot image build ");
   for (unsigned char byte : view.build_id)
     printf("%02x", byte);

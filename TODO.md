@@ -213,9 +213,16 @@ it; git history is the record of completed work.
 * [Medium] tooling, `tools/lib/erx/oracle_qemu.rb`: the suites' events reach the host on the
   console's serial line, which the kernel, the root and ERTS's C output (`erx_output_write`)
   also write, at any byte. Console writers never split an event line, as `erx_console` writes
-  each `display_string` whole, but a C writer can; the line's length and CRC-32 then reject
-  it, and the run reports itself incomplete rather than read it. Move the events to the host
+  each `display_string` whole, but a C writer can; the frame's length and CRC-32 then reject
+  it, its sequence number's gap shows it lost, and the run reports itself incomplete rather
+  than read it. Move the events to the host
   link (`/pl011@9040000`, M4), which only the host link's own sink writes.
+* [Medium] tooling, `tools/lib/erx/pack.rb`, `pack_wire.rb`: `ERX_PACK_TEST_CODE` is set only
+  by `ProductionImage#build_test_image`; other packers that carry test code (`BootImage#build`
+  for libc-test and the native task suites, `OracleHosted#pack`) leave it clear, since
+  `test_code:` defaults to false. Derive the bit from the entries (a per-entry test flag the
+  packer ORs into the header and `erx_index_check` checks against them), or at least make
+  `test_code:` a required keyword so every packer states it.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
   the host link's first consumer, M4.

@@ -44,11 +44,36 @@ class OracleCliTest < Minitest::Test
     Dir.mktmpdir do |directory|
       qemu = FakeQemu.new(directory, passing: true)
       status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
-      assert_equal 0, status
+      assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
       assert_includes output, 'oracle qemu hvf: not_run'
       assert_includes output, 'oracle qemu tcg: passed'
-      assert_includes output, 'partial: the system domain runs file_SUITE and filelib_SUITE'
-      assert_equal [[%w[file_SUITE filelib_SUITE], { accel: 'tcg', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
+      assert_includes output, "partial: the system domain runs #{Erx::OracleSuites::SUITES.keys.join(' and ')}"
+      assert_equal [[Erx::OracleSuites::SUITES.keys, { accel: 'tcg', cpus: 1, jobs: 4 }]], qemu.calls.grep(Array)
+    end
+  end
+
+  # Its runs go where a plain `oracle qemu` run's do not, so neither refuses
+  # the other's directory.
+  def test_check_oracle_and_oracle_qemu_use_separate_default_directories
+    Dir.mktmpdir do |directory|
+      qemu = FakeQemu.new(directory, passing: true)
+      run_cli('check-oracle', qemu_class: qemu, accelerators: %w[tcg])
+      run_cli('oracle', 'qemu', qemu_class: qemu)
+      check, plain = qemu.calls.grep(Hash).map { |options| options.fetch(:out) }
+      assert_equal File.join(Erx::ROOT, 'build/check-oracle/tcg'), check
+      assert_equal File.join(Erx::ROOT, 'build/oracle-qemu'), plain
+      refute check.start_with?("#{plain}/")
+    end
+  end
+
+  def test_check_oracle_fails_when_no_accelerator_ran
+    Dir.mktmpdir do |directory|
+      qemu = FakeQemu.new(directory, passing: true)
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: [])
+      assert_equal 1, status
+      assert_includes output, 'oracle qemu tcg: not_run'
+      assert_includes output, 'failed: no accelerator ran'
+      assert_empty qemu.calls
     end
   end
 

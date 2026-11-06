@@ -30,8 +30,10 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 	handoff = (const erx_boot_handoff_t *)(const void *)record;
 	if (handoff->version != ERX_BOOT_HANDOFF_VERSION)
 		return ("version");
-	if ((handoff->flags & ~(uint32_t)(ERX_PACK_DEVELOPMENT |
-	    ERX_PACK_UNCONFINED_DMA)) != 0)
+	/* Only a development build may carry test code. */
+	if ((handoff->flags & ~ERX_PACK_FLAGS_KNOWN) != 0 ||
+	    ((handoff->flags & ERX_PACK_TEST_CODE) != 0 &&
+	    (handoff->flags & ERX_PACK_DEVELOPMENT) == 0))
 		return ("flags");
 	if (handoff->image_size == 0 ||
 	    (handoff->image_start % ERX_PAGE_SIZE) != 0 ||
@@ -47,6 +49,7 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 	*view = (erx_boot_handoff_view_t){
 		.flags = handoff->flags,
 		.development = (handoff->flags & ERX_PACK_DEVELOPMENT) != 0,
+		.test_code = (handoff->flags & ERX_PACK_TEST_CODE) != 0,
 		.image = { .start = handoff->image_start,
 		    .size = handoff->image_size },
 		.pool_usable = handoff->pool_usable,

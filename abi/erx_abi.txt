@@ -111,6 +111,7 @@ scalar urgency u8 range 0 @urgency_max
 flags pack_flags u32
   bit development 0
   bit unconfined_dma 1
+  bit test_code 2
 enum entry_kind u8
   value file 1
   value image 2

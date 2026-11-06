@@ -73,12 +73,16 @@ class OracleComparisonTest < Minitest::Test
     assert_equal %w[crashed unresolved], [row.erxos, row.verdict]
   end
 
-  # An event as the reporter prints it: a newline, the prefix, the JSON's
-  # length and CRC-32, the JSON and a closing newline.
-  def frame(json, eol: "\n")
-    format("\nerx-oracle-event %<length>d %<crc>08x %<json>s%<eol>s",
-           length: json.bytesize, crc: Zlib.crc32(json), json: json, eol: eol)
+  # An event as the reporter prints it: a newline, the prefix, the sequence
+  # number, the JSON's length, the CRC-32 of those and the JSON, the JSON and
+  # a closing newline.
+  def frame(json, sequence, eol: "\n")
+    format("\nerx-oracle-event %<sequence>d %<length>d %<crc>08x %<json>s%<eol>s",
+           sequence: sequence, length: json.bytesize, crc: Zlib.crc32("#{sequence} #{json.bytesize} #{json}"),
+           json: json, eol: eol)
   end
+
+  def frames(jsons) = jsons.each_with_index.map { |json, sequence| frame(json, sequence) }
 
   def streamed_side(output, command)
     printed = Erx::OracleComparison.printed_events(output)
@@ -94,12 +98,14 @@ class OracleComparisonTest < Minitest::Test
 
   def records(statuses) = events(statuses).map { |record| JSON.generate(record) }
 
+  def finish_of_same(lines) = lines.index { |json| json.include?('"case_finish"') && json.include?('"number":1,') }
+
   # The streamed output of an erXos run killed mid-case: the events of the
   # finished cases, a suite's own prints around them, and a last event the
   # kill cut off in the middle.
   def test_streamed_events_of_a_run_cut_off_mid_case_keep_every_finished_result
-    output = ["boot line\n", "a suite's print, unterminated", *records(ERXOS.merge('hung' => nil)).map { |json| frame(json) },
-              "\nerx-oracle-event 99 00000000 {\"event\":\"tc_do"].join
+    output = ["boot line\n", "a suite's print, unterminated", *frames(records(ERXOS.merge('hung' => nil))),
+              "\nerx-oracle-event 99 12 00000000 {\"event\":\"tc_do"].join
     erxos, printed = streamed_side(output, 'timed_out')
     assert_equal 0, printed.skipped
     assert_equal({ 'same' => 'passed', 'listed' => 'failed', 'unlisted' => 'failed', 'stale' => 'passed',
@@ -110,19 +116,59 @@ class OracleComparisonTest < Minitest::Test
   # A kernel line written into the middle of an event damages that one line.
   def test_a_damaged_event_line_is_skipped_and_counted_not_fatal
     lines = records(ERXOS)
-    index = lines.index { |json| json.include?('"case_finish"') && json.include?('"number":1,') }
-    damaged = frame(lines[index]).sub('"event"', "\"ev[kernel: panic]ent\"")
-    output = lines.each_with_index.map { |json, at| at == index ? damaged : frame(json) }.join
+    index = finish_of_same(lines)
+    output = frames(lines).each_with_index.map do |line, at|
+      at == index ? line.sub('"event"', "\"ev[kernel: panic]ent\"") : line
+    end.join
     erxos, printed = streamed_side(output, 'succeeded')
     assert_equal 1, printed.skipped
-    assert_equal 'incomplete: 1 damaged event lines skipped', erxos.state
+    assert_equal 'incomplete: 1 event lines damaged or lost', erxos.state
     statuses = erxos_statuses(erxos)
     assert_equal 'unknown', statuses.fetch('same')
     assert_equal 'passed', statuses.fetch('hung')
   end
 
+  # A C writer's partial line, closed by no newline, joins the event after it:
+  # the event is still found and read.
+  def test_an_event_after_junk_on_its_line_is_read
+    lines = records(ERXOS)
+    output = frames(lines).map { |line| "erx: root task: partial#{line.delete_prefix("\n")}" }.join
+    erxos, printed = streamed_side(output, 'succeeded')
+    assert_equal 0, printed.skipped
+    assert_equal 'complete', erxos.state
+    assert_equal ERXOS, erxos_statuses(erxos)
+  end
+
+  # Junk that holds a damaged frame before a whole one on the same line: the
+  # whole frame is read, and the damaged one shows as a gap.
+  def test_a_damaged_frame_before_a_whole_one_shows_as_a_gap
+    lines = records(ERXOS)
+    index = finish_of_same(lines)
+    output = frames(lines).each_with_index.map do |line, at|
+      next '' if at == index
+      next "#{frame(lines[index], index).chomp[0, 40]}#{line.delete_prefix("\n")}" if at == index + 1
+
+      line
+    end.join
+    erxos, printed = streamed_side(output, 'succeeded')
+    assert_equal 1, printed.skipped
+    assert_equal 'unknown', erxos_statuses(erxos).fetch('same')
+  end
+
+  # A line a writer cut away entirely leaves no damaged line, only a gap in
+  # the sequence numbers.
+  def test_a_lost_event_line_is_counted_by_its_sequence_gap
+    lines = records(ERXOS)
+    index = finish_of_same(lines)
+    output = frames(lines).each_with_index.reject { |_, at| at == index }.map(&:first).join
+    erxos, printed = streamed_side(output, 'succeeded')
+    assert_equal 1, printed.skipped
+    assert_equal 'incomplete: 1 event lines damaged or lost', erxos.state
+    assert_equal 'unknown', erxos_statuses(erxos).fetch('same')
+  end
+
   def test_a_serial_consoles_crlf_line_ends_are_accepted
-    output = records(ERXOS).map { |json| frame(json).gsub("\n", "\r\n") }.join
+    output = frames(records(ERXOS)).map { |line| line.gsub("\n", "\r\n") }.join
     erxos, printed = streamed_side(output, 'succeeded')
     assert_equal 0, printed.skipped
     assert_equal 'complete', erxos.state
@@ -130,11 +176,12 @@ class OracleComparisonTest < Minitest::Test
   end
 
   def test_only_whole_checked_lines_are_events
-    ok = frame('{"a":1}').lstrip
-    output = [ok, "not #{ok}", "erx-oracle-log x\n", "erx-oracle-event 7 00000000 {\"c\":3}\n", ok.chomp].join
+    first = frame('{"a":1}', 0).lstrip
+    output = [first, "not #{first}", "erx-oracle-log x\n", "erx-oracle-event 1 7 00000000 {\"c\":3}\n",
+              frame('{"b":2}', 2).lstrip.chomp].join
     printed = Erx::OracleComparison.printed_events(output)
     assert_equal "{\"a\":1}\n", printed.events
-    assert_equal 1, printed.skipped
+    assert_equal 2, printed.skipped
   end
 
   def test_a_case_one_side_never_reached_is_unknown

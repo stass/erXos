@@ -239,14 +239,18 @@ class BootPlaceTest < Minitest::Test
   end
 
   def test_the_kernel_accepts_a_good_record_and_says_what_it_holds
-    assert_equal 'flags 1 development 1 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0', handoff(record)
-    assert_match(/development 0 /, handoff(record(flags: 2)))
+    assert_equal 'flags 1 development 1 test_code 0 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0', handoff(record)
+    assert_match(/development 0 test_code 0 /, handoff(record(flags: 2)))
+    assert_match(/flags 5 development 1 test_code 1 /, handoff(record(flags: 5)))
   end
 
   def test_the_kernel_refuses_a_record_bootstrap_did_not_write
     assert_equal 'refused version', handoff("\0".b * @codec.layout_size('erx_boot_handoff'))
     assert_equal 'refused version', handoff(record(version: 2))
+    assert_equal 'refused flags', handoff(record(flags: 8))
+    # A test image is a development build: its mark alone is refused.
     assert_equal 'refused flags', handoff(record(flags: 4))
+    assert_equal 'refused flags', handoff(record(flags: 6))
     assert_equal 'refused image_range', handoff(record(start: 0x4020_4001))
     assert_equal 'refused image_range', handoff(record(size: 0))
     assert_equal 'refused image_range', handoff(record(size: 0x8001))

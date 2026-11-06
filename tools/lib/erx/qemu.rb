@@ -200,12 +200,17 @@ module Erx
         seconds: 30 }.freeze
     ].freeze
 
+    # The kernel's line, right after the development warning, for an image whose archive
+    # carries ERX_PACK_TEST_CODE (ProductionImage's test entry point).
+    TEST_IMAGE_BANNER = { name: 'test-image', pattern: /test image: carries test code\r?\n/n, seconds: 30 }.freeze
+
     # The default guest transcript: bootstrap's memory summary, checked
-    # against the RAM QEMU is given, then the kernel banner lines.
-    def self.boot_transcript(memory_mib:)
+    # against the RAM QEMU is given, then the kernel banner lines, with a test
+    # image's mark when the image is one.
+    def self.boot_transcript(memory_mib:, test_image: false)
       raise Error, 'guest memory must be a whole number of MiB' unless memory_mib.is_a?(Integer)
 
-      [BootstrapMemory.checkpoint(ram_bytes: memory_mib << 20), *BANNER].freeze
+      [BootstrapMemory.checkpoint(ram_bytes: memory_mib << 20), *BANNER, *(test_image ? [TEST_IMAGE_BANNER] : [])].freeze
     end
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),

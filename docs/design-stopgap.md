@@ -319,6 +319,23 @@ reaches it unadmitted. Test images keep `BootImage` and the structural recipe
 under `test/fixtures`, which `Manifest::StructuralFixture` feeds; the production path loads
 nothing from `test/fixtures`, and `production_image_test.rb` checks the loaded files.
 
+No production image carries test code, by construction rather than by a caller's
+convention. `ProductionImage#build` takes no additions: its image holds the system
+release and nothing else. The one way to add files to that release is the test entry
+point, `ProductionImage#build_test_image(directory:, added:)`, which packs them with
+`ERX_PACK_TEST_CODE` set in the archive's flags. The packer sets the bit only in a
+development build, the archive check and the kernel refuse it in any other, the
+kernel's banner prints `test image: carries test code` after the development warning,
+and the image's `Built` record reports the bit read back from the archive header. The
+production boot check refuses an image with the bit and requires the kernel's
+`erx: boot image build` line to report the archive's own identity and flags. The
+source check (`Checks::TEST_IMAGE_BUILDER`, the `test-image-builder` chokepoint rule)
+fails the build when Ruby under `tools/` other than `ProductionImage` itself and
+`OracleQemu`, the oracle's QEMU run, names the test entry point or hands the packer
+a literal true for its `test_code` keyword; the oracle's boot transcript checks the
+banner's test-image line;
+`test/host/checks_test.rb` seeds its violations.
+
 | Archive entry | Kind | What it is |
 | --- | --- | --- |
 | `boot_kernel_path`, `boot_sigma0_path` | file | Fiasco's kernel and `sigma0`, as `bootstrap` loads them |
@@ -706,10 +723,11 @@ line of that boot says how a test ended: `tools/erx check-libc-test ACCEL CPUS` 
 boot's old log first.
 
 Every test that does not pass has its verdict in `test/conformance/libc-test-verdicts.txt`, one line each: the result it must
-have, and why. The reason is a stopgap difference this document states, musl's own behaviour with its source cited, a bug with its
+have, and why; a failed line also pins the places in libc-test's source that the test's error lines name. The reason is a stopgap difference this document states, musl's own behaviour with its source cited, a bug with its
 `TODO.md` item, or, for a test not run, the cause the plan names. A test the table does not name must pass.
-`check-libc-test` fails on any result that differs from its line, a test not run for another cause than its line's, a line
-naming no test, and a boot that leaks the pool, so a test that starts to pass needs its line removed. The stopgap's
+`check-libc-test` fails on any result that differs from its line, a failed test that reports a place its line does not
+list, a test not run for another cause than its line's, a line naming no test, a boot that leaks the pool, and a boot that
+never says whether it did, so a test that starts to pass needs its line removed. The stopgap's
 differences are the two cancellation tests, which no signal interrupts, and the priority-inheritance tests, whose futex
 probe reads `ENOSYS`; the oom tests need `RLIMIT_DATA` through `t_memfill`, and are not run.
 

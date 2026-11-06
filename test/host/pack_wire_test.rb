@@ -59,6 +59,28 @@ class PackWireTest < Minitest::Test
     assert_equal PackFixture.rehash(expected, files: false), actual
   end
 
+  # A test image marks itself in the header's flags, beside the development bit: only a
+  # development build carries test code, and nothing else sets the mark.
+  def test_test_code_is_marked_only_in_a_development_build
+    flags = lambda do |**options|
+      path = File.join(@directory, 'wire')
+      File.open(path, 'wb') do |output|
+        @writer.write(rows: rows, root_entry: 1, build_kind: 'development', output: output, budget: 1_048_576, **options)
+      end
+      File.binread(path, 4, 12).unpack1('V')
+    end
+    assert_equal @codec.member('pack_flags', 'development'), flags.call
+    assert_equal @codec.member('pack_flags', 'development') | @codec.member('pack_flags', 'test_code'),
+                 flags.call(test_code: true)
+    File.open(File.join(@directory, 'release'), 'wb') do |output|
+      error = assert_raises(Erx::Error) do
+        @writer.write(rows: rows, root_entry: 1, build_kind: 'release', output: output, budget: 1_048_576, test_code: true)
+      end
+      assert_match(/test code/, error.message)
+      assert_equal 0, output.pos
+    end
+  end
+
   def test_budget_refusal_precedes_the_first_output_byte
     File.open(File.join(@directory, 'wire'), 'wb') do |output|
       assert_raises(Erx::Error) do

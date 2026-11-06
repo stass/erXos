@@ -396,7 +396,7 @@ module Erx
 
     # Runs musl's libc-test in tasks on one accelerator and CPU count: tools/erx check-libc-test ACCEL CPUS.
     # It fails on any result that differs from its line in test/conformance/libc-test-verdicts.txt,
-    # and on a boot that leaked the pool.
+    # and on a boot that leaked the pool or never said whether it did.
     def self.check_libc_test(arguments)
       accel, cpus = arguments
       raise OptionParser::InvalidArgument, 'check-libc-test ACCEL CPUS' unless arguments.size == 2 && cpus.match?(/\A[1-9][0-9]*\z/)
@@ -404,31 +404,35 @@ module Erx
       require_relative 'lib/erx/libc_test'
       verdicts = LibcTest.load_verdicts(ROOT)
       outcome = LibcTest::Run.new(root: ROOT).call(accel: accel, cpus: cpus.to_i)
-      leaks = outcome.fetch(:pool_leaks_in_boots)
-      Terminal.puts("#{outcome.fetch(:report)}: #{outcome.fetch(:totals)}; pool leaks in boots #{leaks}")
-      problems = LibcTest.disagreements(outcome.fetch(:results), verdicts: verdicts, complete: true)
-      problems << "pool leaks in boots #{leaks}" unless leaks.empty?
+      Terminal.puts("#{outcome.fetch(:report)}: #{outcome.fetch(:totals)}; pool leaks in boots " \
+                    "#{outcome.fetch(:pool_leaks_in_boots)}, unknown in boots #{outcome.fetch(:pool_unknown_in_boots)}")
+      problems = LibcTest.check_problems(outcome, verdicts: verdicts)
       problems.each { |problem| Terminal.puts("libc-test: #{problem}") }
       problems.empty? ? 0 : 1
     end
 
     # The suites the system domain runs, compared with stock under TCG and,
-    # where the host offers it, HVF. Exits 0 only when every run passes. OTP's
-    # four groups and musl's libc-test in a test domain are not here yet
-    # (docs/plan.md, M3), and the run says so.
+    # where the host offers it, HVF. OTP's four groups and musl's libc-test in
+    # a test domain are not here yet (docs/plan.md, M3), so a run whose every
+    # part passed is still partial and exits 2, never 0. A failed run, or a
+    # host where no accelerator ran, exits 1.
     def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil)
       no_arguments(arguments)
       offered = accelerators || QemuGate.available_accelerators(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
       runnable, missing = %w[tcg hvf].partition { |accel| offered.include?(accel) }
       missing.each { |accel| Terminal.puts("oracle qemu #{accel}: not_run; this host's QEMU does not offer #{accel}") }
       results = runnable.map do |accel|
-        status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/oracle-qemu/#{accel}")], qemu_class: qemu_class)
+        status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
         Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
         status.zero?
       end
       Terminal.puts("partial: the system domain runs #{OracleSuites::SUITES.keys.join(' and ')}; OTP's emulator, kernel, " \
-                    'stdlib and compiler groups and libc-test are not wired yet')
-      results.all? ? 0 : 1
+                    'stdlib and compiler groups and libc-test are not wired yet, so the check is not passed')
+      if runnable.empty?
+        Terminal.puts('failed: no accelerator ran')
+        return 1
+      end
+      results.all? ? 2 : 1
     end
 
     def self.help(_arguments)

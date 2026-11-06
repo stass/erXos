@@ -7758,6 +7758,7 @@ module Erx
         base: types.fetch("u32"),
         members: {
           "development".b => 1,
+          "test_code".b => 4,
           "unconfined_dma".b => 2
         }.freeze,
         flags: true,
@@ -10278,6 +10279,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "boot_flags_known".b => Constant.new(
+            name: "boot_flags_known".b,
+            value: 7,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "boot_handoff_version".b => Constant.new(
             name: "boot_handoff_version".b,
             value: 3,
@@ -10842,6 +10849,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "entropy_flags_known".b => Constant.new(
+            name: "entropy_flags_known".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "entropy_quality_fixed".b => Constant.new(
             name: "entropy_quality_fixed".b,
             value: 3,
@@ -10863,6 +10876,12 @@ module Erx
           "entry_file".b => Constant.new(
             name: "entry_file".b,
             value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "entry_flags_known".b => Constant.new(
+            name: "entry_flags_known".b,
+            value: 3,
             type: types.fetch("u8"),
             description: nil
           ).freeze,
@@ -11250,6 +11269,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "group_flags_known".b => Constant.new(
+            name: "group_flags_known".b,
+            value: 15,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
           "group_hints".b => Constant.new(
             name: "group_hints".b,
             value: 1,
@@ -11463,6 +11488,12 @@ module Erx
           "image_fixed".b => Constant.new(
             name: "image_fixed".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "image_flags_known".b => Constant.new(
+            name: "image_flags_known".b,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -11796,6 +11827,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "log_record_flags_known".b => Constant.new(
+            name: "log_record_flags_known".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "log_record_truncated".b => Constant.new(
             name: "log_record_truncated".b,
             value: 1,
@@ -11826,6 +11863,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "machine_flags_known".b => Constant.new(
+            name: "machine_flags_known".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "manifest_bytes_max".b => Constant.new(
             name: "manifest_bytes_max".b,
             value: 16777216,
@@ -11835,6 +11878,12 @@ module Erx
           "manifest_development".b => Constant.new(
             name: "manifest_development".b,
             value: 1,
+            type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "manifest_flags_known".b => Constant.new(
+            name: "manifest_flags_known".b,
+            value: 3,
             type: types.fetch("u16"),
             description: nil
           ).freeze,
@@ -11904,8 +11953,20 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "mem_flags_known".b => Constant.new(
+            name: "mem_flags_known".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "mem_jit".b => Constant.new(
             name: "mem_jit".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mf_device_flags_known".b => Constant.new(
+            name: "mf_device_flags_known".b,
             value: 1,
             type: types.fetch("u32"),
             description: nil
@@ -11970,6 +12031,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "mf_domain_flags_known".b => Constant.new(
+            name: "mf_domain_flags_known".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "mf_domain_required".b => Constant.new(
             name: "mf_domain_required".b,
             value: 1,
@@ -11990,6 +12057,12 @@ module Erx
           ).freeze,
           "mf_image_format_erofs_verity".b => Constant.new(
             name: "mf_image_format_erofs_verity".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mf_limits_flags_known".b => Constant.new(
+            name: "mf_limits_flags_known".b,
             value: 1,
             type: types.fetch("u32"),
             description: nil
@@ -12081,6 +12154,12 @@ module Erx
           "mf_service".b => Constant.new(
             name: "mf_service".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mf_window_rights_known".b => Constant.new(
+            name: "mf_window_rights_known".b,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -12243,6 +12322,12 @@ module Erx
           "p9_getattr_mask_ino".b => Constant.new(
             name: "p9_getattr_mask_ino".b,
             value: 256,
+            type: types.fetch("u64"),
+            description: nil
+          ).freeze,
+          "p9_getattr_mask_known".b => Constant.new(
+            name: "p9_getattr_mask_known".b,
+            value: 16383,
             type: types.fetch("u64"),
             description: nil
           ).freeze,
@@ -12432,6 +12517,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "p9_setattr_valid_known".b => Constant.new(
+            name: "p9_setattr_valid_known".b,
+            value: 511,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "p9_setattr_valid_mode".b => Constant.new(
             name: "p9_setattr_valid_mode".b,
             value: 1,
@@ -12492,6 +12583,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "pack_flags_known".b => Constant.new(
+            name: "pack_flags_known".b,
+            value: 7,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "pack_hash_size".b => Constant.new(
             name: "pack_hash_size".b,
             value: 32,
@@ -12507,6 +12604,12 @@ module Erx
           "pack_strings_max".b => Constant.new(
             name: "pack_strings_max".b,
             value: 4194304,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "pack_test_code".b => Constant.new(
+            name: "pack_test_code".b,
+            value: 4,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -12672,6 +12775,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "seg_flags_known".b => Constant.new(
+            name: "seg_flags_known".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "seg_guarded".b => Constant.new(
             name: "seg_guarded".b,
             value: 1,
@@ -12693,6 +12802,12 @@ module Erx
           "space_depth_max".b => Constant.new(
             name: "space_depth_max".b,
             value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "space_flags_known".b => Constant.new(
+            name: "space_flags_known".b,
+            value: 1,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -12747,6 +12862,12 @@ module Erx
           "vm_fixed".b => Constant.new(
             name: "vm_fixed".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "vm_flags_known".b => Constant.new(
+            name: "vm_flags_known".b,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

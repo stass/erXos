@@ -26,19 +26,23 @@ module Erx
   # The guest boots a test image: the production image's kernel, root task and
   # system release, packed through the same funnel and manifest check, with
   # stock's Common Test and SASL, the reporter and the compiled suites added
-  # to the release under /lib and /test/ct. Only this tool builds it, so no
-  # production image carries test code. The kernel command line's erx.arg
-  # words hand the system domain's ERTS `-run erx_ct_oracle main`, which runs
-  # the suites from /tmp/ct and halts, and the halt ends the machine.
+  # to the release under /lib and /test/ct, through ProductionImage#build_test_image,
+  # which marks its archive (ERX_PACK_TEST_CODE) so the kernel banner says so and the
+  # boot transcript checks that line. Checks::TEST_IMAGE_BUILDER holds that this file
+  # alone calls that entry point, so no production image carries test code. The
+  # kernel command line's erx.arg words hand the system domain's ERTS
+  # `-run erx_ct_oracle main`, which runs the suites from /tmp/ct and halts, and the
+  # halt ends the machine.
   #
   # The events reach the host on the console's serial line, which they share
   # with the kernel's, the root's and ERTS's own C output. In the system domain
   # erlang:display_string/2 reaches erx_console, which writes each call's
   # bytes to the UART whole and unchanged (docs/design-runtime.md, "The console
   # and standard I/O"), so console writers never split an event line; only a C
-  # writer can, at any byte. Each event line carries its length and CRC-32,
-  # so a damaged line is counted, never read, and a run that lost one is
-  # reported as incomplete: TODO.md holds that residual.
+  # writer can, at any byte. Each event frame carries a sequence number, its
+  # length and a CRC-32, so a damaged line is counted, never read, a lost one
+  # shows as a gap, and a run that lost one is reported as incomplete:
+  # TODO.md holds that residual.
   class OracleQemu
     WORK = '/tmp/ct'
     MEMORY_MIB = ProductionImage::MEMORY_MIB
@@ -122,6 +126,9 @@ module Erx
 
     # The files the test image adds to the system release, laid out as the
     # archive holds them under system/, each with the source its receipt names.
+    # The effects come first (stock's installed files, the left-out files
+    # removed, the stand-ins copied over theirs); what each file came from is
+    # then a plan read off the tree.
     def fill_tree(tree, suites, installation:, source:)
       FileUtils.rm_rf(tree)
       prepare(tree)
@@ -129,31 +136,110 @@ module Erx
       stock = OracleSuites::STOCK_APPLICATIONS.flat_map do |application|
         installed = File.join(tree, 'lib', application)
         LEFT_OUT.fetch(application, []).each { |path| FileUtils.rm_rf(File.join(installed, path)) }
-        Dir.glob('**/*', base: installed).select { |path| File.file?(File.join(installed, path)) }.map do |path|
-          stand_in = STAND_INS.fetch(application, {})[path]
-          FileUtils.cp(File.join(@root, stand_in), File.join(installed, path)) if stand_in
-          OracleSuites::Compiled.new(path: File.join(installed, path),
-                                     source: stand_in ? File.join(@root, stand_in) : stock_source(source, application, path))
+        STAND_INS.fetch(application, {}).each do |path, stand_in|
+          target = File.join(installed, path)
+          raise Error, "stock #{application} has no #{path} for its stand-in" unless File.file?(target)
+
+          FileUtils.cp(File.join(@root, stand_in), target)
         end
+        files = Dir.glob('**/*', base: installed).select { |path| File.file?(File.join(installed, path)) }
+        self.class.stock_plan(application, installed: installed, files: files, root: @root, source: source)
       end
       stock + @suites.compile(reporter: prepare(tree, 'test/ct/reporter'), suite_directory: prepare(tree, 'test/ct/suites'),
                               suites: suites, erlc: installation.fetch('erlc'),
                               common_test: File.join(source, 'lib/common_test'))
     end
 
+    public
+
+    # Each of `files`, paths under `installed`, the installed tree of stock's
+    # `application`, with what its receipt names as its source: its erXos
+    # stand-in, or what stock built or copied it from.
+    def self.stock_plan(application, installed:, files:, root:, source:)
+      files.map do |path|
+        stand_in = STAND_INS.fetch(application, {})[path]
+        OracleSuites::Compiled.new(path: File.join(installed, path),
+                                   source: stand_in ? File.join(root, stand_in) : stock_source(source, application, path))
+      end
+    end
+
     # What a file of stock's installed application was built or copied from in
-    # stock's source tree: a beam from its module's source, an application
-    # file from its .app.src, anything else from the same path.
-    def stock_source(source, application, path)
+    # stock's source tree `source`: a beam from its module's one source, an
+    # application or appup file from its .src, anything else from the same
+    # path. No source, or more than one module source, is an error, never a
+    # guess. A module's name is case-sensitive, and the glob on a host whose
+    # file system is not (macOS) also returns names differing in case
+    # (common_test's ct_suite.erl and ct_SUITE.erl), so the name is compared.
+    def self.stock_source(source, application, path)
       tree = File.join(source, 'lib', application)
       candidates = case path
-                   when %r{([^/]+)\.beam\z} then Dir.glob(File.join(tree, '**', "#{Regexp.last_match(1)}.erl")).sort
-                   when %r{\Aebin/([^/]+)\.app\z} then [File.join(tree, 'src', "#{Regexp.last_match(1)}.app.src")]
+                   when %r{([^/]+)\.beam\z}
+                     name = "#{Regexp.last_match(1)}.erl"
+                     Dir.glob(File.join(tree, '**', name)).select { |candidate| File.basename(candidate) == name }
+                   when %r{\Aebin/([^/]+\.app(?:up)?)\z} then [File.join(tree, 'src', "#{Regexp.last_match(1)}.src")]
                    else [File.join(tree, path)]
                    end
-      candidates.find { |candidate| File.file?(candidate) } or
-        raise Error, "stock #{application} has no source for #{path}"
+      found = candidates.select { |candidate| File.file?(candidate) }
+      raise Error, "stock #{application} has no source for #{path}" if found.empty?
+      raise Error, "stock #{application} has #{found.size} sources for #{path}: #{found.sort.join(' ')}" if found.size > 1
+
+      found.first
     end
+
+    # What ended a guest run, named for the report, and why. `booted` says
+    # whether the guest printed the first line its transcript checks:
+    #   succeeded    the guest printed its result line;
+    #   timed_out    the deadline, or a checkpoint's, passed first;
+    #   failed       erXos ended before its result line, so its run crashed;
+    #   qemu_failed  QEMU ended before the guest printed anything: it did not
+    #                start, the host has no such accelerator, or an argument
+    #                was refused;
+    #   cancelled    the run was interrupted on the host;
+    #   host_failed  the host failed before or around the boot.
+    # Only `failed` speaks of erXos; the host states keep their message, and
+    # the comparison shows their cases as unknown.
+    GuestState = Data.define(:name, :message)
+
+    def self.state_of(error, booted:)
+      name = case error
+             in nil then 'succeeded'
+             in TranscriptTimeout then 'timed_out'
+             in CommandError if error.result.fetch('state') == 'timed_out' then 'timed_out'
+             in CommandError if error.result.fetch('state') == 'cancelled' then 'cancelled'
+             in Error if booted then 'failed'
+             in CommandError then 'qemu_failed'
+             in Error then 'host_failed'
+             end
+      GuestState.new(name: name, message: error&.message)
+    end
+
+    # A guest run's outcome: its state, the run record Qemu#run wrote (empty
+    # when it wrote none) and the serial output (empty when there is none).
+    Guest = Data.define(:state, :record, :serial)
+
+    # Runs `qemu`, a Qemu, into `directory` with `arguments` and reads what it
+    # left there. Only Erx errors are caught; anything else is a bug and
+    # propagates.
+    def self.boot_guest(qemu, directory:, **arguments)
+      error = begin
+        qemu.run(directory: directory, **arguments)
+        nil
+      rescue Error => e
+        e
+      end
+      report = File.join(directory, 'report.json')
+      record = if File.file?(report)
+                 JsonInput.parse(BoundedFile.read(report, maximum: 1024 * 1024), max_bytes: 1024 * 1024,
+                                                                                 label: 'QEMU run report')
+               else
+                 {}
+               end
+      serial = record['serial_log']
+      Guest.new(state: state_of(error, booted: !record.fetch('checkpoints', []).empty?), record: record,
+                serial: serial && File.file?(serial) ? BoundedFile.read(serial, maximum: MAX_SERIAL_BYTES) : '')
+    end
+
+    private
 
     # The production image with the tree's files added, each as a release file
     # with a compiled receipt naming its source.
@@ -170,8 +256,8 @@ module Erx
       end
       inputs = [*compiled.flat_map { |file| [file.path, file.source] }, *added.map { |entry| entry.fetch('receipt') }].uniq
       ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                     .build(directory: directory,
-                            added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS))
+                     .build_test_image(directory: directory,
+                                       added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS))
     end
 
     # Boots the image under its deadline and reads the events it printed. The
@@ -179,27 +265,18 @@ module Erx
     # deadline still shows the cases it finished.
     def run_guest(built, suites, accel:, cpus:)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@out, 'guest'))
-      points = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), ProductionImage::Run::SLOGAN,
+      points = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB, test_image: built.test_code), ProductionImage::Run::SLOGAN,
                 { name: 'oracle-result', pattern: RESULT, seconds: @deadline }]
-      state = begin
-        Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: cpus, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points,
-                 machine_end: true, directory: directory, command_line: self.class.command_line(suites, accel: accel))
-        'succeeded'
-      rescue TranscriptTimeout
-        'timed_out'
-      rescue CommandError => error
-        error.result.fetch('state')
-      rescue Error
-        'failed'
-      end
-      record = JsonInput.parse(BoundedFile.read(File.join(directory, 'report.json'), maximum: 1024 * 1024),
-                              max_bytes: 1024 * 1024, label: 'QEMU run report')
-      printed = OracleComparison.printed_events(BoundedFile.read(record.fetch('serial_log'), maximum: MAX_SERIAL_BYTES))
+      guest = self.class.boot_guest(Qemu.new(root: @root, runner: @runner, program: @qemu), directory: directory,
+                                    accel: accel, cpus: cpus, image: built.single, memory_mib: MEMORY_MIB,
+                                    checkpoints: points, machine_end: true,
+                                    command_line: self.class.command_line(suites, accel: accel))
+      printed = OracleComparison.printed_events(guest.serial)
       events = File.join(@out, 'erxos.events.jsonl')
       File.binwrite(events, printed.events)
-      [OracleComparison.side(events: events, command_state: state, skipped: printed.skipped),
-       record.fetch('elapsed_seconds')]
+      [OracleComparison.side(events: events, command_state: guest.state.name, detail: guest.state.message,
+                             skipped: printed.skipped),
+       guest.record.fetch('elapsed_seconds', 0)]
     end
 
     def reference(path) = { 'path' => path.delete_prefix("#{@root}/"), 'sha256' => Digest::SHA256.file(path).hexdigest }

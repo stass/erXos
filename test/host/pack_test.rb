@@ -165,6 +165,14 @@ class PackTest < Minitest::Test
     reject(PackFixture.rehash(bytes), 'manifest_flags')
   end
 
+  # A test image marks itself, and only a development build may be one.
+  def test_test_code_marks_only_a_development_build
+    status, output = check(mutated { |bytes| PackFixture.integer(bytes, 12, 5) })
+    assert_equal 0, status, output
+    reject(mutated { |bytes| PackFixture.integer(bytes, 12, 4) }, 'header_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, 12, 6) }, 'header_values')
+  end
+
   def test_system_release_cannot_be_split_by_an_unmarked_file
     bytes = PackFixture.valid(paths: ['a', 'b', 'system/root'])
     PackFixture.integer(bytes, PackFixture.entry_offset(0) + 7, 1, width: 1)
@@ -225,7 +233,7 @@ class PackTest < Minitest::Test
 
   def test_header_bounds
     reject(mutated { |bytes| PackFixture.integer(bytes, 52, 2) }, 'header_values')
-    reject(mutated { |bytes| PackFixture.integer(bytes, 12, 5) }, 'header_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, 12, 9) }, 'header_values')
     reject(mutated { |bytes| PackFixture.integer(bytes, 24, 65_537) }, 'header_values')
     reject(mutated { |bytes| PackFixture.integer(bytes, 28, 32) }, 'header_values')
   end

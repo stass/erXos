@@ -48,13 +48,16 @@ module Erx
     # stated here. TODO.md holds the gap: the boot cores hold BLAKE3 as well.
     Archive = Data.define(:path, :label, :license, :status, :notice)
 
-    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :report)
+    # flags are the archive header's, as the kernel's banner line reports them; test_code
+    # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made.
+    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :flags, :test_code, :report)
 
     # What a test image adds to the system release (OracleQemu): entries for Pack#build,
     # each with its receipt, the files those receipts name, and the imported trees their
     # sources come from, each with its status. A production image adds nothing.
     Added = Data.define(:entries, :inputs, :imports)
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+    private_constant :NOTHING_ADDED
 
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
@@ -84,8 +87,25 @@ module Erx
     end
 
     # Packs the image from Fiasco's last build into a directory that must be clean, so a
-    # stale file cannot stand in for this build's.
-    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)), added: NOTHING_ADDED)
+    # stale file cannot stand in for this build's. The image carries the system release
+    # and nothing else.
+    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
+      assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false)
+    end
+
+    # The production image with test code added to its system release, marked in its
+    # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
+    # refuses it in any build but a development one. Only OracleQemu calls it, which the
+    # source check holds (Checks::TEST_IMAGE_BUILDER).
+    def build_test_image(directory:, added:)
+      raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
+
+      assemble(directory: directory, manifest_source: File.binread(File.join(@root, MANIFEST)), added: added, test_code: true)
+    end
+
+    # Both entry points' one build: the system release, any additions, and the mark that
+    # says whether there are some.
+    def assemble(directory:, manifest_source:, added:, test_code:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
@@ -101,14 +121,19 @@ module Erx
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task,
                     manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
-                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs])
+                    inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs], test_code: test_code)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
+      flags = header.fetch('flags')
+      marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
+      raise Error, 'the archive header disagrees with the test-code mark asked for' unless marked == test_code
+
       Built.new(single: single, archive: archive, first_stage: @fiasco.image_path,
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),
-                report: report)
+                flags: flags, test_code: marked, report: report)
     end
+    private :assemble
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
     # packed into a clean directory of its own name. A path under those directories that
@@ -290,7 +315,9 @@ module Erx
         end
       end
 
-      # The transcript of a boot as far as ERTS gets, each line in order. The manifest line
+      # The transcript of a boot as far as ERTS gets, each line in order. The image is one
+      # without test code, and the kernel's line names its archive's identity and flags,
+      # so a test image's mark shows. The manifest line
       # carries the numbers the source says, so a root that misread it fails. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
       # release, `kernel` starts, and erx_console's two banners, written through erx_pl011,
@@ -301,9 +328,13 @@ module Erx
         units = source.scan(/^unit /).size
         arguments = ARGUMENTS_ALWAYS + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
+        raise Error, 'a production boot refuses a test image' if built.test_code
+
+        image = /\Aerx: boot image build #{built.build_id} index #{built.index_hash} flags 0x#{built.flags.to_s(16)} archive /n
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+         point('image-identity', /\Aerx: boot image build/n, image, speaker: 'the kernel reports'),
          point('root-identity', /\Aerx: root task: build/n, identity),
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
          point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
@@ -405,9 +436,8 @@ module Erx
            pattern: %r{\Aerx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, #{Regexp.escape(SEEDED_STDOUT_NODE)}\r?\n}n }.freeze].freeze
       end
 
-      def self.point(name, pattern, whole, seconds: 30)
-        { name: name, pattern: pattern, seconds: seconds,
-          verify: whole_line(whole, speaker: 'the root task reports') }.freeze
+      def self.point(name, pattern, whole, seconds: 30, speaker: 'the root task reports')
+        { name: name, pattern: pattern, seconds: seconds, verify: whole_line(whole, speaker: speaker) }.freeze
       end
       private_class_method :point
 
@@ -573,7 +603,7 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:, imports:)
+    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:, imports:, test_code:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
@@ -584,7 +614,7 @@ module Erx
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
                  artifacts: { 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } },
-                 manifest_source: manifest_source, output: output)
+                 manifest_source: manifest_source, output: output, test_code: test_code)
     end
 
     def catalog(root_task, inputs)

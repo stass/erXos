@@ -32,6 +32,8 @@ typedef struct erx_boot_handoff_view erx_boot_handoff_view_t;
 struct erx_boot_handoff_view {
 	uint32_t	 flags;
 	bool		 development;
+	/* The image carries test code: a test image, always a development build. */
+	bool		 test_code;
 	uint8_t		 build_id[8];
 	uint8_t		 index_hash[32];
 	erx_boot_range_t image;

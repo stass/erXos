@@ -139,9 +139,9 @@ run_handoff(char **argv)
 	range = (erx_boot_range_t){ .start = view.image.start, .size = view.image.size };
 	covered = erx_boot_handoff_covered(&view, &range, 1);
 	range.size -= 1;
-	printf("flags %" PRIx32 " development %d image %" PRIx64 " %" PRIx64
-	    " bootargs %.*s stdout %.*s covered %d %d\n", view.flags, view.development,
-	    view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
+	printf("flags %" PRIx32 " development %d test_code %d image %" PRIx64
+	    " %" PRIx64 " bootargs %.*s stdout %.*s covered %d %d\n", view.flags,
+	    view.development, view.test_code, view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
 	    (int)view.stdout_path_len, view.stdout_path,
 	    covered, erx_boot_handoff_covered(&view, &range, 1));
 	free(file);

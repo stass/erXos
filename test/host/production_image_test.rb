@@ -142,10 +142,43 @@ class ProductionImageTest < Minitest::Test
     refute_match point.fetch(:pattern), line.sub('/uart@9000000', '(none)')
   end
 
-  def checkpoint_verifier(name, **options)
-    built = Struct.new(:build_id, :index_hash).new('aa', 'bb')
+  FakeBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, keyword_init: true)
+
+  def checkpoint_verifier(name, built: FakeBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 1, test_code: false), **options)
     points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 4, **options)
     points.find { |point| point.fetch(:name) == name }.fetch(:verify)
+  end
+
+  # A production boot is of an image that carries no test code, and the kernel must report
+  # the archive's own identity and flags, so a test image's mark would show.
+  def test_a_production_boot_is_of_an_image_without_test_code
+    verify = checkpoint_verifier('image-identity')
+    verify.call("erx: boot image build aa index bb flags 0x1 archive 0x40200000+0x1000 bootargs 0\r\n")
+    assert_raises(Erx::Error) { verify.call("erx: boot image build aa index bb flags 0x5 archive 0x40200000+0x1000 bootargs 0\r\n") }
+    assert_raises(Erx::Error) { verify.call("erx: boot image build ab index bb flags 0x1 archive 0x40200000+0x1000 bootargs 0\r\n") }
+    test_image = FakeBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 5, test_code: true)
+    error = assert_raises(Erx::Error) { checkpoint_verifier('image-identity', built: test_image) }
+    assert_match(/refuses a test image/, error.message)
+  end
+
+  # A test image's kernel says so right after the development warning; a production boot's
+  # transcript has no such line.
+  def test_a_test_image_transcript_carries_its_mark_after_the_development_warning
+    names = ->(points) { points.map { |point| point.fetch(:name) } }
+    production = Erx::Qemu.boot_transcript(memory_mib: 512)
+    test_image = Erx::Qemu.boot_transcript(memory_mib: 512, test_image: true)
+    refute_includes names.call(production), Erx::Qemu::TEST_IMAGE_BANNER.fetch(:name)
+    assert_equal names.call(production).index('development-warning') + 1,
+                 names.call(test_image).index(Erx::Qemu::TEST_IMAGE_BANNER.fetch(:name))
+    assert_match Erx::Qemu::TEST_IMAGE_BANNER.fetch(:pattern), "test image: carries test code\r\n"
+  end
+
+  # The production entry point takes no additions: only the test entry point adds test
+  # code, and the source check holds its one caller (Checks::TEST_IMAGE_BUILDER).
+  def test_the_production_build_takes_no_additions
+    production = Erx::ProductionImage.instance_method(:build).parameters
+    refute_includes production.map(&:last), :added
+    assert_equal [%i[keyreq directory], %i[keyreq added]], Erx::ProductionImage.instance_method(:build_test_image).parameters
   end
 
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.

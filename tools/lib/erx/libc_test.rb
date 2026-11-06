@@ -62,16 +62,26 @@ module Erx
       'a wall clock' => %w[clock_settime settimeofday adjtime]
     }.freeze
 
-    Result = Data.define(:name, :state, :detail) do
-      def to_h = { name: name, state: state.to_s, detail: detail }
+    # `at` is where the test's own output says it failed: each FILE:LINE of
+    # libc-test's source its error lines name, sorted, without repeats.
+    Result = Data.define(:name, :state, :detail, :at) do
+      def initialize(name:, state:, detail:, at: [].freeze) = super
+      def to_h = { name: name, state: state.to_s, detail: detail, at: at }
     end
     # Why a test does not pass, as test/conformance/libc-test-verdicts.txt states it.
     # A test the table does not name must pass.
     VERDICTS = 'test/conformance/libc-test-verdicts.txt'
-    Verdict = Data.define(:name, :state, :kind, :reason)
+    # `at` is what a failed line pins: the places the test must report, as
+    # Result#at gives them.
+    Verdict = Data.define(:name, :state, :kind, :at, :reason)
     VERDICT_STATES = %i[failed timed_out not_run].freeze
     VERDICT_KINDS = %w[bug stopgap upstream cannot-run].freeze
-    VERDICT_LINE = /\A(?<name>\S+)\s+(?<state>\S+)\s+(?<kind>\S+)\s+(?<reason>\S.*)\z/
+    VERDICT_LINE = /\A(?<name>\S+)\s+(?<state>\S+)\s+(?<kind>\S+)\s+(?:at=(?<at>\S+)\s+)?(?<reason>\S.*)\z/
+    # A place in libc-test's source, FILE:LINE.
+    PLACE = /[A-Za-z0-9_+.-]+\.[ch]:[0-9]+/
+    # Where an error line of a test's output names its place: t_error's
+    # "PATH/FILE:LINE: " prefix, after anything the line starts with.
+    ERROR_PLACE = %r{(?:\A|[/ ])(?<place>#{PLACE}): }n
     Plan = Data.define(:runnable, :results)
     RUN_LINE = /\Aerx: libc-test: run (?<name>[A-Za-z0-9_.\/+-]+)\r?\z/n
     END_LINE = /\Aerx: libc-test: end (?<name>[A-Za-z0-9_.\/+-]+) (?:(?<how>status|other|launch-refused|join-refused) (?<value>-?[0-9]+)|(?<how>timeout|fault|no-program))\r?\z/n
@@ -136,14 +146,22 @@ module Erx
     def read_boot(serial, tests:, machine: nil)
       started = {}
       ended = {}
+      places = Hash.new { |hash, name| hash[name] = [] }
+      running = nil
       serial.b.each_line(chomp: true) do |line|
         if (match = RUN_LINE.match(line))
           started[match[:name]] = true
+          running = match[:name]
         elsif (match = END_LINE.match(line))
           ended[match[:name]] = match
+          running = nil
+        elsif running && (match = ERROR_PLACE.match(line))
+          places[running] << match[:place]
         end
       end
-      tests.map { |name| result_of(name, ended[name], started: started.key?(name), machine: machine) }
+      tests.map do |name|
+        result_of(name, ended[name], started: started.key?(name), machine: machine).with(at: places[name].uniq.sort.freeze)
+      end
     end
 
     def result_of(name, ended, started:, machine:)
@@ -197,10 +215,14 @@ module Erx
       match = VERDICT_LINE.match(line)
       raise Error, "libc-test verdicts line #{number}: not NAME STATE KIND REASON" unless match
 
-      verdict = Verdict.new(name: match[:name], state: match[:state].to_sym, kind: match[:kind], reason: match[:reason])
+      at = match[:at] == '-' ? [] : match[:at].to_s.split(',')
+      verdict = Verdict.new(name: match[:name], state: match[:state].to_sym, kind: match[:kind], at: at.freeze,
+                            reason: match[:reason])
       problem = if !verdict.name.match?(TEST_NAME) then 'names no test'
                 elsif !VERDICT_STATES.include?(verdict.state) then "has no state #{match[:state]}"
                 elsif !VERDICT_KINDS.include?(verdict.kind) then "has no kind #{verdict.kind}"
+                elsif (verdict.state == :failed) != !match[:at].nil? then 'pins at= on a failed line, and only there'
+                elsif !at.all? { |place| place.match?(/\A#{PLACE}\z/) } || at != at.uniq.sort then 'pins no sorted FILE:LINE list'
                 elsif (verdict.state == :not_run) != (verdict.kind == 'cannot-run') then 'pairs not_run with cannot-run only'
                 elsif verdict.state == :not_run && !verdict.reason.match?(/\Aneeds [a-z ]+\z/) then 'gives no cause the plan names'
                 end
@@ -217,12 +239,27 @@ module Erx
         expected = verdict ? verdict.state : :passed
         if result.state != expected
           "#{result.name}: #{result.state} (#{result.detail}), its verdict says #{expected}"
+        elsif expected == :failed && result.at != verdict.at
+          "#{result.name}: fails at #{places(result.at)}, its verdict says at #{places(verdict.at)}"
         elsif expected == :not_run && !result.detail.to_s.start_with?("#{verdict.reason}:")
           "#{result.name}: not run because #{result.detail}, its verdict says #{verdict.reason}"
         end
       end
       stale = complete ? (verdicts.keys - results.map(&:name)).map { |name| "#{name}: has a verdict and is no test" } : []
       found + stale
+    end
+
+    def places(list) = list.empty? ? 'no place' : list.join(',')
+    private_class_method :places
+
+    # What fails check-libc-test, from a Run's outcome: every disagreement
+    # with the verdicts, a boot that leaked the pool, and a boot whose pool
+    # line never came, which is unknown, never taken for no leak.
+    def check_problems(outcome, verdicts:)
+      [*disagreements(outcome.fetch(:results), verdicts: verdicts, complete: true),
+       ("pool leaks in boots #{outcome.fetch(:pool_leaks_in_boots)}" unless outcome.fetch(:pool_leaks_in_boots).empty?),
+       ("pool unknown in boots #{outcome.fetch(:pool_unknown_in_boots)}" unless outcome.fetch(:pool_unknown_in_boots).empty?)]
+        .compact
     end
 
     # What keeps a canary run from passing: every test of it must pass, and no boot may leak.
@@ -232,12 +269,14 @@ module Erx
     end
 
     class Run
-      # -Wno-parentheses: clang refuses the chained comparison musl/pleval evaluates on purpose,
-      # where the gcc that libc-test's own build assumes only warns.
-      FLAGS =%w[--target=aarch64-none-elf -pipe -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wno-unused-function
-                 -Wno-parentheses -Wno-missing-braces -Wno-unused -Wno-overflow -Wno-unknown-pragmas -fno-builtin -frounding-math -nostdinc
+      FLAGS = %w[--target=aarch64-none-elf -pipe -std=c99 -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -Wno-unused-function
+                 -Wno-missing-braces -Wno-unused -Wno-overflow -Wno-unknown-pragmas -fno-builtin -frounding-math -nostdinc
                  -fno-stack-protector -mno-outline-atomics -Werror=implicit-function-declaration -Werror=implicit-int
                  -Werror=pointer-sign -Werror=pointer-arith].freeze
+      # Flags one test needs beyond FLAGS. musl/pleval.c:53 makes the chained comparison
+      # X <= Y >= Z on purpose, and clang 23 reports a chained comparison as an error by
+      # default, under -Wparentheses, where the gcc libc-test's own build assumes only warns.
+      TEST_FLAGS = { 'musl/pleval' => %w[-Wno-parentheses] }.freeze
       COMMON = %w[fdfill memfill mtest path print rand setrlim utf8 vmfill].freeze
       TASK_SOURCES = [*(NativeRoot::TASK - ["#{NativeRoot::BACKEND}/root_mem.c"]), "#{NativeRoot::BACKEND}/libc_start.c",
                       "#{NativeRoot::BACKEND}/libc_task.c"].freeze
@@ -367,16 +406,24 @@ module Erx
         LibcTest.read_boot(text, tests: batch, machine: machine)
       end
 
-      # A boot whose pool did not come back has leaked some task's pages: the report says which.
+      # A boot whose pool did not come back has leaked some task's pages, and one that never
+      # printed its pool line leaves that unknown: the report says which.
       def note_pool(index, pool)
-        (@pool_leaks ||= []) << index if pool && pool.first != pool.last
+        if pool.nil?
+          (@pool_unknown ||= []) << index
+        elsif pool.first != pool.last
+          (@pool_leaks ||= []) << index
+        end
       end
 
       def report(results, accel:, cpus:)
         path = File.join(@build, "report-#{accel}-#{cpus}cpu.json")
         leaks = @pool_leaks || []
-        File.write(path, "#{JSON.pretty_generate({ pool_leaks_in_boots: leaks, results: results.map(&:to_h) })}\n")
-        { report: path, totals: LibcTest.totals(results), pool_leaks_in_boots: leaks, results: results }.freeze
+        unknown = @pool_unknown || []
+        File.write(path, "#{JSON.pretty_generate({ pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown,
+                                                    results: results.map(&:to_h) })}\n")
+        { report: path, totals: LibcTest.totals(results), pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown,
+          results: results }.freeze
       end
     end
 
@@ -407,7 +454,7 @@ module Erx
       def object_rule(name, source:, output:, compiler:, cflags:)
         "#{output}/#{name}.o: #{source}/src/#{name}.c\n" \
           "\t@mkdir -p $(dir $@)\n" \
-          "\t#{compiler} #{cflags.join(' ')} -MMD -I#{source}/src/common -c $< -o $@ 2>#{output}/#{name}.err\n"
+          "\t#{compiler} #{[*cflags, *Run::TEST_FLAGS.fetch(name, [])].join(' ')} -MMD -I#{source}/src/common -c $< -o $@ 2>#{output}/#{name}.err\n"
       end
     end
   end

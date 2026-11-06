@@ -68,12 +68,14 @@ module Erx
       ).freeze
     end
 
-    def write(rows:, root_entry:, build_kind:, output:, budget:)
+    # test_code marks a test image (ProductionImage's test entry point), which only a
+    # development build may be; the kernel refuses the mark on any other.
+    def write(rows:, root_entry:, build_kind:, output:, budget:, test_code: false)
       raise Error, 'canonical pack output must start at offset zero' unless output.pos.zero?
       raise Error, 'canonical pack writing needs a hasher' unless @hasher.respond_to?(:digests)
       raise Error, 'canonical pack output must be a file' unless output.respond_to?(:path)
       output.seek(0)
-      layout = plan(rows, root_entry: root_entry, build_kind: build_kind, budget: budget)
+      layout = plan(rows, root_entry: root_entry, build_kind: build_kind, budget: budget, test_code: test_code)
       stream(layout, rows, output)
       fill_hashes(layout, output)
       output.seek(layout.total)
@@ -86,8 +88,10 @@ module Erx
 
     # Every offset of the archive, with all three hash fields zero, decided
     # before the first byte is written. A refusal leaves the output untouched.
-    def plan(rows, root_entry:, build_kind:, budget:)
+    def plan(rows, root_entry:, build_kind:, budget:, test_code:)
       check_request(rows, root_entry: root_entry, build_kind: build_kind, budget: budget)
+      raise Error, 'invalid pack test-code mark' unless [true, false].include?(test_code)
+      raise Error, 'only a development build carries test code' if test_code && build_kind != 'development'
       strings = rows.map { |row| row.fetch('path').b }.join
       raise Error, 'pack strings exceed their bound' if strings.bytesize > @codec.constant('pack_strings_max')
       header_size = @codec.layout_size('erx_pack_header')
@@ -107,7 +111,8 @@ module Erx
         entry
       end.freeze
       raise Error, 'complete pack exceeds host budget' if cursor > budget
-      flags = build_kind == 'development' ? @codec.member('pack_flags', 'development') : 0
+      flags = (build_kind == 'development' ? @codec.member('pack_flags', 'development') : 0) |
+              (test_code ? @codec.member('pack_flags', 'test_code') : 0)
       header = { 'version' => @codec.constant('pack_version'), 'flags' => flags,
                  'total_size' => cursor, 'nentries' => rows.size, 'entry_size' => entry_size,
                  'entries_off' => header_size, 'strings_off' => strings_off,

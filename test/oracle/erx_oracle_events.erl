@@ -7,11 +7,13 @@ Records Common Test completion and partial-run evidence for the host oracle.
 
 Each event is appended to the file named by `ERX_ORACLE_EVENTS` and, as it
 happens, written to standard output as the raw bytes of one frame:
-`erx-oracle-event `, the JSON's length in bytes, its CRC-32 as eight hex
-digits, the JSON, and a newline, each separated by one space. A newline
-comes first, so the frame starts a line even after a suite's own
-unterminated print. The host skips and counts a line whose length or
-checksum is wrong. The bytes go through `erlang:display_string/2`, one
+`erx-oracle-event `, the event's sequence number counting from 0, the
+JSON's length in bytes, the CRC-32 of the sequence number, length and JSON
+as printed as eight hex digits, the JSON, and a newline, each separated by
+one space. A newline comes first, so the frame starts a line even after a
+suite's own unterminated print. The host skips and counts a line whose
+frame is wrong, and a gap in the sequence numbers shows it lost an event
+whatever happened to its line. The bytes go through `erlang:display_string/2`, one
 write per event, not through the io server, so no encoding of the output
 device can refuse them.
 """.
@@ -22,57 +24,65 @@ device can refuse them.
 -export([init/1, handle_event/2, handle_call/2, handle_info/2,
          terminate/2, code_change/3]).
 
+%% The open event report and the sequence number of the next event.
+-type state() :: {file:io_device(), non_neg_integer()}.
+
 -doc "Opens the report path supplied by the host oracle command.".
--spec init(term()) -> {ok, file:io_device()} | {error, term()}.
+-spec init(term()) -> {ok, state()} | {error, term()}.
 init(_Arguments) ->
     case os:getenv("ERX_ORACLE_EVENTS") of
         false -> {error, missing_oracle_event_path};
-        Path -> file:open(Path, [append, raw, binary])
+        Path ->
+            case file:open(Path, [append, raw, binary]) of
+                {ok, Device} -> {ok, {Device, 0}};
+                Error -> Error
+            end
     end.
 
 -doc "Records supported Common Test events without changing their result.".
--spec handle_event(term(), file:io_device()) -> {ok, file:io_device()}.
-handle_event(Event, Device) ->
+-spec handle_event(term(), state()) -> {ok, state()}.
+handle_event(Event, {Device, Sequence}) ->
     case event_record(Event) of
-        ignore -> ok;
+        ignore -> {ok, {Device, Sequence}};
         Record ->
             Bytes = iolist_to_binary(json:encode(Record)),
             true = byte_size(Bytes) < 32768,
             ok = file:write(Device, [Bytes, $\n]),
-            true = erlang:display_string(stdout, frame(Bytes))
-    end,
-    {ok, Device}.
+            true = erlang:display_string(stdout, frame(Sequence, Bytes)),
+            {ok, {Device, Sequence + 1}}
+    end.
 
 %% One event on standard output. The prefix is the twin of EVENT_PREFIX in
 %% tools/lib/erx/oracle_comparison.rb, which finds and checks the frame.
--spec frame(binary()) -> binary().
-frame(Json) ->
-    Crc = io_lib:format("~8.16.0b", [erlang:crc32(Json)]),
-    iolist_to_binary([$\n, "erx-oracle-event ", integer_to_list(byte_size(Json)), $\s, Crc, $\s, Json, $\n]).
+-spec frame(non_neg_integer(), binary()) -> binary().
+frame(Sequence, Json) ->
+    Numbers = [integer_to_list(Sequence), $\s, integer_to_list(byte_size(Json))],
+    Crc = io_lib:format("~8.16.0b", [erlang:crc32([Numbers, $\s, Json])]),
+    iolist_to_binary([$\n, "erx-oracle-event ", Numbers, $\s, Crc, $\s, Json, $\n]).
 
 -doc "Acknowledges controller observations after writing their complete record.".
--spec handle_call(term(), file:io_device()) ->
-    {ok, ok | {error, unsupported}, file:io_device()}.
-handle_call({case_fact, Event}, Device) ->
-    {ok, Device} = handle_event(Event, Device),
-    {ok, ok, Device};
-handle_call(_Request, Device) ->
-    {ok, {error, unsupported}, Device}.
+-spec handle_call(term(), state()) ->
+    {ok, ok | {error, unsupported}, state()}.
+handle_call({case_fact, Event}, State) ->
+    {ok, Next} = handle_event(Event, State),
+    {ok, ok, Next};
+handle_call(_Request, State) ->
+    {ok, {error, unsupported}, State}.
 
 -doc "Ignores unrelated process messages.".
--spec handle_info(term(), file:io_device()) -> {ok, file:io_device()}.
-handle_info(_Message, Device) ->
-    {ok, Device}.
+-spec handle_info(term(), state()) -> {ok, state()}.
+handle_info(_Message, State) ->
+    {ok, State}.
 
 -doc "Closes the event report when Common Test removes the handler.".
--spec terminate(term(), file:io_device()) -> ok | {error, term()}.
-terminate(_Reason, Device) ->
+-spec terminate(term(), state()) -> ok | {error, term()}.
+terminate(_Reason, {Device, _Sequence}) ->
     file:close(Device).
 
 -doc "Preserves the open report across a code change.".
--spec code_change(term(), file:io_device(), term()) -> {ok, file:io_device()}.
-code_change(_OldVersion, Device, _Extra) ->
-    {ok, Device}.
+-spec code_change(term(), state(), term()) -> {ok, state()}.
+code_change(_OldVersion, State, _Extra) ->
+    {ok, State}.
 
 event_record(#event{name = erx_selection_begin, data = Id}) ->
     #{event => <<"selection_begin">>, id => reference_text(Id)};

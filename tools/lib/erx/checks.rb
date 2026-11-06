@@ -62,6 +62,18 @@ module Erx
       | [.]from_json\b                                    # json's core additions
     /x
 
+    # No production image carries test code. ProductionImage#build adds nothing to the
+    # system release; its test entry point adds test code and marks the archive
+    # (ERX_PACK_TEST_CODE). Only the oracle's QEMU run builds a test image. So no Ruby
+    # source under tools/, except the module that defines the entry point and that one
+    # caller, may match TEST_IMAGE_ENTRY: the entry point's name, in a call, a symbol or
+    # a comment, or a literal true for the packer's test_code keyword. The check reads
+    # lines, as the JSON check does, so it catches a slip, not a name assembled from
+    # pieces. Tests outside tools/ may name either.
+    TEST_IMAGE_BUILDER = 'tools/lib/erx/oracle_qemu.rb'
+    TEST_IMAGE_DEFINER = 'tools/lib/erx/production_image.rb'
+    TEST_IMAGE_ENTRY = /\bbuild_test_image\b|\btest_code:\s*true\b/
+
     # Unsets every GIT_ variable of the caller's environment, for a git child
     # that must act on the repository it names and on nothing else.
     def self.isolated_git_environment = ENV.keys.grep(/\AGIT_/).to_h { |key| [key, nil] }
@@ -104,6 +116,7 @@ module Erx
       own_sources = listed.reject { |relative| imported?(relative) }
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_json_parsing(own_sources)
+      check_test_image_builders(own_sources)
       check_device_callers(listed)
       check_ns_writers(listed)
       # The chokepoint rules read the same listing, imports included, since
@@ -223,6 +236,19 @@ module Erx
       sources = listed.select { |relative| NsWriters.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = NsWriters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    def check_test_image_builders(own_sources)
+      allowed = [TEST_IMAGE_BUILDER, TEST_IMAGE_DEFINER]
+      own_sources.each do |relative_path|
+        next unless relative_path.start_with?('tools/') && !allowed.include?(relative_path)
+        path = File.join(@root, relative_path)
+        next unless ruby_source?(path)
+        File.binread(path).each_line.with_index(1) do |line, number|
+          next unless TEST_IMAGE_ENTRY.match?(line)
+          raise Error, "a test image is built only by #{TEST_IMAGE_BUILDER}: #{relative_path}:#{number}"
+        end
+      end
     end
 
     # Imports included: a stock module edited to call erx_device is as much a violation.

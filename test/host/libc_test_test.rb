@@ -197,7 +197,7 @@ class LibcTestTest < Minitest::Test
   VERDICTS = <<~TABLE
     # a comment
     a/cancel  timed_out stopgap    blocked calls are not interrupted
-    a/regex   failed    upstream   musl's matcher
+    a/regex   failed    upstream   at=regex.c:14,regex.c:9 musl's matcher
     a/files   not_run   cannot-run needs files
   TABLE
 
@@ -210,7 +210,7 @@ class LibcTestTest < Minitest::Test
 
   def test_results_that_match_their_verdicts_agree
     verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
-    results = [result('a/cancel', :timed_out), result('a/regex', :failed, 'exit status 1'),
+    results = [result('a/cancel', :timed_out), result('a/regex', :failed, 'exit status 1').with(at: %w[regex.c:14 regex.c:9]),
                result('a/files', :not_run, 'needs files: tmpfile'), result('a/plain', :passed)]
     assert_empty(Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true))
   end
@@ -222,6 +222,39 @@ class LibcTestTest < Minitest::Test
     problems = Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true)
     assert_equal(4, problems.size, problems.inspect)
     assert_match(%r{\Aa/files: not run because the machine stopped}, problems[2])
+  end
+
+  # A failed test is held to the places it reports, so a new failure in a
+  # half of the test that passed before is caught.
+  def test_a_failure_at_a_place_its_verdict_does_not_list_is_reported
+    verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
+    results = [result('a/cancel', :timed_out), result('a/regex', :failed, 'exit status 1').with(at: %w[regex.c:14 regex.c:30 regex.c:9]),
+               result('a/files', :not_run, 'needs files: tmpfile')]
+    problems = Erx::LibcTest.disagreements(results, verdicts: verdicts, complete: true)
+    assert_equal(['a/regex: fails at regex.c:14,regex.c:30,regex.c:9, its verdict says at regex.c:14,regex.c:9'], problems)
+  end
+
+  def test_a_tests_error_places_are_read_from_its_own_output_only
+    results = read(['erx: libc-test: run a/one', 'X /b/src/math/ucb/powf.h:103: bad fp exception',
+                    '/b/src/functional/one.c:42: f() failed', '/b/src/functional/one.c:42: f() failed',
+                    'erx: libc-test: end a/one status 1', '/b/src/functional/stray.c:7: after the end',
+                    'erx: libc-test: run a/two', 'erx: libc-test: end a/two status 0'], %w[a/one a/two])
+    assert_equal([%w[one.c:42 powf.h:103], []], results.map(&:at))
+  end
+
+  def outcome(results, leaks: [], unknown: [])
+    { results: results, pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown }
+  end
+
+  def test_check_libc_test_fails_on_a_disagreement_a_leak_and_an_unknown_pool
+    verdicts = Erx::LibcTest.parse_verdicts(VERDICTS)
+    good = [result('a/cancel', :timed_out), result('a/regex', :failed, 'exit status 1').with(at: %w[regex.c:14 regex.c:9]),
+            result('a/files', :not_run, 'needs files: tmpfile')]
+    assert_empty(Erx::LibcTest.check_problems(outcome(good), verdicts: verdicts))
+    assert_equal(['a/plain: failed (exit status 1), its verdict says passed'],
+                 Erx::LibcTest.check_problems(outcome([*good, result('a/plain', :failed, 'exit status 1')]), verdicts: verdicts))
+    assert_equal(['pool leaks in boots [2]'], Erx::LibcTest.check_problems(outcome(good, leaks: [2]), verdicts: verdicts))
+    assert_equal(['pool unknown in boots [0]'], Erx::LibcTest.check_problems(outcome(good, unknown: [0]), verdicts: verdicts))
   end
 
   def test_an_unknown_result_never_agrees
@@ -239,7 +272,8 @@ class LibcTestTest < Minitest::Test
   def test_a_malformed_verdict_is_refused
     ['a/x passed upstream why', 'a/x failed guess why', 'a/x not_run upstream needs files',
      'a/x failed cannot-run needs files', 'a/x not_run cannot-run the shell', 'A x failed upstream why', 'a/x failed',
-     "a/x failed upstream one\na/x failed upstream two"].each do |text|
+     "a/x failed upstream one\na/x failed upstream two", 'a/x failed upstream why', 'a/x failed upstream at=x.c:9,x.c:10 why',
+     'a/x failed upstream at=x.c why', 'a/x timed_out stopgap at=x.c:1 why'].each do |text|
       assert_raises(Erx::Error, text) { Erx::LibcTest.parse_verdicts(text) }
     end
   end

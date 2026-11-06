@@ -43,12 +43,14 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		abort();
 	memcpy(&record, at, sizeof(record));
 	if (record.version != ERX_BOOT_HANDOFF_VERSION ||
-	    (record.flags & ~(uint32_t)(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA)) != 0 ||
+	    (record.flags & ~(uint32_t)(ERX_PACK_DEVELOPMENT | ERX_PACK_UNCONFINED_DMA | ERX_PACK_TEST_CODE)) != 0 ||
+	    ((record.flags & ERX_PACK_TEST_CODE) != 0 && (record.flags & ERX_PACK_DEVELOPMENT) == 0) ||
 	    record.image_size == 0 || record.image_start % ERX_PAGE_SIZE != 0 || record.image_size % ERX_PAGE_SIZE != 0 ||
 	    __builtin_add_overflow(record.image_start, record.image_size, &end) ||
 	    record.bootargs_len > ERX_BOOT_STRINGS_MAX || record.stdout_path_len > ERX_BOOT_STDOUT_PATH_MAX)
 		abort();
 	if (view.flags != record.flags || view.development != ((record.flags & ERX_PACK_DEVELOPMENT) != 0) ||
+	    view.test_code != ((record.flags & ERX_PACK_TEST_CODE) != 0) ||
 	    view.image.start != record.image_start || view.image.size != record.image_size ||
 	    view.pool_usable != record.pool_usable || view.pool_heap != record.pool_heap ||
 	    view.pool_regions != record.pool_regions || view.bootargs_len != record.bootargs_len ||

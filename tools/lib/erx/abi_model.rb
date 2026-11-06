@@ -702,12 +702,15 @@ module Erx
         name.delete_prefix('erx_').sub(/_(?:flags|kind)\z/, '')
       end
 
+      # Each enumeration member, and for each flags type its known bits as
+      # <type>_known, the one mask a reader refuses an unknown bit with.
       def type_constants(types)
         constants = {}
         types.each_value do |type|
           next unless type.is_a?(EnumType)
-          type.members.each do |name, value|
-            key = "#{constant_prefix(type.name)}_#{name}"
+          generated = type.members.transform_keys { |name| "#{constant_prefix(type.name)}_#{name}" }
+          generated["#{type.name}_known"] = type.members.values.reduce(0, :|) if type.flags
+          generated.each do |key, value|
             raise SchemaError, "generated constant collision #{key}" if constants.key?(key)
             constants[key] = Constant.new(name: key.freeze, value: value, type: type.base).freeze
           end

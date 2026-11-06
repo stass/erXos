@@ -79,35 +79,54 @@ module Erx
     # The line prefix of an event in output that carries other text too; the
     # reporter's twin is the prefix in test/oracle/erx_oracle_events.erl.
     EVENT_PREFIX = 'erx-oracle-event '
-    # An event line: the prefix, the JSON's length in bytes, its CRC-32 as
-    # eight lower-case hex digits, then the JSON, closed by "\n" or "\r\n".
-    EVENT_LINE = /\A#{EVENT_PREFIX}(?<length>\d+) (?<crc>\h{8}) (?<json>.*?)\r?\n\z/m
+    # An event frame: the prefix, the event's sequence number from 0, the
+    # JSON's length in bytes, the CRC-32 of the sequence number, length and
+    # JSON as printed, as eight lower-case hex digits, then the JSON, closed
+    # by "\n" or "\r\n". Other text may come before the prefix on its line.
+    EVENT_FRAME = /\A#{EVENT_PREFIX}(?<sequence>\d+) (?<length>\d+) (?<crc>\h{8}) (?<json>.*?)\r?\n\z/m
     # The events found in a run's output, as one JSON line each, and how
-    # many lines claimed to be events but failed their length or checksum.
+    # many it lost: the larger of the lines that held the prefix but no
+    # whole frame (or repeated a sequence number) and the sequence numbers
+    # missing below the last one read. Either alone can miss a loss: a
+    # damaged last event leaves no gap, and a line a writer cut away leaves
+    # no damaged line.
     PrintedEvents = Data.define(:events, :skipped)
 
     module_function
 
     # The events in `output`, a run's captured standard output. Other text is
     # ignored, and so is a last line the run was cut off in, which no
-    # newline closes. A closed line that starts with EVENT_PREFIX and fails
-    # its frame is counted in `skipped`, never read.
+    # newline closes. A closed line that holds EVENT_PREFIX anywhere but no
+    # whole frame is counted in `skipped`, never read.
     def printed_events(output)
-      framed = output.b.lines.select { |line| line.start_with?(EVENT_PREFIX) && line.end_with?("\n") }
-      records = framed.map { |line| event_json(line) }
-      PrintedEvents.new(events: records.compact.map { |json| "#{json}\n" }.join, skipped: records.count(nil))
+      framed = output.b.lines.select { |line| line.end_with?("\n") && line.include?(EVENT_PREFIX) }
+      frames = framed.map { |line| event_frame(line) }
+      read = frames.compact.uniq(&:first)
+      damaged = frames.size - read.size
+      missing = read.empty? ? 0 : read.map(&:first).max + 1 - read.size
+      PrintedEvents.new(events: read.map { |_, json| "#{json}\n" }.join, skipped: [damaged, missing].max)
     end
 
-    # The JSON of one framed line, or nil when its length or checksum is wrong.
-    def event_json(line)
-      frame = EVENT_LINE.match(line)
+    # The sequence number and JSON of the frame in one line, or nil when no
+    # occurrence of the prefix in it starts a frame whose length and
+    # checksum hold. A C writer can put any bytes before the prefix, and
+    # those bytes may hold a damaged frame of their own, so each occurrence
+    # is tried.
+    def event_frame(line)
+      starts = Enumerator.produce(line.index(EVENT_PREFIX)) { |at| line.index(EVENT_PREFIX, at + 1) }.take_while(&:itself)
+      starts.lazy.filter_map { |at| checked_frame(line.byteslice(at..)) }.first
+    end
+    private_class_method :event_frame
+
+    def checked_frame(text)
+      frame = EVENT_FRAME.match(text)
       return unless frame
       return unless frame[:json].bytesize == Integer(frame[:length], 10)
-      return unless Zlib.crc32(frame[:json]) == Integer(frame[:crc], 16)
+      return unless Zlib.crc32("#{frame[:sequence]} #{frame[:length]} #{frame[:json]}") == Integer(frame[:crc], 16)
 
-      frame[:json]
+      [Integer(frame[:sequence], 10), frame[:json]]
     end
-    private_class_method :event_json
+    private_class_method :checked_frame
 
     # The table, from `text`; `source` names it in diagnostics. Blank lines
     # and lines starting with `#` are comments.
@@ -136,10 +155,17 @@ module Erx
     end
     private_class_method :known_difference
 
+    # What ended a run: its command finished (succeeded), the run itself
+    # crashed (failed) or hit its deadline (timed_out). Any other state is the
+    # host's own failure around the run (OracleQemu.state_of names them),
+    # which says nothing of the system under test.
+    RUN_STATES = %w[succeeded failed timed_out].freeze
+
     # One run, from the event stream erx_oracle_events wrote and the state
-    # of the command that ran it (succeeded, failed or timed_out). A stream
-    # that cannot be read yields no cases, so every case is unknown there.
-    def side(events:, command_state:, skipped: 0)
+    # of the command that ran it, with `detail`, the host's message for a
+    # state outside RUN_STATES. A stream that cannot be read yields no cases,
+    # so every case is unknown there.
+    def side(events:, command_state:, detail: nil, skipped: 0)
       report = OracleResults.read(xml: nil, events: events, command: { 'state' => command_state })
       cut_off = cut_off_status(command_state: command_state, skipped: skipped)
       cases = report.fetch('cases').to_h do |record|
@@ -148,26 +174,29 @@ module Erx
                      attempt: record.fetch('attempt')),
          status == 'incomplete' ? cut_off : status]
       end
-      Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state, skipped: skipped),
+      Side.new(state: run_state(complete: report.fetch('complete'), command_state: command_state, detail: detail,
+                                skipped: skipped),
                 cases: cases)
     rescue Error => error
       Side.new(state: "unreadable: #{error.message}", cases: {})
     end
 
-    # What an open case shows: the deadline or the crash that cut it off, or,
-    # when a run that ended well lost event lines, that its result is unknown.
+    # What an open case shows: the deadline or the crash that cut it off, or
+    # that its result is unknown, when a run that ended well lost event lines
+    # or the host failed around the run.
     def cut_off_status(command_state:, skipped:)
       return 'timed_out' if command_state == 'timed_out'
-      return 'unknown' if command_state == 'succeeded' && skipped.positive?
+      return 'crashed' if command_state == 'failed'
 
-      'crashed'
+      'unknown'
     end
     private_class_method :cut_off_status
 
-    def run_state(complete:, command_state:, skipped:)
+    def run_state(complete:, command_state:, detail:, skipped:)
+      return [command_state, detail].compact.join(': ') unless RUN_STATES.include?(command_state)
       return 'timed_out' if command_state == 'timed_out'
-      return 'crashed' unless command_state == 'succeeded'
-      return "incomplete: #{skipped} damaged event lines skipped" if skipped.positive?
+      return 'crashed' if command_state == 'failed'
+      return "incomplete: #{skipped} event lines damaged or lost" if skipped.positive?
 
       complete ? 'complete' : 'incomplete'
     end
