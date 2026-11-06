@@ -20,8 +20,9 @@
  *            with a cut at every 16-byte boundary, read with three buffer
  *            sizes, against the record written whole;
  *   limits   every refusal and the positions and lengths at their bounds;
- *   race     a producer, the reader and (second phase) a mutator that
- *            rewrites the producer's side, on three threads, for TSan.
+ *   race     a producer, the reader and (second phase, until the reader
+ *            refuses) a mutator that rewrites the producer's side, on
+ *            three threads, for TSan.
  *
  * The explore mode shrinks the reader's area to 64 bytes after a normal
  * init, which init itself refuses: the reader's arithmetic depends on the
@@ -29,6 +30,7 @@
  * wrap and wait in few steps.
  */
 
+#include <limits.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -802,6 +804,9 @@ limits(void)
 
 /* ------------------------------------------------------------------- race */
 
+/* The second phase's bound, in multiples of the first phase's takes. */
+#define RACE_MUTATION_FACTOR	64UL
+
 static atomic_bool race_stop;
 static atomic_bool race_mutate;
 static uint64_t race_seed;
@@ -886,14 +891,21 @@ race(uint64_t seed, unsigned long takes)
 	uint64_t last_rpos = 0, record = 0, rpos, seen, state = seed | 1;
 	unsigned long malformed = 0, records = 0, phase_takes = 0;
 
+	CHECK(takes <= ULONG_MAX / (RACE_MUTATION_FACTOR + 1), "takes", takes, 0);
 	race_seed = seed | 1;
 	place(&reader, LANE_SIZE, 0);
 	CHECK(pthread_create(&producer, NULL, race_producer, NULL) == 0,
 	    "thread", 0, 0);
 	CHECK(pthread_create(&mutator, NULL, race_mutator, NULL) == 0,
 	    "thread", 0, 0);
+	/*
+	 * The first phase is takes long. The second ends at the refusal, which
+	 * comes once the mutator has run; on a loaded host it may not get a CPU
+	 * for many takes, so the bound is generous and only stops a run whose
+	 * refusal never comes.
+	 */
 	seen = 0;
-	for (unsigned long i = 0; i < 2 * takes; i++) {
+	for (unsigned long i = 0; i < takes * (RACE_MUTATION_FACTOR + 1); i++) {
 		size_t max = 1 + xorshift(&state) % sizeof(buf);
 
 		if (i == takes)
