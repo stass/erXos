@@ -229,6 +229,26 @@ class RuntimePrimFileTest < Minitest::Test
     end
   end
 
+  # An open file's ipread_s32bu_p32bu (file_SUITE's ipread) in /tmp:
+  # these pin what both answer. Any atom stands for infinity, as in stock's prim_file.
+  TMP_HANDLES = {
+    'tmp ipread' => '{ok,{5,24,<<"hello">>}}', 'tmp ipread exact' => '{ok,{5,24,<<"hello">>}}',
+    'tmp ipread over max' => 'eof', 'tmp ipread zero size' => '{ok,{0,100,eof}}',
+    'tmp ipread payload past end' => '{ok,{5,100,eof}}', 'tmp ipread short block' => 'eof',
+    'tmp ipread past end' => 'eof', 'tmp ipread negative' => '{error,einval}',
+    'tmp ipread max too big' => '{error,einval}', 'tmp ipread bad max' => '{ok,{5,24,<<"hello">>}}',
+    'tmp ipread closed' => '{error,einval}', 'tmp ipread delete' => 'ok'
+  }.freeze
+
+  def test_tmp_open_file_handles
+    release = table(@fixture.release)
+    stock = table(@fixture.stock)
+    TMP_HANDLES.each do |step, want|
+      assert_equal want, stock[step], "stock #{step}"
+      assert_equal want, release[step], step
+    end
+  end
+
   def test_tmp_serves_the_domain
     release = table(@fixture.release)
     TMP_ERXOS.each { |step, want| assert_equal want, release[step], step }

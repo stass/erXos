@@ -47,7 +47,7 @@
 %% (T6 of design-tmp.md), which test/host/erx_file_remote_test.rb checks with xref.
 %%
 %% Not yet done here (TODO.md): a listing's entries for the mount points below a
-%% directory; file:ipread_s32bu_p32bu/3 on an open file.
+%% directory.
 
 -module(erx_file_remote).
 
@@ -57,7 +57,7 @@
 %% An open file's operations, which file dispatches to by its descriptor's module.
 -export([close/1, read/2, read_line/1, pread/2, pread/3, write/2, pwrite/2, pwrite/3,
          position/2, truncate/1, sync/1, datasync/1, advise/4, allocate/3,
-         read_handle_info/2, copy/3, sendfile/8]).
+         read_handle_info/2, copy/3, sendfile/8, ipread_s32bu_p32bu/3]).
 -export([last_name/1, names/1]).
 
 -include("file.hrl").
@@ -816,6 +816,39 @@ read_placed(File, Offset, Size) ->
         {ok, <<>>} -> eof;
         Read -> Read
     end.
+
+%% file:ipread_s32bu_p32bu/3, as stock's ipread_s32bu_p32bu_nif reads it: the 8-byte
+%% block at Offset, <<Size:32, At:32>> big-endian, then Size bytes at At. A block cut
+%% short by the end of the file, or a Size over MaxSize, answers eof; no bytes at At,
+%% {ok, {Size, At, eof}}. Any atom stands for infinity, 2^31 - 1, as in prim_file; an
+%% Offset that is negative or past 2^63 - 1, or a MaxSize from 2^31 or below -2^63,
+%% answers einval before anything is read.
+-spec ipread_s32bu_p32bu(#file_descriptor{}, term(), term()) ->
+          {ok, {non_neg_integer(), non_neg_integer(), binary() | eof}} | eof |
+          {error, posix() | badarg}.
+ipread_s32bu_p32bu(Fd, Offset, Infinity) when is_atom(Infinity) ->
+    ipread_s32bu_p32bu(Fd, Offset, (1 bsl 31) - 1);
+ipread_s32bu_p32bu(Fd, Offset, MaxSize) when is_integer(Offset), is_integer(MaxSize) ->
+    on_open(Fd, fun(File) -> read_pointer_block(File, Offset, MaxSize) end);
+ipread_s32bu_p32bu(_, _, _) ->
+    {error, badarg}.
+
+read_pointer_block(_, Offset, MaxSize)
+  when Offset < 0; Offset > ?OFFSET_MAX; MaxSize >= 1 bsl 31; MaxSize < -?OFFSET_MAX - 1 ->
+    {error, einval};
+read_pointer_block(File, Offset, MaxSize) ->
+    case read_at(File, Offset, 8) of
+        {ok, <<Size:32, At:32>>} when Size =< MaxSize -> pointed_data(read_at(File, At, Size), Size, At);
+        {ok, _} -> eof;
+        eof -> eof;
+        {error, _} = Error -> Error
+    end.
+
+%% A Size of 0 reads nothing and answers eof in place of the data, as stock's does.
+pointed_data({ok, <<>>}, Size, At) -> {ok, {Size, At, eof}};
+pointed_data({ok, Data}, Size, At) -> {ok, {Size, At, Data}};
+pointed_data(eof, Size, At) -> {ok, {Size, At, eof}};
+pointed_data({error, _} = Error, _, _) -> Error.
 
 -spec pread(#file_descriptor{}, [{integer(), non_neg_integer()}]) ->
           {ok, [binary() | eof]} | {error, posix()}.

@@ -1468,7 +1468,9 @@ Error step 5 below finds the working directory through this path.
   answers on a platform without preallocation; `file:advise/4`, which
   9P2000.L has no operation for either, answers `ok`, as stock's
   `efile_advise` answers on a platform without `posix_fadvise`, advice
-  being only a recommendation; `file:sendfile/5` takes
+  being only a recommendation;
+  `file:ipread_s32bu_p32bu/3` reads the pointer block and then its data
+  through the same reads as `pread`, as stock's NIF does; `file:sendfile/5` takes
   `file`'s fallback of reads and sends, since a remote file has no
   descriptor to hand to the host's call;
 * a request waits for its reply or for the end of the grant's process,

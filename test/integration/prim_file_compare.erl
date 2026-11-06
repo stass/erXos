@@ -949,6 +949,7 @@ tmp(Prefix, Mode) ->
     [Show(Step, Call()) || {Step, Call} <- Special],
     tmp_large(At, Show),
     tmp_ahead(At, Show),
+    tmp_ipread(At, Show),
     tmp_cwd(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
@@ -1041,6 +1042,30 @@ tmp_ahead(At, Show) ->
     ok = file:close(L),
     ok = file:close(W),
     Show("ahead delete", file:delete(Name)).
+
+%% file:ipread_s32bu_p32bu/3 on an open file (file_SUITE's ipread): a pointer block,
+%% <<Size:32, Offset:32>>, read at an offset, then Size bytes at Offset. A block past
+%% the end or naming more than the maximum answers eof, a payload past the end
+%% {ok, {Size, Offset, eof}}, a size of zero eof in place of the data.
+tmp_ipread(At, Show) ->
+    Name = At(<<"ipread">>),
+    ok = file:write_file(Name, <<5:32, 24:32, 0:32, 100:32, 5:32, 100:32, "hello">>),
+    {ok, Fd} = file:open(Name, [raw, read, binary]),
+    Steps = [{"ipread", 0, infinity}, {"ipread exact", 0, 5}, {"ipread over max", 0, 4},
+             {"ipread zero size", 8, infinity}, {"ipread payload past end", 16, infinity},
+             {"ipread short block", 24, infinity}, {"ipread past end", 100, infinity},
+             {"ipread negative", -1, infinity}, {"ipread max too big", 0, 1 bsl 31},
+             {"ipread bad max", 0, foo}],
+    [Show(Step, ipread(Fd, Offset, Max)) || {Step, Offset, Max} <- Steps],
+    ok = file:close(Fd),
+    Show("ipread closed", ipread(Fd, 0, infinity)),
+    Show("ipread delete", file:delete(Name)).
+
+%% A raise is a line of its own, so the steps after it still run.
+ipread(Fd, Offset, Max) ->
+    try file:ipread_s32bu_p32bu(Fd, Offset, Max)
+    catch Class:Reason -> {raised, Class, Reason}
+    end.
 
 %% A working directory in the tree (design-files.md, Erlang clients, error step 5):
 %% relative calls run in it; set_cwd refuses a file and a missing path and keeps the
