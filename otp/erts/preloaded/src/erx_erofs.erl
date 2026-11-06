@@ -525,8 +525,8 @@ checksum_matches(Block0) ->
                 0:32, After/binary>>,
     crc32c(Covered) =:= Stored.
 
-%% CRC-32C (Castagnoli, reflected polynomial 0x82F63B78), bit by bit: one
-%% superblock a mount, until the per-byte primitive serves it.
+%% CRC-32C (Castagnoli, reflected polynomial 0x82F63B78), bit by bit, so the
+%% reader runs on stock OTP, which has no erx_bytes NIF (TODO.md).
 crc32c(Bytes) ->
     crc32c(Bytes, 16#FFFFFFFF).
 

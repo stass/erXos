@@ -25,6 +25,25 @@ module Erx
     # The kernel's line that names the boot value it took from /chosen.
     BOOT_VALUE = /\Aerx: boot value /n
 
+    # An expression for a shell of the booted system that runs the CRC-32C per-byte
+    # primitive, erx_bytes:crc32c/2: over "123456789", whose CRC-32C is RFC 3720's check
+    # value E3069283; over 100000 bytes in two calls, the second continuing the first,
+    # since one call takes at most 65536 bytes; and over those 100000 bytes in one call,
+    # which is refused. It follows another typed expression, whose variables stay bound in
+    # the shell, and a shell fun sees them, so it names values only as fun parameters,
+    # which shadow them. It starts with a fun, so the shell's echo of it does not start
+    # {crc32c, and only the answer matches CRC32C_START.
+    CRC32C_EXPRESSION = '(fun(Data)->(fun(Head,Tail)->' \
+                        '{crc32c,integer_to_list(erx_bytes:crc32c(0,<<"123456789">>),16),' \
+                        'integer_to_list(erx_bytes:crc32c(erx_bytes:crc32c(0,Head),Tail),16),' \
+                        'try erx_bytes:crc32c(0,Data) catch error:badarg->badarg end} end)' \
+                        '(binary:part(Data,0,65536),binary:part(Data,65536,byte_size(Data)-65536)) end)' \
+                        '(binary:copy(<<"erXos">>,20000)).'
+    # 2D78517F is the CRC-32C of 20000 copies of "erXos", from the bitwise model in
+    # test/host/medium_boot_test.rb.
+    CRC32C_ANSWER = '{crc32c,"E3069283","2D78517F",badarg}'
+    CRC32C_START = /\A(?:[0-9]+> )?\{crc32c,/n
+
     module_function
 
     # The device tree source that adds the firmware's two properties to a tree: dtc
@@ -44,14 +63,25 @@ module Erx
 
     # The production boot's checkpoints with the boot value's inserted: the kernel
     # prints "erx: boot image build ..." and then "erx: boot value ...". At the shell the
-    # person reads a release file from the slot's EROFS image (image_checkpoints).
+    # person reads a release file from the slot's EROFS image (image_checkpoints), and
+    # then runs the CRC-32C primitive (CRC32C_EXPRESSION).
     def checkpoints(points, choice, release:)
       at = points.index { |point| point.fetch(:name) == 'image-identity' }
       raise Error, 'the production checkpoints name no image-identity' unless at
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      shell, answer = image_checkpoints(points.last, release)
-      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1], shell, answer].freeze
+      shell, image_answer = image_checkpoints(points.last, release)
+      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1], shell,
+       *crc32c_checkpoints(image_answer)].freeze
+    end
+
+    # After the shell's line previous, the person types CRC32C_EXPRESSION, and its answer
+    # must be CRC32C_ANSWER whole.
+    def crc32c_checkpoints(previous)
+      whole = /\A(?:[0-9]+> )?#{Regexp.escape(CRC32C_ANSWER)}\r*\n\z/n
+      [previous.merge(type: "#{CRC32C_EXPRESSION}\r").freeze,
+       { name: 'crc32c', pattern: CRC32C_START, seconds: 30,
+         verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
     end
 
     # The release file the shell reads from the image: stdlib's lists module, many blocks long.

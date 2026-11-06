@@ -37,7 +37,7 @@ class MediumBootTest < Minitest::Test
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
     merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release)
-    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5], merged.map { |point| point.fetch(:name) }
+    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5 crc32c], merged.map { |point| point.fetch(:name) }
     verify = merged.fetch(2).fetch(:verify)
     assert_match Boot::BOOT_VALUE, "erx: boot value normal slot b\r\n"
     verify.call("erx: boot value normal slot b\r\n")
@@ -65,7 +65,34 @@ class MediumBootTest < Minitest::Test
     assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'release-shell' }, release.take(1)) }
   end
 
+  # After the image's answer the shell runs the CRC-32C primitive, and only the answer
+  # the bitwise model gives passes: RFC 3720's check value, the chunked value, and the
+  # refusal of one call over 65536 bytes.
+  def test_the_shell_runs_the_crc32c_primitive_and_must_print_the_models_values
+    merged = Boot.checkpoints([{ name: 'image-identity' }, { name: 'release-shell', pattern: /\AEshell V/n }],
+                              Choice.new(slot: :a, offset: 0, length: 64), release: release)
+    image_answer, crc = merged.last(2)
+    assert_equal "#{Boot::CRC32C_EXPRESSION}\r", image_answer.fetch(:type)
+    assert_equal '{crc32c,"%X","%X",badarg}' % [crc32c('123456789'), crc32c('erXos' * 20_000)], Boot::CRC32C_ANSWER
+    assert_equal 0xE3069283, crc32c('123456789')
+    refute_match crc.fetch(:pattern), "3> #{Boot::CRC32C_EXPRESSION}\r\n"
+    assert_match crc.fetch(:pattern), "3> #{Boot::CRC32C_ANSWER}\r\n"
+    crc.fetch(:verify).call("3> #{Boot::CRC32C_ANSWER}\r\n")
+    crc.fetch(:verify).call("#{Boot::CRC32C_ANSWER}\n")
+    ['{crc32c,"E3069283","2D78517E",badarg}', '{crc32c,"E3069283","2D78517F",3}',
+     "{crc32c,{'EXIT',{undef,[]}}}"].each do |line|
+      assert_raises(Erx::Error, line) { crc.fetch(:verify).call("#{line}\n") }
+    end
+  end
+
   private
+
+  # CRC-32C bit by bit, seeded with all ones and inverted at the end (RFC 3720).
+  def crc32c(bytes)
+    bytes.each_byte.reduce(0xFFFFFFFF) do |crc, byte|
+      8.times.reduce(crc ^ byte) { |bits, _| bits.odd? ? (bits >> 1) ^ 0x82F63B78 : bits >> 1 }
+    end ^ 0xFFFFFFFF
+  end
 
   # Two release entries, the second the module the shell reads, whose bytes are this file's.
   def release

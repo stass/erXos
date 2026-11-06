@@ -10,6 +10,7 @@ require 'tmpdir'
 require 'io/wait'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
+require_relative '../../tools/lib/erx/medium_boot'
 
 # ERTS built with ERLANG_OSTYPE=erxos, driven through a terminal as a person would:
 # `1>`, an expression, its answer, then halt, over erx_console and erx_stdio.
@@ -247,6 +248,17 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'code:load_binary(Mod, "erx_probe", Bin), erx_probe:f().' => /^compiled$/,
       'code:which(dbg).' => %r{^"/lib/runtime_tools-[0-9.]+/ebin/dbg\.beam"$},
       '{ok, _} = dbg:tracer(), ok = dbg:stop(), dbg_done.' => /^dbg_done$/
+    )
+  end
+
+  # The CRC-32C per-byte primitive, a static NIF, runs in the release: the same expression
+  # and answer as the boot from a release medium (Erx::MediumBoot::CRC32C_EXPRESSION). There
+  # the expression follows another that binds shell variables, so here the shell holds
+  # bindings first, and the expression must answer whatever names they use.
+  def test_the_crc32c_primitive_runs_in_the_release
+    assert_answers(
+      'A = 1, B = <<"bound">>, D = 2, Data = 3, Head = 4, Tail = 5, bound.' => /^bound$/,
+      Erx::MediumBoot::CRC32C_EXPRESSION => /^#{Regexp.escape(Erx::MediumBoot::CRC32C_ANSWER)}$/
     )
   end
 

@@ -616,8 +616,12 @@ it; git history is the record of completed work.
 * [Low] test, `tools/fuzz/erx_erofs.rb`: whether a seeded fault is caught depends on the seed: with
   `--seed 11` the reader that does not bound a directory entry's name by its block passes, so that run
   does not show the target catching it; the mutations need one that always cuts a name across its block.
-* [Low] runtime, `erx_erofs`: the superblock's CRC-32C is computed bit by bit in Erlang; it moves to the
-  CRC-32C per-byte primitive when that lands. Device, FIFO and socket inodes answer `enotsup`, which the
+* [Low] runtime, `erx_erofs`: the superblock's CRC-32C is computed bit by bit in Erlang, not by the
+  per-byte primitive `erx_bytes:crc32c/2`: the reader's EUnit cases and fuzz target run it on stock
+  OTP, which has no `erx_bytes` NIF, so moving it needs an Erlang stand-in for those runs (at boot
+  only `erx_ns`, in the same `erx` application as the primitive, mounts an image). The reader's form
+  is Linux's, seeded with all ones and not inverted at the end, so over the covered bytes it is
+  `erx_bytes:crc32c(0, Covered) bxor 16#FFFFFFFF`. Device, FIFO and socket inodes answer `enotsup`, which the
   packer's trees never hold.
 * [Low] runtime, `erx_erofs`: a walk that fails inside an operation (`eio`, `enotsup`, `enametoolong`) answers
   `{[], Error}`, dropping the kinds it passed, so `erx_path` places the error at the first name; a superblock
