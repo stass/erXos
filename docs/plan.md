@@ -114,7 +114,7 @@ numbers are names; the table's order is the order.
 | M10 Users without a container runtime | two users, two domains, one runs out of memory or CPU alone | 4,000 lines of Erlang | M8, M9 | |
 | Track Q The second tier | toybox's `sh` runs a script with subshells, `vi` edits a file and `less` pages a log in a terminal session, and a dynamically linked program loads a library with `dlopen` | the programs' estimate in [design-programs.md](design-programs.md#performance), and the session's shared mappings, an estimated 3,000 lines of Erlang; the kernel's part is track K's | track P, M7 | GQ |
 | M11 Security closure | a release build without the development banner, on erXos's kernel, with an Erlang driver behind an IOMMU window | hardening | M10 | |
-| M12 Storage, networking, boards | a Raspberry Pi 4 boots erXos from its SD card, keeps its files, and takes a system update whose trial survives a power cut | estimated in the subsystems' design documents | M11 | G12, GN |
+| M12 Storage, networking, boards | a Raspberry Pi 4 boots erXos from its SD card, keeps its files through power cuts, and takes a system update whose trial survives a power cut | estimated in the subsystems' design documents | M11 | G12, GN |
 | M13 erXos's F2FS | an installation brings erXos's F2FS, written in Erlang, to the Pi 4, whose files survive power cuts and a later update's failed trial and mount in Linux | estimated in its design document | M12 | G13 |
 | M14 erXos's network stack | M12's sessions run over erXos's own TCP/IP stack, written in Erlang, on both boards | estimated in its design document, within GN's decision | M12 | G14 |
 
@@ -1779,15 +1779,15 @@ criterion to its unconfined-DMA profile.
 
 ## M12: Storage, networking, boards
 
-**Goal.** Storage on the boards, system updates that leave a
+**Goal.** Storage that survives power cuts, system updates that leave a
 bootable system whatever happens, networking to other machines, and the
 first boards, along [design-storage.md](design-storage.md) and the
 [networking](design.md#networking) and [portability](design.md#portability)
 sections of design.md. The network service gets its design document
 before its code.
 
-**Demo.** A Raspberry Pi 4 boots erXos from its SD card and keeps the
-files written to it; a system update arrives over the network,
+**Demo.** A Raspberry Pi 4 boots erXos from its SD card; a file written
+and synced survives a power cut; a system update arrives over the network,
 its trial boot loses power and the old system comes back, and the next
 trial commits after a healthy boot; the system domain killed during a
 trial boots the committed slot.
@@ -1880,7 +1880,11 @@ trial boots the committed slot.
   no PCIe or Ethernet, and QEMU has no Pi 5 model.
 
 **Exit criteria.** The update state machine's exhaustive test passes with
-a power cut after every write and every reset; on both boards, through the
+a power cut after every write and every reset; a file synced under
+`/data` survives a power cut at every step of a scripted write load,
+under TCG and HVF, and a block error injected under littlefs mid-write
+fails that operation with an unknown outcome reported and no
+acknowledged write lost; on both boards, through the
 board rig, a trial that panics, hangs, calls `halt/0`, loses power or
 loses its system domain boots the committed slot next, and a damaged
 boot-selection record is tried in place; a stopped watchdog pet on each
@@ -1952,11 +1956,7 @@ legal review of the clean room before a product ships it.
 
 **Exit criteria.** Every image erXos's F2FS writes, and every state of the
 power-cut harness, passes `fsck.f2fs` and mounts in the Linux guest at the
-last completed checkpoint with every acknowledged `fsync`; a file synced
-under `/data` survives a power cut at every step of a scripted write
-load, under TCG and HVF, and a block error injected mid-write fails that
-operation with an unknown outcome reported and no acknowledged write
-lost; a trial boot's
+last completed checkpoint with every acknowledged `fsync`; a trial boot's
 read-only mount without recovery writes nothing, so the partition after a
 failed trial is byte for byte the partition before it, on erXos's F2FS
 and on Linux's mounted with `norecovery`; the file-semantics corpus
