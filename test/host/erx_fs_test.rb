@@ -37,9 +37,9 @@ class ErxFsTest < Minitest::Test
   # Each fault replaces one passage of one source; the test named in caught_by must fail.
   FAULTS = [
     Fault.new(name: 'a walk of .. at the root asks the tree', file: GRANT,
-              from: "walk_step(<<\"..\">>, [_] = Root, _) ->\n    {ok, Root};",
-              to: "walk_step(<<\"..\">>, [{Dir, _, _}] = Root, #grant{module = M, fs = T}) ->\n" \
-                  "    {ok, _, Qid} = M:walk(Dir, <<\"..\">>, T),\n    {ok, [{Dir, Qid, root} | Root]};",
+              from: "walk_step(<<\"..\">>, [_] = Root, Grant) ->\n    {ok, Root, Grant};",
+              to: "walk_step(<<\"..\">>, [{Dir, _, _}] = Root, #grant{module = M, fs = T} = Grant) ->\n" \
+                  "    {ok, _, Qid} = M:walk(Dir, <<\"..\">>, T),\n    {ok, [{Dir, Qid, root} | Root], Grant};",
               caught_by: 'dotdot_stays_at_the_root_test'),
     Fault.new(name: 'a walk continues past a link', file: GRANT,
               from: 'when Type band ?ERX_P9_QTDIR =:= 0 ->', to: 'when Type band ?ERX_P9_QTDIR =:= -1 ->',
@@ -67,8 +67,8 @@ class ErxFsTest < Minitest::Test
                   '#owner{monitor = Ref, fids = #{}}}}};',
               caught_by: 'ended_owner_leaves_no_fid_test'),
     Fault.new(name: 'a walk that stops keeps its new fid', file: GRANT,
-              from: "walked(_, _, _, {stopped, Qids, _}, Grant) ->\n    {{ok, lists:reverse(Qids)}, Grant};",
-              to: "walked(Owner, _, NewFid, {stopped, Qids, _}, Grant) ->\n" \
+              from: "walked(_, _, _, {stopped, Qids, _, Grant}) ->\n    {{ok, lists:reverse(Qids)}, Grant};",
+              to: "walked(Owner, _, NewFid, {stopped, Qids, _, Grant}) ->\n" \
                   "    {{ok, lists:reverse(Qids)}, add_fid(NewFid, Owner, [{1, {16#80, 0, 1}, root}], Grant)};",
               caught_by: 'fid_table_model_test_'),
     Fault.new(name: 'the in-flight bound admits one more', file: GRANT,
@@ -110,8 +110,8 @@ class ErxFsTest < Minitest::Test
               to: '        #{Fid := #fid{open = {open, Node, Handle}}} when Node =:= none -> {{to_file, Node, {setattr,',
               caught_by: 'truncate_through_a_read_only_open_is_refused_test'),
     Fault.new(name: "an ended fid keeps its file open", file: GRANT,
-              from: '#grant{effects = Effects} = Grant1 = released(Open, Grant#grant{fids = Fids1}),',
-              to: '#grant{effects = Effects} = Grant1 = element(3, {fun released/2, Open, Grant#grant{fids = Fids1}}),',
+              from: "#grant{effects = Effects} = Grant1 =\n        released(Open, repath(Path, [], Grant#grant{fids = Fids1})),",
+              to: "#grant{effects = Effects} = Grant1 =\n        element(3, {fun released/2, Open, repath(Path, [], Grant#grant{fids = Fids1})}),",
               caught_by: 'owner_end_clunks_its_open_fids_test'),
     Fault.new(name: 'a listing is not fitted to its count', file: GRANT,
               from: '{ok, Entries} -> fit_listing(Entries, Count);',
@@ -144,12 +144,12 @@ class ErxFsTest < Minitest::Test
               to: 'failed(Other) when element(1, Other) =:= error -> {error, eio}.',
               caught_by: 'answers_with_a_state_are_eio_in_the_grant_test'),
     Fault.new(name: 'a reply the grammar rejects keeps the grant its operation built', file: GRANT,
-              from: 'false -> {{error, eio}, refused_remove(Request, Before)}',
-              to: 'false -> {{error, eio}, refused_remove(Request, element(1, {Built, Before}))}',
+              from: 'false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}',
+              to: 'false -> {{error, eio}, refused_remove(Request, element(1, {Built, tree_holds(Built, Before)}))}',
               caught_by: 'malformed_qids_change_nothing_test'),
     Fault.new(name: "a rejected reply undoes a remove's clunk", file: GRANT,
-              from: 'false -> {{error, eio}, refused_remove(Request, Before)}',
-              to: 'false -> {{error, eio}, element(2, {fun refused_remove/2, Before})}',
+              from: 'false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}',
+              to: 'false -> {{error, eio}, element(2, {fun refused_remove/2, tree_holds(Built, Before)})}',
               caught_by: 'rejected_remove_still_clunks_its_fid_test'),
     Fault.new(name: "a rejected lcreate leaves the tree's handle open", file: GRANT,
               from: "                            _ = Module:clunk(Handle, Fs),\n" \

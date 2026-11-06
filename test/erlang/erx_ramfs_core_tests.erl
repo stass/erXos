@@ -93,7 +93,7 @@ attr(Ino, Tree) ->
 attr(Field, Ino, Tree) -> maps:get(Field, attr(Ino, Tree)).
 
 walk(Dir, Name, Tree) ->
-    {{ok, Ino, _Qid}, Tree} = step({walk, Dir, Name}, Tree),
+    {{ok, Ino, _Qid}, _Held} = step({walk, Dir, Name, holder}, Tree),
     Ino.
 
 %% The names of a directory, by one listing from the start.
@@ -127,19 +127,60 @@ zero_cap_refuses_every_creation_test() ->
 
 walk_finds_the_named_node_with_its_qid_test() ->
     {Dir, Tree} = mkdir(?ROOT, <<"d">>, tree()),
-    ?assertMatch({{ok, Dir, {directory, _, Dir}}, Tree},
-                 step({walk, ?ROOT, <<"d">>}, Tree)).
+    ?assertMatch({{ok, Dir, {directory, _, Dir}}, _},
+                 step({walk, ?ROOT, <<"d">>, holder}, Tree)).
 
 walk_refusals_test() ->
     {Dir, Tree1} = mkdir(?ROOT, <<"d">>, tree()),
     {File, Tree2} = file(?ROOT, <<"f">>, <<>>, Tree1),
     {_, Tree3} = mkdir(?ROOT, <<"shut">>, 8#600, Tree2),
     Shut = walk(?ROOT, <<"shut">>, Tree3),
-    refused(enoent, {walk, ?ROOT, <<"missing">>}, Tree3),
-    refused(enoent, {walk, 999999, <<"x">>}, Tree3),
-    refused(enotdir, {walk, File, <<"x">>}, Tree3),
-    refused(eacces, {walk, Shut, <<"x">>}, Tree3),
-    refused(enametoolong, {walk, Dir, binary:copy(<<"n">>, 256)}, Tree3).
+    refused(enoent, {walk, ?ROOT, <<"missing">>, holder}, Tree3),
+    refused(enoent, {walk, 999999, <<"x">>, holder}, Tree3),
+    refused(enotdir, {walk, File, <<"x">>, holder}, Tree3),
+    refused(eacces, {walk, Shut, <<"x">>, holder}, Tree3),
+    refused(enametoolong, {walk, Dir, binary:copy(<<"n">>, 256), holder}, Tree3).
+
+%% A walk holds what it found: a rename over the name leaves the old node with no
+%% name and its charge, and the holder's forget frees it and returns the charge.
+walk_holds_a_node_until_its_holder_forgets_it_test() ->
+    {_, Tree1} = file(?ROOT, <<"a">>, <<"new">>, tree()),
+    {Old, Tree2} = file(?ROOT, <<"b">>, binary:copy(<<1>>, 5000), Tree1),
+    {{ok, Old, _}, Tree3} = ok_step({walk, ?ROOT, <<"b">>, g1}, Tree2),
+    {ok, Tree4} = ok_step({rename, ?ROOT, <<"a">>, ?ROOT, <<"b">>}, Tree3),
+    ?assertEqual(0, attr(nlink, Old, Tree4)),
+    ?assertEqual(5000, attr(size, Old, Tree4)),
+    refused(enoent, {open, Old, {read, []}}, Tree4),
+    {ok, Tree5} = ok_step({forget, Old, g1}, Tree4),
+    refused(enoent, {getattr, Old}, Tree5),
+    ?assert(erx_ramfs_core:held(Tree5) < erx_ramfs_core:held(Tree4)),
+    %% A second forget, or one of a holder that holds nothing, changes nothing.
+    ?assertEqual({ok, Tree5}, step({forget, Old, g1}, Tree5)),
+    ?assertEqual({ok, Tree5}, step({forget, Old, g2}, Tree5)).
+
+%% Holds are kept per holder: walking twice holds once, and every holder must let go.
+a_node_lives_until_every_holder_lets_go_test() ->
+    {File, Tree1} = file(?ROOT, <<"f">>, <<"x">>, tree()),
+    {_, Tree2} = ok_step({walk, ?ROOT, <<"f">>, g1}, Tree1),
+    {_, Tree3} = ok_step({walk, ?ROOT, <<"f">>, g1}, Tree2),
+    {_, Tree4} = ok_step({walk, ?ROOT, <<"f">>, g2}, Tree3),
+    {ok, Tree5} = ok_step({unlink, ?ROOT, <<"f">>, file}, Tree4),
+    {ok, Tree6} = ok_step({forget, File, g1}, Tree5),
+    ?assertEqual(0, attr(nlink, File, Tree6)),
+    {ok, Tree7} = ok_step({forget_holder, g2}, Tree6),
+    refused(enoent, {getattr, File}, Tree7),
+    ?assertEqual(erx_ramfs_core:held(tree()), erx_ramfs_core:held(Tree7)).
+
+%% A removed directory finds nothing, even while a holder keeps it.
+a_removed_directory_finds_nothing_test() ->
+    {Dir, Tree1} = mkdir(?ROOT, <<"d">>, tree()),
+    {_, Tree2} = ok_step({walk, ?ROOT, <<"d">>, g1}, Tree1),
+    {ok, Tree3} = ok_step({unlink, ?ROOT, <<"d">>, directory}, Tree2),
+    ?assertEqual(0, attr(nlink, Dir, Tree3)),
+    refused(enoent, {walk, Dir, <<"x">>, g1}, Tree3),
+    refused(enoent, {make, Dir, <<"x">>, {directory, 8#755}}, Tree3),
+    {ok, Tree4} = ok_step({forget, Dir, g1}, Tree3),
+    refused(enoent, {getattr, Dir}, Tree4).
 
 %% ---------------------------------------------------------------------------
 %% getattr

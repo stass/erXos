@@ -320,6 +320,15 @@ it; git history is the record of completed work.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: a fid's path has no depth bound, and `repath/3` counts every
+  step of it, so a clone, clunk or walk in place of a fid at depth D costs O(D) and building the path by walks in place
+  O(D^2); renames of two directories grow a path without bound. Cap a fid's path length (a walk past it refuses), or
+  count steps per shared path suffix so a clone is one increment ([todo-performance.md](docs/todo-performance.md)).
+* [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: the grant's hold bookkeeping (`held`, `steps`, `loose`) has
+  no test of its own: `erx_fs_test_tree` has no `forget`, so a rejected walk reply's holds (`tree_holds/2`), `remove`
+  and `owner_down` with walked fids are seen only end to end, or not at all. Give the test tree `forget`, check in
+  `fid_table_model_test_` that the tree holds exactly the walked nodes the fids name after every step, and consider
+  making the forget an effect `{forget, Node}` the shell performs, so the core sends nothing.
 * [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: an open file's owner process is one per grant, keyed by the node,
   where `docs/design-files.md` starts one per open file on any grant; a file open through two grants of one tree has
   two owners, so its requests are ordered against each other only by the tree. /tmp serves one grant per tree. Add

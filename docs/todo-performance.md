@@ -192,6 +192,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   one link, and of the same three on the release file system. Fixes on the table, cheapest first: a smaller cursor;
   sending a `..` that follows a new name in the same walk, which the grant answers from its fid's record of the
   directories it came through, for walks that stay below the entry's `root` (design-files.md's Alternatives weighs it).
+* **A grant's step count over a whole fid path** (`erx_fs_grant:repath/3`, [design-files.md](design-files.md#serving-the-erx_fs-behaviour)): every new fid, walk in place and clunk counts or uncounts each step of the fid's path, so a clone of a fid at depth D costs D map updates where it cost none, and an end of a grant's owner costs the sum of its fids' depths. Measure: a clone and a clunk of fids at depths 1, 16 and 256 under `tools/erx bench`, against the same with only the steps that differ between the old and new paths counted.
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 
 * **The production image's `NOTICES`** (`tools/lib/erx/production_image.rb`, Phase 1 stopgap): `NOTICES` is 12.6 MiB of a 13.6 MiB image, never released and touched page by page at boot. Measure: the root's boot time with and without those pages.

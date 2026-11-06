@@ -8,8 +8,10 @@
 %% refused step left the tree as it was, and what the tree says of a file agrees with
 %% a model that keeps each file as the list of writes that reached it, cut at its size,
 %% which shares no code with the chunked store and predicts where each write lands and
-%% how much of it. At the end of a sequence every open is closed, after which no inode
-%% number the run saw names a node without a name: a leaked open would keep one. Every
+%% how much of it. Walks hold for two holders, which forget nodes and end, and a model
+%% keeps each holder's set: at the end of a sequence every node a holder still holds is
+%% there, then every open is closed and both holders end, after which no inode number
+%% the run saw names a node without a name: a leaked open or hold would keep one. Every
 %% operation must have been accepted at least ?MIN_ACCEPTED times over the run, so a
 %% step that always refuses fails it. The seed comes from make check-fuzz.
 
@@ -25,14 +27,16 @@
 -define(MIN_ACCEPTED, 500).
 -define(OPERATIONS, [walk, getattr, open, read, write, readdir, readlink, setattr,
                      unlink, rename, clunk, {make, file}, {make, directory},
-                     {make, symlink}, {make, link}]).
+                     {make, symlink}, {make, link}, forget, forget_holder]).
+-define(HOLDERS, [g1, g2]).
 
 %% The state of one sequence: the tree; the next stamp; every inode number a
 %% reply named, kept after its node is gone; the handles open; and per file
-%% the model: its size and its writes, newest first; and per operation the
-%% steps the tree accepted, which the run reports to show what it reached.
+%% the model: its size and its writes, newest first; the {Holder, Ino} pairs
+%% the walks hold; and per operation the steps the tree accepted, which the
+%% run reports to show what it reached.
 -record(run, {tree, stamp = 2, inos = [?ROOT], handles = [], files = #{},
-              accepted = #{}}).
+              holds = [], accepted = #{}}).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
@@ -53,11 +57,22 @@ sequence(Number) ->
     Steps = rand:uniform(?MAX_STEPS),
     Run1 = lists:foldl(fun(Step, R) -> apply_step(Number, Step, request(R), R) end,
                        Run, lists:seq(1, Steps)),
+    lists:foreach(fun({_, Ino}) -> held_is_there(Number, Ino, Run1#run.tree) end,
+                  Run1#run.holds),
     Run2 = lists:foldl(fun(Handle, R) -> apply_step(Number, last, {clunk, Handle}, R) end,
                        Run1, Run1#run.handles),
-    lists:foreach(fun(Ino) -> closed_or_named(Number, Ino, Run2#run.tree) end,
-                  Run2#run.inos),
-    Run2#run.accepted.
+    Run3 = lists:foldl(fun(Holder, R) -> apply_step(Number, last, {forget_holder, Holder}, R) end,
+                       Run2, ?HOLDERS),
+    lists:foreach(fun(Ino) -> closed_or_named(Number, Ino, Run3#run.tree) end,
+                  Run3#run.inos),
+    Run3#run.accepted.
+
+%% A node a holder holds is there, named or not.
+held_is_there(Number, Ino, Tree) ->
+    case erx_ramfs_core:step({getattr, Ino}, 1, 0, Tree) of
+        {{ok, _}, _} -> ok;
+        {Reply, _} -> error({held_node_gone, Number, Ino, Reply})
+    end.
 
 %% With every open closed, a node is named or gone.
 closed_or_named(Number, Ino, Tree) ->
@@ -98,8 +113,8 @@ accepted(Request, _Reply, Accepted) ->
 %% ---------------------------------------------------------------------------
 
 request(Run) ->
-    case rand:uniform(20) of
-        1 -> {walk, ino(Run), name()};
+    case rand:uniform(22) of
+        1 -> {walk, ino(Run), name(), holder()};
         2 -> {getattr, ino(Run)};
         3 -> {open, ino(Run), flags()};
         4 -> {make, ino(Run), name(), {file, mode(), flags()}};
@@ -121,7 +136,19 @@ request(Run) ->
         18 -> pick([statfs, {fsync, handle(Run)}, {xattr, ino(Run), get}]);
         19 -> {make, ino(Run), name(), {node, mode(), 1, 3}};
         20 -> pick([{nonsense}, {open, ino(Run), {read, [trunc | append]}},
-                    {setattr, {node, ino(Run)}, #{size => <<"big">>}}])
+                    {setattr, {node, ino(Run)}, #{size => <<"big">>}}]);
+        21 -> {forget, held_ino(Run), holder()};
+        22 -> {forget_holder, holder()}
+    end.
+
+holder() -> pick(?HOLDERS).
+
+%% A node some holder holds, most often.
+held_ino(#run{holds = []} = Run) -> ino(Run);
+held_ino(#run{holds = Holds} = Run) ->
+    case rand:uniform(4) of
+        1 -> ino(Run);
+        _ -> element(2, pick(Holds))
     end.
 
 ino(#run{inos = Inos}) ->
@@ -181,8 +208,12 @@ pick(List) -> lists:nth(rand:uniform(length(List)), List).
 %% What the replies say, against the model
 %% ---------------------------------------------------------------------------
 
-observed(_N, _S, {walk, _, _}, {ok, Ino, _Qid}, Run) ->
-    known(Ino, Run);
+observed(_N, _S, {walk, _, _, Holder}, {ok, Ino, _Qid}, #run{holds = Holds} = Run) ->
+    known(Ino, Run#run{holds = lists:usort([{Holder, Ino} | Holds])});
+observed(_N, _S, {forget, Ino, Holder}, ok, #run{holds = Holds} = Run) ->
+    Run#run{holds = lists:delete({Holder, Ino}, Holds)};
+observed(_N, _S, {forget_holder, Holder}, ok, #run{holds = Holds} = Run) ->
+    Run#run{holds = [Hold || {H, _} = Hold <- Holds, H =/= Holder]};
 observed(N, S, {getattr, Ino}, {ok, #{kind := file, size := Size}}, Run) ->
     case Run#run.files of
         #{Ino := {Size, _}} -> Run;

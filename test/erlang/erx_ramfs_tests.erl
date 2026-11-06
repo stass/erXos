@@ -4,7 +4,9 @@
 -module(erx_ramfs_tests).
 -moduledoc """
 EUnit tests of /tmp's grant over the real tree (docs/design-tmp.md, Verification): the
-"Fids and nodes" case, a fid that outlives its file never reaching a file made after it, and
+"Fids and nodes" cases, a fid that keeps a removed file and never reaches a file made after
+it, a stat that a rename over its name falls inside, a stopped walk, ".." from a removed
+directory, a removed file freed by its last fid's clunk and a file two grants hold, and
 the "Grammar on the local route" case, names and link texts at and past their limits sent
 to the grant as local messages and refused before any callback. The tree is `erx_ramfs`
 under `erx_fs`, as `erx_ramfs_sup` starts them. test/host/erx_ramfs_test.rb runs these on
@@ -30,12 +32,20 @@ start() ->
     unlink(Tree),
     unlink(Grant),
     put({tree, Grant}, Tree),
+    put({name, Grant}, Name),
     {ok, _} = attach(Grant, 1),
     Grant.
 
 stop(Grant) ->
     exit(Grant, kill),
     exit(erase({tree, Grant}), kill).
+
+%% A second grant on the tree of Grant, attached at fid 1.
+second_grant(Grant) ->
+    {ok, Second} = erx_fs:start_link(erx_ramfs, get({name, Grant}), rw),
+    unlink(Second),
+    {ok, _} = attach(Second, 1),
+    Second.
 
 %% A grant that ends while the request is out fails the case at once with the request, so
 %% that a grant that crashed on it is a failed case and not a timed out one.
@@ -65,22 +75,109 @@ make_file(Grant, Fid, Name, Spare) ->
     {ok, _, _} = call(Grant, {lcreate, Spare, Name, ?O_RDWR, 8#644, 0}),
     ok = call(Grant, {clunk, Spare}).
 
+%% A closed file of 50000 bytes, enough to show in statfs's free blocks.
+make_data_file(Grant, Name, Spare) ->
+    {ok, []} = call(Grant, {walk, 1, Spare, []}),
+    {ok, _, _} = call(Grant, {lcreate, Spare, Name, ?O_RDWR, 8#644, 0}),
+    {ok, 50000, _} = call(Grant, {write, Spare, 0, binary:copy(<<1>>, 50000)}),
+    ok = call(Grant, {clunk, Spare}).
+
 %% Fids and nodes ----------------------------------------------------------
 
 %% A fid walked to a file, the file removed, then a lopen and a getattr through the
-%% fid: both answer enoent, even after a new file is made, which must not take the
-%% removed file's inode number.
+%% fid: the walk keeps the file, so getattr finds it with no links, and lopen answers
+%% enoent, as an open after the unlink would. Once the fid is clunked the file is
+%% gone, and a file made after it must not take its inode number.
 a_fid_never_reaches_a_file_made_after_its_own_test() ->
     Grant = start(),
     make_file(Grant, 1, <<"f">>, 2),
-    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"f">>]}),
+    {ok, [{_, _, Old}]} = call(Grant, {walk, 1, 3, [<<"f">>]}),
     ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
-    make_file(Grant, 1, <<"g">>, 4),
     ?assertEqual({error, enoent}, call(Grant, {lopen, 3, 0})),
-    ?assertEqual({error, enoent}, call(Grant, {getattr, 3, 16#7ff})),
-    %% The new file is there, and under another inode.
-    {ok, [_]} = call(Grant, {walk, 1, 5, [<<"g">>]}),
-    ?assertMatch({ok, _}, call(Grant, {getattr, 5, 16#7ff})),
+    ?assertMatch({ok, #{nlink := 0, qid := {_, _, Old}}}, call(Grant, {getattr, 3, 16#7ff})),
+    ok = call(Grant, {clunk, 3}),
+    make_file(Grant, 1, <<"g">>, 4),
+    {ok, [{_, _, New}]} = call(Grant, {walk, 1, 5, [<<"g">>]}),
+    ?assertNotEqual(Old, New),
+    stop(Grant).
+
+%% erx_file_remote's stat of a path, sent by one process: attach, walk, getattr, clunk.
+%% A rename over the path's last name, sent by another, reaches the grant between the
+%% walk and the getattr, as the grant's mailbox can order them. On Unix a rename over an
+%% existing name is atomic, so a stat of that name finds the old file or the new one and
+%% never answers enoent.
+a_stat_finds_a_name_renamed_over_between_its_walk_and_getattr_test() ->
+    Grant = start(),
+    make_file(Grant, 1, <<"a">>, 2),
+    make_file(Grant, 1, <<"b">>, 3),
+    Stat = spawn(fun() -> receive stop -> ok end end),
+    {ok, _} = call_as(Grant, Stat, {attach, 10, ?NOFID, <<"user">>, <<"tmp">>, 0}),
+    {ok, [_]} = call_as(Grant, Stat, {walk, 10, 11, [<<"b">>]}),
+    ok = call(Grant, {renameat, 1, <<"a">>, 1, <<"b">>}),
+    ?assertMatch({ok, _}, call_as(Grant, Stat, {getattr, 11, 16#7ff})),
+    ok = call_as(Grant, Stat, {clunk, 11}),
+    ok = call_as(Grant, Stat, {clunk, 10}),
+    Stat ! stop,
+    stop(Grant).
+
+%% A walk that stops after its first name makes no fid, so it keeps nothing: the
+%% file it passed is freed with its name.
+a_stopped_walk_keeps_nothing_test() ->
+    Grant = start(),
+    Free = free(Grant),
+    make_data_file(Grant, <<"f">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"f">>, <<"x">>]}),
+    ?assertEqual({error, ebadf}, call(Grant, {getattr, 3, 16#7ff})),
+    ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
+    ?assertEqual(Free, free(Grant)),
+    stop(Grant).
+
+%% A fid at a directory that is removed: the directory finds no name, and ".." through
+%% the fid's chain returns to the parent, after which nothing keeps the directory.
+dotdot_after_rmdir_lets_the_directory_go_test() ->
+    Grant = start(),
+    Free = free(Grant),
+    {ok, _} = call(Grant, {mkdir, 1, <<"d">>, 8#755, 0}),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"d">>]}),
+    ok = call(Grant, {unlinkat, 1, <<"d">>, 16#200}),
+    ?assertMatch({ok, #{nlink := 0}}, call(Grant, {getattr, 3, 16#7ff})),
+    ?assertEqual({error, enoent}, call(Grant, {walk, 3, 4, [<<"x">>]})),
+    ?assert(free(Grant) < Free),
+    {ok, [{16#80, _, _}]} = call(Grant, {walk, 3, 3, [<<"..">>]}),
+    ?assertMatch({ok, #{nlink := 2}}, call(Grant, {getattr, 3, 16#7ff})),
+    ?assertEqual(Free, free(Grant)),
+    stop(Grant).
+
+%% A removed file stays while any fid names it, and its last clunk frees it.
+clunking_every_fid_frees_a_nameless_file_test() ->
+    Grant = start(),
+    Free = free(Grant),
+    make_data_file(Grant, <<"f">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"f">>]}),
+    {ok, []} = call(Grant, {walk, 3, 4, []}),
+    ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
+    ok = call(Grant, {clunk, 3}),
+    ?assert(free(Grant) < Free),
+    ?assertMatch({ok, #{nlink := 0, size := 50000}}, call(Grant, {getattr, 4, 16#7ff})),
+    ok = call(Grant, {clunk, 4}),
+    ?assertEqual(Free, free(Grant)),
+    stop(Grant).
+
+%% Two grants that walked to one file each keep it; it is freed only when both have
+%% let go, the second by ending.
+a_file_two_grants_hold_needs_both_to_let_go_test() ->
+    Grant = start(),
+    Second = second_grant(Grant),
+    Free = free(Grant),
+    make_data_file(Grant, <<"f">>, 2),
+    {ok, [_]} = call(Grant, {walk, 1, 3, [<<"f">>]}),
+    {ok, [_]} = call(Second, {walk, 1, 3, [<<"f">>]}),
+    ok = call(Grant, {unlinkat, 1, <<"f">>, 0}),
+    ok = call(Grant, {clunk, 3}),
+    ?assert(free(Grant) < Free),
+    ?assertMatch({ok, #{nlink := 0}}, call(Second, {getattr, 3, 16#7ff})),
+    exit(Second, kill),
+    ?assertEqual(ok, wait_free(Grant, Free, 100)),
     stop(Grant).
 
 %% Grammar on the local route ----------------------------------------------
@@ -162,9 +259,10 @@ link_texts_are_held_to_their_limit_test() ->
 
 %% Open after unlink ----------------------------------------------------------
 
+%% The free blocks, then the free nodes, which show a node's own charge.
 free(Grant) ->
-    {ok, #{bfree := Free}} = call(Grant, {statfs, 1}),
-    Free.
+    {ok, #{bfree := Blocks, ffree := Nodes}} = call(Grant, {statfs, 1}),
+    {Blocks, Nodes}.
 
 wait_free(_Grant, _Free, 0) ->
     timeout;

@@ -44,6 +44,16 @@ each node open through one of the grant's fids to its file process and its
 count of opened fids; `end_fid/2`, the one place a fid ends, releases its open,
 so the grant never holds more open files than opened fids, and a file process
 ends with its file's last clunk.
+
+A tree that offers `forget/2` holds each node its `walk/3` answers for the
+grant until the grant forgets it. `held` records those nodes, and `steps`
+counts, per node, the steps of the grant's fid paths that name it, which
+only `repath/3` changes. A node a walk answered, and one whose last step a
+path change dropped, is `loose` until the step ends: `drain/1`, which every
+step ends through, forgets each loose node that is held and named by no
+step. So after every step the grant holds exactly the walked nodes its
+fids name, whichever way the step went: a walk that stopped, a reply the
+check rejected, a clunk, `..`, an owner's end.
 """.
 
 -export([new/1, handle_frame/2, monitored/3, owner_down/3, file_started/4,
@@ -107,6 +117,9 @@ ends with its file's last clunk.
                 fids = #{} :: #{fid() => #fid{}},
                 owners = #{} :: #{pid() => #owner{}},
                 files = #{} :: #{term() => #file{}},
+                steps = #{} :: #{term() => pos_integer()},
+                held = #{} :: #{term() => []},
+                loose = [] :: [term()],
                 pending = #{} :: #{reference() => #pending{}},
                 in_flight = 0 :: non_neg_integer(),
                 refused = 0 :: non_neg_integer(),
@@ -415,7 +428,7 @@ finish(Alias, Request, Reply, Grant) ->
 finish(Alias, Request, Reply, Built, Before) ->
     {Checked, Grant} = case accepted(Request, Reply) of
                            true -> {Reply, Built};
-                           false -> {{error, eio}, refused_remove(Request, Before)}
+                           false -> {{error, eio}, refused_remove(Request, tree_holds(Built, Before))}
                        end,
     Grant1 = case Checked of
                  {error, _} -> count_refusal(Grant);
@@ -423,6 +436,11 @@ finish(Alias, Request, Reply, Built, Before) ->
              end,
     {Effects, Grant2} = drain(Grant1),
     {Effects ++ [{reply, Alias, Checked}], Grant2}.
+
+%% The holds a step took stay taken when its grant is dropped: they are the
+%% tree's, and drain/1 forgets those no fid of Before names.
+tree_holds(#grant{held = Held, loose = Loose}, Before) ->
+    Before#grant{held = Held, loose = Loose}.
 
 %% A refusal of a frame the grammar did not decode (Request none) is the
 %% grant's own {error, Posix}; every other reply is checked against its request.
@@ -437,8 +455,18 @@ accepted(Request, Reply) ->
 count_refusal(#grant{refused = Refused} = Grant) ->
     Grant#grant{refused = Refused + 1}.
 
-drain(#grant{effects = Effects} = Grant) ->
-    {lists:reverse(Effects), Grant#grant{effects = []}}.
+drain(Grant) ->
+    #grant{effects = Effects} = Grant1 = forget_loose(Grant),
+    {lists:reverse(Effects), Grant1#grant{effects = []}}.
+
+%% The tree's forget is a cast: the grant's later walks reach the tree after it.
+forget_loose(#grant{loose = []} = Grant) ->
+    Grant;
+forget_loose(#grant{loose = Loose, held = Held, steps = Steps, module = Module, fs = Fs} = Grant) ->
+    Unnamed = [Node || Node <- lists:usort(Loose), is_map_key(Node, Held),
+                       not is_map_key(Node, Steps)],
+    _ = [optional(Module, forget, [Node, Fs], ok) || Node <- Unnamed],
+    Grant#grant{held = maps:without(Unnamed, Held), loose = []}.
 
 %% Each admitted operation, as {Reply, Grant}, or {{to_file, Node, Call}, Grant}
 %% for one the file process answers. Every fid a request names is looked
@@ -547,44 +575,51 @@ walk(Owner, Fid, NewFid, Names, #grant{fids = Fids} = Grant) ->
                              _ -> new_fid_admissible(NewFid, Grant)
                          end,
             case Admissible of
-                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant), Grant);
+                ok -> walked(Owner, Fid, NewFid, walk_names(Names, Path, [], Grant));
                 {error, _} = Error -> {Error, Grant}
             end;
         #{} ->
             {{error, ebadf}, Grant}
     end.
 
-walked(_, _, _, {stopped, [], Posix}, Grant) ->
+%% The walk's grant carries the holds its steps took, kept or not.
+walked(_, _, _, {stopped, [], Posix, Grant}) ->
     {{error, Posix}, Grant};
-walked(_, _, _, {stopped, Qids, _}, Grant) ->
+walked(_, _, _, {stopped, Qids, _, Grant}) ->
     {{ok, lists:reverse(Qids)}, Grant};
-walked(_, Fid, Fid, {done, Path, Qids}, Grant) ->
+walked(_, Fid, Fid, {done, Path, Qids, Grant}) ->
     {{ok, lists:reverse(Qids)}, set_path(Fid, Path, Grant)};
-walked(Owner, _, NewFid, {done, Path, Qids}, Grant) ->
+walked(Owner, _, NewFid, {done, Path, Qids, Grant}) ->
     {{ok, lists:reverse(Qids)}, add_fid(NewFid, Owner, Path, Grant)}.
 
-walk_names([], Path, Qids, _) ->
-    {done, Path, Qids};
+walk_names([], Path, Qids, Grant) ->
+    {done, Path, Qids, Grant};
 walk_names([Name | Names], Path, Qids, Grant) ->
     case walk_step(Name, Path, Grant) of
-        {ok, [{_, Qid, _} | _] = Path1} -> walk_names(Names, Path1, [Qid | Qids], Grant);
-        {error, Posix} -> {stopped, Qids, Posix}
+        {ok, [{_, Qid, _} | _] = Path1, Grant1} -> walk_names(Names, Path1, [Qid | Qids], Grant1);
+        {error, Posix} -> {stopped, Qids, Posix, Grant}
     end.
 
 %% Only a directory is walked from, so a walk that reaches a symbolic link
 %% stops at its next name and the callback is never asked to follow one (F2).
 %% ".." is the grant's: it stays at the root and otherwise returns to the
-%% directory recorded on the way down, even one removed since.
+%% directory recorded on the way down, even one removed since, which the
+%% fid's steps keep alive. A node the callback answers is held from that
+%% answer on.
 walk_step(_, [{_, {Type, _, _}, _} | _], _) when Type band ?ERX_P9_QTDIR =:= 0 ->
     {error, enotdir};
-walk_step(<<"..">>, [_] = Root, _) ->
-    {ok, Root};
-walk_step(<<"..">>, [_ | Parent], _) ->
-    {ok, Parent};
-walk_step(Name, [{Dir, _, _} | _] = Path, #grant{module = Module, fs = Fs}) ->
+walk_step(<<"..">>, [_] = Root, Grant) ->
+    {ok, Root, Grant};
+walk_step(<<"..">>, [_ | Parent], Grant) ->
+    {ok, Parent, Grant};
+walk_step(Name, [{Dir, _, _} | _] = Path,
+          #grant{module = Module, fs = Fs, held = Held, loose = Loose} = Grant) ->
     case Module:walk(Dir, Name, Fs) of
-        {ok, Node, Qid} -> {ok, [{Node, Qid, Name} | Path]};
-        Other -> failed(Other)
+        {ok, Node, Qid} ->
+            {ok, [{Node, Qid, Name} | Path],
+             Grant#grant{held = Held#{Node => []}, loose = [Node | Loose]}};
+        Other ->
+            failed(Other)
     end.
 
 %% lopen opens an unopened fid in place; a fid at a symbolic link is never
@@ -710,8 +745,23 @@ held(Fid, #grant{fids = Fids}) ->
     is_map_key(Fid, Fids).
 
 set_path(Fid, Path, #grant{fids = Fids} = Grant) ->
-    #{Fid := #fid{open = none} = Record} = Fids,
-    Grant#grant{fids = Fids#{Fid := Record#fid{path = Path}}}.
+    #{Fid := #fid{open = none, path = Old} = Record} = Fids,
+    repath(Old, Path, Grant#grant{fids = Fids#{Fid := Record#fid{path = Path}}}).
+
+%% The one function that changes steps, called wherever a fid's path is
+%% made, replaced or ended: New's steps arrive, Old's leave, and a node left
+%% with no step is loose.
+repath(Old, New, #grant{steps = Steps, loose = Loose} = Grant) ->
+    Arrived = lists:foldl(fun({Node, _, _}, S) ->
+                                  maps:update_with(Node, fun(C) -> C + 1 end, 1, S)
+                          end, Steps, New),
+    {Left, Loose1} = lists:foldl(fun({Node, _, _}, {S, L}) ->
+                                         case S of
+                                             #{Node := 1} -> {maps:remove(Node, S), [Node | L]};
+                                             #{Node := C} -> {S#{Node := C - 1}, L}
+                                         end
+                                 end, {Arrived, Loose}, Old),
+    Grant#grant{steps = Left, loose = Loose1}.
 
 %% A new fid is refused while its number is alive (einval, as QEMU answers a
 %% fid in use) and when the pool is full (emfile).
@@ -727,7 +777,7 @@ new_fid_admissible(Fid, #grant{fids = Fids, pool = Pool}) ->
 %% and their monitors: an owner is recorded, and monitored, exactly while it
 %% owns a fid.
 add_fid(Fid, Owner, Path, #grant{fids = Fids, owners = Owners, effects = Effects} = Grant) ->
-    Grant1 = Grant#grant{fids = Fids#{Fid => #fid{owner = Owner, path = Path}}},
+    Grant1 = repath([], Path, Grant#grant{fids = Fids#{Fid => #fid{owner = Owner, path = Path}}}),
     case Owners of
         #{Owner := #owner{fids = Owned} = Record} ->
             Grant1#grant{owners = Owners#{Owner := Record#owner{fids = Owned#{Fid => []}}}};
@@ -737,9 +787,10 @@ add_fid(Fid, Owner, Path, #grant{fids = Fids, owners = Owners, effects = Effects
     end.
 
 end_fid(Fid, #grant{fids = Fids, owners = Owners} = Grant) ->
-    {#fid{owner = Owner, open = Open}, Fids1} = maps:take(Fid, Fids),
+    {#fid{owner = Owner, open = Open, path = Path}, Fids1} = maps:take(Fid, Fids),
     #{Owner := #owner{monitor = Ref, fids = Owned} = Record} = Owners,
-    #grant{effects = Effects} = Grant1 = released(Open, Grant#grant{fids = Fids1}),
+    #grant{effects = Effects} = Grant1 =
+        released(Open, repath(Path, [], Grant#grant{fids = Fids1})),
     case maps:remove(Fid, Owned) of
         Left when map_size(Left) =:= 0 ->
             Grant1#grant{owners = maps:remove(Owner, Owners),

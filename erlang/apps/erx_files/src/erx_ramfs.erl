@@ -20,6 +20,13 @@ registered name for the grant. It acts only on a request that carries that
 reference and wants its reply at an alias of its own node, so a process that
 learns its pid reaches the tree only through `erx_fs`'s checks. Any other
 message is dropped, and a request the core does not know answers `einval`.
+
+A walk holds the node it finds for the grant that asked, the caller of
+`walk/3`, until that grant's `forget/2` of it, which is the one request sent
+without waiting for a reply: messages from one process arrive in the order
+sent, so a forget never overtakes a later walk from the same grant. The tree
+process monitors each grant that walked, and its end lets go of every node
+it held, so a grant that crashes leaks nothing.
 If the tree process ends anyway, every caller waiting on it ends with it,
 and `erx_ramfs_sup` restarts `/tmp` whole.
 """.
@@ -29,7 +36,7 @@ and `erx_ramfs_sup` restarts `/tmp` whole.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, serve/1]).
--export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4,
+-export([init/1, root/1, walk/3, forget/2, getattr/2, open/3, read/4, readdir/4,
          readlink/2, statfs/1, clunk/2, read_mode/0, write/4, make/4,
          setattr/3, unlink/4, rename/5, fsync/2]).
 
@@ -66,7 +73,8 @@ start_link(Cap, Name) when is_integer(Cap), Cap >= 0, is_atom(Name) ->
 
 -doc false.
 -spec serve({start, pid(), non_neg_integer(), atom()}
-            | {reference(), erx_ramfs_core:ino(), erx_ramfs_core:tree()}) -> no_return().
+            | {reference(), erx_ramfs_core:ino(), erx_ramfs_core:tree(),
+               #{pid() => reference()}}) -> no_return().
 serve({start, Parent, Cap, Name}) ->
     %% A crash report shows no queued request, whose data is the domain's files.
     _ = process_flag(sensitive, true),
@@ -77,25 +85,47 @@ serve({start, Parent, Cap, Name}) ->
             Tree = erx_ramfs_core:new(Cap, Stamp, time_ns()),
             persistent_term:put({?MODULE, Name}, {self(), Secret}),
             proc_lib:init_ack(Parent, {ok, self()}),
-            ?MODULE:serve({Secret, Stamp, Tree});
+            ?MODULE:serve({Secret, Stamp, Tree, #{}});
         {error, _} = Error ->
             proc_lib:init_fail(Parent, Error, {exit, normal})
     end;
 %% Each request is handled whole, and the next awaited through a remote call,
-%% so the tree process moves to new code between requests.
-serve({Secret, Root, Tree}) ->
+%% so the tree process moves to new code between requests. Holders maps each
+%% grant that walked to the monitor whose DOWN ends its holds.
+serve({Secret, Root, Tree, Holders}) ->
     receive
         {?MODULE, Secret, Alias, Request} when is_reference(Alias), node(Alias) =:= node() ->
             {Reply, Tree1} = step(Request, Root, Tree),
             erlang:send(Alias, {?MODULE, Alias, Reply}),
-            ?MODULE:serve({Secret, Root, Tree1});
+            ?MODULE:serve({Secret, Root, Tree1, watched(Request, Holders)});
+        {?MODULE, Secret, forget, Ino, Holder} ->
+            {ok, Tree1} = step({forget, Ino, Holder}, Root, Tree),
+            ?MODULE:serve({Secret, Root, Tree1, Holders});
+        {'DOWN', Ref, process, Holder, _} when map_get(Holder, Holders) =:= Ref ->
+            {ok, Tree1} = step({forget_holder, Holder}, Root, Tree),
+            ?MODULE:serve({Secret, Root, Tree1, maps:remove(Holder, Holders)});
         _ ->
-            ?MODULE:serve({Secret, Root, Tree})
+            ?MODULE:serve({Secret, Root, Tree, Holders})
     end.
 
+%% A grant is monitored from its first walk until its end.
+watched({walk, _, _, Holder}, Holders) when is_pid(Holder), not is_map_key(Holder, Holders) ->
+    Holders#{Holder => erlang:monitor(process, Holder)};
+watched(_Request, Holders) ->
+    Holders.
+
+%% A walk holds for the grant that sent it, which the tree process monitors.
+step({walk, _, _, Holder}, _Root, Tree) when not is_pid(Holder) ->
+    {{error, einval}, Tree};
 %% The root is the tree process's own: the core names it by the first stamp.
 step(root, Root, Tree) ->
     {{ok, Root}, Tree};
+%% A release makes and changes nothing that takes a version, so it draws no
+%% stamp and cannot fail.
+step({forget, _, _} = Request, Root, Tree) ->
+    erx_ramfs_core:step(Request, Root, time_ns(), Tree);
+step({forget_holder, _} = Request, Root, Tree) ->
+    erx_ramfs_core:step(Request, Root, time_ns(), Tree);
 step(Request, _Root, Tree) ->
     case erx_fs_version:draw() of
         {ok, Stamp} -> erx_ramfs_core:step(Request, Stamp, time_ns(), Tree);
@@ -135,10 +165,15 @@ root(Server) ->
 
 -doc false.
 walk(Dir, Name, Server) ->
-    case call(Server, {walk, Dir, Name}) of
+    case call(Server, {walk, Dir, Name, self()}) of
         {ok, Ino, Qid} -> {ok, Ino, qid(Qid)};
         Error -> Error
     end.
+
+-doc false.
+forget(Ino, {Pid, Secret}) ->
+    erlang:send(Pid, {?MODULE, Secret, forget, Ino, self()}),
+    ok.
 
 -doc false.
 getattr(Ino, Server) ->

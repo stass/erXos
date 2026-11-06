@@ -1229,6 +1229,9 @@ writes in Erlang form the `erx_files` application
 -callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
+%% A tree that adds forget keeps each node its walk answers alive for the
+%% calling grant until the grant forgets it or ends. The one callback without a reply.
+-callback forget(Node :: term(), Fs :: term()) -> term().
 -callback getattr(Node :: term(), Fs :: term()) ->
               {ok, attr()} | {error, file:posix()}.
 -callback open(Node :: term(), Flags :: non_neg_integer(), Fs :: term()) ->
@@ -1268,7 +1271,7 @@ writes in Erlang form the `erx_files` application
               ok | {error, file:posix()}.
 -callback xattr(Node :: term(), Op :: xattr_op(), Fs :: term()) ->
               {ok, term()} | {error, file:posix()}.
--optional_callbacks([read_mode/0, readlink/2, write/4, make/4, setattr/3,
+-optional_callbacks([forget/2, read_mode/0, readlink/2, write/4, make/4, setattr/3,
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
 -type what() :: {file, Mode :: 0..8#7777, Flags :: non_neg_integer()}
@@ -1285,6 +1288,22 @@ serves `remove` and `unlinkat`, and `rename` serves `rename` and
 `renameat`. Each decision POSIX makes in one step is one callback, so no
 other client's request can come between its parts:
 
+* `walk` and `forget` keep a walked fid's node, for a tree that adds
+  `forget`, as FreeBSD's vnodes keep a tmpfs node. `walk` holds the node
+  it answers for the calling grant in the same step as its lookup, so a
+  fid never names a node the tree has freed, whatever another client
+  renames or removes between two requests through it. The grant counts,
+  per node, the steps of its fid paths that name it; one function
+  replaces a fid's path, for a new fid, a walk in place, `..`, a clunk or
+  an owner's end, and a node no step names any more, or one a walk that
+  stopped passed, is forgotten once, at the end of the request. `forget`
+  answers nothing: the grant sends it and goes on, and since one
+  process's messages arrive in order, it never overtakes the grant's
+  later walk of the same node. A hold is keyed by its grant, so walking
+  a node twice holds it once and a forget of a node not held does
+  nothing, and the tree drops every hold of a grant that ends. A tree
+  without `forget` holds nothing, and a request through a fid whose node
+  it freed answers what it answers for a node that is gone.
 * `make` of `{file, Mode, Flags}` serves `lcreate` whole: it creates the
   file, or, without `EXCL`, opens the regular file `Name` already names,
   and either way returns the open `Handle`, counted as an open as `open`'s
@@ -1417,8 +1436,9 @@ other client's request can come between its parts:
   through whatever renames have happened since, and never leaves the
   grant's subtree, since the chain ends at its root. After the fid's
   node is removed, the requests that reach it answer what the module
-  answers for a node that is gone, `enoent` for `/tmp`, while `..` still
-  walks to the recorded parent.
+  answers for a node with no name, which `/tmp` keeps while a fid names
+  it: `getattr` answers with `nlink` 0, and `lopen` and `walk` answer
+  `enoent`; `..` still walks to the recorded parent.
 * **Held bytes.** What a grant holds for its client beyond its fids, such
   as the snapshot behind an open `/proc` file, is bounded by the server's
   per-fid bound and its pool; a server whose per-fid state is large sets a

@@ -38,7 +38,19 @@ class ErxRamfsTest < Minitest::Test
     Fault.new(name: "a grant that does not clunk a dead owner's fids", file: "#{APP}/erx_fs_grant.erl",
               from: "            drain(lists:foldl(fun end_fid/2, Grant, maps:keys(Fids)));\n",
               to: "            _ = Fids,\n            {[], Grant};\n",
-              caught_by: 'a_dead_owners_open_file_gives_back_what_it_held_test')
+              caught_by: 'a_dead_owners_open_file_gives_back_what_it_held_test'),
+    Fault.new(name: 'a grant that never forgets a walked node', file: "#{APP}/erx_fs_grant.erl",
+              from: '    _ = [optional(Module, forget, [Node, Fs], ok) || Node <- Unnamed],',
+              to: '    _ = Unnamed,',
+              caught_by: 'clunking_every_fid_frees_a_nameless_file_test'),
+    Fault.new(name: "a tree that keeps a dead grant's holds", file: "#{APP}/erx_ramfs.erl",
+              from: '            {ok, Tree1} = step({forget_holder, Holder}, Root, Tree),',
+              to: '            Tree1 = Tree,',
+              caught_by: 'a_file_two_grants_hold_needs_both_to_let_go_test'),
+    Fault.new(name: 'a walk that holds nothing', file: "#{APP}/erx_ramfs_core.erl",
+              from: '{done, {ok, Ino, qid(Ino, Tree)}, hold(Ino, Holder, Tree)}',
+              to: '{done, {ok, Ino, qid(Ino, Tree)}, Tree}',
+              caught_by: 'a_stat_finds_a_name_renamed_over_between_its_walk_and_getattr_test')
   ].freeze
 
   def test_the_cases_pass
