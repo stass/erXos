@@ -501,12 +501,12 @@ it; git history is the record of completed work.
   `tools/lib/erx/chokepoint_rules/ns.rb`, the fuzz target `tools/fuzz/ns_fuzz.c` and
   `test/fixtures/release_fs_driver.c` move with it, and `prim_file:erx_resolve/1` goes.
 * [Medium] runtime, `erx_file_remote` and `erx_ns_resolve_rename`: a rename re-resolved after a link
-  (`prim_file:erx_resolve/1`) goes through `erx_ns_resolve_two`, so a source that reaches `/` or a mount's
-  top only through a link skips rename's einval, and the client's own top test (`NameList =:= []` in
-  `renamed/3` and `remove/5`) misses a bind's top, whose names are its root's: `rename`, `del_dir` and
+  (`prim_file:erx_resolve/1`) goes through `erx_ns_resolve_two`, so a source that reaches `/` only through a link
+  skips rename's einval, and the client's own top test (`NameList =:= []` in
+  `renamed/3` and `remove/5`) misses a bind's top, whose names are its root's: a rename of `/x`, a
+  read-write bind of `/tmp/a`, to `/tmp/c` moves `/tmp/a` where Linux answers `exdev`, and `rename`, `del_dir` and
   `delete` of `/tmp/l/x` with `/tmp/l -> /` and `/x` a bind act on the bind's root. Let the place term carry
-  the namespace's own top decision; `renamed/3`'s `{<<"/">>, _}` clause is then dead. `tools/fuzz/ns_fuzz.c`
-  checks only `erx_ns_resolve_two`; have it check `erx_ns_resolve_rename` against it too.
+  the namespace's own top decision; `renamed/3`'s `{<<"/">>, _}` clause is then dead.
 * [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
   a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
   link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers

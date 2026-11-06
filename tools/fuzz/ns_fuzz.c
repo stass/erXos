@@ -12,7 +12,8 @@
  * path, and the rest are the release's file paths. Whatever the path holds, a
  * resolved result keeps design-files.md's properties; a change keeps the table's
  * (points normalised and unique, at most ERX_NS_MOUNTS_MAX, `/` never removed) or
- * leaves it as it was, and a bind's point reaches what its source did; a lookup and a listing
+ * leaves it as it was, and a bind's point reaches what its source did; a rename's
+ * pair is a pair's but einval for a source of `/`; a lookup and a listing
  * agree with a plain scan of the table.
  */
 
@@ -44,6 +45,8 @@ static void fuzz_change(erx_ns_t *, const uint8_t *, size_t);
 static void fuzz_check_two(const erx_ns_t *, const uint8_t *, size_t,
     const uint8_t *, size_t);
 static bool fuzz_same_result(const erx_ns_result_t *, const erx_ns_result_t *);
+static void fuzz_check_rename(const erx_ns_t *, const uint8_t *, size_t,
+    const uint8_t *, size_t);
 
 static bool
 fuzz_next_line(const uint8_t *bytes, size_t length, size_t *cursor,
@@ -415,6 +418,41 @@ fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
 		abort();
 }
 
+/*
+ * erx_ns_resolve_rename agrees with erx_ns_resolve_two except for a source of
+ * the one byte `/`, both paths resolving: that is ERX_NS_EINVAL with both
+ * results refused. Any other source, `//` or the top of a mount or bind,
+ * answers as erx_ns_resolve_two answers.
+ */
+static void
+fuzz_check_rename(const erx_ns_t *ns, const uint8_t *source, size_t source_length,
+    const uint8_t *destination, size_t destination_length)
+{
+	static erx_ns_result_t one, two, pair_one, pair_two, rename_one, rename_two;
+	erx_ns_status_t status, want;
+
+	want = erx_ns_resolve_two(ns, source, source_length, destination,
+	    destination_length, &pair_one, &pair_two);
+	if (erx_ns_resolve(ns, source, source_length, &one) == ERX_NS_OK &&
+	    erx_ns_resolve(ns, destination, destination_length, &two) == ERX_NS_OK &&
+	    source_length == 1 && source[0] == '/') {
+		status = erx_ns_resolve_rename(ns, source, source_length, destination,
+		    destination_length, &rename_one, &rename_two);
+		if (status != ERX_NS_EINVAL || rename_one.res_mount != NULL ||
+		    rename_one.res_nnames != 0 || rename_one.res_names_length != 0 ||
+		    rename_one.res_path_length != 0 || rename_two.res_mount != NULL ||
+		    rename_two.res_nnames != 0 || rename_two.res_names_length != 0 ||
+		    rename_two.res_path_length != 0)
+			abort();
+		return;
+	}
+	status = erx_ns_resolve_rename(ns, source, source_length, destination,
+	    destination_length, &rename_one, &rename_two);
+	if (status != want || !fuzz_same_result(&rename_one, &pair_one) ||
+	    !fuzz_same_result(&rename_two, &pair_two))
+		abort();
+}
+
 int
 LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 {
@@ -482,6 +520,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		fuzz_check_two(&ns, line, line_length, (const uint8_t *)point,
 		    strlen(point));
 		fuzz_check_two(&ns, (const uint8_t *)point, strlen(point), line,
+		    line_length);
+		fuzz_check_rename(&ns, line, line_length, (const uint8_t *)point,
+		    strlen(point));
+		fuzz_check_rename(&ns, (const uint8_t *)point, strlen(point), line,
 		    line_length);
 	}
 

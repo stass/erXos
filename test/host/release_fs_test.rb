@@ -212,15 +212,16 @@ class ReleaseFsTest < Minitest::Test
     cases.keys.zip(lines.drop(5)).each { |paths, line| assert_equal cases.fetch(paths), pair(line), paths.inspect }
   end
 
-  # A rename whose source names `/` or the top of a mount, its last written name a plain
-  # one, is einval, stock's answer for a rename of `/`, before the pair could be exdev; a
-  # last `.` or `..`, or a destination at a top, resolves as any other pair.
-  def test_a_rename_of_a_top_is_einval_before_exdev
+  # A rename whose source is written `/` is einval, stock's answer for a rename of `/`,
+  # before the pair could be exdev; `//`, the top of a mount or bind, a last `.` or `..`,
+  # or a destination at a top resolves as any other pair.
+  def test_a_rename_of_root_is_einval_before_exdev
     exdev = [NS_EXDEV, nil, '', nil, '']
     einval = [NS_EINVAL, nil, '', nil, '']
-    cases = { ['/', '/tmp/b'] => einval, ['/', '/etc'] => einval, ['//', '/etc'] => einval,
-              ['/tmp', '/u/b'] => einval, ['/tmp/', '/tmp/c'] => einval, ['/x', '/tmp/c'] => einval,
-              ['tmp', '/etc'] => einval, ['/tmp/.', '/u/b'] => exdev, ['/tmp/a/..', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
+    cases = { ['/', '/tmp/b'] => einval, ['/', '/etc'] => einval, ['//', '/etc'] => [NS_OK, 0, '', 0, 'etc'], ['//', '/tmp/b'] => exdev,
+              ['/tmp', '/u/b'] => exdev, ['/tmp/', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
+              ['/x', '/tmp/c'] => [NS_OK, 3, 'a', 1, 'c'], ['/tmp/..', '/etc'] => [NS_OK, 0, '', 0, 'etc'],
+              ['tmp', '/etc'] => exdev, ['/.', '/etc'] => [NS_OK, 0, '', 0, 'etc'], ['/tmp/.', '/u/b'] => exdev, ['/tmp/a/..', '/tmp/c'] => [NS_OK, 1, '', 1, 'c'],
               ['/tmp/b', '/u/b'] => exdev, ['/tmp/b', '/tmp'] => [NS_OK, 1, 'b', 1, ''],
               ['/etc', '/lib/x'] => [NS_OK, 0, 'etc', 0, 'lib/x'], ["/a\0", '/u/b'] => einval }
     lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), mount('/u', 7, 'u', RIGHTS_RW), bind('/tmp/a', '/x', false)] +

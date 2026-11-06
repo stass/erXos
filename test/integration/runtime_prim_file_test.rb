@@ -347,8 +347,8 @@ class RuntimePrimFileTest < Minitest::Test
       'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"x">>},{<<"/tmp">>,<<>>,<<"a/y">>},<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
       'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
       'ns rename local' => '{{error,exdev},none}', 'ns rename root' => '{{error,einval},none}',
-      'ns rename root local' => '{{error,einval},none}', 'ns rename mount top' => '{{error,einval},none}',
-      'ns rename bind top' => '{{error,einval},none}', 'ns rename mount dot' => '{{error,exdev},none}',
+      'ns rename root local' => '{{error,einval},none}', 'ns rename mount top' => '{{error,exdev},none}',
+      'ns rename bind top' => '{{error,exdev},none}', 'ns rename mount dot' => '{{error,exdev},none}',
       'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[{<<"/u">>,<<>>,<<"x">>},{<<"/u">>,<<>>,<<"y">>},<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
       'ns link two' => '{{error,exdev},none}' }.each do |step, want|
       assert_equal want, release.fetch(step), step
@@ -386,7 +386,7 @@ class RuntimePrimFileTest < Minitest::Test
     'symlink missing dotdot' => '{error,enoent}', 'symlink root' => '{error,eexist}',
     'rename' => 'ok', 'renamed' => "{{error,enoent},#{DIRECTORY}}", 'rename missing' => '{error,enoent}',
     'rename from dot' => '{error,ebusy}', 'rename to dot' => '{error,ebusy}',
-    'rename missing dot' => '{error,enoent}', 'rename root' => '{error,einval}',
+    'rename missing dot' => '{error,enoent}', 'rename root' => '{error,ebusy}',
     'link' => 'ok', 'linked' => "{#{FILE},#{FILE}}", 'link dot' => '{error,eexist}',
     'link missing to dot' => '{error,enoent}', 'link missing' => '{error,enoent}',
     'link a directory' => '{error,eperm}', 'link root' => '{error,eexist}',

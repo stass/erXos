@@ -329,37 +329,19 @@ erx_ns_pair(const erx_ns_result_t *first, const erx_ns_result_t *second)
 }
 
 /*
- * Whether a path as written, resolved to result, is a rename's source that names
- * `/` or the top of a mount or bind: its whole path is the entry's point, or `/`
- * above the entries of a narrowed namespace, and its last written name is neither
- * `.` nor `..`. A path of slashes alone has no last name and is `/`. The point,
- * not the names, decides, since a bind's top has the names of its root.
+ * Whether a rename's source, as written, is `/`: stock prim_file's own test
+ * (strcmp in efile_rename), so `//`, `/.` and the top of a mount or bind are
+ * not, and answer as Linux answers (design-files.md, Errors).
  */
 static bool
-erx_ns_renames_top(const uint8_t *path, size_t length, const erx_ns_result_t *result)
+erx_ns_renames_root(const uint8_t *path, size_t length)
 {
-	const erx_ns_mount_t *mount = result->res_mount;
-	size_t end = length, start;
-
-	/* res_path is under the point, so a path of the point's length is the point. */
-	if (result->res_path_length !=
-	    (mount == NULL ? 1 : erx_ns_field_length(mount->point)))
-		return (false);
-	while (end > 0 && path[end - 1] == '/')
-		end--;
-	start = end;
-	while (start > 0 && path[start - 1] != '/')
-		start--;
-	if (end - start == 1 && path[start] == '.')
-		return (false);
-	if (end - start == 2 && path[start] == '.' && path[start + 1] == '.')
-		return (false);
-	return (true);
+	return (length == 1 && path[0] == '/');
 }
 
 /*
  * Both paths resolved, the first first; a refusal of either refuses both results.
- * A rename checks its source's top between the resolution and the pairing.
+ * A rename checks whether its source is `/` between the resolution and the pairing.
  */
 static erx_ns_status_t
 erx_ns_resolve_both(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
@@ -373,7 +355,7 @@ erx_ns_resolve_both(const erx_ns_t *ns, const uint8_t *first, size_t first_lengt
 	if (status == ERX_NS_OK)
 		status = erx_ns_resolve(ns, second, second_length, second_out);
 	if (status == ERX_NS_OK && rename &&
-	    erx_ns_renames_top(first, first_length, first_out))
+	    erx_ns_renames_root(first, first_length))
 		status = ERX_NS_EINVAL;
 	if (status == ERX_NS_OK)
 		status = erx_ns_pair(first_out, second_out);

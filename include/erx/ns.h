@@ -39,7 +39,7 @@ typedef enum erx_ns_rights {	/* no value writes and runs together (F6) */
 
 typedef enum erx_ns_status {
 	ERX_NS_OK,
-	ERX_NS_EINVAL,		/* not UTF-8, holds a NUL, or a rename of a top */
+	ERX_NS_EINVAL,		/* not UTF-8, holds a NUL, or a rename of `/` */
 	ERX_NS_ENAMETOOLONG,	/* over a limit of the path, a name or the count */
 	ERX_NS_ENOENT,		/* empty, or reaches no mount */
 	ERX_NS_EEXIST,		/* a mount or bind at a point the table already has */
@@ -106,12 +106,11 @@ erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 erx_ns_status_t	erx_ns_resolve_two(const erx_ns_t *, const uint8_t *, size_t,
 	    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
 /*
- * erx_ns_resolve_two for a rename, the source first. A source that names `/` or
- * the top of a mount or bind, its last written name a plain one, is ERX_NS_EINVAL
- * before the pair could be ERX_NS_EXDEV: stock prim_file answers einval for a
- * rename of `/`, and erXos answers so for the top of every mount. A last `.` or
- * `..` is left to the client, which answers it as Linux does (design-files.md,
- * Errors).
+ * erx_ns_resolve_two for a rename, the source first. A source written as `/` is
+ * ERX_NS_EINVAL, once both paths resolve and before the pair could be
+ * ERX_NS_EXDEV: stock prim_file answers einval for a rename of `/`. Any other
+ * source, `//` and the top of a mount or bind included, resolves as
+ * erx_ns_resolve_two resolves it (design-files.md, Errors).
  */
 erx_ns_status_t	erx_ns_resolve_rename(const erx_ns_t *, const uint8_t *, size_t,
 	    const uint8_t *, size_t, erx_ns_result_t *, erx_ns_result_t *);
