@@ -17,7 +17,8 @@ class ErxDeviceTest < Minitest::Test
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   SOURCES = [File.join(ROOT, 'test/fixtures/erx_device_harness.c'),
              File.join(ROOT, 'otp/erts/emulator/nifs/erxos/erx_device_core.c'),
-             File.join(ROOT, 'otp/erts/emulator/nifs/erxos/erx_device.c')].freeze
+             File.join(ROOT, 'otp/erts/emulator/nifs/erxos/erx_device.c'),
+             File.join(ROOT, 'otp/erts/emulator/nifs/erxos/erx_device_queue.c')].freeze
   FIXTURE = File.join(ROOT, 'test/fixtures/device_table_fixture.svd')
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze

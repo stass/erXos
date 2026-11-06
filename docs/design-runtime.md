@@ -440,7 +440,7 @@ the work. ERTS's Erlang-visible behaviour is checked against stock OTP
 | **R5.** A domain's runtime spends only its own budget and grant | every page it uses is committed in its own space and charged to its budget; every thread is in its own group or a child of it | none within the runtime: both are kernel-enforced | the kernel's tests; a test domain that exhausts its budget and its grant |
 | **R6.** A frame reaches ERTS's distribution code only after the funnel accepted it against the export table on the lane it arrived on | the lane driver's drain, which one executor at a time runs under the connection's drain word, is the only caller of `erts_net_message`, and it calls it only with a frame the funnel returned as accepted; the funnel is the only reader of a lane's ring; the peer's identity is the lane's, never a field of the frame | a second caller of `erts_net_message`; a read of a ring outside the funnel; a frame handed on after a refusal | source checks for both chokepoints, each with a seeded violation; the hostile-peer corpus of [design-domains.md](design-domains.md#the-funnel) replayed into a lane |
 | **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13) and alias deactivation (edit 14), which are the one exit path and the one deactivation function ERTS has, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
-| **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from a pool's memory object, offset and length, checked against the object, and alone writes one: a register the SVD source marks as holding an address refuses `write/3`, and a descriptor's address fields and addressing flags are not among the fields `post/3` takes. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `reset_done/1`, and after a driver's exit the NIF posts nothing on the device until `reset_done/1`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `reset_done/1` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer on collection, a seeded post before `reset_done/1`, a seeded write of a marked register and a seeded pool owned by a process each fail the test |
+| **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from a queue's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks as holding an address refuses `write/3`, and `post/4` takes only bytes, lengths and which segments the device writes, never an address, a descriptor field or a flag. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `reset_done/1`, and after a driver's exit the NIF posts nothing on the device until `reset_done/1`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `reset_done/1` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `reset_done/1`, a seeded write of a marked register and a seeded pool owned by a process each fail the test |
 | **R9.** No binary aliases memory a device can write | `complete/2` copies each buffer's returned bytes into a fresh binary and returns the buffer to its pool, and the NIF makes no binary over a pool | a resource binary over a pool buffer | a model device on the hosted backend that rewrites a buffer after its completion, after which the binary `complete/2` returned is unchanged |
 | **R10.** The system domain holds no generated machine code, no JIT object and no C++ | it runs the interpreter image, built without BeamAsm, asmjit, libc++ and libc++abi, whose manifest carries no `ERX_IMAGE_JIT`, so its space allows no JIT object and the kernel refuses it one (K8; [design-kernel.md](design-kernel.md#image-manifests)) | a symbol of BeamAsm, asmjit or libc++ linked into the interpreter image; a root image marked `ERX_IMAGE_JIT` | the build check on the interpreter image's symbols, which a seeded asmjit object linked into it fails; the packer's refusal of a root image marked for JIT, which a seeded manifest exercises; a boot test in which a NIF of the system domain asks for a JIT object and gets the kernel's refusal |
 | **R11.** No call stub hands the kernel an address to read or write | every stub is generated from the ABI file, whose argument kinds are register values, UTCB fields and memory windows (a memory object's capability with an offset and a length), and the generator refuses a pointer parameter; only `liberx` issues kernel calls | a hand-written stub; an argument kind the kernel reads through | the generator's test, in which a seeded pointer argument in a test ABI file fails generation; the chokepoint check that only `liberx`'s generated stubs trap, which a seeded hand-written trap fails |
@@ -1922,74 +1922,100 @@ register does not let it read. A driver reads `dr` once, which pops a byte, and 
 the data and the error bits of that one word with it. A driver clears the interrupts it
 handled with `write(Dev, icr, read(Dev, mis))`, which needs no mask.
 
-**The buffer pool.** `erx_device:pool_create(Dev, BufferSize, Count)`
-adds a pool to the device's record: for a confined device a memory object
-from the domain's budget, mapped into the domain and into the device's
-DMA window with `erx_dma_map`; for an unconfined one a range of the
-device's contiguous memory, the system domain's for the whole boot. It
-returns `{ok, Pool}`, the pool's name in
-that record; every buffer the device ever addresses is a range of a pool.
-`erx_device:buffer(Pool)` takes a free buffer and returns it as a NIF
-resource, or `{error, empty}`; a buffer the driver took and never posted
-returns to its pool when its resource is collected, since the device
-holds no address of it. `erx_device:fill(Buffer, Offset, IoData)` copies
-transmit data into the buffer, the one per-byte copy of a transmit path.
-A buffer's device address is built by the NIF from the pool's memory
-object, the buffer's offset and its length, checked against the object,
-through `erx_dma_map`'s I/O address or `erx_mem_dma_addr`, and is never
-given to Erlang.
+**Queues and their pools.** `erx_device:queue_create(Dev, Queue, Size, BufferSize)`
+adds to the device's record its queue `Queue`, of `Size` entries in the
+layout the device uses, and the queue's pool of `Size` buffers of
+`BufferSize` bytes. The rings and the pool are each memory the record
+holds: for a confined device a memory object from the domain's budget,
+mapped into the domain and into the device's DMA window with
+`erx_dma_map`; for an unconfined one contiguous memory, the system
+domain's for the whole boot. It returns `{ok, Q}`, the queue's name in
+that record; the same queue again is that queue again, posted buffers
+and all, so a restarted driver finds it. Every buffer the device ever
+addresses is a range of a pool, and every device address is built by the
+NIF from the memory object and an offset, through `erx_dma_map`'s I/O
+address or `erx_mem_dma_addr`, and never given to Erlang. A queue is on
+the device only once `reset_done/1` has installed it: the device's
+marked registers then hold the rings' base addresses and the size, with
+whatever else the layout's sequence names to make the device take the
+queue, such as virtio's ready bit.
 
-**Queues.** `erx_device:queue_create(Dev, Queue, Size)` adds to the
-device's record its queue `Queue`, of `Size` entries in the layout the
-device uses: it makes the queue's rings in memory of the record, as
-`pool_create/3` makes a pool, writes their base addresses and the size
-into the device's marked registers, with whatever else the layout's
-sequence names to make the device take the queue, such as virtio's ready
-bit, and returns `{ok, Q}`. No address of a queue reaches Erlang either.
+A pool belongs to one queue and its buffers to the queue's descriptors:
+buffer *i* is the buffer of the chain whose head is descriptor *i*. The
+queue's own bookkeeping, `erx_device_queue`, hands out heads only from
+its free list, so no two chains in flight share a buffer and no buffer is
+handed out but by a post: the property needs no record of its own.
 
-**Descriptors.** `erx_device:post(Dev, Q, Descriptors)` writes
-descriptors into one of the device's queues, whose layout the ABI file
-fixes and the NIF's generated queue code writes. Each descriptor names a
-buffer, an offset and a length within it, the tag the driver wants back,
-and only the fields the layout marks as the driver's, such as the flag
-that lets the device write the buffer. Every address field, and every flag
-that makes the device fetch an address, such as virtio's `NEXT` and
-`INDIRECT`, is the NIF's alone: it links the descriptors of one post where
-the layout chains them, so no descriptor can aim the device at a table or
-a chain the NIF did not build. The NIF computes the device address,
-performs the cache maintenance the envelope's plan orders for a device
-that is not coherent (a clean before the device reads, a clean and
-invalidate before and after it writes, never an invalidate alone), ends
-with a barrier, and writes the queue's doorbell register by name. A
-posted buffer is held by the queue's table in the device's record until
-the device returns it. `erx_device:complete(Dev, Q)` reads the queue's
-completion entries with one load per field through the generated
-accessors, checks each entry's descriptor index against its own table and
-each returned length against the buffer, copies the buffer's returned
-range into a fresh binary, returns the buffer to its pool, and returns
-`[{Tag, Length, Binary}]`. That copy is the one per-byte copy of a
-receive path, per-byte C like `fill/3`: a device can write a buffer again
-after its completion, and ERTS assumes a binary never changes, so no
-binary ever aliases memory a device can reach (R9). The driver parses the
-bytes in Erlang, with binary pattern matching in its own supervised
-process, so a malicious device corrupts no memory and a malformed frame
-kills at most the process that parsed it.
+**Posting.** `erx_device:post(Dev, Q, Tag, Segments)`, where `Segments`
+is a list of one to four `{out, IoData}` and `{in, Length}`, every `out`
+before every `in`, makes one request in one call: the NIF lays the
+segments end to end in the buffer of the next free head, copies each
+`out`'s bytes in, the one per-byte copy of a transmit path, and has
+`erx_device_queue` decide the descriptors, whose layout the ABI file
+fixes. Each descriptor's address, length and link, and every flag that
+makes the device fetch an address, such as virtio's `NEXT` and
+`INDIRECT`, are the NIF's alone; the driver chooses only which segments
+the device writes, so no descriptor can aim the device at a table, a
+chain or a buffer the NIF did not build. The NIF then writes the plan
+whole, since the queue counts it made once decided: the descriptors, the
+available entry, a barrier, the available index, the cache maintenance
+the envelope's plan orders for a device that is not coherent (a clean
+before the device reads, a clean and invalidate before and after it
+writes, never an invalidate alone), a barrier, and the queue's doorbell
+register by name. No step after the decision can fail. A driver never
+holds a buffer: there is nothing to take, fill and post in turn, so no
+order of calls can leave a buffer taken and not posted. `Tag`, below
+2^64, comes back with the completion. A queue with too few free
+descriptors is `{error, full}`, and the driver waits for a completion;
+segments longer than a buffer, empty or out of order are `badarg`.
+
+**Completing.** `erx_device:complete(Dev, Q)` reads the used ring's index
+once and each entry's two fields once, from the slot `erx_device_queue`
+names, which checks the index against what is in flight, the entry's
+descriptor against its own table and its length against what the chain
+let the device write. It copies the bytes the device wrote, in the
+order of the chain's `in` segments and cut at the length it reported,
+into a fresh binary, returns the buffer to its pool, and returns
+`{ok, [{Tag, Bytes}]}`, stopping once 64 KiB are copied, at most 64 KiB
+and one buffer, so a call stays
+within a reduction slice; the driver calls again until it gets
+`{ok, []}`. That copy is the one per-byte copy of a receive path,
+per-byte C like the post's: a device can write a buffer again after its
+completion, and ERTS assumes a binary never changes, so no binary ever
+aliases memory a device can reach (R9). The driver parses the bytes in
+Erlang, with binary pattern matching in its own supervised process, so a
+malicious device corrupts no memory and a malformed frame kills at most
+the process that parsed it. Anything else a device writes, an index
+ahead of the chains in flight, an entry naming no posted head or a
+length beyond the chain, breaks the queue: the entries before it are
+still returned, and from then on `post/4` and `complete/2` on it are
+`{error, broken}` until `reset_done/1`, so a malformed completion never
+frees a buffer the device may still write.
 
 **The reset rule.** A posted buffer belongs to its queue until the
 device returns it: it goes back to its pool only through `complete/2` or
 when the driver declares the device reset with
-`erx_device:reset_done(Dev)`, after resetting it by register writes. A
-driver cannot take a posted buffer back, and once a driver process that
-used the device exits, the NIF refuses `post/3` on the device until
-`reset_done/1`, so a pool's addresses are given out again only after a
-reset has made the device forget every old descriptor, and a device
-that still holds one never writes into memory a later buffer took
+`erx_device:reset_done(Dev)`, after resetting it by register writes, at
+the point of the device's initialisation where it takes its queues
+(virtio's queue setup, before `DRIVER_OK`). A driver cannot take a
+posted buffer back, and once a driver process that used the device
+exits, the NIF refuses `post/4` on the device until `reset_done/1`, so a
+pool's addresses are given out again only after a reset has made the
+device forget every old descriptor, and a device that still holds one
+never writes into memory a later buffer took
 ([design-kernel.md](design-kernel.md#dma-and-the-iommu)). `reset_done/1`
-returns every posted buffer to its pool and writes each queue's base
-addresses into the device again, by the layout's sequence; the pools,
-the queues and their memory stay in the device's record, so a restarted
-driver uses them as its predecessor did. The pool's count is the
-driver's bound on what the device may hold at once.
+applies one plan to the device's queues, whole: it checks that the
+device has let each queue go (virtio's ready bit reads 0) and offers its
+size, and only once every queue passes returns every posted
+buffer to its pool, zeroes the rings, and writes the size, the base
+addresses and, last, the ready bit by the layout's sequence. A queue
+the device still holds is `{error, ebusy}` and one larger than the
+device offers `{error, erange}`, each with nothing of any queue
+changed. The queues and their memory stay in the device's record, so a
+restarted driver uses them as its predecessor did: it resets the device,
+calls `queue_create/4` for each queue, which finds it, and then
+`reset_done/1`, the same sequence as at first start. The queue's size is
+the driver's bound on what the device may hold at once.
 
 **Interrupts.** `erx_device:irq_bind(Dev, Line)`, whose `Line` indexes
 the lines of the device's record, binds the line's IRQ
@@ -2047,7 +2073,7 @@ done once per packet, per block and per file around them.
 | `erx_bytes:inet_csum/2` | the Internet checksum of RFC 1071 over an iolist, continuing from a partial sum, and RFC 1624's incremental update | the network stack | a straightforward Erlang model |
 | `erlang:crc32/2`, ERTS's own | CRC-32, through ERTS's bundled zlib | F2FS's checksums | the host's stock OTP |
 | `erx_verity:check/3` | checks blocks of an EROFS image, given as binaries with their block numbers, against the image's dm-verity tree, keeping the tree's checked blocks in a bounded cache, and returns `{ok, Blocks}` with only blocks that matched, or `{error, eio}` naming the first that did not; the tree's layout, root and salt come from the image's record in the system configuration, in the layout `erx_verity_t` of the ABI file ([design-storage.md](design-storage.md#data-model)) | the EROFS reader | `veritysetup` over the packer's images |
-| `erx_device:fill/3` | copies transmit data into a pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
+| `erx_device:post/4`'s copy | copies a request's `out` bytes into its pool buffer ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | `erx_device:complete/2`'s copy | copies a completed buffer's returned bytes into a fresh binary ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
 
@@ -2830,7 +2856,7 @@ across them is the conformance suite.
 | A peer stops taking frames | the lane is full | the frames in the ring, and the rest in the entry's queue | none needed | once the entry's queue passes ERTS's busy limit, the senders to that peer are suspended, as toward a busy distribution connection; in the system domain no sender is suspended, a message past the manifest's `system_queue` is dropped and counted, and any other signal ends the connection |
 | A process stops taking its messages from other domains | its queue quota, where it has one | its undecoded frames up to the quota and one more, then the frame for it and those behind it in the lane they share | none needed | the drain takes nothing more from that lane until the process takes its messages, so the lane's sender waits on a full lane; without a quota, the process's `max_heap_size` ends it, as in stock OTP |
 | A program's channel record is malformed, or a frame on it is beyond the program's credit, a request on a busy slot or a notice that is not due | the funnel in channel mode; the driver's count of the program's credit | the record discarded | the driver ends the program as a fault ends it, and the owner gets `{exit_status, N}` with `ERX_EXIT_SIGNAL` plus `SIGSYS` ([design-programs.md](design-programs.md#the-channel)) | the handler sees the port close; the shell reports the program's end |
-| A device returns a descriptor index or length out of range | the device NIF's check in `complete/2` | the entry skipped; the buffer still posted | the driver resets the device and calls `reset_done/1`, which returns it to its pool | a log line naming the device; the driver's supervisor may restart it |
+| A device returns a used index, descriptor index or length out of range | `erx_device_queue`'s check in `complete/2` | the queue broken: entries before it returned, every buffer still posted, `post/4` and `complete/2` `{error, broken}` | the driver resets the device and calls `reset_done/1`, which returns every buffer to its pool | the driver's log line naming the device; the driver's supervisor may restart it |
 | Capacity changes faster than ERTS adjusts | `acted_seq` behind `cap_seq` | none | none needed | ERTS acts on the latest value; intermediate values are skipped, as level-valued events allow |
 | The JIT's code space is exhausted | the JIT object cannot grow | the module unloaded | the loader | `{error, system_limit}` from the load; a counter in the inspector |
 | An encoding error in the translator | the repaired error path | the translation discarded | the loader | `{error, badfile}`; a log line naming the module |
@@ -3048,16 +3074,17 @@ own domain, so a runtime that lies harms only itself.
   ([design-programs.md](design-programs.md#verification-and-testing)).
 * **The device NIF.** On the hosted backend a model device completes,
   skips and misreports descriptors: every address the NIF gives it lies
-  in a pool buffer; a posted buffer whose resource is collected stays
-  posted until its completion or `reset_done/1`, and after a driver's
-  exit `post/3` fails until `reset_done/1`; an out-of-range index or
-  length is skipped and logged; a
+  in the buffer of the chain's head, and no two chains in flight share a
+  buffer; a refused post writes nothing to the rings or the doorbell;
+  `reset_done/1` refuses a queue the device still holds and changes
+  nothing of it, and otherwise zeroes the rings before the ready bit;
+  after a driver's exit `post/4` fails until `reset_done/1`; an
+  out-of-range index or length breaks the queue until `reset_done/1`; a
   buffer the device rewrites after its completion leaves the binary
   `complete/2` returned unchanged (R9); a driver process killed with
   buffers posted leaves its pools and queues in place, and nothing the
   device may hold is reused before `reset_done/1` (R8); `write/3` of a
-  marked register and a descriptor that names an addressing flag each
-  fail with `badarg`; a restarted driver whose line its predecessor left
+  marked register fails with `badarg`; a restarted driver whose line its predecessor left
   masked receives its next interrupt, and its predecessor's late exit
   leaves its binding in place. A seeded return of a posted buffer on
   collection, a seeded post before `reset_done/1`, a seeded raw-offset

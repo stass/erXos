@@ -7,25 +7,39 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 
-# The pure core of a device's queue (test/fixtures/erx_device_queue_harness.c), clean under
-# the address and undefined sanitizers.
+# The pure core of a device's queue (test/fixtures/erx_device_queue_harness.c), and the
+# effects that put it on a virtio-mmio device the harness plays
+# (test/fixtures/erx_device_dma_harness.c), clean under the address and undefined sanitizers.
 class ErxDeviceQueueTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
-  SOURCES = [File.join(ROOT, 'test/fixtures/erx_device_queue_harness.c'), File.join(NIFS, 'erx_device_queue.c')].freeze
-  FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
+  CORE = File.join(NIFS, 'erx_device_queue.c')
+  FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
 
   def test_posts_completions_refusals_and_resets
+    output = run_harness(File.join(ROOT, 'test/fixtures/erx_device_queue_harness.c'), CORE)
+    assert_match(/^erx_device_queue done$/, output)
+  end
+
+  def test_queues_on_a_device
+    output = run_harness(File.join(ROOT, 'test/fixtures/erx_device_dma_harness.c'), CORE,
+                         File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'))
+    assert_match(/^erx_device_dma done$/, output)
+  end
+
+  private
+
+  def run_harness(*sources)
     Dir.mktmpdir('erx-device-queue-') do |directory|
       binary = File.join(directory, 'harness')
-      output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', File.join(ROOT, 'include'), '-I', NIFS, *SOURCES,
-                                       '-o', binary, stdin_data: '')
+      output, status = Open3.capture2e(COMPILER, *FLAGS, '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', NIFS,
+                                       *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')
       assert status.success?, output
-      assert_match(/^erx_device_queue done$/, output)
+      output
     end
   end
 end

@@ -7,7 +7,7 @@
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
 %% read_field/3, write_field/4, field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
-%% documentation. open/1 and irq_bind/2 are NIFs.
+%% documentation. open/1, irq_bind/2 and the queue calls are NIFs.
 %%
 %% A read or a write is one volatile access and never waits. write_field/4 on an ordinary
 %% field reads the word and writes it back, so a field's update is not atomic against
@@ -25,9 +25,10 @@
 -export([open/1]).
 -export([read/2, write/3, read_field/3, write_field/4, field/4]).
 -export([irq_bind/2, irq_ack/2]).
+-export([queue_create/4, reset_done/1, post/4, complete/2]).
 -export([stand_in_fire/2]).
 
--export_type([device/0, register_name/0, spec/0]).
+-export_type([device/0, register_name/0, spec/0, queue/0, segment/0]).
 
 -on_load(init/0).
 
@@ -35,6 +36,8 @@
 -type register_name() :: atom() | {atom(), non_neg_integer()}.
 -type window() :: {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
 -type spec() :: #{peripheral := atom(), window := window(), lines := [non_neg_integer()]}.
+-opaque queue() :: non_neg_integer().
+-type segment() :: {out, iodata()} | {in, pos_integer()}.
 
 init() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
@@ -80,6 +83,50 @@ irq_bind(_Dev, _Line) ->
 
 -spec irq_ack(device(), non_neg_integer()) -> ok.
 irq_ack(_Dev, _Line) ->
+    erlang:nif_error(undef).
+
+%% The device's queue Index, of Size entries, a power of two up to 256, and as many buffers
+%% of BufferSize bytes, up to 65536, the pool at most 1 MiB; anything else is badarg. Its
+%% rings and buffers are memory of the device's record for the boot, whose addresses never
+%% reach Erlang. The same queue again is that queue again, so a restarted driver finds it;
+%% the same Index with another geometry is `{error, ebusy}`. A device that is not
+%% virtio-mmio version 2 is `{error, enotsup}`, as any queue is on a hosted runtime. The
+%% device takes the queue at reset_done/1.
+-spec queue_create(device(), non_neg_integer(), pos_integer(), pos_integer()) ->
+          {ok, queue()} | {error, atom() | {status, integer()}}.
+queue_create(_Dev, _Index, _Size, _BufferSize) ->
+    erlang:nif_error(undef).
+
+%% The reset rule's last step: called once the driver has reset the device by register
+%% writes and has reached virtio's queue setup, before DRIVER_OK. Every queue of the device
+%% forgets what was posted, its buffers return to its pool, its rings are zeroed, and the
+%% device takes it again. `{error, ebusy}` when the device still has a queue ready, as one
+%% it was never reset from has, and `{error, erange}` for a queue larger than the device
+%% offers; until a later reset_done/1 succeeds, post/4 and complete/2 on that queue are
+%% `{error, broken}`.
+-spec reset_done(device()) -> ok | {error, atom() | {status, integer()}}.
+reset_done(_Dev) ->
+    erlang:nif_error(undef).
+
+%% Posts one request of 1 to 4 segments, every `out` before every `in`, laid end to end in
+%% a free buffer of the queue: the out bytes are copied in, the device writes the in
+%% lengths. There is no buffer to take or fill first, so none is ever held and not posted.
+%% Tag, below 2^64, comes back with the completion. `{error, full}` when the queue has too
+%% few free descriptors, so the driver waits for completions; `{error, broken}` when the
+%% queue needs reset_done/1; badarg for segments longer than a buffer, empty or out of
+%% order.
+-spec post(device(), queue(), non_neg_integer(), [segment()]) ->
+          ok | {error, full | broken}.
+post(_Dev, _Queue, _Tag, _Segments) ->
+    erlang:nif_error(undef).
+
+%% What the device has returned, in order, as `{Tag, Bytes}`: Bytes is a fresh binary of
+%% what the device wrote into the request's in segments, end to end, cut at the length it
+%% reported. One call copies at most 64 KiB and one buffer, so a driver calls again until it gets
+%% `{ok, []}`. A device's malformed entry breaks the queue: what came before it is
+%% returned, and the next call is `{error, broken}` until reset_done/1.
+-spec complete(device(), queue()) -> {ok, [{non_neg_integer(), binary()}]} | {error, broken}.
+complete(_Dev, _Queue) ->
     erlang:nif_error(undef).
 
 %% Hosted only: fires a stand-in's line, as a device would. Natively this stays undef.

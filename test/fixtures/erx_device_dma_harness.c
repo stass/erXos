@@ -1,0 +1,383 @@
+/*
+ * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * erx_device's queues on the host (test/host/erx_device_queue_test.rb): a virtio-mmio device
+ * whose register window is plain memory and whose DMA addresses are this process's own, so
+ * the harness plays the device. It reads the rings the NIF's effects wrote, writes into the
+ * buffers and the used ring, and lies, and checks what erx_device_queue_create,
+ * erx_device_reset_done, erx_device_post and erx_device_complete do with it: the reset plan
+ * whole and in order, a post whole or not at all, each chain in its own buffer, and a broken
+ * queue refused until the next reset.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "liberx/backend/api.h"
+#include "otp/erts/emulator/nifs/erxos/erx_device.h"
+
+#define CHECK(condition)							\
+	do {									\
+		if (!(condition)) {						\
+			printf("FAILED %s:%d: %s\n", __FILE__, __LINE__, #condition); \
+			exit(1);						\
+		}								\
+	} while (0)
+
+#define MEMORIES_MAX	8u
+#define BUFFER_SIZE	ERX_DEVICE_BUFFER_MAX
+#define QUEUE_SIZE	8u
+
+/* Every memory object the effects make, as plain memory whose device address is its own. */
+typedef struct memory {
+	uint8_t		*bytes;
+	uint64_t	size;
+} memory_t;
+
+static memory_t memories[MEMORIES_MAX];
+static uint32_t memory_count;
+static const erx_device_peripheral_t *virtio;
+static uint8_t *window;
+
+static uint64_t
+make_memory(uint64_t size)
+{
+	CHECK(memory_count < MEMORIES_MAX);
+	memories[memory_count].bytes = aligned_alloc(ERX_PAGE_SIZE, size);
+	CHECK(memories[memory_count].bytes != NULL);
+	memories[memory_count].size = size;
+	return (memory_count++);
+}
+
+int
+erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr, uint64_t *mem)
+{
+	(void)budget;
+	(void)resource;
+	(void)base;
+	CHECK(attr == ERX_MEM_ATTR_DEVICE);
+	*mem = make_memory(ERX_PAGE_SIZE);
+	CHECK(size <= ERX_PAGE_SIZE);
+	memset(memories[*mem].bytes, 0, ERX_PAGE_SIZE);
+	window = memories[*mem].bytes;
+	return (ERX_OK);
+}
+
+int
+erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit, uint64_t *mem)
+{
+	(void)budget;
+	(void)resource;
+	CHECK(limit == 0 && size % ERX_PAGE_SIZE == 0 && size <= ERX_MEM_CONTIGUOUS_MAX);
+	*mem = make_memory(size);
+	/* Garbage, so the reset is seen to zero the rings. */
+	memset(memories[*mem].bytes, 0xa5, size);
+	return (ERX_OK);
+}
+
+int
+erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)
+{
+	if (mem >= memory_count)
+		return (ERX_EINVAL);
+	if (offset >= memories[mem].size)
+		return (ERX_ERANGE);
+	*addr = (uint64_t)(uintptr_t)(memories[mem].bytes + offset);
+	return (ERX_OK);
+}
+
+/* Each reservation is for the memory made just before it, at that memory's own address. */
+int
+erx_vm_reserve(uint64_t addr, uint64_t size, uint32_t flags, uint64_t *reserved)
+{
+	CHECK(addr == 0 && flags == 0 && memory_count > 0 && size <= memories[memory_count - 1].size);
+	*reserved = (uint64_t)(uintptr_t)memories[memory_count - 1].bytes;
+	return (ERX_OK);
+}
+
+int
+erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot)
+{
+	CHECK(space == ERX_CAP_SELF && mem < memory_count && addr == (uint64_t)(uintptr_t)memories[mem].bytes &&
+	    size <= memories[mem].size && offset == 0 && prot == ERX_PROT_RW);
+	return (ERX_OK);
+}
+
+int
+erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
+{
+	(void)budget;
+	(void)resource;
+	(void)kind;
+	*irq = selector;
+	return (ERX_OK);
+}
+
+/* The device's side of its registers, by the generated table's names. */
+static uint32_t *
+reg(const char *name)
+{
+	const uint32_t found = erx_device_register_named(virtio, name);
+
+	CHECK(found < virtio->register_count);
+	return ((uint32_t *)(void *)(window + virtio->registers[found].offset));
+}
+
+static uint64_t
+reg_address(const char *low, const char *high)
+{
+	return (*reg(low) | (uint64_t)*reg(high) << 32);
+}
+
+/* The device's view of the rings, through the addresses the registers hold. */
+typedef struct rings {
+	erx_virtq_desc_t	*desc;
+	erx_virtq_ring_head_t	*avail;
+	uint16_t		*avail_ring;
+	erx_virtq_ring_head_t	*used;
+	erx_virtq_used_elem_t	*used_ring;
+} rings_t;
+
+static rings_t
+device_rings(void)
+{
+	const uintptr_t avail = (uintptr_t)reg_address("queue_driver_low", "queue_driver_high");
+	const uintptr_t used = (uintptr_t)reg_address("queue_device_low", "queue_device_high");
+
+	return ((rings_t){ .desc = (erx_virtq_desc_t *)(uintptr_t)reg_address("queue_desc_low", "queue_desc_high"),
+	    .avail = (erx_virtq_ring_head_t *)avail, .avail_ring = (uint16_t *)(avail + ERX_VIRTQ_RING_HEAD_SIZE),
+	    .used = (erx_virtq_ring_head_t *)used, .used_ring = (erx_virtq_used_elem_t *)(used + ERX_VIRTQ_RING_HEAD_SIZE) });
+}
+
+/* What the sink collected. */
+static uint64_t sunk_tags[QUEUE_SIZE];
+static uint32_t sunk_lengths[QUEUE_SIZE];
+static uint8_t sunk_bytes[QUEUE_SIZE][BUFFER_SIZE];
+static uint32_t sunk;
+
+static uint8_t *
+sink(void *context, uint64_t tag, uint32_t length)
+{
+	CHECK(context == &sunk && sunk < QUEUE_SIZE && length <= BUFFER_SIZE);
+	sunk_tags[sunk] = tag;
+	sunk_lengths[sunk] = length;
+	return (sunk_bytes[sunk++]);
+}
+
+/*
+ * The device serves the next available chain as virtio-blk serves a read: it checks the
+ * chain's shape against what was posted, fills every writable descriptor with `fill`, and
+ * returns `length`. The head it served.
+ */
+static uint16_t
+device_serve(const rings_t *rings, uint16_t *seen, uint8_t fill, uint32_t length)
+{
+	const uint16_t head = rings->avail_ring[*seen % QUEUE_SIZE];
+	uint16_t index = head;
+
+	for (uint32_t step = 0; step < ERX_DEVICE_CHAIN_MAX; step++) {
+		const erx_virtq_desc_t *const desc = &rings->desc[index];
+
+		CHECK((desc->flags & ~(ERX_VIRTQ_DESC_F_NEXT | ERX_VIRTQ_DESC_F_WRITE)) == 0);
+		if ((desc->flags & ERX_VIRTQ_DESC_F_WRITE) != 0)
+			memset((void *)(uintptr_t)desc->addr, fill, desc->len);
+		if ((desc->flags & ERX_VIRTQ_DESC_F_NEXT) == 0)
+			break;
+		index = desc->next;
+	}
+	rings->used_ring[rings->used->idx % QUEUE_SIZE] = (erx_virtq_used_elem_t){ .id = head, .len = length };
+	rings->used->idx++;
+	(*seen)++;
+	return (head);
+}
+
+static uint32_t
+open_virtio(void)
+{
+	const erx_device_spec_t spec = { .peripheral = "virtio_mmio", .peripheral_length = 11, .base = 0x0a000000,
+	    .size = 512 };
+	uint32_t device;
+
+	virtio = erx_device_peripheral_find("virtio_mmio", 11);
+	CHECK(virtio != NULL);
+	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_OK);
+	return (device);
+}
+
+static void
+check_create(const erx_device_t *device, uint32_t *queue)
+{
+	uint32_t again;
+
+	*reg("version") = 1;
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, queue) == ERX_ENOTSUP);
+	*reg("version") = ERX_VIRTIO_MMIO_VERSION;
+	CHECK(erx_device_queue_create(device, 0, 6, BUFFER_SIZE, queue) == ERX_EINVAL);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, 0, queue) == ERX_EINVAL);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE + 1, queue) == ERX_EINVAL);
+	CHECK(erx_device_queue_create(device, 0, 32, BUFFER_SIZE, queue) == ERX_EINVAL);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, queue) == ERX_OK);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, &again) == ERX_OK && again == *queue);
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE / 2, BUFFER_SIZE, &again) == ERX_EBUSY);
+	/* Nothing reaches the device before the reset installs the queue. */
+	CHECK(*reg("queue_ready") == 0 && reg_address("queue_desc_low", "queue_desc_high") == 0);
+}
+
+/* The reset plan: refused whole while the device holds the queue, then rings zeroed, addresses, ready. */
+static rings_t
+check_reset(const erx_device_t *device, uint32_t queue)
+{
+	const erx_device_piece_t one = { .device_writes = true, .length = 1 };
+	erx_device_queue_layout_t layout;
+	rings_t rings;
+	uint32_t count;
+
+	CHECK(erx_device_post(device, queue, 1, &one, 1) == ERX_ECORRUPT);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
+	*reg("queue_ready") = 1;
+	CHECK(erx_device_reset_done(device) == ERX_EBUSY);
+	CHECK(*reg("queue_num") == 0 && reg_address("queue_desc_low", "queue_desc_high") == 0);
+	*reg("queue_ready") = 0;
+	*reg("queue_num_max") = QUEUE_SIZE / 2;
+	CHECK(erx_device_reset_done(device) == ERX_ERANGE);
+	CHECK(*reg("queue_num") == 0 && *reg("queue_ready") == 0);
+	*reg("queue_num_max") = 256;
+	CHECK(erx_device_reset_done(device) == ERX_OK);
+	CHECK(*reg("queue_sel") == 0 && *reg("queue_num") == QUEUE_SIZE && *reg("queue_ready") == 1);
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	rings = device_rings();
+	CHECK((uint8_t *)rings.avail == (uint8_t *)rings.desc + layout.avail);
+	CHECK((uint8_t *)rings.used == (uint8_t *)rings.desc + layout.used);
+	for (uint32_t at = 0; at < layout.bytes; at++)
+		CHECK(((uint8_t *)rings.desc)[at] == 0);
+	return (rings);
+}
+
+/* A virtio-blk read: the header goes out, the device writes 512 bytes and a status. */
+static void
+check_read(const erx_device_t *device, uint32_t queue, const rings_t *rings, uint16_t *seen)
+{
+	static const uint8_t header[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 7 };
+	const erx_device_piece_t read[] = { { .device_writes = false, .data = header, .length = sizeof(header) },
+	    { .device_writes = true, .length = 512 }, { .device_writes = true, .length = 1 } };
+	uint32_t count;
+	uint16_t head;
+
+	*reg("queue_notify") = 0xff;
+	CHECK(erx_device_post(device, queue, 77, read, 3) == ERX_OK);
+	CHECK(*reg("queue_notify") == 0 && rings->avail->idx == 1);
+	head = rings->avail_ring[0];
+	CHECK(memcmp((const void *)(uintptr_t)rings->desc[head].addr, header, sizeof(header)) == 0);
+	CHECK(rings->desc[head].len == sizeof(header) && rings->desc[head].flags == ERX_VIRTQ_DESC_F_NEXT);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 0);
+	CHECK(device_serve(rings, seen, 0x5a, 513) == head);
+	sunk = 0;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1);
+	CHECK(sunk == 1 && sunk_tags[0] == 77 && sunk_lengths[0] == 513);
+	for (uint32_t at = 0; at < 513; at++)
+		CHECK(sunk_bytes[0][at] == 0x5a);
+	/* A device writing the buffer after its completion changes nothing returned. */
+	memset((void *)(uintptr_t)rings->desc[rings->desc[head].next].addr, 0x11, 512);
+	CHECK(sunk_bytes[0][0] == 0x5a);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 0);
+}
+
+/* Refused posts write nothing; chains in flight each have their own buffer; a full queue says so. */
+static void
+check_posts(const erx_device_t *device, uint32_t queue, const rings_t *rings)
+{
+	static const uint8_t bytes[4] = { 1, 2, 3, 4 };
+	const erx_device_piece_t too_long[] = { { .device_writes = false, .data = bytes, .length = 4 },
+	    { .device_writes = true, .length = BUFFER_SIZE - 3 } };
+	const erx_device_piece_t backwards[] = { { .device_writes = true, .length = 4 },
+	    { .device_writes = false, .data = bytes, .length = 4 } };
+	const erx_device_piece_t empty[] = { { .device_writes = true, .length = 0 } };
+	const erx_device_piece_t three[] = { { .device_writes = false, .data = bytes, .length = 4 },
+	    { .device_writes = true, .length = 4 }, { .device_writes = true, .length = 1 } };
+	const uint16_t idx = rings->avail->idx;
+	uint64_t first;
+
+	*reg("queue_notify") = 0xff;
+	CHECK(erx_device_post(device, queue, 1, too_long, 2) == ERX_EINVAL);
+	CHECK(erx_device_post(device, queue, 1, backwards, 2) == ERX_EINVAL);
+	CHECK(erx_device_post(device, queue, 1, empty, 1) == ERX_EINVAL);
+	CHECK(erx_device_post(device, queue, 1, three, 0) == ERX_EINVAL);
+	CHECK(erx_device_post(device, queue + 1, 1, three, 3) == ERX_EINVAL);
+	CHECK(rings->avail->idx == idx && *reg("queue_notify") == 0xff);
+	CHECK(erx_device_post(device, queue, 2, three, 3) == ERX_OK);
+	first = rings->desc[rings->avail_ring[idx % QUEUE_SIZE]].addr;
+	CHECK(erx_device_post(device, queue, 3, three, 3) == ERX_OK);
+	CHECK(rings->desc[rings->avail_ring[(idx + 1) % QUEUE_SIZE]].addr != first);
+	CHECK((rings->desc[rings->avail_ring[(idx + 1) % QUEUE_SIZE]].addr - first) % BUFFER_SIZE == 0);
+	*reg("queue_notify") = 0xff;
+	CHECK(erx_device_post(device, queue, 4, three, 3) == ERX_EWOULDBLOCK);
+	CHECK(rings->avail->idx == (uint16_t)(idx + 2) && *reg("queue_notify") == 0xff);
+}
+
+/* A lying device breaks the queue until a reset, which gives every buffer back. */
+static void
+check_broken(const erx_device_t *device, uint32_t queue, rings_t *rings, uint16_t *seen)
+{
+	const erx_device_piece_t whole[] = { { .device_writes = true, .length = BUFFER_SIZE } };
+	uint32_t count;
+
+	rings->used_ring[rings->used->idx % QUEUE_SIZE] = (erx_virtq_used_elem_t){ .id = 99, .len = 1 };
+	rings->used->idx++;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
+	CHECK(erx_device_post(device, queue, 5, whole, 1) == ERX_ECORRUPT);
+	CHECK(erx_device_reset_done(device) == ERX_EBUSY);
+	*reg("queue_ready") = 0;
+	CHECK(erx_device_reset_done(device) == ERX_OK);
+	*rings = device_rings();
+	*seen = 0;
+
+	/* Two whole buffers: one call copies up to its bound and leaves the rest for the next. */
+	CHECK(erx_device_post(device, queue, 6, whole, 1) == ERX_OK);
+	CHECK(erx_device_post(device, queue, 7, whole, 1) == ERX_OK);
+	device_serve(rings, seen, 0x21, BUFFER_SIZE);
+	device_serve(rings, seen, 0x22, BUFFER_SIZE);
+	sunk = 0;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1 && sunk_tags[0] == 6);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1 && sunk_tags[1] == 7);
+	CHECK(sunk_bytes[1][BUFFER_SIZE - 1] == 0x22);
+
+	/*
+	 * A completion before a malformed one is still returned, and the next call reports the
+	 * break; a used index beyond the chains in flight breaks the queue at once.
+	 */
+	CHECK(erx_device_post(device, queue, 8, whole, 1) == ERX_OK);
+	CHECK(erx_device_post(device, queue, 9, whole, 1) == ERX_OK);
+	device_serve(rings, seen, 0x23, 3);
+	rings->used_ring[rings->used->idx % QUEUE_SIZE] = (erx_virtq_used_elem_t){ .id = 0, .len = BUFFER_SIZE + 1 };
+	rings->used->idx++;
+	sunk = 0;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_OK && count == 1 && sunk_lengths[0] == 3);
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
+	*reg("queue_ready") = 0;
+	CHECK(erx_device_reset_done(device) == ERX_OK);
+	*rings = device_rings();
+	CHECK(erx_device_post(device, queue, 10, whole, 1) == ERX_OK);
+	rings->used->idx = 2;
+	CHECK(erx_device_complete(device, queue, sink, &sunk, &count) == ERX_ECORRUPT);
+}
+
+int
+main(void)
+{
+	const erx_device_t *device;
+	uint32_t queue;
+	uint16_t seen = 0;
+	rings_t rings;
+
+	device = erx_device_get(open_virtio());
+	CHECK(device != NULL);
+	check_create(device, &queue);
+	rings = check_reset(device, queue);
+	check_read(device, queue, &rings, &seen);
+	check_posts(device, queue, &rings);
+	check_broken(device, queue, &rings, &seen);
+	printf("erx_device_dma done\n");
+	return (0);
+}

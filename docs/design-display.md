@@ -1294,7 +1294,7 @@ Each passing case has a seeded failure that proves the code ran.
 | Only an image resource's destructor frees pixel memory | the same build check, over the NIF's calls to the allocator's free |
 | Only `erx_screen` writes the screen image and calls the display driver's `flush` callback | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
-| Only the display driver's process calls `erx_device:fill/3` and `post/3` on the display device | the same xref check |
+| Only the display driver's process calls `erx_device:fill/3` and `post/4` on the display device | the same xref check |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's operations and events | the generated-output drift check |
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |

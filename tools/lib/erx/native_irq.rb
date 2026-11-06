@@ -17,7 +17,8 @@ module Erx
   module NativeIrq
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'otp/erts/emulator/nifs/erxos/erx_device_core.c',
-               'otp/erts/emulator/nifs/erxos/erx_device.c', 'test/guest/native_irq/guest.c'].freeze
+               'otp/erts/emulator/nifs/erxos/erx_device.c',
+               'otp/erts/emulator/nifs/erxos/erx_device_queue.c', 'test/guest/native_irq/guest.c'].freeze
     LABEL_UART = 0x55a0
     # What the harness types, one character per prompt.
     FIRST = 'a'

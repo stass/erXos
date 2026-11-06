@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "erx_device_core.h"
+#include "erx_device_queue.h"
 
 #define ERX_DEVICE_MAX		8u
 #define ERX_DEVICE_LINES_MAX	4u
@@ -88,5 +89,68 @@ bool	erx_device_field_of(const erx_device_register_t *reg, erx_device_element_t 
 
 /* The IRQ object of the device's line, false for a line it does not have. */
 bool	erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *irq);
+
+/*
+ * Queues (docs/design-runtime.md, "Queues" to "The reset rule"), for a virtio-mmio device of
+ * version 2. A queue is state of the device's record for the boot: erx_device_queue's
+ * bookkeeping, its rings and its pool of `size` buffers, each in contiguous memory mapped
+ * here, whose device addresses nothing outside this file sees. The caller serialises every
+ * call below; the register accesses above stay lock-free.
+ */
+#define ERX_DEVICE_QUEUES_MAX		4u
+/* What one erx_device_complete copies before it stops: the entry that crosses it is copied whole. */
+#define ERX_DEVICE_COMPLETE_BYTES	65536u
+
+/* One segment of a post: bytes the device reads, or a length of buffer the device writes. */
+typedef struct erx_device_piece {
+	bool		device_writes;
+	const uint8_t	*data;		/* length bytes to copy in when the device reads them */
+	uint32_t	length;
+} erx_device_piece_t;
+
+/* Where a completion's bytes go: `length` writable bytes the caller made for this tag, never NULL. */
+typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length);
+
+/*
+ * ERX_OK with the queue's name. The device's queue `index`, of `size` entries and as many
+ * buffers of `buffer_size` bytes, the size a power of two up to ERX_DEVICE_QUEUE_SIZE_MAX and
+ * the pool at most ERX_MEM_CONTIGUOUS_MAX, else ERX_EINVAL. The same queue again is that queue
+ * again, posted buffers and all, so a restarted driver finds it, and the same index with
+ * another geometry is ERX_EBUSY. A device that is not virtio-mmio version 2 is ERX_ENOTSUP. A
+ * new queue is not on the device until erx_device_reset_done installs it. A failure may leave
+ * memory made, for the boot.
+ */
+int	erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,
+	    uint32_t *queue);
+
+/*
+ * The reset rule's last step, once the driver has reset the device and, at virtio's queue
+ * setup step, before DRIVER_OK: every queue of the device forgets its chains, its buffers
+ * return to its pool, its rings are zeroed, and the device takes it again. A queue the device
+ * still has ready, as one never reset has, is ERX_EBUSY, and one larger than the device
+ * offers ERX_ERANGE, each before anything of any queue changes. Until the device's queues
+ * are installed again, post and complete on them are ERX_ECORRUPT.
+ */
+int	erx_device_reset_done(const erx_device_t *device);
+
+/*
+ * Posts one chain: its pieces, readable before writable, laid end to end in a free buffer of
+ * the queue, the readable ones copied in, then the descriptors, the available entry and the
+ * doorbell, all or nothing. ERX_EINVAL for no such queue of the device, a count outside
+ * 1..ERX_DEVICE_CHAIN_MAX, an empty piece, pieces longer than a buffer or out of order;
+ * ERX_EWOULDBLOCK for too few free descriptors; ERX_ECORRUPT for a queue needing a reset.
+ */
+int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *pieces,
+	    uint32_t count);
+
+/*
+ * Completes the entries the device has returned, in order, until ERX_DEVICE_COMPLETE_BYTES are
+ * copied: each one's bytes go to what `sink` gives for its tag, and its buffer back to the
+ * pool. ERX_OK with how many; ERX_EINVAL for no such queue; ERX_ECORRUPT, with none, for a
+ * queue needing a reset, which a device's malformed entry makes it: entries before that one
+ * are still completed, and the next call reports it.
+ */
+int	erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_t *sink, void *context,
+	    uint32_t *completed);
 
 #endif /* ERX_DEVICE_H */

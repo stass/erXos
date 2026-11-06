@@ -81,14 +81,16 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/fixtures/erx_device_harness.c')],
           seed: { 'otp/erts/emulator/sys/erxos/seeded.c' => "void f(void) { erx_device_read(0, 0, e, 0); }\n" }
         ),
-        # A device address reaches no runtime code but erx_device's, and its pools and queues have not come yet.
+        # A device address reaches no runtime code but erx_device.c's, which builds every one for its queues.
         Chokepoints::Forbidden.new(
           name: 'device-dma-calls',
           rule: 'no runtime code outside erx_device calls erx_dma_map or erx_mem_dma_addr',
           design: DEVICE_DESIGN,
           scope: Chokepoints::Scope.new(own: false, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_(?:dma_map|mem_dma_addr)\b/,
-          seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_dma_addr(0, 0, 0); }\n" }
+          sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c")],
+          seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_dma_addr(0, 0, 0); }\n",
+                  'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_dma_map(0, 0, 0, 0, 0); }\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'device-table-include',

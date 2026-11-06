@@ -5,12 +5,13 @@
 
 /*
  * The queue core of erx_device (otp/erts/emulator/nifs/erxos/erx_device_queue.h) against a
- * hostile device. The input is a script: one byte of setup, the queue's size as a power of
- * two (its value mod 9), then operations, each an opcode byte and its operands:
+ * hostile device. The input is a script: a byte of setup, the queue's size as a power of
+ * two (its value mod 9); a u16, one less than its buffers' size; a byte whose bit 0 puts the
+ * pool at the very top of the address space; then operations, each an opcode byte and its
+ * operands:
  *
- *   0  post: a count byte, a buffer length u16, then per segment an offset u16, a length u16
- *      and a byte whose bit 0 lets the device write it; a count byte with bit 7 set puts the
- *      buffer just below the top of the address space
+ *   0  post: a count byte, then per segment an offset u16, a length u16 and a byte whose
+ *      bit 0 lets the device write it
  *   1  the used ring's index: any u16, as a device may write it
  *   2  the used ring's index: the core's next entry plus a byte, as an honest device would
  *   3  a used entry: any u32 id and any u32 length
@@ -19,7 +20,7 @@
  *   5  reset
  *
  * The harness keeps its own record of every chain posted and checks after each step that a
- * post's descriptors are free ones, within the buffer and linked in order, with no flag but
+ * post's descriptors are free ones, within its head's buffer and linked in order, with no flag but
  * NEXT and WRITE and none the device reads after one it writes; that a completion names a
  * chain posted and not completed, with its tag, and as ranges the chain's writable segments
  * in order, the last cut short, summing to the length; that descriptors are never lost or
@@ -102,10 +103,9 @@ check_accounting(void)
 static void
 post(script_t *script)
 {
-	const uint32_t raw = (uint32_t)take(script, 1);
-	const uint32_t count = (raw & 0x7f) % (ERX_DEVICE_CHAIN_MAX + 2);
-	const uint64_t base = (raw & 0x80) != 0 ? UINT64_MAX - 0x8000 : FUZZ_BASE;
-	const uint32_t buffer_length = (uint32_t)take(script, 2);
+	const uint32_t count = (uint32_t)take(script, 1) % (ERX_DEVICE_CHAIN_MAX + 2);
+	const uint32_t buffer_length = queue.buffer_size;
+	uint64_t base;
 	erx_device_segment_t segments[ERX_DEVICE_CHAIN_MAX + 1];
 	erx_device_post_plan_t plan;
 	shadow_chain_t *chain;
@@ -117,7 +117,7 @@ post(script_t *script)
 		segments[index].device_writes = (take(script, 1) & 1) != 0;
 	}
 	before = queue;
-	if (!erx_device_queue_post(&queue, segments, count, 0, base, buffer_length, next_tag, &plan)) {
+	if (!erx_device_queue_post(&queue, segments, count, next_tag, &plan)) {
 		check(memcmp(&queue, &before, sizeof(queue)) == 0);
 		return;
 	}
@@ -125,6 +125,7 @@ post(script_t *script)
 	check(plan.head == plan.descs[0].index && plan.avail_slot == (before.avail_idx & (queue.size - 1)));
 	check(plan.avail_idx == (uint16_t)(before.avail_idx + 1));
 	chain = &shadow[plan.head];
+	base = queue.pool + (uint64_t)plan.head * queue.buffer_size;
 	check(!chain->posted);
 	for (uint32_t index = 0; index < count; index++) {
 		const erx_device_desc_write_t *desc = &plan.descs[index];
@@ -180,7 +181,7 @@ complete(uint32_t id, uint32_t length)
 	}
 	check(!was_broken && was_pending > 0 && id < queue.size);
 	chain = &shadow[id];
-	check(chain->posted && done.tag == chain->tag && length <= chain->writable && done.length == length);
+	check(chain->posted && done.tag == chain->tag && length <= chain->writable && done.length == length && done.buffer == id);
 	/* The ranges are the chain's writable segments in order, the last cut to the length. */
 	for (uint32_t index = 0; index < chain->count && left > 0; index++) {
 		const erx_device_segment_t *segment = &chain->segments[index];
@@ -222,7 +223,11 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	script_t script = { .bytes = data, .left = size };
 	uint32_t head, length;
 
-	if (!erx_device_queue_init(&queue, 1u << (take(&script, 1) % 9)))
+	const uint32_t queue_size = 1u << (take(&script, 1) % 9);
+	const uint32_t buffer_size = (uint32_t)take(&script, 2) + 1;
+	const uint64_t pool = (take(&script, 1) & 1) != 0 ? UINT64_MAX - (uint64_t)queue_size * buffer_size + 1 : FUZZ_BASE;
+
+	if (!erx_device_queue_init(&queue, queue_size, buffer_size, pool))
 		abort();
 	forget_all();
 	next_tag = 0;

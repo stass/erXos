@@ -1254,6 +1254,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_event_table.o \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
+	$(OBJDIR)/erx_device_queue.o \
 	$(OBJDIR)/erx_device_bif.o \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \

@@ -31,44 +31,48 @@ erx_device_queue_layout(uint32_t size, erx_device_queue_layout_t *layout)
 void
 erx_device_queue_reset(erx_device_queue_t *queue)
 {
-	const uint32_t size = queue->size;
+	const uint32_t size = queue->size, buffer_size = queue->buffer_size;
+	const uint64_t pool = queue->pool;
 
 	memset(queue, 0, sizeof(*queue));
 	queue->size = size;
+	queue->buffer_size = buffer_size;
+	queue->pool = pool;
 	queue->free_count = size;
 	for (uint32_t index = 0; index + 1 < size; index++)
 		queue->next[index] = (uint16_t)(index + 1);
 }
 
 bool
-erx_device_queue_init(erx_device_queue_t *queue, uint32_t size)
+erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t buffer_size, uint64_t pool)
 {
 	erx_device_queue_layout_t layout;
+	uint64_t last;
 
-	if (!erx_device_queue_layout(size, &layout))
+	if (!erx_device_queue_layout(size, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX ||
+	    __builtin_add_overflow(pool, (uint64_t)size * buffer_size - 1, &last))
 		return (false);
 	queue->size = size;
+	queue->buffer_size = buffer_size;
+	queue->pool = pool;
 	erx_device_queue_reset(queue);
 	return (true);
 }
 
 /*
- * Every segment non-empty and within the buffer, every address it makes representable, and
+ * Every segment non-empty and within the buffer, and
  * every segment the device writes after every one it reads, as virtio 1.2 section 2.7.4.2
  * requires: a device may answer any other order by asking for a reset.
  */
 static bool
-segments_fit(const erx_device_segment_t *segments, uint32_t count, uint64_t buffer_addr, uint32_t buffer_length)
+segments_fit(const erx_device_segment_t *segments, uint32_t count, uint32_t buffer_length)
 {
 	for (uint32_t index = 0; index < count; index++) {
 		const erx_device_segment_t *segment = &segments[index];
-		uint64_t end;
 
 		if (segment->length == 0 || (uint64_t)segment->offset + segment->length > buffer_length)
 			return (false);
 		if (index > 0 && segments[index - 1].device_writes && !segment->device_writes)
-			return (false);
-		if (__builtin_add_overflow(buffer_addr, (uint64_t)segment->offset + segment->length, &end))
 			return (false);
 	}
 	return (true);
@@ -76,22 +80,24 @@ segments_fit(const erx_device_segment_t *segments, uint32_t count, uint64_t buff
 
 bool
 erx_device_queue_post(erx_device_queue_t *queue, const erx_device_segment_t *segments, uint32_t count,
-    uint32_t buffer, uint64_t buffer_addr, uint32_t buffer_length, uint64_t tag, erx_device_post_plan_t *plan)
+    uint64_t tag, erx_device_post_plan_t *plan)
 {
 	erx_device_chain_t chain;
+	uint64_t buffer_addr;
 	uint32_t index;
 
 	if (queue->broken || count == 0 || count > ERX_DEVICE_CHAIN_MAX || count > queue->free_count ||
-	    !segments_fit(segments, count, buffer_addr, buffer_length))
+	    !segments_fit(segments, count, queue->buffer_size))
 		return (false);
 	/* Field by field over zeroed records, so no padding of the caller's reaches a completion. */
 	memset(&chain, 0, sizeof(chain));
 	chain.posted = true;
 	chain.count = count;
-	chain.buffer = buffer;
 	chain.tag = tag;
 	memset(plan, 0, sizeof(*plan));
 	index = queue->free_head;
+	/* Within the pool, whose last byte erx_device_queue_init checked is representable. */
+	buffer_addr = queue->pool + (uint64_t)index * queue->buffer_size;
 	for (uint32_t step = 0; step < count; step++) {
 		const erx_device_segment_t *segment = &segments[step];
 		erx_device_desc_write_t *desc = &plan->descs[step];
@@ -173,7 +179,7 @@ erx_device_queue_complete(erx_device_queue_t *queue, uint32_t id, uint32_t lengt
 	chain = &queue->chains[id];
 	memset(completion, 0, sizeof(*completion));
 	completion->tag = chain->tag;
-	completion->buffer = chain->buffer;
+	completion->buffer = id;
 	completion->length = length;
 	for (uint32_t step = 0; step < chain->count && left > 0; step++) {
 		erx_device_segment_t range = chain->segments[step];

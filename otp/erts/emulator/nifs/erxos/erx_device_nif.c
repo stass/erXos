@@ -2,13 +2,14 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * erx_device's rare calls (docs/design-runtime.md, "The device NIF"): opening a
- * device, which interns its table's names as atoms for the BIFs, and binding a line to the
- * calling process. A binding is a resource monitoring that process: its exit unbinds the
+ * erx_device's NIF calls (docs/design-runtime.md, "The device NIF"): opening a
+ * device, which interns its table's names as atoms for the BIFs, binding a line to the
+ * calling process, and a device's queues: creating one, the reset rule's last step, posting a
+ * chain and completing what the device returned. A binding is a resource monitoring that process: its exit unbinds the
  * line unless a later binding has moved it, so the late exit of a crashed driver never
  * undoes its successor's binding.
  *
- * One lock serialises opens and everything a binding changes. It is taken before the event
+ * One lock serialises opens, everything a binding changes and every queue call. It is taken before the event
  * table's lock and held across service calls; a dispatch, which holds the event table's
  * lock, never takes it.
  */
@@ -58,6 +59,8 @@ status_error(ErlNifEnv *env, int status)
 	case ERX_ERANGE:	name = "erange"; break;
 	case ERX_ERIGHTS:	name = "erights"; break;
 	case ERX_ELIMIT:	name = "elimit"; break;
+	case ERX_EWOULDBLOCK:	name = "full"; break;
+	case ERX_ECORRUPT:	name = "broken"; break;
 	default:
 		return (enif_make_tuple2(env, enif_make_atom(env, "error"),
 		    enif_make_tuple2(env, enif_make_atom(env, "status"), enif_make_int(env, status))));
@@ -244,6 +247,151 @@ binding_down(ErlNifEnv *env, void *object, ErlNifPid *pid, ErlNifMonitor *monito
 	enif_release_resource(binding);
 }
 
+/* The open device a term names, or NULL. */
+static const erx_device_t *
+device_of(ErlNifEnv *env, ERL_NIF_TERM term)
+{
+	unsigned index;
+
+	return (enif_get_uint(env, term, &index) ? erx_device_get(index) : NULL);
+}
+
+/* queue_create(Dev, Queue, Size, BufferSize) */
+static ERL_NIF_TERM
+queue_create_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	unsigned index, size, buffer_size;
+	uint32_t queue;
+	int status;
+
+	(void)argc;
+	if (device == NULL || !enif_get_uint(env, argv[1], &index) || !enif_get_uint(env, argv[2], &size) ||
+	    !enif_get_uint(env, argv[3], &buffer_size))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_queue_create(device, index, size, buffer_size, &queue);
+	enif_mutex_unlock(device_lock);
+	if (status == ERX_EINVAL)
+		return (enif_make_badarg(env));
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint(env, queue)));
+}
+
+static ERL_NIF_TERM
+reset_done_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	int status;
+
+	(void)argc;
+	if (device == NULL)
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_reset_done(device);
+	enif_mutex_unlock(device_lock);
+	return (status == ERX_OK ? enif_make_atom(env, "ok") : status_error(env, status));
+}
+
+/*
+ * One `{out, IoData}` or `{in, Length}`. An out piece's bytes stay valid for the call: they
+ * are a binary of the call's terms, or one enif_inspect_iolist_as_binary made in its env.
+ */
+static bool
+decode_piece(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_piece_t *piece)
+{
+	const ERL_NIF_TERM *pair;
+	ErlNifBinary bytes;
+	unsigned length;
+	int arity;
+
+	if (!enif_get_tuple(env, term, &arity, &pair) || arity != 2)
+		return (false);
+	if (enif_is_identical(pair[0], enif_make_atom(env, "out"))) {
+		if (!enif_inspect_iolist_as_binary(env, pair[1], &bytes) || bytes.size > ERX_DEVICE_BUFFER_MAX)
+			return (false);
+		*piece = (erx_device_piece_t){ .device_writes = false, .data = bytes.data, .length = (uint32_t)bytes.size };
+		return (true);
+	}
+	if (!enif_is_identical(pair[0], enif_make_atom(env, "in")) || !enif_get_uint(env, pair[1], &length))
+		return (false);
+	*piece = (erx_device_piece_t){ .device_writes = true, .data = NULL, .length = length };
+	return (true);
+}
+
+/* post(Dev, Q, Tag, Segments) */
+static ERL_NIF_TERM
+post_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	erx_device_piece_t pieces[ERX_DEVICE_CHAIN_MAX];
+	ERL_NIF_TERM list = argv[3], head;
+	ErlNifUInt64 tag;
+	unsigned queue, count = 0;
+	int status;
+
+	(void)argc;
+	if (device == NULL || !enif_get_uint(env, argv[1], &queue) || !enif_get_uint64(env, argv[2], &tag))
+		return (enif_make_badarg(env));
+	while (enif_get_list_cell(env, list, &head, &list)) {
+		if (count == ERX_DEVICE_CHAIN_MAX || !decode_piece(env, head, &pieces[count]))
+			return (enif_make_badarg(env));
+		count++;
+	}
+	if (!enif_is_empty_list(env, list))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_post(device, queue, tag, pieces, count);
+	enif_mutex_unlock(device_lock);
+	if (status == ERX_EINVAL)
+		return (enif_make_badarg(env));
+	return (status == ERX_OK ? enif_make_atom(env, "ok") : status_error(env, status));
+}
+
+/* What complete_nif collects: one `{Tag, Binary}` per completion, at most the queue's size. */
+typedef struct completions {
+	ErlNifEnv	*env;
+	uint32_t	count;
+	ERL_NIF_TERM	terms[ERX_DEVICE_QUEUE_SIZE_MAX];
+} completions_t;
+
+/* A fresh binary for each completion, so no term ever aliases memory the device can write. */
+static uint8_t *
+completion_sink(void *context, uint64_t tag, uint32_t length)
+{
+	completions_t *const completions = context;
+	ERL_NIF_TERM binary;
+	uint8_t *const bytes = enif_make_new_binary(completions->env, length, &binary);
+
+	completions->terms[completions->count++] = enif_make_tuple2(completions->env,
+	    enif_make_uint64(completions->env, tag), binary);
+	return (bytes);
+}
+
+/* complete(Dev, Q) */
+static ERL_NIF_TERM
+complete_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	completions_t completions = { .env = env };
+	unsigned queue;
+	uint32_t count;
+	int status;
+
+	(void)argc;
+	if (device == NULL || !enif_get_uint(env, argv[1], &queue))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_complete(device, queue, completion_sink, &completions, &count);
+	enif_mutex_unlock(device_lock);
+	if (status == ERX_EINVAL)
+		return (enif_make_badarg(env));
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_list_from_array(env, completions.terms, count)));
+}
+
 #ifdef ERX_DEVICE_STAND_IN
 /* Fires a hosted stand-in's line, as a device would. A native build has no such NIF. */
 static ERL_NIF_TERM
@@ -278,6 +426,10 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 static ErlNifFunc nif_funcs[] = {
 	{ "open", 1, open_nif, 0 },
 	{ "irq_bind", 2, irq_bind_nif, 0 },
+	{ "queue_create", 4, queue_create_nif, 0 },
+	{ "reset_done", 1, reset_done_nif, 0 },
+	{ "post", 4, post_nif, 0 },
+	{ "complete", 2, complete_nif, 0 },
 #ifdef ERX_DEVICE_STAND_IN
 	{ "stand_in_fire", 2, stand_in_fire_nif, 0 },
 #endif

@@ -10,17 +10,19 @@
  * The queue's rings lie in memory the device can write, so nothing here reads them. The core
  * keeps its own copy of what it posted: which descriptors are free, which chain each posted
  * head starts, the tag the driver wants back and the ranges of its buffer the device may
- * write. erx_device.c writes a post's plan into the rings and reads each used entry once,
+ * write. The queue owns its buffers too: buffer i, of buffer_size bytes at device address
+ * pool + i * buffer_size, belongs to the chain whose head is descriptor i, so no two chains in
+ * flight ever share a buffer, and none is taken without being posted. erx_device.c writes a post's plan into the rings and reads each used entry once,
  * and the core decides what that entry may mean:
  *
- *   post      a chain of 1..ERX_DEVICE_CHAIN_MAX segments of one buffer becomes a plan of
+ *   post      a chain of 1..ERX_DEVICE_CHAIN_MAX segments of the head's buffer becomes a plan of
  *             descriptors whose addresses, NEXT links and WRITE flags the core alone
  *             computes, so no descriptor aims the device at anything but the buffer;
  *   used      the used ring's index, loaded once, says how many entries are new, which
  *             cannot exceed the chains in flight;
  *   complete  each new entry names a head the core posted and a length within what the
  *             chain let the device write, and gives back the tag, the buffer and the ranges
- *             to copy out; its descriptors return to the free list from the core's own links.
+ *             to copy out; its descriptors and its buffer return from the core's own links.
  *
  * Anything else a device writes breaks the queue: every later call fails until reset, so a
  * malformed completion never frees a buffer the device may still write. Reset is the reset
@@ -38,6 +40,8 @@
 /* Bounds of this record, not of virtio: a queue's size, and the segments of one chain. */
 #define ERX_DEVICE_QUEUE_SIZE_MAX	256u
 #define ERX_DEVICE_CHAIN_MAX		4u
+/* A buffer's largest size, so a post's copy and a completion's stay within a call's bound. */
+#define ERX_DEVICE_BUFFER_MAX		65536u
 
 /* Where a queue of `size` entries puts its rings in one run of memory, and how long it is. */
 typedef struct erx_device_queue_layout {
@@ -58,7 +62,6 @@ typedef struct erx_device_segment {
 typedef struct erx_device_chain {
 	bool			posted;
 	uint32_t		count;
-	uint32_t		buffer;
 	uint64_t		tag;
 	uint64_t		writable;	/* the sum of the device-writable segments' lengths */
 	erx_device_segment_t	segments[ERX_DEVICE_CHAIN_MAX];
@@ -76,6 +79,8 @@ typedef struct erx_device_chain {
  */
 typedef struct erx_device_queue {
 	uint32_t		size;		/* a power of two, at most ERX_DEVICE_QUEUE_SIZE_MAX */
+	uint32_t		buffer_size;	/* each of the size buffers, 1..ERX_DEVICE_BUFFER_MAX */
+	uint64_t		pool;		/* buffer 0's device address; the last byte is representable */
 	uint16_t		avail_idx;	/* the available ring's running index */
 	uint16_t		last_used;	/* the next used entry to complete, a running index */
 	uint32_t		free_head;
@@ -109,7 +114,7 @@ typedef struct erx_device_post_plan {
 	uint16_t		avail_idx;
 } erx_device_post_plan_t;
 
-/* A completed chain: what the driver gave, and the ranges of its buffer to copy out, in order. */
+/* A completed chain: its tag, its buffer, and the ranges of the buffer to copy out, in order. */
 typedef struct erx_device_completion {
 	uint64_t		tag;
 	uint32_t		buffer;
@@ -121,20 +126,24 @@ typedef struct erx_device_completion {
 /* False for a size that is not a power of two from 1 to ERX_DEVICE_QUEUE_SIZE_MAX. */
 bool	erx_device_queue_layout(uint32_t size, erx_device_queue_layout_t *layout);
 
-/* An empty queue of `size` entries, as after a reset; false, touching nothing, for a bad size. */
-bool	erx_device_queue_init(erx_device_queue_t *queue, uint32_t size);
+/*
+ * An empty queue of `size` entries and `size` buffers of `buffer_size` bytes from device address
+ * `pool`, as after a reset. False, touching nothing, for a bad size, a buffer size of 0 or over
+ * ERX_DEVICE_BUFFER_MAX, or a pool whose end the address space cannot hold.
+ */
+bool	erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t buffer_size, uint64_t pool);
 /* The reset rule's last step: every chain forgotten, the rings empty, the queue whole again. */
 void	erx_device_queue_reset(erx_device_queue_t *queue);
 
 /*
- * Posts a chain over pool buffer `buffer`, an index the core hands back at completion, of
- * `buffer_length` bytes at device address `buffer_addr`. False, changing nothing, for a broken
- * queue, a count outside 1..ERX_DEVICE_CHAIN_MAX, an empty segment or one outside the buffer,
- * a segment the device reads after one it writes, an address that overflows, or too few free
- * descriptors. The core counts the post as made, so the effects apply the plan whole.
+ * Posts a chain over the buffer of its head descriptor, whose index plan->head gives and the
+ * completion hands back. False, changing nothing, for a broken queue, a count outside
+ * 1..ERX_DEVICE_CHAIN_MAX, an empty segment or one outside the buffer, a segment the device
+ * reads after one it writes, or too few free descriptors. The core counts the post as made,
+ * so the effects apply the plan whole.
  */
 bool	erx_device_queue_post(erx_device_queue_t *queue, const erx_device_segment_t *segments, uint32_t count,
-	    uint32_t buffer, uint64_t buffer_addr, uint32_t buffer_length, uint64_t tag, erx_device_post_plan_t *plan);
+	    uint64_t tag, erx_device_post_plan_t *plan);
 
 /*
  * How many used entries are new, given the used ring's index as one load read it. More than
