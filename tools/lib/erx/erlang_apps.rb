@@ -56,7 +56,8 @@ module Erx
       raise Error, "#{SOURCE} holds applications ErlangApps does not list: #{unlisted.join(' ')}" unless unlisted.empty?
 
       APPLICATIONS.each { |application| build_application(application, otp: otp) }
-      ServingSet.check(erl: File.join(File.dirname(@erlc), 'erl'), directories: ServingSet.directories(otp: otp), root: @root)
+      ServingSet.check(runner: @runner, erl: File.join(File.dirname(@erlc), 'erl'),
+                       directories: ServingSet.directories(otp: otp), root: @root)
     end
 
     private

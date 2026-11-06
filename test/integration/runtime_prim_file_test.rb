@@ -4,6 +4,7 @@
 
 require 'digest'
 require 'fileutils'
+require 'find'
 require 'minitest/autorun'
 require 'open3'
 require 'timeout'
@@ -59,9 +60,18 @@ class RuntimePrimFileTest < Minitest::Test
     @fixture = self.class.fixture
   end
 
+  # The corpus leaves directories its owner cannot write or search, which would refuse
+  # removal of their entries, and links that may dangle. Removal needs only each
+  # directory's owner bits; Find walks by lstat, so no link is followed or stat'ed, and
+  # yields a directory before it reads it.
   Minitest.after_run do
-    FileUtils.chmod_R('u+w', fixture.directory) if fixture
-    FileUtils.remove_entry(fixture.directory) if fixture
+    next unless fixture
+
+    Find.find(fixture.directory) do |entry|
+      status = File.lstat(entry)
+      File.chmod((status.mode & 0o7777) | 0o700, entry) if status.directory?
+    end
+    FileUtils.remove_entry(fixture.directory)
   end
 
   def test_both_runs_finish

@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'open3'
 require_relative 'error'
+require_relative 'oracle'
 
 module Erx
   # The modules /tmp's serving processes can call (docs/design-tmp.md, T6): the tree
@@ -27,8 +27,10 @@ module Erx
 
     # The module names the seeds reach in the beams of directories, sorted, without
     # the preloaded ones. Calls to BIFs count: a BIF's module, such as binary or os, is
-    # loaded through the code server like any other.
-    def self.closure(erl:, directories:, root:)
+    # loaded through the code server like any other. runner runs erl as every build step
+    # runs, under a deadline with its output in a log, and the module list is read back
+    # from that log.
+    def self.closure(runner:, erl:, directories:, root:)
       query = "(Mod) range (closure E | [#{SEEDS.join(',')}] : Mod)"
       expression = <<~ERLANG
         {ok, X} = xref:start(serving, [{xref_mode, functions}]),
@@ -38,11 +40,10 @@ module Erx
         [io:format("module ~ts~n", [M]) || M <- Modules],
         halt().
       ERLANG
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, erl, '-noshell', '-eval', expression,
-                                       stdin_data: '')
-      raise Error, "xref of the serving set failed:\n#{output}" unless status.success?
-
-      reached = output.lines.filter_map { |line| line[/\Amodule (\S+)\n\z/, 1] }
+      record = runner.run([erl, '-noshell', '-eval', expression], name: 'serving-set', deadline: DEADLINE, chdir: root,
+                                                                  env: Oracle::CLEAN_ERLANG_ENV)
+      # The log holds erl's stderr too, which need not be UTF-8.
+      reached = File.binread(record.fetch('log')).scrub.lines.filter_map { |line| line[/\Amodule (\S+)\n\z/, 1] }
       (reached - [FUN_CALL] - preloaded(root: root)).sort
     end
 
@@ -79,8 +80,8 @@ module Erx
     end
 
     # Fails unless the checked-in list is exactly what the beams reach.
-    def self.check(erl:, directories:, root:)
-      want = closure(erl: erl, directories: directories, root: root)
+    def self.check(runner:, erl:, directories:, root:)
+      want = closure(runner: runner, erl: erl, directories: directories, root: root)
       have = listed(File.read(File.join(root, GENERATED)))
       return if have == want
 

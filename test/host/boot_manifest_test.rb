@@ -20,6 +20,9 @@ require_relative '../../tools/lib/erx/manifest'
 class BootManifestTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[liberx/backend/core/boot_manifest.c liberx/generated/abi_reader.c test/fixtures/boot_manifest_driver.c].freeze
+  # The fields of the source's runtime_limits system block, in the order the driver prints them.
+  RUNTIME_LIMIT_FIELDS = %w[max_frame max_message_heap funnel_depth exports tmp overlay atoms foreign_atoms
+                            processes].freeze
 
   def setup
     @directory = Dir.mktmpdir('erx-boot-manifest-')
@@ -58,7 +61,15 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
     assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -kernel start_distribution false \n"
-    assert_includes output, "limits 65536 1048576 64 256 0 0 65536 1024 4096\n"
+    assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
+  end
+
+  def system_runtime_limits
+    block = @source[/^runtime_limits system\n((?:  .*\n)*)/, 1]
+    flunk 'the manifest has no runtime_limits system block' unless block
+    values = block.lines.to_h { |line| line.split.first(2) }
+    assert_equal RUNTIME_LIMIT_FIELDS.sort, values.keys.sort
+    RUNTIME_LIMIT_FIELDS.map { |field| values.fetch(field) }
   end
 
   def test_a_manifest_with_no_system_args_gives_no_words
