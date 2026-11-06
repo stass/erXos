@@ -1364,6 +1364,17 @@ it; git history is the record of completed work.
 
 ## Security residuals
 
+* [Medium] system domain, the reset count
+  ([design-system.md](docs/design-system.md)): any successful login clears the
+  count, including a web login or a compromised display domain replaying a
+  recorded passphrase at a window, so a machine with a boot fault that lets
+  the network come up can be kept out of rescue. Clear it only on a login at
+  a secure line, or only after a login has lasted a while. Related: in a
+  default release build no principal may open the system shell, so the
+  rescue texts' "the operator can inspect the crash record"
+  (design-system.md, design-platforms.md) holds only when the manifest names
+  a system-shell principal; state that there.
+
 * [Low] console and display, the line cap
   ([Window tokens](docs/design-live.md#window-tokens)): a display holds at most
   the lines its `console_line` parameter allows, 16 by default, and every
