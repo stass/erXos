@@ -379,7 +379,7 @@ module Erx
         argv = [@java, "-Xmx#{settings.fetch('heap_mib')}m", '-Xms16m', '-XX:+UseParallelGC',
                 "-Djava.io.tmpdir=#{temporary}", '-cp', jar, 'tlc2.TLC', '-tool',
                 '-workers', settings.fetch('workers').to_s, '-seed', '0', '-fp', '0',
-                '-noGenerateSpecTE', '-metadir', File.join(work, 'states'),
+                '-metadir', File.join(work, 'states'),
                 '-config', entry.fetch('config')]
         argv << '-deadlock' if entry.fetch('deadlock') == 'terminal'
         argv << entry.fetch('module')

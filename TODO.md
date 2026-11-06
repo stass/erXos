@@ -310,13 +310,6 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] dependencies, `deps.lock` `tla-tools`: the pin names
-  `releases/download/v1.8.0/tla2tools.jar`, but tlaplus's v1.8.0 is a rolling
-  pre-release whose asset is replaced, so `make fetch` in a fresh tree fails with
-  "source SHA-256 mismatch: tla-tools" while older trees keep the pinned bytes. Pin
-  an immutable release, such as v1.7.4, or a copy whose bytes do not change, and
-  rerun `make check-tla` on it.
-
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

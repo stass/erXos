@@ -35,9 +35,9 @@
     {
       "id": "tla-tools",
       "kind": "file",
-      "version": "1.8.0-asset-692577622",
-      "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
-      "sha256": "011267fca25d0752cf18894dd585cd28b96960c112ea8a20b823ea770e7e10cd",
+      "version": "1.7.4",
+      "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+      "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
       "filename": "tla2tools.jar",
       "license": "MIT",
       "status": "permanent"
