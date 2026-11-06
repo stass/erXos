@@ -47,7 +47,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	    ((record.flags & ERX_PACK_TEST_CODE) != 0 && (record.flags & ERX_PACK_DEVELOPMENT) == 0) ||
 	    record.image_size == 0 || record.image_start % ERX_PAGE_SIZE != 0 || record.image_size % ERX_PAGE_SIZE != 0 ||
 	    __builtin_add_overflow(record.image_start, record.image_size, &end) ||
-	    record.bootargs_len > ERX_BOOT_STRINGS_MAX || record.stdout_path_len > ERX_BOOT_STDOUT_PATH_MAX)
+	    record.bootargs_len > ERX_BOOT_STRINGS_MAX || record.stdout_path_len > ERX_BOOT_STDOUT_PATH_MAX ||
+	    !(record.boot_value == ERX_BOOT_VALUE_UNKNOWN ? record.boot_slot == ERX_BOOT_SLOT_NONE :
+	    (record.boot_value == ERX_BOOT_VALUE_NORMAL || record.boot_value == ERX_BOOT_VALUE_TRIAL) &&
+	    (record.boot_slot == ERX_BOOT_SLOT_A || record.boot_slot == ERX_BOOT_SLOT_B)))
 		abort();
 	if (view.flags != record.flags || view.development != ((record.flags & ERX_PACK_DEVELOPMENT) != 0) ||
 	    view.test_code != ((record.flags & ERX_PACK_TEST_CODE) != 0) ||
@@ -55,6 +58,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	    view.pool_usable != record.pool_usable || view.pool_heap != record.pool_heap ||
 	    view.pool_regions != record.pool_regions || view.bootargs_len != record.bootargs_len ||
 	    view.stdout_path_len != record.stdout_path_len ||
+	    view.boot.value != record.boot_value || view.boot.slot != record.boot_slot ||
 	    memcmp(view.build_id, record.build_id, sizeof(view.build_id)) != 0 ||
 	    memcmp(view.index_hash, record.index_hash, sizeof(view.index_hash)) != 0)
 		abort();
@@ -62,7 +66,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	if (view.bootargs != (const char *)at + ERX_BOOT_HANDOFF_OFF_BOOTARGS ||
 	    ERX_BOOT_HANDOFF_OFF_BOOTARGS + view.bootargs_len > ERX_BOOT_HANDOFF_SIZE ||
 	    view.stdout_path != (const char *)at + ERX_BOOT_HANDOFF_OFF_STDOUT_PATH ||
-	    ERX_BOOT_HANDOFF_OFF_STDOUT_PATH + view.stdout_path_len > ERX_BOOT_HANDOFF_OFF_RESERVED)
+	    ERX_BOOT_HANDOFF_OFF_STDOUT_PATH + view.stdout_path_len > ERX_BOOT_HANDOFF_OFF_BOOT_VALUE)
 		abort();
 	/* An accepted stdout path is empty or a node path: no byte the root could not print. */
 	for (uint32_t index = 0; index < view.stdout_path_len; index++) {

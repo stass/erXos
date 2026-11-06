@@ -7,10 +7,11 @@
 # are a good record, a test image's (development and test code) and the test mark
 # alone, which it refuses, the highest image range it accepts, its refusals one field at a
 # time, stdout paths good, longest, too long and with a byte no node name has, a record
-# off its alignment and a short one.
-handoff = lambda do |version: 3, flags: 1, start: 0x4020_0000, size: 0x10_0000, bootargs: 7, stdout: '/pl011@9000000', stdout_length: stdout.bytesize|
+# off its alignment and a short one, and boot pairs good and refused.
+handoff = lambda do |version: 4, flags: 1, start: 0x4020_0000, size: 0x10_0000, bootargs: 7, stdout: '/pl011@9000000',
+                     stdout_length: stdout.bytesize, boot: [2, 1]|
   [version, flags, 'B' * 8, 'H' * 32, start, size, 0x1000_0000, 0x10_0000, 1, bootargs].pack('VVa8a32Q<Q<Q<Q<VV')
-    .ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(260, "\0".b)
+    .ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV') + ("\0".b * 4)
 end
 Erx::PackFuzz.declare_target(
   sources: ['kernel/core/boot_handoff.c'],
@@ -29,7 +30,12 @@ Erx::PackFuzz.declare_target(
      handoff.call(flags: 5),
      handoff.call(flags: 4),
      handoff.call(flags: 0x8000_0000),
-     handoff.call(bootargs: 0xFFFF_FFFF)].map { |record| "\x00".b + record } +
+     handoff.call(bootargs: 0xFFFF_FFFF),
+     handoff.call(boot: [1, 0]),
+     handoff.call(boot: [3, 2]),
+     handoff.call(boot: [1, 1]),
+     handoff.call(boot: [2, 0]),
+     handoff.call(boot: [4, 1])].map { |record| "\x00".b + record } +
     ["\x01".b + handoff.call, "\x00".b + handoff.call.byteslice(0, 88)]
   )
 )

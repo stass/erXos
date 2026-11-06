@@ -119,7 +119,7 @@ class BootPlaceTest < Minitest::Test
     assert_equal 2, output.scan(/^copy /).size
     # The record starts with the version, the flags, the build id and the hash.
     record = output.b[/copy [^\n]*\n(?!copy)(.*)\n\z/mn, 1]
-    assert_equal [3, 1], record.unpack('VV')
+    assert_equal [4, 1], record.unpack('VV')
   end
 
   def test_an_image_without_a_dynamic_section_runs_where_it_is_linked
@@ -231,22 +231,25 @@ class BootPlaceTest < Minitest::Test
     File.binread(@runner.run([@driver, 'handoff', path], name: 'handoff', deadline: 30).fetch('log')).strip
   end
 
-  # stdout_path's length sits after the 2048 bytes of bootargs, and its bytes after that.
-  def record(version: 3, flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000', stdout_length: stdout.bytesize)
+  # stdout_path's length sits after the 2048 bytes of bootargs, its 256 bytes after that,
+  # then the boot value and its slot.
+  def record(version: 4, flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000',
+             stdout_length: stdout.bytesize, boot: [2, 1])
     bytes = [version, flags].pack('VV') + ("\x11".b * 8) + ("\x22".b * 32) + [start, size, 0, 0, 0, args.bytesize].pack('Q<4VV') + args.b
-    bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b
+    bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV')
     bytes.ljust(@codec.layout_size('erx_boot_handoff'), "\0".b)
   end
 
   def test_the_kernel_accepts_a_good_record_and_says_what_it_holds
-    assert_equal 'flags 1 development 1 test_code 0 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0', handoff(record)
+    assert_equal 'flags 1 development 1 test_code 0 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0 boot 2 1',
+                 handoff(record)
     assert_match(/development 0 test_code 0 /, handoff(record(flags: 2)))
     assert_match(/flags 5 development 1 test_code 1 /, handoff(record(flags: 5)))
   end
 
   def test_the_kernel_refuses_a_record_bootstrap_did_not_write
     assert_equal 'refused version', handoff("\0".b * @codec.layout_size('erx_boot_handoff'))
-    assert_equal 'refused version', handoff(record(version: 2))
+    assert_equal 'refused version', handoff(record(version: 3))
     assert_equal 'refused flags', handoff(record(flags: 8))
     # A test image is a development build: its mark alone is refused.
     assert_equal 'refused flags', handoff(record(flags: 4))
@@ -274,6 +277,58 @@ class BootPlaceTest < Minitest::Test
     assert_equal 'refused stdout_path', handoff(record(stdout: '/pl011@9000000:115200'))
     assert_equal 'refused stdout_path', handoff(record(stdout: "/pl011\e[2J"))
     assert_equal 'refused stdout_path', handoff(record(stdout: "/pl011\0"))
+  end
+
+  # unknown goes with slot none, normal (2) and trial (3) with slot a (1) or b (2).
+  GOOD_PAIRS = [[1, 0], [2, 1], [2, 2], [3, 1], [3, 2]].freeze
+  ALL_PAIRS = (0..4).to_a.product((0..3).to_a).push([0xFFFF_FFFF, 1], [2, 0xFFFF_FFFF]).freeze
+
+  def test_the_kernel_accepts_exactly_the_pairs_of_the_machine_page
+    ALL_PAIRS.each do |pair|
+      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')}\z/ : /\Arefused boot_value\z/
+      assert_match expected, handoff(record(boot: pair)), pair.inspect
+    end
+  end
+
+  # Bootstrap writes only a pair the kernel accepts; a refused write leaves the record alone.
+  def test_the_record_carries_the_pair_bootstrap_writes
+    ALL_PAIRS.each do |pair|
+      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')}\z/ : /\Aunwritten\z/
+      assert_match expected, write(*pair), pair.inspect
+    end
+  end
+
+  # /chosen/bootloader's partition and tryboot, each one big-endian cell: partition 2 is
+  # slot a and 3 slot b (abi/medium.txt), tryboot 1 a trial and 0 any other boot.
+  def test_the_pair_comes_from_the_two_cells
+    partitions = [*0..5, 0xFFFF_FFFF, 0x0200_0000, 0x0300_0000]
+    partitions.product([0, 1, 2, 0xFFFF_FFFF, 0x0100_0000]).each do |partition, tryboot|
+      slot = { 2 => 1, 3 => 2 }[partition]
+      value = { 0 => 2, 1 => 3 }[tryboot]
+      expected = slot && value ? [value, slot] : [1, 0]
+      assert_equal expected, pair(cell(partition), cell(tryboot)), [partition, tryboot].inspect
+    end
+  end
+
+  def test_a_missing_or_misshapen_property_gives_unknown
+    [['-', cell(0)], [cell(2), '-'], %w[- -], ['', cell(0)], [cell(2), ''],
+     [cell(0) + cell(2), cell(0)], [cell(2) + cell(0), cell(0)], [cell(2), cell(0) * 2],
+     ['000002', cell(0)], [cell(2), '000000'], ["#{cell(2)}00", cell(0)], [cell(2), "#{cell(0)}00"]].each do |partition, tryboot|
+      assert_equal [1, 0], pair(partition, tryboot), [partition, tryboot].inspect
+    end
+  end
+
+  def cell(number) = format('%08x', number)
+
+  def pair(partition, tryboot)
+    output = File.binread(@runner.run([@driver, 'pair', partition, tryboot], name: 'pair', deadline: 30).fetch('log'))
+    match = output.match(/\Avalue (\d+) slot (\d+)\n\z/)
+    assert match, output
+    [match[1].to_i, match[2].to_i]
+  end
+
+  def write(value, slot)
+    File.binread(@runner.run([@driver, 'write', value.to_s, slot.to_s], name: 'write', deadline: 30).fetch('log')).strip
   end
 
   def test_a_command_line_is_cut_at_the_last_whole_word

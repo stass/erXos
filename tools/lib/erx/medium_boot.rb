@@ -1,0 +1,116 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'fileutils'
+require_relative 'boot_record'
+require_relative 'error'
+require_relative 'fiasco'
+require_relative 'output_directory'
+require_relative 'production_image'
+require_relative 'qemu'
+require_relative 'release_medium'
+require_relative 'runner'
+
+module Erx
+  # The QEMU harness as the firmware of a release medium (docs/design-platforms.md,
+  # "Slots and the boot-selection record"): it reads the boot-selection record with the
+  # slot parser (BootRecord), copies the committed slot's bootable file out of the
+  # medium, boots it with -kernel and the medium as the guest's block device, and
+  # writes the boot value into /chosen/bootloader of QEMU's own device tree, which it
+  # passes with -dtb. Every boot here is a normal boot: the harness asks for no trial,
+  # so tryboot is 0.
+  module MediumBoot
+    # The kernel's line that names the boot value it took from /chosen.
+    BOOT_VALUE = /\Aerx: boot value /n
+
+    module_function
+
+    # The device tree source that adds the firmware's two properties to a tree: dtc
+    # merges a node defined twice, so appended to QEMU's own tree it adds them under its
+    # /chosen. choice is the slot parser's answer.
+    def chosen_source(choice)
+      partition = BootRecord::SLOTS.fetch(choice.slot).partition
+      "\n/ {\n\tchosen {\n\t\tbootloader {\n\t\t\tpartition = <#{partition}>;\n\t\t\ttryboot = <0>;\n\t\t};\n\t};\n};\n"
+    end
+
+    # The checkpoint of the kernel's boot value line: a normal boot of the chosen slot.
+    def boot_value_checkpoint(choice)
+      whole = /\Aerx: boot value normal slot #{choice.slot}\r?\n\z/n
+      { name: 'boot-value', pattern: BOOT_VALUE, seconds: 30,
+        verify: ->(text) { raise Error, "the kernel reports #{text.inspect}" unless whole.match?(text) } }.freeze
+    end
+
+    # The production boot's checkpoints with the boot value's inserted: the kernel
+    # prints "erx: boot image build ..." and then "erx: boot value ...".
+    def checkpoints(points, choice)
+      at = points.index { |point| point.fetch(:name) == 'image-identity' }
+      raise Error, 'the production checkpoints name no image-identity' unless at
+
+      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)..]].freeze
+    end
+
+    # Boots the production image from its release medium to the shell under HVF.
+    class Run
+      MEMORY_MIB = ProductionImage::MEMORY_MIB
+      # Under HVF the watchdog numbers are the kernel's defaults, whatever they are.
+      WATCHDOG = '[0-9]+,[0-9]+,[0-9]+'
+
+      def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+        @root = File.expand_path(root)
+        @runner = runner
+        @compiler = compiler
+        @linker = linker
+        @qemu = qemu
+      end
+
+      # Packs the production image and its release medium once, then boots each CPU
+      # count from a fresh copy of the medium. Returns { "hvf-<n>cpu" => 'passed' }; any
+      # disagreement raises.
+      def call(cpus:, jobs: 4, build: true)
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build(jobs: jobs) if build
+        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/medium-boot/image'))
+        built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+                                        .build_medium(directory: directory)
+        cpus.to_h { |count| ["hvf-#{count}cpu", boot(count, built, written)] }
+      end
+
+      private
+
+      def boot(count, built, written)
+        directory = OutputDirectory.prepare(root: @root, mode: 0o700,
+                                            path: File.join(@root, 'build/medium-boot', "hvf-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"))
+        medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors)
+        choice = BootRecord.read(medium)
+        image = BootRecord.extract(medium, choice, output: File.join(directory, 'slot.boot'))
+        raise Error, 'the slot parser chose a file that is not the packed image' unless FileUtils.compare_file(image, built.single)
+
+        disks = [QemuPlan::Disk.new(path: medium)]
+        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: WATCHDOG, cpus: count)
+        Qemu.new(root: @root, runner: @runner, program: @qemu)
+            .run(accel: 'hvf', cpus: count, image: image, memory_mib: MEMORY_MIB, directory: File.join(directory, 'boot'),
+                 checkpoints: MediumBoot.checkpoints(points, choice), dtb: firmware_tree(count, image, disks, choice, directory),
+                 disks: disks)
+        'passed'
+      end
+
+      # QEMU's own tree for this boot's machine with the firmware's /chosen properties.
+      def firmware_tree(count, image, disks, choice, directory)
+        stock = File.join(directory, 'virt.dtb')
+        tree = File.join(directory, 'firmware.dtb')
+        source = File.join(directory, 'firmware.dts')
+        argv = QemuPlan.argv(accel: 'hvf', image: image, serial: '/dev/null', cpus: count, memory_mib: MEMORY_MIB,
+                             program: @qemu, disks: disks)
+        machine = argv.index('-machine') + 1
+        @runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]],
+                    name: 'qemu-dumpdtb-firmware', deadline: 30)
+        listing = File.read(@runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', stock], name: 'dtc-firmware', deadline: 30).fetch('log'))
+        File.write(source, listing + MediumBoot.chosen_source(choice))
+        @runner.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', tree, source], name: 'dtc-firmware-tree', deadline: 30)
+        tree
+      end
+    end
+  end
+end

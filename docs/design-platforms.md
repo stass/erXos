@@ -218,6 +218,13 @@ boot arguments, the boot image's range, `rng-seed`, `kaslr-seed`,
 `stdout-path`, and, from firmware that boots one of two slots,
 `bootloader/partition` and `bootloader/tryboot`, from which the kernel
 derives the boot value ([design-storage.md](design-storage.md#system-updates)).
+Each is one 32-bit cell, as the Raspberry Pi firmware writes them: the
+number of the partition booted, its entry's index in the master boot
+record counted from 1, and 1 for a trial or 0 for any other boot. The
+kernel maps the partition to a slot by `medium_slot_a_partition` and
+`medium_slot_b_partition` of `abi/medium.txt`; a missing property, a
+property of another length, a `tryboot` other than 0 or 1, or a partition that is not a slot
+gives `unknown`.
 
 ## Algorithms and behavior
 
@@ -802,16 +809,45 @@ at a commit; a reset count in a sector of its own beside it; slots written
 raw; a trial request the firmware clears as the trial starts; and the
 booted slot reported in `/chosen`.
 
+**The record's bytes** are the same on every platform, and the medium
+layout of `abi/medium.txt` fixes them, so the slot writer, which is the
+same code on every platform, writes one format; the Raspberry Pi's is
+chosen because its firmware cannot read another. The record's partition
+is the medium's first; its first MiB holds the partition's FAT, the record
+is the sector 1 MiB into it (`medium_record_select_start`, counted from the
+partition's first sector) and the reset count the sector 2 MiB into it
+(`medium_record_count_start`). Each so has a MiB of its own, the layout's
+alignment, which is the erase unit the medium assumes. The record has two
+encodings, `medium_record_a` while slot A, the medium's second partition,
+is committed and `medium_record_b` while slot B, its third, is. Each is
+followed by zeros to the end of the sector, and both have the same length,
+since a commit rewrites the sector and never the FAT's directory entry
+that records the file's length. Each is the Raspberry Pi firmware's
+`autoboot.txt`; while A is committed it reads
+
+```
+[all]
+tryboot_a_b=1
+boot_partition=2
+[tryboot]
+boot_partition=3
+```
+
+and while B is, the two numbers swap. A sector that is neither encoding,
+byte for byte, is an unreadable record. The packer writes the partition's
+FAT with `autoboot.txt` as a file of the text's length whose one cluster
+starts at the record's sector, so the firmware reads the record through
+the FAT and every other reader, the slot writer and the QEMU harness, reads
+the sector; and it writes `normal(A)`, `medium_record_a`, to a new medium.
+
 **On the Raspberry Pi** the record is the firmware's `autoboot.txt` and the
 request its one-shot `tryboot` flag
 ([research](research-boards-storage.md#booting-a-chosen-partition-on-the-raspberry-pi)):
 
 * `autoboot.txt` lives in the first FAT partition: `boot_partition` names
   the committed slot and, with `tryboot_a_b=1`, its `[tryboot]` section
-  names the spare. It has exactly two encodings, byte for byte, one per
-  committed slot, padded to one sector, and the packer places it alone in
-  an erase-unit-aligned region, away from the FAT's own structures.
-  `normal(C)` is the encoding naming C with the `tryboot` flag clear;
+  names the spare; its two encodings and its sector are the record's
+  bytes above. `normal(C)` is the encoding naming C with the `tryboot` flag clear;
   `trial(S)` is the same encoding with the flag set, under which the
   firmware boots the slot the `[tryboot]` section names, S; and a commit
   writes the other encoding, which names S.
@@ -856,9 +892,20 @@ configured number as a reset loop, so a test never loops however the
 guest's count behaves. The packer places the bootable file of
 every slot at an offset the medium layout fixes (`medium_slot_boot_start`
 of `abi/medium.txt`), inside the FAT's file, so
-the harness finds them without parsing FAT; it checks every size it reads
-against the slot's bounds, in one parser with a fuzz target, since a guest
-may have written the slot. It learns that a trial was asked for from the
+the harness finds them without parsing FAT. The file's length is the one
+its boot header records, which in the single file is the file's exact
+length (`image_size` of the header,
+[design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)). The harness's
+slot parser reads the record's sector and the chosen slot's boot header,
+refuses an unreadable record, a header without its magic, and a length
+shorter than the header or running past the slot's end, since a guest
+may have written either, and has a fuzz target. The harness copies that
+many bytes out of the slot into a file of its own for `-kernel`, attaches
+the medium as the guest's raw block device, and writes
+`bootloader/partition`, the chosen slot's partition number, and
+`bootloader/tryboot`, 0 or 1 by the one-shot flag, into `/chosen` of
+QEMU's own device tree, which it dumps with the boot's own machine,
+memory, CPU and disk options and passes with `-dtb`. It learns that a trial was asked for from the
 kernel's final line on the early console, which every end of the machine
 writes last, after stopping every other CPU, so no domain's line can come
 after it and pass for it; the line names the end the kernel takes, so a

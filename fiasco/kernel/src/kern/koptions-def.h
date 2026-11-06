@@ -94,7 +94,7 @@ namespace L4_kernel_options
     Unsigned32  node;             /// The AMP node ID where the options apply
     Unsigned32  erx_pad;
 
-    /// erXos's handoff record (docs/design-stopgap.md, "The handoff record").
-    Unsigned8   erx_handoff[2400];
+    /// erXos's handoff record (docs/design-stopgap.md, "Boot handoff").
+    Unsigned8   erx_handoff[2408];
   } __attribute__((packed));
 };

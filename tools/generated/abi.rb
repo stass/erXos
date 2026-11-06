@@ -7842,6 +7842,16 @@ module Erx
         flags: false,
         allowed: nil
       ).freeze
+      types["medium_record_a"] = BytesType.new(
+        name: "medium_record_a".b,
+        size: 64,
+        fixed: "[all]\ntryboot_a_b=1\nboot_partition=2\n[tryboot]\nboot_partition=3\n".b
+      ).freeze
+      types["medium_record_b"] = BytesType.new(
+        name: "medium_record_b".b,
+        size: 64,
+        fixed: "[all]\ntryboot_a_b=1\nboot_partition=3\n[tryboot]\nboot_partition=2\n".b
+      ).freeze
       types["mem_attr"] = EnumType.new(
         name: "mem_attr".b,
         base: types.fetch("u32"),
@@ -8886,10 +8896,10 @@ module Erx
       ).freeze
       types["erx_boot_handoff"] = Layout.new(
         name: "erx_boot_handoff".b,
-        version: 3,
+        version: 4,
         storage: "wire_le".b,
         alignment: 8,
-        size: 2400,
+        size: 2408,
         fields: [
           Field.new(
             name: "version".b,
@@ -9074,9 +9084,37 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
+            name: "boot_value".b,
+            type: types.fetch("boot_value"),
+            offset: 2396,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "boot_slot".b,
+            type: types.fetch("boot_slot"),
+            offset: 2400,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
             name: "reserved".b,
             type: types.fetch("u32"),
-            offset: 2396,
+            offset: 2404,
             count: nil,
             bits: [].freeze,
             atomic: nil,
@@ -11320,6 +11358,8 @@ module Erx
           "machine_flags".b,
           "manifest_flags".b,
           "manifest_mode".b,
+          "medium_record_a".b,
+          "medium_record_b".b,
           "mem_attr".b,
           "mem_flags".b,
           "mf_device_flags".b,
@@ -11417,7 +11457,7 @@ module Erx
           ).freeze,
           "boot_handoff_version".b => Constant.new(
             name: "boot_handoff_version".b,
-            value: 3,
+            value: 4,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -13287,9 +13327,21 @@ module Erx
             type: types.fetch("u8"),
             description: nil
           ).freeze,
+          "medium_record_count_start".b => Constant.new(
+            name: "medium_record_count_start".b,
+            value: 4096,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "medium_record_sectors".b => Constant.new(
             name: "medium_record_sectors".b,
             value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_record_select_start".b => Constant.new(
+            name: "medium_record_select_start".b,
+            value: 2048,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
@@ -13305,9 +13357,21 @@ module Erx
             type: types.fetch("u8"),
             description: nil
           ).freeze,
+          "medium_slot_a_partition".b => Constant.new(
+            name: "medium_slot_a_partition".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "medium_slot_a_start".b => Constant.new(
             name: "medium_slot_a_start".b,
             value: 16384,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "medium_slot_b_partition".b => Constant.new(
+            name: "medium_slot_b_partition".b,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

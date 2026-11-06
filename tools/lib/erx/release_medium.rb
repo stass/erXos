@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative 'boot_record'
 require_relative 'erofs_image'
 require_relative 'error'
 require_relative 'medium_image'
@@ -11,9 +12,10 @@ module Erx
   # file's medium layout (MediumImage) whose slot A holds a production image's bootable
   # file and, after it, the release's EROFS image, which mkfs.erofs writes from the system
   # release's files at the paths the boot image's archive gives them
-  # (ProductionImage::Built#release). The boot-selection record's partition, slot B, the
-  # vault's partition and the data partition hold zeros; /data's littlefs formats its
-  # volume over the zeros at its first mount (erx_lfs).
+  # (ProductionImage::Built#release). The boot-selection record commits slot A
+  # (BootRecord.sector), and the rest of its partition, slot B, the vault's partition
+  # and the data partition hold zeros; /data's littlefs formats its volume over the
+  # zeros at its first mount (erx_lfs).
   module ReleaseMedium
     NAME = 'medium.img'
     EROFS = 'release.erofs'
@@ -79,12 +81,20 @@ module Erx
       erofs = ErofsImage.new(runner: runner).write(files: files(built.release), name: IMAGE,
                                                    output: File.join(directory, EROFS))
       plan = slot_plan(boot: slot_file('boot', built.single), images: [slot_file(IMAGE, erofs)])
+      Written.new(path: medium(plan, directory: directory, data_sectors: data_sectors), erofs: erofs, data_sectors: data_sectors,
+                  slot: plan)
+    end
+
+    # Writes the medium, NAME in directory, whose slot A holds plan's files and whose
+    # boot-selection record commits slot A; returns its path. A boot that may write
+    # its medium takes a fresh one from the plan of the release medium written once.
+    def medium(plan, directory:, data_sectors:)
       slot = MediumImage.constant('slot_a_start')
       pieces = [plan.boot, *plan.images].to_h do |extent|
         [slot + (extent.slot_offset / SECTOR_BYTES), MediumImage::FilePiece.new(path: extent.file.path, length: extent.file.length)]
       end
-      path = MediumImage.create(directory: directory, name: NAME, data_sectors: data_sectors, pieces: pieces)
-      Written.new(path: path, erofs: erofs, data_sectors: data_sectors, slot: plan)
+      pieces[BootRecord::RECORD_OFFSET / SECTOR_BYTES] = BootRecord.sector(:a)
+      MediumImage.create(directory: directory, name: NAME, data_sectors: data_sectors, pieces: pieces)
     end
 
     def slot_file(name, path) = SlotFile.new(name: name, path: path, length: File.size(path))

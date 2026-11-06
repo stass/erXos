@@ -1734,18 +1734,30 @@ document's "residual risks accepted" paragraph.
   partition hold no FAT: the bootable file lies at `medium_slot_boot_start`
   after 4 MiB of zeros, where
   [design-platforms.md](docs/design-platforms.md#slots-and-the-boot-selection-record)
-  places it inside the FAT's file; and the record partition is zeros: the
-  record's two encodings, its sector inside the partition and the reset
-  count's sector are not yet fixed, and the QEMU harness's slot parser,
-  which reads them, defines them with the packer's writer of them. Slot A's
+  places it inside the FAT's file; and the record partition holds the
+  record's sector (`BootRecord.sector`) without the FAT whose
+  `autoboot.txt` file is that sector, which the Raspberry Pi's firmware
+  needs and nothing on QEMU reads. Slot A's
   EROFS image extents (`ReleaseMedium.slot_plan`) are not yet recorded in
   the boot image's manifest, whose image windows refuse until the hash
   tree sizing lands; recording them moves the EROFS image's writing ahead
   of `pack` inside `ProductionImage#assemble`, since the boot image then
-  carries its extent and root hash. The EROFS image holds a copy of the
+  carries its extent and root hash, and lets the device service grant the
+  booted slot's EROFS windows from the boot value, which the QEMU boot
+  from the medium (`tools/lib/erx/medium_boot.rb`) passes in
+  `/chosen`; until then the guest reads its release from the boot image
+  alone. The EROFS image holds a copy of the
   whole system release, which the boot image also holds, until the boot
   from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
+
+* [Low] storage, the boot-selection record (`abi/medium.txt`): the record and
+  the reset count each have a MiB of their own, the layout's alignment taken as
+  the erase unit; SD cards commonly erase 4 MiB, under which the record
+  partition's FAT, the record and the count share one unit, against the
+  isolation of [design-storage.md](docs/design-storage.md#system-updates).
+  Measure or look up the boards' cards before the slot writer writes the count
+  at every boot; the reset count's own encoding is undefined until then too.
 
 * [High] logging: a central system log service that every source writes
   to, with routing to the UART and other readers and per-reader access,

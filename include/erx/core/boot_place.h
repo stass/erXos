@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/core/boot_pair.h"
 #include "erx/core/boot_range.h"
 
 /*
@@ -123,15 +124,28 @@ bool erx_boot_load_plan(const erx_boot_load_request_t *, erx_boot_workspace_t *,
 size_t erx_boot_args_cut(const char *, size_t, size_t);
 
 /*
+ * The boot value and its slot from the raw bytes of /chosen/bootloader's
+ * partition and tryboot properties, each NULL when absent
+ * (docs/design-platforms.md, "What the loader hands over"). Each is one
+ * big-endian 32-bit cell: the partition booted, its index in the master boot
+ * record counted from 1, and 1 for a trial or 0 for any other boot. A missing
+ * property, a property of another length, a tryboot other than 0 or 1, or a
+ * partition that is not a slot of abi/medium.txt gives unknown with slot
+ * none. The bytes may lie at any alignment.
+ */
+erx_boot_pair_t erx_boot_pair_derive(const void *, size_t, const void *, size_t);
+
+/*
  * Writes the handoff record over size bytes at record from the plan, the
- * first bootargs_len bytes of bootargs, at most the record's bound, and the
+ * first bootargs_len bytes of bootargs, at most the record's bound, the
  * stdout_len bytes of the node path /chosen/stdout-path names, at most
  * ERX_BOOT_STDOUT_MAX, stored empty unless it is a node path
- * (erx_boot_node_path_valid). Returns false when the record does not fit,
- * and then writes nothing.
+ * (erx_boot_node_path_valid), and the boot pair. Returns false when the
+ * record does not fit or the pair is one a reader refuses
+ * (erx_boot_pair_valid), and then writes nothing.
  */
 bool erx_boot_handoff_write(const erx_boot_load_plan_t *, const char *, size_t,
-    const char *, size_t, uint8_t *, size_t);
+    const char *, size_t, erx_boot_pair_t, uint8_t *, size_t);
 
 #ifdef __cplusplus
 }

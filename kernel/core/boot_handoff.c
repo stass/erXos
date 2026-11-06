@@ -46,6 +46,8 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		return ("stdout_path_length");
 	if (!erx_boot_node_path_valid(handoff->stdout_path, handoff->stdout_path_len))
 		return ("stdout_path");
+	if (!erx_boot_pair_valid(handoff->boot_value, handoff->boot_slot))
+		return ("boot_value");
 	*view = (erx_boot_handoff_view_t){
 		.flags = handoff->flags,
 		.development = (handoff->flags & ERX_PACK_DEVELOPMENT) != 0,
@@ -59,6 +61,7 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		.bootargs_len = handoff->bootargs_len,
 		.stdout_path = (const char *)handoff->stdout_path,
 		.stdout_path_len = handoff->stdout_path_len,
+		.boot = { .value = handoff->boot_value, .slot = handoff->boot_slot },
 	};
 	for (size_t index = 0; index < sizeof(view->build_id); index++)
 		view->build_id[index] = handoff->build_id[index];

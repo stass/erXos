@@ -142,6 +142,23 @@ chosen_stdout_path(void const *fdt, int chosen, char (&path)[ERX_BOOT_STDOUT_MAX
   return strnlen(path, sizeof(path));
 }
 
+// The boot pair from /chosen/bootloader's partition and tryboot, which firmware
+// that boots one of two slots writes, and the QEMU harness writes as it does
+// (docs/design-platforms.md, "What the loader hands over"). The core decides;
+// a missing node or property reaches it as an absent one, and gives unknown.
+static erx_boot_pair_t
+chosen_boot_pair(void const *fdt, int chosen)
+{
+  int bootloader = chosen < 0 ? chosen : fdt_subnode_offset(fdt, chosen, "bootloader");
+  int partition_size = 0, tryboot_size = 0;
+  void const *partition = bootloader < 0 ? nullptr
+    : fdt_getprop(fdt, bootloader, "partition", &partition_size);
+  void const *tryboot = bootloader < 0 ? nullptr
+    : fdt_getprop(fdt, bootloader, "tryboot", &tryboot_size);
+  return erx_boot_pair_derive(partition, partition ? static_cast<size_t>(partition_size) : 0,
+                              tryboot, tryboot ? static_cast<size_t>(tryboot_size) : 0);
+}
+
 // The device tree's reservation block and every region inherited code has
 // reserved so far, its device-tree nodes and the device tree's own included.
 static size_t
@@ -292,7 +309,8 @@ erx_image_load(Platform_base *plat)
   static char stdout_path[ERX_BOOT_STDOUT_MAX + 1];
   size_t stdout_length = chosen_stdout_path(fdt, chosen, stdout_path);
   if (!erx_boot_handoff_write(&plan, args, args_length, stdout_path, stdout_length,
-                              options->erx_handoff, sizeof(options->erx_handoff)))
+                              chosen_boot_pair(fdt, chosen), options->erx_handoff,
+                              sizeof(options->erx_handoff)))
     refuse("handoff record", "write");
 
   printf("erXos image: index ");

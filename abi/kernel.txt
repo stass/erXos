@@ -636,8 +636,10 @@ layout erx_cap_slot 1 shared 8 64
   visibility next internal
   sequence seq terminal 0xffffffffffffffff exhaustion @stale recovery none
 
-# What bootstrap tells the kernel (docs/design-stopgap.md, "The handoff record").
-layout erx_boot_handoff 3 wire_le 8 2400
+# What bootstrap tells the kernel (docs/design-stopgap.md, "Boot handoff").
+# boot_value and boot_slot are the pair bootstrap derives from /chosen/bootloader,
+# under the machine page's rule for pairs.
+layout erx_boot_handoff 4 wire_le 8 2408
   field version u32 0
   field flags pack_flags 4
   field build_id u8 8 count 8
@@ -651,4 +653,6 @@ layout erx_boot_handoff 3 wire_le 8 2400
   field bootargs u8 88 count 2048
   field stdout_path_len u32 2136
   field stdout_path u8 2140 count 256
-  field reserved u32 2396
+  field boot_value boot_value 2396
+  field boot_slot boot_slot 2400
+  field reserved u32 2404

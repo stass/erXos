@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/core/boot_pair.h"
 #include "erx/crash.h"
 #include "erx/log.h"
 
@@ -71,7 +72,6 @@ typedef struct erx_crash_log_walk {
 } erx_crash_log_walk_t;
 
 static bool erx_crash_all_zero(const uint8_t *, size_t);
-static bool erx_crash_boot_pair(uint32_t, uint32_t);
 static bool erx_crash_cause_known(uint32_t);
 static erx_crash_check_t erx_crash_check_body(const uint8_t *, uint32_t, uint32_t,
     uint32_t);
@@ -95,21 +95,6 @@ erx_crash_all_zero(const uint8_t *bytes, size_t length)
 	for (size_t index = 0; index < length; index++)
 		seen |= bytes[index];
 	return (seen == 0);
-}
-
-/* The machine page's pairs: slot none exactly when the value is unknown. */
-static bool
-erx_crash_boot_pair(uint32_t value, uint32_t slot)
-{
-	switch (value) {
-	case ERX_BOOT_VALUE_UNKNOWN:
-		return (slot == ERX_BOOT_SLOT_NONE);
-	case ERX_BOOT_VALUE_NORMAL:
-	case ERX_BOOT_VALUE_TRIAL:
-		return (slot == ERX_BOOT_SLOT_A || slot == ERX_BOOT_SLOT_B);
-	default:
-		return (false);
-	}
 }
 
 static bool
@@ -185,7 +170,7 @@ erx_crash_settle(const erx_crash_input_t *input, erx_crash_brief_t *header)
 
 	sane = input->cpu < ERX_CPU_LIMIT &&
 	    erx_crash_fault_fits(input->cause, &input->fault);
-	pair = erx_crash_boot_pair(input->boot_value, input->boot_slot);
+	pair = erx_boot_pair_valid(input->boot_value, input->boot_slot);
 
 	header->magic = ERX_CRASH_MAGIC;
 	header->version = ERX_CRASH_VERSION;
@@ -408,7 +393,7 @@ erx_crash_check(const void *bytes, size_t available)
 		return (ERX_CRASH_CHECK_CAUSE);
 	if (header.cpu >= ERX_CPU_LIMIT)
 		return (ERX_CRASH_CHECK_CPU);
-	if (!erx_crash_boot_pair(header.boot_value, header.boot_slot))
+	if (!erx_boot_pair_valid(header.boot_value, header.boot_slot))
 		return (ERX_CRASH_CHECK_BOOT);
 	if (!erx_crash_all_zero(in + ERX_CRASH_PADDING_OFF, ERX_CRASH_PADDING_BYTES))
 		return (ERX_CRASH_CHECK_PADDING);

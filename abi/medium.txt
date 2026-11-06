@@ -15,9 +15,30 @@
 # harness finds it without parsing the slot (docs/design-platforms.md, "Slots and the
 # boot-selection record"); the 4 MiB before it hold the slot's FAT's boot sector,
 # reserved area and tables, which a FAT of a slot's size with 4 KiB clusters fits.
+#
+# The boot-selection record (docs/design-platforms.md, "Slots and the boot-selection
+# record") is the sector medium_record_select_start sectors from the record partition's
+# first sector, 1 MiB in, and the reset count the sector medium_record_count_start
+# sectors from it, 2 MiB in; the partition's first MiB holds its FAT. Firmware names a
+# slot by its partition's number, its entry's index in the master boot record counted
+# from 1: medium_slot_a_partition and medium_slot_b_partition. The record has exactly
+# two encodings, medium_record_a while slot A is committed and medium_record_b while
+# slot B is, each followed by zeros to the end of the sector; the two have the same
+# length, since a commit rewrites the sector and never the FAT's directory entry that
+# records the file's length. Each is the Raspberry Pi firmware's autoboot.txt naming
+# the committed slot's partition, and the other slot's in its [tryboot] section;
+# medium_record_a's text is, line by line, "[all]", "tryboot_a_b=1",
+# "boot_partition=2", "[tryboot]", "boot_partition=3", each ended by a line feed, and
+# medium_record_b's swaps the two numbers.
 limit medium_record_start u32 2048
 limit medium_record_sectors u32 8192
 limit medium_record_type u8 0x0e
+limit medium_record_select_start u32 2048
+limit medium_record_count_start u32 4096
+limit medium_slot_a_partition u32 2
+limit medium_slot_b_partition u32 3
+bytes medium_record_a 64 value 5b616c6c5d0a747279626f6f745f615f623d310a626f6f745f706172746974696f6e3d320a5b747279626f6f745d0a626f6f745f706172746974696f6e3d330a
+bytes medium_record_b 64 value 5b616c6c5d0a747279626f6f745f615f623d310a626f6f745f706172746974696f6e3d330a5b747279626f6f745d0a626f6f745f706172746974696f6e3d320a
 limit medium_slot_a_start u32 16384
 limit medium_slot_b_start u32 1064960
 limit medium_slot_sectors u32 1048576

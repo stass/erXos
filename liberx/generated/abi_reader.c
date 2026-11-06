@@ -1630,7 +1630,9 @@ erx_boot_handoff_decode(const uint8_t *bytes, size_t length,
 	for (size_t index = 0; index < 256; index++) {
 		value.stdout_path[index] = bytes[2140 + index * 1];
 	}
-	value.reserved = erx_abi_load_u32(bytes + 2396);
+	value.boot_value = erx_abi_load_u32(bytes + 2396);
+	value.boot_slot = erx_abi_load_u32(bytes + 2400);
+	value.reserved = erx_abi_load_u32(bytes + 2404);
 
 	*result = value;
 	return (true);

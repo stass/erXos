@@ -94,7 +94,7 @@ namespace L4_kernel_options
     l4_uint32_t  node;
     l4_uint32_t  erx_pad;
 
-    /// erXos's handoff record (docs/design-stopgap.md, "The handoff record").
-    l4_uint8_t   erx_handoff[2400];
+    /// erXos's handoff record (docs/design-stopgap.md, "Boot handoff").
+    l4_uint8_t   erx_handoff[2408];
   } __attribute__((packed));
 };

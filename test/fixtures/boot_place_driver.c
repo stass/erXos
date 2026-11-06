@@ -12,6 +12,10 @@
  * the top of memory, and prints the plan or the refusal.
  *
  * handoff FILE: accepts FILE's bytes as a record and prints what it holds.
+ * write VALUE SLOT: writes a record with that boot pair, then accepts it and
+ * prints what it holds, or "unwritten".
+ * pair PARTITION TRYBOOT: derives the boot pair from the two properties' bytes,
+ * each in hex, or - when absent, and prints it.
  * args LIMIT TEXT: prints TEXT's length cut at LIMIT.
  */
 
@@ -110,8 +114,9 @@ run_plan(char **argv)
 		    copy->source - request.window_start, copy->target,
 		    copy->file_size, copy->mem_size);
 	}
-	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14, record,
-	    sizeof(record)))
+	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14,
+	    (erx_boot_pair_t){ .value = ERX_BOOT_VALUE_UNKNOWN, .slot = ERX_BOOT_SLOT_NONE },
+	    record, sizeof(record)))
 		abort();
 	fwrite(record, 1, 48, stdout);
 	printf("\n");
@@ -119,32 +124,98 @@ run_plan(char **argv)
 	return (0);
 }
 
-static int
-run_handoff(char **argv)
+static void
+print_accepted(size_t length)
 {
 	erx_boot_handoff_view_t view;
 	const char *reason;
-	size_t length;
-	uint8_t *file = read_file(argv[0], &length);
 	erx_boot_range_t range;
 	bool covered;
 
-	memcpy(record, file, length < sizeof(record) ? length : sizeof(record));
 	reason = erx_boot_handoff_accept(record, length, &view);
 	if (reason != NULL) {
 		printf("refused %s\n", reason);
-		free(file);
-		return (0);
+		return;
 	}
 	range = (erx_boot_range_t){ .start = view.image.start, .size = view.image.size };
 	covered = erx_boot_handoff_covered(&view, &range, 1);
 	range.size -= 1;
 	printf("flags %" PRIx32 " development %d test_code %d image %" PRIx64
-	    " %" PRIx64 " bootargs %.*s stdout %.*s covered %d %d\n", view.flags,
-	    view.development, view.test_code, view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
-	    (int)view.stdout_path_len, view.stdout_path,
-	    covered, erx_boot_handoff_covered(&view, &range, 1));
+	    " %" PRIx64 " bootargs %.*s stdout %.*s covered %d %d boot %" PRIu32
+	    " %" PRIu32 "\n", view.flags, view.development, view.test_code,
+	    view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
+	    (int)view.stdout_path_len, view.stdout_path, covered,
+	    erx_boot_handoff_covered(&view, &range, 1), view.boot.value, view.boot.slot);
+}
+
+static int
+run_handoff(char **argv)
+{
+	size_t length;
+	uint8_t *file = read_file(argv[0], &length);
+
+	memcpy(record, file, length < sizeof(record) ? length : sizeof(record));
+	print_accepted(length);
 	free(file);
+	return (0);
+}
+
+static int
+run_write(char **argv)
+{
+	const erx_boot_pair_t boot = { .value = (uint32_t)strtoul(argv[0], NULL, 0),
+	    .slot = (uint32_t)strtoul(argv[1], NULL, 0) };
+
+	plan.flags = 1;
+	plan.archive = (erx_boot_range_t){ .start = 0x40204000, .size = 0x8000 };
+	memset(record, 0xa5, sizeof(record));
+	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14, boot,
+	    record, sizeof(record))) {
+		/* A refused write leaves the record as it was. */
+		for (size_t index = 0; index < sizeof(record); index++)
+			if (record[index] != 0xa5)
+				abort();
+		printf("unwritten\n");
+		return (0);
+	}
+	print_accepted(sizeof(record));
+	return (0);
+}
+
+/*
+ * A property's bytes from hex into buffer one byte past its alignment, since
+ * a device tree aligns a property only to 4; NULL for "-".
+ */
+static const uint8_t *
+property(const char *hex, uint8_t buffer[static 17], size_t *length)
+{
+	const size_t digits = strlen(hex);
+
+	*length = 0;
+	if (strcmp(hex, "-") == 0)
+		return (NULL);
+	if (digits % 2 != 0 || digits / 2 > 16)
+		exit(2);
+	for (size_t index = 0; index < digits / 2; index++) {
+		const char pair[3] = { hex[2 * index], hex[2 * index + 1], 0 };
+
+		buffer[1 + index] = (uint8_t)strtoul(pair, NULL, 16);
+	}
+	*length = digits / 2;
+	return (buffer + 1);
+}
+
+static int
+run_pair(char **argv)
+{
+	_Alignas(8) uint8_t partition_bytes[17], tryboot_bytes[17];
+	size_t partition_len, tryboot_len;
+	const uint8_t *partition = property(argv[0], partition_bytes, &partition_len);
+	const uint8_t *tryboot = property(argv[1], tryboot_bytes, &tryboot_len);
+	const erx_boot_pair_t boot = erx_boot_pair_derive(partition, partition_len,
+	    tryboot, tryboot_len);
+
+	printf("value %" PRIu32 " slot %" PRIu32 "\n", boot.value, boot.slot);
 	return (0);
 }
 
@@ -155,6 +226,10 @@ main(int argc, char **argv)
 		return (run_plan(argv + 2));
 	if (argc == 3 && strcmp(argv[1], "handoff") == 0)
 		return (run_handoff(argv + 2));
+	if (argc == 4 && strcmp(argv[1], "write") == 0)
+		return (run_write(argv + 2));
+	if (argc == 4 && strcmp(argv[1], "pair") == 0)
+		return (run_pair(argv + 2));
 	if (argc == 4 && strcmp(argv[1], "args") == 0) {
 		printf("%zu\n", erx_boot_args_cut(argv[3], strlen(argv[3]),
 		    strtoull(argv[2], NULL, 0)));

@@ -22,7 +22,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_ARCH_USER_LIMIT` | 281474976710656 |
 | `ERX_BOOT_DET` | 1 |
 | `ERX_BOOT_FLAGS_KNOWN` | 7 |
-| `ERX_BOOT_HANDOFF_VERSION` | 3 |
+| `ERX_BOOT_HANDOFF_VERSION` | 4 |
 | `ERX_BOOT_INSTALLED_ONLY` | 2 |
 | `ERX_BOOT_KERNEL_ALIGN` | 2097152 |
 | `ERX_BOOT_KIP_VIEW_MIN` | 4096 |
@@ -334,10 +334,14 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MEDIUM_EXTENDED_START` | 2113536 |
 | `ERX_MEDIUM_EXTENDED_TYPE` | 15 |
 | `ERX_MEDIUM_LINK_TYPE` | 5 |
+| `ERX_MEDIUM_RECORD_COUNT_START` | 4096 |
 | `ERX_MEDIUM_RECORD_SECTORS` | 8192 |
+| `ERX_MEDIUM_RECORD_SELECT_START` | 2048 |
 | `ERX_MEDIUM_RECORD_START` | 2048 |
 | `ERX_MEDIUM_RECORD_TYPE` | 14 |
+| `ERX_MEDIUM_SLOT_A_PARTITION` | 2 |
 | `ERX_MEDIUM_SLOT_A_START` | 16384 |
+| `ERX_MEDIUM_SLOT_B_PARTITION` | 3 |
 | `ERX_MEDIUM_SLOT_B_START` | 1064960 |
 | `ERX_MEDIUM_SLOT_BOOT_START` | 8192 |
 | `ERX_MEDIUM_SLOT_SECTORS` | 1048576 |
@@ -1647,7 +1651,7 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 
 ### `erx_boot_handoff_t`
 
-Storage: `wire_le`. Prefix size: 2400. Alignment: 8.
+Storage: `wire_le`. Prefix size: 2408. Alignment: 8.
 
 | Field | Type | Offset | Count |
 | --- | --- | ---: | ---: |
@@ -1664,7 +1668,9 @@ Storage: `wire_le`. Prefix size: 2400. Alignment: 8.
 | `bootargs` | `u8` | 88 | 2048 |
 | `stdout_path_len` | `u32` | 2136 | 1 |
 | `stdout_path` | `u8` | 2140 | 256 |
-| `reserved` | `u32` | 2396 | 1 |
+| `boot_value` | `boot_value` | 2396 | 1 |
+| `boot_slot` | `boot_slot` | 2400 | 1 |
+| `reserved` | `u32` | 2404 | 1 |
 
 ### `erx_boot_info_t`
 

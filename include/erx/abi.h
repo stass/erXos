@@ -28,7 +28,7 @@ struct erx_rights {
 #define ERX_ARCH_USER_LIMIT UINT64_C(281474976710656)
 #define ERX_BOOT_DET UINT32_C(1)
 #define ERX_BOOT_FLAGS_KNOWN UINT32_C(7)
-#define ERX_BOOT_HANDOFF_VERSION UINT32_C(3)
+#define ERX_BOOT_HANDOFF_VERSION UINT32_C(4)
 #define ERX_BOOT_INSTALLED_ONLY UINT32_C(2)
 #define ERX_BOOT_KERNEL_ALIGN UINT32_C(2097152)
 #define ERX_BOOT_KIP_VIEW_MIN UINT32_C(4096)
@@ -340,10 +340,14 @@ struct erx_rights {
 #define ERX_MEDIUM_EXTENDED_START UINT32_C(2113536)
 #define ERX_MEDIUM_EXTENDED_TYPE UINT8_C(15)
 #define ERX_MEDIUM_LINK_TYPE UINT8_C(5)
+#define ERX_MEDIUM_RECORD_COUNT_START UINT32_C(4096)
 #define ERX_MEDIUM_RECORD_SECTORS UINT32_C(8192)
+#define ERX_MEDIUM_RECORD_SELECT_START UINT32_C(2048)
 #define ERX_MEDIUM_RECORD_START UINT32_C(2048)
 #define ERX_MEDIUM_RECORD_TYPE UINT8_C(14)
+#define ERX_MEDIUM_SLOT_A_PARTITION UINT32_C(2)
 #define ERX_MEDIUM_SLOT_A_START UINT32_C(16384)
+#define ERX_MEDIUM_SLOT_B_PARTITION UINT32_C(3)
 #define ERX_MEDIUM_SLOT_B_START UINT32_C(1064960)
 #define ERX_MEDIUM_SLOT_BOOT_START UINT32_C(8192)
 #define ERX_MEDIUM_SLOT_SECTORS UINT32_C(1048576)
@@ -3007,6 +3011,16 @@ typedef uint16_t erx_manifest_flags_t;
 
 typedef uint16_t erx_manifest_mode_t;
 
+typedef uint8_t erx_medium_record_a_t[64];
+#define ERX_MEDIUM_RECORD_A_SIZE 64
+#define ERX_MEDIUM_RECORD_A_BYTES { 0x5b, 0x61, 0x6c, 0x6c, 0x5d, 0x0a, 0x74, 0x72, 0x79, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x61, 0x5f, 0x62, 0x3d, 0x31, 0x0a, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x3d, 0x32, 0x0a, 0x5b, 0x74, 0x72, 0x79, 0x62, 0x6f, 0x6f, 0x74, 0x5d, 0x0a, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x3d, 0x33, 0x0a }
+#define ERX_MEDIUM_RECORD_A_STRING "[all]\012tryboot_a_b=1\012boot_partition=2\012[tryboot]\012boot_partition=3\012"
+
+typedef uint8_t erx_medium_record_b_t[64];
+#define ERX_MEDIUM_RECORD_B_SIZE 64
+#define ERX_MEDIUM_RECORD_B_BYTES { 0x5b, 0x61, 0x6c, 0x6c, 0x5d, 0x0a, 0x74, 0x72, 0x79, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x61, 0x5f, 0x62, 0x3d, 0x31, 0x0a, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x3d, 0x33, 0x0a, 0x5b, 0x74, 0x72, 0x79, 0x62, 0x6f, 0x6f, 0x74, 0x5d, 0x0a, 0x62, 0x6f, 0x6f, 0x74, 0x5f, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x3d, 0x32, 0x0a }
+#define ERX_MEDIUM_RECORD_B_STRING "[all]\012tryboot_a_b=1\012boot_partition=3\012[tryboot]\012boot_partition=2\012"
+
 typedef uint32_t erx_mem_attr_t;
 
 typedef uint32_t erx_mem_flags_t;
@@ -3301,7 +3315,7 @@ typedef uint32_t erx_p9_setattr_valid_t;
 
 typedef uint32_t erx_pack_flags_t;
 
-#define ERX_BOOT_HANDOFF_SIZE 2400
+#define ERX_BOOT_HANDOFF_SIZE 2408
 #define ERX_BOOT_HANDOFF_ALIGN 8
 #define ERX_BOOT_HANDOFF_OFF_VERSION 0
 #define ERX_BOOT_HANDOFF_OFF_FLAGS 4
@@ -3316,7 +3330,9 @@ typedef uint32_t erx_pack_flags_t;
 #define ERX_BOOT_HANDOFF_OFF_BOOTARGS 88
 #define ERX_BOOT_HANDOFF_OFF_STDOUT_PATH_LEN 2136
 #define ERX_BOOT_HANDOFF_OFF_STDOUT_PATH 2140
-#define ERX_BOOT_HANDOFF_OFF_RESERVED 2396
+#define ERX_BOOT_HANDOFF_OFF_BOOT_VALUE 2396
+#define ERX_BOOT_HANDOFF_OFF_BOOT_SLOT 2400
+#define ERX_BOOT_HANDOFF_OFF_RESERVED 2404
 typedef struct erx_boot_handoff erx_boot_handoff_t;
 struct erx_boot_handoff {
 	_Alignas(8) uint32_t	version;
@@ -3332,6 +3348,8 @@ struct erx_boot_handoff {
 	uint8_t	bootargs[2048];
 	uint32_t	stdout_path_len;
 	uint8_t	stdout_path[256];
+	erx_boot_value_t	boot_value;
+	erx_boot_slot_t	boot_slot;
 	uint32_t	reserved;
 };
 _Static_assert(sizeof(erx_boot_handoff_t) == ERX_BOOT_HANDOFF_SIZE, "erx_boot_handoff size");
@@ -3362,6 +3380,10 @@ _Static_assert(offsetof(erx_boot_handoff_t, stdout_path_len) ==
     ERX_BOOT_HANDOFF_OFF_STDOUT_PATH_LEN, "erx_boot_handoff.stdout_path_len offset");
 _Static_assert(offsetof(erx_boot_handoff_t, stdout_path) ==
     ERX_BOOT_HANDOFF_OFF_STDOUT_PATH, "erx_boot_handoff.stdout_path offset");
+_Static_assert(offsetof(erx_boot_handoff_t, boot_value) ==
+    ERX_BOOT_HANDOFF_OFF_BOOT_VALUE, "erx_boot_handoff.boot_value offset");
+_Static_assert(offsetof(erx_boot_handoff_t, boot_slot) ==
+    ERX_BOOT_HANDOFF_OFF_BOOT_SLOT, "erx_boot_handoff.boot_slot offset");
 _Static_assert(offsetof(erx_boot_handoff_t, reserved) ==
     ERX_BOOT_HANDOFF_OFF_RESERVED, "erx_boot_handoff.reserved offset");
 

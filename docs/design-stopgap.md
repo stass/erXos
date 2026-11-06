@@ -140,7 +140,10 @@ Inherited code reads no executable and no modules.
    identifier, index hash, the archive's range, `/chosen/bootargs` cut at the last whole word, and
    the full path of the node `/chosen/stdout-path` names: libfdt resolves the value up to its first
    `:`, a path or an alias of `/aliases`, and the path is empty when that names no node or is longer
-   than `ERX_BOOT_STDOUT_PATH_MAX`)
+   than `ERX_BOOT_STDOUT_PATH_MAX`; and the boot value with its slot, which `erx_boot_pair_derive`
+   computes from `/chosen/bootloader`'s `partition` and `tryboot`
+   ([design-platforms.md](design-platforms.md#data-model)), `unknown` with slot `none` when either is
+   missing or malformed or the partition is not a slot)
    into the options block for the kernel. That block is mapped into no task, so it also writes the
    record, by `erx_image_load`, into the **handoff page**, a free page from
    `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
@@ -150,9 +153,10 @@ Inherited code reads no executable and no modules.
 
 **The kernel.** Its options are a constant, `Fiasco::KERNEL_OPTIONS` (`fiasco.rb`), built into
 `bootstrap`, with neither `-serial_esc` nor `-serial_input`, and it is built without JDB. Its own
-changes are `erx_handoff.cpp`: it accepts the record, prints the banner (`development build: trusted
-code only`, the build identifier, the index hash) and panics if no bootloader descriptor covers the
-archive. The fork's kernel-call route, `erx_probe` and `erx_syscall`, is out of its build
+changes are `erx_handoff.cpp`: it accepts the record, refusing a boot value and slot that are not
+one of the machine page's pairs, prints the banner (`development build: trusted code only`, the
+build identifier, the index hash, then `erx: boot value <unknown|normal|trial> slot <none|a|b>`,
+whose names come from a fixed table) and panics if no bootloader descriptor covers the archive. The fork's kernel-call route, `erx_probe` and `erx_syscall`, is out of its build
 (`Modules.generic:112`), and its sources stay in `fiasco/kernel/src/erx/` for erXos's kernel to draw on. It
 greets as erXos (`kip.cpp`). It starts `sigma0` and then the root (`std_workload.cpp`), with capabilities
 at `L4_BASE_TASK_CAP`, `L4_BASE_FACTORY_CAP`, `L4_BASE_THREAD_CAP`, `L4_BASE_PAGER_CAP` (a gate to

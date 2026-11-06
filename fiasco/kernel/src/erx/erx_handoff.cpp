@@ -1,9 +1,10 @@
 // Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 // SPDX-License-Identifier: BSD-2-Clause
 //
-// The kernel's side of bootstrap's handoff record (docs/design-stopgap.md, "The
-// handoff record"): it accepts the record through the C17 core, prints the
-// banner's line for the boot image, and checks that a bootloader descriptor
+// The kernel's side of bootstrap's handoff record (docs/design-stopgap.md, "Boot
+// handoff"): it accepts the record through the C17 core, prints the
+// banner's lines for the boot image and the boot pair bootstrap derived from
+// /chosen/bootloader, and checks that a bootloader descriptor
 // covers the archive. A kernel started without bootstrap's validator has a
 // zero record and stops here, before it starts anything.
 INTERFACE:
@@ -57,6 +58,9 @@ Erx_handoff::banner()
   printf(" flags 0x%x archive 0x%llx+0x%llx bootargs %u\n", view.flags,
          static_cast<unsigned long long>(view.image.start),
          static_cast<unsigned long long>(view.image.size), view.bootargs_len);
+  // The accepted pair has a name in each table; the names never come from input.
+  printf("erx: boot value %s slot %s\n", erx_boot_value_name(view.boot.value),
+         erx_boot_slot_name(view.boot.slot));
 }
 
 // The archive's bytes stay reserved only while a descriptor says so.

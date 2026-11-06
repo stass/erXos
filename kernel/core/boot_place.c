@@ -103,6 +103,7 @@ static bool erx_boot_hold_apart(const erx_boot_load_request_t *,
     erx_boot_range_t, erx_boot_clear_t *, erx_boot_error_t *);
 static bool erx_boot_place_role(const erx_boot_load_request_t *, size_t,
     erx_boot_work_t *, erx_boot_load_plan_t *, erx_boot_error_t *);
+static bool erx_boot_cell(const void *, size_t, uint32_t *);
 
 static bool
 erx_boot_fail(erx_boot_error_t *error, const char *reason, const char *path,
@@ -477,10 +478,58 @@ erx_boot_args_cut(const char *args, size_t length, size_t limit)
 	return (0);
 }
 
+/* One big-endian 32-bit cell, read a byte at a time: a property is aligned only to 4. */
+static bool
+erx_boot_cell(const void *property, size_t length, uint32_t *cell)
+{
+	const uint8_t *bytes = property;
+
+	if (property == NULL || length != sizeof(*cell))
+		return (false);
+	*cell = (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 |
+	    (uint32_t)bytes[2] << 8 | bytes[3];
+	return (true);
+}
+
+erx_boot_pair_t
+erx_boot_pair_derive(const void *partition, size_t partition_len,
+    const void *tryboot, size_t tryboot_len)
+{
+	const erx_boot_pair_t unknown = { .value = ERX_BOOT_VALUE_UNKNOWN,
+	    .slot = ERX_BOOT_SLOT_NONE };
+	erx_boot_pair_t pair;
+	uint32_t number, trial;
+
+	if (!erx_boot_cell(partition, partition_len, &number) ||
+	    !erx_boot_cell(tryboot, tryboot_len, &trial))
+		return (unknown);
+	switch (number) {
+	case ERX_MEDIUM_SLOT_A_PARTITION:
+		pair.slot = ERX_BOOT_SLOT_A;
+		break;
+	case ERX_MEDIUM_SLOT_B_PARTITION:
+		pair.slot = ERX_BOOT_SLOT_B;
+		break;
+	default:
+		return (unknown);
+	}
+	switch (trial) {
+	case 0:
+		pair.value = ERX_BOOT_VALUE_NORMAL;
+		break;
+	case 1:
+		pair.value = ERX_BOOT_VALUE_TRIAL;
+		break;
+	default:
+		return (unknown);
+	}
+	return (pair);
+}
+
 bool
 erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
     size_t bootargs_len, const char *stdout_path, size_t stdout_len,
-    uint8_t *record, size_t size)
+    erx_boot_pair_t boot, uint8_t *record, size_t size)
 {
 	erx_boot_handoff_t *handoff;
 
@@ -489,6 +538,7 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 	    (bootargs == NULL && bootargs_len != 0) ||
 	    stdout_len > ERX_BOOT_STDOUT_PATH_MAX ||
 	    (stdout_path == NULL && stdout_len != 0) ||
+	    !erx_boot_pair_valid(boot.value, boot.slot) ||
 	    ((uintptr_t)record % ERX_BOOT_HANDOFF_ALIGN) != 0)
 		return (false);
 	/* A node name outside the specification's characters: the tree names no console. */
@@ -502,6 +552,8 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 		.image_size = plan->archive.size,
 		.bootargs_len = (uint32_t)bootargs_len,
 		.stdout_path_len = (uint32_t)stdout_len,
+		.boot_value = boot.value,
+		.boot_slot = boot.slot,
 	};
 	for (size_t index = 0; index < ERX_BOOT_ID_SIZE; index++)
 		handoff->build_id[index] = plan->build_id[index];

@@ -133,6 +133,9 @@ class ReleaseMediumTest < Minitest::Test
         assert_equal File.binread(boot), medium.pread(File.size(boot), slot + first.slot.boot.slot_offset)
         assert_equal File.binread(first.erofs), medium.pread(image.file.length, slot + image.slot_offset)
         zeros(first).each { |offset| assert_equal "\0".b * SECTOR, medium.pread(SECTOR, offset), "sector #{offset / SECTOR}" }
+        assert_equal Erx::BootRecord.sector(:a), medium.pread(SECTOR, Erx::BootRecord::RECORD_OFFSET), 'the record commits slot A'
+        count = (CODEC.constant('medium_record_start') + CODEC.constant('medium_record_count_start')) * SECTOR
+        assert_equal "\0".b * SECTOR, medium.pread(SECTOR, count), 'the reset count is zero'
       end
 
       extracted = File.join(directory, 'extracted')

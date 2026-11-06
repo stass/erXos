@@ -10,11 +10,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/core/boot_pair.h"
 #include "erx/core/boot_range.h"
 
 /*
- * What the kernel accepts from bootstrap (docs/design-stopgap.md, "The handoff
- * record"). The record lives in the kernel's own image, which only bootstrap
+ * What the kernel accepts from bootstrap (docs/design-stopgap.md, "Boot
+ * handoff"). The record lives in the kernel's own image, which only bootstrap
  * wrote before the kernel ran; these checks catch a first stage and a kernel
  * built apart, and a boot that skipped bootstrap's validator, whose record is
  * all zeros.
@@ -25,7 +26,7 @@ extern "C" {
 #endif
 
 /* The size of the record Fiasco's options block embeds. */
-#define ERX_BOOT_HANDOFF_RECORD_SIZE	2400
+#define ERX_BOOT_HANDOFF_RECORD_SIZE	2408
 
 typedef struct erx_boot_handoff_view erx_boot_handoff_view_t;
 
@@ -49,6 +50,8 @@ struct erx_boot_handoff_view {
 	 */
 	const char	*stdout_path;
 	uint32_t	 stdout_path_len;
+	/* The boot value and its slot bootstrap derived from /chosen/bootloader. */
+	erx_boot_pair_t	 boot;
 };
 
 /*
