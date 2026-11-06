@@ -80,7 +80,8 @@ typedef struct erx_ns {
  * directory stores. Both are NUL-terminated, and neither holds `.`, `..` or an
  * empty name. res_top says whether res_path is its entry's point itself, the top
  * of a mount or of a bind, whose names are its root's: the one place that decides
- * what a rename, a del_dir and a delete refuse with ebusy (design-files.md, Errors).
+ * which paths have no parent the entry reaches, which every client operation on a
+ * parent and a last name answers for itself (design-files.md, Errors, step 3).
  */
 typedef struct erx_ns_result {
 	const erx_ns_mount_t *res_mount;

@@ -327,8 +327,8 @@ erx_grant_term(ErlNifEnv *env, const efile_path_t *path)
  * Names are the path's names from the tree's root, Root's first, joined by `/`. A
  * client following a symbolic link expresses the link's directory as a namespace path
  * with them (design-files.md, Resolving a path). Top is the namespace's res_top, true
- * when the path is the entry's point itself, which the client refuses to remove or
- * rename (design-files.md, Errors).
+ * when the path is the entry's point itself, which has no parent the client may act on
+ * (design-files.md, Errors, step 3).
  */
 static ERL_NIF_TERM
 erx_place_term(ErlNifEnv *env, const efile_path_t *path)

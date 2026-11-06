@@ -147,7 +147,8 @@ class RuntimePrimFileTest < Minitest::Test
   # whole: the file it made stays, empty. A restart leaves /tmp empty and the old open file
   # answering eio, and the restart leaves no old owner alive. A
   # working directory is a path: on a grant that ended it answers eio, and once its mount
-  # is gone it reaches the release file system.
+  # is gone it reaches the release file system. make_dir at the top of a bind whose root
+  # was removed through its parent's mount answers eexist, and does not make the root again.
   TMP_ERXOS = {
     'tmpx limit' => 'true', 'tmpx small fits' => 'ok', 'tmpx small past' => '{error,enospc}',
     'tmpx small b' => '{ok,regular,0,read_write,420,1}', 'tmpx small write' => 'ok', 'tmpx small kept' => '{ok,<<3>>}',
@@ -159,7 +160,8 @@ class RuntimePrimFileTest < Minitest::Test
     'tmpx concurrent renames' => '{0,true,800,1,true}', 'tmpx concurrent fill' => '{[enospc],true,true}',
     'tmpx cwd path' => '{ok,"/tmp/seq/w"}', 'tmpx small cwd' => 'ok',
     'tmpx small cwd info' => '{ok,regular,60000,read_write,420,1}', 'tmpx small cwd ended' => '{error,eio}',
-    'tmpx small cwd unmounted' => '{error,enoent}', 'tmpx small cwd kept' => '{ok,"/small"}'
+    'tmpx small cwd unmounted' => '{error,enoent}', 'tmpx small cwd kept' => '{ok,"/small"}',
+    'tmpx top gone make_dir' => '{error,eexist}', 'tmpx top gone kept' => '{error,enoent}'
   }.freeze
 
   # The working directory in /tmp, by the client's error steps (design-files.md, Erlang
@@ -180,6 +182,22 @@ class RuntimePrimFileTest < Minitest::Test
   def test_tmp_working_directory
     release = table(@fixture.release)
     TMP_CWD.each { |step, want| assert_equal want, release[step], step }
+  end
+
+  # Making a name at a bind's top (design-files.md, Errors, step 3), writable and
+  # read-only: the top is a name that exists, so each answers as stock answers for the
+  # bound directory itself, and nothing is made in it. Pinned on both sides.
+  TMP_TOP = {
+    'make_dir' => 'eexist', 'make_dir/' => 'eexist', 'open write' => 'eisdir', 'open read write' => 'eisdir',
+    'open exclusive' => 'eexist', 'symlink' => 'eexist', 'symlink/' => 'eexist', 'link' => 'eexist'
+  }.flat_map { |step, error| ['', ' ro'].map { |ro| ["tmp top #{step}#{ro}", "{error,#{error}}"] } }
+    .to_h.merge('tmp top kept' => '{{ok,["f"]},{ok,<<"f">>}}').freeze
+
+  def test_tmp_bind_top_is_a_name_that_exists
+    [@fixture.release, @fixture.stock].each do |run|
+      answers = table(run)
+      TMP_TOP.each { |step, want| assert_equal want, answers[step], step }
+    end
   end
 
   # Reads and writes past the client's 64 KiB unit (file_SUITE's segment_read and

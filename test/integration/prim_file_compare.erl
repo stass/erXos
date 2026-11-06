@@ -973,6 +973,7 @@ tmp(Prefix, Mode) ->
     tmp_advise(At, Show),
     tmp_directory_handle(At, Show),
     tmp_cwd(At, Mode, Show),
+    tmp_bind_top(At, Mode, Show),
     Show("listing", sorted(file:list_dir(Top))),
     tmp_erxos(Mode).
 
@@ -1116,6 +1117,52 @@ tmp_directory_handle(At, Show) ->
     directory_handle(Dir, Show, "dirfd"),
     Show("dirfd file", closed(file:open(At(<<"dirfd/f">>), [read, directory]))),
     Show("dirfd delete", {file:delete(At(<<"dirfd/f">>)), file:del_dir(Dir)}).
+
+%% Making a name at a bind's top (design-files.md, Errors, step 3): the top is a name that
+%% exists, so make_dir, a creating open, make_symlink and make_link's new name answer as
+%% Linux answers for an existing directory at a mount point, writable or read-only, and
+%% nothing is made in the bound directory's parent. Stock's counterpart is the bound
+%% directory itself. On erXos only: a bind whose root was removed through its parent's
+%% mount answers eexist too, and does not make the root again.
+tmp_bind_top(At, Mode, Show) ->
+    Bound = At(<<"bt">>),
+    ok = file:make_dir(Bound),
+    ok = file:write_file(At(<<"bt/f">>), <<"f">>),
+    {Rw, Ro} = case Mode of
+                   "release" ->
+                       ok = erx_ns:bind(Bound, <<"/bt">>, []),
+                       ok = erx_ns:bind(Bound, <<"/btr">>, [ro]),
+                       {<<"/bt">>, <<"/btr">>};
+                   "stock" ->
+                       {Bound, Bound}
+               end,
+    Steps = [{"make_dir", fun(Where) -> file:make_dir(Where) end},
+             {"make_dir/", fun(Where) -> file:make_dir(<<Where/binary, "/">>) end},
+             {"open write", fun(Where) -> closed(file:open(Where, [write])) end},
+             {"open read write", fun(Where) -> closed(file:open(Where, [read, write])) end},
+             {"open exclusive", fun(Where) -> closed(file:open(Where, [write, exclusive])) end},
+             {"symlink", fun(Where) -> file:make_symlink(<<"t">>, Where) end},
+             {"symlink/", fun(Where) -> file:make_symlink(<<"t">>, <<Where/binary, "/">>) end},
+             {"link", fun(Where) -> file:make_link(<<Where/binary, "/f">>, Where) end}],
+    [Show("top " ++ Step ++ Rights, Call(Where))
+     || {Rights, Where} <- [{"", Rw}, {" ro", Ro}], {Step, Call} <- Steps],
+    Show("top kept", {sorted(file:list_dir(Bound)), file:read_file(At(<<"bt/f">>))}),
+    bind_top_gone(At, Mode),
+    [ok = erx_ns:unmount(Point) || Mode =:= "release", Point <- [<<"/bt">>, <<"/btr">>]],
+    ok = file:delete(At(<<"bt/f">>)),
+    ok = file:del_dir(Bound).
+
+bind_top_gone(_, "stock") -> ok;
+bind_top_gone(At, "release") ->
+    Gone = At(<<"btg">>),
+    ok = file:make_dir(Gone),
+    ok = erx_ns:bind(Gone, <<"/btg">>, []),
+    ok = file:del_dir(Gone),
+    io:format("tmpx top gone make_dir\t~0tp~n", [file:make_dir(<<"/btg">>)]),
+    io:format("tmpx top gone kept\t~0tp~n", [file:read_file_info(Gone)]),
+    ok = erx_ns:unmount(<<"/btg">>),
+    _ = file:del_dir(Gone),
+    ok.
 
 directory_handle(Dir, Show, Step) ->
     case file:open(Dir, [read, directory]) of

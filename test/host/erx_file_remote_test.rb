@@ -14,6 +14,11 @@ require 'tmpdir'
 # which make check supplies), lists each module's calls to other modules; each must be a
 # BIF or name a module of the preloaded Makefile's list. A seeded call to lists:usort/1
 # must be caught.
+#
+# Every operation on a parent directory and a last name takes them from parent/1, which
+# answers top for a mount's or a bind's top (design-files.md, Errors, step 3), so the
+# client's one split of a name list, split_last/1, has parent/1 as its only caller. xref
+# lists split_last/1's callers; a seeded split of make_link's existing path must be caught.
 class ErxFileRemoteTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = { 'erx_file_remote' => 'otp/erts/preloaded/src/erx_file_remote.erl',
@@ -31,6 +36,16 @@ class ErxFileRemoteTest < Minitest::Test
     [io:format("~s ~s ~b ~s~n", [M, F, A, erlang:is_builtin(M, F, A)]) || {_, {M, F, A}} <- Calls],
     halt().
   ERLANG
+  # Prints each caller of split_last/1 as `Module Function Arity`.
+  SPLITTERS = <<~ERLANG.tr("\n", ' ')
+    {ok, _} = xref:start(s), ok = xref:set_default(s, [{warnings, false}, {verbose, false}]),
+    [Beam] = filelib:wildcard("*.beam"),
+    {ok, _} = xref:add_module(s, Beam), {ok, Calls} = xref:q(s, "E || erx_file_remote:split_last/1"),
+    [io:format("~s ~s ~b~n", [M, F, A]) || {{M, F, A}, _} <- Calls],
+    halt().
+  ERLANG
+  LINKED = "linked(Grant, [{_, _, Names, _}, OtherPlace], [ExistingText, NewText]) ->\n"
+  SEEDED_LINKED = "#{LINKED}    _ = split_last(names(Names)),\n".freeze
 
   def test_both_modules_are_on_the_preload_list
     SOURCES.each_key { |name| assert_includes preloaded, name }
@@ -56,7 +71,21 @@ class ErxFileRemoteTest < Minitest::Test
     assert_includes forbidden(calls).map { |call| call.first(3).join(':') }, 'lists:usort:1'
   end
 
+  def test_only_parent_splits_a_name_list
+    assert_equal [%w[erx_file_remote parent 1]], splitters(File.read(SOURCES.fetch('erx_file_remote')))
+  end
+
+  def test_seeded_split_outside_parent_is_caught
+    source = File.read(SOURCES.fetch('erx_file_remote'))
+    assert_equal 1, source.scan(LINKED).size
+    assert_includes splitters(source.sub(LINKED, SEEDED_LINKED)), %w[erx_file_remote linked 3]
+  end
+
   private
+
+  def splitters(source)
+    xref('erx_file_remote', source, SPLITTERS).select { |words| words.size == 3 }.sort
+  end
 
   def preloaded
     text = File.read(PRELOAD_MAKEFILE)
@@ -73,6 +102,11 @@ class ErxFileRemoteTest < Minitest::Test
   end
 
   def external_calls(name, source)
+    xref(name, source, XREF).select { |words| words.size == 4 }
+  end
+
+  # The words of each line the script prints, on the module compiled from source.
+  def xref(name, source, script)
     Dir.mktmpdir('erx-file-remote-xref') do |work|
       path = File.join(work, "#{name}.erl")
       File.write(path, source)
@@ -81,9 +115,9 @@ class ErxFileRemoteTest < Minitest::Test
       assert status.success?, output
       File.delete(path)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
-                                       '-eval', XREF, chdir: work, stdin_data: '')
+                                       '-eval', script, chdir: work, stdin_data: '')
       assert status.success?, output
-      output.lines.map(&:split).select { |words| words.size == 4 }
+      output.lines.map(&:split)
     end
   end
 end

@@ -69,8 +69,8 @@
 -type names() :: binary().
 %% Where a path lies on its grant: the entry maps the namespace path Point to the tree's
 %% names Root, and Names begins with Root. Top is the namespace's own answer to whether
-%% the path is Point itself, which rename, del_dir and delete take from here and not
-%% from the names: a bind's top has its root's names.
+%% the path is Point itself, which every operation on a parent and a last name takes
+%% through parent/1 and not from the names: a bind's top has its root's names.
 -type place() :: {Point :: binary(), Root :: names(), Names :: names(), Top :: boolean()}.
 %% A path as the caller wrote it, encoded as prim_file encodes it for its NIF, NUL-terminated.
 -type path() :: binary().
@@ -308,17 +308,12 @@ unset() ->
 
 -spec make_dir(grant(), place(), path()) -> ok | {error, posix()}.
 make_dir(Grant, Place, Path) ->
-    one(Grant, Place, Path,
-        fun(OnGrant, NameList, Text) ->
-                make(OnGrant, NameList, Text,
-                     fun(Names) ->
-                             in_directory(OnGrant, Names,
-                                          fun(DirFid, Name) ->
-                                                  {mkdir, DirFid, Name, 8#777 band bnot ?UMASK, 0}
-                                          end)
-                     end)
-        end,
-        fun(Text) -> prim_file:make_dir(Text) end).
+    make(Grant, Place, Path,
+         fun(OnGrant, Parent, _) ->
+                 in_directory(OnGrant, Parent,
+                              fun(DirFid, Name) -> {mkdir, DirFid, Name, 8#777 band bnot ?UMASK, 0} end)
+         end,
+         fun(Text) -> prim_file:make_dir(Text) end).
 
 %% A new name written with a trailing "/" names a directory, which a link is not: nothing
 %% is made, and the answer is eexist for a name that exists, else the walk's, as Linux's
@@ -329,33 +324,36 @@ make_symlink(Grant, Place, EncodedTarget, Path) ->
         Target when byte_size(Target) > ?ERX_P9_SYMLINK_MAX ->
             {error, enametoolong};
         Target ->
-            one(Grant, Place, Path,
-                fun(OnGrant, NameList, Text) ->
-                        make(OnGrant, NameList, Text,
-                             fun(Names) ->
-                                     case slashed(Text) of
-                                         false ->
-                                             in_directory(OnGrant, Names,
-                                                          fun(DirFid, Name) ->
-                                                                  {symlink, DirFid, Name, Target, 0}
-                                                          end);
-                                         true ->
-                                             looked(OnGrant, Names, fun exists/1)
-                                     end
-                             end)
-                end,
-                fun(Text) -> prim_file:make_symlink(EncodedTarget, Text) end)
+            make(Grant, Place, Path,
+                 fun(OnGrant, Parent, Text) ->
+                         case slashed(Text) of
+                             false ->
+                                 in_directory(OnGrant, Parent,
+                                              fun(DirFid, Name) -> {symlink, DirFid, Name, Target, 0} end);
+                             true ->
+                                 looked(OnGrant, whole(Parent), fun exists/1)
+                         end
+                 end,
+                 fun(Text) -> prim_file:make_symlink(EncodedTarget, Text) end)
     end.
 
-%% An operation that makes a name: a last "." or ".." answers eexist once the rest of the
-%% path is a directory (step 2), as does the tree's root, which always exists; else Make
-%% runs on the names, unless the rights refuse a write.
-make(Grant, NameList, Text, Make) ->
-    case last_name_step(Text, fun(_) -> {error, eexist} end) of
-        plain when NameList =:= [] -> {error, eexist};
-        plain -> if_writable(Grant, [{dir_of(NameList), follow}], fun() -> Make(NameList) end);
-        {error, _} = Error -> Error
-    end.
+%% An operation that makes a name, following links as one/5 does: a last "." or ".."
+%% answers eexist once the rest of the path is a directory (step 2), as does a path whose
+%% place says Top (step 3), a name that always exists; else Make runs on the grant, the
+%% path's parent and its text, unless the rights refuse a write.
+make(Grant, Place, Path, Make, Local) ->
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [Reached], [Text]) ->
+                       case {last_name_step(Text, fun(_) -> {error, eexist} end), parent(Reached)} of
+                           {plain, top} ->
+                               {error, eexist};
+                           {plain, {Dir, _} = Parent} ->
+                               if_writable(OnGrant, [{Dir, follow}], fun() -> Make(OnGrant, Parent, Text) end);
+                           {{error, _} = Error, _} ->
+                               Error
+                       end
+               end,
+               fun([Text]) -> Local(Text) end).
 
 %% A trailing "/" changes nothing here: rmdir acts only on a directory, and a link, which
 %% the last name is never followed through, answers enotdir from the server.
@@ -365,8 +363,8 @@ del_dir(Grant, Place, Path) ->
                     fun(<<".">>) -> {error, einval};
                        (<<"..">>) -> {error, enotempty}
                     end,
-                    fun(OnGrant, Names, _) ->
-                            in_directory(OnGrant, Names,
+                    fun(OnGrant, Parent, _) ->
+                            in_directory(OnGrant, Parent,
                                          fun(DirFid, Name) ->
                                                  {unlinkat, DirFid, Name, ?ERX_P9_AT_REMOVEDIR}
                                          end)
@@ -395,13 +393,13 @@ working_directory_step(Path) ->
 -spec delete(grant(), place(), path()) -> ok | {error, posix()}.
 delete(Grant, Place, Path) ->
     Answer = remove(Grant, Place, Path, fun(_) -> {error, eisdir} end,
-                    fun(OnGrant, Names, Text) ->
+                    fun(OnGrant, Parent, Text) ->
                             case slashed(Text) of
                                 false ->
-                                    in_directory(OnGrant, Names,
+                                    in_directory(OnGrant, Parent,
                                                  fun(DirFid, Name) -> {unlinkat, DirFid, Name, 0} end);
                                 true ->
-                                    looked(OnGrant, Names, fun not_a_directory/1)
+                                    looked(OnGrant, whole(Parent), fun not_a_directory/1)
                             end
                     end,
                     fun(Text) -> prim_file:delete(Text) end),
@@ -413,17 +411,15 @@ delete(Grant, Place, Path) ->
 %% An operation that removes a name, following links as one/5 does: a last "." or ".."
 %% answers Special's error once the rest of the path is a directory (step 2), and a path
 %% whose place says Top, the top of a mount or of a bind, ebusy (step 3); else Remove runs
-%% on the grant, the names and the text, unless the rights refuse a write.
+%% on the grant, the path's parent and its text, unless the rights refuse a write.
 remove(Grant, Place, Path, Special, Remove, Local) ->
     with_links(Grant, [Place], [text(Path)],
-               fun(OnGrant, [{_, _, Names, Top}], [Text]) ->
-                       case {last_name_step(Text, Special), Top} of
-                           {plain, true} ->
+               fun(OnGrant, [Reached], [Text]) ->
+                       case {last_name_step(Text, Special), parent(Reached)} of
+                           {plain, top} ->
                                {error, ebusy};
-                           {plain, false} ->
-                               NameList = names(Names),
-                               if_writable(OnGrant, [{dir_of(NameList), follow}],
-                                           fun() -> Remove(OnGrant, NameList, Text) end);
+                           {plain, {Dir, _} = Parent} ->
+                               if_writable(OnGrant, [{Dir, follow}], fun() -> Remove(OnGrant, Parent, Text) end);
                            {{error, _} = Error, _} ->
                                Error
                        end
@@ -442,32 +438,30 @@ rename(Grant, Place, OtherPlace, Source, Destination) ->
         _ -> Answer
     end.
 
-renamed(Grant, [{_, _, Names, FromTop}, {_, _, OtherNames, ToTop}], [Source, Destination]) ->
-    {From, To} = {names(Names), names(OtherNames)},
-    case special(Source) orelse special(Destination) of
-        true ->
+renamed(Grant, [Place, OtherPlace], [Source, Destination]) ->
+    case {special(Source) orelse special(Destination), parent(Place), parent(OtherPlace)} of
+        {true, _, _} ->
             %% Both paths' directories first, the source's before, as Linux finds them
             %% before it looks at either last name.
             case directory(rest(Source)) of
                 ok -> on_ok(directory(rest(Destination)), {error, ebusy});
                 Error -> Error
             end;
-        false when FromTop; ToTop ->
+        {false, {FromDir, _} = From, {ToDir, _} = To} ->
+            if_writable(Grant, [{FromDir, follow}, {ToDir, follow}],
+                        fun() -> moved(Grant, From, To, slashed(Source) orelse slashed(Destination)) end);
+        {false, _, _} ->
             %% Step 3: either path is its entry's top, as the namespace placed it.
-            {error, ebusy};
-        false ->
-            if_writable(Grant, [{dir_of(From), follow}, {dir_of(To), follow}],
-                        fun() -> moved(Grant, From, To, slashed(Source) orelse slashed(Destination)) end)
+            {error, ebusy}
     end.
 
-moved(Grant, From, To, false) ->
-    {FromDir, FromName} = split_last(From),
-    {ToDir, ToName} = split_last(To),
+%% A rename between two parents. A path written with a trailing "/" names a directory:
+%% the source must be one before anything moves.
+moved(Grant, {FromDir, FromName}, {ToDir, ToName}, false) ->
     ok_of(act(Grant, [{FromDir, follow}, {ToDir, follow}],
               fun([FromFid, ToFid]) -> {renameat, FromFid, FromName, ToFid, ToName} end));
-moved(Grant, From, To, true) ->
-    {ToDir, _} = split_last(To),
-    case act(Grant, [{From, nofollow}, {ToDir, follow}], fun([Fid, _]) -> {getattr, Fid, ?INFO_MASK} end) of
+moved(Grant, From, {ToDir, _} = To, true) ->
+    case act(Grant, [{whole(From), nofollow}, {ToDir, follow}], fun([Fid, _]) -> {getattr, Fid, ?INFO_MASK} end) of
         {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =:= ?ERX_P9_S_IFDIR -> moved(Grant, From, To, false);
         {ok, _} -> {error, enotdir};
         Other -> Other
@@ -483,26 +477,25 @@ make_link(Grant, Place, OtherPlace, Existing, New) ->
     with_links(Grant, [Place, OtherPlace], [text(Existing), text(New)], fun linked/3,
                fun([From, To]) -> prim_file:make_link(From, To) end).
 
-linked(Grant, [{_, _, Names, _}, {_, _, OtherNames, _}], [ExistingText, NewText]) ->
-    {Existing, Made} = {names(Names), names(OtherNames)},
-    Walk = {Existing, case slashed(ExistingText) of
-                           true -> directory;
-                           false -> nofollow
-                       end},
-    case special(NewText) orelse Made =:= [] of
-        true ->
-            %% The new name is "." or "..", or the tree's root: once the existing path
-            %% is reached, the answer is step 2's or the root's eexist.
+linked(Grant, [{_, _, Names, _}, OtherPlace], [ExistingText, NewText]) ->
+    Walk = {names(Names), case slashed(ExistingText) of
+                              true -> directory;
+                              false -> nofollow
+                          end},
+    case {special(NewText), parent(OtherPlace)} of
+        {false, {Dir, _} = Made} ->
+            if_writable(Grant, [Walk, {Dir, follow}],
+                        fun() -> link_made(Grant, Walk, Made, slashed(NewText)) end);
+        _ ->
+            %% The new name is "." or "..", or its entry's top (step 3): once the
+            %% existing path is reached, the answer is step 2's or the top's eexist.
             case act(Grant, [Walk], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
                 {ok, _} -> special_new_name(NewText);
                 Other -> Other
-            end;
-        false ->
-            if_writable(Grant, [Walk, {dir_of(Made), follow}],
-                        fun() -> link_made(Grant, Walk, Made, slashed(NewText)) end)
+            end
     end.
 
-%% The answer for a new name that is ".", ".." or the tree's root.
+%% The answer for a new name that is ".", ".." or its entry's top.
 special_new_name(New) ->
     case last_name_step(New, fun(_) -> {error, eexist} end) of
         plain -> {error, eexist};
@@ -512,10 +505,9 @@ special_new_name(New) ->
 %% A new name written with a trailing "/" is never made: eexist for a name that exists,
 %% else the walk's answer. An existing directory is never linked: once the new name's
 %% directory is found and the name is free, eperm.
-link_made(Grant, Walk, Made, Slashed) ->
-    {Dir, Name} = split_last(Made),
+link_made(Grant, Walk, {Dir, Name} = Made, Slashed) ->
     Named = fun() ->
-                    exists(act(Grant, [Walk, {Made, nofollow}],
+                    exists(act(Grant, [Walk, {whole(Made), nofollow}],
                                fun([_, Fid]) -> {getattr, Fid, ?INFO_MASK} end))
             end,
     case {Walk, Slashed} of
@@ -542,9 +534,9 @@ link_made(Grant, Walk, Made, Slashed) ->
 -spec open(grant(), place(), list(), path()) -> {ok, #file_descriptor{}} | {error, posix()}.
 open(Grant, Place, Modes, Path) ->
     Open = open_mode(Modes),
-    one(Grant, Place, Path,
-        fun(OnGrant, NameList, Text) -> open_on(OnGrant, NameList, Text, Open) end,
-        fun(Text) -> prim_file:open(Text, Modes) end).
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [Reached], [Text]) -> open_on(OnGrant, Reached, Text, Open) end,
+               fun([Text]) -> prim_file:open(Text, Modes) end).
 
 %% What the modes ask, as stock's efile_translate_modelist and get_flags read them:
 %% append and exclusive write, an open that neither reads nor writes reads, and only a
@@ -588,21 +580,30 @@ has(Mode, [Mode | _]) -> true;
 has(Mode, [_ | Modes]) -> has(Mode, Modes);
 has(_, _) -> false.
 
-open_on(Grant, NameList, Text, #{access := read, directory := Directory, flags := Flags} = Open) ->
+open_on(Grant, {_, _, Names, _}, Text, #{access := read, directory := Directory, flags := Flags} = Open) ->
     Mode = case Directory orelse slashed(Text) of
                true -> directory;
                false -> follow
            end,
-    described(kept(Grant, {NameList, Mode}, fun(Fid) -> {lopen, Fid, Flags} end), Grant, Open);
+    described(kept(Grant, {names(Names), Mode}, fun(Fid) -> {lopen, Fid, Flags} end), Grant, Open);
 open_on(_, _, _, #{directory := true}) ->
     %% A directory is never opened to write: einval, as Linux answers O_DIRECTORY with
     %% O_CREAT, before anything is walked or truncated.
     {error, einval};
-open_on(Grant, NameList, Text, Open) ->
-    case last_name_step(Text, fun(_) -> {error, eisdir} end) of
-        plain when NameList =:= [] -> {error, eisdir};
-        plain -> created(Grant, NameList, slashed(Text), Open);
-        {error, _} = Error -> Error
+open_on(Grant, Place, Text, #{flags := Flags} = Open) ->
+    case {last_name_step(Text, fun(_) -> {error, eisdir} end), parent(Place)} of
+        {plain, top} ->
+            %% Step 3: the entry's top is a directory that exists, opened as Linux opens
+            %% one with O_CREAT: eexist when exclusive, unless written with a trailing
+            %% "/", else eisdir.
+            case exclusive(Flags) andalso not slashed(Text) of
+                true -> {error, eexist};
+                false -> {error, eisdir}
+            end;
+        {plain, Parent} ->
+            created(Grant, Parent, slashed(Text), Open);
+        {{error, _} = Error, _} ->
+            Error
     end.
 
 %% An open that writes, on its last name's directory. A name written with a trailing "/"
@@ -610,24 +611,23 @@ open_on(Grant, NameList, Text, Open) ->
 %% answers. On an entry that is not rw, the name is looked at as Linux looks before it
 %% refuses: eexist for an exclusive open of any name there, eisdir for a directory, and
 %% erofs for a file or a missing name.
-created(Grant, NameList, true, _) ->
-    on_ok(ok_of(act(Grant, [{dir_of(NameList), follow}], fun stat/1)), {error, eisdir});
-created({_, _, rw} = Grant, NameList, false, #{flags := Flags} = Open) ->
-    {Dir, Name} = split_last(NameList),
+created(Grant, {Dir, _}, true, _) ->
+    on_ok(ok_of(act(Grant, [{Dir, follow}], fun stat/1)), {error, eisdir});
+created({_, _, rw} = Grant, {Dir, Name}, false, #{flags := Flags} = Open) ->
     Create = fun(DirFid) -> {lcreate, DirFid, Name, Flags, 8#666 band bnot ?UMASK, 0} end,
     case {kept(Grant, {Dir, follow}, Create), exclusive(Flags)} of
-        {{error, eloop}, false} -> {link, 1, length(NameList) - 1};
+        {{error, eloop}, false} -> {link, 1, length(Dir)};
         {{error, eloop}, true} -> {error, eexist};
         {Kept, _} -> described(Kept, Grant, Open)
     end;
-created(Grant, NameList, false, #{flags := Flags}) ->
+created(Grant, {Dir, _} = Parent, false, #{flags := Flags}) ->
     Last = case exclusive(Flags) of
                true -> nofollow;
                false -> follow
            end,
-    case act(Grant, [{dir_of(NameList), follow}], fun stat/1) of
+    case act(Grant, [{Dir, follow}], fun stat/1) of
         {ok, _} ->
-            case {act(Grant, [{NameList, Last}], fun stat/1), Last} of
+            case {act(Grant, [{whole(Parent), Last}], fun stat/1), Last} of
                 {{ok, _}, nofollow} -> {error, eexist};
                 {{ok, #{mode := Mode}}, _} when Mode band ?ERX_P9_S_IFMT =:= ?ERX_P9_S_IFDIR -> {error, eisdir};
                 {{ok, _}, _} -> {error, erofs};
@@ -915,18 +915,18 @@ without_cr(Line) ->
 %% file is open, or to its end if that comes first.
 -spec read_file(grant(), place(), path()) -> {ok, binary()} | {error, posix()}.
 read_file(Grant, Place, Path) ->
-    one(Grant, Place, Path,
-        fun(OnGrant, NameList, Text) ->
-                case open_on(OnGrant, NameList, Text, open_mode([read])) of
-                    {ok, Fd} ->
-                        Contents = on_open(Fd, fun(File) -> contents(File) end),
-                        _ = close(Fd),
-                        Contents;
-                    Other ->
-                        Other
-                end
-        end,
-        fun(Text) -> prim_file:read_file(Text) end).
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [Reached], [Text]) ->
+                       case open_on(OnGrant, Reached, Text, open_mode([read])) of
+                           {ok, Fd} ->
+                               Contents = on_open(Fd, fun(File) -> contents(File) end),
+                               _ = close(Fd),
+                               Contents;
+                           Other ->
+                               Other
+                       end
+               end,
+               fun([Text]) -> prim_file:read_file(Text) end).
 
 contents(File) ->
     case size_of(File) of
@@ -1245,9 +1245,8 @@ last_name_step(Text, Special) ->
         false -> plain
     end.
 
-%% Request on the directory of NameList's last name and that name.
-in_directory(Grant, NameList, Request) ->
-    {Dir, Name} = split_last(NameList),
+%% Request on a parent's directory and its name.
+in_directory(Grant, {Dir, Name}, Request) ->
     ok_of(act(Grant, [{Dir, follow}], fun([DirFid]) -> Request(DirFid, Name) end)).
 
 %% What a last name that is not followed is, for an operation written with a trailing
@@ -1276,11 +1275,6 @@ if_writable(Grant, Walks, _) ->
         {ok, _} -> {error, erofs};
         Other -> Other
     end.
-
-%% The names of a non-empty name list's directory.
-dir_of(NameList) ->
-    {Dir, _} = split_last(NameList),
-    Dir.
 
 writable({_, _, rw}) -> true;
 writable({_, _, _}) -> false.
@@ -1368,7 +1362,21 @@ raw(Name) -> text(prim_file:internal_name2native(Name)).
 names(<<>>) -> [];
 names(Names) -> binary:split(Names, <<"/">>, [global]).
 
-%% A non-empty name list's directory names and last name.
+%% The directory a place's last name lies in, as names from the tree's root, and that
+%% name; or top for the top of a mount or of a bind, whose parent lies outside the entry:
+%% the tree's root has none, and a bind's root has one the entry does not reach. Every
+%% operation that acts on a parent and a last name takes them from here and decides what
+%% top means for it (design-files.md, Errors, step 3), so none acts on a top's parent.
+%% This is the one caller of split_last/1, which test/host/erx_file_remote_test.rb checks.
+%% Below its top a place has at least one name past its entry's Root.
+-spec parent(place()) -> {Dir :: [binary()], Name :: binary()} | top.
+parent({_, _, _, true}) -> top;
+parent({_, _, Names, false}) -> split_last(names(Names)).
+
+%% A parent's names, its last name's included.
+whole({Dir, Name}) -> Dir ++ [Name].
+
+%% A non-empty name list's directory names and last name; parent/1 alone calls it.
 split_last(NameList) ->
     {Dir, [Name]} = split_at(length(NameList) - 1, NameList),
     {Dir, Name}.

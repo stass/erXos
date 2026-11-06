@@ -513,6 +513,12 @@ it; git history is the record of completed work.
   entry: on a read-only bind `make_dir` answers `erofs` where Linux answers `eexist`, and on a writable bind
   whose root was removed elsewhere it makes the root again. Take the place's `Top` there too, ideally through
   one `parent(Place) -> {Dir, Name} | top` that every operation must answer, so `dir_of([])` cannot be reached.
+* [Medium] runtime, `erx_file_remote`: `parent/1` takes a place below its top to have more names
+  than its `Root` on the namespace's word (`liberx/ns.c`, `res_top`); the xref check proves only that
+  `split_last/1` has one caller, and `split_at/2` or `last_name/1` could still build a parent. A floor
+  where requests are sent (no `mkdir`, `symlink`, `link`, `lcreate`, `unlinkat` or `renameat` on a
+  directory walk shorter than the entry's `Root`, refused with `eio`) would make it hold by
+  construction; with a `-type parent()` and specs under dialyzer for the helpers that take one.
 * [Low] runtime, `erx_file_remote` and [design-files.md](docs/design-files.md#errors) step 3: `ebusy` for a
   mount's or bind's top comes before errors Linux reports first: `delete` of a directory top answers `ebusy`
   where Linux's `unlink` answers `eisdir` (stock `eperm`), and a rename onto a directory top in the same mount,
