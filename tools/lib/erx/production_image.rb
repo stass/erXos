@@ -51,8 +51,9 @@ module Erx
 
     # flags are the archive header's, as the kernel's banner line reports them; test_code
     # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made. release
-    # is the system release's entries, which the release medium's EROFS image holds.
-    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :flags, :test_code, :report, :release)
+    # is the system release's entries, which the release medium's EROFS image, erofs, holds;
+    # the archive's manifest records that image's extent.
+    Built = Data.define(:single, :archive, :first_stage, :index_hash, :build_id, :flags, :test_code, :report, :release, :erofs)
 
     # What a test image adds to the system release (OracleQemu): entries for Pack#build,
     # each with its receipt, the files those receipts name, and the imported trees their
@@ -99,7 +100,7 @@ module Erx
     # directory, which must be clean.
     def build_medium(directory:)
       built = build(directory: directory)
-      [built, ReleaseMedium.write(built: built, directory: built_directory(built), runner: @runner)]
+      [built, ReleaseMedium.write(built: built, directory: built_directory(built))]
     end
 
     # The production image with test code added to its system release, marked in its
@@ -129,7 +130,8 @@ module Erx
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
       release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries
-      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task,
+      erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *added.entries], root_task: root_task, images: images,
                     manifest_source: manifest_source, erts: erts, output: archive, imports: IMPORTS.merge(added.imports),
                     inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *added.inputs], test_code: test_code)
       single = File.join(directory, 'image.boot')
@@ -141,7 +143,7 @@ module Erx
 
       Built.new(single: single, archive: archive, first_stage: @fiasco.image_path,
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),
-                flags: flags, test_code: marked, report: report, release: release)
+                flags: flags, test_code: marked, report: report, release: release, erofs: erofs)
     end
     private :assemble
 
@@ -665,7 +667,7 @@ module Erx
          'id' => 'root', 'artifact' => program, 'receipt' => receipt }]
     end
 
-    def pack(entries:, root_task:, manifest_source:, inputs:, erts:, output:, imports:, test_code:)
+    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, output:, imports:, test_code:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts), runner: @runner,
@@ -675,7 +677,7 @@ module Erx
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance)
           .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: 'development', platform: platform,
-                 artifacts: { 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } },
+                 artifacts: { 'root' => { 'kind' => 'executable', 'entry' => paths.index(ROOT_ENTRY_PATH) } }.merge(images),
                  manifest_source: manifest_source, output: output, test_code: test_code)
     end
 

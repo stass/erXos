@@ -89,7 +89,8 @@ class ManifestSystemOnlyTest < Minitest::Test
     view = @codec.open('manifest', result.bytes)
     assert_equal 0, view.count('domains')
     assert_equal 3, view.count('devices')
-    assert_equal 5, view.count('windows')
+    assert_equal 6, view.count('windows')
+    assert_equal 1, view.count('images')
   end
 
   def test_the_report_claims_only_what_was_checked
@@ -382,15 +383,47 @@ class ManifestSystemOnlyTest < Minitest::Test
     refused(Erx::Manifest::Unsupported, 'unsupported', 'partial_boot', source, message: /M5/)
   end
 
-  def test_an_image_record_is_refused_naming_its_milestone
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'image', @source + "image i\n  device \"d\"\n  input \"i\"\n", message: /M6/)
+  # The release image (docs/design-stopgap.md, "The Phase 1 manifest check"): format
+  # erofs_unchecked, its extents from the artifact, every tree field zero.
+  def test_the_release_image_is_recorded_without_a_tree
+    view = @codec.open('manifest', admit.bytes)
+    image = view.fetch('images', 0)
+    assert_equal 'release', view.string(image.fetch('name'))
+    assert_equal @codec.member('mf_image_format', 'erofs_unchecked'), image.fetch('format')
+    assert_equal [8192, 4096, 2], image.values_at('data_bytes', 'data_block_size', 'data_blocks')
+    assert_equal [0, 0, 0, 0, 0, 0], image.values_at('hash_block_size', 'hash_offset', 'hash_bytes', 'salt_length',
+                                                     'hash_algorithm', 'salt').map { |value| value.is_a?(String) ? value.sum : value }
+    assert_equal 0, image.fetch('root_hash').sum
+    assert_equal [{ 'slot_offset' => 128 << 20, 'length' => 8192 }], (0...view.count('extents')).map { |at| view.fetch('extents', at) }
+    windows = (0...view.count('windows')).map { |at| view.fetch('windows', at) }
+    verified = windows.select { |row| row.fetch('role') == @codec.member('mf_window_role', 'verified_image') }
+    assert_equal [[0, @codec.member('mf_window_rights', 'read')]], verified.map { |row| row.values_at('image', 'rights') }
   end
 
-  def test_a_verified_image_window_is_refused_naming_its_milestone
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'window.role', @source + window(role: 'verified_image'), message: /M6/)
+  def test_an_image_input_must_be_an_image_artifact_of_the_pack
+    ['@artifact.root', '@artifact.absent', '"release"'].each do |input|
+      refused(Erx::Manifest::Invalid, 8, 'image.input', @source.sub('input @artifact.release', "input #{input}"))
+    end
   end
 
-  def test_a_window_naming_an_image_is_refused
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'window.image', @source + window(role: 'fat', image: '@image.i'), message: /M6/)
+  def test_image_extents_are_sorted_disjoint_sectors_inside_a_slot
+    slot = 1_048_576 * 512
+    [[], [{ 'slot_offset' => 0, 'length' => 0 }], [{ 'slot_offset' => 1, 'length' => 4096 }],
+     [{ 'slot_offset' => slot - 4096, 'length' => 8192 }], [{ 'slot_offset' => 0, 'length' => 4000 }],
+     [{ 'slot_offset' => 8192, 'length' => 4096 }, { 'slot_offset' => 0, 'length' => 4096 }],
+     [{ 'slot_offset' => 0, 'length' => 4096 }, { 'slot_offset' => 2048, 'length' => 4096 }]].each do |extents|
+      against = context { |arguments| arguments[:artifacts] = arguments[:artifacts].merge('release' => { 'kind' => 'erofs_image', 'extents' => extents }) }
+      refused(Erx::Manifest::Invalid, 8, 'image.input', @source, against)
+    end
+  end
+
+  def test_an_image_without_a_tree_takes_no_salt
+    refused(Erx::Manifest::Invalid, 8, 'image.salt', @source.sub("input @artifact.release\n", "input @artifact.release\n  salt 0x00\n"))
+  end
+
+  def test_a_verified_image_window_is_read_only_and_names_its_image
+    refused(Erx::Manifest::Invalid, 8, 'window.rights', @source.sub("  rights read\n  image @image.release", "  rights read,write\n  image @image.release"))
+    refused(Erx::Manifest::Invalid, 8, 'window.image', @source.sub('image @image.release', 'image none'))
+    refused(Erx::Manifest::Invalid, 8, 'window.image', @source + window(role: 'fat', image: '@image.release'))
   end
 end

@@ -117,9 +117,12 @@ class ReleaseMediumTest < Minitest::Test
       files = tree(File.join(directory, 'input'))
       boot = File.join(directory, 'image.boot')
       File.binwrite(boot, Random.new(7).bytes((3 * MIB) + 100))
-      built = Struct.new(:single, :release).new(boot, files.map { |path, source| { 'path' => path, 'artifact' => source } })
-      first = written(built, File.join(directory, 'first'))
-      second = written(built, File.join(directory, 'second'))
+      release = files.map { |path, source| { 'path' => path, 'artifact' => source } }
+      first, artifacts = written(boot, release, File.join(directory, 'first'))
+      second, = written(boot, release, File.join(directory, 'second'))
+      extents = first.slot.images.map { |extent| { 'slot_offset' => extent.slot_offset, 'length' => extent.file.length } }
+      assert_equal({ 'release' => { 'kind' => 'erofs_image', 'extents' => extents } }, artifacts,
+                   'the manifest records the image where the medium holds it')
 
       assert_equal Digest::SHA256.file(first.path), Digest::SHA256.file(second.path), 'two writes differ'
       assert_equal Medium.sectors(data_sectors: first.data_sectors) * SECTOR, File.size(first.path)
@@ -198,9 +201,13 @@ class ReleaseMediumTest < Minitest::Test
     end
   end
 
-  def written(built, directory)
+  # The image and the medium as ProductionImage#build_medium writes them, and the
+  # artifacts the image gives the manifest check.
+  def written(boot, release, directory)
     FileUtils.mkdir_p(directory)
-    Erx::ReleaseMedium.write(built: built, directory: directory, runner: runner(directory))
+    erofs, artifacts = Erx::ReleaseMedium.image(entries: release, directory: directory, runner: runner(directory))
+    built = Struct.new(:single, :erofs).new(boot, erofs)
+    [Erx::ReleaseMedium.write(built: built, directory: directory), artifacts]
   end
 
   # The windows erx_blk_table admits from the medium's three records.

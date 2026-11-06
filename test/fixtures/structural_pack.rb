@@ -56,7 +56,7 @@ module StructuralPackFixture
     context = Erx::Manifest::Context.new(build_kind: 'development', platform: ManifestContextFixture.platform,
                                          catalog: rows.map { |row| row.reject { |key, _| %w[snapshot size].include?(key) } },
                                          root_entry: root_entry,
-                                         artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_entry } },
+                                         artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_entry } }.merge(ManifestContextFixture.images),
                                          provenance: provenance)
     source = File.binread(File.join(root, 'test/fixtures/manifest_empty.txt'))
     structural = Erx::Manifest.structural_fixture(source: source, codec: codec, context: context)

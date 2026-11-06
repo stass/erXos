@@ -272,11 +272,18 @@ every `domain`, `partial_boot`, `window`, `service`, `facet`, `introduce`,
 `image` and `liveness` record. **`SystemOnly`** sits beside `EmptyNative` and
 shares its readers: a development manifest, full or partial boot, with the
 system domain alone. It accepts the records the system release's services need
-and refuses `domain`, `partial_boot`, `introduce`, `image` and `liveness` records with a
-diagnostic naming the milestone that brings them; an `image` record and a
-`verified_image` window wait for the storage design's hash tree sizing. Phase 1's
-EROFS windows pass blocks through unchecked; the hash check is a stopgap
-residual recorded in `TODO.md`. QEMU `virt`'s record is
+and refuses `domain`, `partial_boot`, `introduce` and `liveness` records with a
+diagnostic naming the milestone that brings them. Its `image` records are
+format `erofs_unchecked` ([design-abi.md](design-abi.md)): the packer writes no
+hash tree, so an image's record carries its data's length and extents, which
+the packer derives from the built image, the artifact its `input` names, and
+zeros for every tree field, and a `salt` is refused. Each image lies on the
+block device the system domain holds, and a `verified_image` window names one
+image, read-only, held by the system domain. The production image's one image
+is the system release's EROFS image (`ReleaseMedium`), written before the
+archive is packed, since the archive's manifest records it; the image does not
+hold the manifest. Phase 1's EROFS windows pass blocks through unchecked; the
+hash check is a stopgap residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
 manifest
 [config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt).

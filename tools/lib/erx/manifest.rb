@@ -340,7 +340,8 @@ module Erx
     # and what its report claims (claims).
     class SystemDomainCheck
       TABLES = { 'principal' => 'principals', 'limits' => 'limits',
-                 'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes' }.freeze
+                 'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes',
+                 'image' => 'images' }.freeze
 
       def initialize(source, codec:, context:, planner:, consumers:)
         @source = source
@@ -774,7 +775,6 @@ module Erx
         'domain' => 'configured domains arrive at M5',
         'partial_boot' => 'child domains of a partial boot arrive at M5',
         'introduce' => 'introductions connect configured domains, which arrive at M5',
-        'image' => 'a verified image needs the hash tree sizing that M6 brings',
         'liveness' => 'the system domain\'s watchdog pets without reading liveness records, which a later milestone brings'
       }.freeze
 
@@ -813,7 +813,8 @@ module Erx
         rows['services'] = normalize_services(services)
         check_facets(services)
         rows['liveness'] = normalize_liveness(services)
-        rows['windows'] = normalize_windows(rows.fetch('devices'))
+        rows['images'], rows['extents'] = normalize_images(rows.fetch('devices'))
+        rows['windows'] = normalize_windows(rows.fetch('devices'), rows.fetch('images'))
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
                           root_memory: root_memory, platform: @context.platform)
       end
@@ -886,18 +887,19 @@ module Erx
         rows.sort_by { |row| row.fetch('service') }
       end
 
-      def normalize_windows(devices)
+      def normalize_windows(devices, images)
         rows = records('window').map do |record|
           holder = one(record, 'holder')
           invalid('the system domain holds every window until the storage domain at M9', 8, 'window.holder') unless !holder.quoted && holder.value == 'system'
           role = window_role(record)
           { 'holder' => @codec.constant('mf_none'), 'device' => window_device(record, devices),
             'role' => role, 'partition' => window_partition(record, role),
-            'rights' => window_rights(record), 'image' => window_image(record) }
+            'rights' => window_rights(record, role), 'image' => window_image(record, role) }
+                 .tap { |row| check_image_device(row, images) }
         end
-        placed = rows.map { |row| row.values_at('device', 'role', 'partition') }
+        placed = rows.map { |row| row.values_at('device', 'role', 'partition', 'image') }
         invalid('two windows name one role and partition', 8, 'window.partition') unless placed.uniq.size == placed.size
-        rows.sort_by { |row| row.values_at('holder', 'device', 'role', 'partition') }
+        rows.sort_by { |row| row.values_at('holder', 'device', 'role', 'partition', 'image') }
       end
 
       # design-abi.md: fixed-medium roles have partition 0, because the medium
@@ -909,9 +911,11 @@ module Erx
         partition
       end
 
-      def window_rights(record)
+      def window_rights(record, role)
         rights = flags(record, 'rights', 'mf_window_rights')
-        invalid('a window grants at least read', 8, 'window.rights') if (rights & @codec.member('mf_window_rights', 'read')).zero?
+        read = @codec.member('mf_window_rights', 'read')
+        invalid('a window grants at least read', 8, 'window.rights') if (rights & read).zero?
+        invalid('a verified-image window is read-only', 8, 'window.rights') if role == image_role && rights != read
         rights
       end
 
@@ -924,16 +928,85 @@ module Erx
       def window_role(record)
         role = enum(record, 'role', 'mf_window_role')
         invalid('no vault partition until M11', 8, 'window.role') if role == @codec.member('mf_window_role', 'vault')
-        if role == @codec.member('mf_window_role', 'verified_image')
-          unsupported('a verified image window needs the hash tree sizing that M6 brings', 'window.role')
-        end
         role
       end
 
-      def window_image(record)
+      # design-abi.md: a verified-image window names an image-table index, and every
+      # other role names none.
+      def window_image(record, role)
         token = one(record, 'image')
-        return @codec.constant('mf_none') if !token.quoted && token.value == 'none'
-        unsupported('a verified image needs the hash tree sizing that M6 brings', 'window.image')
+        absent = !token.quoted && token.value == 'none'
+        if role == image_role
+          invalid('a verified-image window names its image', 8, 'window.image') if absent
+          reference_token(token, 'image', record.line)
+        else
+          invalid('only a verified-image window names an image', 8, 'window.image') unless absent
+          @codec.constant('mf_none')
+        end
+      end
+
+      # A verified-image window lies on the device its image lies on, since the image's
+      # extents are places on that device.
+      def check_image_device(row, images)
+        return if row.fetch('role') != image_role || images.fetch(row.fetch('image')).fetch('device') == row.fetch('device')
+
+        invalid("a verified-image window names its image's device", 8, 'window.device')
+      end
+
+      # An image's tree fields when the packer writes no tree.
+      NO_TREE = { 'hash_block_size' => 0, 'hash_offset' => 0, 'hash_bytes' => 0, 'salt_length' => 0,
+                  'hash_algorithm' => 0, 'salt' => Array.new(32, 0), 'root_hash' => Array.new(32, 0) }.freeze
+
+      def image_role = @codec.member('mf_window_role', 'verified_image')
+
+      # The image table and its extents (docs/design-stopgap.md, "The Phase 1 manifest
+      # check"): each image is format erofs_unchecked, since the packer writes no hash
+      # tree, so its record holds its data's length and extents, taken from the built
+      # image its input artifact describes, and zeros for every tree field.
+      def normalize_images(devices)
+        block_size = @codec.constant('page_size')
+        records('image').sort_by { |record| record.name.b }.each_with_object([[], []]) do |record, (images, extents)|
+          invalid('image name is not a system identifier', 5, 'image.name') unless record.name.match?(Frontend::IDENTIFIER)
+          invalid('an image without a hash tree takes no salt', 8, 'image.salt') if record.properties.key?('salt')
+          placed = checked_extents(image_artifact(record))
+          bytes = placed.sum { |extent| extent.fetch('length') }
+          invalid('an image is whole blocks', 8, 'image.input') unless (bytes % block_size).zero?
+          device = devices.index { |row| row['path'] == text(record, 'device') && row.fetch('role') == device_role('block') }
+          invalid('image names no block device the system domain holds', 8, 'image.device') unless device
+          images << { 'name' => record.name.b, 'device' => device,
+                      'format' => @codec.member('mf_image_format', 'erofs_unchecked'),
+                      'extents' => { 'table' => 'extents', 'first' => extents.size, 'count' => placed.size },
+                      'data_bytes' => bytes, 'data_block_size' => block_size, 'data_blocks' => bytes / block_size }
+                    .merge(NO_TREE)
+          extents.concat(placed)
+        end
+      end
+
+      # The artifact an image's input names, which the packer derived from the built image.
+      def image_artifact(record)
+        token = one(record, 'input')
+        named = !token.quoted && token.value.start_with?('@artifact.')
+        artifact = named ? @context.artifacts[token.value.delete_prefix('@artifact.')] : nil
+        invalid('image input names no image artifact of this pack', 8, 'image.input') unless artifact.is_a?(Hash) && artifact['kind'] == 'erofs_image'
+        artifact
+      end
+
+      # design-abi.md: nonempty, sorted and disjoint whole sectors, relative to the slot's
+      # start and inside it.
+      def checked_extents(artifact)
+        sector = @codec.constant('mbr_sector_size')
+        slot = @codec.constant('medium_slot_sectors') * sector
+        extents = artifact['extents']
+        invalid('an image has at least one extent', 8, 'image.input') unless extents.is_a?(Array) && !extents.empty?
+        extents.each_with_object([]) do |extent, placed|
+          offset, length = extent.values_at('slot_offset', 'length') if extent.is_a?(Hash)
+          floor = placed.empty? ? 0 : placed.last.fetch('slot_offset') + placed.last.fetch('length')
+          unless offset.is_a?(Integer) && length.is_a?(Integer) && length.positive? && offset >= floor &&
+                 (offset % sector).zero? && (length % sector).zero? && offset + length <= slot
+            invalid('image extents are sorted, disjoint whole sectors inside a slot', 8, 'image.input')
+          end
+          placed << { 'slot_offset' => offset, 'length' => length }
+        end
       end
     end
 

@@ -80,7 +80,7 @@ class StructuralPackTest < Minitest::Test
     error = assert_raises(Erx::Manifest::Unsupported) do
       production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
                        platform: ManifestContextFixture.platform,
-                       artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } },
+                       artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
                        manifest_source: structural.fetch('manifest_source'), output: output)
     end
     assert_equal 4, error.property
@@ -101,7 +101,7 @@ class StructuralPackTest < Minitest::Test
     output = File.join(@directory, 'development.erxpack')
     result = production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
                               platform: JSON.parse(File.read(File.join(@root, 'config/platforms/qemu-virt.json'))),
-                              artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } },
+                              artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
                               manifest_source: File.binread(File.join(@root, 'config/manifest/qemu-virt-development.txt')),
                               output: output)
     assert_equal 'system_only', result.fetch('manifest').fetch('mode')

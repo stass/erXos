@@ -7918,6 +7918,7 @@ module Erx
         name: "mf_hash_algorithm".b,
         base: types.fetch("u32"),
         members: {
+          "none".b => 0,
           "sha256".b => 1
         }.freeze,
         flags: false,
@@ -7927,6 +7928,7 @@ module Erx
         name: "mf_image_format".b,
         base: types.fetch("u32"),
         members: {
+          "erofs_unchecked".b => 2,
           "erofs_verity".b => 1
         }.freeze,
         flags: false,
@@ -13525,9 +13527,21 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "mf_hash_algorithm_none".b => Constant.new(
+            name: "mf_hash_algorithm_none".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "mf_hash_algorithm_sha256".b => Constant.new(
             name: "mf_hash_algorithm_sha256".b,
             value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "mf_image_format_erofs_unchecked".b => Constant.new(
+            name: "mf_image_format_erofs_unchecked".b,
+            value: 2,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

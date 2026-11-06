@@ -17,6 +17,7 @@ require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
 require_relative 'release_files'
+require_relative 'release_medium'
 require_relative 'runner'
 require_relative 'runtime'
 require_relative 'toolchain_provenance'
@@ -92,11 +93,12 @@ module Erx
                                         runner: @runner, compiler: @compiler, linker: @linker)
       files = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle).entries
       entries = [root_entry(root_task), *files]
+      _erofs, images = ReleaseMedium.image(entries: files, directory: @directory, runner: @runner)
       catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of(files, root: @root)))
       pack_with(tools, catalog).build(
         entries: entries, root_path: 'system/root', build_kind: 'development',
         platform: JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 1024 * 1024, label: 'platform record'),
-        artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_index(entries) } },
+        artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root_index(entries) } }.merge(images),
         manifest_source: File.binread(File.join(@root, MANIFEST)), output: output
       )
     end

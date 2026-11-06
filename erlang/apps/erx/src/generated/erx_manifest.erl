@@ -4570,7 +4570,7 @@ type('mf_hash_algorithm') ->
         'base' => 'u32',
         'flags' => false,
         'mask' => 1,
-        'values' => [1],
+        'values' => [0, 1],
         'allowed' => 'none'
     };
 type('mf_image_format') ->
@@ -4579,8 +4579,8 @@ type('mf_image_format') ->
         'size' => 4,
         'base' => 'u32',
         'flags' => false,
-        'mask' => 1,
-        'values' => [1],
+        'mask' => 3,
+        'values' => [1, 2],
         'allowed' => 'none'
     };
 type('mf_kind') ->

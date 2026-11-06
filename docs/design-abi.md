@@ -983,6 +983,13 @@ cannot supply an unchecked root hash or extent. At boot the device
 service adds the currently named slot's base after checking the boot
 value; `unknown` supplies no such window.
 
+Image format 2, `erofs_unchecked`, is an EROFS image with no tree,
+which only a development manifest admits: its window is its data alone,
+`data_bytes` long, its hash algorithm is 0, none, and every tree field,
+the salt and the root hash are zero, so the hash-checking reader opens it
+`unchecked` and no record claims a check that nothing makes
+([design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check)).
+
 Boot order is the complete permutation of the configured-domain
 indices, with servers before clients. The packer uses a topological
 order whose ready set is ordered by domain-name bytes. It rejects a

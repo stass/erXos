@@ -72,7 +72,9 @@ enum mf_parameter_kind u32
   value bytes 9
 enum mf_image_format u32
   value erofs_verity 1
+  value erofs_unchecked 2
 enum mf_hash_algorithm u32
+  value none 0
   value sha256 1
 
 layout erx_mf_span 1 wire_le 4 8

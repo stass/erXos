@@ -7,6 +7,12 @@
 module ManifestContextFixture
   module_function
 
+  # The release image the development manifest names, as ReleaseMedium.image describes
+  # a built one: two blocks at the slot's images start.
+  def images
+    { 'release' => { 'kind' => 'erofs_image', 'extents' => [{ 'slot_offset' => 128 << 20, 'length' => 8192 }] } }
+  end
+
   def platform
     { 'name' => 'fixture', 'cpuset' => 1, 'console' => '/uart@0', 'hostlink' => '',
       'units' => [{ 'key' => 'uart0', 'devices' => [
@@ -30,7 +36,7 @@ module ManifestContextFixture
     system = codec.member('entry_flags', 'system')
     ordinary = codec.member('entry_kind', 'file')
     { build_kind: 'development', platform: platform, root_entry: 2,
-      artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } },
+      artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(images),
       catalog: [
         { 'path' => 'system/NOTICES', 'kind' => ordinary, 'flags' => system,
           'source' => { 'kind' => 'generated', 'producer' => 'notices' } },

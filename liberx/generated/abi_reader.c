@@ -2865,10 +2865,10 @@ erx_manifest_check_images(const uint8_t *bytes ERX_UNUSED,
     const uint8_t *file ERX_UNUSED, size_t base ERX_UNUSED,
     erx_abi_error_t *error ERX_UNUSED)
 {
-	if (!(record->hash_algorithm == UINT32_C(1)))
+	if (!(record->hash_algorithm == UINT32_C(0) || record->hash_algorithm == UINT32_C(1)))
 		return (erx_abi_fail(error, "tag",
 		    "images[].hash_algorithm", base + 68));
-	if (!(record->format == UINT32_C(1)))
+	if (!(record->format == UINT32_C(2) || record->format == UINT32_C(1)))
 		return (erx_abi_fail(error, "tag",
 		    "images[].format", base + 12));
 	if (!(record->name.offset <= header->strings.count && record->name.length <= header->strings.count - record->name.offset && record->name.length <= UINT64_C(63) && record->name.length != 0))

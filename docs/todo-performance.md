@@ -14,6 +14,11 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
+* **[Low] packer, `mkfs.erofs` on every build.** `ProductionImage#assemble`, every test image
+  and the hosted `Release#build` write the system release's EROFS image (`ReleaseMedium.image`) before
+  packing, since the manifest records its extent; the hosted pack uses only its length. Measure the
+  added wall time of a production and a hosted build; if it matters, size the image without writing it
+  twice, or cache it by the release's digest.
 * **[Low] drivers, the cost of a register access from Erlang.** `erx_device:read/2`
   and `write/3` are BIFs, each resolving a register's name and checking it in
   the generated table. Nothing has measured that against the access itself, a

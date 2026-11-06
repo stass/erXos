@@ -102,7 +102,7 @@ class BootManifestTest < Minitest::Test
 
   # A missing disk is a normal state: a manifest with no block unit reads, and has no record.
   def test_a_manifest_without_the_block_unit_has_no_device_record
-    source = @source.sub(/^unit block\n(?:  .*\n)*/, '').gsub(/^window \w+\n(?:  .*\n)*/, '')
+    source = @source.sub(/^unit block\n(?:  .*\n)*/, '').gsub(/^(?:window|image) \w+\n(?:  .*\n)*/, '')
     refute_equal @source, source
     output, status = read(admitted(source))
     assert status.success?, output

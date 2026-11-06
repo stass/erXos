@@ -9,6 +9,9 @@
 # suites, logs and priv_dir directories charge about 97 MiB at the end of a
 # stock run. The system baseline, 240 MiB, holds that cap and ERTS, and with
 # the system principal's 128 MiB leaves 16 MiB of root_memory for devices.
+# The image release is the system release's EROFS image in the slot, with no
+# hash tree; the packer takes its extent from the image it builds
+# (ReleaseMedium.image), and the system domain holds a read-only window on it.
 manifest 1
 share system
   quota_ns 30000000
@@ -126,4 +129,14 @@ window data
   partition 0
   rights read,write
   image none
+image release
+  device "/virtio_mmio@a003e00"
+  input @artifact.release
+window release
+  holder system
+  device "/virtio_mmio@a003e00"
+  role verified_image
+  partition 0
+  rights read
+  image @image.release
 shell_principal @principal.system

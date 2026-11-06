@@ -367,7 +367,9 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_MF_DOMAIN_FLAGS_KNOWN` | 3 |
 | `ERX_MF_DOMAIN_REQUIRED` | 1 |
 | `ERX_MF_DOMAIN_RESCUE` | 2 |
+| `ERX_MF_HASH_ALGORITHM_NONE` | 0 |
 | `ERX_MF_HASH_ALGORITHM_SHA256` | 1 |
+| `ERX_MF_IMAGE_FORMAT_EROFS_UNCHECKED` | 2 |
 | `ERX_MF_IMAGE_FORMAT_EROFS_VERITY` | 1 |
 | `ERX_MF_LIMITS_FLAGS_KNOWN` | 1 |
 | `ERX_MF_LIMITS_SPACES` | 1 |
