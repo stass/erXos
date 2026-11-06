@@ -49,8 +49,9 @@
 
 -module(erx_file_remote).
 
-%% erx_path's callbacks on a grant, and how prim_file reads a walk's reply.
--export([walk/2, link_text/2, passed/2, refused/2]).
+%% erx_path's callbacks on a grant, and how prim_file reads a walk's reply; refused/2 and
+%% walk_reply/2 for the fuzz target (test/erlang/erx_file_remote_fuzz.erl).
+-export([walk/2, link_text/2, passed/2, refused/2, walk_reply/2]).
 -export([read_file_info/3, read_link/2, list_dir/2, write_file_info/3, make_dir/2,
          del_dir/2, delete/2, rename/3, make_link/3, make_symlink/3]).
 -export([open/3, read_file/2, set_cwd/2, identity/2]).
@@ -100,7 +101,8 @@
 %% read_line asks for.
 -define(READ_AHEAD, 65536).
 -define(LINE_READ, 256).
-%% The most one read answers, as Linux's read(2) caps a count at MAX_RW_COUNT.
+%% The most bytes one read answers, 4 KiB short of 2 GiB: a larger count reads short, as a
+%% read may, and the caller reads on.
 -define(READ_MAX, 16#7ffff000).
 
 %% Reading -----------------------------------------------------------------
@@ -830,8 +832,8 @@ base(#{cells := Cells}, cur) -> {ok, atomics:get(Cells, ?OFFSET)};
 base(File, eof) -> size_of(File);
 base(_, _) -> {error, badarg}.
 
-%% Sets the size to the offset. Through a file not opened for writing, einval, as Linux's
-%% ftruncate answers, sending nothing.
+%% Sets the size to the offset. Through a file not opened for writing, einval, as FreeBSD's
+%% kern_ftruncate answers, sending nothing.
 -spec truncate(#file_descriptor{}) -> ok | {error, posix()}.
 truncate(Fd) ->
     emptied(Fd, fun(#{access := read}) ->
@@ -988,7 +990,7 @@ walk({_, Tree, _} = Grant, Names) ->
     {Walks, _} = walks(Root, Names),
     Made = [Root | [New || {walk, _, New, _} <- Walks]],
     case exchange(Grant, [attach(Root, Tree) | Walks] ++ [{clunk, Fid} || Fid <- Made]) of
-        [{ok, _} | Walked] -> walk_reply(Walks, Walked, []);
+        [{ok, _} | Walked] -> walk_reply(Walks, Walked);
         [{error, _} = Error | _] -> {[], Error}
     end.
 
@@ -1083,7 +1085,7 @@ reached_paths([], _, _) ->
     ok;
 reached_paths([{Walks, _, Mode} | Reaches], Walked, Which) ->
     {Mine, Others} = split_at(length(Walks), Walked),
-    case walk_reply(Walks, Mine, []) of
+    case walk_reply(Walks, Mine) of
         {Kinds, ok} = Reply ->
             case passed(Kinds, Mode) of
                 true -> reached_paths(Reaches, Others, Which + 1);
@@ -1093,28 +1095,54 @@ reached_paths([{Walks, _, Mode} | Reaches], Walked, Which) ->
             {resume, Which, Reply}
     end.
 
-%% A chain of walks' reply as the resolver reads it, Kinds those of the chunks before,
-%% last first. A walk that lists fewer qids than names stopped: at a missing name when
-%% its last qid is a directory (enoent), else on a file that is not one (enotdir). A
+%% A chain of walks' reply as the resolver reads it, from the grammar's checked reply to
+%% each walk, in order (any replies after them are another request's). The server's
+%% replies are untrusted, and the grammar has already held each to its request's names
+%% (decode_reply/2). A walk that lists fewer qids than names stopped: at a missing name
+%% when its last qid is a directory (enoent), else on a file that is not one (enotdir). A
 %% chunk that ends on a file that is not a directory ends the walk there, since the next
-%% would start from it.
+%% would start from it. A qid after one that is not a directory names a walk past a file,
+%% which no server makes: that reply answers eio, with the kinds of the chunks before it.
+-spec walk_reply([tuple()], [term()]) -> reply().
+walk_reply(Walks, Replies) ->
+    walk_reply(Walks, Replies, []).
+
 walk_reply([], _, Kinds) ->
     {lists:reverse(Kinds, []), ok};
 walk_reply([{walk, _, _, Names} | Walks], [{ok, Qids} | Replies], Kinds) ->
-    Passed = kinds(Qids, Kinds),
-    case {length(Qids) =:= length(Names), Passed} of
-        {true, _} when Walks =:= [] -> walk_reply(Walks, Replies, Passed);
-        {true, [directory | _]} -> walk_reply(Walks, Replies, Passed);
-        {_, [Kind | _]} when Kind =/= directory -> {lists:reverse(Passed, []), {error, enotdir}};
-        {_, _} -> {lists:reverse(Passed, []), {error, enoent}}
+    case kinds(Qids, Kinds) of
+        past_a_file -> {lists:reverse(Kinds, []), {error, eio}};
+        {walked, Passed} when length(Qids) =:= length(Names) ->
+            chunk_end(whole, Passed, Walks, Replies);
+        {walked, Passed} -> chunk_end(short, Passed, Walks, Replies)
     end;
 walk_reply([_ | _], [{error, _} = Error | _], Kinds) ->
     {lists:reverse(Kinds, []), Error}.
 
-kinds([{Type, _, _} | Qids], Kinds) when Type band ?ERX_P9_QTDIR =/= 0 -> kinds(Qids, [directory | Kinds]);
-kinds([{Type, _, _} | Qids], Kinds) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> kinds(Qids, [link | Kinds]);
-kinds([_ | Qids], Kinds) -> kinds(Qids, [other | Kinds]);
-kinds([], Kinds) -> Kinds.
+%% How a chunk that listed a qid for every name (whole) or fewer (short) leaves the
+%% reading, Passed the kinds so far, last first: the last chunk whole ends ok, a whole
+%% chunk that ends on a directory goes on to the next, and otherwise the walk ends at the
+%% chunk's last qid, enotdir on a file that is not a directory and enoent, the next name
+%% missing, on a directory.
+chunk_end(whole, Passed, [], _) -> {lists:reverse(Passed, []), ok};
+chunk_end(whole, [directory | _] = Passed, Walks, Replies) -> walk_reply(Walks, Replies, Passed);
+chunk_end(_, [Kind | _] = Passed, _, _) when Kind =/= directory -> {lists:reverse(Passed, []), {error, enotdir}};
+chunk_end(_, Passed, _, _) -> {lists:reverse(Passed, []), {error, enoent}}.
+
+%% Each qid's kind onto Kinds, last first, as {walked, Kinds}; past_a_file when a qid
+%% follows one that is not a directory.
+kinds([], Kinds) ->
+    {walked, Kinds};
+kinds([Qid | Qids], Kinds) ->
+    case {kind(Qid), Qids} of
+        {directory, _} -> kinds(Qids, [directory | Kinds]);
+        {Kind, []} -> {walked, [Kind | Kinds]};
+        {_, [_ | _]} -> past_a_file
+    end.
+
+kind({Type, _, _}) when Type band ?ERX_P9_QTDIR =/= 0 -> directory;
+kind({Type, _, _}) when Type band ?ERX_P9_QTSYMLINK =/= 0 -> link;
+kind(_) -> other.
 
 %% An encoded path's text: prim_file's encoding ends in the NUL its NIF hands to C.
 text(Encoded) when byte_size(Encoded) > 0, binary_part(Encoded, byte_size(Encoded) - 1, 1) =:= <<0>> ->

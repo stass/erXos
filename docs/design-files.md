@@ -395,7 +395,7 @@ and back ([Errors](#errors)).
 | unlinkat | `{unlinkat, DirFid, Name, Flags}` | `ok` | `Flags` 0 or `AT_REMOVEDIR` |
 | readlink | `{readlink, Fid}` | `{ok, Target}` | `Fid` a symbolic link |
 | getattr | `{getattr, Fid, RequestMask}` | `{ok, Attr}` | `Attr` a map whose keys are 9P2000.L's field names, `valid` to `data_version`; erXos's servers set `valid` to the basic fields and the `data_version` bit ([Identity](#identity-and-version)) |
-| setattr | `{setattr, Fid, Attr}` | `ok` | `Attr` a map of 9P2000.L's fields, `valid` naming those set; a `uid` or `gid` other than the file's own fails with `eperm`, and the file's own changes nothing but `ctime`, as a `chown` to its own owner does; a size set through an opened fid needs that fid opened for writing, whatever the file's mode, and fails with `einval` otherwise, as Linux's `ftruncate` does; a size set through an unopened fid needs the file's write permission, as `truncate` does |
+| setattr | `{setattr, Fid, Attr}` | `ok` | `Attr` a map of 9P2000.L's fields, `valid` naming those set; a `uid` or `gid` other than the file's own fails with `eperm`, and the file's own changes nothing but `ctime`, as a `chown` to its own owner does; a size set through an opened fid needs that fid opened for writing, whatever the file's mode, and fails with `einval` otherwise, as FreeBSD's `kern_ftruncate` does; a size set through an unopened fid needs the file's write permission, as `truncate` does |
 | xattrwalk | `{xattrwalk, Fid, NewFid, Name}` | `{ok, Size}` | `NewFid` then reads the value, or the list of names for an empty `Name` |
 | xattrcreate | `{xattrcreate, Fid, Name, Size, Flags}` | `ok` | `Fid` then takes writes of `Size` bytes, at most 65,536, committed at its clunk; `enotsup` where the format keeps none |
 | readdir | `{readdir, Fid, Offset, Count}` | `{ok, Entries}` | `Fid` an open directory; each entry `{Qid, Offset, Type, Name}`, `Type` Linux's `d_type`, not the qid's type, the entries fitting in `Count` bytes as 9P2000.L packs them; an empty list at the end of the directory |
@@ -900,11 +900,16 @@ An action names its entry as the table holds it, the names to walk from
 the provider's root, the entry's `root` names first, and for a parent the
 last name; a program's entry, whose fid already stands at its root, has
 an empty `root`. The caller sends the
-operation together with the action's walk; when the walk stops before its
-last name or ends on a link the operation follows, the operation fails
-with `ebadf` and changes nothing ([Pipelined
-requests](#pipelined-requests)), and the caller calls the resumption with
-the walk's reply, which returns the next action. A parent's operation
+operation together with the action's walk. When the walk stops before its
+last name, it makes no fid, so the operation fails with `ebadf` and
+changes nothing ([Pipelined requests](#pipelined-requests)); when it
+ends on a link the operation follows, it makes its fid on the link,
+where nothing sent with it acts through the link (`lopen` fails with
+`eloop`, an operation on a directory with `enotdir`, and one that
+changes a file is sent only once the walk has passed), and the caller
+sets the operation's answer aside. Either way the caller calls the
+resumption with the walk's reply, which returns the next action. A
+parent's operation
 that meets a link at the last name, as `lcreate` answers `eloop` for an
 operation that follows it, reports it as one more kind, `link`, after the
 directory's, and the resumption follows the link. A resumption called
@@ -1056,11 +1061,13 @@ The resolver reads a path's names in this order:
      for itself without asking (step 3 of the client's
      [errors](#erlang-clients-prim_file-and-erx_file_remote)).
 
-   A target or parent walk that stops at a link, or ends on a last link
-   the operation follows, makes no new fid, so the operation sent with it
-   fails with `ebadf` and changes nothing ([Pipelined
-   requests](#pipelined-requests)); the caller calls the resumption with
-   the walk's reply and the resolver follows the link. An operation is
+   A target or parent walk that stops at a link makes no new fid, so the
+   operation sent with it fails with `ebadf` and changes nothing
+   ([Pipelined requests](#pipelined-requests)); one that ends on a last
+   link the operation follows makes its fid on the link, where nothing
+   sent with it acts through the link, and the caller sets the
+   operation's answer aside. Either way the caller calls the resumption
+   with the walk's reply and the resolver follows the link. An operation is
    never sent with
    a walk whose names still need a check of their own, so
    `change_mode("file/.")` answers `enotdir` from a walk of its own and
@@ -1800,8 +1807,12 @@ entry's `root` names, from a fid it attaches to the tree's root. The
 client is the resolver's executor:
 it performs each walk and link read the resolver asks for, sends the
 operation with a target's or a parent's walk, calls the resumption with
-the walk's reply when the operation answers `ebadf`, and never reads a
-path's names itself. A link that leads a resolution from a grant onto
+the walk's reply when the walk did not pass as the operation asks, having
+stopped short, ended on a link the operation follows, or, for a parent,
+ended on a file that is not a directory, and never reads a
+path's names itself. A walk's reply comes from the server and is
+untrusted: one that lists a qid after a qid that is not a directory names
+a walk on from a file, which no server makes, and answers `eio`. A link that leads a resolution from a grant onto
 the release or an EROFS image leaves the resolver's next action on that
 entry, and `prim_file` runs the operation there, as on any path the
 caller writes. `erx_file_remote` and `erx_path` are preloaded, as
@@ -1889,7 +1900,7 @@ Error step 5 below finds the working directory through this path.
   has not read; stock's `pwrite` empties its buffer but leaves its
   descriptor's offset past the bytes read ahead, so that its next read
   skips them, which erXos's does not. One read answers at most
-  0x7ffff000 bytes, as Linux's `read(2)` does. The opening process owns the fid, so the file closes when that
+  0x7ffff000 bytes, 4 KiB short of 2 GiB, a short read the caller reads on from. The opening process owns the fid, so the file closes when that
   process ends, and a call from any other process fails with
   `error(not_on_controlling_process)`, as stock `prim_file`'s
   `get_fd_data/1` fails it. A write sets the offset by the rule of [Open
@@ -1971,8 +1982,9 @@ or replaces the directory a last link leads to; `make_symlink` and
 `make_link`'s new name answer `eexist` for a directory, and an `open`
 that creates answers for one as without the `/`, `eexist` when it is
 `exclusive` and `eisdir` otherwise; and `make_link`'s existing path is
-followed, must be a directory, and so answers `eperm` once the new name
-is free. The resolver makes each of these checks with a walk of the
+followed, must be a directory, and so answers `eperm` before its new
+name is looked up, as `kern_linkat_vp` refuses a directory before its
+`CREATE` lookup of the new name. The resolver makes each of these checks with a walk of the
 last name (step 6 of [Resolving a path](#resolving-a-path)) before
 anything is sent that changes the tree.
 
@@ -2007,15 +2019,21 @@ one translation lives here, applied in this order:
    included, `eloop` past 32 links, `einval` and `enametoolong` for a
    malformed path or one over its bounds, and, once the names before it
    have joined the place, `einval` for a last `.` or `..` of `del_dir`
-   or of `rename` on either side, which `delete` answers as `eperm`, as
-   `kern_funlinkat` turns `namei`'s `EINVAL`. The degenerate `/` given
+   or of `rename` on either side. `delete` answers every `einval` of the
+   resolver as `eperm`, a malformed path's and a last `.` or `..`'s
+   alike, as `kern_funlinkat` turns every `EINVAL` of `namei`, so
+   `delete("d/..")` and `delete(".")` answer `eperm`, while a trailing
+   `/` after a file stands as `enotdir`, `vfs_lookup`'s answer under
+   `TRAILINGSLASH`. The degenerate `/` given
    to anything but a lookup, from the path or a link's text, answers
    `eisdir`; step 4 makes it `eperm`
    for `delete`, as stock's `efile_del_file` makes FreeBSD's `EISDIR`,
    and a rename of a directory onto `/` answers `einval`, as
    `kern_renameat` turns it. `make_link` resolves its
    existing path first, as `kern_linkat` looks it up before the new name,
-   and a failure there is the answer; `make_symlink`'s target is text and
+   and a failure there is the answer, as is `eperm` for a directory there,
+   whatever the new name, as `kern_linkat_vp` answers before it looks the
+   new name up; `make_symlink`'s target is text and
    is never resolved. Steps 4 and 5 then apply to the answer as to a
    server's.
 3. A **top**, an existing directory that no request to a parent can name
@@ -2331,7 +2349,7 @@ that hold them.
 
 | Failure | Detection | What remains | Cleanup | What the user sees |
 | --- | --- | --- | --- | --- |
-| A malformed path | the resolver | nothing | none | `einval` or `enametoolong` |
+| A malformed path | the resolver | nothing | none | `einval` (`eperm` from `delete`) or `enametoolong` |
 | A frame that fails the funnel | the receiver's funnel | nothing | the receiver stops reading the lane and the system domain takes the connection down ([design-domains.md](design-domains.md#the-funnel)) | `noconnection` on every grant across that connection; `eio` on its open files |
 | A request that fails the protocol's grammar or bounds | `erx_fs`, before any callback | nothing | none | `einval`; the server counts it |
 | A 9P2000.L message at an edge that fails the codec | `erx_9p` | nothing | the bridge discards it and counts it | the edge's client sees no reply, as for a message lost on its transport |
@@ -3031,7 +3049,10 @@ Open question for the user:
   which checks the name before a `.` is a directory and, read but not
   run, answers a last `..` of `DELETE` or `RENAME` by its cache), `sys/kern/vfs_syscalls.c`
   (`kern_frmdirat`'s `EBUSY` for a mounted root; `kern_funlinkat`'s
-  `EPERM` for a directory and for `namei`'s `EINVAL`; `kern_renameat`'s
+  `EPERM` for a directory and for every `EINVAL` of `namei`;
+  `kern_linkat_vp`'s `EPERM` for a directory before the new name's
+  lookup; `kern_ftruncate`'s `EINVAL` through a descriptor not opened
+  for writing; `kern_renameat`'s
   `EBUSY` for a mounted root as source or destination, its `EINVAL` for
   a directory renamed onto `/`, and its look-up of the source with
   `DELETE` and the destination with `RENAME`; `kern_linkat`, which

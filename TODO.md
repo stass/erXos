@@ -514,6 +514,11 @@ it; git history is the record of completed work.
   listings across mounts), which needs the namespace's table from the NIF.
 * [Low] runtime, `erx_file_remote`: `#file_info.major_device` is a hash of the grant's pid and tree where the
   design has a number the namespace gives each mounted tree; two trees can collide.
+* [Low] runtime, `otp/erts/preloaded/src/prim_file.erl`: `delete/1` answers every `einval` as `eperm`, a
+  server's answer to `unlinkat` included, where FreeBSD's `kern_funlinkat` turns only `namei`'s `EINVAL`
+  and lets `VOP_REMOVE`'s stand ([Errors](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote),
+  step 2); the resolver's answer needs to reach `delete/1` apart from the server's for the translation to
+  apply to it alone.
 * [Low] runtime, `erx_file_remote`: `del_dir`, `delete` and `rename` of a mount point answer `ebusy` only
   when the point is the tree's root; a bind of a directory below the root is removed or renamed through the
   bind where Linux answers `ebusy`; the remote answer's place says so (`Names =:= Root`), so the check is one
