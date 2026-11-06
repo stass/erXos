@@ -3,9 +3,10 @@
 
 %% prim_file's operations on a path below a file server's grant (design-files.md, Erlang
 %% clients). prim_file's NIF answers such a path with its mount entry's grant, {Pid, Tree,
-%% Rights}, and its place, {Point, Root, Names}: the entry's point in the namespace, the
-%% entry's root in the tree, and the path's names from the tree's root, the entry's root
-%% included. prim_file calls the operation here, in the calling process, with the path as
+%% Rights}, and its place, {Point, Root, Names, Top}: the entry's point in the namespace,
+%% the entry's root in the tree, the path's names from the tree's root, the entry's root
+%% included, and whether the path is the entry's point itself, the top of a mount or of
+%% a bind, as the namespace decides it. prim_file calls the operation here, in the calling process, with the path as
 %% the caller wrote it. Rights are the entry's, so a read-only bind of a writable grant
 %% arrives read-only, and a request that writes is refused with erofs here, before
 %% anything is sent.
@@ -67,8 +68,10 @@
 %% A path's names from the tree's root, joined by "/": <<>> is the root.
 -type names() :: binary().
 %% Where a path lies on its grant: the entry maps the namespace path Point to the tree's
-%% names Root, and Names begins with Root.
--type place() :: {Point :: binary(), Root :: names(), Names :: names()}.
+%% names Root, and Names begins with Root. Top is the namespace's own answer to whether
+%% the path is Point itself, which rename, del_dir and delete take from here and not
+%% from the names: a bind's top has its root's names.
+-type place() :: {Point :: binary(), Root :: names(), Names :: names(), Top :: boolean()}.
 %% A path as the caller wrote it, encoded as prim_file encodes it for its NIF, NUL-terminated.
 -type path() :: binary().
 %% A path's text: a path() without its NUL.
@@ -358,20 +361,17 @@ make(Grant, NameList, Text, Make) ->
 %% the last name is never followed through, answers enotdir from the server.
 -spec del_dir(grant(), place(), path()) -> ok | {error, posix()}.
 del_dir(Grant, Place, Path) ->
-    Answer = one(Grant, Place, Path,
-                 fun(OnGrant, NameList, Text) ->
-                         remove(OnGrant, NameList, Text,
-                                fun(<<".">>) -> {error, einval};
-                                   (<<"..">>) -> {error, enotempty}
-                                end,
-                                fun(Names) ->
-                                        in_directory(OnGrant, Names,
-                                                     fun(DirFid, Name) ->
-                                                             {unlinkat, DirFid, Name, ?ERX_P9_AT_REMOVEDIR}
-                                                     end)
-                                end)
-                 end,
-                 fun(Text) -> prim_file:del_dir(Text) end),
+    Answer = remove(Grant, Place, Path,
+                    fun(<<".">>) -> {error, einval};
+                       (<<"..">>) -> {error, enotempty}
+                    end,
+                    fun(OnGrant, Names, _) ->
+                            in_directory(OnGrant, Names,
+                                         fun(DirFid, Name) ->
+                                                 {unlinkat, DirFid, Name, ?ERX_P9_AT_REMOVEDIR}
+                                         end)
+                    end,
+                    fun(Text) -> prim_file:del_dir(Text) end),
     case Answer of
         {error, Full} when Full =:= enotempty; Full =:= eexist -> working_directory_step(Path);
         _ -> Answer
@@ -394,36 +394,41 @@ working_directory_step(Path) ->
 %% for a directory, enotdir for anything else, a link included, as Linux's unlink answers.
 -spec delete(grant(), place(), path()) -> ok | {error, posix()}.
 delete(Grant, Place, Path) ->
-    Answer = one(Grant, Place, Path,
-                 fun(OnGrant, NameList, Text) ->
-                         remove(OnGrant, NameList, Text, fun(_) -> {error, eisdir} end,
-                                fun(Names) ->
-                                        case slashed(Text) of
-                                            false ->
-                                                in_directory(OnGrant, Names,
-                                                             fun(DirFid, Name) ->
-                                                                     {unlinkat, DirFid, Name, 0}
-                                                             end);
-                                            true ->
-                                                looked(OnGrant, Names, fun not_a_directory/1)
-                                        end
-                                end)
-                 end,
-                 fun(Text) -> prim_file:delete(Text) end),
+    Answer = remove(Grant, Place, Path, fun(_) -> {error, eisdir} end,
+                    fun(OnGrant, Names, Text) ->
+                            case slashed(Text) of
+                                false ->
+                                    in_directory(OnGrant, Names,
+                                                 fun(DirFid, Name) -> {unlinkat, DirFid, Name, 0} end);
+                                true ->
+                                    looked(OnGrant, Names, fun not_a_directory/1)
+                            end
+                    end,
+                    fun(Text) -> prim_file:delete(Text) end),
     case Answer of
         {error, eisdir} -> {error, eperm};
         _ -> Answer
     end.
 
-%% An operation that removes a name: a last "." or ".." answers Special's error once the
-%% rest of the path is a directory (step 2), and the tree's root, a mount point, ebusy
-%% (step 3); else Remove runs on the names, unless the rights refuse a write.
-remove(Grant, NameList, Text, Special, Remove) ->
-    case last_name_step(Text, Special) of
-        plain when NameList =:= [] -> {error, ebusy};
-        plain -> if_writable(Grant, [{dir_of(NameList), follow}], fun() -> Remove(NameList) end);
-        {error, _} = Error -> Error
-    end.
+%% An operation that removes a name, following links as one/5 does: a last "." or ".."
+%% answers Special's error once the rest of the path is a directory (step 2), and a path
+%% whose place says Top, the top of a mount or of a bind, ebusy (step 3); else Remove runs
+%% on the grant, the names and the text, unless the rights refuse a write.
+remove(Grant, Place, Path, Special, Remove, Local) ->
+    with_links(Grant, [Place], [text(Path)],
+               fun(OnGrant, [{_, _, Names, Top}], [Text]) ->
+                       case {last_name_step(Text, Special), Top} of
+                           {plain, true} ->
+                               {error, ebusy};
+                           {plain, false} ->
+                               NameList = names(Names),
+                               if_writable(OnGrant, [{dir_of(NameList), follow}],
+                                           fun() -> Remove(OnGrant, NameList, Text) end);
+                           {{error, _} = Error, _} ->
+                               Error
+                       end
+               end,
+               fun([Text]) -> Local(Text) end).
 
 %% A source that is not a directory, written with a trailing "/" on either side, answers
 %% enotdir, as Linux's rename answers once it has found the source.
@@ -437,22 +442,20 @@ rename(Grant, Place, OtherPlace, Source, Destination) ->
         _ -> Answer
     end.
 
-renamed(Grant, [{_, _, Names}, {_, _, OtherNames}], [Source, Destination]) ->
+renamed(Grant, [{_, _, Names, FromTop}, {_, _, OtherNames, ToTop}], [Source, Destination]) ->
     {From, To} = {names(Names), names(OtherNames)},
-    case {Source, special(Source) orelse special(Destination)} of
-        {<<"/">>, _} ->
-            %% Step 1: stock's own answer for a failed rename of "/".
-            {error, einval};
-        {_, true} ->
+    case special(Source) orelse special(Destination) of
+        true ->
             %% Both paths' directories first, the source's before, as Linux finds them
             %% before it looks at either last name.
             case directory(rest(Source)) of
                 ok -> on_ok(directory(rest(Destination)), {error, ebusy});
                 Error -> Error
             end;
-        {_, false} when From =:= []; To =:= [] ->
+        false when FromTop; ToTop ->
+            %% Step 3: either path is its entry's top, as the namespace placed it.
             {error, ebusy};
-        {_, false} ->
+        false ->
             if_writable(Grant, [{dir_of(From), follow}, {dir_of(To), follow}],
                         fun() -> moved(Grant, From, To, slashed(Source) orelse slashed(Destination)) end)
     end.
@@ -480,7 +483,7 @@ make_link(Grant, Place, OtherPlace, Existing, New) ->
     with_links(Grant, [Place, OtherPlace], [text(Existing), text(New)], fun linked/3,
                fun([From, To]) -> prim_file:make_link(From, To) end).
 
-linked(Grant, [{_, _, Names}, {_, _, OtherNames}], [ExistingText, NewText]) ->
+linked(Grant, [{_, _, Names, _}, {_, _, OtherNames, _}], [ExistingText, NewText]) ->
     {Existing, Made} = {names(Names), names(OtherNames)},
     Walk = {Existing, case slashed(ExistingText) of
                            true -> directory;
@@ -1192,7 +1195,7 @@ set_cwd(Grant, Place, Path) ->
 %% chdir's checks on what the path reaches: a directory, which the domain's user may
 %% search, as the owner whose permission bits a server checks (design-tmp.md,
 %% Permissions); else enotdir or eacces, or the walk's answer.
-cwd_at(Grant, {_, _, Names} = Reached, Text) ->
+cwd_at(Grant, {_, _, Names, _} = Reached, Text) ->
     case act(Grant, [{names(Names), followed(Text)}], fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
         {ok, #{mode := Mode}} when Mode band ?ERX_P9_S_IFMT =/= ?ERX_P9_S_IFDIR -> {error, enotdir};
         {ok, #{mode := Mode}} when Mode band 8#100 =:= 0 -> {error, eacces};
@@ -1201,7 +1204,7 @@ cwd_at(Grant, {_, _, Names} = Reached, Text) ->
     end.
 
 %% The namespace path a place names: the entry's point, then the names below its root.
-namespace_path({Point, Root, Names}) ->
+namespace_path({Point, Root, Names, _}) ->
     {_, Below} = split_at(length(names(Root)), names(Names)),
     joined([Point | Below], false).
 
@@ -1214,7 +1217,7 @@ identity(Text) ->
     Found = case prim_file:erx_resolve([Text]) of
                 {remote, Grant, Place} ->
                     with_links(Grant, [Place], [Text],
-                               fun({Pid, Tree, _} = OnGrant, [{_, _, Names}], _) ->
+                               fun({Pid, Tree, _} = OnGrant, [{_, _, Names, _}], _) ->
                                        case act(OnGrant, [{names(Names), follow}],
                                                 fun([Fid]) -> {getattr, Fid, ?INFO_MASK} end) of
                                            {ok, #{qid := {_, _, QidPath}}} -> {found, {Pid, Tree, QidPath}};
@@ -1376,7 +1379,7 @@ split_last(NameList) ->
 %% text, Local on the text of a path that a link led to the NIF's own providers.
 one(Grant, Place, Path, Try, Local) ->
     with_links(Grant, [Place], [text(Path)],
-               fun(OnGrant, [{_, _, Names}], [Text]) -> Try(OnGrant, names(Names), Text) end,
+               fun(OnGrant, [{_, _, Names, _}], [Text]) -> Try(OnGrant, names(Names), Text) end,
                fun([Text]) -> Local(Text) end).
 
 %% Runs Try on the grant and the places its paths lie on, and gives its answer, unless a
@@ -1430,7 +1433,7 @@ follow(Grant, Places, Texts, Try, Local, Followed, Which, At) ->
 %% root's own names has no such directory, and a relative one answers enoent. A link that
 %% is empty answers enoent, as on Linux. Reading the link may meet an earlier one, which
 %% is answered as a link() for the caller to follow.
-link_path(Grant, {Point, Root, Names}, At, Slashed) ->
+link_path(Grant, {Point, Root, Names, _}, At, Slashed) ->
     {Through, After} = split_at(At + 1, names(Names)),
     case act(Grant, [{Through, nofollow}], fun([Fid]) -> {readlink, Fid} end) of
         {ok, <<>>} ->

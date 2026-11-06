@@ -257,6 +257,14 @@ fuzz_check_result(const erx_ns_t *ns, const erx_ns_result_t *out)
 	/* The result is a prefix match, and the longest one. */
 	if (out->res_mount != NULL && !fuzz_under(out->res_path, out->res_mount->point))
 		abort();
+	/*
+	 * The top is exactly the path at its entry's point, and a path on an entry with no
+	 * names is its top, so erx_file_remote never takes the parent of no names.
+	 */
+	if (out->res_top != (out->res_mount != NULL &&
+	    strcmp(out->res_path, out->res_mount->point) == 0) ||
+	    (out->res_mount != NULL && out->res_names_length == 0 && !out->res_top))
+		abort();
 	for (uint32_t index = 0; index < ns->count; index++) {
 		if (fuzz_under(out->res_path, ns->mounts[index].point) && (out->res_mount == NULL ||
 		    strlen(ns->mounts[index].point) > strlen(out->res_mount->point)))
@@ -364,7 +372,8 @@ for (uint32_t other = 0; other < fs->count; other++) {
 static bool
 fuzz_same_result(const erx_ns_result_t *a, const erx_ns_result_t *b)
 {
-	return (a->res_mount == b->res_mount && a->res_nnames == b->res_nnames &&
+	return (a->res_mount == b->res_mount && a->res_top == b->res_top &&
+	    a->res_nnames == b->res_nnames &&
 	    a->res_names_length == b->res_names_length &&
 	    a->res_path_length == b->res_path_length &&
 	    memcmp(a->res_names, b->res_names, a->res_names_length) == 0 &&
@@ -411,9 +420,9 @@ fuzz_check_two(const erx_ns_t *ns, const uint8_t *first, size_t first_length,
 		if (!fuzz_same_result(&one, &pair_one) ||
 		    !fuzz_same_result(&two, &pair_two))
 			abort();
-	} else if (pair_one.res_mount != NULL || pair_one.res_nnames != 0 ||
+	} else if (pair_one.res_mount != NULL || pair_one.res_top || pair_one.res_nnames != 0 ||
 	    pair_one.res_names_length != 0 || pair_one.res_path_length != 0 ||
-	    pair_two.res_mount != NULL || pair_two.res_nnames != 0 ||
+	    pair_two.res_mount != NULL || pair_two.res_top || pair_two.res_nnames != 0 ||
 	    pair_two.res_names_length != 0 || pair_two.res_path_length != 0)
 		abort();
 }
@@ -438,9 +447,9 @@ fuzz_check_rename(const erx_ns_t *ns, const uint8_t *source, size_t source_lengt
 	    source_length == 1 && source[0] == '/') {
 		status = erx_ns_resolve_rename(ns, source, source_length, destination,
 		    destination_length, &rename_one, &rename_two);
-		if (status != ERX_NS_EINVAL || rename_one.res_mount != NULL ||
+		if (status != ERX_NS_EINVAL || rename_one.res_mount != NULL || rename_one.res_top ||
 		    rename_one.res_nnames != 0 || rename_one.res_names_length != 0 ||
-		    rename_one.res_path_length != 0 || rename_two.res_mount != NULL ||
+		    rename_one.res_path_length != 0 || rename_two.res_mount != NULL || rename_two.res_top ||
 		    rename_two.res_nnames != 0 || rename_two.res_names_length != 0 ||
 		    rename_two.res_path_length != 0)
 			abort();

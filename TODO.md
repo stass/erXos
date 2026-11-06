@@ -507,6 +507,18 @@ it; git history is the record of completed work.
   read-write bind of `/tmp/a`, to `/tmp/c` moves `/tmp/a` where Linux answers `exdev`, and `rename`, `del_dir` and
   `delete` of `/tmp/l/x` with `/tmp/l -> /` and `/x` a bind act on the bind's root. Let the place term carry
   the namespace's own top decision; `renamed/3`'s `{<<"/">>, _}` clause is then dead.
+* [Medium] runtime, `erx_file_remote`: `make/4`, `open_on/4` and `linked/3` still decide a tree's root from
+  the names (`NameList =:= []`), so at a bind's top, whose names are its root's, `make_dir`, a creating
+  `open`, `make_symlink` and `make_link`'s new name act on the bind root's parent on the server, outside the
+  entry: on a read-only bind `make_dir` answers `erofs` where Linux answers `eexist`, and on a writable bind
+  whose root was removed elsewhere it makes the root again. Take the place's `Top` there too, ideally through
+  one `parent(Place) -> {Dir, Name} | top` that every operation must answer, so `dir_of([])` cannot be reached.
+* [Low] runtime, `erx_file_remote` and [design-files.md](docs/design-files.md#errors) step 3: `ebusy` for a
+  mount's or bind's top comes before errors Linux reports first: `delete` of a directory top answers `ebusy`
+  where Linux's `unlink` answers `eisdir` (stock `eperm`), and a rename onto a directory top in the same mount,
+  a top onto a file, a missing destination directory and a read-only parent answer `ebusy` where Linux
+  answers `eisdir`, `enotdir`, `enoent` and `erofs`. Apply step 3 after the checks Linux makes first, or
+  record the order as a documented difference with a test.
 * [Low] runtime, `erx_ns_resolve_two` and [design-files.md](docs/design-files.md#erlang-clients-prim_file-and-erx_file_remote):
   a rename or a link places each path by its whole resolved path, where Linux places a rename's two paths and a
   link's new name by their directories: `rename("/tmp/x", "/tmp/..")` answers `exdev` where Linux answers

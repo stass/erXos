@@ -322,11 +322,13 @@ erx_grant_term(ErlNifEnv *env, const efile_path_t *path)
 }
 
 /*
- * {Point, Root, Names}: where the path lies, for erx_file_remote. The entry maps the
- * namespace path Point to the tree's names Root ("" for the tree's root), and Names
- * are the path's names from the tree's root, Root's first, joined by `/`. A client
- * following a symbolic link expresses the link's directory as a namespace path with
- * them (design-files.md, Resolving a path).
+ * {Point, Root, Names, Top}: where the path lies, for erx_file_remote. The entry maps
+ * the namespace path Point to the tree's names Root ("" for the tree's root), and
+ * Names are the path's names from the tree's root, Root's first, joined by `/`. A
+ * client following a symbolic link expresses the link's directory as a namespace path
+ * with them (design-files.md, Resolving a path). Top is the namespace's res_top, true
+ * when the path is the entry's point itself, which the client refuses to remove or
+ * rename (design-files.md, Errors).
  */
 static ERL_NIF_TERM
 erx_place_term(ErlNifEnv *env, const efile_path_t *path)
@@ -335,7 +337,8 @@ erx_place_term(ErlNifEnv *env, const efile_path_t *path)
 
 	memcpy(enif_make_new_binary(env, path->result.res_names_length, &names),
 	    path->result.res_names, path->result.res_names_length);
-	return (enif_make_tuple3(env, path->point, path->root, names));
+	return (enif_make_tuple4(env, path->point, path->root, names,
+	    enif_make_atom(env, path->result.res_top ? "true" : "false")));
 }
 
 /*

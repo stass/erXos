@@ -23,9 +23,9 @@
  *                       path, <mount or -> <names>
  *   R <first> <second>  erx_ns_resolve_rename; answers as T does
  *   Q <path>            answer one line:
- *                       <status> <mount or -> <nnames> <names> <path> <kind> <file> <listing>
+ *                       <status> <mount or -> <top> <nnames> <names> <path> <kind> <file> <listing>
  *
- * status is erx_ns_status_t's number, mount the table's index, kind
+ * status is erx_ns_status_t's number, mount the table's index, top 1 or 0, kind
  * erx_release_fs_kind_t's number and listing the names joined by `,`. A refused
  * path answers its status and nothing more. An operand may be `-`, for empty.
  */
@@ -135,7 +135,7 @@ driver_answer(const uint8_t *path, size_t length)
 		fputs("- ", stdout);
 	else
 		printf("%d ", (int)(out.res_mount - ns.mounts));
-	printf("%u ", out.res_nnames);
+	printf("%d %u ", out.res_top ? 1 : 0, out.res_nnames);
 	driver_put_hex(out.res_names, out.res_names_length);
 	putchar(' ');
 	driver_put_hex(out.res_path, out.res_path_length);

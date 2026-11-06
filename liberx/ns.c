@@ -279,6 +279,9 @@ erx_ns_resolve(const erx_ns_t *ns, const uint8_t *path, size_t length,
 		return (status);
 	}
 	out->res_mount = mount;
+	/* The point is the path or a whole-name prefix of it: equal lengths mean the path is the point. */
+	out->res_top = mount != NULL &&
+	    out->res_path_length == erx_ns_field_length(mount->point);
 	return (ERX_NS_OK);
 }
 
@@ -287,6 +290,7 @@ static void
 erx_ns_refuse(erx_ns_result_t *out)
 {
 	out->res_mount = NULL;
+	out->res_top = false;
 	out->res_nnames = 0;
 	out->res_names_length = 0;
 	out->res_path_length = 0;

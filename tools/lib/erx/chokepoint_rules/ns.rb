@@ -11,10 +11,11 @@ module Erx
           rule: 'only erx_ns_resolve writes a resolved path, so a path reaches a provider only through it',
           design: 'docs/design-files.md#invariants',
           scope: Chokepoints::Scope.new(own: true, extra: ['otp/erts/emulator/nifs/erxos/**/*']),
-          pattern: /\bres_(?:mount|nnames|names_length|path_length|names|path)\b\s*(?:\[[^\]]*\]\s*)?(?:[-+*\/|&^]?=(?!=)|\+\+|--)/,
+          pattern: /\bres_(?:mount|top|nnames|names_length|path_length|names|path)\b\s*(?:\[[^\]]*\]\s*)?(?:[-+*\/|&^]?=(?!=)|\+\+|--)/,
           sites: [Chokepoints::Site.new(glob: 'liberx/ns.c')],
           seed: { 'liberx/seeded.c' => "void f(erx_ns_result_t *out) { out->res_names_length = 0; }\n",
-                  'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(erx_ns_result_t *out) { out->res_path[0] = 0; }\n" }
+                  'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(erx_ns_result_t *out) { out->res_path[0] = 0; }\n",
+                  'otp/erts/emulator/nifs/erxos/seeded_top.c' => "void f(erx_ns_result_t *out) { out->res_top = 1; }\n" }
         ),
         Chokepoints::Forbidden.new(
           name: 'erts-reads-no-index',

@@ -75,21 +75,24 @@ typedef struct erx_ns {
  * What a path resolved to; a source check lets only liberx/ns.c write these
  * fields. res_mount is NULL for the empty root, a read-only
  * directory above the mount points of a narrowed namespace. res_names is the names
- * after the mount's point, under its root, joined by `/` with no leading `/`,
- * and empty at the top. res_path is the whole path, normalised and absolute, which
- * is what a working directory stores. Both are NUL-terminated, and neither
- * holds `.`, `..` or an empty name.
+ * after the mount's point, under its root, joined by `/` with no leading `/`.
+ * res_path is the whole path, normalised and absolute, which is what a working
+ * directory stores. Both are NUL-terminated, and neither holds `.`, `..` or an
+ * empty name. res_top says whether res_path is its entry's point itself, the top
+ * of a mount or of a bind, whose names are its root's: the one place that decides
+ * what a rename, a del_dir and a delete refuse with ebusy (design-files.md, Errors).
  */
 typedef struct erx_ns_result {
 	const erx_ns_mount_t *res_mount;
 	uint32_t	res_nnames;
+	bool		res_top;
 	size_t		res_names_length;
 	size_t		res_path_length;
 	char		res_names[ERX_PATH_MAX];
 	char		res_path[ERX_PATH_MAX];
 } erx_ns_result_t;
 
-/* Anything but ERX_NS_OK leaves res_mount NULL and every count zero. */
+/* Anything but ERX_NS_OK leaves res_mount NULL, res_top false and every count zero. */
 erx_ns_status_t	erx_ns_resolve(const erx_ns_t *, const uint8_t *, size_t,
 	    erx_ns_result_t *);
 /*

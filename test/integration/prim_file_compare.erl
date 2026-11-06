@@ -241,8 +241,18 @@ two_paths(Show) ->
     Show("rename mount dot", Reached(fun() -> prim_file:rename(<<"/tmp/.">>, <<"/u/y">>) end)),
     Show("link one", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/u/y">>) end)),
     Show("link two", Reached(fun() -> prim_file:make_link(<<"/u/x">>, <<"/tmp/y">>) end)),
+    %% The top of a writable bind on the same grant is a mount point too, though its
+    %% names are its root's: a rename to or from it, del_dir and delete answer ebusy
+    %% without asking the server, and the bound directory stays where it is. The rename
+    %% from the top goes last, as without the refusal it moves /tmp/a away.
+    ok = erx_ns:bind(<<"/tmp/a">>, <<"/x">>, []),
+    Show("rename to bind top", prim_file:rename(<<"/tmp/a/f">>, <<"/x">>)),
+    Show("del_dir bind top", prim_file:del_dir(<<"/x">>)),
+    Show("delete bind top", prim_file:delete(<<"/x">>)),
+    Show("rename from bind top", Reached(fun() -> prim_file:rename(<<"/x">>, <<"/tmp/d">>) end)),
+    Show("bind top kept", info(prim_file:read_file_info(<<"/tmp/a/f">>))),
     _ = erlang:trace_pattern({erx_file_remote, '_', '_'}, false, []),
-    [ok = erx_ns:unmount(Point) || Point <- [<<"/ro">>, <<"/u">>, <<"/tmp">>]],
+    [ok = erx_ns:unmount(Point) || Point <- [<<"/x">>, <<"/ro">>, <<"/u">>, <<"/tmp">>]],
     ok.
 
 %% The operation's answer and the call that reached erx_file_remote, its pid left out.

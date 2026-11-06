@@ -342,15 +342,19 @@ class RuntimePrimFileTest < Minitest::Test
       'ns bind' => 'ok', 'ns bound' => "{ok,regular,0,read_write,#{0o100644}}", 'ns unmount' => 'ok',
       'ns after' => '{error,enoent}', 'ns root' => '{error,ebusy}', 'ns mount gone' => 'ok',
       'ns gone' => '{error,eio}', 'ns unmount gone' => 'ok', 'ns unmount bound' => 'ok', 'ns fids' => '{true,1}',
-      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{<<"/ro">>,<<"a">>,<<"a/c">>},1,<<47,114,111,47,99,0>>]}',
-      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"c">>},<<47,116,109,112,47,99,0>>]}',
-      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"x">>},{<<"/tmp">>,<<>>,<<"a/y">>},<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
+      'ns ro bind' => '{{error,enoent},read_file_info,<<"test">>,ro,[{<<"/ro">>,<<"a">>,<<"a/c">>,false},1,<<47,114,111,47,99,0>>]}',
+      'ns rw mount' => '{ok,make_dir,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"c">>,false},<<47,116,109,112,47,99,0>>]}',
+      'ns rename one' => '{{error,enoent},rename,<<"test">>,rw,[{<<"/tmp">>,<<>>,<<"x">>,false},{<<"/tmp">>,<<>>,<<"a/y">>,false},<<47,116,109,112,47,120,0>>,<<47,116,109,112,47,97,47,121,0>>]}',
       'ns rename two' => '{{error,exdev},none}', 'ns rename ro' => '{{error,exdev},none}',
       'ns rename local' => '{{error,exdev},none}', 'ns rename root' => '{{error,einval},none}',
       'ns rename root local' => '{{error,einval},none}', 'ns rename mount top' => '{{error,exdev},none}',
       'ns rename bind top' => '{{error,exdev},none}', 'ns rename mount dot' => '{{error,exdev},none}',
-      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[{<<"/u">>,<<>>,<<"x">>},{<<"/u">>,<<>>,<<"y">>},<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
-      'ns link two' => '{{error,exdev},none}' }.each do |step, want|
+      'ns link one' => '{{error,enoent},make_link,<<"u">>,rw,[{<<"/u">>,<<>>,<<"x">>,false},{<<"/u">>,<<>>,<<"y">>,false},<<47,117,47,120,0>>,<<47,117,47,121,0>>]}',
+      'ns link two' => '{{error,exdev},none}',
+      'ns rename to bind top' => '{error,ebusy}', 'ns del_dir bind top' => '{error,ebusy}',
+      'ns delete bind top' => '{error,ebusy}',
+      'ns rename from bind top' => '{{error,ebusy},rename,<<"test">>,rw,[{<<"/x">>,<<"a">>,<<"a">>,true},{<<"/tmp">>,<<>>,<<"d">>,false},<<47,120,0>>,<<47,116,109,112,47,100,0>>]}',
+      'ns bind top kept' => FILE }.each do |step, want|
       assert_equal want, release.fetch(step), step
     end
   end

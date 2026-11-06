@@ -586,7 +586,7 @@ read_file_nif(_Filename) ->
 
 %% erXos: a path on a file server's grant comes back from the NIF as
 %% {remote, Grant, Place}, Grant {Pid, Tree, Rights} as the path's mount entry
-%% holds it and Place {Point, Root, Names}, the entry's point and root and the path's
+%% holds it and Place {Point, Root, Names, Top}, the entry's point and root and the path's
 %% names from the tree's root, the entry's root included, and the operation runs
 %% in this process through erx_file_remote (design-files.md, Erlang clients). A
 %% rename or a hard link whose paths both lie on one grant's tree, through one

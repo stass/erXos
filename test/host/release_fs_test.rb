@@ -46,7 +46,7 @@ class ReleaseFsTest < Minitest::Test
   WIDE_DEPTH = 3
   WORKING_DIRECTORIES = %w[/ /d /d/e].freeze
 
-  Answer = Data.define(:status, :mount, :nnames, :names, :path, :kind, :file, :listing)
+  Answer = Data.define(:status, :mount, :top, :nnames, :names, :path, :kind, :file, :listing)
   Entry = Data.define(:point, :kind, :server, :tree, :root, :rights)
   CORE = %w[liberx/ns.c liberx/release_fs.c].freeze
 
@@ -180,6 +180,21 @@ class ReleaseFsTest < Minitest::Test
                   Entry.new(point: '/z', kind: NS_SERVER, server: 7, tree: 'tmp', root: '/b/c/d', rights: RIGHTS_RO),
                   Entry.new(point: '/w', kind: 0, server: 0, tree: '', root: '/d', rights: RIGHTS_RO)],
                  entries(lines).drop(2)
+  end
+
+  # The namespace alone decides whether a path is its entry's point: a mount's top and
+  # a bind's top, whose names are its root's, are; the bind's source, a path below a
+  # point, and the empty root above a narrowed namespace's mounts are not.
+  def test_a_path_at_an_entrys_point_is_its_top
+    paths = { '/' => true, '/tmp' => true, '/tmp/b/c' => false, '/x' => true, '/x/e/..' => true, '//x/.' => true,
+              '/x/e' => false, '/xy' => false }
+    lines = edit([mount('/tmp', 7, 'tmp', RIGHTS_RW), bind('/tmp/b/c', '/x', false), *paths.keys.map { |path| query(path) }])
+    answers = lines.drop(2).map { |line| parse(line) }
+    assert_equal [NS_OK] * paths.size, answers.map(&:status)
+    assert_equal paths.values, answers.map(&:top), answers.map(&:path).inspect
+    assert_equal 'b/c', answers[3].names
+    narrowed = ask(['/', '/lib'], mounts: [['/lib', '/lib']])
+    assert_equal [[nil, false], [0, true]], narrowed.map { |answer| [answer.mount, answer.top] }
   end
 
   def test_a_bind_is_refused_whole
@@ -419,10 +434,11 @@ class ReleaseFsTest < Minitest::Test
   end
 
   def parse(line)
-    status, mount, nnames, names, path, kind, file, listing = line.split(' ', 8)
-    return Answer.new(status: Integer(status), mount: nil, nnames: 0, names: '', path: '', kind: nil, file: nil, listing: []) if mount.nil?
+    status, mount, top, nnames, names, path, kind, file, listing = line.split(' ', 9)
+    return Answer.new(status: Integer(status), mount: nil, top: false, nnames: 0, names: '', path: '', kind: nil, file: nil, listing: []) if mount.nil?
 
-    Answer.new(status: Integer(status), mount: mount == '-' ? nil : Integer(mount), nnames: Integer(nnames),
+    Answer.new(status: Integer(status), mount: mount == '-' ? nil : Integer(mount), top: top == '1',
+               nnames: Integer(nnames),
                names: unhex(names), path: unhex(path), kind: Integer(kind), file: Integer(file),
                listing: listing == '-' ? [] : listing.split(','))
   end
@@ -468,9 +484,9 @@ class ReleaseFsTest < Minitest::Test
     WORKING_DIRECTORIES.flat_map do |cwd|
       paths.zip(ask(paths, cwd: cwd, driver: driver)).filter_map do |path, answer|
         names, normal, kind, file, listing = model(path, cwd: cwd)
-        got = [answer&.status, answer&.mount, answer&.nnames, answer&.names, answer&.path, answer&.kind, answer&.file,
+        got = [answer&.status, answer&.mount, answer&.top, answer&.nnames, answer&.names, answer&.path, answer&.kind, answer&.file,
                answer&.listing]
-        want = [NS_OK, 0, names.split('/').size, names, normal, kind, file, listing]
+        want = [NS_OK, 0, normal == '/', names.split('/').size, names, normal, kind, file, listing]
         "#{cwd} #{path}: #{got} != #{want}" if got != want
       end
     end
