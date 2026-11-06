@@ -40,8 +40,9 @@ class QemuGateMutantTest < Minitest::Test
       runs = Erx::DebugLogProbe::Run.new(root: ROOT, source: source).call(accels: %w[hvf], cpus: [1])
       Erx::QemuGate.result(runs.transform_values { 'passed' })
     end
-    context = Erx::QemuGate::Context.new(root: ROOT, accels: %w[hvf], available: %w[hvf], jobs: 8)
-    results = Erx::QemuGate.run(suites: [Erx::QemuGate::Suite.new(name: 'debug_log', run: probe)], context: context)
+    context = Erx::QemuGate::Context.new(root: ROOT, jobs: 8)
+    suite = Erx::QemuGate::Suite.new(name: 'debug_log', cells: %w[hvf-1cpu], run: probe)
+    results = Erx::QemuGate.run(suites: [suite], context: context)
     [Erx::QemuGate.status(results.fetch('debug_log')), results.fetch('debug_log').notes]
   end
 

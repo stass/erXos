@@ -1834,7 +1834,7 @@ reference tables and field projections are covered by the drift check.
   and the host tool reports its session ended with the
   outcome of its outstanding calls unknown, then reconnects.
 * **QEMU transcript tests** for the console prompt, `erx:i/1`,
-  `erx:source/1` and a host-side `erx watch` load, under TCG and HVF.
+  `erx:source/1` and a host-side `erx watch` load, under HVF.
 * **`/proc`:** each status rendered in a file; a scoped tree's `enoent`
   for an existing process outside its scope and for a missing one, with
   equal timing; a snapshot that stays fixed while the process changes; a

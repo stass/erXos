@@ -214,9 +214,9 @@ class ProductionImageTest < Minitest::Test
   # A stopped pet ends the machine about the pet deadline later: at once or much later is a fault.
   def test_a_stopped_pet_must_end_the_machine_about_the_pet_deadline_later
     run = Erx::ProductionImage::Run.allocate
-    proof = Erx::ProductionImage::Run::PET_PROOF.fetch("tcg")
+    proof = Erx::ProductionImage::Run::PET_PROOF.fetch("hvf")
     at = ->(stopped, fired) { [{ 'name' => 'pet-stopped', 'elapsed_seconds' => stopped }, { 'name' => 'watchdog-fired', 'elapsed_seconds' => fired }] }
-    assert_nil run.send(:judge_missed_pet_time, at.call(100.0, 130.5), proof)
+    assert_nil run.send(:judge_missed_pet_time, at.call(100.0, 105.5), proof)
     assert_raises(Erx::Error) { run.send(:judge_missed_pet_time, at.call(100.0, 101.0), proof) }
     assert_raises(Erx::Error) { run.send(:judge_missed_pet_time, at.call(100.0, 160.0), proof) }
   end
@@ -257,5 +257,13 @@ class ProductionImageTest < Minitest::Test
       assert_raises(Erx::Error) { Erx::ProductionImage.clear_directory(root: tree, path: tree) }
       assert File.directory?(File.join(tree, 'build'))
     end
+  end
+
+  # TCG runs only the smoke: asked for the whole matrix, the run refuses before it builds.
+  def test_the_whole_matrix_refuses_tcg
+    run = Erx::ProductionImage::Run.allocate.tap { |instance| instance.instance_variable_set(:@root, ROOT) }
+    error = assert_raises(Erx::Error) { run.call(accels: %w[hvf tcg]) }
+    assert_match(/TCG runs only the smoke/, error.message)
+    assert_raises(Erx::Error) { run.call(accels: %w[kvm]) }
   end
 end

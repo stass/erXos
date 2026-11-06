@@ -253,7 +253,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   link, the system domain's relay, the web domain, the session's line and the
   inspector, and a record view sends whole records every 2 s while they change.
   Settled by round-trip times and link bytes per second for the machine's
-  record and a 1,000-child listing, under TCG and HVF and over a 115,200-baud
+  record and a 1,000-child listing, under HVF and over a 115,200-baud
   UART; the fix on the table is a record difference message.
 * **[Low] web, `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node
   tree,** and a tree's first attachment, which arrives over several 64 KiB

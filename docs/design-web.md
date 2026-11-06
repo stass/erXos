@@ -1004,7 +1004,7 @@ Numbers to measure, on the
 * a record view's round trip over the host tool's front end, which
   crosses the host link, the system domain's relay, the web domain, the
   line and the inspector, for the machine's record and a 1,000-child
-  listing, under TCG and HVF and over a 115,200-baud UART, where whole
+  listing, under HVF and over a 115,200-baud UART, where whole
   records every 2 s may be too much and a record difference would be
   the fix;
 * `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node tree, and

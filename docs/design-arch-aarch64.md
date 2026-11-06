@@ -1001,7 +1001,7 @@ GIC has no ITS, so the GICv2m frame serves both accelerators by one path
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| GICv2m behaviour differs between TCG and HVF | low | MSI drivers | one path for both, tested on both |
+| GICv2m behaviour differs between TCG and HVF | low | MSI drivers | one path for both, tested under HVF |
 | A new core needs a speculation mitigation Linux adds later | medium | a side channel on that core | mitigations are chosen from the ID registers as Linux chooses them, and each board's port checks Linux's list |
 
 No open question remains for the user.

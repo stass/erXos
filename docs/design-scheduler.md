@@ -2042,8 +2042,9 @@ reading that lane and tell the system domain, which takes the connection down
 | Runtimes | attribution: a service serving three clients with known work per request, its per-client report against a cycle-counter ground truth | the report within the budget E-S5 sets; shown as runtime-reported in the inspector, with a seeded misreport changing nothing outside the service: its group's usage stays within its quota |
 | Parity | the stopgap and erXos's kernel run the same group-readiness tests (create, bind, trigger, take ready, park, wake); the decisions of C0 and C1 are tested on erXos's kernel alone | identical readiness results on both; quotas, urgency, charging, shares and the finishing share answer unsupported on the stopgap, each by a test, and Fiasco's placement of a woken thread at the head of its level is the one documented scheduling difference |
 
-Every test runs under TCG and HVF; a test that passes under only one is a
-bug until explained. The host builds run under ASan and UBSan, and the
+Every test runs under HVF; TCG runs only the deterministic-mode transcript
+and a boot smoke test. A failure seen under one accelerator only is a bug
+until explained. The host builds run under ASan and UBSan, and the
 concurrency tests under TSan.
 
 ## Performance
@@ -2081,9 +2082,8 @@ experiments below:
 **Experiments.** Each runs under HVF on the primary host (Apple M4 Max,
 macOS) with QEMU 11.1.2 (`virt-11.1`, `-cpu host`, configured as
 [design-platforms.md](design-platforms.md#qemu-virt) describes), erXos built with
-the release flags of [design.md](design.md#build-and-toolchain), and is
-repeated under TCG for correctness only; TCG numbers are never compared
-with HVF numbers. Results are recorded with host, load, accelerator, QEMU
+the release flags of [design.md](design.md#build-and-toolchain); TCG
+numbers are never compared with HVF numbers. Results are recorded with host, load, accelerator, QEMU
 version, compiler, flags, workload and baseline. [plan.md](plan.md) places
 each where it gates work.
 

@@ -1038,7 +1038,7 @@ in [Trust in the boot](#trust-in-the-boot).
   its first pet, which `B` must cover, and whether the crash region
   survives `SYSTEM_RESET`; the results go into a research record.
 * **The same suite everywhere.** The conformance suite runs on QEMU
-  `virt` under TCG and HVF and on each board; a test that passes only on
+  `virt` under HVF and on each board; a test that passes only on
   one accelerator is a bug until explained.
 * **Device-tree tests.** The `dma-ranges` reader runs on the host over the
   trees of QEMU `virt`, both BCM2711 steppings and the BCM2712; the device

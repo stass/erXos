@@ -2796,7 +2796,7 @@ for the same reason.
   and reader pages; `liberx`'s `erx_etf` decoder; the system domain's safe
   decode, checking that its atom count never changes; and the facets'
   generated admission over mutated requests.
-* **Hostile runtimes** under QEMU, with TCG and with HVF. Each is a native
+* **Hostile runtimes** under QEMU, with HVF. Each is a native
   test domain that holds a connection with the domain under test and does
   one of these:
   * floods frames at a facet, at a process that never reads, and at many

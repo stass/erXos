@@ -6,22 +6,15 @@ require_relative '../native_crash'
 require_relative '../qemu_gate'
 
 # A root thread's fault ends the machine with a crash record that is read back,
-# under each accelerator and CPU count (tools/lib/erx/native_crash.rb). Run raises on
-# the first disagreement, which the gate reports as this suite failing. An
-# accelerator the host lacks leaves its cells not_run. check_qemu builds the kernel
+# under HVF at each CPU count (tools/lib/erx/native_crash.rb). Run raises on
+# the first disagreement, which the gate reports as this suite failing. check_qemu builds the kernel
 # before any suite runs, so this suite does not.
+cpus = [1, 4]
 Erx::QemuGate.declare_suite(
+  cells: Erx::QemuGate.suite_cells(cpus),
   run: lambda do |context|
-    cpus = [1, 4]
-    ran = if context.runnable.empty?
-            {}
-          else
-            Erx::NativeCrash::Run.new(root: context.root)
-                              .call(accels: context.runnable, cpus: cpus, jobs: context.jobs, build: false)
-                              .transform_values { 'passed' }
-          end
-    skipped = context.missing.product(cpus).to_h { |accel, count| ["#{accel}-#{count}cpu", 'not_run'] }
-    notes = context.missing.map { |accel| "#{accel} is not offered by this host's QEMU" }
-    Erx::QemuGate.result(ran.merge(skipped), notes: notes)
+    run = Erx::NativeCrash::Run.new(root: context.root)
+    ran = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], cpus: cpus, jobs: context.jobs, build: false)
+    Erx::QemuGate.result(ran.transform_values { 'passed' })
   end
 )

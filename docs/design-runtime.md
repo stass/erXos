@@ -2917,7 +2917,7 @@ own domain, so a runtime that lies harms only itself.
 ## Verification and testing
 
 * **The oracle.** OTP's `emulator`, `kernel`, `stdlib` and `compiler`
-  suites run in a test domain under QEMU, with TCG and with HVF, on both
+  suites run in a test domain under QEMU with HVF, on both
   runtime images, and on the development host on stock OTP 29.1.2; a
   Ruby tool compares them case by case (`make check-oracle`). Every difference
   is a bug, a documented difference with a test (the table of
@@ -2949,7 +2949,7 @@ own domain, so a runtime that lies harms only itself.
 * **Wake storms.** Four executors pass a million messages in rings across
   run queues while a peer domain rings the connection's bell; a watchdog
   fails the test if any executor stays parked for 10 ms while its run
-  queue or a lane holds work. Under TCG and HVF.
+  queue or a lane holds work. Under HVF.
 * **Capacity.** A test policy moves a domain's capacity between one and
   four CPUs every 10 ms while OTP's `emulator` suite runs; the suite
   passes, and `schedulers_online` matches the capacity at every sample.
@@ -3057,7 +3057,7 @@ own domain, so a runtime that lies harms only itself.
   collection, a seeded post before `reset_done/1`, a seeded raw-offset
   accessor and a seeded register without its address mark each fail. Under QEMU the virtio block and network drivers run their device
   tests through the NIF with interrupts delivered through the event
-  table, under TCG and HVF.
+  table, under HVF.
 * **The event table.** Labels fire while their sinks close and exit and
   are reused at once by new sinks: every delivery reaches a live sink or
   is dropped, none reaches a dead one, and a stale delivery that reaches
@@ -3204,7 +3204,7 @@ measures it per device class.
 | minimal ERTS domain | the budget [plan.md](plan.md) sets from the host baseline | measured in a domain under HVF |
 | BeamAsm over the interpreter | 1x to 4x | cited: `erts/emulator/internal_doc/BeamAsm.md` |
 | a reference's AES-128 permutation | the local-operation target holds on the portable path as well as the hardware path | `erts-local` reports `make_ref/0`, alias creation, comparison, hashing and term round trips for both paths |
-| interrupt to driver process | per device class, set by G9 | the driver tests report it under TCG and HVF separately |
+| interrupt to driver process | per device class, set by G9 | the driver tests report it under HVF |
 
 **Benchmarks.** `tools/erx bench erts-local` runs the ring, spawn, switch
 and `make_ref/0` benchmarks of

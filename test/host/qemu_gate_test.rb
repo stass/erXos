@@ -5,19 +5,31 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/qemu_gate'
+require_relative '../../tools/lib/erx/production_image'
 
 # The QEMU gate decides from what each suite observed and never turns an
 # absence into a pass. These tests run the real suites only where they start
-# no guest: a host without the accelerator, and a roster of pending cases.
+# no guest: a roster of pending cases. Every other suite is run here as a
+# stand-in that reports chosen cells under the real suite's declaration.
 class QemuGateTest < Minitest::Test
   Gate = Erx::QemuGate
   ROOT = File.expand_path('../..', __dir__)
 
-  def context(accels: %w[hvf], available: %w[hvf tcg])
-    Gate::Context.new(root: ROOT, accels: accels, available: available, jobs: 1)
-  end
+  def context = Gate::Context.new(root: ROOT, jobs: 1)
 
   def result(**cells) = Gate.result(cells.transform_keys(&:to_s))
+
+  def suite(name, cells, &run) = Gate::Suite.new(name: name, cells: cells, run: run)
+
+  def real_suite(name) = Gate.suites.find { |entry| entry.name == name }
+
+  # The real suite's declared cells, run by a stand-in that reports every
+  # one of them as passed except those it drops.
+  def run_dropping(name, dropped)
+    declared = real_suite(name)
+    reported = (declared.cells - dropped).to_h { |cell| [cell, 'passed'] }
+    Gate.run(suites: [suite(name, declared.cells) { |_| Gate.result(reported) }], context: context).fetch(name)
+  end
 
   def with_suite_files(files)
     Dir.mktmpdir('erx-qemu-suites-') do |directory|
@@ -34,12 +46,28 @@ class QemuGateTest < Minitest::Test
   def test_a_directory_without_suites_or_with_a_bad_declaration_stops_the_gate
     with_suite_files({}) { |directory| assert_raises(Erx::Error) { Gate.load_suites(directory) } }
     with_suite_files('empty.rb' => '# nothing') { |directory| assert_raises(Erx::Error) { Gate.load_suites(directory) } }
-    with_suite_files('bad.rb' => 'Erx::QemuGate.declare_suite(run: 1)') do |directory|
+    with_suite_files('bad.rb' => "Erx::QemuGate.declare_suite(cells: ['hvf-1cpu'], run: 1)") do |directory|
       assert_raises(Erx::Error) { Gate.load_suites(directory) }
     end
-    with_suite_files('Bad-Name.rb' => 'Erx::QemuGate.declare_suite(run: -> (_) {})') do |directory|
+    with_suite_files('Bad-Name.rb' => "Erx::QemuGate.declare_suite(cells: ['hvf-1cpu'], run: -> (_) {})") do |directory|
       assert_raises(Erx::Error) { Gate.load_suites(directory) }
     end
+  end
+
+  def test_a_suite_must_declare_the_cells_it_reports
+    ['[]', 'nil', "['hvf-1cpu', 'hvf-1cpu']", '[1]'].each do |cells|
+      with_suite_files('cells.rb' => "Erx::QemuGate.declare_suite(cells: #{cells}, run: -> (_) {})") do |directory|
+        assert_raises(Erx::Error, cells) { Gate.load_suites(directory) }
+      end
+    end
+  end
+
+  def test_every_suite_runs_under_hvf_and_only_the_production_image_names_tcg
+    Gate.suites.each do |entry|
+      refute_empty entry.cells.select { |cell| cell.start_with?("#{Gate::SUITE_ACCELERATOR}-") }, entry.name
+    end
+    tcg = Gate.suites.to_h { |entry| [entry.name, entry.cells.grep(/\A#{Gate::SMOKE_ACCELERATOR}-/o)] }.reject { |_, cells| cells.empty? }
+    assert_equal({ 'production_image' => %w[tcg-1cpu tcg-deterministic] }, tcg)
   end
 
   def test_a_suite_is_judged_from_its_cells
@@ -71,16 +99,43 @@ class QemuGateTest < Minitest::Test
     assert_equal 'incomplete', Gate.overall(%w[pending])
   end
 
-  def test_the_accelerators_the_qemu_plan_lists_work_as_a_set_would
-    listed = Erx::QemuPlan.accelerators("Accelerators supported in QEMU binary:\nhvf\ntcg\n")
-    here = Gate::Context.new(root: ROOT, accels: %w[hvf tcg tcg], available: listed, jobs: 1)
-    assert_equal %w[hvf tcg], here.runnable
-    assert_empty here.missing
+  def test_the_production_image_with_every_cell_passes
+    assert_equal 'passed', Gate.status(run_dropping('production_image', []))
+  end
+
+  def test_a_production_image_run_without_the_smoke_does_not_pass
+    entry = run_dropping('production_image', Erx::ProductionImage::Run::SMOKE_CELLS)
+    assert_equal 'not_run', entry.cells.fetch('tcg-1cpu')
+    assert_equal 'not_run', entry.cells.fetch('tcg-deterministic')
+    assert_equal 'incomplete', Gate.status(entry)
+    assert_equal 'incomplete', Gate.overall([Gate.status(entry)])
+    assert_includes entry.notes, 'tcg-deterministic was expected and did not run'
+  end
+
+  def test_a_production_image_run_without_the_transcript_alone_does_not_pass
+    entry = run_dropping('production_image', %w[tcg-deterministic])
+    assert_equal 'incomplete', Gate.status(entry)
+  end
+
+  def test_a_run_that_drops_one_hvf_cell_does_not_pass
+    %w[production_image debug_log boot_image].each do |name|
+      entry = run_dropping(name, [real_suite(name).cells.find { |cell| cell.start_with?('hvf-4cpu') }])
+      assert_equal 'incomplete', Gate.status(entry), name
+      assert_equal 'incomplete', Gate.overall(['passed', Gate.status(entry)]), name
+    end
+  end
+
+  def test_a_declared_cell_left_pending_beside_cells_that_ran_did_not_run
+    entry = Gate.run(suites: [suite('s', %w[a b]) { |_| result(a: 'passed', b: 'pending') }], context: context).fetch('s')
+    assert_equal({ 'a' => 'passed', 'b' => 'not_run' }, entry.cells)
+    assert_equal 'incomplete', Gate.status(entry)
+    waiting = Gate.run(suites: [suite('s', %w[a b]) { |_| result(a: 'pending', b: 'pending') }], context: context).fetch('s')
+    assert_equal 'pending', Gate.status(waiting)
   end
 
   def test_a_suite_that_raises_is_a_failed_suite_with_the_message
-    suites = [Gate::Suite.new(name: 'boom', run: ->(_) { raise Erx::Error, 'transcript differs' }),
-              Gate::Suite.new(name: 'fine', run: ->(_) { result(x: 'passed') })]
+    suites = [suite('boom', %w[x]) { |_| raise Erx::Error, 'transcript differs' },
+              suite('fine', %w[x]) { |_| result(x: 'passed') }]
     results = Gate.run(suites: suites, context: context)
     assert_equal 'failed', Gate.status(results.fetch('boom'))
     assert_equal ['transcript differs'], results.fetch('boom').notes
@@ -89,48 +144,32 @@ class QemuGateTest < Minitest::Test
   end
 
   def test_a_bug_in_a_suite_is_not_swallowed
-    suites = [Gate::Suite.new(name: 'bug', run: ->(_) { raise NoMethodError, 'nil' })]
+    suites = [suite('bug', %w[x]) { |_| raise NoMethodError, 'nil' }]
     assert_raises(NoMethodError) { Gate.run(suites: suites, context: context) }
   end
 
-  def test_a_missing_accelerator_is_reported_as_not_run
-    here = context(accels: %w[hvf tcg], available: %w[tcg])
-    assert_equal %w[hvf], here.missing
-    assert_equal %w[tcg], here.runnable
-
-    # No accelerator at all: the real debug-log suite starts no guest and says so.
-    none = context(accels: %w[hvf], available: [])
-    entry = Gate.suites.find { |suite| suite.name == 'debug_log' }.run.call(none)
-    assert_equal({ 'hvf-1cpu' => 'not_run', 'hvf-4cpu' => 'not_run' }, entry.cells)
-    assert_equal 'incomplete', Gate.status(entry)
-    assert_match(/hvf is not offered/, entry.notes.first)
+  def test_suites_run_under_hvf_and_tcg_is_the_smoke_alone
+    assert_equal 'hvf', Gate::SUITE_ACCELERATOR
+    assert_equal 'tcg', Gate::SMOKE_ACCELERATOR
+    assert_equal %w[hvf tcg], Gate::REQUIRED_ACCELERATORS
+    assert(Erx::ProductionImage::Run::SMOKE_CELLS.all? { |cell| cell.start_with?("#{Gate::SMOKE_ACCELERATOR}-") })
   end
 
-def test_suites_run_under_hvf_and_tcg_is_the_smoke_alone
-  assert_equal 'hvf', Gate::SUITE_ACCELERATOR
-  assert_equal 'tcg', Gate::SMOKE_ACCELERATOR
-  assert_equal %w[hvf tcg], Gate::REQUIRED_ACCELERATORS
-
-  # Neither accelerator offered: the production-image suite starts no guest, and names both gaps.
-  entry = Gate.suites.find { |suite| suite.name == 'production_image' }.run.call(context(available: []))
-  assert_equal({ 'hvf-1cpu' => 'not_run', 'hvf-4cpu' => 'not_run', 'tcg-1cpu' => 'not_run' }, entry.cells)
-  assert_equal ["hvf is not offered by this host's QEMU", "tcg is not offered by this host's QEMU"], entry.notes
-end
-
   def test_pending_conformance_cases_are_reported_as_pending_and_start_no_guest
-    entry = Gate.suites.find { |suite| suite.name == 'conformance' }.run.call(context(available: []))
-    refute_empty entry.cells
+    results = Gate.run(suites: [real_suite('conformance')], context: context)
+    entry = results.fetch('conformance')
+    assert_equal Gate.suite_cells([1, 4]), entry.cells.keys & Gate.suite_cells([1, 4])
     assert_equal ['pending'], entry.cells.values.uniq
     assert_equal 'pending', Gate.status(entry)
   end
 
   def test_the_table_names_each_suite_its_status_and_what_did_not_run
-    results = { 'a' => Gate.result({ 'tcg-1cpu' => 'passed', 'hvf-1cpu' => 'not_run' }, notes: ['hvf is not offered']),
+    results = { 'a' => Gate.result({ 'hvf-1cpu' => 'passed', 'hvf-4cpu' => 'not_run' }, notes: ['hvf-4cpu was expected']),
                 'b' => Gate.result({ 'case x' => 'pending' }) }
-    lines = Gate.table(results, context: context(accels: %w[tcg hvf], available: %w[tcg]))
-    assert_match(/\Aa +incomplete +tcg-1cpu passed, hvf-1cpu not_run\z/, lines[0])
+    lines = Gate.table(results)
+    assert_match(/\Aa +incomplete +hvf-1cpu passed, hvf-4cpu not_run\z/, lines[0])
     assert_match(/\Ab +pending +case x pending\z/, lines[1])
-    assert_equal 'a: hvf is not offered', lines[2]
-    assert_equal 'qemu gate: incomplete; 2 suites, 1 pending; accelerators asked: tcg hvf; available: tcg', lines[3]
+    assert_equal 'a: hvf-4cpu was expected', lines[2]
+    assert_equal 'qemu gate: incomplete; 2 suites, 1 pending; suites under hvf, smoke under tcg', lines[3]
   end
 end

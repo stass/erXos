@@ -381,15 +381,16 @@ QEMU monitor and back. The first build of ERTS takes a while.
 
 ```sh
 make build
+make run
 make run ACCEL=tcg
-make run ACCEL=hvf
 make oracle-build DOCKER_CONTEXT=NAME FLAVOUR=emu
 make check-oracle-host DOCKER_CONTEXT=NAME FLAVOUR=emu
 make bench FLAVOUR=jit
 tools/erx status
 ```
 
-For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
+`make run` boots under HVF when QEMU offers it and TCG otherwise; `ACCEL=`
+chooses. For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
 `tools/erx oracle qemu`: `file_SUITE` and `filelib_SUITE` under Common

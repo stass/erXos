@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 RUBY ?= ruby
-ACCEL ?= tcg
+# Empty: HVF when the host offers it, else TCG.
+ACCEL ?=
 JOBS ?= 4
 FLAVOUR ?= emu
 DOCKER_CONTEXT ?=
@@ -22,7 +23,7 @@ build:
 	$(RUBY) tools/erx build fiasco --jobs $(JOBS)
 
 run: build
-	$(RUBY) tools/erx qemu --accel $(ACCEL)
+	$(RUBY) tools/erx qemu $(if $(ACCEL),--accel $(ACCEL))
 
 check:
 	$(RUBY) tools/erx check

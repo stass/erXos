@@ -1263,7 +1263,7 @@ Each passing case has a seeded failure that proves the code ran.
   unchecked offset fails it; the harness runs the display suite under
   QEMU `virt` with a virtio-gpu and virtio-input attached as virtio-pci
   and compares screenshots taken through QEMU's monitor with reference
-  images, under TCG and HVF; a seeded wrong channel conversion fails it.
+  images, under HVF; a seeded wrong channel conversion fails it.
   A panel driver is tested against a model of its command set on the
   host.
 * **Power.** G6's idle test at the driver.

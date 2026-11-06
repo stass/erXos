@@ -94,6 +94,15 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, '--accel'
   end
 
+  # Each command a gate suite stands for runs what its suite runs, under HVF.
+  def test_the_suite_commands_take_no_accelerator_choice
+    %w[check-boot-image check-debug-log conformance].each do |command|
+      status, output = run_cli(command, '--accel', 'tcg')
+      assert_equal 2, status, command
+      assert_includes output, '--accel', command
+    end
+  end
+
   def test_check_runs_every_generation_gate_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|

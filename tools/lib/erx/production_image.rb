@@ -228,11 +228,13 @@ module Erx
       # "The watchdog"). HVF runs the defaults.
       TCG_WATCHDOG = '1,30,600'
       COMMAND_LINES = { 'tcg' => "erx.watchdog=#{TCG_WATCHDOG}" }.freeze
+      # The smoke's cells, both under TCG, the one accelerator that runs deterministic mode.
+      SMOKE_CELLS = %w[tcg-1cpu tcg-deterministic].freeze
       # One more word on the deterministic boot's line, which the page must carry too.
       DETERMINISTIC_LINE = 'erx.det=1 erx.arg=-deterministic'
-      # The watchdog's numbers for each accelerator's proof boot: a boot deadline it beats, and
-      # a pet deadline. TCG's working line gives 600 seconds, which no test waits out.
-      PET_PROOF = { 'tcg' => { period: 1, pet: 30, boot: 120 }, 'hvf' => { period: 1, pet: 5, boot: 60 } }.freeze
+      # The watchdog's numbers for the proof boot under each accelerator of the whole matrix,
+      # which TCG never runs: a boot deadline it beats, and a pet deadline.
+      PET_PROOF = { 'hvf' => { period: 1, pet: 5, boot: 60 } }.freeze
       # How far past the boot deadline the proof boot stays up, and how long past the pet
       # deadline and the period the stopped pet's crash record may take to appear.
       PET_MARGIN_SECONDS = 5
@@ -288,16 +290,21 @@ module Erx
         @qemu = qemu
       end
 
-      # smoke_accels name accelerators that get only the smoke: the plain boot to the shell at
-      # one CPU, and under TCG the deterministic transcript, without the boots that probe refusals,
-      # the watchdog and the console.
-      def call(accels:, cpus: [1, 4], jobs: 4, build: true, smoke_accels: [])
+      # accels run the whole matrix: every boot below at each CPU count. TCG is not one of them;
+      # it runs only the smoke, which smoke: true adds as SMOKE_CELLS: the plain boot to the shell
+      # at one CPU, and the deterministic transcript, without the boots that probe refusals, the
+      # watchdog and the console.
+      def call(accels:, cpus: [1, 4], jobs: 4, build: true, smoke: false)
+        unless (accels - PET_PROOF.keys).empty?
+          raise Error, "production image: the whole matrix runs under #{PET_PROOF.keys.join(' ')}; TCG runs only the smoke"
+        end
+
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         check_device_paths
         built = image(fiasco)
         narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: narrow_manifest) : nil
-        full_matrix(accels, cpus, built, narrow).merge(smoke(smoke_accels, built))
+        full_matrix(accels, cpus, built, narrow).merge(smoke ? smoke_cells(built) : {})
       end
 
       # The transcript of a boot as far as ERTS gets, each line in order. The image is one
@@ -434,20 +441,27 @@ module Erx
 
       private
 
-      def smoke(accels, built)
-        accels.to_h do |accel|
-          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: 1)
-          full = boot(accel, 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
-          deterministic(built) if accel == 'tcg'
-          ["#{accel}-1cpu", { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze]
-        end
+      # SMOKE_CELLS under TCG: the plain boot to the shell at one CPU, then the transcript.
+      # Each name sits beside the boot that earns it, so dropping a boot drops its cell, and
+      # the gate then marks the declared cell not_run.
+      def smoke_cells(built)
+        { 'tcg-1cpu' => smoke_boot(built), 'tcg-deterministic' => deterministic(built) }
       end
+
+      def smoke_boot(built)
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern('tcg'), cpus: 1)
+        full = boot('tcg', 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES['tcg'])
+        { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze
+      end
+
+      # The watchdog numbers the boot reports: TCG's from COMMAND_LINES, and under HVF the
+      # kernel's defaults, whatever they are.
+      def watchdog_pattern(accel) = accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+'
 
       def full_matrix(accels, cpus, built, narrow)
         accels.product(cpus).to_h do |accel, count|
-          points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count)
+          points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count)
           full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
-          deterministic(built) if accel == 'tcg' && count == 1
           if count == cpus.first
             boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
                                       points: Run.command_line_refusal_checkpoints)
@@ -466,14 +480,15 @@ module Erx
       end
 
       # Two boots in deterministic mode, to the shell, whose transcripts must be the same
-      # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG.
+      # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG. The cell
+      # carries how many lines the two agreed on.
       def deterministic(built)
         points = Run.checkpoints(built, root: @root, watchdog: 'off', cpus: 1, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size)
         first, second = Array.new(2) do
           report = boot('tcg', 1, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE, points: points)
           File.binread(report.fetch('serial_log'))
         end
-        DeterministicTranscript.compare(first, second)
+        { lines: DeterministicTranscript.compare(first, second) }.freeze
       end
 
       # The pet at work: the machine outlives its deadlines, and once erx_watchdog stops being
@@ -583,7 +598,7 @@ module Erx
       end
 
       def boot_narrow(accel, count, built)
-        points = Run.checkpoints(built, root: @root, watchdog: accel == 'tcg' ? TCG_WATCHDOG : '[0-9]+,[0-9]+,[0-9]+', cpus: count,
+        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
                                         manifest_source: narrow_manifest)
         boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
       end

@@ -8,29 +8,16 @@ require_relative '../qemu_gate'
 # The production image, packed through the manifest check, boots to where ERTS starts and
 # ends the machine, and refuses a machine too small for its manifest, under HVF at each CPU
 # count (tools/lib/erx/production_image.rb). Under TCG it has the two things only TCG does:
-# one boot to the shell at one CPU, and the deterministic-mode transcript (`erx.det=1`).
-# Run raises on the first disagreement, which the gate reports as this suite failing. An
-# accelerator the host lacks leaves its cells not_run. check_qemu builds the kernel before
-# any suite runs, so this suite does not.
+# one boot to the shell at one CPU, and the deterministic-mode transcript (`erx.det=1`),
+# each a cell of its own, so a run that skips either leaves the suite incomplete. Run raises
+# on the first disagreement, which the gate reports as this suite failing. check_qemu builds
+# the kernel before any suite runs, so this suite does not.
+cpus = [1, 4]
 Erx::QemuGate.declare_suite(
+  cells: [*Erx::QemuGate.suite_cells(cpus), *Erx::ProductionImage::Run::SMOKE_CELLS],
   run: lambda do |context|
-    cpus = [1, 4]
-    smoke = [Erx::QemuGate::SMOKE_ACCELERATOR] & context.available
-    ran = if context.runnable.empty? && smoke.empty?
-            {}
-          else
-            Erx::ProductionImage::Run.new(root: context.root)
-                                     .call(accels: context.runnable, cpus: cpus, jobs: context.jobs, build: false,
-                                           smoke_accels: smoke)
-                                     .transform_values { 'passed' }
-          end
-    skipped = context.missing.product(cpus).to_h { |accel, count| ["#{accel}-#{count}cpu", 'not_run'] }
-    if smoke.empty?
-      skipped["#{Erx::QemuGate::SMOKE_ACCELERATOR}-1cpu"] = 'not_run'
-    end
-    notes = (context.missing + ([Erx::QemuGate::SMOKE_ACCELERATOR] - smoke)).map do |accel|
-      "#{accel} is not offered by this host's QEMU"
-    end
-    Erx::QemuGate.result(ran.merge(skipped), notes: notes)
+    run = Erx::ProductionImage::Run.new(root: context.root)
+    ran = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], cpus: cpus, jobs: context.jobs, build: false, smoke: true)
+    Erx::QemuGate.result(ran.transform_values { 'passed' })
   end
 )

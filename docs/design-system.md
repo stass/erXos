@@ -3097,7 +3097,7 @@ under test ran.
   budget other than the domain's two, which the budget check catches; a
   seeded plan that installs another domain's IPC gate into the domain,
   which the library's host test must refuse.
-* **The root task and its end, under QEMU with TCG and with HVF:** boot to
+* **The root task and its end, under QEMU with HVF:** boot to
   the login prompt and to the system shell; kill the system domain under
   load, with domains, sessions and programs running, and find the crash
   record on the console, every domain stopped, and the machine ended as
@@ -3187,7 +3187,7 @@ under test ran.
   fresh binary, after which the buffer is back in its pool and a model
   device that rewrites it leaves the binary unchanged
   ([design-runtime.md](design-runtime.md#invariants), R9); interrupt
-  delivery as a message under TCG and HVF, with the latency `tools/erx
+  delivery as a message under HVF, with the latency `tools/erx
   bench irq` measures for G9; a device given to a second domain while the
   first holds it, refused with `ERX_EBUSY`, and given to the first's
   restarted instance as soon as the first's exit record has been handled;

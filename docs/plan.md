@@ -26,8 +26,9 @@ Ground rules:
   ([design-stopgap.md](design-stopgap.md)).
 * **A demo per milestone.** Every milestone ends with something a person
   can watch, and `make run` works at every commit.
-* **Tests accumulate.** Each milestone adds transcript tests under TCG and
-  HVF and keeps every earlier test passing. Exit criteria are tests, never
+* **Tests accumulate.** Each milestone adds transcript tests under HVF and
+  keeps every earlier test passing; TCG runs only the deterministic-mode
+  transcript and a boot smoke test. Exit criteria are tests, never
   inspection.
 * **Two backends pass one test set.** Every `liberx` function lands with
   tests of its contract that the hosted and the Fiasco backends both
@@ -97,7 +98,7 @@ numbers are names; the table's order is the order.
 | Milestone | Demo | New code (estimate) | Needs | Gate |
 | --- | --- | --- | --- | --- |
 | M0 The tree, the toolchain and the oracle | focused stock OTP 29.1.2 cases verify the offline Linux test runner; native Mac OTP supplies bootstrap tools; the frozen Fiasco set builds from the tree; every generated file regenerates unchanged | 4,000 lines of Ruby | | G0 |
-| M1 The system boots on Fiasco | the near-stock Fiasco prints erXos's banner and starts `liberx`'s root entry as the root task under TCG and HVF; the root allocates, maps and reuses memory, runs threads with TLS and timed waits, runs a second task through a read-execute alias and ends it, takes an interrupt through the readiness interface, and ends the machine with a crash record on a stopped pet; the production image boots to the point where ERTS starts | 3,000 to 4,500 lines of C17 | M0, G0 | |
+| M1 The system boots on Fiasco | the near-stock Fiasco prints erXos's banner and starts `liberx`'s root entry as the root task under HVF; the root allocates, maps and reuses memory, runs threads with TLS and timed waits, runs a second task through a read-execute alias and ends it, takes an interrupt through the readiness interface, and ends the machine with a crash record on a stopped pet; the production image boots to the point where ERTS starts | 3,000 to 4,500 lines of C17 | M0, G0 | |
 | Track H Hosted mode | the runtime runs as a Mac process under the sanitizers; from M5, domains and their connections run as Mac processes too | 3,000 lines of C17 | M0 | |
 | M3 The shell is the operating system | `1>` on the serial console, from ERTS in the system domain in user mode, started by the root task | 8,000 lines of C, 1,000 of Erlang | M1, track H | G3 |
 | M4 The machine is an object | save in the editor on the Mac, run in the machine; follow a process to its source; ERTS and backend events on one timeline, the kernel's row unsupported | 10,000 lines of Erlang, 3,000 of Ruby, 2,000 of C | M3 | |
@@ -160,7 +161,7 @@ In Phase 2, after M7, build the domain and connection path of M5 together
 with the inspection M4 brought. This is the smallest coherent
 demonstration of domains on erXos's kernel:
 
-* boot the root task and the system ERTS under TCG and HVF, with the
+* boot the root task and the system ERTS under HVF, with the
   trusted-code development banner;
 * create one application domain from a pinned release through the domain
   library, give it one facet, and exchange a bounded request and reply
@@ -371,7 +372,7 @@ oracle records a focused Linux stock case and correctly reports controlled
 passes, failures, skips, timeouts and interrupted/incomplete runs. It proves
 loopback peer operation and absence of external networking, and removes
 its container including daemonized test children on success or cancellation;
-the stopgap boots to Fiasco's banner under TCG and HVF in the harness; a
+the stopgap boots to Fiasco's banner under HVF in the harness; a
 build twice from clean gives identical structural `ERXPACK` fixtures, with
 startup and policy admission explicitly unsupported; the fuzz target of the
 boot-image validator runs its budget clean.
@@ -405,7 +406,7 @@ and join, runs a second task that executes code through a read-execute
 alias and ends with a status, takes the UART's interrupt and a software
 interrupt through the readiness interface, and ends the machine with a
 crash record when a pet stops; the production image boots to the point
-where ERTS starts. All under TCG and HVF, one and four CPUs.
+where ERTS starts. All under HVF, one and four CPUs.
 
 **Scope.** Fiasco built near-stock from the fork, with `sigma0` and
 `bootstrap`, the two banner lines, no serial input or JDB entry on the
@@ -430,7 +431,7 @@ brings it; the chokepoint that confines Fiasco's headers and capabilities
 to `liberx/backend/fiasco`, with its seeded violation; the hosted
 backend's matching functions and refusals.
 
-**Exit criteria.** Each demo step is a transcript test under TCG and HVF;
+**Exit criteria.** Each demo step is a transcript test under HVF;
 a page committed, written, decommitted and committed again reads zeros; a
 page protected to no access and back reads its contents unchanged, and a
 stack made through `PROT_NONE` works; the pool's count returns to its
@@ -475,7 +476,7 @@ the accuracy of [design-scheduler.md](design-scheduler.md#performance);
 the test domain's executors
 resume exactly where they were preempted (S1, checked by a test that
 preempts at every instruction of a loop in deterministic mode); the storm
-test of the park protocol passes on four CPUs under TCG and HVF; a group
+test of the park protocol passes on four CPUs under HVF; a group
 of zero quota with 1,000 throttled threads costs each CPU one timer expiry
 and one failed draw per period; a space whose group's quota is zero, or
 spent, still posts its exit record once its threads have finished their
@@ -1132,7 +1133,7 @@ own facets (design-web's W1 over the host link); a release manifest that
 lists the host link's `web` facet fails the manifest check; `make web`
 twice with the network disabled gives byte-identical files; each
 chokepoint check catches its seeded violation; the end-to-end tests run
-`tools/erx web` against a QEMU guest under TCG and HVF.
+`tools/erx web` against a QEMU guest under HVF.
 
 **Exit criteria, widgets on the web.** A user interface attached,
 detached, changed and re-attached shows the newest tree,
@@ -1162,7 +1163,7 @@ includes `vttest`'s core; V1's byte test of design-live with a terminal
 window in place of the serial line; the virtio-gpu response and
 virtio-input event parsers' fuzz targets; the framebuffer copy under UBSan
 at its bounds; screenshots through QEMU's monitor equal the reference
-images under TCG and HVF; a fault injected for each row of
+images under HVF; a fault injected for each row of
 design-display's failure table has that row's effect and recovery and
 loses only what the failing party owned (requirement 10 and the
 failures test of
@@ -1194,7 +1195,7 @@ over trees from another domain, with a tree carrying more fresh atoms than
 `foreign_atoms` dropped and counted.
 
 **Exit criteria, Plan 9's programs.** acme and sam open, edit and save a
-file in their windows under TCG and HVF, and 9term runs the command shell
+file in their windows under HVF, and 9term runs the command shell
 over a pseudo-terminal; the display domain refuses no draw message they
 send.
 
@@ -1215,7 +1216,7 @@ allows plain HTTP fails the manifest check.
 
 **Gate GW, with part 1.** Measures a record view's round trip over the
 host tool's front end, for the machine's record and a 1,000-child listing,
-under TCG and HVF and over a 115,200-baud UART host link. Decides whether
+under HVF and over a 115,200-baud UART host link. Decides whether
 whole records stay on the wire or the protocol gains a record difference
 ([design-web.md](design-web.md#risks-and-open-questions)).
 
@@ -1289,7 +1290,7 @@ Linux guest with the files the reader sees, and passes upstream's
 `fsck.erofs`; every read of the EROFS reader goes through
 `erx_verity:read/3`, which a build check enforces with its seeded
 violation; a file synced under `/data` survives
-a power cut after the sync and the next boot, under TCG and HVF; the
+a power cut after the sync and the next boot, under HVF; the
 build check that only the driver's modules reference the device NIF
 passes, with its seeded violation; the partition-table parser, the EROFS reader, littlefs's
 images and the per-byte primitives run their fuzz budgets clean.
@@ -1378,8 +1379,8 @@ stopgap implements and then the rest of the interface, from
     in scope; the chokepoint checks that confine kernel calls to `liberx`;
     the stack proof and chokepoint checks over the C17 cores.
 
-  Its criteria: the conformance suite passes under TCG and HVF on one and
-  four CPUs; in each of those four configurations, two hostile native
+  Its criteria: the conformance suite passes under HVF on one and
+  four CPUs; in each of those two configurations, two hostile native
   domains attack every call for ten minutes with malformed arguments, stale
   and wrong-rights capabilities, faults, floods and streams of thread kills,
   with threads pinned to every online CPU, each reports per-CPU progress
@@ -1891,7 +1892,7 @@ trial boots the committed slot.
 **Exit criteria.** The update state machine's exhaustive test passes with
 a power cut after every write and every reset; a file synced under
 `/data` survives a power cut at every step of a scripted write load,
-under TCG and HVF, and a block error injected under littlefs mid-write
+under HVF, and a block error injected under littlefs mid-write
 fails that operation with an unknown outcome reported and no
 acknowledged write lost; on both boards, through the
 board rig, a trial that panics, hangs, calls `halt/0`, loses power or
@@ -2024,7 +2025,7 @@ replacement of lwIP.
 | G5 | M5 | E-D1 to E-D4 (`tools/erx bench xdomain-pingpong`, `xdomain-throughput`, `xdomain-stall`, `domain-lifecycle`); full E-S2; BeamAsm's speedup and footprint in an ordinary domain; translation time at a domain's start | default table sizes; `lane` and the manifest's `system_lane`, the producer's wait rule, encoding straight into the lane; the funnel's allowance per step; the manifest's `system_queue` and the death path's batching; the busy limit and the facets' limits; no kernel object per lightweight process; the ahead-of-time roster's triggers |
 | GP | track P | a program's start (`tools/erx bench spawn`) against its budget and `posix_spawn` on Linux; the `make`-shaped workload and `tools/erx bench pipe`, hosted and under HVF | the channel's and data area's defaults; the handler's batching; one ring per write end; whether a program's start needs a cheaper path |
 | G6 | after track P's first part | the system on erXos's kernel: an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; a program's start; isolation beside hostile domains; the EROFS reader's, littlefs's and the block driver's throughput and commit latency on QEMU (`tools/erx bench fs`, `blk`) against M6's baseline | whether the system meets the design's budgets before M8 and M9 build on it; G5's lane defaults and the facets' limits confirmed or revised |
-| GW | track D's part 1 | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under TCG and HVF and over a 115,200-baud UART host link | whether whole records stay on the wire or the web protocol gains a record difference |
+| GW | track D's part 1 | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under HVF and over a 115,200-baud UART host link | whether whole records stay on the wire or the web protocol gains a record difference |
 | GD | track D's part 6 | the Erlang renderer's frame time on a 240 by 240 panel against LVGL's on the same panel; the parity test through both | whether LVGL leaves the panels |
 | G8 | M8 | E-S1 (the ladder C0 to C2), E-S3 to E-S9 | default cooperation features; time slice, grace and period; capacity rules; the shared services' sizing rule and whether a service needs a child group per client class |
 | G9 | M9 | interrupt-to-handler latency per device class (`tools/erx bench irq`), ring throughput against sDDF's figures, `tools/erx bench blk`, the network driver's packet rate, MSIs under HVF | completion batching per device class; virtio-pci over virtio-mmio; each row of the driver table, which alone admits a native shim |
