@@ -371,6 +371,11 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
+  `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
+  instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so
+  nothing reaches the terminal raw, but the one-escaper-per-sink rule holds only by convention; route them through
+  `Terminal.escape` and add a chokepoint check.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: the rows for the cases after `signal_SUITE` come from
   the group run in three parts, and z_SUITE's `leaked_processes` and `used_thread_specific_events` fail only because
   the split ends a_SUITE's holder process. Run the group whole on the hosted runtime and refresh those rows.
