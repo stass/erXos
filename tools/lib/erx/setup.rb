@@ -24,12 +24,16 @@ module Erx
 
     Step = Data.define(:name, :kind, :argv, :deadline)
 
+    # `oracle build`'s own default deadline (tools/erx, the oracle command), which a
+    # setup step must not cut short: a killed build restarts from nothing.
+    ORACLE_BUILD_DEADLINE = 14_400
+
     COMMAND_STEPS = [
-      Step.new(name: 'oracle-jit', kind: :command, deadline: 3600,
+      Step.new(name: 'oracle-jit', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[oracle build --backend native --flavour jit]),
-      Step.new(name: 'oracle-emu', kind: :command, deadline: 3600,
+      Step.new(name: 'oracle-emu', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[oracle build --backend native --flavour emu]),
-      Step.new(name: 'runtime', kind: :command, deadline: 3600,
+      Step.new(name: 'runtime', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[build runtime])
     ].freeze
 
@@ -102,12 +106,13 @@ module Erx
       end
     end
 
-# An oracle directory without its build record is what an interrupted
-# build leaves; the build refuses to reuse it, so it is re-created.
-def leftovers(step)
-  flavour = step.argv[step.argv.index('--flavour').to_i + 1] if step.argv.include?('--flavour')
-  flavour && File.exist?(File.join(@root, 'build/oracle', flavour)) ? ['--clean'] : []
-end
+    # An oracle directory without its build record is what an interrupted
+    # build leaves; the build refuses to reuse it, so it is re-created.
+    def leftovers(step)
+      flavour = step.argv[step.argv.index('--flavour').to_i + 1] if step.argv.include?('--flavour')
+      directory = File.join(@root, 'build/oracle', flavour.to_s)
+      flavour && File.exist?(directory) && !File.file?(File.join(directory, 'build.json')) ? ['--clean'] : []
+    end
 
     # Never touches the network: the archive comes from a checkout's
     # verified downloads, or is already here from `make fetch`.
@@ -124,12 +129,12 @@ end
       raise Error, "#{e.message}; run `make fetch` or set ERX_SOURCE_CACHE to another checkout's build/third_party"
     end
 
-# Dependencies#fetch would download a missing archive; setup must not.
-def require_local_archive(id)
-  return if File.file?(File.join(@root, 'build/downloads', archive_name(id)))
+    # Dependencies#fetch would download a missing archive; setup must not.
+    def require_local_archive(id)
+      return if File.file?(File.join(@root, 'build/downloads', archive_name(id)))
 
-  raise Error, "source #{id} is not downloaded"
-end
+      raise Error, "source #{id} is not downloaded"
+    end
 
     def archive_name(id)
       @dependencies.sources.find { |source| source['id'] == id }.then do |source|

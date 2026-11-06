@@ -252,20 +252,25 @@ module Erx
     def places(list) = list.empty? ? 'no place' : list.join(',')
     private_class_method :places
 
-    # What fails check-libc-test, from a Run's outcome: every disagreement
-    # with the verdicts, a boot that leaked the pool, and a boot whose pool
-    # line never came, which is unknown, never taken for no leak.
-    def check_problems(outcome, verdicts:)
-      [*disagreements(outcome.fetch(:results), verdicts: verdicts, complete: true),
-       ("pool leaks in boots #{outcome.fetch(:pool_leaks_in_boots)}" unless outcome.fetch(:pool_leaks_in_boots).empty?),
-       ("pool unknown in boots #{outcome.fetch(:pool_unknown_in_boots)}" unless outcome.fetch(:pool_unknown_in_boots).empty?)]
-        .compact
+    # The pool's verdict on a Run, as problems: a boot that leaked the pool, and a boot
+    # whose pool line never came, which is unknown, never taken for no leak. Built once,
+    # in Run#report, and read by every consumer of the outcome.
+    def pool_problems(leaks:, unknown:)
+      [("pool leaks in boots #{leaks}" unless leaks.empty?),
+       ("pool unknown in boots #{unknown}" unless unknown.empty?)].compact
     end
 
-    # What keeps a canary run from passing: every test of it must pass, and no boot may leak.
-    def canary_problems(totals:, pool_leaks:)
-      [("the canary's results are #{totals}" unless totals == { passed: CANARY.size }),
-       ("pool leaks in boots #{pool_leaks}" unless pool_leaks.empty?)].compact
+    # What fails check-libc-test, from a Run's outcome: every disagreement
+    # with the verdicts, and the pool's problems.
+    def check_problems(outcome, verdicts:)
+      [*disagreements(outcome.fetch(:results), verdicts: verdicts, complete: true), *outcome.fetch(:pool_problems)]
+    end
+
+    # What keeps a canary run from passing: every test of it must pass, and the pool must have
+    # no problem.
+    def canary_problems(outcome)
+      [("the canary's results are #{outcome.fetch(:totals)}" unless outcome.fetch(:totals) == { passed: CANARY.size }),
+       *outcome.fetch(:pool_problems)].compact
     end
 
     class Run
@@ -423,7 +428,7 @@ module Erx
         File.write(path, "#{JSON.pretty_generate({ pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown,
                                                     results: results.map(&:to_h) })}\n")
         { report: path, totals: LibcTest.totals(results), pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown,
-          results: results }.freeze
+          pool_problems: LibcTest.pool_problems(leaks: leaks, unknown: unknown), results: results }.freeze
       end
     end
 

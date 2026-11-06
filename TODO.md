@@ -220,9 +220,10 @@ it; git history is the record of completed work.
 * [Medium] tooling, `tools/lib/erx/pack.rb`, `pack_wire.rb`: `ERX_PACK_TEST_CODE` is set only
   by `ProductionImage#build_test_image`; other packers that carry test code (`BootImage#build`
   for libc-test and the native task suites, `OracleHosted#pack`) leave it clear, since
-  `test_code:` defaults to false. Derive the bit from the entries (a per-entry test flag the
-  packer ORs into the header and `erx_index_check` checks against them), or at least make
-  `test_code:` a required keyword so every packer states it.
+  `test_code:` defaults to false. The by-construction fix is to derive the header bit from
+  per-entry test flags in the packer (ORed into the header, checked against the entries by
+  `erx_index_check`); every packer then marks its test image, and the lexical
+  `test-image-builder` check (`Checks::TEST_IMAGE_BUILDER`) can go.
 * [Low] stopgap, `tools/lib/erx/qemu.rb`: the harness gives QEMU one `-serial`, and QEMU `virt`
   places `/pl011@9040000`, the manifest's `hostlink`, only with a second one. Add the port with
   the host link's first consumer, M4.
@@ -317,19 +318,38 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] tooling, `tools/lib/erx/oracle_comparison.rb:104`, `oracle_qemu.rb:203-213,232,239`: the
+  oracle comparison's host side has gaps. (1) A repeated sequence number keeps the first copy
+  (`frames.compact.uniq(&:first)`), so a stray or forged frame wins over the real one; the CRC is
+  integrity, not authentication, and a frame appended after the last real event goes undetected
+  by the sequence logic (state it next to the event-frames residual above). (2) `boot_guest`
+  catches errors from `qemu.run` only; an unreadable `report.json` (`JsonInput.parse`) or a
+  serial log over 256 MiB (`BoundedFile.read`) raises out of `OracleQemu#run` and aborts
+  check-oracle mid-loop; map both to a host state, or to `failed` when the guest booted. (3)
+  A `CommandError` from `qemu --version` timing out maps to `timed_out`, and a QEMU or HVF crash
+  after the bootstrap memory line maps to `failed`, so host problems read as erXos's; the
+  `cancelled` branch (line 208) is unreachable from `run_guest`, which passes no `cancelled:`.
+* [Low] tooling, `tools/lib/erx/libc_test.rb:158,270-279,454-457`, `tools/lib/erx/setup.rb`: (1)
+  Every serial line between a test's run and end lines that matches `FILE.c:N: ` is
+  attributed to that test, including kernel or root C output; a spurious disagreement, never a
+  false pass. Require the `src/` path form `t_error` prints. (2) The libc-test make rules
+  depend on sources only, and `forget_programs` deletes only `.elf`, so objects built under old
+  `FLAGS` are reused; hash the flags into the rule or delete the objects when they change.
+  (3) `setup.rb:114-125`: with `ERX_SOURCE_CACHE` set, setup raises if the cache lacks an
+  archive this tree already has; the catch-all rescue appends "run `make fetch`..." to every
+  error, including a SHA-256 mismatch; `archive_name` duplicates `Dependencies#archive_path`
+  (expose and reuse it); the source steps' `deadline: 300` is never used. (4)
+  `setup.rb:141-143`: `toolchain_env` hard-codes `/opt/homebrew/...` where Homebrew lives in
+  `~/homebrew` and Linux is a host, and passes nothing silently when neither path exists;
+  report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;
+  store it on `Step`. `ERX_SOURCE_CACHE` names `build/third_party` but setup reads the sibling
+  `build/downloads` (`archive_directory`); name the directory actually read.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page
   (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
   backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
   word, and a checkpoint of `parked N of N` at the shell.
-* [Medium] dependencies, `deps.lock` `tla-tools`: the pin names
-  `releases/download/v1.8.0/tla2tools.jar`, but tlaplus's v1.8.0 is a rolling
-  pre-release whose asset is replaced, so `make fetch` in a fresh tree fails with
-  "source SHA-256 mismatch: tla-tools" while older trees keep the pinned bytes. Pin
-  an immutable release, such as v1.7.4, or a copy whose bytes do not change, and
-  rerun `make check-tla` on it.
-
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.

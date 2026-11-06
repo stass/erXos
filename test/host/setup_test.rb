@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require 'fileutils'
 require 'digest'
+require 'json'
 require_relative '../../tools/lib/erx/setup'
 
 class SetupTest < Minitest::Test
@@ -45,6 +46,142 @@ class SetupTest < Minitest::Test
       File.binwrite(bogus, 'not the pinned bytes')
       assert_raises(Erx::Error) { dependencies.adopt('musl', from: bogus) }
       assert_empty Dir.glob(File.join(root, 'build/downloads/*.tar.gz'))
+    end
+  end
+end
+
+# The decisions of Setup that keep it off the network and keep it from trusting a
+# stray marker or directory. The runner records each command and runs it for real.
+class SetupDecisionsTest < Minitest::Test
+  # Wraps a Runner and remembers the program of every command it ran.
+  class RecordingRunner
+    attr_reader :programs
+
+    def initialize(runner)
+      @runner = runner
+      @programs = []
+    end
+
+    def run(argv, **options)
+      @programs << File.basename(argv.first)
+      @runner.run(argv, **options)
+    end
+  end
+
+  def lock_with_sha(sha256)
+    text = File.read(File.expand_path('../../deps.lock', __dir__))
+    lock = Erx::JsonInput.parse(text)
+    lock.fetch('sources').find { |source| source['id'] == 'musl' }['sha256'] = sha256
+    JSON.pretty_generate(lock)
+  end
+
+  # A tree whose deps.lock pins musl to the bytes of a tiny archive built here.
+  def with_tree
+    Dir.mktmpdir('erx-setup-') do |temporary|
+      root = File.realpath(temporary)
+      content = File.join(root, 'content')
+      FileUtils.mkdir_p(File.join(content, 'musl-1.2.6'))
+      File.write(File.join(content, 'musl-1.2.6/hello.txt'), "hello\n")
+      cache = File.join(root, 'other/build/downloads')
+      FileUtils.mkdir_p(cache)
+      sample = File.join(cache, 'sample.tar.gz')
+      system('tar', '-czf', sample, '-C', content, 'musl-1.2.6', exception: true)
+      sha256 = Digest::SHA256.file(sample).hexdigest
+      File.write(File.join(root, 'deps.lock'), lock_with_sha(sha256))
+      FileUtils.mkdir_p(File.join(root, 'build'))
+      runner = RecordingRunner.new(Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')))
+      yield root, runner, sample, sha256
+    end
+  end
+
+  def setup_for(root, runner, cache: nil)
+    Erx::Setup.new(root: root, runner: runner, cache: cache)
+  end
+
+  def marker_dir(root)
+    File.join(root, 'build/third_party/musl').tap { |directory| FileUtils.mkdir_p(directory) }
+  end
+
+  def test_source_valid_accepts_only_its_own_marker
+    with_tree do |root, runner, _sample, _sha|
+      setup = setup_for(root, runner)
+      refute setup.send(:source_valid?, 'musl')
+      entry = setup.instance_variable_get(:@dependencies).sources.find { |source| source['id'] == 'musl' }
+      marker = File.join(marker_dir(root), '.source.json')
+      File.write(marker, JSON.pretty_generate(entry))
+      assert setup.send(:source_valid?, 'musl')
+      File.write(marker, JSON.pretty_generate(entry.merge('sha256' => '0' * 64)))
+      refute setup.send(:source_valid?, 'musl'), 'a marker for other bytes'
+      File.write(marker, '{ not json')
+      refute setup.send(:source_valid?, 'musl'), 'an unparsable marker'
+      File.delete(marker)
+      File.write(File.join(root, 'real.json'), JSON.pretty_generate(entry))
+      File.symlink(File.join(root, 'real.json'), marker)
+      refute setup.send(:source_valid?, 'musl'), 'a symlink marker'
+    end
+  end
+
+  def test_leftovers_cleans_only_an_oracle_directory_without_a_build_record
+    with_tree do |root, runner, _sample, _sha|
+      setup = setup_for(root, runner)
+      jit, emu, runtime = Erx::Setup::COMMAND_STEPS
+      assert_empty setup.send(:leftovers, jit), 'no directory'
+      FileUtils.mkdir_p(File.join(root, 'build/oracle/jit'))
+      assert_equal ['--clean'], setup.send(:leftovers, jit)
+      assert_empty setup.send(:leftovers, emu), 'the other flavour'
+      assert_empty setup.send(:leftovers, runtime), 'a step with no flavour'
+      File.write(File.join(root, 'build/oracle/jit/build.json'), '{}')
+      assert_empty setup.send(:leftovers, jit), 'a finished build'
+    end
+  end
+
+  def test_oracle_steps_wait_as_long_as_the_oracle_build_does
+    assert(Erx::Setup::COMMAND_STEPS.all? { |step| step.deadline >= 14_400 })
+  end
+
+  def test_a_missing_archive_is_an_error_and_never_a_download
+    with_tree do |root, runner, _sample, _sha|
+      error = assert_raises(Erx::Error) { setup_for(root, runner).send(:obtain_source, 'musl') }
+      assert_match(/not downloaded/, error.message)
+      assert_empty runner.programs
+    end
+  end
+
+  def test_a_cache_without_the_archive_is_an_error_and_never_a_download
+    with_tree do |root, runner, _sample, _sha|
+      cache = File.join(root, 'empty/build/third_party')
+      FileUtils.mkdir_p(File.join(root, 'empty/build/downloads'))
+      error = assert_raises(Erx::Error) { setup_for(root, runner, cache: cache).send(:obtain_source, 'musl') }
+      assert_match(/not found in ERX_SOURCE_CACHE/, error.message)
+      assert_empty runner.programs
+      assert_empty Dir.glob(File.join(root, 'build/downloads/*'))
+    end
+  end
+
+  def test_a_cached_archive_is_adopted_and_unpacked_without_the_network
+    with_tree do |root, runner, sample, sha|
+      cache = File.join(root, 'other/build/third_party')
+      File.rename(sample, File.join(root, 'other/build/downloads', "musl-#{sha}.tar.gz"))
+      setup = setup_for(root, runner, cache: cache)
+      setup.send(:obtain_source, 'musl')
+      assert File.file?(File.join(root, 'build/downloads', "musl-#{sha}.tar.gz"))
+      assert_equal "hello\n", File.read(File.join(root, 'build/third_party/musl/musl-1.2.6/hello.txt'))
+      assert setup.send(:source_valid?, 'musl')
+      refute_includes runner.programs, 'curl'
+      refute_includes runner.programs, 'git'
+    end
+  end
+
+  def test_adopt_keeps_matching_bytes_and_leaves_an_existing_archive_alone
+    with_tree do |root, runner, sample, sha|
+      dependencies = Erx::Dependencies.new(root: root, runner: runner)
+      archive = dependencies.adopt('musl', from: sample)
+      assert_equal File.join(root, 'build/downloads', "musl-#{sha}.tar.gz"), archive
+      assert_equal sha, Digest::SHA256.file(archive).hexdigest
+      assert_equal [archive], Dir.glob(File.join(root, 'build/downloads/*'))
+      File.write(sample, 'other bytes')
+      assert_equal archive, dependencies.adopt('musl', from: sample)
+      assert_equal sha, Digest::SHA256.file(archive).hexdigest, 'an existing archive is not replaced'
     end
   end
 end

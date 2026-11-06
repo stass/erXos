@@ -276,7 +276,7 @@ module Erx
       File.binwrite(events, printed.events)
       [OracleComparison.side(events: events, command_state: guest.state.name, detail: guest.state.message,
                              skipped: printed.skipped),
-       guest.record.fetch('elapsed_seconds', 0)]
+       guest.record['elapsed_seconds']]
     end
 
     def reference(path) = { 'path' => path.delete_prefix("#{@root}/"), 'sha256' => Digest::SHA256.file(path).hexdigest }

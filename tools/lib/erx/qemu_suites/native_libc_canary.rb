@@ -16,7 +16,7 @@ Erx::QemuGate.declare_suite(
     run = Erx::LibcTest::Run.new(root: context.root)
     ran = context.runnable.product(cpus).to_h do |accel, count|
       outcome = run.call(accel: accel, cpus: count, jobs: context.jobs, build: false, only: Erx::LibcTest::CANARY)
-      problems = Erx::LibcTest.canary_problems(totals: outcome.fetch(:totals), pool_leaks: outcome.fetch(:pool_leaks_in_boots))
+      problems = Erx::LibcTest.canary_problems(outcome)
       raise Erx::Error, "libc-test canary, #{accel} at #{count} CPUs: #{problems.join('; ')}; see #{outcome.fetch(:report)}" unless problems.empty?
 
       ["#{accel}-#{count}cpu", 'passed']

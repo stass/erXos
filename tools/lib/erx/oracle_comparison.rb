@@ -38,8 +38,8 @@ module Erx
       def identity = [suite, group, testcase]
     end
     # One run: `state` is complete, timed_out, crashed, incomplete (with the count of
-    # damaged event lines skipped, when there were any) or
-    # "unreadable: why"; `cases` maps each CaseKey to a status of STATUSES
+    # damaged event lines skipped, when there were any), "unreadable: why", or a state
+    # of the host that never ran the guest (qemu_failed: why, host_failed: why); `cases` maps each CaseKey to a status of STATUSES
     # or UNRESOLVED_STATUSES.
     Side = Data.define(:state, :cases)
     # One case's two statuses and its verdict. `attempt` is nil only for a

@@ -32,8 +32,8 @@ module Erx
           test: 'test/host/device_callers_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'test-image-builder', rule: "only the oracle's QEMU run builds a test image, the one image that " \
-                                            'carries test code',
+          name: 'test-image-builder', rule: "only the oracle's QEMU run calls the production image's test entry point, and no " \
+                                            "other tools source passes a literal true for the packer's test keyword",
           design: "#{STOPGAP}#the-production-image", check: 'Checks::TEST_IMAGE_BUILDER',
           test: 'test/host/checks_test.rb'
         ),

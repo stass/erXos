@@ -436,7 +436,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [SUITE...] | oracle qemu [SUITE...] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | qemu | oracle build|run|probe | oracle hosted [SUITE...] | oracle qemu [SUITE...] | bench WORKLOAD | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | gates | status | setup [--jobs N]')
       0
     end
 
@@ -523,22 +523,22 @@ module Erx
       0
     end
 
-# Everything a fresh worktree needs before its gates run; steps whose
-# output is already valid are skipped. Takes no network path: sources
-# come from `make fetch` or from ERX_SOURCE_CACHE, verified by hash.
-def self.setup(input_arguments, setup_class: Setup)
-  arguments = input_arguments.dup
-  jobs = 4
-  parser = OptionParser.new do |options|
-    options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
-  end
-  parser.parse!(arguments)
-  raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+    # Everything a fresh worktree needs before its gates run; steps whose
+    # output is already valid are skipped. Takes no network path: sources
+    # come from `make fetch` or from ERX_SOURCE_CACHE, verified by hash.
+    def self.setup(input_arguments, setup_class: Setup)
+      arguments = input_arguments.dup
+      jobs = 4
+      parser = OptionParser.new do |options|
+        options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-  ran = setup_class.new(root: ROOT, jobs: jobs).call
-  Terminal.puts(ran.empty? ? 'setup: nothing to do' : "setup: ran #{ran.join(', ')}")
-  0
-end
+      ran = setup_class.new(root: ROOT, jobs: jobs).call
+      Terminal.puts(ran.empty? ? 'setup: nothing to do' : "setup: ran #{ran.join(', ')}")
+      0
+    end
 
     def self.fetch(input_arguments)
       arguments = input_arguments.dup
@@ -655,7 +655,7 @@ end
       outcome = qemu_class.new(root: ROOT, out: options[:out], deadline: options[:deadline])
                           .run(suites, accel: options[:accel], cpus: options[:cpus], jobs: options[:jobs])
       File.read(outcome.report).each_line { |line| Terminal.puts(line.chomp) }
-      Terminal.puts("report: #{outcome.report}; guest #{options[:accel]} #{options[:cpus]} CPU, #{outcome.seconds.round} s")
+      Terminal.puts("report: #{outcome.report}; guest #{options[:accel]} #{options[:cpus]} CPU, #{outcome.seconds ? "#{outcome.seconds.round} s" : 'unknown'}")
       outcome.result.passed? ? 0 : 1
     end
 

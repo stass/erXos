@@ -62,9 +62,11 @@ module Erx
       | [.]from_json\b                                    # json's core additions
     /x
 
-    # No production image carries test code. ProductionImage#build adds nothing to the
-    # system release; its test entry point adds test code and marks the archive
-    # (ERX_PACK_TEST_CODE). Only the oracle's QEMU run builds a test image. So no Ruby
+    # ProductionImage#build adds nothing to the system release; its test entry point adds
+    # test code and marks the archive (ERX_PACK_TEST_CODE). This check enforces two things
+    # only: that only the oracle's QEMU run calls that entry point, and that no other
+    # source passes a literal true for the packer's test keyword. It does not prove that every image carrying
+    # test code is marked; other packers carry unmarked test code (TODO.md). So no Ruby
     # source under tools/, except the module that defines the entry point and that one
     # caller, may match TEST_IMAGE_ENTRY: the entry point's name, in a call, a symbol or
     # a comment, or a literal true for the packer's test_code keyword. The check reads

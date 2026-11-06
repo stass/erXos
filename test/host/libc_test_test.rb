@@ -143,11 +143,20 @@ class LibcTestTest < Minitest::Test
 
   def test_the_canary_holds_only_a_whole_pass
     size = Erx::LibcTest::CANARY.size
-    assert_empty(Erx::LibcTest.canary_problems(totals: { passed: size }, pool_leaks: []))
-    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1, failed: 1 }, pool_leaks: []))
-    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1, not_run: 1 }, pool_leaks: []))
-    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size - 1 }, pool_leaks: []))
-    refute_empty(Erx::LibcTest.canary_problems(totals: { passed: size }, pool_leaks: [0]))
+    assert_empty(Erx::LibcTest.canary_problems(canary_outcome({ passed: size })))
+    refute_empty(Erx::LibcTest.canary_problems(canary_outcome({ passed: size - 1, failed: 1 })))
+    refute_empty(Erx::LibcTest.canary_problems(canary_outcome({ passed: size - 1, not_run: 1 })))
+    refute_empty(Erx::LibcTest.canary_problems(canary_outcome({ passed: size - 1 })))
+    refute_empty(Erx::LibcTest.canary_problems(canary_outcome({ passed: size }, leaks: [0])))
+  end
+
+  def test_the_canary_fails_on_an_unknown_pool
+    problems = Erx::LibcTest.canary_problems(canary_outcome({ passed: Erx::LibcTest::CANARY.size }, unknown: [1]))
+    assert_equal(['pool unknown in boots [1]'], problems)
+  end
+
+  def canary_outcome(totals, leaks: [], unknown: [])
+    { totals: totals, pool_problems: Erx::LibcTest.pool_problems(leaks: leaks, unknown: unknown) }
   end
 
   def test_a_truncated_end_line_says_nothing
@@ -243,7 +252,7 @@ class LibcTestTest < Minitest::Test
   end
 
   def outcome(results, leaks: [], unknown: [])
-    { results: results, pool_leaks_in_boots: leaks, pool_unknown_in_boots: unknown }
+    { results: results, pool_problems: Erx::LibcTest.pool_problems(leaks: leaks, unknown: unknown) }
   end
 
   def test_check_libc_test_fails_on_a_disagreement_a_leak_and_an_unknown_pool
