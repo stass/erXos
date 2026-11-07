@@ -1279,6 +1279,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_crc32c.o \
 	$(OBJDIR)/sha256c.o \
 	$(OBJDIR)/erx_device_bif.o \
+	$(OBJDIR)/erx_trace_ring_bif.o \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \
 	$(OBJDIR)/erx_prim_file.o \

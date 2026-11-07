@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds erx_device's BIFs.
+# Modified by erXos: adds erx_device's and erx_trace_ring's BIFs.
 #
 
 #
@@ -873,3 +873,11 @@ bif erx_device:read_field/3
 bif erx_device:write_field/4
 bif erx_device:field/4
 bif erx_device:irq_ack/2
+
+#
+# erXos: the trace rings' reader and the clock pair of erx:trace (docs/design-live.md,
+# "Tracing").
+#
+
+bif erx_trace_ring:read/3
+bif erx_trace_ring:clocks/0

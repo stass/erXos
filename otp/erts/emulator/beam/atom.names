@@ -19,6 +19,8 @@
 #
 # %CopyrightEnd%
 #
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs.
+#
 
 #
 # IMPORTANT! All atoms defined here *need* to be in 7-bit ascii!
@@ -123,6 +125,7 @@ atom await_result
 atom await_sched_wall_time_modifications
 atom awaiting_load
 atom awaiting_unload
+atom backend
 atom backtrace backtrace_depth
 atom badarg badarith badarity badfield badfile badfun badkey badmap badmatch
 atom badrecord badsig
@@ -399,6 +402,7 @@ atom iolist_size_continue
 atom iolist_to_iovec_continue
 atom iodata
 atom iovec
+atom kernel
 atom keypos
 atom kill
 atom killed
@@ -583,6 +587,7 @@ atom positive
 atom position
 atom prepare
 atom prepare_on_load
+atom present
 atom print
 atom priority
 atom priority_messages
@@ -763,6 +768,7 @@ atom explicit_unalias
 atom undef
 atom ungreedy
 atom unicode
+atom unknown
 atom unregister
 atom urun
 atom use_stdio

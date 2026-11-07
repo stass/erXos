@@ -2406,12 +2406,19 @@ document's "residual risks accepted" paragraph.
 
 * [Medium] tracer, `erx:trace` ([design-live.md](docs/design-live.md#tracing),
   [design-stopgap.md](docs/design-stopgap.md#the-trace-ring)), in four packages. P1's remainder:
-  the stopgap reporter `liberx_trace` in `abi/inspection.txt`, which the inspection schema refuses
-  as a stopgap that reports no attribute until it learns a reporter of trace rows; a test that the
+  a test that the
   park core's `trace` effect writes one `park` and one `wake` per sleeping park, none for one that
   returns at once, with the returned status (`test/fixtures/fiasco_park_driver.c`'s is a no-op);
-  and the hosted ring through the function API. P2, the BIFs `erx_trace_ring:read/3` and `clocks/0` and
-  the merger's pure core; P3, `erx:trace` in the system domain with the `native_trace` suite on four
+  and the hosted ring through the function API. P2's remainder: a test of the BIFs
+  `erx_trace_ring:read/3` and `clocks/0` (their argument refusals, the records' fields and a
+  bignum cursor) on the hosted runtime, which needs that ring, or on QEMU in P3; the merger
+  (`erx_tracer`) has no case for a read refused with a status other than `notsup`, which the
+  design does not name; `erx_tracer:erts/5` takes the system domain's own trace messages and
+  crashes on another shape, so P4's relay records need their own validation before they reach
+  it; the BIF's 32 KiB buffer comes from `erts_alloc`, which ends the VM when memory runs out,
+  where `erts_alloc_fnf` and `{error, nomem}` would not; and the generated `erx_status_name`
+  table is sized by the most negative status, so a sparse status would need a bound in the
+  model or a switch. P3, `erx:trace` in the system domain with the `native_trace` suite on four
   CPUs; P4, the trace facet, the relay, frame tracing and the host link's events stream, which need
   M5's connections, since the stopgap offers no lanes.
 * [Medium] code service, installed storage (`erlang/apps/erx_code/src/erx_code.erl`):
