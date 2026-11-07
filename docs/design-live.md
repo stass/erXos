@@ -1891,7 +1891,15 @@ meaning and `i(Path)` is the inspector; `erx:i()` keeps its prefix. A
 function of the same name and arity that a user defines in the shell is
 shadowed by a shortcut, a documented difference with a test. A test
 derives the shell's command list and OTP's `shell_default` exports from
-OTP's modules and fails if a shortcut collides with either.
+OTP's modules and fails if a shortcut collides with either, and fails
+if the shell would resolve a shortcut's name differently from stock:
+it resolves each call in a function defined at the prompt by name
+alone (`shell.erl`, `reconstruct1/3`, through
+`edlin_expand:shell_default_or_bif/1`), so a shortcut whose name stock
+resolves to `erlang` would take that BIF's calls. `trace` is such a
+name, for `erlang:trace/2,3`, so `trace(Spec)` waits until the shell
+resolves those calls by name and arity; until then `erx:trace(Spec)`
+keeps its prefix.
 
 ### The host tool
 

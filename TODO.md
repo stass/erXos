@@ -398,16 +398,10 @@ it; git history is the record of completed work.
   `shell_default`; derive the names from `local_func/8`'s clauses and add auto-imported BIFs
   (`erl_internal:bif/2`). The design's test that a shortcut shadows a shell-defined function of its name and
   arity is not written either.
-* [Medium] live, the `trace/1` shortcut (`otp/lib/stdlib/src/shell_default.erl`): the shell resolves a call
-  in a function defined at the prompt by name alone (`shell.erl` `reconstruct1/3` through
-  `edlin_expand:shell_default_or_bif/1`, which answers `shell_default` for any name it exports), so with
-  `trace/1` exported, `t(P) -> trace(P, true, [send]).` calls `shell_default:trace/3` and fails with `undef`
-  where stock calls `erlang:trace/3`; argument completion of `trace(` loses `erlang:trace/3` too. Either
-  resolve by name and arity in `reconstruct1/3` and `edlin_context` (an OTP edit for design-runtime's table),
-  or rename the shortcut (the owner's call); then make the collision test check that stock's
-  `shell_default_or_bif/1` answers `user_defined` or `shell_default` for each shortcut name. Also, definitions
-  at the prompt are refused for every arity of an exported name (`shell.erl:462`), not only the shortcut's,
-  which design-live's "Shortcuts" paragraph should say.
+* [Low] live, the shortcuts (`otp/lib/stdlib/src/shell_default.erl`): a function defined at the prompt is
+  refused for every arity of an exported shortcut's name (`shell.erl:462`), not only the shortcut's arity, as
+  design-live's "Shortcuts" paragraph says; say so there, or resolve by arity with the planned item on
+  `trace/1`.
 * [Low] live, `erx_source`: the source read follows symbolic links and checks the size before reading rather
   than reading at most the cap, and a rendered line is not cut at a width, so a 4 MiB line (32 MiB of
   expanded tabs) reaches the console whole. Read with `file:read(Fd, Max + 1)` after `read_link_info`, and cut
@@ -2481,6 +2475,14 @@ document's "residual risks accepted" paragraph.
   leaves to it: an exposed domain's node name and its registration, the
   error a domain without a network grant gets (provisionally `eacces`),
   and sockets with several holders.
+* [Low] live, the `trace/1` shortcut ([design-live.md](docs/design-live.md#erlang-in-every-domain)): the
+  shell resolves each call in a function defined at the prompt by name alone (`shell.erl` `reconstruct1/3`,
+  through `edlin_expand:shell_default_or_bif/1`), and argument completion does too (`edlin_context`), so an
+  exported `trace/1` would make `trace(P, true, [send])` there call `shell_default:trace/3` instead of
+  `erlang:trace/3`. Resolve by name and arity in both (an OTP edit for design-runtime's table), then add
+  `trace/1` to `shell_default` and move it from `?PENDING` to `?SHORTCUTS` in
+  `test/erlang/erx_shortcut_tests.erl`, whose `shell_name_resolves_like_stock_test` then checks resolution by
+  name and arity instead of by name.
 
 * [Medium] tracer, `erx:trace` ([design-live.md](docs/design-live.md#tracing),
   [design-stopgap.md](docs/design-stopgap.md#the-trace-ring)), in four packages. P1's remainder:

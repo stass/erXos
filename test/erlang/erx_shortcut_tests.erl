@@ -11,11 +11,12 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% The shortcuts this build exports, each over an erx function it has.
--define(SHORTCUTS, [{i, 1}, {source, 1}, {trace, 1}, {trace_stop, 1}]).
-%% The design's other shortcuts, whose erx functions come with later milestones of
-%% docs/plan.md: ps/0 and domains/0 with the inspector's domain listings, attach/1
-%% with sessions in their own domains. Their names are kept free already.
--define(PENDING, [{ps, 0}, {domains, 0}, {attach, 1}]).
+-define(SHORTCUTS, [{i, 1}, {source, 1}, {trace_stop, 1}]).
+%% The design's other shortcuts: ps/0 and domains/0, whose erx functions come with the
+%% inspector's domain listings, attach/1, with sessions in their own domains (later
+%% milestones of docs/plan.md), and trace/1, which waits for the shell to resolve calls
+%% by name and arity (shell_name_resolves_like_stock_test). Their names are kept free.
+-define(PENDING, [{ps, 0}, {domains, 0}, {attach, 1}, {trace, 1}]).
 
 shortcuts_collide_with_nothing_test() ->
     ?assertEqual([], collisions(?SHORTCUTS ++ ?PENDING, shell:local_func(), stock_exports())).
@@ -26,6 +27,21 @@ shell_default_adds_exactly_the_shortcuts_test() ->
     Ours = erxos_exports(),
     ?assertEqual([], stock_exports() -- Ours),
     ?assertEqual(lists:sort(?SHORTCUTS), lists:sort(Ours -- stock_exports())).
+
+%% A function defined at the prompt has its calls resolved by name alone, through
+%% edlin_expand:shell_default_or_bif/1 (shell.erl, reconstruct1/3), which answers
+%% shell_default for any name shell_default exports, at any arity. So a shortcut keeps
+%% stock's resolution only if stock already answers shell_default or user_defined for
+%% its name; trace, with erlang:trace/2,3, answers erlang. The check runs over what
+%% erXos's shell_default adds; stock's shell_default is the one loaded here.
+shell_name_resolves_like_stock_test() ->
+    ?assertEqual([], renamed(erxos_exports() -- stock_exports())),
+    ?assertEqual([{trace, 1}], renamed([{trace, 1}, {i, 1}])).
+
+renamed(Shortcuts) ->
+    [{Name, Arity} || {Name, Arity} <- Shortcuts,
+                      not lists:member(edlin_expand:shell_default_or_bif(atom_to_list(Name)),
+                                       ["shell_default", "user_defined"])].
 
 %% The check catches each kind of collision: a shell command's name at any
 %% arity, and the name and arity of one of OTP's exports.
