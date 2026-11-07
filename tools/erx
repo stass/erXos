@@ -117,7 +117,7 @@ module Erx
     end
 
     def self.check(input_arguments, runner_class: Runner, checks_class: Checks, arch_terms: ArchTerms,
-                   runtime: method(:with_test_runtime))
+                   runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle))
       arguments = input_arguments.dup
       OptionParser.new.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
@@ -126,6 +126,7 @@ module Erx
       checks_class.new(root: ROOT, runner: runner).run
       arch_terms.check(root: ROOT)
       generated(runner: runner)
+      rc_oracle.call(runner: runner)
       runtime.call(runner: runner) do |environment|
         stack_proof(runner: runner, environment: environment)
         tests = Dir.glob(File.join(ROOT, 'test/host/*_test.rb')).sort
@@ -135,6 +136,17 @@ module Erx
       end
       Terminal.puts('offline source, generation, host and native integration checks passed')
       0
+    end
+
+    # The command shell's integration tests (erx_shell_corpus, erx_shell_commands) run
+    # against plan9port's rc, built on the host. `make setup` builds it, but a change to
+    # its recipe or pin leaves that build stale, so check builds it again, from the
+    # fetched pin and offline, whenever RcOracle.locate refuses what is there.
+    def self.ensure_rc_oracle(runner:, root: ROOT, build_class: RcOracle::Build)
+      RcOracle.locate(root: root)
+    rescue RcOracle::MissingBuild, RcOracle::StaleBuild
+      build_class.new(root: root, runner: runner).call
+      RcOracle.locate(root: root)
     end
 
     # An integration test runs in `make check` unless it is excused here: these

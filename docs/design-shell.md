@@ -835,8 +835,9 @@ remain independent of catalog generation.
   ([research](research-boards-storage.md#the-command-shells-oracle)).
   `tools/erx build rc-oracle` compiles rc and the lib9 members it links
   with erXos's own compiler invocations, never plan9port's build
-  scripts, and `Erx::RcOracle` runs a script with a fixed `$path` and
-  `$home`, an empty private working directory, standard input at end
+  scripts; `make setup` runs it, and `make check` runs it again when the
+  build is missing or older than its recipe or pin. `Erx::RcOracle` runs
+  a script with a fixed `$path` and `$home`, an empty private working directory, standard input at end
   of file and a deadline, returning its output and final `$status`, or
   saying it timed out or gave no status, never guessing one.
   Every script of the shell's test corpus runs under both, and their

@@ -72,8 +72,10 @@ class TopLevelCliTest < Minitest::Test
     runtime = proc do |**_options, &block|
       block.call('ERX_ERL' => '/verified/erl', 'ERX_ERLC' => '/verified/erlc')
     end
+    rc_oracle = ->(runner:) { commands << [['ensure-rc-oracle'], { name: 'rc-oracle', runner: runner }] }
     yield runner_class: Factory.new(recording_runner(commands, fail_name: fail_name)),
-          checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime
+          checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime,
+          rc_oracle: rc_oracle
   end
 
   # The gate needs HVF for its suites and TCG for its smoke and deterministic boots, and never
@@ -127,6 +129,33 @@ class TopLevelCliTest < Minitest::Test
     end
     assert integration.all? { |_argv, options| options.fetch(:env).fetch('ERX_ERL') == '/verified/erl' }
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
+  end
+
+  # The command shell's integration tests read the rc oracle, so check makes sure of it
+  # before the runtime and every test.
+  def test_check_ensures_the_rc_oracle_before_the_tests
+    commands = []
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check', **collaborators)
+      assert_equal 0, status, output
+    end
+    names = commands.map { |_argv, options| options.fetch(:name) }
+    assert_equal 1, names.count('rc-oracle')
+    assert_operator names.index('rc-oracle'), :<, names.index { |name| name.start_with?('stack-proof', 'host-tests-') }
+  end
+
+  # A tree without a current rc oracle builds one and locates it again, so a build that
+  # leaves nothing behind fails check rather than its tests.
+  def test_ensure_rc_oracle_builds_what_locate_refuses
+    builds = []
+    build_class = Class.new do
+      define_method(:initialize) { |root:, runner:| builds << [root, runner] }
+      define_method(:call) { nil }
+    end
+    assert_raises(Erx::RcOracle::MissingBuild) do
+      Erx::CLI.ensure_rc_oracle(runner: :runner, root: @directory, build_class: build_class)
+    end
+    assert_equal [[@directory, :runner]], builds
   end
 
   # Arm's archive is read only by `tools/erx sysreg refresh` and by
