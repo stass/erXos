@@ -34,6 +34,7 @@
 #include "liberx/backend/core/device_check.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
+#include "liberx/backend/fiasco/trace.h"
 #include "liberx/backend/fiasco/vm.h"
 
 /* A task's run of slots: its threads, its semaphores, then the three below. */
@@ -232,6 +233,7 @@ erx_fiasco_task_create_body(uint32_t caller, uint64_t flags, uint64_t *space)
 		return (ERX_ENOMEM);
 	}
 	*space = erx_fiasco_task_space_encode(task);
+	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_START, (uint64_t)task + 1, 0, 0);
 	return (ERX_OK);
 }
 
@@ -334,6 +336,7 @@ task_end(uint32_t task, int64_t status)
 {
 	task_teardown(task);
 	task_rows[task] = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .status = status };
+	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_END, (uint64_t)task + 1, (uint64_t)status, 0);
 	(void)l4_semaphore_up(erx_fiasco_task_ended_cap(task));
 }
 

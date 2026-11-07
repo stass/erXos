@@ -20,6 +20,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/group_report.h"
 #include "liberx/backend/core/object_info.h"
+#include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/park.h"
@@ -60,8 +61,13 @@ dispatcher_main(uint64_t unused)
 	(void)unused;
 	for (;;) {
 		tag = l4_ipc_wait(utcb, &record, L4_IPC_NEVER);
-		if (l4_ipc_error(tag, utcb) == 0)
-			erx_fiasco_group_signal((uint32_t)record);
+		if (l4_ipc_error(tag, utcb) != 0)
+			continue;
+		/* Before the trigger, so the delivery precedes the wake it causes in the ring. */
+		if (record < ERX_BACKEND_PARK_OBJECTS_MAX)
+			erx_backend_trace_write(ERX_TRACE_EVENT_IRQ_DELIVER,
+			    atomic_load_explicit(&group_label[record], memory_order_relaxed), 0, 0);
+		erx_fiasco_group_signal((uint32_t)record);
 	}
 }
 

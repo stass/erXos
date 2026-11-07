@@ -267,15 +267,22 @@ erx_backend_park_wait(erx_backend_park_group_t *group, const erx_backend_park_ef
 	    .group_seen = group_seen, .slot_seen = slot_seen };
 	const erx_backend_park_event_t timeout = { .op = ERX_BACKEND_PARK_OP_TIMEOUT, .slot = slot };
 
+	int status = ERX_OK;
+
+	/* A park that returns at once records nothing; one that sleeps records its park and its end. */
 	if (park_locked_step(group, effects, context, &park).action != ERX_BACKEND_PARK_SLEEP)
 		return (ERX_OK);
-	if (effects->down(context, slot, deadline))
-		return (ERX_OK);
-	if (park_locked_step(group, effects, context, &timeout).action == ERX_BACKEND_PARK_TIMED_OUT)
-		return (ERX_ETIMEDOUT);
-	/* A waker took this slot as the deadline came: its up is on the way. */
-	effects->absorb(context, slot);
-	return (ERX_OK);
+	effects->trace(context, ERX_TRACE_EVENT_PARK, slot, deadline);
+	if (!effects->down(context, slot, deadline)) {
+		if (park_locked_step(group, effects, context, &timeout).action == ERX_BACKEND_PARK_TIMED_OUT)
+			status = ERX_ETIMEDOUT;
+		else
+			/* A waker took this slot as the deadline came: its up is on the way. */
+			effects->absorb(context, slot);
+	}
+	/* The status, an int, is stored sign-extended in the record's arg word. */
+	effects->trace(context, ERX_TRACE_EVENT_WAKE, slot, (uint64_t)(int64_t)status);
+	return (status);
 }
 
 int

@@ -14,6 +14,7 @@
 
 #include <l4/sys/semaphore.h>
 
+#include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/thread.h"
@@ -24,9 +25,10 @@ static void park_unlock(void *);
 static bool park_down(void *, uint32_t, uint64_t);
 static void park_absorb(void *, uint32_t);
 static void park_up(void *, uint32_t);
+static void park_trace(void *, uint32_t, uint32_t, uint64_t);
 
 static const erx_backend_park_effects_t park_effects = { .lock = park_lock, .unlock = park_unlock,
-    .down = park_down, .absorb = park_absorb, .up = park_up };
+    .down = park_down, .absorb = park_absorb, .up = park_up, .trace = park_trace };
 static _Alignas(ERX_PAGE_SIZE) erx_group_stat_t park_status;
 static erx_backend_park_group_t park_group = { .status = &park_status };
 static erx_fiasco_lock_t park_group_lock;
@@ -72,6 +74,14 @@ park_up(void *context, uint32_t slot)
 {
 	(void)context;
 	(void)l4_semaphore_up((l4_cap_idx_t)park_semaphore(slot));
+}
+
+/* The root records its executors' parks; a task's stub records nothing. */
+static void
+park_trace(void *context, uint32_t event, uint32_t slot, uint64_t arg)
+{
+	(void)context;
+	erx_backend_trace_write(event, slot, arg, 0);
 }
 
 uint32_t

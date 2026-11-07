@@ -21,6 +21,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/group_report.h"
 #include "liberx/backend/core/park_table.h"
+#include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/hosted/internal.h"
 
 /* An object's handle: never one of a thread's, so neither names the other. */
@@ -42,9 +43,10 @@ static void group_unlock(void *);
 static bool group_down(void *, uint32_t, uint64_t);
 static void group_absorb(void *, uint32_t);
 static void group_up(void *, uint32_t);
+static void group_trace(void *, uint32_t, uint32_t, uint64_t);
 
 static const erx_backend_park_effects_t group_effects = { .lock = group_lock, .unlock = group_unlock,
-    .down = group_down, .absorb = group_absorb, .up = group_up };
+    .down = group_down, .absorb = group_absorb, .up = group_up, .trace = group_trace };
 static _Alignas(ERX_PAGE_SIZE) erx_group_stat_t group_status;
 static erx_backend_park_group_t group = { .status = &group_status };
 static pthread_mutex_t group_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -88,6 +90,13 @@ group_up(void *context, uint32_t slot)
 {
 	(void)context;
 	erx_hosted_semaphore_up(&group_semaphores[slot]);
+}
+
+static void
+group_trace(void *context, uint32_t event, uint32_t slot, uint64_t arg)
+{
+	(void)context;
+	erx_backend_trace_write(event, slot, arg, 0);
 }
 
 /*
@@ -229,16 +238,19 @@ int
 erx_irq_trigger(uint64_t irq)
 {
 	irq_object_t *object;
+	uint64_t label;
 	bool bound;
 
 	(void)pthread_mutex_lock(&irq_mutex);
 	object = irq_find(irq);
 	bound = object != NULL && object->bound;
+	label = bound ? object->label : 0;
 	(void)pthread_mutex_unlock(&irq_mutex);
 	if (object == NULL)
 		return (ERX_EINVAL);
 	if (!bound)
 		return (ERX_OK);
+	erx_backend_trace_write(ERX_TRACE_EVENT_IRQ_DELIVER, label, 0, 0);
 	return (erx_backend_park_signal(&group, &group_effects, NULL, (uint32_t)(irq - IRQ_HANDLE_BASE)));
 }
 

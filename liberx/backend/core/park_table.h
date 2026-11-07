@@ -77,8 +77,11 @@ erx_backend_park_result_t erx_backend_park_step(erx_backend_park_t *, const erx_
 /*
  * What the protocol asks of its caller. down blocks the slot's own executor until
  * its up or the deadline, and returns false at the deadline, never before it.
- * absorb blocks until an up already on its way arrives. up never blocks. Only the
- * step and the status mirror run under the lock.
+ * absorb blocks until an up already on its way arrives. up never blocks. trace records
+ * the slot executor's own park (ERX_TRACE_EVENT_PARK, with its deadline) and the end of
+ * that park (ERX_TRACE_EVENT_WAKE, with its status) on the trace ring, outside the park
+ * lock (docs/design-stopgap.md, "The trace ring"). Only the step and the status mirror
+ * run under the lock.
  */
 typedef struct erx_backend_park_effects {
 	void	(*lock)(void *);
@@ -86,6 +89,7 @@ typedef struct erx_backend_park_effects {
 	bool	(*down)(void *, uint32_t, uint64_t);
 	void	(*absorb)(void *, uint32_t);
 	void	(*up)(void *, uint32_t);
+	void	(*trace)(void *, uint32_t, uint32_t, uint64_t);	/* event, slot, deadline or status */
 } erx_backend_park_effects_t;
 
 typedef struct erx_backend_park_group {

@@ -382,8 +382,18 @@ race_up(void *context, uint32_t slot)
 	pthread_mutex_unlock(&race_sem_lock);
 }
 
+/* The trace ring has its own tests (test/host/trace_ring_test.rb). */
+static void
+race_trace(void *context, uint32_t event, uint32_t slot, uint64_t arg)
+{
+	(void)context;
+	(void)event;
+	(void)slot;
+	(void)arg;
+}
+
 static const erx_backend_park_effects_t race_effects = { .lock = race_lock, .unlock = race_unlock,
-    .down = race_down, .absorb = race_absorb, .up = race_up };
+    .down = race_down, .absorb = race_absorb, .up = race_up, .trace = race_trace };
 
 static void *
 race_executor(void *argument)

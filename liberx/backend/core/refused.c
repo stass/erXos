@@ -50,3 +50,16 @@ erx_irq_route(uint64_t irq, uint64_t cpu)
 	(void)cpu;
 	return (ERX_ENOTSUP);
 }
+
+int
+erx_trace_read(uint64_t res, uint32_t cpu, uint64_t cursor, erx_trace_record_t *records, uint32_t max,
+    erx_trace_read_result_t *result)
+{
+	(void)res;
+	(void)cpu;
+	(void)cursor;
+	(void)records;
+	(void)max;
+	(void)result;
+	return (ERX_ENOTSUP);
+}

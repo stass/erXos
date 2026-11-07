@@ -203,6 +203,36 @@ int	erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *windo
  */
 uint32_t	erx_info_partial(uint32_t topic);
 
+/*
+ * What one trace read did: where the next read starts, how many records it copied, and how
+ * many records between the cursor and next were overwritten before they were read.
+ */
+typedef struct erx_trace_read_result {
+	uint64_t	next;
+	uint64_t	kept;
+	uint64_t	overwritten;
+} erx_trace_read_result_t;
+
+/*
+ * The root's trace ring (docs/design-stopgap.md, "The trace ring"): copies at most max of the
+ * whole records from cursor on into records[0 .. kept) and takes no lock. A cursor of
+ * UINT64_MAX copies nothing and returns the ring's head as next. Any other cursor past the
+ * head, or max 0 or over ERX_TRACE_READ_MAX, is ERX_EINVAL; a cursor at the head of an
+ * exhausted ring is ERX_ELIMIT. A cursor more than ERX_TRACE_RING_RECORDS below the head
+ * starts that far below it, and the records it skips count as overwritten. In a task, which
+ * has no ring, ERX_ENOTSUP.
+ */
+int	erx_backend_trace_read(uint64_t cursor, erx_trace_record_t *records, uint32_t max,
+	    erx_trace_read_result_t *result) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * The kernel's per-CPU trace rings (docs/design-kernel.md, "Trace ring"), with the same
+ * cursor and records as erx_backend_trace_read. The stopgap has no kernel ring: ERX_ENOTSUP
+ * on both backends, so the trace's kernel row is unsupported.
+ */
+int	erx_trace_read(uint64_t res, uint32_t cpu, uint64_t cursor, erx_trace_record_t *records,
+	    uint32_t max, erx_trace_read_result_t *result) ERX_WARN_UNUSED_RESULT;
+
 /* how is ERX_END_OFF or ERX_END_RESET, and res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 

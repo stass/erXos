@@ -29,6 +29,7 @@
 #include "erx/core/debug_log.h"
 #include "erx/core/dispatch.h"
 #include "liberx/backend/core/object_info.h"
+#include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/group.h"
@@ -37,6 +38,7 @@
 #include "liberx/backend/fiasco/service_wire.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/time.h"
+#include "liberx/backend/fiasco/trace.h"
 #include "liberx/backend/fiasco/vm.h"
 
 #define SERVICE_STACK_BYTES	16384u
@@ -158,6 +160,7 @@ service_thread_table_init(void)
 	    erx_fiasco_thread_semaphore_cap(0))) < 0)
 		return ("threads: the kernel refused the first thread's semaphore");
 	erx_fiasco_thread_first_init();
+	erx_trace_ring_touch();
 	return (NULL);
 }
 
@@ -645,6 +648,8 @@ service_thread_set_affinity(uint32_t caller, uint64_t thread, uint64_t mask)
 	if (row->threads[index] == ERX_FIASCO_TASK_THREAD_ABSENT)
 		return (ERX_EINVAL);
 	row->affinity[index] = mask;
+	if (task == ERX_FIASCO_TASK_ROOT)
+		erx_fiasco_trace_set_mask(index, mask);
 	if (row->threads[index] != ERX_FIASCO_TASK_THREAD_STARTED)
 		return (ERX_OK);
 	param = service_sched_param(mask);
@@ -673,6 +678,8 @@ service_thread_delete(uint32_t task, uint32_t index)
 
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_ABSENT;
 	row->affinity[index] = 0;
+	if (task == ERX_FIASCO_TASK_ROOT)
+		erx_fiasco_trace_set_mask(index, 0);
 	if (service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_task_thread_cap(task, index))) ||
 	    service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_task_semaphore_cap(task, index)))) {
 		erx_fiasco_console_write(line, sizeof(line) - 1);
