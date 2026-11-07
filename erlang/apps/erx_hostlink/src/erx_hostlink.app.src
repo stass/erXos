@@ -1,0 +1,15 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The host link (docs/design-live.md, "The host link"): the session between tools/erx and
+%% the system domain over the second UART. erx_hostlink_frame is its wire frames,
+%% erx_hostlink_stream the frames within a session (reassembly, sequence, credit) and
+%% erx_hostlink_session the session protocol's pure core (hello, the call window, kept
+%% replies, the facet table); erx_hostlink_payload is Phase 1's check of a payload from the host.
+{application, erx_hostlink,
+ [{description, "erXos host link"},
+  {vsn, "1"},
+  {modules, [erx_hostlink_frame, erx_hostlink_stream, erx_hostlink_session, erx_hostlink_payload]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {env, []}]}.

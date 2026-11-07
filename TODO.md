@@ -1300,6 +1300,34 @@ it; git history is the record of completed work.
   kernel capabilities pass as typed items. File access over 9P carries no
   such handle, its handles being 9P's fids
   ([design-live.md](docs/design-live.md#the-host-link)).
+* [Medium] live, host-link payload check (`erlang/apps/erx_hostlink/src/erx_hostlink_payload.erl`):
+  until `liberx`'s `erx_etf` exists (M5), a control payload from the host
+  is checked by a size bound, `binary_to_term/2` in safe mode and a walk
+  that refuses pids, references, ports and funs, not by the host grammar,
+  and it is decoded onto the heap before the resident limit sees its
+  size: a 16 MiB payload of empty lists builds about 256 MiB. Replace
+  `erx_hostlink_payload:measure/1` with `erx_etf`'s check with the host
+  grammar, which gives the decoded size before decoding; until then the
+  effect layer may run the check in a process whose `max_heap_size` is the
+  room left ([design-live.md](docs/design-live.md#the-host-link)).
+* [Medium] live, host-link resident bound
+  (`erlang/apps/erx_hostlink/src/erx_hostlink_session.erl`): the design's
+  "The host link" says the credit, the call window and the resident limit
+  together bound what a host can make the target hold, but a hello forgets
+  the replaced session's executing calls and a cast holds no reservation
+  once handed on, so a host that fills the window, sends a new hello and
+  repeats holds up to 32 MiB more each round. Count a replaced session's
+  outstanding calls, matched by their serial, against the next session's
+  room until their `call_done` arrives, and give a cast a reservation
+  until its handler has taken it.
+* [Medium] live, host-link session (`erlang/apps/erx_hostlink/src/erx_hostlink_session.erl`):
+  choices the design leaves open, to settle in design-live.md's "The host
+  link":
+  * Funs and ports in a reply are rendered `{'$fun', Text}` and
+    `{'$port', Text}` beside the design's `'$pid'` and `'$ref'`, and a reply
+    that fails the host grammar or the message limit becomes
+    `{error, system_limit}`; `message_max` bounds both directions, so a
+    release build's 8 KiB limit also bounds replies.
 * [Low] shell, parser choices to settle against plan9port's rc once its
   oracle runs: `|[a=b]` is read as descriptor a of the left command to b of
   the right one, which may be the reverse of rc's lex.c; an empty operand

@@ -17,7 +17,7 @@ module Erx
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_shell].freeze
+    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_shell erx_hostlink].freeze
     SOURCE = 'erlang/apps'
     # Kernel's own error and warning flags (otp/lib/kernel/src/Makefile, otp/make/otp.mk.in)
     # less its documentation warnings, which erXos's modules do not follow, with

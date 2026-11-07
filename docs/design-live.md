@@ -369,7 +369,7 @@ offset  size  field
 2       2     reserved  = 0
 4       16    session   opaque session identifier from hello; all zero before it
 20      4     seq       frame number within the session and direction, from 0
-24      4     target    control: facet number, 0 for the root; credit: bytes granted; else 0
+24      4     target    control: facet number, 0 for the root; credit: total granted; else 0
 28      n     body      at most 8,192 bytes
 28+n    4     crc       CRC-32C of bytes 0 .. 28+n-1
 ```
@@ -377,22 +377,44 @@ offset  size  field
 Integers are little-endian. A files body is one whole 9P2000.L message
 ([Files between the host and the
 machine](#files-between-the-host-and-the-machine)). A control body carries
-a piece of a control message: a 16-byte header (`kind`: 1 call, 2 reply, 3
-cast; `flags` bit 0 `MORE`; `total`, the length of the whole payload, the
-same in every frame; `id`, the call identifier, nonzero for calls and
-replies) followed by a piece of an external-term-format payload. A
+a piece of a control message: a 16-byte header (`kind`, a byte: 1 call, 2
+reply, 3 cast; `flags`, a byte, bit 0 `MORE`, set on every piece but the
+last; 2 reserved bytes, zero; `total`, 4 bytes, the length of the whole
+payload, the same in every frame; `id`, 8 bytes, the call identifier,
+nonzero for calls and replies and zero for casts) followed by a piece of
+an external-term-format payload. Every piece but the last is a full 8,176
+bytes, the body less its header, so a message has exactly as many pieces
+as its `total` needs and a receiver keeps no more than the `total` it
+reserved; a piece of any other size is discarded with its message. The
+pieces of one message are consecutive among the control frames of its
+session, and frames of other streams may come between them. The layouts
+and bounds are
+`abi/protocols/hostlink.txt`'s, and the COBS encoding is Cheshire and
+Baker's. A sender may send a zero before a frame, to end any damaged bytes
+before it; two zeros in a row make no frame. A
 receiver discards an encoded frame longer than 8,300 bytes, a frame whose
 CRC fails, a frame with an unknown version or a stream its side does not
 receive, and a frame of any session but the current one, and counts each;
 it never answers malformed input. The one exception to the session rule is
 a control frame of session 0, which carries the `hello` that opens a
-session. `seq` grows by one per frame and the session ends before it
-wraps; a receiver that sees a gap discards the message it was
-reassembling, and the sender's retry sends it again. A message's `total`
-may not exceed the session's limit, 16 MiB, or 8 KiB, one frame's body, in
+session; a hello and its reply are one frame each, taken apart from the
+current session's sequence, the message it is reassembling and its
+resident limit, and a hello of more frames is discarded. `seq` grows by
+one per frame and the session ends before it wraps. A receiver discards
+and counts a frame whose `seq` is below the one it expects, a repeat,
+and leaves the message it is reassembling alone; one that sees a gap
+discards the message it was reassembling, and the sender's retry sends
+it again. A message's `total`
+may not exceed the session's limit, 16 MiB, or 8 KiB in
 a release build whose configuration lists no facet for the host, and must
 fit what is left of the session's resident limit ([The host
 link](#the-host-link)), which bounds reassembly before any byte is kept.
+A message whose `total` is over the session's limit is discarded and
+counted, and one that does not fit the resident limit is refused; the
+later pieces of either are skipped, not taken as the start of another
+message. A piece that does not continue the message being reassembled (by
+its kind, id, target or total), or bytes past `total`, discard that
+message.
 
 ### Escape rules
 
@@ -1372,7 +1394,23 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   received bytes and drops beyond that, counting the loss
   ([design-system.md](design-system.md#drivers)), so the tool
   sends only within credit: 16 KiB at the start of a session, renewed by
-  credit frames from `erx_hostlink` as it consumes input.
+  credit frames from `erx_hostlink` as it consumes input. A credit frame's
+  `target` is the total the target has granted in the session, modulo
+  2^32, so a later grant makes up for one lost with a damaged frame. The
+  target counts every byte it reads from the link, a read's bytes before
+  the frames they hold, from the read after the one that held the hello
+  that opened the session; it grants once 4 KiB are owed, and grants what
+  is owed, or repeats its last grant, whenever the link's input goes
+  idle, so a host short of credit for a frame is never left waiting. The
+  tool counts every byte it sends from its hello's first byte, and sends
+  nothing between its hello and the reply but repeats of the hello, so
+  the target never grants a byte the tool has not sent and grants less
+  only by the hello and what was read with it. Those bytes must stay well
+  under the 8,083 by which the initial credit exceeds the largest frame
+  and its zero, so the tool repeats a hello only after waiting for its
+  reply, never many times into one read. The tool takes a
+  grant that adds more than it has sent and not yet had granted as stale
+  and ignores it.
 * **Streams.** The control stream carries calls, replies and casts; the
   terminal stream carries a console session's tty, raw in both directions;
   the events stream carries log lines and trace records;
@@ -1386,10 +1424,15 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   host link's `console` line.
 * **Sessions.** The tool opens a session with `{hello, Nonce}` in frames
   whose session is all zero, with `Nonce` a fresh 16-byte binary from the
-  host's random source. The target replies with that nonce, an independently
-  generated nonzero 128-bit session identifier, its build identifier and
-  format versions. The tool matches the nonce and refuses another build;
-  the target closes the preceding session and its facets. Identifiers are
+  host's random source; the hello is a call to the root. The target
+  replies `{hello, Nonce, SessionId, Build, Versions}`: that nonce, an
+  independently generated nonzero 128-bit session identifier, its build
+  identifier and format versions. The tool matches the nonce and refuses
+  another build; the target closes the preceding session and its facets.
+  A hello with the current session's nonce, sent again because its reply
+  was lost or repeated on the link, gets that session's reply again and
+  replaces nothing, so frames the tool sent under the first reply still
+  reach the session; a hello with any other nonce replaces it. Identifiers are
   opaque bytes, not authority or authentication. With good independent
   entropy, an old identifier matches one new session with probability
   2^-128; over many sessions the collision bound grows with the number of
@@ -1430,7 +1473,8 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   * A session holds at most 1,024 facets; opening one more fails with
     `{error, system_limit}`. A facet's number is never reused within a
     session, so a number the host kept names nothing once its facet is
-    closed.
+    closed, and a call to a number the table does not hold is answered
+    `{error, noproc}`.
   * A pid in a reply that is not one of the session's facets is rendered
     as `{'$pid', Text}`, and a reference as `{'$ref', Text}`, where `Text`
     is its printed form. These are names: the host cannot address them.
@@ -1454,6 +1498,16 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   the main thread's stack a few thousand levels down. Its encoder holds
   the tool's own calls to the byte and depth bounds; the target checks
   their decoded size.
+
+  In Phase 1, until `erx_etf`'s check exists, the implementation behind
+  this check is `erx_hostlink_payload`: a payload passes when it is at
+  most 16 MiB, is not in ETF's compressed form, decodes with
+  `binary_to_term/2` in safe mode with no bytes after the term, and holds
+  no pid, reference, port or fun; its decoded size, for the resident
+  limit, is the decoded term's flat size plus the payload's own bytes,
+  which bound its binaries' bytes. Safe mode creates no atom and no
+  external fun, but the term is built on the heap before its size is
+  known, up to about sixteen times the payload's bytes.
 * **Resident bytes.** What a session makes `erx_hostlink` hold stays
   within the session's resident limit, 32 MiB (an estimate), charged to
   the system domain's budget, which holds one session's, since the link

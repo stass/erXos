@@ -49,7 +49,7 @@ class RuntimeReleaseTest < Minitest::Test
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end
     shipped = paths.filter_map { |path| path[%r{\Asystem/lib/([a-z_]+)-[^/]+/}, 1] }.uniq
-    assert_equal %w[compiler erx erx_blk erx_files erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
+    assert_equal %w[compiler erx erx_blk erx_files erx_hostlink erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
                  'the release holds its applications and no more'
   end
 
