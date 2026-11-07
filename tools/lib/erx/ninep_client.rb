@@ -22,6 +22,8 @@ module Erx
     class Refused < Error; end
     # A deadline passed with no reply.
     class Timeout < Error; end
+    # A file read past the byte cap its caller set.
+    class TooLarge < Error; end
 
     CODEC = ABI::Generated::CODEC
     PROTOCOL = ABI::Generated::SCHEMA.protocols.find { |protocol| protocol.fetch(:name) == 'erx_9p' }
@@ -32,6 +34,8 @@ module Erx
     NOTAG = CODEC.constant('p9_notag')
     VERSION = '9P2000.L'
     HEADER = 7
+    # The most bytes read_file holds by default: well above any file the exit check reads.
+    READ_MAX = 16 * 1024 * 1024
     QID = 13
 
     Qid = Data.define(:type, :version, :path)
@@ -94,14 +98,15 @@ module Erx
       nil
     end
 
-    # The whole of the file at names in tree aname, read through fids 1 and 2.
-    def read_file(aname, names)
+    # The whole of the file at names in tree aname, read through fids 1 and 2; raises
+    # TooLarge once it holds more than max_bytes, since the server decides where it ends.
+    def read_file(aname, names, max_bytes: READ_MAX)
       attach(1, aname)
       raise Refused, "#{LineEscape.escape(names.join('/'))} not found" unless walk(1, 2, names).size == names.size
 
       _qid, iounit = lopen(2, 0)
       unit = iounit.zero? ? @msize - 24 : [iounit, @msize - 11].min
-      contents = read_from(2, unit)
+      contents = read_from(2, unit, max_bytes)
       clunk(2)
       clunk(1)
       contents
@@ -109,13 +114,14 @@ module Erx
 
     private
 
-    def read_from(fid, unit)
+    def read_from(fid, unit, max_bytes)
       contents = String.new(encoding: Encoding::BINARY)
       loop do
         piece = read(fid, contents.bytesize, unit)
         return contents if piece.empty?
 
         contents << piece
+        raise TooLarge, "the file holds more than #{max_bytes} bytes" if contents.bytesize > max_bytes
       end
     end
 

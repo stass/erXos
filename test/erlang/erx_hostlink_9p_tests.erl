@@ -413,6 +413,30 @@ a_release_build_or_an_unread_manifest_serves_none_test() ->
     ?assertEqual(unknown, erx_hostlink_files:manifest_flags({error, enoent})),
     ?assertEqual(unknown, erx_hostlink_files:manifest_flags({ok, <<"not a manifest">>})).
 
+%% The configuration's list of trees is atoms; any other entry, or a value that is no
+%% list, refuses the configuration with that entry named, line-escaped, rather than
+%% serving fewer trees than it meant.
+configured_trees_test() ->
+    Old = application:get_env(erx_hostlink, files_trees),
+    try
+        ?assertEqual({ok, [<<"proc">>, <<"data">>]}, configured_trees([proc, data])),
+        ?assertEqual({ok, []}, configured_trees([])),
+        ?assertEqual({error, {files_trees, <<"\"data\"">>}}, configured_trees([proc, "data"])),
+        ?assertEqual({error, {files_trees, <<"proc">>}}, configured_trees(proc)),
+        ?assertEqual({error, {files_trees, <<"tail">>}}, configured_trees([proc | tail])),
+        {error, {files_trees, Named}} = configured_trees([proc, <<"x", 16#202E/utf8, "\n">>]),
+        ?assertEqual(nomatch, binary:match(Named, [<<16#202E/utf8>>, <<"\n">>]))
+    after
+        case Old of
+            {ok, Value} -> application:set_env(erx_hostlink, files_trees, Value);
+            undefined -> application:unset_env(erx_hostlink, files_trees)
+        end
+    end.
+
+configured_trees(Value) ->
+    application:set_env(erx_hostlink, files_trees, Value),
+    erx_hostlink_files:configured_trees().
+
 %%% The bridge process over a real grant ---------------------------------
 
 %% A bridge of tree test, served by an erx_fs grant of erx_fs_test_tree.

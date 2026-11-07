@@ -134,7 +134,7 @@ marker_present(_Marker, _Dir, _Children) -> {error, enoent}.
 -doc """
 The entries of the directory at Path, in order: `status`, then the paths
 below it. A path whose children the schema names lists those that Scope
-reaches (erx_inspector:reachable/3); a listing lists the ids of the
+reaches (erx_inspector:declared_reachable/3); a listing lists the ids of the
 inspector's answer for it, ListingAnswer, then `.partial` when the
 inspector gave only part of them, or holds only `.unknown` when it gave
 none.
@@ -160,7 +160,7 @@ listed(Path, {unknown, _}) -> [{<<".unknown">>, {unknown, Path}}].
 ids(Path, Ids) -> [{name(Id), {dir, Path ++ [Id]}} || Id <- Ids].
 
 reachable(Path, Scope) ->
-    erx_inspector:reachable(Path, erx_schema:resolve(Path), Scope) =/= error.
+    erx_inspector:declared_reachable(Path, erx_schema:resolve(Path), Scope) =/= error.
 
 -doc """
 Whether the directory at Path lists the inspector's entries: a path whose

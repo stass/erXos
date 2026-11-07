@@ -161,7 +161,44 @@ class FilesRelayTest < Minitest::Test
     server_io&.close
   end
 
+  # A server whose file never ends: every read is answered in full, for at most 64
+  # reads, so a client without a bound would still finish. read_file stops at its byte
+  # cap and raises, holding no more than the cap and one piece.
+  def test_read_file_stops_at_its_byte_cap
+    client_io, server_io = UNIXSocket.pair
+    server = Thread.new { endless_file(server_io, reads: 64) }
+    client = Erx::NinepClient.new(io: client_io, deadline: 5)
+    error = assert_raises(Erx::NinepClient::TooLarge) { client.read_file('t', ['f'], max_bytes: 20_000) }
+    assert_match(/more than 20000 bytes/, error.message)
+  ensure
+    client_io&.close
+    server&.join(5)
+    server_io&.close
+  end
+
   private
+
+  # Answers attach, walk, lopen, clunk and read requests on io, each read with as many
+  # bytes as it asks for, until reads are spent (then empty) or the client closes.
+  def endless_file(io, reads:)
+    types = Erx::NinepClient::TYPES
+    qid = "\0" * Erx::NinepClient::QID
+    while (head = io.read(4))
+      type, tag, body = io.read(head.unpack1('V') - 4).unpack('Cva*')
+      reply = case type
+              when types.fetch(:attach) then qid
+              when types.fetch(:walk) then [1].pack('v') + qid
+              when types.fetch(:lopen) then qid + [0].pack('V')
+              when types.fetch(:clunk) then ''
+              when types.fetch(:read)
+                count = (reads -= 1).negative? ? 0 : body.unpack1('x12V')
+                [count].pack('V') + ("\0" * count)
+              end
+      io.write([7 + reply.bytesize, type + 1, tag].pack('VCv') + reply)
+    end
+  rescue IOError, Errno::EPIPE, Errno::ECONNRESET
+    nil
+  end
 
   # A relay on a socket in a fresh owner-only directory, linked to a FakeTarget over a
   # socket pair, serving connections clients; yields the socket's path and the target.

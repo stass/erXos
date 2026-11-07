@@ -38,6 +38,15 @@ root_test_() ->
     [?_assertEqual({{error, badarg}, []}, erx_hostlink:root(Request, Link))
      || Request <- [{open, nosuch}, {open, <<"install">>}, open, {open, install, extra}, 42]].
 
+%% Only the heap bound refuses a payload as too large: a payload whose term passes the
+%% session's resident limit (32 MiB) is too_large, and any other end of the measuring
+%% process is a failure named with its reason.
+bounded_measure_test_() ->
+    {timeout, 60,
+     [?_assertEqual({error, too_large}, erx_hostlink:bounded_measure(term_to_binary(lists:duplicate(3000000, 0)))),
+      ?_assertMatch({error, {failed, {function_clause, _}}}, erx_hostlink:bounded_measure(not_a_payload)),
+      ?_assertMatch({ok, _}, erx_hostlink:bounded_measure(term_to_binary(ok)))]}.
+
 %% An install facet is a process the root reports as opened, and it ends with its link.
 install_facet_ends_with_its_link_test() ->
     Link = spawn(fun() -> receive stop -> ok end end),

@@ -81,7 +81,7 @@ live_process_record_test() ->
 foreign_pid() ->
     binary_to_term(<<131, 88, 119, 9, "erx@other", 1:32, 0:32, 7:32>>).
 
-reachable(Path, Scope) -> erx_inspector:reachable(Path, erx_schema:resolve(Path), Scope).
+reachable(Path, Scope) -> erx_inspector:declared_reachable(Path, erx_schema:resolve(Path), Scope).
 
 machine_paths_need_scope_all_test() ->
     ?assertEqual({ok, machine}, reachable([], [5])),

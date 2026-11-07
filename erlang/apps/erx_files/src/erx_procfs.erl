@@ -196,7 +196,7 @@ read_mode() -> immediate.
 ask({exists, Path}, Scope) ->
     case erx_schema:resolve(Path) of
         {ok, #{kind := listing} = Declaration} ->
-            case erx_inspector:reachable(Path, {ok, Declaration}, Scope) of
+            case erx_inspector:declared_reachable(Path, {ok, Declaration}, Scope) of
                 {ok, _Owner} -> {ok, listing};
                 error -> {error, scope}
             end;

@@ -60,7 +60,7 @@ module Erx
       UNIXSocket.open(listen) do |io|
         client = NinepClient.new(io: io, deadline: 30)
         client.version
-        client.read_file('tmp', ['files_probe'])
+        client.read_file('tmp', ['files_probe'], max_bytes: BYTES)
       end
     end
 

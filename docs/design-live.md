@@ -1461,7 +1461,10 @@ to deliver to, or when the caller of `erx_trace:start/3` or
 taken the reference, since nobody could then stop it. Any other reason
 is a failure, `killed` for a trace process past its heap bound
 included, and the printer then prints one escaped line,
-`erx:trace failed:` and the reason. The shell's
+`erx:trace failed:` and the reason. A trace process that fails before
+it answers its caller has started nothing the caller could stop, and
+`erx:trace/1` returns `{error, {failed, Why}}` with the reason; a
+printer it had already spawned may print its failure line as well. The shell's
 printer writes one line per entry, the time in seconds, the row, the
 event, each field as `name=value` (`pid` and `domain` first, `cpu`,
 `thread` and `space` last, the others by name) and the reporter's label in brackets,
@@ -1866,7 +1869,7 @@ grant's rights and bounds (V3).
 | `erx:ps() -> ok` | lists every process of every domain the caller's inspect facet covers, by domain, and under a session its programs: pid or program number, registered name or program name, current function, reductions, memory and queue length, each marked with its reporter; the `ps` command emits the same fields as records |
 | `erx:inspect(Path, Options) -> {ok, record()} \| {error, Reason}` | `Options` holds `offset`, `limit` and `timeout`; `Reason` includes `scope` and `no_facet` |
 | `erx:source(Pid \| {module(), atom(), arity()}) -> ok \| {error, Reason}` | prints the source lines around a process's current location or a function's first line; `{error, unsupported}` when the module's release carries no source |
-| `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope`; `erx:trace_stop(Ref)` ends it |
+| `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope` for a refusal, and `{failed, Why}` when the trace process ends before it has started the trace, `Why` its exit reason; `erx:trace_stop(Ref)` ends it |
 | `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([Window tokens](#window-tokens)) |
 | `erx:console_size(Width, Height) -> ok` | system domain only |
 | `erx_code:history(DomainId, Module) -> {ok, [{Hash, Time}]} \| {error, scope}` | the hashes loaded into a domain for a module, newest first, at most 16, through the caller's inspect facet ([The code store](#the-code-store)) |

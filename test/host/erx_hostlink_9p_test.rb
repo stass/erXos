@@ -16,11 +16,13 @@ class ErxHostlink9pTest < Minitest::Test
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
   GENERATED = %w[otp/erts/preloaded/src/erx_9p_grammar.erl
-                 erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx/src/generated/erx_manifest.erl]
+                 erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx/src/generated/erx_manifest.erl
+                 erlang/apps/erx/src/erx_text_tables.erl]
               .map { |source| Erx::Generated.path(source, root: ROOT) }
   SOURCES = [*GENERATED,
              *%w[erlang/apps/erx_files/src/erx_fs_grant.erl
                  erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_version.erl
+                 erlang/apps/erx/src/erx_text.erl
                  erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl]
                .map { |source| File.join(ROOT, source) }].freeze
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)

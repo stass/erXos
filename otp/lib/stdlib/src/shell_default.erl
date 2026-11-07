@@ -77,8 +77,9 @@ code:load_abs("$PATH/user_default").
 %% erXos's shortcuts (docs/design-live.md, "Erlang, in every domain"): each
 %% is a one-line call of its erx function, with no authority of its own.
 %% test/erlang/erx_shortcut_tests.erl fails if one has the name of a shell
-%% command or the name and arity of one of OTP's own exports here.
--export([source/1]).
+%% command or the name and arity of one of OTP's own exports here. OTP exports
+%% i/0 and i/3 here but not i/1, so i() and i(X, Y, Z) keep OTP's meaning.
+-export([i/1, source/1, trace/1, trace_stop/1]).
 -import(io, [format/1]).
 
 -doc "Print the help for all shell commands.".
@@ -254,6 +255,26 @@ function's first line, as `erx:source/1` does.
 """.
 -spec source(pid() | mfa()) -> ok | {error, term()}.
 source(Target) -> erx:source(Target).
+
+-doc """
+erXos: prints the inspector's record for a path, such as `[processes, Pid]`, as
+`erx:i/1` does. `i()` and `i(X, Y, Z)` are OTP's process listing and process
+information.
+""".
+-spec i(list()) -> ok | {error, term()}.
+i(Path) -> erx:i(Path).
+
+-doc """
+erXos: starts a trace that prints in the shell, as `erx:trace/1` does.
+""".
+-spec trace(term()) -> {ok, reference()} | {error, term()}.
+trace(Spec) -> erx:trace(Spec).
+
+-doc """
+erXos: ends a trace that `trace/1` started, as `erx:trace_stop/1` does.
+""".
+-spec trace_stop(reference()) -> ok.
+trace_stop(Ref) -> erx:trace_stop(Ref).
 
 -doc false.
 '$handle_undefined_function'(Func, Args) ->

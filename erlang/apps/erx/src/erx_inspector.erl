@@ -33,7 +33,7 @@ collector here is `{error, unsupported}`.
 """.
 
 -export([inspect/2, entries/2, overview/1]).
--export([scoped/3, reachable/3, listing/2]).
+-export([scoped/3, declared_reachable/3, listing/2]).
 -export_type([scope/0, answer/0, entries/0]).
 
 -type scope() :: all | [non_neg_integer()].
@@ -89,7 +89,7 @@ overview(Scope) ->
 %% Runs Answer with the path's owner when Scope reaches Path, and answers
 %% {error, scope} otherwise, as for a path that names nothing.
 within(Path, Scope, Answer) ->
-    case reachable(Path, erx_schema:resolve(Path), Scope) of
+    case declared_reachable(Path, erx_schema:resolve(Path), Scope) of
         {ok, Owner} -> Answer(Owner);
         error -> {error, scope}
     end.
@@ -99,16 +99,16 @@ The owner of Path when Scope reaches it, given erx_schema:resolve/1's
 answer for it; `error` for a path outside the scope, one that names no
 declared path, and a pid of a runtime this inspector does not reach.
 """.
--spec reachable(term(), {ok, erx_schema:declaration()} | {error, unknown_path}, scope()) ->
+-spec declared_reachable(term(), {ok, erx_schema:declaration()} | {error, unknown_path}, scope()) ->
           {ok, owner()} | error.
-reachable(_Path, {error, unknown_path}, _Scope) ->
+declared_reachable(_Path, {error, unknown_path}, _Scope) ->
     error;
-reachable(Path, {ok, #{visible := Visible}}, Scope) when Scope =/= all ->
+declared_reachable(Path, {ok, #{visible := Visible}}, Scope) when Scope =/= all ->
     case lists:member(all, Visible) of
         true -> error;
         false -> reachable(Path, Scope)
     end;
-reachable(Path, {ok, _Declaration}, Scope) ->
+declared_reachable(Path, {ok, _Declaration}, Scope) ->
     reachable(Path, Scope).
 
 %% A path no declaration closes to a scoped caller: a domain's when its

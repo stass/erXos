@@ -398,6 +398,16 @@ it; git history is the record of completed work.
   `shell_default`; derive the names from `local_func/8`'s clauses and add auto-imported BIFs
   (`erl_internal:bif/2`). The design's test that a shortcut shadows a shell-defined function of its name and
   arity is not written either.
+* [Medium] live, the `trace/1` shortcut (`otp/lib/stdlib/src/shell_default.erl`): the shell resolves a call
+  in a function defined at the prompt by name alone (`shell.erl` `reconstruct1/3` through
+  `edlin_expand:shell_default_or_bif/1`, which answers `shell_default` for any name it exports), so with
+  `trace/1` exported, `t(P) -> trace(P, true, [send]).` calls `shell_default:trace/3` and fails with `undef`
+  where stock calls `erlang:trace/3`; argument completion of `trace(` loses `erlang:trace/3` too. Either
+  resolve by name and arity in `reconstruct1/3` and `edlin_context` (an OTP edit for design-runtime's table),
+  or rename the shortcut (the owner's call); then make the collision test check that stock's
+  `shell_default_or_bif/1` answers `user_defined` or `shell_default` for each shortcut name. Also, definitions
+  at the prompt are refused for every arity of an exported name (`shell.erl:462`), not only the shortcut's,
+  which design-live's "Shortcuts" paragraph should say.
 * [Low] live, `erx_source`: the source read follows symbolic links and checks the size before reading rather
   than reading at most the cap, and a rendered line is not cut at a width, so a 4 MiB line (32 MiB of
   expanded tabs) reaches the console whole. Read with `file:read(Fd, Max + 1)` after `read_link_info`, and cut
@@ -471,8 +481,8 @@ it; git history is the record of completed work.
   in `erx_inspector`; have `erx_schema` export the page and the schema mark which machine paths a scoped facet
   reads. A thread past a partial listing's end is answered `{error, scope}`, as one that does not exist.
   Not collected yet: `[groups]`, `[budgets]`, `[domains]` and a domain's record, modules, exports, connections
-  and paginated `[domains, Id, processes]`; `erx:inspect/2`, `erx:ps/0`, `erx:domains/0` and the `shell_default`
-  shortcuts.
+  and paginated `[domains, Id, processes]`; `erx:inspect/2`, and `erx:ps/0` and `erx:domains/0` with their
+  `shell_default` shortcuts, which `test/erlang/erx_shortcut_tests.erl` lists as pending.
 * [Medium] /proc (`erlang/apps/erx_files/src/erx_procfs.erl`, `erx_procfs_core.erl`; design-live's
   [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts one tree of scope `all` and mounts
   it at `/proc` in every runtime, since every Phase 1 runtime is the system domain's; when domains come (M5), start
@@ -1534,6 +1544,20 @@ it; git history is the record of completed work.
   its counts (discarded, stray replies) reach no inspector record yet; and
   `tools/erx files` serves one client at a time and reaches only QEMU's UNIX
   socket, like `load` and `watch`.
+* [Low] live, host link's files stream (`erlang/apps/erx_hostlink/src/erx_hostlink_files.erl`): a
+  `files_trees` configuration that is not a list of atoms is refused at each session's bridge start, one
+  crash report per session, and the host's 9P client hears nothing until its deadline; check it once when
+  `erx_hostlink` starts and refuse to start, as a bad build word does.
+* [Low] live, 9P client (`tools/lib/erx/ninep_client.rb`, `version`): an agreed msize has no lower bound, so
+  below 24 `read_file`'s read size reaches zero or goes negative and packs as a 4 GiB count; refuse an agreed
+  msize below 4096, as the bridge refuses one offered. `max_bytes` is not validated either.
+* [Low] live, `erx:trace/1` (`erlang/apps/erx/src/erx_trace.erl`, `await_start/3`): `{error, {failed, Why}}`
+  returns the trace process's raw exit reason, which the shell prints with printable Unicode unescaped and
+  keeps in its history, a fault's reason with the trace's buffers included; return a bounded, escaped
+  reason, or `killed` or `fault`, and log the whole reason, before traces are scoped (M5).
+* [Low] live, host link (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `bounded_measure/1`): a fault of
+  `erx_hostlink_payload:measure/1` is refused as `{failed, Why}` but counted with malformed payloads as
+  `bad_payload` and its reason dropped; count it apart or log it once.
 * [Low] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
   review findings open: the namespace entry's `ro` is not applied; the bridge's own clunk replies
   count as stray; the tree lookup reads the namespace table on each attach;

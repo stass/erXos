@@ -57,6 +57,14 @@ scope_test() ->
     receive {'DOWN', Monitor, process, Dead, _} -> ok end,
     ?assertEqual({error, scope}, erx_trace:start(#{select => [Dead]}, all, self())).
 
+%% A trace process that ends before it answers, at its heap bound or by a fault, is a
+%% failure the caller is told of with the reason, not an exception in the caller's shell.
+failed_start_test() ->
+    {Killed, KilledMonitor} = spawn_monitor(fun() -> exit(killed) end),
+    ?assertEqual({error, {failed, killed}}, erx_trace:await_start(Killed, KilledMonitor, make_ref())),
+    {Faulted, FaultedMonitor} = spawn_monitor(fun() -> exit({badarg, []}) end),
+    ?assertEqual({error, {failed, {badarg, []}}}, erx_trace:await_start(Faulted, FaultedMonitor, make_ref())).
+
 %% An unknown domain id and an existing one outside the scope answer alike, so the
 %% answer does not tell which domains exist.
 unknown_domain_test() ->

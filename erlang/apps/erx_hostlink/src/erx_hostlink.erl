@@ -51,10 +51,17 @@ install facet exists (erx_hostlink_install, over erx_code); the others answer
 the root `{error, badarg}`. Casts reach no facet: none takes them.
 """.
 
--export([start_link/0, root/2, build/1]).
+-export([start_link/0, root/2, build/1, bounded_measure/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 
 -include("generated/erx_abi.hrl").
+
+%% The token this process hands the console driver with each frame it writes,
+%% {erx_console_output, ?WRITE_TOKEN, Bytes}, and which the driver hands back
+%% unchanged, {erx_console_written, ?WRITE_TOKEN}, once the frame is written
+%% (erx_console.erl's driver protocol). It is an atom of its own, not a pid:
+%% the driver only echoes it, and this process has one frame in flight.
+-define(WRITE_TOKEN, hostlink_frame).
 
 %% How long the line stays quiet before the session hears `idle`. The host
 %% waits for a grant only when it has less credit than its next frame needs,
@@ -128,7 +135,7 @@ handle_info({erx_console_input, Bytes}, #state{held = Held} = State) ->
     {noreply, take_input(State#state{held = <<Held/binary, Bytes/binary>>})};
 handle_info({timeout, Ref, idle}, #state{idle = Ref} = State) ->
     {noreply, step(idle, State#state{idle = none})};
-handle_info({erx_console_written, self}, State) ->
+handle_info({erx_console_written, ?WRITE_TOKEN}, State) ->
     {noreply, take_input(write_next(State#state{writing = false}))};
 handle_info({call_done, Worker, Reply, Opened}, #state{workers = Workers} = State) ->
     case maps:take(Worker, Workers) of
@@ -231,13 +238,13 @@ end_files(#state{files = {Bridge, Ref}} = State) ->
     State#state{files = none}.
 
 %% Hands the driver the next frame unless one is being written. The driver
-%% answers {erx_console_written, self} once it is.
+%% answers {erx_console_written, ?WRITE_TOKEN} once it is.
 write_next(#state{writing = true} = State) ->
     State;
 write_next(#state{output = Output, output_bytes = Out, driver = Driver} = State) ->
     case queue:out(Output) of
         {{value, Bytes}, Rest} ->
-            Driver ! {erx_console_output, self, Bytes},
+            Driver ! {erx_console_output, ?WRITE_TOKEN, Bytes},
             State#state{output = Rest, output_bytes = Out - byte_size(Bytes), writing = true};
         {empty, _} ->
             State
@@ -333,11 +340,19 @@ heap_limit() ->
       kill => true, error_logger => false}.
 
 %% erx_hostlink_payload:measure/1 in a process held to heap_limit(): one
-%% killed on passing it measured a payload too large to hold.
+%% killed on passing it measured a payload too large to hold; any other end
+%% of it is a fault of the measure, not a property of the payload, and is
+%% answered as a failure with its reason rather than as too_large. The
+%% session refuses both alike and counts them as bad_payload; the reason is
+%% not kept. Exported for the tests.
+-doc false.
+-spec bounded_measure(binary()) ->
+          {ok, non_neg_integer()} | {error, erx_hostlink_payload:reason() | {failed, term()}}.
 bounded_measure(Payload) ->
     {Pid, Ref} = spawn_opt(fun() -> exit({measured, erx_hostlink_payload:measure(Payload)}) end,
                            [monitor, {max_heap_size, heap_limit()}]),
     receive
         {'DOWN', Ref, process, Pid, {measured, Result}} -> Result;
-        {'DOWN', Ref, process, Pid, _Killed} -> {error, too_large}
+        {'DOWN', Ref, process, Pid, killed} -> {error, too_large};
+        {'DOWN', Ref, process, Pid, Why} -> {error, {failed, Why}}
     end.

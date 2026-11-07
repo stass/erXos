@@ -75,9 +75,10 @@ build(Sections) ->
 -doc """
 Starts a trace of processes, frames or kernel events (erx_trace) that prints one
 line per event in the shell, `Spec` as in docs/design-live.md, "Tracing";
-`{error, badarg}`, `{error, no_facet}` or `{error, scope}` when it is refused.
+`{error, badarg}`, `{error, no_facet}` or `{error, scope}` when it is refused, and
+`{error, {failed, Why}}` when the trace process ends before it starts the trace.
 """.
--spec trace(term()) -> {ok, reference()} | {error, badarg | no_facet | scope}.
+-spec trace(term()) -> {ok, reference()} | {error, badarg | no_facet | scope | {failed, term()}}.
 trace(Spec) ->
     erx_trace:print(Spec, ?TRACE_SCOPE).
 

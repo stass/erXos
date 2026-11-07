@@ -58,7 +58,12 @@ init(Link, Options) ->
                 #{trees := Given} ->
                     Given;
                 #{} ->
-                    Names = configured_trees(),
+                    %% A refused configuration ends the bridge with the reason, which
+                    %% names the bad entry, and the files stream has no bridge.
+                    Names = case configured_trees() of
+                                {ok, Configured} -> Configured;
+                                {error, Reason} -> error(Reason)
+                            end,
                     fun(Aname) -> tree_grant(Aname, Names, prim_file:erx_table()) end
             end,
     Draw = maps:get(draw_fid, Options, fun prim_file:erx_fid/0),
@@ -116,18 +121,31 @@ tree_grant(Aname, Names, Table) ->
 
 -doc """
 The trees the host may reach, as the names attach's Aname takes: those the
-host link's configuration lists, or the build's when it lists none.
+host link's configuration lists, a list of atoms, or the build's when it
+lists none. A configuration that is not a list of atoms is refused with
+`{files_trees, Text}`, `Text` the first entry that is no atom, or the tail
+or value that is no list, as written and line-escaped.
 """.
--spec configured_trees() -> [binary()].
+-spec configured_trees() -> {ok, [binary()]} | {error, {files_trees, binary()}}.
 configured_trees() ->
     case application:get_env(erx_hostlink, files_trees) of
-        {ok, Names} when is_list(Names) ->
-            [atom_to_binary(Name) || Name <- Names, is_atom(Name)];
-        {ok, _} ->
-            [];
+        {ok, Names} ->
+            tree_names(Names, []);
         undefined ->
-            default_trees(manifest_flags(file:read_file(manifest_path())))
+            {ok, default_trees(manifest_flags(file:read_file(manifest_path())))}
     end.
+
+tree_names([], Acc) ->
+    {ok, lists:reverse(Acc)};
+tree_names([Name | Rest], Acc) when is_atom(Name) ->
+    tree_names(Rest, [atom_to_binary(Name) | Acc]);
+tree_names([Bad | _], _Acc) ->
+    refused(Bad);
+tree_names(Bad, _Acc) ->
+    refused(Bad).
+
+refused(Bad) ->
+    {error, {files_trees, erx_text:escape_line(io_lib:format("~tP", [Bad, 12]))}}.
 
 -doc """
 The trees a build serves when its configuration lists none, from its system

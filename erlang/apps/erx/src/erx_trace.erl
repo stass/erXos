@@ -47,6 +47,8 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 -export([check/3, start/3, stop/1, handled/2, print/2, line/1]).
 %% The trace process's pure decisions, exported for test/erlang/erx_trace_tests.erl.
 -export([classify/2, window/0, deliver/2, report/3, acked/1, buffer/3, cursor/3]).
+%% The caller's wait for the trace process's answer, exported for the same tests.
+-export([await_start/3]).
 -export_type([spec/0, request/0, scope/0, domain_id/0, window/0]).
 
 %% The system domain's id, its node's creation (docs/design-domains.md: no node has a
@@ -56,6 +58,8 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 -define(MAX_SELECT, 16).
 -define(MAX_DOMAIN, 16#ffffffff).
 -define(TICK_MS, 10).
+%% Nanoseconds in a second: erx_clock_ns, the entries' time, printed as seconds.
+-define(NS_PER_S, 1000000000).
 %% The most records one read asks for, and the most reads of one ring in one round:
 %% eight full reads cover the stopgap's whole ring of 4,096 records.
 -define(READ_MAX, 512).
@@ -84,6 +88,8 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 -type scope() :: none | all | [domain_id()].
 -type request() :: #{select := [pid() | domain_id()], frames := boolean(), kernel := boolean()}.
 -type reason() :: badarg | no_facet | scope.
+%% A trace process that ended before it answered, with its exit reason.
+-type failure() :: {failed, term()}.
 
 %% The messages the trace process accepts, as classify/2 names them; it ignores any other.
 %%   {timeout, Timer, tick}       its own round timer, the current one only
@@ -126,9 +132,10 @@ Starts a trace of Spec under Scope whose entries go to Receiver as
 `{erx_trace, Ref, Entry}`; Receiver acknowledges them with handled/2 and may monitor
 the returned pid to learn when the trace ends. The trace ends when Receiver ends,
 stop(Ref) is called, the caller dies before this returns, or the trace process passes
-its heap bound (reason killed).
+its heap bound (reason killed). `{error, {failed, Why}}` when the trace process ends
+before it answers, `Why` its exit reason.
 """.
--spec start(term(), scope(), pid()) -> {ok, reference(), pid()} | {error, reason()}.
+-spec start(term(), scope(), pid()) -> {ok, reference(), pid()} | {error, reason() | failure()}.
 start(Spec, Scope, Receiver) when is_pid(Receiver) ->
     run(Spec, Scope, Receiver).
 
@@ -153,9 +160,10 @@ handled(_Ref, Count) ->
 -doc """
 Starts a trace of Spec under Scope that prints in the caller's shell: the trace
 process spawns a printer, which writes line/1 of each entry to the caller's group
-leader, and one line naming the reason if the trace fails, and ends with the trace.
+leader, and one line naming the reason if the trace fails, and ends with the trace;
+`{error, {failed, Why}}` as for start/3.
 """.
--spec print(term(), scope()) -> {ok, reference()} | {error, reason()}.
+-spec print(term(), scope()) -> {ok, reference()} | {error, reason() | failure()}.
 print(Spec, Scope) ->
     case run(Spec, Scope, printer) of
         {ok, Ref, _Trace} -> {ok, Ref};
@@ -358,14 +366,22 @@ spawn_trace(Request, Target) ->
     Caller = self(),
     Tag = make_ref(),
     {Pid, Monitor} = spawn_opt(fun() -> trace_init(Request, Target, Caller, Tag) end, [monitor | ?TRACE_OPTS]),
+    await_start(Pid, Monitor, Tag).
+
+%% The trace process's answer to its caller, who takes it. A trace process that ends
+%% before it answers, killed at its heap bound or by a fault, has started nothing the
+%% caller could stop, so the caller is told of the failure with its reason.
+-doc false.
+-spec await_start(pid(), reference(), reference()) ->
+          {ok, reference(), pid()} | {error, reason() | failure()}.
+await_start(Pid, Monitor, Tag) ->
     receive
         {Tag, Reply} ->
             erlang:demonitor(Monitor, [flush]),
             Pid ! {Tag, taken},
             Reply;
         {'DOWN', Monitor, process, Pid, Why} ->
-            %% The trace process failed before it answered: a fault, not a refusal.
-            error({erx_trace, Why})
+            {error, {failed, Why}}
     end.
 
 %% The session opens first, so a refusal leaves no printer behind. Then the receiver
@@ -562,7 +578,7 @@ failure(Why) ->
 %% erx_clock_ns as seconds with nine decimals, the seconds right-aligned in at least five
 %% columns: a wider count widens the column, where io_lib's fixed width would print stars.
 seconds(Time) ->
-    [string:pad(integer_to_binary(Time div 1000000000), 5, leading), $., io_lib:format("~9..0w", [Time rem 1000000000])].
+    [string:pad(integer_to_binary(Time div ?NS_PER_S), 5, leading), $., io_lib:format("~9..0w", [Time rem ?NS_PER_S])].
 
 field_order(Fields) ->
     First = [Key || Key <- [pid, domain], is_map_key(Key, Fields)],

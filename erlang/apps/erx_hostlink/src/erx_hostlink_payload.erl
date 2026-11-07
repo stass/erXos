@@ -33,6 +33,7 @@ under the same checks. Neither raises on any input.
 -include("generated/erx_abi.hrl").
 
 -export([measure/1, decode/1]).
+-export_type([reason/0]).
 
 -define(ETF_VERSION, 131).
 -define(ETF_COMPRESSED, 80).

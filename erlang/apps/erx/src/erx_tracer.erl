@@ -28,6 +28,7 @@
 -export([new/1, ring/4, erts/5, hold/2, release/2, flush/1, dropped/3, emit/3, convert/2]).
 -export_type([merger/0, row/0, source/0, entry/0, clock_pair/0]).
 
+%% The longest an entry waits for the sources behind it: 100 ms, in nanoseconds.
 -define(HOLD_NS, 100000000).
 
 -type row() :: erts | backend | kernel.

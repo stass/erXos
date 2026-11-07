@@ -10,19 +10,22 @@
 -module(erx_shortcut_tests).
 -include_lib("eunit/include/eunit.hrl").
 
-%% Every shortcut the design names.
--define(SHORTCUTS, [{ps, 0}, {i, 1}, {domains, 0}, {source, 1}, {trace, 1}, {trace_stop, 1},
-                    {attach, 1}]).
+%% The shortcuts this build exports, each over an erx function it has.
+-define(SHORTCUTS, [{i, 1}, {source, 1}, {trace, 1}, {trace_stop, 1}]).
+%% The design's other shortcuts, whose erx functions come with later milestones of
+%% docs/plan.md: ps/0 and domains/0 with the inspector's domain listings, attach/1
+%% with sessions in their own domains. Their names are kept free already.
+-define(PENDING, [{ps, 0}, {domains, 0}, {attach, 1}]).
 
 shortcuts_collide_with_nothing_test() ->
-    ?assertEqual([], collisions(?SHORTCUTS, shell:local_func(), stock_exports())).
+    ?assertEqual([], collisions(?SHORTCUTS ++ ?PENDING, shell:local_func(), stock_exports())).
 
-%% erXos's shell_default keeps all of OTP's exports and adds only shortcuts.
-shell_default_adds_only_shortcuts_test() ->
+%% erXos's shell_default keeps all of OTP's exports and adds exactly the shortcuts
+%% this build has.
+shell_default_adds_exactly_the_shortcuts_test() ->
     Ours = erxos_exports(),
     ?assertEqual([], stock_exports() -- Ours),
-    ?assertEqual([], (Ours -- stock_exports()) -- ?SHORTCUTS),
-    ?assert(lists:member({source, 1}, Ours)).
+    ?assertEqual(lists:sort(?SHORTCUTS), lists:sort(Ours -- stock_exports())).
 
 %% The check catches each kind of collision: a shell command's name at any
 %% arity, and the name and arity of one of OTP's exports.
