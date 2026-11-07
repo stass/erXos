@@ -16,13 +16,14 @@ class RuntimeBuildTest < Minitest::Test
   ErlangApps = Erx::ErlangApps
 
   # Stands in for every subprocess: rsync copies with file times, as -a does, the
-  # emulator's make leaves an executable, xref of the serving set answers with
-  # serving_reached in its log, and each step's name is recorded.
+  # preloaded make compiles as make would (make_preloaded), the emulator's make
+  # embeds what erts/ebin holds and leaves an executable, xref of the serving set
+  # answers with serving_reached in its log, and each step's name is recorded.
   class RecordingRunner
     # The directories each application's make ran in, in order, those whose ../ebin
-    # was missing when it ran, and the preloaded sources the copy held when the
-    # preloaded make ran.
-    attr_reader :steps, :relinked, :options, :directories, :missing_ebins, :argvs, :preloaded_sources
+    # was missing when it ran, the preloaded sources the copy held when the
+    # preloaded make ran, and the beams erts/ebin held when the emulator's make ran.
+    attr_reader :steps, :relinked, :options, :directories, :missing_ebins, :argvs, :preloaded_sources, :embedded
     attr_accessor :fail_step, :link_leaves_nothing, :serving_reached
 
     def initialize(output, log_dir:)
@@ -45,7 +46,7 @@ class RuntimeBuildTest < Minitest::Test
 
       case name
       when 'runtime-copy', 'runtime-copy-generated' then FileUtils.cp_r("#{argv[-2]}.", argv[-1], preserve: true)
-      when 'runtime-preloaded' then @preloaded_sources = Dir.glob('*.erl', base: File.join(@output.root, 'erts/preloaded/src')).sort
+      when 'runtime-preloaded' then make_preloaded(options.fetch(:env).fetch('ERX_GEN'))
       when 'runtime-emulator' then make_emulator
       when 'serving-set' then serving_log
       end
@@ -66,10 +67,31 @@ class RuntimeBuildTest < Minitest::Test
       { 'log' => log }
     end
 
-    # As the emulator's makefile behaves: beam.smp is copied from beam.emu when beam.emu
-    # exists, and an empty .SECONDARY makes a missing beam.emu no reason to link while
-    # beam.smp exists. So only with both gone does a link happen.
+    # OTP's beam rule (make/otp.mk.in): a beam is compiled when it is missing or older
+    # than its .erl, its one prerequisite, and holds its source and the generated
+    # header the source includes, read where the build's ERX_GEN names it.
+    def make_preloaded(generated)
+      sources = File.join(@output.root, 'erts/preloaded/src')
+      ebin = File.join(@output.root, 'erts/ebin')
+      header = File.join(generated, HEADER)
+      @preloaded_sources = Dir.glob('*.erl', base: sources).sort
+      FileUtils.mkdir_p(ebin)
+      @preloaded_sources.each do |source|
+        erl = File.join(sources, source)
+        beam = File.join(ebin, "#{File.basename(source, '.erl')}.beam")
+        next if File.exist?(beam) && File.mtime(beam) >= File.mtime(erl)
+
+        File.write(beam, File.read(erl) + (File.file?(header) ? File.read(header) : ''))
+      end
+    end
+
+    # As the emulator's makefile behaves: it embeds the preloaded beams, beam.smp is
+    # copied from beam.emu when beam.emu exists, and an empty .SECONDARY makes a missing
+    # beam.emu no reason to link while beam.smp exists. So only with both gone does a
+    # link happen.
     def make_emulator
+      ebin = File.join(@output.root, 'erts/ebin')
+      @embedded = Dir.glob('*.beam', base: ebin).sort.to_h { |beam| [beam, File.read(File.join(ebin, beam))] }
       primary = File.join(File.dirname(@output.beam), 'beam.smp')
       @relinked = !File.exist?(@output.beam) && !File.exist?(primary)
       return if link_leaves_nothing
@@ -112,6 +134,8 @@ class RuntimeBuildTest < Minitest::Test
   end
 
   GRAMMAR = 'erts/preloaded/src/erx_9p_grammar.erl'
+  # The generated header that preloaded modules such as prim_file include.
+  HEADER = 'erlang/apps/erx/include/generated/erx_abi.hrl'
   # The checkout itself, whose emulator and preloaded makefiles one case reads.
   TREE = File.expand_path('../..', __dir__)
 
@@ -216,6 +240,41 @@ class RuntimeBuildTest < Minitest::Test
     assert_equal '../../ebin', File.read(File.join(otp, 'erts/preloaded/src/Makefile'))[/^EBIN=(.*)$/, 1]
     assert_equal Erx::ServingSet.preloaded(root: TREE).map { |name| "$(ERL_TOP)/erts/ebin/#{name}.beam" }.sort,
                  embedded.split.reject { |word| word == '\\' }.sort
+  end
+
+  # A preloaded beam's one make prerequisite is its .erl, so a change to a generated
+  # header it includes, and to nothing else, must still reach the beam the emulator embeds.
+  def test_a_change_to_a_generated_header_alone_reaches_the_embedded_beams
+    write_otp('erts/preloaded/src/prim_file.erl', "-include(\"generated/erx_abi.hrl\").\n")
+    @generated.files = @generated.files.merge(HEADER => "-define(ONE, 1).\n")
+    build
+    assert_includes @runner.embedded.fetch('prim_file.beam'), 'ONE'
+    @generated.files = @generated.files.merge(HEADER => "-define(TWO, 2).\n")
+    build
+    assert_includes @runner.embedded.fetch('prim_file.beam'), 'TWO'
+  end
+
+  # The emulator's dependency files are computed again on every build because each
+  # names preload.c, which names the preloaded beams the build compiles again, so a
+  # header a source starts to include, generated or not, becomes its object's
+  # prerequisite at the next build.
+  def test_the_emulator_dependency_files_follow_the_preloaded_beams
+    makefile = File.read(File.join(TREE, 'otp/erts/emulator/Makefile.in'))
+    rules = makefile.scan(%r{^\$\(TTF_DIR\)/(\w+)\.depend\.mk: (.*)$})
+    assert_operator rules.size, :>=, 9
+    rules.each { |name, prerequisites| assert_includes prerequisites.split, '$(PRELOAD_SRC)', name }
+    assert_match(/^\$\(PRELOAD_SRC\): \$\(PRELOAD_BEAM\) /, makefile)
+  end
+
+  # erts/ebin holds only what this build's preloaded make wrote: no beam of a module
+  # that has since left erts/preloaded/src, for whatever reads the directory.
+  def test_erts_ebin_holds_no_beam_of_an_earlier_build
+    write_otp('erts/preloaded/src/gone.erl', "-module(gone).\n")
+    build
+    assert_includes @runner.embedded.keys, 'gone.beam'
+    FileUtils.rm_f(File.join(@root, 'otp/erts/preloaded/src/gone.erl'))
+    build
+    refute_includes @runner.embedded.keys, 'gone.beam'
   end
 
   # A beam in the copy could stay newer than its source, and make would keep it over a

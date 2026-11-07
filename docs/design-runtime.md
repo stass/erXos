@@ -337,7 +337,9 @@ release asks for them. Each shipped application ships its beams, its
 them through `include_lib` as on stock, and no `.appup`, since an update
 replaces a whole slot. Every beam the emulator embeds or a release ships, the
 preloaded modules included, is compiled from source by the runtime build with
-`+deterministic`; `otp/` tracks no application's `ebin`, prebuilt beam or boot script,
+`+deterministic`, the preloaded modules again by every build, since make's
+rule for a beam names only its source and not the generated headers it
+includes; `otp/` tracks no application's `ebin`, prebuilt beam or boot script,
 only the fixtures of OTP's test suites and examples.
 erXos's own Erlang code is applications of its own
 under `erlang/apps/` ([design.md](design.md#repository-layout)), listed
