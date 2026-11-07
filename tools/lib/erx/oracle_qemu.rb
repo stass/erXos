@@ -94,6 +94,10 @@ module Erx
     # Runs `suites`, names of the group's suites (OracleSuites), on stock and in the guest
     # under `accel` with `cpus` CPUs, and compares them.
     def run(suites, accel:, cpus:, jobs: 4)
+      raise Error, "a guest has #{Qemu::CPUS.min} to #{Qemu::CPUS.max} CPUs, not #{cpus}" unless Qemu::CPUS.include?(cpus)
+
+      # Stock runs as many schedulers as the system domain's ERTS gets.
+      schedulers = ProductionImage::Run.schedulers(File.read(File.join(@root, ProductionImage::MANIFEST)), cpus: cpus)
       table = @suites.known_differences
       oracle = Oracle.new(root: @root, runner: @runner)
       fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
@@ -102,7 +106,7 @@ module Erx
         tree = File.join(@out, 'tree')
         compiled = fill_tree(tree, suites, installation: installation, source: oracle.source_path('jit'))
         image = test_image(tree, compiled, fiasco: fiasco)
-        [@suites.run_stock(tree, suites, erl: installation.fetch('erl')), *run_guest(image, suites, accel: accel, cpus: cpus)]
+        [@suites.run_stock(tree, erl: installation.fetch('erl'), schedulers: schedulers), *run_guest(image, accel: accel, cpus: cpus)]
       end
       result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: "QEMU #{accel}")
       report = File.join(@out, 'report.txt')
@@ -111,14 +115,19 @@ module Erx
     end
 
     # The kernel command line of a run: the accelerator's own words, then one
-    # erx.arg word for each argument ERTS takes after the manifest's.
-    def self.command_line(suites, accel:)
+    # erx.arg word for each argument ERTS takes after the manifest's. It names
+    # no suite: erx_ct_oracle runs every suite the image's /test/ct/suites
+    # holds, which is the selection, so the line is the same whatever is
+    # selected. Bootstrap cuts a line longer than `limit` at its last whole
+    # word and the guest would run without the words cut, so a longer line is
+    # refused here.
+    def self.command_line(accel:, limit:)
       paths = [*OracleSuites::STOCK_APPLICATIONS.map { |application| "/lib/#{application}/ebin" }, '/test/ct/reporter']
-      arguments = [*paths.flat_map { |path| ['-pa', path] }, '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', WORK, *suites]
-      unless arguments.all? { |argument| argument.match?(/\A[A-Za-z0-9_\/.-]+\z/) }
-        raise Error, 'an oracle argument does not fit one kernel command-line word'
-      end
-      [ProductionImage::Run::COMMAND_LINES[accel], *arguments.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
+      arguments = [*paths.flat_map { |path| ['-pa', path] }, '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', WORK]
+      line = [ProductionImage::Run::COMMAND_LINES[accel], *arguments.map { |argument| "erx.arg=#{argument}" }].compact.join(' ')
+      raise Error, "the oracle's kernel command line is #{line.bytesize} bytes, over the #{limit} the kernel takes" if line.bytesize > limit
+
+      line
     end
 
     private
@@ -281,14 +290,14 @@ module Erx
     # Boots the image under its deadline and reads the events it printed. The
     # serial log is read whatever ended the boot, so a guest cut off by its
     # deadline still shows the cases it finished.
-    def run_guest(built, suites, accel:, cpus:)
+    def run_guest(built, accel:, cpus:)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@out, 'guest'))
       points = [*Qemu.boot_transcript(memory_mib: MACHINE.memory_mib, test_image: built.test_code), ProductionImage::Run::SLOGAN,
                 { name: 'oracle-result', pattern: RESULT, seconds: @deadline }]
       guest = self.class.boot_guest(Qemu.new(root: @root, runner: @runner, program: @qemu), directory: directory,
                                     accel: accel, cpus: cpus, image: built.single, memory_mib: MACHINE.memory_mib,
                                     checkpoints: points, machine_end: true,
-                                    command_line: self.class.command_line(suites, accel: accel))
+                                    command_line: self.class.command_line(accel: accel, limit: @codec.constant('boot_strings_max')))
       printed = OracleComparison.printed_events(guest.serial)
       events = File.join(@out, 'erxos.events.jsonl')
       File.binwrite(events, printed.events)

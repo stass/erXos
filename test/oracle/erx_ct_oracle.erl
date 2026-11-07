@@ -6,10 +6,10 @@
 Runs OTP suites under Common Test for `tools/erx oracle hosted`
 (design-tmp.md, Verification, "OTP's suites"), on erXos and on stock alike.
 
-`main([SuiteDir, WorkDir | Suites])` copies `SuiteDir`, the compiled
-suites and their `_data` directories, to `WorkDir/suites`, so each
-`data_dir` is writable as it is in a stock checkout, and runs the named
-suites from there with Common Test's logs, and so every `priv_dir`, under
+`main([SuiteDir, WorkDir])` copies `SuiteDir`, the compiled suites and
+their `_data` directories, to `WorkDir/suites`, so each `data_dir` is
+writable as it is in a stock checkout. It runs every suite of the copy,
+in name order. Common Test's logs, and so every `priv_dir`, go under
 `WorkDir/logs`. The events `erx_oracle_events` records go to
 `WorkDir/logs/events.jsonl` and, as each happens, to standard output as one
 line after the prefix `erx-oracle-event `: on erXos `WorkDir` is under
@@ -22,7 +22,7 @@ run by its events, not by the exit status.
 -export([main/1]).
 
 -spec main([string()]) -> no_return().
-main([SuiteDir, WorkDir | Suites]) ->
+main([SuiteDir, WorkDir]) ->
     Copy = filename:join(WorkDir, "suites"),
     LogDir = filename:join(WorkDir, "logs"),
     ok = copy_tree(SuiteDir, Copy),
@@ -30,7 +30,7 @@ main([SuiteDir, WorkDir | Suites]) ->
     ok = filelib:ensure_dir(Events),
     true = os:putenv("ERX_ORACLE_EVENTS", Events),
     Result = ct:run_test([{dir, Copy},
-                          {suite, [list_to_atom(Suite) || Suite <- Suites]},
+                          {suite, suites(Copy)},
                           {logdir, LogDir},
                           {auto_compile, false},
                           {event_handler, erx_oracle_events}]),
@@ -38,6 +38,16 @@ main([SuiteDir, WorkDir | Suites]) ->
     [print_lines("erx-oracle-log ", Log)
      || Log <- filelib:wildcard(filename:join(LogDir, "ct_run.*/*.logs/run.*/suite.log"))],
     erlang:halt(0).
+
+%% The suites compiled into Dir, sorted by name. The directory holds
+%% exactly the selection: the host compiles only the chosen suites into
+%% it, so no list of names has to reach the runtime, whose command line
+%% the kernel bounds (ERX_BOOT_STRINGS_MAX).
+suites(Dir) ->
+    case filelib:wildcard("*_SUITE.beam", Dir) of
+        [] -> error({no_suites, Dir});
+        Beams -> [list_to_atom(filename:basename(Beam, ".beam")) || Beam <- Beams]
+    end.
 
 %% Every regular file under From, at the same relative path under To. The
 %% copy reads and writes whole files, so it needs nothing of file:copy/2.

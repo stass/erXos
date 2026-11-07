@@ -144,9 +144,15 @@ module Erx
       end
     end
 
-    # Stock reads its events where erx_oracle_events writes them, so a run cut
-    # off by its deadline still shows the cases it reached.
-    def run_stock(tree, suites, erl:)
+    # Runs every suite compiled into `tree` on stock. Stock reads its events
+    # where erx_oracle_events writes them, so a run cut off by its deadline
+    # still shows the cases it reached. `schedulers`, when given, is the
+    # number of schedulers the erXos side runs, which stock then runs too
+    # (`+S`, which the dirty CPU schedulers follow):
+    # a suite skips the cases that need more schedulers than are online, so
+    # sides with different counts would differ in those cases for that alone.
+    # The peers a suite starts keep ERTS's default.
+    def run_stock(tree, erl:, schedulers: nil)
       work = File.join(@out, 'stock')
       FileUtils.rm_rf(work)
       OutputDirectory.prepare(root: @out, path: work)
@@ -159,8 +165,8 @@ module Erx
                                                   'ERL_ZFLAGS' => LOOPBACK_DISTRIBUTION,
                                                   'ERL_EPMD_RELAXED_COMMAND_CHECK' => '1')
       record = begin
-        finished([erl, '-sname', STOCK_NODE, '-noshell', '-pa', File.join(tree, 'test/ct/reporter'),
-                  '-run', 'erx_ct_oracle', 'main', File.join(tree, 'test/ct/suites'), work, *suites],
+        finished([erl, *scheduler_flags(schedulers), '-sname', STOCK_NODE, '-noshell', '-pa', File.join(tree, 'test/ct/reporter'),
+                  '-run', 'erx_ct_oracle', 'main', File.join(tree, 'test/ct/suites'), work],
                  name: 'stock', deadline: @deadline, chdir: work, env: environment)
       ensure
         stop_epmd(File.join(File.dirname(erl), 'epmd'), environment: environment)
@@ -193,6 +199,8 @@ module Erx
     # group's test directory, since a group's suites share helper modules
     # there, all compiled together beside `headers`, the group's
     # RELEASED_HEADERS, which no file of the test directory may shadow.
+    # erx_ct_oracle runs every suite the directory holds, so the suites it
+    # holds are refused unless they are `suites`.
     def compile_suites(directory, suites, erlc:, headers:)
       helpers = Dir.glob(File.join(@source, '*.{erl,hrl}')).sort.reject { |path| path.end_with?('_SUITE.erl') }
       shadowed = helpers.map { |path| File.basename(path) } & headers.map { |header| File.basename(header.source_header) }
@@ -211,6 +219,8 @@ module Erx
                        .reject { |path| NOT_MODULES.include?(File.basename(path)) }
       erlang(erlc, '-I', directory, '-o', directory,
              *modules.map { |path| File.join(directory, File.basename(path)) }, name: 'erlc-suites')
+      held = Dir.glob('*_SUITE.erl', base: directory).map { |file| File.basename(file, '.erl') }.sort
+      raise Error, "#{directory} holds the suites #{held.join(' ')}, not the selection" unless held == suites.sort
       copied = sources.map { |path| Compiled.new(path: File.join(directory, path.delete_prefix("#{@source}/")), source: path) }
       installed = headers.map do |header|
         Compiled.new(path: File.join(directory, File.basename(header.source_header)), source: header.generator)
@@ -237,6 +247,8 @@ module Erx
 
     # The node the stock run started its epmd for has halted, but epmd stays
     # until told to go; the run's own port and relaxed check let it be told.
+    def scheduler_flags(schedulers) = schedulers ? ['+S', "#{schedulers}:#{schedulers}"] : []
+
     def stop_epmd(epmd, environment:)
       @runner.run([epmd, '-kill'], name: 'stock-epmd-kill', deadline: 30, chdir: @out, env: environment)
     rescue Error => error

@@ -852,6 +852,11 @@ it; git history is the record of completed work.
   race polls instead of parking, so the handshakes' orderings rest on the
   M5 herd7 litmus tests; add a threaded mode in which both parties park on
   `need` and `wake` under a deadline.
+* [Low] stopgap bootstrap, `fiasco/bootstrap/server/src/erx_image.cc` (`erx_boot_args_cut`): a command line over
+  `ERX_BOOT_STRINGS_MAX` (2,048 bytes) is cut at its last whole word without a word on the console, where
+  docs/design-kernel.md ("Configuration") says the boot reports the cut. The QEMU oracle's guest ran only the stdlib
+  suites that fit a 2,375-byte line, and nothing in its serial log said so. Print the cut, with both lengths, and
+  check the line in a boot transcript test.
 * [Low] stopgap bootstrap, overlapping RAM regions:
   `Region_list::optimize` (`fiasco/bootstrap/server/src/region.cc`)
   merges a region into its predecessor by setting the predecessor's end to

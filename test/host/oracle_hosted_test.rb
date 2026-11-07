@@ -9,7 +9,7 @@ require_relative '../../tools/lib/erx/oracle_hosted'
 
 # The hosted runtime's command line, which no run is needed to check.
 class OracleHostedTest < Minitest::Test
-  def command = Erx::OracleHosted.erxos_command(beam: '/b/beam.emu', archive: '/a/release.pack', suites: %w[x_SUITE])
+  def command = Erx::OracleHosted.erxos_command(beam: '/b/beam.emu', archive: '/a/release.pack')
 
   def code_paths = command.each_cons(2).filter_map { |flag, value| value if flag == '-pa' }
 
@@ -23,9 +23,10 @@ class OracleHostedTest < Minitest::Test
     assert_empty code_paths.select { |path| path.start_with?('/lib/') }
   end
 
-  def test_the_reporter_and_the_suites_are_passed
+  # erx_ct_oracle runs every suite the suite directory holds, so none is named.
+  def test_the_reporter_and_the_suite_directory_are_passed
     assert_includes code_paths, '/test/ct/reporter'
-    assert_equal %w[x_SUITE], command.last(1)
+    assert_equal %w[main /test/ct/suites /tmp/ct], command.last(3)
   end
 end
 

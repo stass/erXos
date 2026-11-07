@@ -43,10 +43,11 @@ module Erx
 
     # The runtime's command line. The code server lists every application under
     # /lib itself, so a `-pa` for one would put its directory on the path twice;
-    # only the reporter, which is not under /lib, is added.
-    def self.erxos_command(beam:, archive:, suites:)
+    # only the reporter, which is not under /lib, is added. erx_ct_oracle runs
+    # every suite of /test/ct/suites, which holds the selection.
+    def self.erxos_command(beam:, archive:)
       [beam, archive, '-noshell', '-pa', '/test/ct/reporter',
-       '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', ERXOS_WORK, *suites]
+       '-run', 'erx_ct_oracle', 'main', '/test/ct/suites', ERXOS_WORK]
     end
 
     def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', 'clang'))
@@ -68,7 +69,7 @@ module Erx
       stock, erxos = oracle.with_runtime('jit') do |installation|
         tree = File.join(@out, 'tree')
         fill_tree(tree, suites, installation: installation, stock_source: oracle.source_path('jit'))
-        [@suites.run_stock(tree, suites, erl: installation.fetch('erl')), run_erxos(tree, suites)]
+        [@suites.run_stock(tree, erl: installation.fetch('erl')), run_erxos(tree)]
       end
       result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: 'hosted')
       report = File.join(@out, 'report.txt')
@@ -153,13 +154,13 @@ module Erx
     end
 
     # erXos's /tmp is gone with the runtime, so its events are what it printed.
-    def run_erxos(tree, suites)
+    def run_erxos(tree)
       archive = pack(tree)
       output = Runtime.output(root: @root)
       environment = Oracle::CLEAN_ERLANG_ENV.merge('ROOTDIR' => '/', 'BINDIR' => File.dirname(output.beam),
                                                   'EMU' => 'beam', 'PROGNAME' => 'erl', 'HOME' => nil,
                                                   'ERL_CRASH_DUMP_BYTES' => '0')
-      record = @suites.finished(self.class.erxos_command(beam: output.beam, archive: archive, suites: suites),
+      record = @suites.finished(self.class.erxos_command(beam: output.beam, archive: archive),
                         name: 'erxos', deadline: @deadline, chdir: @out, env: environment,
                         output_limit: MAX_OUTPUT_BYTES)
       events = File.join(@out, 'erxos.events.jsonl')

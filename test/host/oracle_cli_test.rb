@@ -142,15 +142,26 @@ class OracleCliTest < Minitest::Test
   end
 
   def test_qemu_command_line_hands_erts_the_reporter_one_word_per_argument
-    line = Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'tcg')
+    line = Erx::OracleQemu.command_line(accel: 'tcg', limit: 2048)
     words = line.split(' ')
     assert_equal "erx.watchdog=#{Erx::ProductionImage::Run::TCG_WATCHDOG}", words.first
     assert_equal %w[-pa /lib/common_test/ebin -pa /lib/sasl/ebin -pa /lib/syntax_tools/ebin -pa /lib/tools/ebin -pa /test/ct/reporter
                     -run erx_ct_oracle main
-                    /test/ct/suites /tmp/ct file_SUITE], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
+                    /test/ct/suites /tmp/ct], words.drop(1).map { |word| word.delete_prefix('erx.arg=') }
     assert words.drop(1).all? { |word| word.start_with?('erx.arg=') }
-    refute_includes Erx::OracleQemu.command_line(%w[file_SUITE], accel: 'hvf'), 'erx.watchdog'
-    assert_raises(Erx::Error) { Erx::OracleQemu.command_line(['a SUITE'], accel: 'tcg') }
+    refute_includes Erx::OracleQemu.command_line(accel: 'hvf', limit: 2048), 'erx.watchdog'
+  end
+
+  # Bootstrap cuts a command line longer than the kernel takes at its last
+  # whole word, so a guest handed a whole group's suites by name ran only
+  # those that fit and the rest showed as unresolved. The line names no
+  # suite, and one over the limit is refused, never booted.
+  def test_qemu_command_line_fits_what_the_kernel_takes_or_is_refused
+    limit = Erx::ABI::Generated::CODEC.constant('boot_strings_max')
+    line = Erx::OracleQemu.command_line(accel: 'tcg', limit: limit)
+    assert_operator line.bytesize, :<=, limit
+    assert_equal line, Erx::OracleQemu.command_line(accel: 'tcg', limit: line.bytesize)
+    assert_raises(Erx::Error) { Erx::OracleQemu.command_line(accel: 'tcg', limit: line.bytesize - 1) }
   end
 
   # The system shell redraws its prompt before the reporter's io:format line.
@@ -284,6 +295,30 @@ class OracleCliTest < Minitest::Test
 
     def initialize = @commands = []
     def run(argv, **) = @commands << argv
+  end
+
+  # Answers every command as passed and keeps its argument vector.
+  class PassingRunner < RecordingRunner
+    def run(argv, **)
+      super
+      { 'state' => 'passed', 'elapsed_seconds' => 1 }
+    end
+  end
+
+  # A suite skips the cases that need more schedulers than are online, so
+  # stock runs as many as the guest has CPUs, and the hosted run keeps
+  # ERTS's default on both sides.
+  def test_stock_runs_the_schedulers_it_is_given
+    Dir.mktmpdir do |directory|
+      root = File.expand_path('../..', __dir__)
+      [[1, %w[+S 1:1]], [nil, []]].each do |schedulers, flags|
+        runner = PassingRunner.new
+        suites = Erx::OracleSuites.new(root: root, out: directory, runner: runner, deadline: 1, group: 'stdlib')
+        suites.run_stock(File.join(directory, 'tree'), erl: '/stock/bin/erl', schedulers: schedulers)
+        stock = runner.commands.first
+        assert_equal ['/stock/bin/erl', *flags, '-sname'], stock.first(flags.size + 2)
+      end
+    end
   end
 
   # OTP's compiler test Makefile installs compiler's generated

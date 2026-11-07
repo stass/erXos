@@ -399,7 +399,6 @@ module Erx
         share = manifest_source[/^share system\n(?:  .*\n)*?  cpuset (\d+)$/, 1].to_i
         (share & ((1 << cpus) - 1)).to_s(2).count('1')
       end
-      private_class_method :schedulers
 
       # A machine at rest at the shell, with the group's report on: once the prompt is up, a
       # line of the report says every executor parked. The report writes a line only when the
