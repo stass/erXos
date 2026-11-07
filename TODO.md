@@ -1296,11 +1296,99 @@ to the corpus and follow rc
 * [Low] shell, one reader of a source's units: `run_source`, `eval` and
   the parser's fuzz target each step through units by hand, threading
   the rest, the lines read and whether an `if not` may follow; the
-  interactive loop would be a fourth. A cursor in erx_shell_parse that
+  interactive layer's loop (`erx_shell`) is a fourth. A cursor in erx_shell_parse that
   `next_bounded` takes and returns, with diagnostics already counted from
   the source's start, would hold that state in one place; split
   `outcome()` then into a unit's and a source's, since `run_unit` never
   gives `syntax_error` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
+* [Medium] shell, the interactive layer's stand-in runner:
+  `erx_shell_basic_runner` knows `echo`, `true` and `false` and refuses
+  redirections, pipelines and substitutions until the command namespace's
+  runner replaces it as `erx_shell:start/1`'s default
+  (`erlang/apps/erx_shell/src/erx_shell_basic_runner.erl`).
+* [Medium] shell, what a runner owns when a line is cut short: `Ctrl-C` or
+  the heap limit ends the line's process and the shell keeps its state
+  from before the line, so runner state the line built is lost and
+  processes it started (pipeline stages, open files) are not ended, while
+  a background job must outlive its line. The runner seam needs a stated
+  rule, such as a `Runner:interrupted/1` callback or an owner process per
+  line, before the command namespace's runner lands
+  (`erlang/apps/erx_shell/src/erx_shell.erl`, docs/design-shell.md).
+* [Medium] shell, `erx_shell` as a `gen_statem` with `reading` and
+  `running` states: the shell is a plain process, as Eshell's evaluator
+  is, but the group protocol is plain messages, so a state machine could
+  send `get_line` and take its reply, the line's `DOWN` and the group's
+  interrupt as events, which drops the `loop`/`read` recursion and makes
+  a stale interrupt impossible by construction
+  (`erlang/apps/erx_shell/src/erx_shell.erl`).
+* [Low] shell, a Ctrl-C right after a line is read can be lost:
+  `drop_interrupts` runs after `io:request` returns, so an interrupt the
+  group sends between its reply and that drop is taken as stale and the
+  line runs on until a second Ctrl-C. Sending the `io_request` directly
+  and receiving its reply and the interrupts in one `receive` drops only
+  those queued before the reply; the `gen_statem` above gives the same
+  (`erlang/apps/erx_shell/src/erx_shell.erl`, `read/3`).
+* [Low] shell, what a line's end means is decided inside `wait/5`'s
+  receive: a pure `unit_ended(Reason, Sh)` returning the text to show and
+  whether to go on would be tested without processes, as `after_parse/3`
+  is (`erlang/apps/erx_shell/src/erx_shell.erl`).
+* [Low] shell, the reading loop has no byte bound of its own: the parser
+  caps a unit at 4 KiB, but the group's line and the shell's `Line`
+  binary, in a process with no `max_heap_size`, hold whatever is typed or
+  pasted, as stock's shell does; SH2 bounds a line at 64 KiB
+  (`erlang/apps/erx_shell/src/erx_shell.erl`, `read/3`).
+* [Low] shell, the command shell's lines go to the Erlang shell's history
+  file when `kernel`'s `shell_history` is on, since its group uses the
+  same `group_history`; start its group with `{line_history, false}` or
+  give it a history of its own. `erx_shell:start/0` also hands the
+  operator the shell process's raw exit reason, which a crash in the
+  runner's `new/1` or the terminal's `write` would fill with their state
+  (`erlang/apps/erx_shell/src/erx_shell.erl`, `erlang/apps/erx/src/erx_console.erl`).
+* [Low] console, which requests of a hidden group are answered is a list
+  in `from_hidden_group`: a group request it does not name leaves that
+  group waiting for a reply, and a hidden group's `set_unicode_state`
+  still changes the shared `prim_tty` state. Sending every group message
+  through the one request path and discarding a hidden group's bytes at
+  the output edge would make hiding one decision
+  (`erlang/apps/erx/src/erx_console.erl`).
+* [Low] console, a group's shell that exits with reason `kill` kills the
+  console: OTP's `group` passes the shell's reason on with `exit(Drv, R)`,
+  which cannot be trapped when `R` is `kill`, as with stock `user_drv`;
+  have `group` send the reason as a message instead
+  (`otp/lib/kernel/src/group.erl`).
+* [Low] test, `runtime_console_test.rb`'s nested shells rest on a 300 ms
+  sleep for which `run_shell` call comes first; under load the inner
+  shell may start first and the case checks inner-first ending instead
+  of outer-first. Have the first shell's start function tell the
+  evaluator it runs before the second starts
+  (`test/integration/runtime_console_test.rb`).
+* [Low] shell, a line outlives its shell: the line's process is
+  monitored, not linked, so a shell killed outright leaves a running line
+  spinning (`erlang/apps/erx_shell/src/erx_shell.erl`, `run/3`).
+* [Low] shell, the 4 MiB heap limit counts the variables a line starts
+  with: once they near it, every later line passes its limit, even
+  `x=()`; bound what the shell keeps, or limit a line to its starting
+  state plus 4 MiB (`erlang/apps/erx_shell/src/erx_shell.erl`).
+* [Low] shell, whether a diagnostic that names a command is program
+  output or text attributed to a source: the evaluator writes `Name: not
+  found` and `whatis`'s `Name=value` raw, the stand-in runner names no
+  command for want of an escaper; once substitutions exist a program's
+  output reaches those names. Decide in docs/design-shell.md and make the
+  two agree (`erlang/apps/erx_shell/src/erx_shell_eval.erl`).
+* [Medium] shell, `Ctrl-D` does not end the command shell at the console:
+  edlin binds it to forward delete, and a group in edlin mode that is sent
+  `eof` ends the edited line without a newline and waits for more, so
+  `get_line` never answers `eof`. An edlin action that deletes forward or,
+  on an empty line, ends the input, bound for the command shell's group
+  alone, would give rc's `Ctrl-D`; `exit` ends it meanwhile
+  (`otp/lib/stdlib/src/edlin.erl`, `otp/lib/kernel/src/group.erl`).
+* [Low] shell, `$status` after `Ctrl-C` ends a running line: the shell
+  keeps the state it had before the line, where the design sets `$status`
+  to say the line was interrupted; it needs a way to set a variable through erx_shell_eval
+  (`erlang/apps/erx_shell/src/erx_shell.erl`).
+* [Low] shell, a boot word that makes the command shell the console's first
+  shell, so that a person reaches it without typing `erx_shell:start().` at
+  the Erlang shell (`erlang/apps/erx/src/erx_console.erl`).
 * [Low] shell, a runner's reply of the wrong shape: `with_redirs`, a
   substitution's capture and `whatis` match the reply directly, so a
   runner that breaks its contract crashes the evaluator with the whole
@@ -1740,6 +1828,16 @@ to the corpus and follow rc
   credential files whose directory is not on the list.
 
 ## Security residuals
+
+* [Low] shell and console, who may take the console: any process of the
+  system domain may call `erx_console:run_shell/1`, which gives a group
+  of its choosing the operator's keystrokes, or `erx_console:write/1`,
+  which puts raw bytes on the line past `prim_tty`, the escaping and
+  the hidden groups' policy (a command shell under another one still
+  writes). Acceptable while development builds run trusted code only;
+  tie both to the current group, and add a chokepoint check of
+  `write/1`'s callers, before the security closure
+  (`erlang/apps/erx/src/erx_console.erl`).
 
 * [Medium] ABI, the manifest's image records (`abi/manifest.txt`): only the
   packer's Phase 1 check (`tools/lib/erx/manifest.rb`, `normalize_images`)

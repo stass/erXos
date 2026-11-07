@@ -1700,6 +1700,20 @@ stand-in: the system shell's tty stays raw with every flag clear, so nothing lie
 between `prim_tty` and the driver ([design-live.md](design-live.md#the-tty)).
 Input bytes reach the group unchanged, and `prim_tty`'s bytes the driver unchanged.
 
+**A shell typed at the shell takes the console on a group of its own.** In Phase 1
+the command shell runs in the system domain on its console
+([design-shell.md](design-shell.md)): `erx_shell:start()`, typed at the Erlang
+shell, calls `erx_console:run_shell/1`, which starts a group for it, as `user_drv`'s
+`s` and `c` start a shell and connect to it, and gives that group the input; when
+its shell ends, the input goes back to the group below and the caller gets its
+answer; such shells may end in any order, and once the input has ended each group
+that gets the input is told so. As `user_drv` shows only its current group, the
+groups below are not shown: their output is acknowledged and dropped, and their
+questions answered; `user`, which carries the logger's output, is always shown.
+`Ctrl-C` interrupts the command shell, which ends its running line and reads on. A line's output is bytes: it reaches the driver through
+`erx_console:write/1`, past `prim_tty`, with each newline sent as CR-LF, as a
+cooked tty's `ONLCR` sends it, and every other byte unchanged.
+
 `prim_tty` stays because the group's requests (insert, move, delete, redraw) carry
 edit state across wrapped lines, so a console without it would be a larger
 renderer of its own, while a cooked line discipline and `-oldshell` give no arrow

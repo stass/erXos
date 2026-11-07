@@ -176,7 +176,15 @@ what a terminal needs added:
   emacs-style line editing and history from OTP's `edlin`, basic
   completion of command names and paths through `edlin`'s expansion hook,
   and job control ([Job control](#job-control)). vi-style editing is not
-  provided.
+  provided. The shell is a group's shell, as the Erlang shell is, and reads
+  a line at a time under `$prompt(1)`, `; ` by default; a unit that only
+  more lines can complete reads on under `$prompt(2)`, empty by default. A
+  whole unit runs in an evaluator process of its own, so `Ctrl-C` ends it
+  and the shell reads on with the variables it had before it and `$status`
+  saying the line was interrupted; `Ctrl-C`
+  while a line is typed drops the unit read so far. A unit that does not
+  parse is reported, sets `$status` as in a script and is skipped; `exit`
+  and the end of input, `Ctrl-D`, end the shell.
 * **One evaluator per stage.** A pipeline's stage, a command substitution
   and a `{...}` block run in the background are each an Erlang process
   that starts with a copy of the shell's variables and functions, so no

@@ -48,7 +48,7 @@ runs each evaluator with `max_heap_size` set, so a runaway recursion ends
 its own process, never the session (docs/design-shell.md, SH2).
 """.
 
--export([new/3, run_source/2, run_unit/2, status/1, var/2, runner_state/1,
+-export([new/3, run_source/2, run_unit/2, parse_fault/2, status/1, var/2, runner_state/1,
          true_status/1, pattern_text/1, pattern_match/2]).
 
 -export_type([shell/0, value/0, runner/0, request/0, body/1, pattern/0,
@@ -230,6 +230,13 @@ run_unit(Program, Sh) ->
         throw:{rc_fault, Message, Sh1} -> fault_outcome(Message, Sh1)
     end.
 
+-doc """
+Reports a unit that does not parse, Diagnostic being what the parser said
+of it, as run_source/2 reports one: `rc: ` and the diagnostic written to
+descriptor 2, and `$status` set to its message alone. Nothing of the unit
+runs.
+""".
+-spec parse_fault(erx_shell_parse:diagnostic(), shell()) -> outcome().
 parse_fault(Diagnostic, Sh) ->
     Printed = erx_shell_parse:format_error(Diagnostic),
     {syntax_error, Printed, syntax_status(Diagnostic, Printed, Sh)}.

@@ -63,16 +63,19 @@ module Erx
 
     # The production boot's checkpoints with the boot value's inserted: the kernel
     # prints "erx: boot image build ..." and then "erx: boot value ...". At the shell the
-    # person reads a release file from the slot's EROFS image (image_checkpoints), and
-    # then runs the CRC-32C primitive (CRC32C_EXPRESSION).
+    # person reads a release file from the slot's EROFS image (image_checkpoints), runs
+    # the CRC-32C primitive (crc32c_checkpoints), and then starts the command shell and
+    # types at it (command_shell_checkpoints). Each list takes the line before it and
+    # sets what the person types there.
     def checkpoints(points, choice, release:)
       at = points.index { |point| point.fetch(:name) == 'image-identity' }
       raise Error, 'the production checkpoints name no image-identity' unless at
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       shell, image_answer = image_checkpoints(points.last, release)
+      *crc32c, crc32c_answer = crc32c_checkpoints(image_answer)
       [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1], shell,
-       *crc32c_checkpoints(image_answer)].freeze
+       *crc32c, *command_shell_checkpoints(crc32c_answer)].freeze
     end
 
     # After the shell's line previous, the person types CRC32C_EXPRESSION, and its answer
@@ -83,6 +86,35 @@ module Erx
        { name: 'crc32c', pattern: CRC32C_START, seconds: 30,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
     end
+
+    # After the Erlang shell's line previous, the person starts the command shell, and
+    # its lines follow (COMMAND_SHELL).
+    def command_shell_checkpoints(previous)
+      [previous.merge(type: "erx_shell:start().\r").freeze, *COMMAND_SHELL]
+    end
+
+    # The command shell on the console (docs/design-shell.md), started from the Erlang
+    # shell: each line it shows, and what the person then types. The banner says it has
+    # the input, so nothing is typed before; a variable, a loop that echoes it, a line
+    # continued on the next, whose prompt is empty, a syntax error, and exit, after
+    # which the Erlang shell answers again. The line editor echoes each line as typed and
+    # then redraws it after cursor movements, which no pattern here matches; it rings the
+    # bell at a `}` with no `{` on its line.
+    COMMAND_SHELL = [
+      ['rc-banner', /\Arc: the command shell; exit ends it\r*\n\z/n, "x=(a b c)\r"],
+      ['rc-assign', /\A; x=\(a b c\)\r*\n\z/n, "for(i in $x) echo $i\r"],
+      ['rc-loop', /\A; for\(i in \$x\) echo \$i\r*\n\z/n, nil],
+      ['rc-loop-a', /\Aa\r*\n\z/n, nil],
+      ['rc-loop-b', /\Ab\r*\n\z/n, nil],
+      ['rc-loop-c', /\Ac\r*\n\z/n, "{\r"],
+      ['rc-open', /\A; \{\r*\n\z/n, "echo con tinued}\r"],
+      ['rc-continued-line', /\Aecho con tinued\}\a?\r*\n\z/n, nil],
+      ['rc-continued', /\Acon tinued\r*\n\z/n, "echo a)\r"],
+      ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n, "exit\r"],
+      ['rc-exit', /\A; exit\r*\n\z/n, nil],
+      ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
+      ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]
+    ].map { |name, pattern, type| { name: name, pattern: pattern, seconds: 30, **{ type: type }.compact }.freeze }.freeze
 
     # The release file the shell reads from the image: stdlib's lists module, many blocks long.
     IMAGE_FILE = %r{\Asystem/lib/stdlib-[^/]+/ebin/lists\.beam\z}

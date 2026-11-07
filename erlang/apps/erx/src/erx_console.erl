@@ -3,12 +3,19 @@
 
 %% The system domain's console service (docs/design-runtime.md, "The console and
 %% standard I/O"; docs/design-live.md, "The console"): a program with its own line
-%% editor on a raw terminal, as on Unix. It sits between two groups and the console's
-%% driver, as user_drv does: the shell's group, which gets the input, and the `user`
-%% group, which the shell's own group can ask for options. Input bytes go to the shell's
-%% group as `{self(), {data, Chars}}`, and each request of either group goes through
-%% prim_tty's terminal-less state to become bytes for the driver. It runs no line
-%% discipline and reads no program's bytes.
+%% editor on a raw terminal, as on Unix. It sits between its groups and the console's
+%% driver, as user_drv does: the current group, which gets the input and is shown, and
+%% the `user` group, which the shell's own group can ask for options and which is always
+%% shown. Input bytes go to the current group as `{self(), {data, Chars}}`, and each
+%% request of a shown group goes through prim_tty's terminal-less state to become bytes
+%% for the driver. It runs no line discipline and reads no program's bytes.
+%%
+%% A shell typed at the shell takes the input on a group of its own (run_shell/1), as
+%% user_drv's `s` and `c` start a shell and connect to it, and gives it back to the group
+%% below when it ends; the groups below are not shown, so their output is acknowledged
+%% and dropped, and only write/1's callers still reach the line. A command's output, which is bytes,
+%% goes to the line through write/1, past prim_tty, with only a cooked tty's newline
+%% processing.
 %%
 %% The driver is the module `-erx console_driver Module` names. It implements
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
@@ -31,7 +38,7 @@
 -module(erx_console).
 -behaviour(gen_server).
 
--export([start/0]).
+-export([start/0, run_shell/1, write/1]).
 -export([input/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -44,11 +51,19 @@
 -define(LOG_POLL_MS, 100).
 
 -record(state, {driver :: pid(),
-                group :: pid(),
+                %% The group the console started with, which the others return the input to.
+                base :: pid(),
                 user :: pid(),
                 tty :: prim_tty:state(),
                 size :: {pos_integer(), pos_integer()},
                 terminal :: boolean(),
+                %% The groups run_shell/1 started, innermost first, each with its caller
+                %% to answer when it ends. The innermost gets the input, or `base` when
+                %% there are none (current/1).
+                shells = [] :: [{pid(), gen_server:from()}],
+                %% Whether the input has ended: each group that gets the input from then
+                %% on is told so.
+                input_ended = false :: boolean(),
                 %% Where the next read of the kernel log starts.
                 log_cursor = 0 :: non_neg_integer(),
                 %% The start of a character whose other bytes have not been read yet.
@@ -59,26 +74,45 @@
 start() ->
     gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
+-doc """
+Runs Shell, a shell's start function as group:start/3 takes it, on a group of its
+own that gets the console's input until the shell ends, and returns then: `ok` if
+the shell ended normally, `{error, Reason}` with its exit reason if not. The group
+that had the input gets it back; shells started this way may end in any order.
+Ctrl-C interrupts the new group's shell. This is how a shell typed at the Erlang
+shell, such as the command shell (erx_shell:start/0), takes the console.
+""".
+-spec run_shell({module(), atom(), [term()]}) -> ok | {error, term()}.
+run_shell(Shell = {Module, Function, Args})
+  when is_atom(Module), is_atom(Function), is_list(Args) ->
+    gen_server:call(?MODULE, {run_shell, Shell}, infinity).
+
+-doc """
+Writes Bytes to the console's line as they are, but for each newline, which goes out
+as CR-LF as a cooked tty's ONLCR sends it, and returns once they are written: the
+output of a command, which is bytes, never text the console renders.
+""".
+-spec write(iodata()) -> ok.
+write(Bytes) ->
+    gen_server:call(?MODULE, {write, iolist_to_binary(Bytes)}, infinity).
+
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
     process_flag(trap_exit, true),
     {ok, DriverPid, Terminal} = (driver_module()):start_link(self()),
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are, and the shell's stock end-of-input branch ends the runtime.
-    GroupOptions = [{dumb, not Terminal},
-                    {expand_below,
-                     application:get_env(stdlib, shell_expand_location, below) =:= below}],
     TTY = banner(prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
     User = group:start(self(), noshell, [{name, user}]),
     Group = case wants_shell() of
-                true -> group:start(self(), {shell, start, [init]}, GroupOptions);
+                true -> group:start(self(), {shell, start, [init]}, group_options(Terminal));
                 false -> User
             end,
     %% Where group:whereis_shell/0 looks, as it looks in user_drv.
     put(current_group, Group),
     erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
     {ok, #state{driver = DriverPid,
-                group = Group,
+                base = Group,
                 user = User,
                 tty = TTY,
                 size = ?DEFAULT_SIZE,
@@ -106,10 +140,26 @@ slogan() ->
 wants_shell() ->
     init:get_argument(noshell) =:= error andalso init:get_argument(noinput) =:= error.
 
+%% As user_drv does for a line with no terminal on it: no editing, no echo and bytes as
+%% they are, and the shell's stock end-of-input branch ends the runtime.
+group_options(Terminal) ->
+    [{dumb, not Terminal},
+     {expand_below, application:get_env(stdlib, shell_expand_location, below) =:= below}].
+
 tty_options(true) -> #{};
 tty_options(false) -> #{input => cooked, output => raw}.
 
--spec handle_call(term(), gen_server:from(), #state{}) -> {reply, {error, unknown_call}, #state{}}.
+-spec handle_call(term(), gen_server:from(), #state{}) ->
+          {reply, term(), #state{}} | {noreply, #state{}}.
+handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal = Terminal}) ->
+    %% No completion: the Erlang shell's would complete Erlang.
+    Options = [{expand_fun, fun(_Before, _Options) -> {no, [], []} end}
+               | group_options(Terminal)],
+    New = group:start(self(), Shell, Options),
+    {noreply, gets_input(State#state{shells = [{New, From} | Shells]})};
+handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
+    Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
+    {noreply, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -122,11 +172,10 @@ handle_info({erx_console_input, Bytes}, State = #state{pending = Pending}) ->
     {Events, Left} = input(Pending, Bytes),
     lists:foreach(fun(Event) -> deliver(Event, State) end, Events),
     {noreply, State#state{pending = Left}};
-handle_info(erx_console_eof, State = #state{group = Group, pending = Pending}) ->
+handle_info(erx_console_eof, State = #state{pending = Pending}) ->
     %% What began a character will never end it, so it reads as stock reads a bad byte.
     [deliver({data, latin1(Pending)}, State) || Pending =/= <<>>],
-    Group ! {self(), eof},
-    {noreply, State#state{pending = <<>>}};
+    {noreply, gets_input(State#state{pending = <<>>, input_ended = true})};
 handle_info({erx_console_size, Columns, Rows}, State = #state{tty = TTY})
   when is_integer(Columns), is_integer(Rows),
        Columns >= 1, Columns =< ?MAX_SIDE, Rows >= 1, Rows =< ?MAX_SIDE ->
@@ -152,33 +201,100 @@ handle_info(erx_log_poll, State = #state{driver = Driver, log_cursor = Cursor}) 
     end;
 handle_info({erx_console_written, none}, State) ->
     {noreply, State};
+handle_info({erx_console_written, {caller, From}}, State) ->
+    gen_server:reply(From, ok),
+    {noreply, State};
 handle_info({erx_console_written, {Group, Reply}}, State) ->
     Group ! {reply, Reply, ok},
-    {noreply, State};
-handle_info({Pid, Request}, State = #state{group = Group, user = User})
-  when Pid =:= Group; Pid =:= User ->
-    {noreply, group_request(Request, Pid, State)};
-handle_info({Pid, set_unicode_state, Unicode}, State = #state{group = Group, user = User, tty = TTY})
-  when Pid =:= Group; Pid =:= User ->
-    ok = io:setopts(standard_error, [{encoding, encoding(Unicode)}]),
-    Pid ! {self(), set_unicode_state, prim_tty:unicode(TTY)},
-    {noreply, State#state{tty = prim_tty:unicode(TTY, Unicode)}};
-handle_info({Pid, read, _Count}, State = #state{group = Group, user = User})
-  when Pid =:= Group; Pid =:= User ->
-    Pid ! {self(), {error, enotsup}},
     {noreply, State};
 handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% user_sup kills `user` when the system stops: the runtime is on its way out.
     {stop, Reason, State};
-handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, group = Group})
-  when Pid =:= Driver; Pid =:= Group ->
-    %% Nothing would read the terminal again, and its keys no longer signal: end the
-    %% runtime, whose exit restores the terminal, where stock starts another shell.
-    erlang:display_string(stderr, lists:flatten(io_lib:format("erx_console: ended by ~p\r\n", [Reason]))),
-    erlang:halt(1),
-    {stop, Reason, State};
+handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, shells = Shells}) ->
+    case lists:keytake(Pid, 1, Shells) of
+        {value, {Pid, Caller}, Others} ->
+            %% A shell run_shell/1 started has ended, and its group with it, in whatever
+            %% order: its caller gets how it ended, which the group's first exit carries
+            %% from its shell, and the input goes to the innermost group left. The group's
+            %% own exit, which follows, names a group the console no longer holds.
+            gen_server:reply(Caller, shell_ended(Reason)),
+            {noreply, gets_input(State#state{shells = Others})};
+        false when Pid =:= Driver; Pid =:= Base ->
+            %% Nothing would read the terminal again, and its keys no longer signal: end
+            %% the runtime, whose exit restores the terminal, where stock starts another
+            %% shell.
+            erlang:display_string(stderr, lists:flatten(io_lib:format("erx_console: ended by ~p\r\n", [Reason]))),
+            erlang:halt(1),
+            {stop, Reason, State};
+        false ->
+            {noreply, State}
+    end;
+handle_info(Message, State = #state{user = User})
+  when is_tuple(Message), tuple_size(Message) >= 2, is_pid(element(1, Message)) ->
+    Pid = element(1, Message),
+    Current = current(State),
+    case is_group(Pid, State) of
+        true when Pid =:= User; Pid =:= Current ->
+            {noreply, from_group(Message, State)};
+        true ->
+            {noreply, from_hidden_group(Message, State)};
+        false ->
+            {noreply, State}
+    end;
 handle_info(_Message, State) ->
     {noreply, State}.
+
+%% Whether Pid is one of the console's groups: `user`, the one it started with, or one
+%% run_shell/1 started.
+is_group(Pid, #state{user = User, base = Base, shells = Shells}) ->
+    Pid =:= User orelse Pid =:= Base orelse lists:keymember(Pid, 1, Shells).
+
+%% The group that gets the input: the innermost shell run_shell/1 started, or the one
+%% the console started with.
+current(#state{shells = [{Group, _Caller} | _]}) -> Group;
+current(#state{base = Base}) -> Base.
+
+%% State once its current group has the input: group:whereis_shell/0 finds that group,
+%% and it reads the input's end if the input has ended. Telling a group twice is
+%% harmless, as a second end of input is to a terminal.
+gets_input(State = #state{input_ended = Ended}) ->
+    Group = current(State),
+    put(current_group, Group),
+    [Group ! {self(), eof} || Ended],
+    State.
+
+%% How a shell run_shell/1 started ended, as its caller is told.
+shell_ended(normal) -> ok;
+shell_ended(Reason) -> {error, Reason}.
+
+%% A group below the one that has the input is not shown, as user_drv shows only its
+%% current group: its output is acknowledged and dropped, so neither its writers nor
+%% its shell's hints wait or reach the line, and its questions are answered.
+from_hidden_group({Pid, {Sync, _Encoding, _Output, Reply}}, State)
+  when Sync =:= put_chars_sync; Sync =:= put_ansi_sync ->
+    Pid ! {reply, Reply, ok},
+    State;
+from_hidden_group(Message = {_Pid, Query}, State)
+  when Query =:= tty_geometry; Query =:= get_unicode_state; Query =:= get_terminal_state;
+       element(1, Query) =:= open_editor ->
+    from_group(Message, State);
+from_hidden_group(Message = {_Pid, Query, _Value}, State)
+  when Query =:= set_unicode_state; Query =:= read ->
+    from_group(Message, State);
+from_hidden_group(_Output, State) ->
+    State.
+
+from_group({Pid, set_unicode_state, Unicode}, State = #state{tty = TTY}) ->
+    ok = io:setopts(standard_error, [{encoding, encoding(Unicode)}]),
+    Pid ! {self(), set_unicode_state, prim_tty:unicode(TTY)},
+    State#state{tty = prim_tty:unicode(TTY, Unicode)};
+from_group({Pid, read, _Count}, State) ->
+    Pid ! {self(), {error, enotsup}},
+    State;
+from_group({Pid, Request}, State) ->
+    group_request(Request, Pid, State);
+from_group(_Message, State) ->
+    State.
 
 %% The driver's module, from the argument the boot information page carries. The last naming
 %% wins, since the hosted entry adds its driver after the manifest's arguments, and a plain
@@ -230,11 +346,11 @@ latin1(Bin) -> unicode:characters_to_binary(Bin, latin1).
 control($\^C) -> interrupt;
 control($\^G) -> menu.
 
-deliver({data, Utf8}, #state{group = Group}) ->
-    Group ! {self(), {data, Utf8}};
-deliver(interrupt, #state{group = Group}) ->
+deliver({data, Utf8}, State) ->
+    current(State) ! {self(), {data, Utf8}};
+deliver(interrupt, State) ->
     %% As ssh_cli does: the group turns this into an interrupt of the shell's evaluator.
-    exit(Group, interrupt);
+    exit(current(State), interrupt);
 deliver(menu, #state{driver = Driver, tty = TTY}) ->
     %% Ctrl-G belongs to the console's menu and no session reads it. With no sessions to
     %% list, the menu is a bell.
@@ -242,6 +358,12 @@ deliver(menu, #state{driver = Driver, tty = TTY}) ->
     Driver ! {erx_console_output, none, Bytes}.
 
 %% -- Output ---------------------------------------------------------------------------
+
+%% A command's bytes as a cooked tty's OPOST and ONLCR send them: each newline as CR-LF,
+%% every other byte unchanged.
+-spec onlcr(binary()) -> binary().
+onlcr(Bytes) ->
+    binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
 
 %% A rendered log line ends in its one newline; a terminal's line ends in CR-LF.
 log_line(<<>>) ->

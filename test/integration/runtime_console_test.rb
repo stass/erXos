@@ -346,6 +346,112 @@ class RuntimeConsoleTest < Minitest::Test
     end
   end
 
+  # The command shell, started from the Erlang shell, takes the console until it ends: a
+  # variable, a loop, history, Ctrl-C of an edited line and of a running line, a line
+  # continued on the next, a syntax error, rubbing out, and exit back to the Erlang shell,
+  # whose own history the command shell's lines did not join.
+  RC_SESSION = [
+    ["erx_shell:start().\r", /^rc: the command shell; exit ends it\n; \z/],
+    ["x=(a b c)\r", /^; x=\(a b c\)\n; \z/],
+    ["for(i in $x) echo $i\r", /^a\nb\nc\n; \z/],
+    [UP, /^; for\(i in \$x\) echo \$i\z/],
+    [CTRL_C, /^; for\(i in \$x\) echo \$i\n; \z/],
+    ["{\r", /^; \{\n\z/],
+    ["echo con tinued}\r", /^echo con tinued\}\ncon tinued\n; \z/],
+    ["echo a)\r", /^rc: syntax error at line 1, column 7: unexpected '\)'\n; \z/],
+    ["echo $status\r", /^unexpected '\)'\n; \z/],
+    ["while(true) true\r", /^; while\(true\) true\n\z/],
+    [CTRL_C, /^\^C\n; \z/],
+    ["echo xy#{BACKSPACE}z\r", /^xz\n; \z/],
+    ["exit\r", /^; exit\nok\n2> \z/],
+    [UP, /^2> erx_shell:start\(\)\.\z/],
+    ["\r", /\n; \z/],
+    ["exit\r", /^; exit\nok\n3> \z/]
+  ].freeze
+
+  RC_TRANSCRIPT = <<~SCREEN.chomp
+    1> erx_shell:start().
+    rc: the command shell; exit ends it
+    ; x=(a b c)
+    ; for(i in $x) echo $i
+    a
+    b
+    c
+    ; for(i in $x) echo $i
+    ; {
+    echo con tinued}
+    con tinued
+    ; echo a)
+    rc: syntax error at line 1, column 7: unexpected ')'
+    ; echo $status
+    unexpected ')'
+    ; while(true) true
+    ^C
+    ; echo xz
+    xz
+    ; exit
+    ok
+    2> erx_shell:start().
+    rc: the command shell; exit ends it
+    ; exit
+    ok
+    3>
+  SCREEN
+
+  def test_the_command_shell_takes_the_console_and_gives_it_back
+    with_erxos do |session|
+      RC_SESSION.each do |keys, pattern|
+        session.type(keys)
+        session.wait_for(pattern)
+      end
+      keep_transcript('rc', session.screen.to_s)
+      assert_equal RC_TRANSCRIPT, session.screen.to_s[/^1> .*/m].rstrip
+    end
+  end
+
+  # Two shells started through erx_console:run_shell/1 whose processes wait for `stop`;
+  # the outer one ends first, with a reason, and each caller prints how its shell ended
+  # through `user`, which is always shown. The Erlang shell writes while a shell is above
+  # it.
+  NESTED_SHELLS = 'Shell = fun(R) -> spawn(fun() -> receive stop -> exit(R) end end) end, ' \
+                  'Run = fun(Name, P) -> spawn(fun() -> io:format(user, "~s: ~p~n", ' \
+                  '[Name, erx_console:run_shell({erlang, element, [1, {P}]})]) end) end, ' \
+                  'P1 = Shell(first), P2 = Shell(normal), Run("first", P1), timer:sleep(300), ' \
+                  'Run("second", P2), timer:sleep(300), io:format("hid~s~n", ["den"]), ' \
+                  'P1 ! stop, timer:sleep(300), P2 ! stop, timer:sleep(300), done.'
+
+  def test_shells_on_the_console_end_in_any_order_and_a_hidden_group_is_not_shown
+    with_erxos do |session|
+      session.type("#{NESTED_SHELLS}\r")
+      session.wait_for(/^done\n2> \z/)
+      screen = session.screen.to_s
+      assert_match(/^first: \{error,first\}$/, screen)
+      assert_match(/^second: ok$/, screen)
+      refute_match(/^hidden$/, screen)
+    end
+  end
+
+  # The input ending while the command shell reads ends it, and then the Erlang shell
+  # below it, whose end of input ends the runtime with status 0.
+  def test_the_input_ending_under_the_command_shell_ends_both_shells
+    Open3.popen2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
+                  OUTPUT.beam, OUTPUT.archive) do |input, output, waiter|
+      input.write("erx_shell:start().\n")
+      input.flush
+      seen = +''
+      begin
+        seen << output.readpartial(4096) until seen.include?("exit ends it")
+      rescue EOFError
+        flunk "the runtime ended before the command shell started: #{seen.inspect}"
+      end
+      input.write("echo under rc\n")
+      input.close
+      seen << output.read
+      assert_equal 0, waiter.value.exitstatus, seen
+      assert_match(/; under rc\r?\n/, seen)
+    end
+  end
+
   # Differences from stock, each a decision of docs/design-live.md.
   # Ctrl-G belongs to the console's menu, which lists sessions; with none there is a bell.
   def test_ctrl_g_rings_the_bell_and_reaches_no_group

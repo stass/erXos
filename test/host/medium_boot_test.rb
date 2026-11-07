@@ -37,7 +37,9 @@ class MediumBootTest < Minitest::Test
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
     merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release)
-    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5 crc32c], merged.map { |point| point.fetch(:name) }
+    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5 crc32c] +
+                 Boot::COMMAND_SHELL.map { |point| point.fetch(:name) }, merged.map { |point| point.fetch(:name) }
+    assert_equal "erx_shell:start().\r", merged.find { |point| point.fetch(:name) == 'crc32c' }.fetch(:type)
     verify = merged.fetch(2).fetch(:verify)
     assert_match Boot::BOOT_VALUE, "erx: boot value normal slot b\r\n"
     verify.call("erx: boot value normal slot b\r\n")
@@ -71,7 +73,7 @@ class MediumBootTest < Minitest::Test
   def test_the_shell_runs_the_crc32c_primitive_and_must_print_the_models_values
     merged = Boot.checkpoints([{ name: 'image-identity' }, { name: 'release-shell', pattern: /\AEshell V/n }],
                               Choice.new(slot: :a, offset: 0, length: 64), release: release)
-    image_answer, crc = merged.last(2)
+    image_answer, crc = %w[image-md5 crc32c].map { |name| merged.find { |point| point.fetch(:name) == name } }
     assert_equal "#{Boot::CRC32C_EXPRESSION}\r", image_answer.fetch(:type)
     assert_equal '{crc32c,"%X","%X",badarg}' % [crc32c('123456789'), crc32c('erXos' * 20_000)], Boot::CRC32C_ANSWER
     assert_equal 0xE3069283, crc32c('123456789')
