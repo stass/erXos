@@ -14,11 +14,6 @@ roadmap item. Latency and fairness that a stopgap does not promise are
 residuals of the component that replaces it, not items here, unless they
 block a milestone's numbers.
 
-* **[Low] boot, the root's place 192 MiB into RAM.** `liberx/backend/fiasco/root.ld` puts the
-  root task there, so `bootstrap` copies the root's segments to it and the free memory around
-  the root splits differently. No difference is expected, and none is measured: compare
-  `tools/erx bench` boot time of the production image with root.ld at `0x44000000` and at
-  `0x4c000000`, under HVF on a quiet host, and drop the item if they agree.
 * **[Low] packer, `mkfs.erofs` on every build.** `ProductionImage#assemble`, every test image
   and the hosted `Release#build` write the system release's EROFS image (`ReleaseMedium.image`) before
   packing, since the manifest records its extent; the hosted pack uses only its length. Measure the

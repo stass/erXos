@@ -132,7 +132,9 @@ module Erx
         'ERX_LLD' => @linker,
         'ERX_LLVM_BIN' => @tools,
         'ERX_SYSROOT' => @sysroot,
-        'ERX_TREE' => @root
+        'ERX_TREE' => @root,
+        # root.ld's place for ERTS's own links (otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf).
+        'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot::PLACE).map { |flag| "-Wl,#{flag}" }.join(' ')
       ).freeze
     end
 

@@ -13,7 +13,7 @@ require_relative 'pack_provenance'
 module Erx
   # A program that runs as the root task on Fiasco: C17 from liberx's fiasco
   # backend, plus whatever a caller adds, freestanding, linked with Fiasco's own
-  # l4sys and libsigma0 and at the fixed address root.ld gives. Fiasco's build
+  # l4sys and libsigma0 and at the fixed address its link gives root.ld. Fiasco's build
   # must have run: its headers and libraries are this build's inputs.
   class NativeRoot
     BACKEND = 'liberx/backend/fiasco'
@@ -27,6 +27,12 @@ module Erx
     # RELRO header: root.ld names no program headers and would get one for it, and task.ld
     # names its own, so there the flag changes nothing.
     ROOT_LINK_FLAGS = %w[-z max-page-size=4096 -z norelro].freeze
+    # QEMU virt's RAM starts here. A root's place is an address in it that root.ld takes
+    # from its link (place_flags): a system image's comes from its machine
+    # (ProductionImage::Machine#root_address), and every other root, a test's, takes
+    # PLACE, 64 MiB into RAM, the place of the development machine.
+    RAM_FIRST = 0x4000_0000
+    PLACE = RAM_FIRST + (64 << 20)
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory: the effects over sigma0 and the two pure cores.
@@ -84,8 +90,9 @@ module Erx
     # archives that hold ERTS and musl, with the objects' debug information left out. It is
     # the interpreter image, which this one link of it checks for JIT and C++ before
     # anything packs it.
-    def build_system(directory:, archives:)
-      program = build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: archives, strip_debug: true)
+    def build_system(directory:, archives:, place:)
+      program = build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: archives, strip_debug: true,
+                      place: place)
       InterpreterImage.check(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
       program
     end
@@ -100,8 +107,8 @@ module Erx
     # dependency files leave out Fiasco's, musl's and the compiler's headers, system
     # headers here, so the receipt names erXos's own sources. Fiasco's audit answers for
     # Fiasco's; TODO.md holds musl's. Returns the program, its receipt, and every file those name.
-    def build_system_receipted(directory:, archives:)
-      program = build_system(directory: directory, archives: archives)
+    def build_system_receipted(directory:, archives:, place:)
+      program = build_system(directory: directory, archives: archives, place: place)
       compiles = SYSTEM.map { |source| compile_record(source, directory: directory) }
       linked = {
         'version' => 1, 'kind' => 'linked', 'artifact' => reference(program),
@@ -116,21 +123,32 @@ module Erx
       { program: program, receipt: receipt, inputs: inputs.freeze }.freeze
     end
 
+    # The linker flag that gives root.ld its place: an address in RAM on a page boundary.
+    def self.place_flags(place)
+      raise Error, format('a root place must be a page-aligned address in RAM, not 0x%x', place) unless
+        place.is_a?(Integer) && place >= RAM_FIRST && (place % 4096).zero?
+
+      [format('--defsym=erx_fiasco_image_start=0x%x', place)]
+    end
+
     # A task's program for the boot image: fixed addresses, as task.ld gives.
     def build_task(name:, sources:, directory:, flags: [])
-      build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS)
+      build(name: name, sources: sources, directory: directory, flags: flags, script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS,
+            place: nil)
     end
 
     # Compiles sources in source's tree and links them into directory/name, with Fiasco's
     # boot archive, which holds the cores the service reads a program with, and any
     # further archives. Headers of
     # Fiasco are system headers here: they are inherited, so -pedantic judges only
-    # erXos's own code.
-    def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT, link_flags: [], strip_debug: false)
+    # erXos's own code. place is where root.ld puts the program; a task.ld link, whose
+    # addresses are task.ld's own, passes nil.
+    def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT, link_flags: [], strip_debug: false,
+              place: PLACE)
       objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, *link_flags, *ROOT_LINK_FLAGS, *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
+      @runner.run([@linker, '-T', script, *(place ? self.class.place_flags(place) : []), *link_flags, *ROOT_LINK_FLAGS, *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
                    '-o', program, *objects,
                    # The archives name one another's symbols in no fixed order, so the linker
                    # rescans them as a group until nothing new resolves.

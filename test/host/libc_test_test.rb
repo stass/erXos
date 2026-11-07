@@ -82,7 +82,7 @@ class LibcTestTest < Minitest::Test
 
   def test_each_link_script_keeps_the_tls_segment_whole
     %w[task.ld root.ld].each do |script|
-      flags = script == 'task.ld' ? Erx::NativeRoot::TASK_LINK_FLAGS : []
+      flags = script == 'task.ld' ? Erx::NativeRoot::TASK_LINK_FLAGS : Erx::NativeRoot.place_flags(Erx::NativeRoot::PLACE)
       segment = tls_segment(File.expand_path("../../liberx/backend/fiasco/#{script}", __dir__), link_flags: flags)
       start, file_bytes, memory_bytes, alignment = segment.values_at(3, 5, 6, 7)
       assert_equal([1, 4096], [file_bytes, alignment], "#{script}: file bytes and alignment")

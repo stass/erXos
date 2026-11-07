@@ -304,12 +304,19 @@ plus the smaller of half the RAM and 128 MiB, `0x48000000` from 256 MiB
 of RAM up ([measured](research-baselines.md#boot-conventions)), so a
 single file up to 126 MiB long lies below it at those sizes. For a longer
 file QEMU puts the device tree at the next 2 MiB boundary behind the file
-([measured](research-baselines.md#boot-conventions)). The stand-in root's
-fixed place, 192 MiB into RAM (`liberx/backend/fiasco/root.ld` gives the
-arithmetic), bounds the single file to about 188 MiB. In the
-two-file form, for debugging, `-initrd` places the boot image at
-`0x48000000` with the device tree directly after it, so the root's place
-bounds that archive to about 63 MiB. Either way the
+([measured](research-baselines.md#boot-conventions)). The stand-in root
+is a fixed image, and its place belongs to the machine an image is built
+for (`ProductionImage::Machine`, through the one linker symbol
+`liberx/backend/fiasco/root.ld` takes from the link). The development
+machine, 160 MiB, links it 64 MiB into RAM, which bounds the single file
+to about 62 MiB and keeps the root inside small machines; below 256 MiB
+the device tree sits at half of RAM, so on a machine of 128 or 136 MiB it
+lands on the root and bootstrap refuses the boot with `place_overlap`.
+The QEMU oracle's machine, 2 GiB, links it 192 MiB into RAM, which bounds
+the single file to about 188 MiB. In the two-file form, for debugging,
+`-initrd` places the boot image at `0x48000000` with the device tree
+directly after it, which needs a root linked above both, as the oracle's
+is, and bounds that archive to about 63 MiB. Either way the
 kernel reads every address and assumes none. U-Boot's `booti`
 implements the same protocol. The Raspberry Pi firmware loads the single
 file by the same protocol (`kernel8.img` on the Pi 4, `kernel_2712.img`

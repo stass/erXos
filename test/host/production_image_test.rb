@@ -227,7 +227,7 @@ class ProductionImageTest < Minitest::Test
   # same properties.
   def test_a_larger_machine_grows_the_root_the_system_baseline_and_tmp_alone
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64)
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64, root_mib: 64)
     grown = machine.manifest(source)
     { 'root_memory' => 1024, 'system_baseline' => 1024, 'tmp' => 64 }.each do |field, growth|
       assert_equal manifest_number(source, field) + (growth << 20), manifest_number(grown, field)
@@ -239,13 +239,13 @@ class ProductionImageTest < Minitest::Test
     assert_equal record, Erx::ProductionImage::DEVELOPMENT_MACHINE.platform(record), 'the development machine is the record'
     assert_equal({ 'ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20, 'units' => [] },
                  machine.platform('ram_bytes' => 1, 'fiasco_reserve' => 1, 'units' => []))
-    wider = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 0, tmp_growth_mib: 64)
+    wider = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 0, tmp_growth_mib: 64, root_mib: 64)
     assert_raises(Erx::Error) { wider.manifest(source) }
   end
 
   # A manifest without exactly one line of a grown field is refused, never left ungrown.
   def test_a_manifest_without_one_line_of_a_grown_field_is_refused
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256, tmp_growth_mib: 0)
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256, tmp_growth_mib: 0, root_mib: 64)
     ["  root_memory 1\n  system_baseline 1\n", "  system_baseline 1\n  tmp 1\n", "  root_memory 1\n  tmp 1\n",
      "  root_memory 1\n  root_memory 2\n  system_baseline 1\n  tmp 1\n"].each do |source|
       assert_raises(Erx::Error) { machine.manifest(source) }
@@ -257,6 +257,28 @@ class ProductionImageTest < Minitest::Test
   def test_the_oracle_machine_gives_tmp_its_160_mib
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
     assert_equal 160 << 20, manifest_number(Erx::OracleQemu::MACHINE.manifest(source), 'tmp')
+  end
+
+  # Each machine names the root's place. The development machine's lies inside its own
+  # RAM and the refusal boot's, below the device tree QEMU puts at half of a 160 MiB
+  # machine's RAM and above the one at half of the refusal boot's; the oracle's lies high
+  # enough for its large archive. A place with no room for the root is refused, and the
+  # link takes only a page-aligned address in RAM.
+  def test_each_machine_names_a_root_place_its_ram_holds
+    development = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    room = Erx::ProductionImage::ROOT_ROOM_MIB
+    assert_equal 0x4400_0000, development.root_address
+    assert_operator development.root_mib + room, :<=, development.memory_mib / 2
+    assert_operator (Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB / 2) + 2, :<=, development.root_mib
+    assert_operator development.root_mib + room, :<=, Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB
+    assert_equal 0x4c00_0000, Erx::OracleQemu::MACHINE.root_address
+    [development.memory_mib - room + 1, -1].each do |root_mib|
+      assert_raises(Erx::Error) { development.with(root_mib: root_mib).root_address }
+    end
+    assert_equal ['--defsym=erx_fiasco_image_start=0x44000000'], Erx::NativeRoot.place_flags(0x4400_0000)
+    [0x4400_0001, 0x3fff_f000, '0x44000000'].each do |place|
+      assert_raises(Erx::Error) { Erx::NativeRoot.place_flags(place) }
+    end
   end
 
   # The refusal boot means something only on a machine that cannot give root_memory:

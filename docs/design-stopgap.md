@@ -353,9 +353,12 @@ checks the banner's test-image line;
 A test image may also name a larger machine (`ProductionImage::Machine`): its RAM,
 its `fiasco_reserve`, which grows with RAM because Fiasco sizes its kernel memory
 as 6% of it, a growth added to both `root_memory` and `system_baseline` of the
-development manifest, and a growth of `/tmp`'s cap; the rest of the added RAM
-widens the archive's room below RAM, up to the root's fixed place, which holds the
-archive to about 187 MiB (`liberx/backend/fiasco/root.ld` gives the arithmetic).
+development manifest, a growth of `/tmp`'s cap, and the root's place, the one
+address `liberx/backend/fiasco/root.ld` takes from the root's link; the rest of the
+added RAM widens the archive's room below RAM, up to the root's place. The
+development machine links the root 64 MiB into RAM, so it fits 160 MiB, and the
+oracle's 2 GiB machine 192 MiB into RAM, which holds the archive to about 187 MiB
+([Boot](design-platforms.md#boot) gives the arithmetic).
 No other line of the manifest changes, and the manifest check proves the
 grown manifest against the platform record with that RAM and reserve as it proves
 the development one. The production image always boots on the development machine,

@@ -57,9 +57,11 @@ module Erx
     # 1 GiB more and /tmp a 160 MiB cap; nothing else of the manifest changes, and
     # that 1 GiB also holds the 256 MiB cap of Common Test's log tree
     # (OracleSuites::ERXOS_LOG_CAP) beside /tmp's. The manifest's arithmetic would
-    # leave the archive 768 MiB; the root's fixed place holds it to about 187 MiB
-    # (liberx/backend/fiasco/root.ld).
-    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 144)
+    # leave the archive 768 MiB; the root, linked 192 MiB into RAM, holds it to about
+    # 187 MiB, since QEMU puts the device tree at 128 MiB or, for a longer file, at the
+    # next 2 MiB boundary behind it (docs/design-platforms.md, "Boot").
+    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 144,
+                                           root_mib: 192)
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'
     # The line erx_ct_oracle prints when Common Test returns; the machine ends

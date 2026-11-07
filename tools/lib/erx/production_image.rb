@@ -38,10 +38,12 @@ module Erx
     NOTICES_PATH = 'system/NOTICES'
     MEMORY_MIB = 160
     # No more RAM than root_memory, of which Fiasco and the archive take their part first,
-    # so the pool falls short and the root must refuse the boot. It is also clear of the
-    # band where QEMU's device tree, at half of RAM below 256 MiB, lands on the root's
-    # fixed place (liberx/backend/fiasco/root.ld), so the root, not bootstrap, refuses.
+    # so the pool falls short and the root must refuse the boot. The development machine's
+    # root, 64 MiB into RAM, ends inside it, and QEMU's device tree, at half of RAM below
+    # 256 MiB, lies below the root there, so the root, not bootstrap, refuses.
     TOO_LITTLE_MEMORY_MIB = 96
+    # What a machine keeps for the root's image past its place: the image is about 5 MiB.
+    ROOT_ROOM_MIB = 8
     LICENSE = 'LICENSE'
     # The trees imported into the source tree that the root builds from: BLAKE3 for its
     # reader of the archive and the entropy generator's mixing, ChaCha20 for that
@@ -75,14 +77,27 @@ module Erx
     # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
     # 6% of it), system_growth_mib, which is added to both root_memory and
     # system_baseline of the development manifest, and tmp_growth_mib, which is added
-    # to /tmp's cap and is part of the system growth, since /tmp lives in the baseline.
+    # to /tmp's cap and is part of the system growth, since /tmp lives in the baseline,
+    # and root_mib, the root task's place in MiB from the start of RAM (root_address),
+    # which the root's link takes (liberx/backend/fiasco/root.ld). The root is a fixed
+    # image, so each machine names its place: low on a small machine, whose RAM must
+    # hold the root, and higher where a test image's archive, which lies below the
+    # root, is larger.
     # What the system growth leaves of the added RAM widens the room bootstrap keeps
     # for the archive. The production image boots on DEVELOPMENT_MACHINE, the
     # platform record's own; a test image whose suites need more memory or carry a
     # larger archive (OracleQemu) names a larger one, and Pack's manifest check proves
     # the grown manifest against the platform record of that machine as it proves the
     # development one.
-    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib, :tmp_growth_mib) do
+    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib, :tmp_growth_mib, :root_mib) do
+      # The root's place, with room for the root's image (about 5 MiB) before RAM ends.
+      def root_address
+        raise Error, "the root's place, #{root_mib} MiB into RAM, leaves no room for it in #{memory_mib} MiB" if
+          root_mib.negative? || root_mib + ROOT_ROOM_MIB > memory_mib
+
+        NativeRoot::RAM_FIRST + (root_mib << 20)
+      end
+
       def platform(record) = record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
 
       # The development manifest's text with root_memory and system_baseline each grown
@@ -99,7 +114,8 @@ module Erx
           end
       end
     end
-    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 16, system_growth_mib: 0, tmp_growth_mib: 0)
+    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 16, system_growth_mib: 0, tmp_growth_mib: 0,
+                                      root_mib: 64)
 
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
@@ -165,7 +181,8 @@ module Erx
       erts = @runtime.build
       archives = [*erts.otp_archives, erts.libc, @fiasco.user_library('libgcc.a')]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
-                            .build_system_receipted(directory: File.join(directory, 'root'), archives: archives)
+                            .build_system_receipted(directory: File.join(directory, 'root'), archives: archives,
+                                                    place: machine.root_address)
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')

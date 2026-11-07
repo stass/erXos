@@ -8,21 +8,17 @@
  * first page: a program linked with musl finds its TLS image through them. Each
  * segment starts on its own page, as the packer's ELF plan requires.
  *
- * The place is 192 MiB into RAM, 0x4c000000. In the single-file form bootstrap
- * loads at 0x40200000 with the archive behind it, and QEMU puts the 1 MiB device
- * tree at 0x48000000 or, for a longer file, at the next 2 MiB boundary behind it
- * (docs/research-baselines.md, "Boot conventions"). So the file may run to
- * 0x4be00000, about 188 MiB, and the archive in it to about 187 MiB, on every
- * machine of 256 MiB or more. In the two-file form the archive starts at
- * 0x48000000 with the device tree behind it, so it must stay under about 63 MiB.
- * The root's image, about 5 MiB, must end inside a 256 MiB machine's RAM
- * (0x50000000): on that machine the production boot check expects the root
- * itself, not bootstrap's place_outside_memory, to refuse the boot
- * (ProductionImage::TOO_LITTLE_MEMORY_MIB).
+ * The place is not written here: every link gives erx_fiasco_image_start with
+ * --defsym (NativeRoot.place_flags), and a link that does not fails on the
+ * undefined symbol. A system image takes it from the machine it is built for
+ * (ProductionImage::Machine#root_address), which docs/design-platforms.md
+ * explains: low, 64 MiB into RAM, for the development machine, so a 160 MiB
+ * machine holds it, and 192 MiB into RAM for the QEMU oracle's machine, so a
+ * single file of about 188 MiB lies below it. Test roots take
+ * NativeRoot::PLACE, the low place.
  */
 ENTRY(_start)
 SECTIONS {
-	erx_fiasco_image_start = 0x4c000000;
 	. = erx_fiasco_image_start + SIZEOF_HEADERS;
 	.rodata : { *(.rodata .rodata.*) }
 	.note.erx.abi : { KEEP(*(.note.erx.abi)) }
