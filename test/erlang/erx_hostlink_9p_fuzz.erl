@@ -13,13 +13,14 @@ by random bytes; replies of the grants, well formed or not, to the aliases
 the bridge used and to aliases it never made; and grants that end. After
 every step it checks what the bridge promises: it never crashes, every
 message it sends the host is one 9P2000.L reply within the stream's msize,
-every request it sends a grant passes the grammar, and its fid table, tags,
-pending and draining requests stay within their bounds.
+every request it sends a grant passes the grammar, and its fid table, tags
+and pending requests stay within their bounds.
 
 It also checks the order of the answers as a host sees them: it keeps the
 tags the host has in use, from each request the bridge admitted (one it did
-not count as discarded) until its answer, and a version frees them all. An
-answer on a tag not in use fails, and so does an answer on a tag after the
+not count as discarded) until its answer. A version in the session is
+refused, so its answer must be an error, and it frees no tag. An answer on
+a tag not in use fails, and so does an answer on a tag after the
 `Rflush` of a flush that named it, until the host uses the tag again: the
 host may reuse a tag once a flush of it is answered (flush(5)). A flush's
 answer fails while the flush it names, or an earlier flush of the same
@@ -78,22 +79,19 @@ step(Event, Bridge, Aliases, Host) ->
     Host1 = admitted(Event, Bridge, Bridge1, Host),
     Host2 = lists:foldl(fun answered/2, Host1, [Bytes || {host, Bytes} <- Effects]),
     %% The aliases a grant may still answer: what the bridge sent, less what
-    %% was answered or forgotten, so what a version forgot drains in time.
-    Forgotten = [Alias || {unalias, Alias} <- Effects],
-    {Bridge1, Sent ++ ((Aliases -- Answered) -- Forgotten), Host2}.
+    %% was answered or what the bridge awaits no more.
+    Unaliased = [Alias || {unalias, Alias} <- Effects],
+    {Bridge1, Sent ++ ((Aliases -- Answered) -- Unaliased), Host2}.
 
 %% The host's tags in use once the bridge took Event: a request it admitted
 %% enters, with an id from a clock of its own and, for a flush, the id of what
-%% is in use on the tag it names and of the request its chain ends in; a
-%% version the bridge serves frees every tag first, and one whose msize it
-%% refuses frees none.
+%% is in use on the tag it names and of the request its chain ends in.
 admitted({host, Bytes, _}, Before, After, Host) ->
     Discarded = maps:get(counts, erx_hostlink_9p:info(Before)) =/= maps:get(counts, erx_hostlink_9p:info(After)),
     Id = erlang:unique_integer([monotonic]),
     case erx_9p:decode(Bytes, ?MSIZE) of
         {ok, _, {reply, _, _}} -> Host;
         {ok, _, _} when Discarded -> Host;
-        {ok, Tag, {version, Msize, _}} when Msize >= 4096 -> #{Tag => {Id, version}};
         {ok, Tag, {flush, Old}} -> Host#{Tag => {Id, flush_of(Old, Host)}};
         {ok, Tag, _} -> Host#{Tag => {Id, request}};
         {error, _} -> Host
@@ -111,9 +109,15 @@ flush_of(Old, Host) ->
 %% One answer to the host: its tag must be in use. A flush's answer must
 %% follow the flush it names and every earlier flush of the same request, and
 %% frees the tag it named too when the request it flushed is still in use
-%% there: the grant abandoned it.
+%% there: the grant abandoned it. A version's answer is an error, since every
+%% round's session is open.
 answered(Bytes, Host) ->
-    {ok, Tag, {reply, _, _}} = erx_9p:decode(Bytes, ?MSIZE),
+    {ok, Tag, {reply, Operation, Reply}} = erx_9p:decode(Bytes, ?MSIZE),
+    case {Operation, Reply} of
+        {version, {error, _}} -> ok;
+        {version, _} -> erlang:error({version_served, Tag, Reply});
+        _ -> ok
+    end,
     case maps:take(Tag, Host) of
         {{Id, {flush, Old, Target, Root}}, Rest} when Target =/= none ->
             Earlier = [T || T := {E, {flush, _, _, R}} <- Rest, R =:= Root, E < Id],
@@ -144,8 +148,8 @@ check_effect({clunk, Grant, Fid}) when is_pid(Grant), is_integer(Fid) -> ok;
 check_effect({unalias, Alias}) when is_reference(Alias) -> ok;
 check_effect(Effect) -> erlang:error({unknown_effect, Effect}).
 
-check_bounds(#{fids := Fids, tags := Tags, draining := Draining, requests := Requests, load := Load} = Info) ->
-    case Fids =< ?POOL andalso Tags + Draining =< Load andalso Load =< 64 andalso Requests =< 32 of
+check_bounds(#{fids := Fids, tags := Tags, requests := Requests} = Info) ->
+    case Fids =< ?POOL andalso Tags =< 64 andalso Requests =< 32 of
         true -> ok;
         false -> erlang:error({out_of_bounds, Info})
     end.
@@ -189,7 +193,7 @@ request(Host) ->
           fun() -> {xattrwalk, Fid(), Fid(), <<>>} end,
           fun() -> {getattr, Fid(), 16#3fff} end,
           fun() -> {lcreate, Fid(), Name(), 2, 8#644, 0} end],
-    %% A version resets the session, so it comes once in about 60 requests.
+    %% A version is refused in a session; it comes once in about 60 requests.
     case rand:uniform(60) of
         1 -> Version();
         _ -> (pick(Requests))()

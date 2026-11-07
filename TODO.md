@@ -1532,13 +1532,13 @@ it; git history is the record of completed work.
   `admit/4`): a flush of a deferred request only waits behind it, and no
   grant abandons a request at a flush, as design-files.md's Flush allows;
   so a deferred request whose file process never answers (a stuck job, a
-  waiting lock once locks are served) holds its slot at the grant, and the
-  host link bridge's request place when a `version` forgot it, until the
-  session ends. Abandoning at a flush (answer only the flush, drop the
-  file process's late answer) makes the bridge's version flushes let it go.
+  waiting lock once locks are served) holds its slot at the grant, and its
+  tag at the host link bridge, until the session ends. Abandoning at a
+  flush (answer only the flush, drop the file process's late answer) lets
+  a flush free both.
 * [Medium] security residual, host link's 9P bridge
   (`erlang/apps/erx_hostlink/src/erx_hostlink_files.erl`, `tree_grant/3`):
-  the bridge uses the system domain's own grants and its load bound, 64,
+  the bridge uses the system domain's own grants and its tags bound, 64,
   equals a grant's whole 64 requests in flight, so a host that keeps 32
   slow reads and their flushes at the `data` grant makes that grant refuse
   the system domain's own processes with `emfile`; a grant of the bridge's

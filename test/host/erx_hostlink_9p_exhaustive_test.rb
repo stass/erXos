@@ -38,15 +38,14 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
     out_of_order: Fault.new(property: /flush_out_of_order|flush_before_its_target/,
                             text: 'seq = Seq + 1}, []}',
                             broken: 'seq = Seq - 1}, []}'),
-    # (d) A forwarded request keeps no room for its flush.
-    no_flush_room: Fault.new(property: /out_of_bounds/,
-                             text: 'added_load({forward, _, _}, _B) -> 2;',
-                             broken: 'added_load({forward, _, _}, _B) -> 1;'),
-    # (e) A version keeps the flushes no grant holds, so their answers still reach the host.
-    version_leaks: Fault.new(property: /old_tag_answered/,
-                             text: "forgotten(_Tag, #flush{}, _B, Acc) ->\n    Acc.",
-                             broken: "forgotten(Tag, #flush{} = Flush, _B, {Drains, Sends}) ->\n    " \
-                                     '{Drains#{Tag => Flush}, Sends}.'),
+    # (d) A message admitted with every tag of the bound in use takes one tag past it.
+    past_the_tags_bound: Fault.new(property: /out_of_bounds/,
+                                   text: 'Plan when map_size(Slots) < TagsMax ->',
+                                   broken: 'Plan when map_size(Slots) =< TagsMax ->'),
+    # (e) A version in an open session is served as if it opened one.
+    version_served: Fault.new(property: /version_served/,
+                              text: 'plan({version, Msize, Version}, _Drawn, #bridge{msize = none}) when',
+                              broken: 'plan({version, Msize, Version}, _Drawn, _B) when'),
     # (c) A flush the grant refuses or answers malformed abandons its request, so the host
     # takes a request as not done that its grant still does.
     refusal_abandons: Fault.new(property: /abandoned_without_grant/,

@@ -436,7 +436,11 @@ unchanged. Linux's client sends every flag but `TRUNC`, truncating through
 #### Version and attach
 
 At an edge, `version` opens a 9P session and resets it, and `attach` makes
-a root fid, as 9P2000.L says. Inside the machine, a grant is one client
+a root fid, as 9P2000.L says; the host link's bridge, whose client starts
+afresh with a new host-link session, serves only the `version` that opens
+its session
+([design-live.md](design-live.md#files-between-the-host-and-the-machine)).
+Inside the machine, a grant is one client
 domain's session with the server from the moment the server makes it, and
 every process of the client domain shares it, so a `version` there is
 answered with the protocol's name and the smaller of the client's message

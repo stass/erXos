@@ -18,11 +18,11 @@ require 'tmpdir'
 # between the host and the machine").
 module ErxHostlink9pFuzz
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = [File.join(ROOT, 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'),
+  SOURCES = [File.join(ROOT, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/generated/erx_9p.erl')].freeze
   CORE_SOURCE = File.join(ROOT, 'erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_hostlink_9p_fuzz.erl')
-  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
+  INCLUDE = File.join(ROOT, 'erlang/apps/erx/include')
   POOL_CHECK = 'map_size(Fids) >= Pool -> {error, emfile};'
   NO_POOL_CHECK = 'map_size(Fids) > Pool -> {error, emfile};'
   CHAIN_ORDER = 'seq = Seq + 1}, []}'

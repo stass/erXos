@@ -9,7 +9,8 @@ by test/host/erx_hostlink_9p_exhaustive_test.rb on stock's emulator.
 It enumerates every interleaving of a host and one grant over a small bound,
 from a session with fid 1 attached: the host sends reads, flushes of a tag
 in use (at most two flushes for each request, a flush of a flush counted
-for the request it ends in) and one `version`, within a budget of messages
+for the request it ends in) and one `version` in the session, within a
+budget of messages
 and always on its lowest free tag; the grant answers any message it holds in
 any order, a request well formed or malformed, a flush `ok`, refused or
 malformed; and the grant may end once. Each configuration sets the bridge's
@@ -25,11 +26,12 @@ On every trace it checks, as the host and the grant see the bridge:
   `flush_out_of_order`); a request a flush's answer leaves unanswered was
   abandoned, which only the grant may do, by answering a flush of it `ok`
   (`abandoned_without_grant`), and is never answered later;
-* (d) the requests and messages the grant holds stay within the bounds, and
-  the bridge's derived counts agree with what the grant holds
-  (`out_of_bounds`, `count_mismatch`);
-* (e) after a `version`, no tag of the session before it is answered
-  (`old_tag_answered`): the host uses tags 1-3 before it and 4-6 after.
+* (d) the requests and tags in use stay within the bounds, and the bridge's
+  derived counts agree with what the grant holds (`out_of_bounds`,
+  `count_mismatch`);
+* (e) a `version` in the session is refused: answered with an error on its
+  own tag (`version_served`), while what was in flight before it is still
+  answered, as (b) checks.
 """.
 
 -export([run/0]).
@@ -38,6 +40,7 @@ On every trace it checks, as the host and the grant see the bridge:
 -define(NOFID, 16#ffffffff).
 -define(VERSION_TAG, 7).
 -define(FLUSHES_PER_REQUEST, 2).
+-define(TAGS, [1, 2, 3]).
 
 %% The bridge and what the grant and the host hold:
 %% * outstanding: each alias the grant owes a reply at, with what was sent:
@@ -58,31 +61,29 @@ On every trace it checks, as the host and the grant see the bridge:
                 budget :: non_neg_integer(),
                 version = true :: boolean(),
                 down = true :: boolean(),
-                tags = [1, 2, 3] :: [non_neg_integer()],
-                old = [] :: [non_neg_integer()],
                 limits :: {pos_integer(), pos_integer()},
                 trace = [] :: list()}).
 
-%% Requests, load and host messages of each configuration.
+%% Requests, tags and host messages of each configuration.
 -define(CONFIGURATIONS, [{1, 2, 5}, {2, 4, 5}, {3, 6, 5}]).
 
 run() ->
-    lists:foreach(fun({Requests, Load, Budget}) ->
-                          #{traces := Traces, steps := Steps} = explore(world(Requests, Load, Budget), #{traces => 0, steps => 0}),
-                          io:format("exhaustive: requests ~b load ~b budget ~b: ~b traces, ~b steps ok~n",
-                                    [Requests, Load, Budget, Traces, Steps])
+    lists:foreach(fun({Requests, Tags, Budget}) ->
+                          #{traces := Traces, steps := Steps} = explore(world(Requests, Tags, Budget), #{traces => 0, steps => 0}),
+                          io:format("exhaustive: requests ~b tags ~b budget ~b: ~b traces, ~b steps ok~n",
+                                    [Requests, Tags, Budget, Traces, Steps])
                   end, ?CONFIGURATIONS).
 
 %% A session with fid 1 attached to tree a, the one grant's.
-world(Requests, Load, Budget) ->
+world(Requests, Tags, Budget) ->
     Grant = spawn(fun() -> receive stop -> ok end end),
     Trees = fun(<<"a">>) -> {ok, Grant}; (_) -> error end,
-    B0 = erx_hostlink_9p:new(#{trees => Trees, alias => fun make_ref/0, requests => Requests, load => Load}),
+    B0 = erx_hostlink_9p:new(#{trees => Trees, alias => fun make_ref/0, requests => Requests, tags => Tags}),
     {B1, _} = erx_hostlink_9p:step({host, erx_9p:encode(100, {version, ?MSIZE, <<"9P2000.L">>}), 0}, B0),
     {B2, Effects} = erx_hostlink_9p:step({host, erx_9p:encode(101, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}), 11}, B1),
     [Alias] = [A || {grant, _, A, _} <- Effects],
     {B3, _} = erx_hostlink_9p:step({reply, Alias, {ok, {16#80, 0, 1}}}, B2),
-    #world{bridge = B3, grant = Grant, budget = Budget, limits = {Requests, Load}}.
+    #world{bridge = B3, grant = Grant, budget = Budget, limits = {Requests, Tags}}.
 
 explore(W, Stats) ->
     quiescent(W),
@@ -102,8 +103,8 @@ choices(W) ->
 
 host_choices(#world{budget = 0}) ->
     [];
-host_choices(#world{host = Host, tags = Tags, flushes = Flushes, version = Version}) ->
-    Free = [Tag || Tag <- Tags, not is_map_key(Tag, Host)],
+host_choices(#world{host = Host, flushes = Flushes, version = Version}) ->
+    Free = [Tag || Tag <- ?TAGS, not is_map_key(Tag, Host)],
     New = case Free of
               [Tag | _] ->
                   [{read, Tag} | [{flush, Tag, Old} || Old := Entry <- Host,
@@ -129,12 +130,9 @@ take({read, Tag}, W) ->
     host_message(Tag, {read, 1, 0, 4}, W);
 take({flush, Tag, Old}, W) ->
     host_message(Tag, {flush, Old}, W);
-take(version, #world{tags = Tags, old = Old} = W) ->
-    %% A version frees every tag: the host's old ones never come back.
-    W1 = W#world{host = #{?VERSION_TAG => {0, version}}, flushes = #{}, version = false,
-                 old = Old ++ Tags, tags = [4, 5, 6]},
-    stepped(version, {host, erx_9p:encode(?VERSION_TAG, {version, ?MSIZE, <<"9P2000.L">>}), 0},
-            W1#world{budget = W#world.budget - 1});
+take(version, W) ->
+    %% A tag of its own, so it is never one a flush names or one in use.
+    host_message(?VERSION_TAG, {version, ?MSIZE, <<"9P2000.L">>}, W#world{version = false});
 take({reply, Alias, Reply} = Choice, #world{outstanding = Outstanding, sent = Sent, abandonable = Abandonable} = W) ->
     Abandons = case {lists:keyfind(Alias, 1, Outstanding), Reply} of
                    {{Alias, {flush, Target}}, ok} when is_map_key(Target, Sent) -> [map_get(Target, Sent)];
@@ -183,7 +181,8 @@ effect({unalias, Alias}, #world{outstanding = Outstanding} = W) ->
     %% The runtime drops the reply the grant may still send there.
     W#world{outstanding = lists:keydelete(Alias, 1, Outstanding)};
 effect({host, Bytes}, W) ->
-    {ok, Tag, {reply, _, _}} = erx_9p:decode(Bytes, ?MSIZE),
+    {ok, Tag, {reply, Operation, Reply}} = erx_9p:decode(Bytes, ?MSIZE),
+    refused(Operation, Reply) orelse fail(version_served, {Tag, Reply}, W),
     answered(Tag, W);
 effect({monitor, _}, W) ->
     W;
@@ -192,9 +191,13 @@ effect({clunk, _, _}, W) ->
 
 %%% The checks
 
-%% One answer on Tag, as the host takes it: (a), (c) and (e).
-answered(Tag, #world{host = Host, old = Old, abandonable = Abandonable} = W) ->
-    lists:member(Tag, Old) andalso fail(old_tag_answered, Tag, W),
+%% (e): the session is open, so a version's answer is an error.
+refused(version, {error, _}) -> true;
+refused(version, _Served) -> false;
+refused(_Operation, _Reply) -> true.
+
+%% One answer on Tag, as the host takes it: (a) and (c).
+answered(Tag, #world{host = Host, abandonable = Abandonable} = W) ->
     case maps:take(Tag, Host) of
         {{Id, {flush, Target, Root}}, Rest} ->
             [fail(flush_before_its_target, Tag, W) || {T, {flush, _, _}} <- maps:values(Rest), T =:= Target],
@@ -210,12 +213,12 @@ answered(Tag, #world{host = Host, old = Old, abandonable = Abandonable} = W) ->
             fail(tag_not_in_use, Tag, W)
     end.
 
-%% (d): what the grant holds within the bounds, and the bridge's counts the
-%% same as what the grant holds.
-bounded(#world{bridge = B, outstanding = Outstanding, limits = {RequestsMax, LoadMax}} = W) ->
+%% (d): what the grant holds and the tags in use within the bounds, and the
+%% bridge's counts the same as what the grant holds.
+bounded(#world{bridge = B, outstanding = Outstanding, limits = {RequestsMax, TagsMax}} = W) ->
     Info = erx_hostlink_9p:info(B),
     Requests = length([A || {A, request} <- Outstanding]),
-    length(Outstanding) =< LoadMax andalso Requests =< RequestsMax andalso maps:get(load, Info) =< LoadMax
+    length(Outstanding) =< TagsMax andalso Requests =< RequestsMax andalso maps:get(tags, Info) =< TagsMax
         orelse fail(out_of_bounds, Info, W),
     maps:get(awaited, Info) =:= length(Outstanding) andalso maps:get(requests, Info) =:= Requests
         orelse fail(count_mismatch, {Info, Outstanding}, W),
