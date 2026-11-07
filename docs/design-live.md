@@ -291,11 +291,42 @@ kernel's.
 
 The collector of each source assigns the reporter, never the report: an
 attribute from `erx_object_info` is `kernel`'s or that of the stopgap
-reporter the system domain's `liberx` names for it, one from a service's
+reporter the schema lists on it, one from a service's
 records `service`'s, and one from a domain's agent `runtime`'s, whatever
-the agent's frame says. A value the inspector derives from other
-attributes, as a budget's spending and room, is `ok` only when every
-input is `ok`; otherwise it is `unsupported` when an input is and
+the agent's frame says.
+
+The collector of `erx_object_info` decides each attribute from two masks
+and the report's value. The first is the report's `reported` field
+([design-abi.md](design-abi.md#inspection-schema)). The second is
+`erx_info_partial(Topic)` of the system domain's own `liberx`: the
+fields its backend counts only partly, zero on erXos's kernel. A partly
+counted field has its `reported` bit clear, so a reader that knows
+nothing of the second mask sees it as not reported, never as exact. For
+an attribute of the topic's kind that lists `kernel` and is not
+`derived`:
+
+| `reported` bit | partial bit | Attribute |
+| --- | --- | --- |
+| set | clear | `{kernel, {ok, V}}` |
+| clear | set | `{{stopgap, S}, {partial, V}}`, S the one stopgap reporter the attribute lists for `kernel` |
+| clear, or no such field | clear | `{kernel, unsupported}` |
+| set | set | `{kernel, {error, invalid}}`, a fault of `liberx` |
+
+A partial bit on an attribute that lists no stopgap for `kernel` is a
+fault of `liberx` too, and the attribute is `{kernel, {error, invalid}}`,
+so a stopgap's count never passes for the kernel's. A call refused with
+`ERX_ENOTSUP` makes every attribute of the topic `{kernel,
+unsupported}`; `ERX_ERANGE` from a topic whose `index` counts entries
+ends the listing and makes no record; any other refusal makes each
+attribute `{kernel, {error, S}}`, S the status's name. The inspector
+makes the call itself, on capabilities it holds, and the partial mask is
+its own `liberx`'s, so no domain's report reaches either mask. The
+kernel names no reporter: the schema names the stopgap reporter of a
+field the system domain's `liberx` marks partial.
+
+A value the inspector derives from other attributes, one the schema
+marks `derived`, as a budget's spending and room, is `ok` only when
+every input is `ok`; otherwise it is `unsupported` when an input is and
 `unknown` when none is, and it carries the reporter of an input that is
 not `ok`, so a partial count never yields a room that reads as exact.
 
@@ -324,7 +355,8 @@ adding attributes keeps it.
 | `[groups]`, `[groups, Id]` | group: grant, capacity, usage, throttling, executors and their states, child groups; machine-wide, for scope `all` | kernel; the policy's intent, service |
 | `[domains, Id, group]`, `[domains, Id, budget]` | the domain's group and budget, as above, within the facet's scope | kernel |
 | `[domains]`, `[domains, Id]` | domain: name, principal, state and death record (service); budget guarantee, cap and spending, group usage, threads (kernel); atom count, ETS tables, modules, process count (runtime) | each attribute marked |
-| `[domains, Id, threads]`, `[..., capabilities]`, `[..., mappings]` | the domain's threads, capability table and mapping records, paginated | kernel |
+| `[domains, Id, threads]`, `[domains, Id, threads, T]` | the domain's threads by object id, from `ERX_INFO_THREAD` on its space; thread: state and wait kind | kernel |
+| `[domains, Id, capabilities]`, `[domains, Id, mappings]` | the domain's capability table and mapping records, paginated | kernel |
 | `[domains, Id, connections]`, `[domains, Id, connections, Peer]` | the domain's connections: the peer domain and each lane's size (service, from the domain service's records); each doorbell's trigger count (kernel, from the IRQ object); frames accepted and refused on each lane (runtime, from the domain's funnel) | each attribute marked |
 | `[domains, Id, exports]` | the domain's export table: local pid or alias, peer domain and rights, paginated | runtime |
 | `[domains, Id, programs]`, `[domains, Id, programs, N]` | for a session's domain, its programs, each a port of the session's runtime: name, owner pid, state, exit status, the fids its handler holds for it, its namespace, its failed write-backs of shared mappings (runtime, from the session's agent); its sub-space's state and charges and its group's usage (kernel, from `INSPECT` on the session's space and group tree); below it, `threads`, `capabilities` and `mappings` of the sub-space as the session's agent relays them from the capabilities it holds, marked runtime, or `unsupported` | each attribute marked |
@@ -1934,7 +1966,16 @@ reference tables and field projections are covered by the drift check.
   `logger_std_h` on a standard device, and has a seeded violation. The console's
   two decoders of log records, for the kernel's records from `erx_log_read` and for the
   domains' records from their facets, have fuzz targets.
-* **Inspection tests:** one per status and per reporter; scope tests for
+* **Inspection tests:** one per status and per reporter; the collector
+  of `erx_object_info` over constructed reports, one per row of its
+  table, a partial bit on an attribute with no stopgap, an attribute the
+  layout has no field for, a `derived` attribute over a partial input,
+  and each kind of refusal, `ERX_ERANGE` ending a listing among them,
+  each paired with a
+  seed that flips one bit or the status and must change the attribute;
+  a host test that every bit of each stopgap backend's `erx_info_partial`
+  names an attribute listing a stopgap for `kernel`, failing on a seeded
+  bit for `guarantee`; scope tests for
   facets limited to some domains; a record for every path kind against a
   domain whose agent lies, which must appear marked `runtime`, and whose
   listing of another domain's pids is dropped; a session's program with a

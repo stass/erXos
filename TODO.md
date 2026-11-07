@@ -128,6 +128,9 @@ it; git history is the record of completed work.
   `erx_object_destroy`, `erx_object_info`, `erx_budget_create`, `erx_log_read`, `erx_group_configure` and
   `erx_group_info` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
   entry and the Erlang log reader, which arrive with M3; each gets its body and a `test/guest/function_api` row then.
+  `erx_object_info`'s body is the service request of
+  [Reporting kernel objects](docs/design-stopgap.md#reporting-kernel-objects), with `erx_info_partial` and the
+  pool's count of pages for each budget.
 * [Low] stopgap, `test/guest/native_task/guest.c`, `request_against_exit`: no seed shows the dropped-request
   count can move, as the thread deletion seed stops the suite at its earlier `service` case.
 * [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
@@ -445,6 +448,20 @@ it; git history is the record of completed work.
   variable segment), ignores an attribute's `build` (a release record may carry a `development` attribute), and
   has no fuzz target over random terms. `cpu_index`'s bound 63 is written beside `@cpu_limit` because the grammar
   has no `@limit - 1`. The domain kind lacks design-live's death record and group usage.
+* [Medium] kernel reports, `abi/erx_abi.txt`, `abi/inspection.txt` and `liberx` (design-abi's
+  [Inspection schema](docs/design-abi.md#inspection-schema)): the topic enum and the `erx_info_<kind>` layouts with
+  their `reported` flags are not declared, and the generator does not check their names against the schema or
+  refuse two stopgap reporters for one category on an attribute. `erx_group_report` becomes `erx_info_group`, with
+  `reported` in place of `usage_known`, which `otp/erts/emulator/sys/erxos/sys_time.c` reads; its
+  `capacity_mcpu` bit stays clear, and `cpuset`'s until a set is configured, where
+  `liberx/backend/core/group_report.h` writes 1,000 times the CPU count and a zero. The schema lacks the `group`
+  and `thread` kinds and their paths in design-live's [Paths](docs/design-live.md#paths) (a thread's `state` and
+  `wait` typed by root enums of the kernel's thread states and wait kinds, with their visibility), names the
+  budget's threshold `watch`, and has no `derived` property, which the budget's `spending`, `borrowing`, `room`,
+  `deficit` and `give_back` need.
+  `erx_info_partial` is not in `liberx/backend/api.h`. The budget layout declares only the fields master and the
+  budget redesign on branch `design-budget-caps` agree on (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `threshold`);
+  `pinned` or `freeing` follows that redesign, and until then shows `unsupported`.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).
@@ -2515,7 +2532,10 @@ document's "residual risks accepted" paragraph.
   rights that follow a flag (`erx_mem_create_paged`), and typed items in the
   UTCB checked by the pass plan (`erx_cap_pass`, IPC), which
   `carries_capability?` refuses as a plain aggregate
-  ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)).
+  ([design-abi.md](docs/design-abi.md#kernel-calls-and-bindings)). The
+  `call erx_object_info` declaration waits on the any-type form; its topic
+  enum, `reported` flags and report layouts do not
+  ([design-abi.md](docs/design-abi.md#inspection-schema)).
 * [Low] crash record, the brief form's promise: `fault` keeps `addr`, `pc` and
   `status`, so a wild dereference or an exit status can carry 8 bytes of what
   the root task held, against [design-kernel.md](docs/design-kernel.md#the-root-task)'s

@@ -514,6 +514,13 @@ adding one never exposes it by default:
   `web`, or `none`: the renderings that show it. A rendering shows no
   attribute that does not list it.
 
+An optional fifth property, `derived INPUTS`, a comma-separated list of
+the kind's other attributes, marks an attribute the inspector computes
+from those inputs ([design-live.md](design-live.md#inspection-records)),
+as a budget's spending is computed from `used`, `carved` and `lent`; no
+report layout has a field for it, and each input is an attribute that is
+not itself `derived`.
+
 A kind's attributes appear in its records, in shell and host tables, in
 `/proc` `status` files and on the web in declaration order, which is the
 schema's field order.
@@ -570,7 +577,34 @@ runtime's work in its place, such as the Phase 1 backend of `liberx`
 counting a budget's pages in the kernel's place
 ([design-stopgap.md](design-stopgap.md#reporting-a-budget)); replacing
 the component removes its declaration, and the attributes it reported
-come from the category it stood in for.
+come from the category it stood in for. An attribute lists at most one
+stopgap reporter for each category.
+
+**Kernel reports.** `erx_object_info` writes one report layout per
+topic ([design-kernel.md](design-kernel.md#failure-handling-diagnostics-and-debuggability)).
+A topic the inspector shows is named after the kind it reports
+(`machine`, `cpu`, `group`, `budget`, `thread`), and its layout is
+`erx_info_<kind>`. Every field of that layout other than `reported`,
+and `id` in a topic whose `index` counts entries (`thread`), is an
+attribute field, named after an attribute of the kind that lists
+`kernel` and is not `derived`. `reported` is a `flags` field with one
+bit for each attribute field, named after it: a set bit says the kernel
+interface reports the field with the attribute's full meaning, and a
+clear bit says it does not, so the field's value means nothing to a
+reader that knows no more. The generator checks these names, so the
+collector maps fields and bits to attributes by name and keeps no table
+of its own; an attribute that lists `kernel`, is not `derived` and has
+no field in the layout reads as a clear bit. No report layout names a
+reporter or a `partial` status. A field that a stopgap backend counts
+only partly has its `reported` bit clear, and that backend names it
+through `liberx` in the inspector's own domain; its reporter is the one
+stopgap the attribute lists for `kernel`
+([design-live.md](design-live.md#inspection-records)). The topic enum,
+the `flags` and the layouts are ordinary root declarations of
+`erx_abi.txt` and need no grammar of their own; the `call
+erx_object_info` declaration alone waits on the call grammar's
+capability argument of any type
+([Kernel calls and bindings](#kernel-calls-and-bindings)).
 
 ```text
 inspection 1
@@ -1455,8 +1489,12 @@ symbol collisions, integer overflow, misalignment, holes and overlapping
 fields, invalid bits and shifts, unbounded tails, bad references, missing
 pass sets, illegal rights, missing call bounds, invalid window effects,
 register/UTCB overflow, incomplete mappings, and incomplete sequence
-metadata. Each test expects its specific diagnostic and unchanged output
-files. Parsing arbitrary declaration bytes has its own bounded fuzz entry
+metadata, and in the inspection schema a report layout field or a
+`reported` bit named after no attribute of its kind that lists `kernel`,
+a field for a `derived` attribute, a `derived` input that names no
+attribute of the kind or a `derived` one, and an attribute that lists
+two stopgap reporters for one category. Each
+test expects its specific diagnostic and unchanged output files. Parsing arbitrary declaration bytes has its own bounded fuzz entry
 point and cannot publish files.
 
 Reader tests use independent byte fixtures for exact field values and

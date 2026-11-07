@@ -1328,9 +1328,9 @@ any budget to the root holds at most `ERX_BUDGET_DEPTH_MAX` budgets.
   is refused; a session or the policy watches the budgets it carved to
   resize them, or the pool its programs draw on, before a program is
   refused, with one software IRQ object per watched budget.
-* **Inspecting.** `erx_object_info` on a budget reports, in its basic
-  topic, `kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `pinned`
-  and `threshold`, from which the inspector derives the spending, the
+* **Inspecting.** `erx_object_info` on a budget reports, in its own
+  topic, `ERX_INFO_BUDGET`, `kind`, `guarantee`, `cap`, `used`,
+  `carved`, `lent`, `pinned` and `threshold`, from which the inspector derives the spending, the
   room, which is zero when the spending is at or above the cap, the
   **deficit**, the spending above the cap after a shrink, the
   borrowing, and what a destroy of the budget would give back to its
@@ -8033,6 +8033,29 @@ object's type and the capability's rights only; an object id needs
 about objects others create. The inspector presents them as kernel-reported
 records ([design-live.md](design-live.md#inspection)). The trace ring and
 the kernel log complete the picture; the panic report is the last resort.
+
+A topic is a value of the ABI's topic enum, and each has a report layout
+of its own in `abi/erx_abi.txt`. The topics the inspector and the system
+domain read:
+
+| Topic | Asked on, with `index` | Reports |
+| --- | --- | --- |
+| `ERX_INFO_BASIC` | any capability, without `INSPECT` | the object's type and the capability's rights |
+| `ERX_INFO_MACHINE` | the root resource | the machine's attributes: CPUs online, memory total and free, uptime, and the machine page's facts |
+| `ERX_INFO_CPU` | the root resource; `index` a CPU, and a CPU not online is `ERX_ERANGE` | the CPU's running thread, idle time, ready threads per urgency, interrupts taken and throttled groups |
+| `ERX_INFO_GROUP` | a group | the report `erx_group_info` writes, `erx_info_group` ([design-scheduler.md](design-scheduler.md)) |
+| `ERX_INFO_BUDGET` | a budget | the fields of **Inspecting** in [Budgets](#budgets) |
+| `ERX_INFO_THREAD` | a space; `index` counts its threads, and one past the last is `ERX_ERANGE` | the thread's object id, state and wait kind |
+| `ERX_INFO_IMAGE_ENTRY` | the boot image or a slice; `index` counts entries | one validated entry ([Reading the index](#the-boot-image)) |
+
+The other details listed above are topics of the same enum. A thread
+listing read over several calls can miss or repeat a thread created or
+ended between them. Every topic the inspector shows carries a `reported`
+mask with one bit per field, and its fields are named after the
+attributes of its kind in the inspection schema
+([design-abi.md](design-abi.md#inspection-schema)): a clear bit says the
+kernel does not report that field, and the inspector shows it as
+`unsupported`. No report names a reporter.
 
 ## Security
 
