@@ -17038,6 +17038,34 @@ module Erx
               "erange".b,
               "enolck".b
             ].freeze,
+            :error_numbers => [
+              ["enoent".b, 2].freeze,
+              ["eacces".b, 13].freeze,
+              ["eperm".b, 1].freeze,
+              ["eexist".b, 17].freeze,
+              ["enotdir".b, 20].freeze,
+              ["eisdir".b, 21].freeze,
+              ["enotempty".b, 39].freeze,
+              ["erofs".b, 30].freeze,
+              ["enospc".b, 28].freeze,
+              ["efbig".b, 27].freeze,
+              ["einval".b, 22].freeze,
+              ["ebadf".b, 9].freeze,
+              ["emfile".b, 24].freeze,
+              ["enfile".b, 23].freeze,
+              ["eio".b, 5].freeze,
+              ["enametoolong".b, 36].freeze,
+              ["enotsup".b, 95].freeze,
+              ["eloop".b, 40].freeze,
+              ["enxio".b, 6].freeze,
+              ["exdev".b, 18].freeze,
+              ["enomem".b, 12].freeze,
+              ["eagain".b, 11].freeze,
+              ["enodata".b, 61].freeze,
+              ["erange".b, 34].freeze,
+              ["enolck".b, 37].freeze
+            ].freeze,
+            :error_type => 7,
             :kinds => {
               "fid".b => {
                 :form => "integer",
@@ -17045,7 +17073,8 @@ module Erx
                 :except => {
                   :value => 4294967295,
                   :constant => "p9_nofid".b
-                }.freeze
+                }.freeze,
+                :local => false
               }.freeze,
               "io_count".b => {
                 :form => "integer",
@@ -17053,7 +17082,8 @@ module Erx
                 :max => {
                   :value => 65536,
                   :constant => "p9_io_max".b
-                }.freeze
+                }.freeze,
+                :local => false
               }.freeze,
               "xattr_size".b => {
                 :form => "integer",
@@ -17061,7 +17091,8 @@ module Erx
                 :max => {
                   :value => 65536,
                   :constant => "p9_xattr_max".b
-                }.freeze
+                }.freeze,
+                :local => false
               }.freeze,
               "unlink_flags".b => {
                 :form => "integer",
@@ -17075,12 +17106,14 @@ module Erx
                     :value => 512,
                     :constant => "p9_at_removedir".b
                   }.freeze
-                ].freeze
+                ].freeze,
+                :local => false
               }.freeze,
               "at".b => {
                 :form => "integer",
                 :base => "u64".b,
-                :atom => "unknown".b
+                :atom => "unknown".b,
+                :local => true
               }.freeze,
               "name".b => {
                 :form => "text",
@@ -17089,7 +17122,8 @@ module Erx
                   :constant => "name_max".b
                 }.freeze,
                 :utf8 => true,
-                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b, "dotdot".b].freeze
+                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b, "dotdot".b].freeze,
+                :length => "u16"
               }.freeze,
               "walk_name".b => {
                 :form => "text",
@@ -17098,7 +17132,8 @@ module Erx
                   :constant => "name_max".b
                 }.freeze,
                 :utf8 => true,
-                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b].freeze
+                :refuse => ["nul".b, "slash".b, "empty".b, "dot".b].freeze,
+                :length => "u16"
               }.freeze,
               "entry_name".b => {
                 :form => "text",
@@ -17107,7 +17142,8 @@ module Erx
                   :constant => "name_max".b
                 }.freeze,
                 :utf8 => true,
-                :refuse => ["nul".b, "slash".b, "empty".b].freeze
+                :refuse => ["nul".b, "slash".b, "empty".b].freeze,
+                :length => "u16"
               }.freeze,
               "xattr_name".b => {
                 :form => "text",
@@ -17116,7 +17152,8 @@ module Erx
                   :constant => "name_max".b
                 }.freeze,
                 :utf8 => true,
-                :refuse => ["nul".b, "slash".b].freeze
+                :refuse => ["nul".b, "slash".b].freeze,
+                :length => "u16"
               }.freeze,
               "string".b => {
                 :form => "text",
@@ -17125,7 +17162,8 @@ module Erx
                   :constant => "p9_string_max".b
                 }.freeze,
                 :utf8 => true,
-                :refuse => ["nul".b].freeze
+                :refuse => ["nul".b].freeze,
+                :length => "u16"
               }.freeze,
               "target".b => {
                 :form => "text",
@@ -17134,7 +17172,8 @@ module Erx
                   :constant => "p9_symlink_max".b
                 }.freeze,
                 :utf8 => false,
-                :refuse => ["nul".b].freeze
+                :refuse => ["nul".b].freeze,
+                :length => "u16"
               }.freeze,
               "data".b => {
                 :form => "text",
@@ -17143,7 +17182,8 @@ module Erx
                   :constant => "p9_io_max".b
                 }.freeze,
                 :utf8 => false,
-                :refuse => [].freeze
+                :refuse => [].freeze,
+                :length => "u32".b
               }.freeze,
               "qid".b => {
                 :form => "tuple",

@@ -245,7 +245,7 @@ module Erx
         used_bases = (@kinds.values.flat_map { |kind| [kind[:base], *kind.fetch(:elements, []), kind[:element],
                                                        *kind.fetch(:fields, []).map(&:last)] } +
                       @operations.flat_map { |operation| (operation.fetch(:request) + (operation.fetch(:reply) || [])).map(&:last) })
-                     .compact.uniq.select { |kind| BASE_CHECKS.key?(kind) }
+                     .compact.map { |kind| base_kind(kind) }.uniq.select { |kind| BASE_CHECKS.key?(kind) }
         bases = BASE_CHECKS.select { |kind, _| used_bases.include?(kind) }
                            .map { |kind, test| "is_#{kind}(Value) ->\n    #{test}." }
         "%% The field kinds of the table.\n" +
@@ -346,6 +346,11 @@ module Erx
                 "%% past 16#10ffff.\nis_utf8(<<_/utf8, Rest/binary>>) ->\n    is_utf8(Rest);\n" \
                 "is_utf8(<<>>) ->\n    true;\nis_utf8(_) ->\n    false." : nil].compact.join("\n\n")
       end
+
+      # The base kind whose check a field of kind takes. The grammar's alias is a
+      # reference, which no base check covers, so here it is itself; the wire
+      # codec (abi_emit_wire.rb) overrides this, as its alias is a u16 tag.
+      def base_kind(kind) = kind
 
       def check(kind)
         kind == 'alias' ? 'is_reference' : "is_#{kind}"

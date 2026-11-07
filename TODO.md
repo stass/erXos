@@ -380,6 +380,15 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] files, `erx_9p` codec (`tools/lib/erx/abi_emit_wire.rb`, `abi/protocols/9p.txt`): a packed list's
+  per-element size (`packed @p9_dirent_fixed`, 24) is declared rather than derived from the dirent tuple's wire
+  widths, so a change to `dirent` would make the grammar's `packed_dirents/1` disagree with the bytes the codec
+  writes; derive it in the generator or refuse a mismatch. `decode/2` also accepts T and R messages alike, so a
+  bridge must itself refuse a reply from its client and a request from its server; split it into
+  `decode_request/2` and `decode_reply/2` when the first bridge is written. The wire emitter subclasses
+  `ProtocolEmitter` and reaches into its private renderers; extract a kind-check renderer parameterised by the
+  alias's form if the grammar emitter's internals change.
+
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so

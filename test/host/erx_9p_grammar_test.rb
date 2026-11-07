@@ -55,7 +55,8 @@ class Erx9pGrammarTest < Minitest::Test
       '  integer a.b u32 max 1' => /not a plain Erlang atom/,
       '  integer q u64 or end' => /not a plain Erlang atom/,
       "  operation error 201\n    request fid u32" => /cannot be named error/,
-      '  text huge max 65537' => /outside 0\.\.65536/,
+      '  text huge max 65536' => /outside 0\.\.65535/,
+      '  text huge max 65537 length u32' => /outside 0\.\.65536/,
       "  operation clunk2 120\n    request fid u32" => /duplicate operation type/,
       "  operation odd 200\n    request fid u32\n    reply data u8\n    check data.length le fid.value" =>
         /measure length does not apply to data/,

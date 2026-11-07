@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # The file protocol's frame profile: 9P2000.L's operations as Erlang terms
 # (docs/design-files.md#the-file-protocol). tools/lib/erx/abi_emit_protocol.rb
-# generates otp/erts/preloaded/src/erx_9p_grammar.erl from it.
+# generates otp/erts/preloaded/src/erx_9p_grammar.erl from it, and
+# tools/lib/erx/abi_emit_wire.rb the codec of its 9P2000.L bytes,
+# erlang/apps/erx/src/generated/erx_9p.erl (docs/design-files.md#the-codec).
 #
 # Readings where docs/design-files.md states no bound:
 # * Uname, Aname, Version and a lock's ClientId are text of at most
@@ -25,12 +27,23 @@
 #   which it does is known only at the server, so a read-only grant refuses
 #   it before any callback (F5).
 #
-# Members: "errors" lists the error atoms a reply may carry. "integer",
-# "text", "tuple", "list" and "map" declare the field kinds; an integer is
-# u8, u16, u32 or u64 with "max N", "except N", "in A B" or "or ATOM"; a
-# text has "max N", "utf8" and "refuse" of nul, slash, empty, dot (".")
-# and dotdot (".."); a list has "max N" elements and "packed N" for a
-# list of tuples ending in a text, each packing as N bytes and the text's.
+# Members: "errors" lists, one "error ATOM NUMBER" each, the error atoms a
+# reply may carry and Linux's number for each, which 9P2000.L's Rlerror
+# carries (Linux's asm-generic errno-base.h and errno.h; ENOTSUP is
+# EOPNOTSUPP there). "integer", "text", "tuple", "list" and "map" declare
+# the field kinds; an integer is u8, u16, u32 or u64 with "max N",
+# "except N", "in A B" or "or ATOM", and "local" after "or ATOM" for one
+# 9P2000.L does not carry; a text has "max N", "utf8", "refuse" of nul,
+# slash, empty, dot (".") and dotdot (".."), and "length u32"; a list has
+# "max N" elements and "packed N" for a list of tuples ending in a text,
+# each packing as N bytes and the text's.
+#
+# The 9P2000.L layout follows from the kinds: integers little-endian at
+# their width; an alias as a u16 tag; a text as a u16 length, or the u32
+# that "length u32" names, then its bytes; a list as a u16 count of its
+# elements, and a packed list as a u32 count of its bytes, then each
+# element; a tuple's elements and a map's fields in order; a local field
+# not at all, so the codec drops it and decodes it as its atom.
 # An operation's "request" and "reply" fields are in 9P2000.L's order;
 # "refused" means it has no reply but an error. "check R.M le Q.M" holds a
 # reply field R to request field Q, measured by value, bytes, length or
@@ -107,19 +120,44 @@ flags p9_getattr_mask u64
   bit data_version 13
 
 protocol erx_9p
-  errors enoent eacces eperm eexist enotdir eisdir enotempty erofs enospc efbig einval ebadf emfile enfile eio enametoolong enotsup eloop enxio exdev enomem eagain enodata erange enolck
+  errors type @p9_rlerror
+    error enoent 2
+    error eacces 13
+    error eperm 1
+    error eexist 17
+    error enotdir 20
+    error eisdir 21
+    error enotempty 39
+    error erofs 30
+    error enospc 28
+    error efbig 27
+    error einval 22
+    error ebadf 9
+    error emfile 24
+    error enfile 23
+    error eio 5
+    error enametoolong 36
+    error enotsup 95
+    error eloop 40
+    error enxio 6
+    error exdev 18
+    error enomem 12
+    error eagain 11
+    error enodata 61
+    error erange 34
+    error enolck 37
   integer fid u32 except @p9_nofid
   integer io_count u32 max @p9_io_max
   integer xattr_size u64 max @p9_xattr_max
   integer unlink_flags u32 in 0 @p9_at_removedir
-  integer at u64 or unknown
+  integer at u64 or unknown local
   text name max @name_max utf8 refuse nul slash empty dot dotdot
   text walk_name max @name_max utf8 refuse nul slash empty dot
   text entry_name max @name_max utf8 refuse nul slash empty
   text xattr_name max @name_max utf8 refuse nul slash
   text string max @p9_string_max utf8 refuse nul
   text target max @p9_symlink_max refuse nul
-  text data max @p9_io_max
+  text data max @p9_io_max length u32
   tuple qid u8 u32 u64
   tuple dirent qid u64 u8 entry_name
   list walk_names walk_name max @p9_maxwelem

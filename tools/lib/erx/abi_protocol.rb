@@ -27,6 +27,10 @@ module Erx
       FID_KIND = 'fid'
       FID_ATTRIBUTES = %w[directory node new].freeze
       MAX_ERRORS = 64
+      # An error reply is a reply of no operation, and the codec carries a reply as
+      # {reply, Operation, Reply}, so neither word may name an operation.
+      RESERVED_OPERATIONS = %w[error reply].freeze
+      LENGTHS = { 'u16' => 65_535, 'u32' => 65_536 }.freeze
       # Names become Erlang atoms and functions: no reserved word, no dot, and no
       # kind whose check would clash with a BIF or a helper of the generated module.
       ERLANG_RESERVED = %w[after and andalso band begin bnot bor bsl bsr bxor case catch cond div else end
@@ -49,6 +53,7 @@ module Erx
 
       def protocol(declaration, name, constants)
         errors = nil
+        error_type = nil
         kinds = {}
         operations = []
         declaration.members.slice_before { |member| member.indent == 2 }.each do |line, *children|
@@ -57,9 +62,9 @@ module Erx
           case keyword
           when 'errors'
             line.fail!('duplicate errors list') if errors
-            line.fail!('errors list must name 1 to 64 atoms') unless words.size.between?(1, MAX_ERRORS)
-            errors = words.map { |word| atom_name(word, line: line) }
-            line.fail!('duplicate error atom') unless errors.uniq.size == errors.size
+            line.fail!('expected errors type N') unless words.size == 2 && words.first == 'type'
+            error_type = number(words[1], 255, line, constants).fetch(:value)
+            errors = error_numbers(children, line, constants)
           when 'integer', 'text', 'tuple', 'list', 'map'
             kind_name = atom_name(words.first, line: line)
             line.fail!("reserved kind name #{kind_name}") if RESERVED_KINDS.include?(kind_name)
@@ -79,11 +84,14 @@ module Erx
         unless operations.map { |item| item.fetch(:name) }.uniq.size == operations.size
           declaration.fail!('duplicate operation')
         end
+        message_types = operations.flat_map { |item| [item.fetch(:type), item.fetch(:type) + 1] } + [error_type]
+        declaration.fail!('message types of requests, replies and errors collide') unless message_types.uniq.size == message_types.size
         used = used_kinds(kinds, operations)
         unused = kinds.keys - used
         declaration.fail!("unused kinds #{unused.join(' ')}") unless unused.empty?
         { name: name, module: "#{name}_grammar", source: declaration.line.path,
-          errors: errors.freeze, kinds: kinds.freeze,
+          errors: errors.map(&:first).freeze, error_numbers: errors, error_type: error_type,
+          kinds: kinds.freeze,
           operations: operations.freeze }.freeze
       end
 
@@ -108,7 +116,8 @@ module Erx
       end
 
       def integer_kind(words, line, constants)
-        base, option, *values = words
+        local = words.last == 'local'
+        base, option, *values = local ? words[0...-1] : words
         line.fail!('an integer is u8, u16, u32 or u64') unless INTEGER_BITS.key?(base)
         maximum = (1 << INTEGER_BITS.fetch(base)) - 1
         numbers = -> { values.map { |value| number(value, maximum, line, constants) } }
@@ -122,13 +131,18 @@ module Erx
         in ['or', 1] then result[:atom] = atom_name(values.first, line: line)
         else line.fail!('an integer takes max N, except N, in VALUES or or ATOM')
         end
+        line.fail!('only an integer with or ATOM may be local') if local && !result[:atom]
+        result[:local] = local
         result.freeze
       end
 
       def text_kind(words, line, constants)
         line.fail!('a text starts with max N') unless words[0] == 'max' && words.size >= 2
-        result = { form: 'text', max: number(words[1], 65_536, line, constants),
-                   utf8: false, refuse: [] }
+        length = words.size >= 4 && words[-2] == 'length' ? words.last : 'u16'
+        line.fail!('a text has length u16 or u32') unless LENGTHS.key?(length)
+        words = words[0...-2] if words[-2] == 'length'
+        result = { form: 'text', max: number(words[1], LENGTHS.fetch(length), line, constants),
+                   utf8: false, refuse: [], length: length }
         rest = words.drop(2)
         if rest.first == 'utf8'
           result[:utf8] = true
@@ -163,8 +177,9 @@ module Erx
       def operation(line, words, children, kinds, constants)
         Model.arity(line, 3)
         name = atom_name(words[0], line: line)
-        line.fail!('an operation cannot be named error') if name == 'error'
-        type = number(words[1], 255, line, constants).fetch(:value)
+        line.fail!("an operation cannot be named #{name}") if RESERVED_OPERATIONS.include?(name)
+        type = number(words[1], 254, line, constants).fetch(:value)
+        line.fail!('a request type is even: its reply is the next') unless type.even?
         request = []
         reply = []
         checks = []
@@ -273,6 +288,21 @@ module Erx
         name = Syntax.identifier(word, line: line)
         line.fail!("#{name} is not a plain Erlang atom") if name.include?('.') || ERLANG_RESERVED.include?(name)
         name
+      end
+
+      # Each "error ATOM NUMBER" member: the atom a reply carries and the
+      # nonzero u32 9P2000.L's Rlerror carries for it, each distinct.
+      def error_numbers(children, line, constants)
+        line.fail!("errors names 1 to #{MAX_ERRORS} errors") unless children.size.between?(1, MAX_ERRORS)
+        pairs = children.map do |child|
+          child.fail!('expected error ATOM NUMBER') unless child.words.size == 3 && child.words.first == 'error'
+          number = number(child.words[2], (1 << 32) - 1, child, constants).fetch(:value)
+          child.fail!('an error number is not 0') if number.zero?
+          [atom_name(child.words[1], line: child), number].freeze
+        end
+        line.fail!('duplicate error atom') unless pairs.map(&:first).uniq.size == pairs.size
+        line.fail!('duplicate error number') unless pairs.map(&:last).uniq.size == pairs.size
+        pairs.freeze
       end
 
       def known_kind(word, line, kinds)

@@ -801,8 +801,14 @@ reads the message's size, checks it against the negotiated `msize` and
 the bytes received, then each string's length and each count against
 what remains, requires valid UTF-8 for names, creates no atom, and either
 returns the term or refuses the message; it has a fuzz target that runs
-on the host's stock OTP. An error number maps to its `file:posix()` atom
-through a generated table of Linux's numbers.
+on the host's stock OTP. A request is the grammar's request term, except
+that `flush`'s `OldTag` is the edge's u16 tag, which the bridge maps to
+an alias as it maps every tag; a reply is `{reply, Operation, Reply}`
+with the grammar's `Reply`, and an `Rlerror`, whose bytes name no
+operation, decodes as `{reply, error, {error, Posix}}`. The module
+belongs to the `erx` application rather than the preloaded set, since
+only the bridges, which are services, use it. An error number maps to
+its `file:posix()` atom through a generated table of Linux's numbers.
 
 A **9P bridge** joins an edge to the grants inside: it keeps, for the
 edge's 9P session, a table from the edge's fids to fids it holds on a
@@ -2266,8 +2272,10 @@ display belongs to whatever displays a name under its source
   between `liberx` and a handler is a frame profile too
   ([design-programs.md](design-programs.md#the-channel)).
 * **`erx_9p`**, the codec: `decode(Bytes, Msize)` returns
-  `{ok, Tag, Message}` or `{error, Reason}`, and `encode(Tag, Message)`
-  returns 9P2000.L's bytes ([The codec](#the-codec)).
+  `{ok, Tag, Message}` or `{error, Reason}`, a message whose header is
+  whole but whose fields fail as `{malformed, Tag}`; `encode(Tag, Message)`
+  returns 9P2000.L's bytes, and `encode(Tag, Message, Msize)` refuses a
+  message larger than `Msize` ([The codec](#the-codec)).
 * **`liberx`**: the file functions of musl's POSIX layer over requests to
   the program's handler and the program's data area; it holds no
   namespace, no grant and no fid, and serves no files.

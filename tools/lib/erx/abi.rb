@@ -13,6 +13,7 @@ require_relative 'abi_emit_calls'
 require_relative 'abi_emit_support'
 require_relative 'abi_emit_erlang'
 require_relative 'abi_emit_protocol'
+require_relative 'abi_emit_wire'
 require_relative 'json_input'
 require_relative 'output_directory'
 
@@ -51,6 +52,7 @@ module Erx
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
         files.merge!(ProtocolEmitter.outputs(schema))
+        files.merge!(WireEmitter.outputs(schema))
         files.each do |path, bytes|
           raise SchemaError, "generated output is not ASCII: #{path}" unless bytes.ascii_only?
         end
