@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # The file protocol's frame profile: 9P2000.L's operations as Erlang terms
 # (docs/design-files.md#the-file-protocol). tools/lib/erx/abi_emit_protocol.rb
-# generates otp/erts/preloaded/src/erx_9p_grammar.erl from it, and
+# generates build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl from it, and
 # tools/lib/erx/abi_emit_wire.rb the codec of its 9P2000.L bytes,
-# erlang/apps/erx/src/generated/erx_9p.erl (docs/design-files.md#the-codec).
+# build/gen/erlang/apps/erx/src/generated/erx_9p.erl (docs/design-files.md#the-codec).
 #
 # Readings where docs/design-files.md states no bound:
 # * Uname, Aname, Version and a lock's ClientId are text of at most

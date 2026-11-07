@@ -591,7 +591,7 @@ cap previous_crash 11 previous_crash optional
 # links the table's free list by slot index. seq never resets: its
 # terminal value retires the slot for good, and a lookup reads it as a
 # stale capability. It is private: only kernel/core/cap.c and its host
-# tests see its members (K1), through kernel/generated/cap_slot_impl.h.
+# tests see its members (K1), through build/gen/kernel/generated/cap_slot_impl.h.
 enum cap_slot_state u32
   value free 0
   value reserved 1

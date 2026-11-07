@@ -7873,7 +7873,7 @@ the latter on every user IPC input together with the receiver's decoder.
 Each sequence-counted layout also declares its terminal retirement,
 reader exhaustion result and permitted recovery transition.
 
-`tools/gen_abi.rb` generates from it: `include/erx/abi.h` with every
+`tools/gen_abi.rb` generates from it: `build/gen/include/erx/abi.h` with every
 constant and layout, each layout pinned with `_Static_assert` on its size
 and field offsets, a get and set function for every bit range, so no code
 packs descriptor bits by hand, and for each field of a sequence-counted
