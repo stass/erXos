@@ -588,9 +588,14 @@ cap previous_crash 11 previous_crash optional
 # lock while its table's writer changes it ("Reading a slot without a
 # lock"). object is the object store's nonzero handle while the slot is
 # live, 0 otherwise; type is the object's type, fixed for its life; next
-# links the table's free list by slot index. seq never resets: its
-# terminal value retires the slot for good, and a lookup reads it as a
-# stale capability. It is private: only kernel/core/cap.c and its host
+# links the table's free list by slot index. table is the address of the
+# table the slot belongs to, fixed when its page is added. obj_prev and
+# obj_next are the addresses of the slots before and after it on its
+# object's slot list, 0 at either end, which every operation that
+# installs or clears a slot changes under the object's capability lock;
+# nothing reads them without it, and a lookup never reads these three. seq never
+# resets: its terminal value retires the slot for good, and a lookup
+# reads it as a stale capability. It is private: only kernel/core/cap.c and its host
 # tests see its members (K1), through build/gen/kernel/generated/cap_slot_impl.h.
 enum cap_slot_state u32
   value free 0
@@ -606,7 +611,9 @@ layout erx_cap_slot shared 8 64
   field type u32 28
   field state u32 32
   field next u32 36
-  padding 40 24
+  field table u64 40
+  field obj_prev u64 48
+  field obj_next u64 56
   atomic object load acquire store release
   atomic generation load acquire store release
   atomic seq load acquire store release
@@ -614,6 +621,9 @@ layout erx_cap_slot shared 8 64
   atomic type load acquire store release
   atomic state load acquire store release
   atomic next load acquire store release
+  atomic table load relaxed store relaxed
+  atomic obj_prev load relaxed store relaxed
+  atomic obj_next load relaxed store relaxed
   writer object cap_table
   writer generation cap_table
   writer seq cap_table
@@ -621,6 +631,9 @@ layout erx_cap_slot shared 8 64
   writer type cap_table
   writer state cap_table
   writer next cap_table
+  writer table cap_table
+  writer obj_prev object_cap_lock
+  writer obj_next object_cap_lock
   owner object kernel all
   owner generation kernel all
   owner seq kernel all
@@ -628,6 +641,9 @@ layout erx_cap_slot shared 8 64
   owner type kernel all
   owner state kernel all
   owner next kernel all
+  owner table kernel all
+  owner obj_prev kernel all
+  owner obj_next kernel all
   visibility object internal
   visibility generation internal
   visibility seq internal
@@ -635,6 +651,9 @@ layout erx_cap_slot shared 8 64
   visibility type internal
   visibility state internal
   visibility next internal
+  visibility table internal
+  visibility obj_prev internal
+  visibility obj_next internal
   sequence seq terminal 0xffffffffffffffff exhaustion @stale recovery none
 
 # A trace record ("Trace ring"): one event, written by its ring's one

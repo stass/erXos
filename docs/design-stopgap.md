@@ -1510,7 +1510,7 @@ follow M7 in [plan.md](plan.md).
 
 | Family | On this backend | Guarantee lands |
 | --- | --- | --- |
-| K1, K2, K17, K21, K24, K25 | handle tables with generations, so a stale handle is `ERX_ESTALE`; handles made only by creation, `erx_cap_dup` and the creator's pass; release at the last handle and mapping; no rights, and no pass sets | Track K's pilot (the capability table), its conformance tests; the hostile tests at M5's kernel part |
+| K1, K2, K17, K21, K24, K25 | handle tables with generations, so a stale handle is `ERX_ESTALE`; handles made only by creation, `erx_cap_dup` and the creator's pass; release at the last handle and mapping; no rights, and no pass sets | Track K's pilot (objects and the capability table, with host tests); conformance tests with Track K's kernel; the hostile tests at M5's kernel part |
 | K3, K32 | budgets as records; an object goes with its budget; nothing charged against a guarantee or cap, and no walls, so no domain, the browser-facing web domain included, is held to its own budget | Track K's pilot (budgets); M5's kernel part (walls, "every charge returns"); M10 (users) |
 | K4, K5, K6, K9 | the range table; mappings with records, at the rights they were made with, and no protection change over one | Track K (memory, the TLB planner), conformance tests |
 | K7, K12, K13 | none | Track K; the hostile suites of M2, M5's kernel part and M11 |

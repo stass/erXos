@@ -498,9 +498,10 @@ it; git history is the record of completed work.
   its end, so an error after the first unit of a piece reads as end of file where stock answers the error.
 * [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
   [Inspection schema](docs/design-abi.md#inspection-schema)):
-  `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on
-  (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `threshold`); `pinned` or `freeing` follows that redesign, and
-  until then shows `unsupported`. `erx_info_machine` has no field for `development` or `dma_profile`, since the
+  `erx_info_budget` declares `kind`, `guarantee`, `cap`, `used`, `carved`, `lent` and
+  `threshold` but not `pinned`, which design-kernel's [Budgets](docs/design-kernel.md#budgets)
+  and the budget core's `erx_budget_counters` report. Add the field; until then the
+  inspector shows `pinned` as `unsupported`. `erx_info_machine` has no field for `development` or `dma_profile`, since the
   design does not say how a boolean or a closed atom set travels in a report, so both read as clear bits; and the
   `group` kind declares only the five attributes `erx_info_group` carries, not design-live's throttling,
   executors, child groups or the policy's intent. `tools/lib/erx/abi_inspection.rb`'s report check compares
@@ -1082,7 +1083,10 @@ it; git history is the record of completed work.
   `erx_reserve_use` and `erx_reserve_refund`. The record cache, the lists
   of charged objects and the destroy's walk over them are the stopgap
   integration's (WP14), which `test/fixtures/budget_driver.c` stands in
-  for. A pin returns the budgets whose `pinned` rose from zero for a
+  for; the record cache also makes a carve's charge of the child's record
+  to the parent (design-kernel's **Carving** in
+  [Budgets](docs/design-kernel.md#budgets)), which `erx_budget_carve`
+  leaves to it. A pin returns the budgets whose `pinned` rose from zero for a
   follow-up pin of their records' cache pages, where the design pins
   them in the same adjustment; fold that in with the cache.
 * [Medium] Budget core tests, `test/host/budget_test.rb`: the TSan race
@@ -1284,6 +1288,15 @@ it; git history is the record of completed work.
 * [Low] Capability core, `kernel/core/cap.c`: the slot-count decrement and
   the release report move into `erx_cap_slot_clear` once the object store
   exists (WP12).
+* [Medium] Capability core, `kernel/core/cap.c` (design-kernel's
+  [Objects and capabilities](docs/design-kernel.md#objects-and-capabilities)):
+  the slot's `table`, `obj_prev` and `obj_next` fields exist in the
+  generated layout but nothing writes them, not even
+  `erx_cap_table_add_page`, which leaves the page storage's old bytes
+  there instead of the table's address and two zero links, so no object
+  has a slot list yet; and `erx_cap_read` checks the slot but not the object's state or
+  its budget's, which it reads through the object store from the handle.
+  Both need the object store.
 * [Medium] Capability core, `kernel/core/cap.c`: the table's owner hands
   `erx_cap_table_add_page` each page's storage, so the core can refuse a
   page that overlaps its own table, directory or pages, but not one that

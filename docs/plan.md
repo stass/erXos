@@ -135,7 +135,7 @@ names; the table's order is the order.
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
 | 1b-H M13 erXos's F2FS on QEMU | erXos's F2FS, written in Erlang, keeps a QEMU disk's files through power cuts and its images mount in the Linux guest; on the Pi 4 with M12 | estimated in its design document | M6 | G13 |
 | **Phase 2** | | | | |
-| Track K erXos's kernel | the pilot, then the kernel, booting Phase 1 and 1b's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the shared core exists; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A | GK1, GK2, GK3 |
+| Track K erXos's kernel | the pilot, then the kernel, booting Phase 1 and 1b's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the capability core and the budget core exist; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A | GK1, GK2, GK3 |
 | M7 The stopgap leaves | erXos's kernel boots Phase 1 and 1b's system and runs every test and benchmark it ran on the stopgap | integration | track K | GK3 |
 | M2 The execution contract holds | a native test domain and a hostile domain share four CPUs by grants; no wakeup is lost; a blocking call from an executor is refused | 4,000 lines of C17 | M7 | G2 |
 | M5's kernel part | a hostile runtime attacks a neighbour's funnel for ten minutes without effect; a domain killed under load gives every charge back to its principal's budget | in track K's figure | M2 | G5, confirmed |
@@ -1521,8 +1521,9 @@ stopgap implements and then the rest of the interface, from
   decisions in C17 cores:
   * capabilities with generations and per-type rights, with copies, closes,
     `erx_cap_pass` in its creator's case and deletion, which frees an object
-    after an RCU grace period, as Fiasco does; budgets as space banks, whose
-    deletion deletes every object charged to them; capability transfer at
+    after an RCU grace period, as Fiasco does; budgets with guarantees, caps
+    and walls (K32), as space banks, whose deletion deletes every object
+    charged to them; capability transfer at
     an IPC rendezvous lands in M5's kernel part, with this IPC designed to
     add it without
     reshaping the rendezvous;
