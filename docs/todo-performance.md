@@ -255,7 +255,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   start-up mounts into one put.
 * **Runner's poll for a child's exit** (`tools/lib/erx/runner.rb`, host tooling): `run` checks for exit every 50 ms, so a short child costs up to that much more, and one pack starts about 450 children. Measure: a pack's time with a poll that starts at 1 ms and backs off to 50 ms.
 
-* **The PL011 console driver sends a byte at a time** (`erlang/apps/erx_uart/src/erx_pl011.erl`, `send`): each byte costs two register BIF calls, a read of `FR.TXFF` and a write of `DR`, and a full transmit FIFO waits a whole millisecond before it looks again. Settled by timing the console transcript's 20,000-byte output under HVF against a send that waits for `FR.TXFE` and then writes a whole FIFO's worth without reading `FR` between bytes.
+* **The PL011 console driver sends a byte at a time** (`erlang/apps/erx_uart/src/erx_pl011.erl`, `send`): each byte costs two register BIF calls, a read of `FR.TXFF` and a write of `DR`, and a full transmit FIFO waits a whole millisecond before it looks again. The command shell's `cat` of `/NOTICES` reached the host's terminal at about 256 KB/s (769,610 bytes in 3 s; Apple M3 Max, macOS, HVF, QEMU 11.1.3, one guest CPU, the development boot image of `tools/erx boot`, the serial line on a pseudo-terminal), so a 16 MB file takes about a minute. Settled by timing the console transcript's 20,000-byte output under HVF against a send that waits for `FR.TXFE` and then writes a whole FIFO's worth without reading `FR` between bytes.
 
 * **[Medium] display, a full-screen pixel load across domains**
   ([design-display.md](design-display.md#performance)): a `y` load crosses
