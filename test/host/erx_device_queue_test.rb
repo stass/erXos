@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/generated_tree'
 
 # The pure core of a device's queue (test/fixtures/erx_device_queue_harness.c), and the
 # effects that put it on a virtio-mmio device the harness plays
@@ -37,7 +38,9 @@ class ErxDeviceQueueTest < Minitest::Test
   def run_harness(*sources, includes: [])
     Dir.mktmpdir('erx-device-queue-') do |directory|
       binary = File.join(directory, 'harness')
-      output, status = Open3.capture2e(COMPILER, *FLAGS, *includes.flat_map { |dir| ['-I', dir] }, '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', NIFS,
+      output, status = Open3.capture2e(COMPILER, *FLAGS, *includes.flat_map { |dir| ['-I', dir] },
+                                       *Erx::Generated.include_flags(root: ROOT), '-I', ROOT,
+                                       '-I', File.join(ROOT, 'include'), '-I', NIFS,
                                        *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')

@@ -8,6 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/log_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges kernel/core/log.c against LogModel: all 256 byte classes, the text an
 # attacker would send to a terminal, cuts at every capacity around a token,
@@ -21,7 +22,7 @@ class LogTest < Minitest::Test
   CORE = 'kernel/core/log.c'
   HOSTED = 'liberx/backend/hosted/log.c'
   HOSTED_CORES = %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
-                    kernel/generated/abi_decode.c kernel/generated/abi_run.c].freeze
+                    build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
   FORGERIES = {
     'newline and a forged kernel line' => "ok\nerx: panic: forged\r\n",
     'csi that clears the screen' => "\e[2J\e[H",
@@ -370,6 +371,7 @@ class LogTest < Minitest::Test
   def test_core_builds_freestanding_for_the_target
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O2',
                  '--target=aarch64-none-elf', '-ffreestanding', '-mgeneral-regs-only',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-c', File.join(@root, CORE),
                  '-o', File.join(@directory, 'log.o')], name: 'compile-target', deadline: 60)
   end
@@ -383,7 +385,8 @@ class LogTest < Minitest::Test
     compile = lambda do |name, source|
       path = File.join(@directory, "#{name}.c")
       File.write(path, source)
-      @runner.run([compiler, '-std=c17', '-w', '-I', File.join(@root, 'include'), '-c', path,
+      @runner.run([compiler, '-std=c17', '-w', *Erx::Generated.include_flags(root: @root),
+                   '-I', File.join(@root, 'include'), '-c', path,
                    '-o', File.join(@directory, "#{name}.o")], name: "compile-#{name}", deadline: 60)
     end
     compile.call('literal', call.call('"%s"'))
@@ -441,7 +444,8 @@ class LogTest < Minitest::Test
   def build_driver(core, name:, warnings: true)
     output = File.join(@directory, name)
     flags = warnings ? ['-Wall', '-Wextra', '-Werror', '-pedantic'] : ['-w']
-    @runner.run([compiler, '-std=c17', *flags, '-O1', '-g', *@sanitizer_flags, '-I', File.join(@root, 'include'),
+    @runner.run([compiler, '-std=c17', *flags, '-O1', '-g', *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'),
                  core, File.join(@root, 'test/fixtures/log_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output
@@ -450,11 +454,12 @@ class LogTest < Minitest::Test
   def build_probe(name: 'hosted', sanitizers: @sanitizer_flags)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-D_DARWIN_C_SOURCE', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror', '-pedantic',
-                 '-O1', '-g', *sanitizers, '-pthread', '-I', File.join(@root, 'include'), '-I', @root,
-                 '-I', File.join(@root, 'kernel/generated'), '-I', File.join(@root, 'kernel/core'),
+                 '-O1', '-g', *sanitizers, '-pthread', *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', @root,
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), '-I', File.join(@root, 'kernel/core'),
                  *HOSTED_CORES.map { |source| File.join(@root, source) },
                  File.join(@root, CORE), File.join(@root, HOSTED),
-                 File.join(@root, 'liberx/backend/hosted/generated/calls.c'),
+                 Erx::Generated.path('liberx/backend/hosted/generated/calls.c', root: @root),
                  File.join(@root, 'test/fixtures/log_hosted_probe.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output

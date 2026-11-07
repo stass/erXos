@@ -13,6 +13,7 @@ require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/boot_file'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/fuzz/run_pack'
+require_relative '../fixtures/generated_tree'
 
 # The single bootable file: the packer's writer, and erx_boot_locate over what
 # it wrote and over each way a locator or a memory map can be wrong.
@@ -34,11 +35,12 @@ class BootFileTest < Minitest::Test
 
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  '-I', File.join(@root, 'tools/host'),
                  File.join(@root, 'kernel/core/pack.c'), File.join(@root, 'kernel/crypto/blake3/blake3.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
-                 File.join(@root, 'liberx/generated/abi_reader.c'), File.join(@root, 'tools/host/input.c'),
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root), File.join(@root, 'tools/host/input.c'),
                  File.join(@root, 'test/fixtures/boot_locate_driver.c'), '-o', @driver],
                 name: 'compile-boot-locate', deadline: 60)
   end
@@ -193,10 +195,11 @@ class BootFileTest < Minitest::Test
     boot.seeds.each { |name, bytes| File.binwrite(File.join(corpus, name), bytes) }
     program = File.join(@directory, 'seeded-fuzz')
     @runner.run([ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-O1', '-g', '-fsanitize=fuzzer,address,undefined',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  File.join(@directory, 'seeded.c'), File.join(@root, 'kernel/crypto/blake3/blake3.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
-                 File.join(@root, 'liberx/generated/abi_reader.c'),
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'tools/fuzz/boot_fuzz.c'), '-o', program], name: 'compile-seeded-fuzz', deadline: 90)
     error = assert_raises(Erx::CommandError) do
       @runner.run([program, '-runs=20000', '-seed=1', '-max_len=32768', '-timeout=5',

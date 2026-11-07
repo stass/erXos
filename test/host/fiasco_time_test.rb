@@ -6,6 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
@@ -37,7 +38,8 @@ class FiascoTimeTest < Minitest::Test
   def build(core, name:, flags: @sanitizer_flags)
     output = File.join(@directory, name.tr(' ', '-'))
     log, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                                  *flags, '-I', File.join(ROOT, 'include'), '-I', ROOT, core, File.join(ROOT, DRIVER), '-o', output,
+                                  *flags, *Erx::Generated.include_flags(root: ROOT),
+                                  '-I', File.join(ROOT, 'include'), '-I', ROOT, core, File.join(ROOT, DRIVER), '-o', output,
                                   stdin_data: '')
     assert status.success?, log
     output

@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/map_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the mapping-record core (kernel/core/map.c) against MapModel, a sorted
 # array of intervals that shares nothing with the tree. The driver runs command
@@ -624,7 +625,8 @@ class MapTest < Minitest::Test
   def build_driver(core, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *@sanitizer_flags,
-                 '-D_DEFAULT_SOURCE', '-D_DARWIN_C_SOURCE', '-I', File.join(@root, 'include'),
+                 '-D_DEFAULT_SOURCE', '-D_DARWIN_C_SOURCE', *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'),
                  core, File.join(@root, 'test/fixtures/map_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

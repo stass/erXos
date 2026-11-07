@@ -10,6 +10,7 @@ require_relative '../../tools/lib/erx/native_semaphore_race'
 require_relative '../../tools/lib/erx/native_threads'
 require_relative '../../tools/lib/erx/native_task'
 require_relative '../../tools/lib/erx/native_watchdog'
+require_relative '../fixtures/generated_tree'
 
 # The threads, watchdog and interrupt suites' seeded failures (docs/design-stopgap.md,
 # "Verification"): each seed breaks one thing in a copy of the sources, and the suite's
@@ -21,8 +22,9 @@ require_relative '../../tools/lib/erx/native_watchdog'
 class NativeSeedsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # What the seeded suites compile, at the same paths as in the tree: the interrupt
-  # root takes erx_device's C from ERTS's NIF directory.
-  COPIED = %w[include kernel liberx test otp/erts/emulator/nifs/erxos].freeze
+  # root takes erx_device's C from ERTS's NIF directory, and every program the
+  # generated tree's sources and headers.
+  COPIED = %w[include kernel liberx test otp/erts/emulator/nifs/erxos build/gen].freeze
   THREAD = 'liberx/backend/fiasco/thread.c'
   SERVICE = 'liberx/backend/fiasco/service.c'
   WATCHDOG = 'liberx/backend/fiasco/watchdog_thread.c'

@@ -30,19 +30,19 @@ module Erx
     AFTER_FLOOD = 'after the flood'
     HOSTED_SOURCES = %w[
       kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
-      kernel/generated/abi_decode.c kernel/generated/abi_run.c
-      liberx/backend/hosted/generated/calls.c liberx/backend/hosted/log.c
+      build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c
+      build/gen/liberx/backend/hosted/generated/calls.c liberx/backend/hosted/log.c
       test/guest/debug_log_probe/hosted.c test/guest/debug_log_probe/probe.c
     ].freeze
     HOSTED_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
-                      -I include -I kernel/generated -I kernel/core -I . -I test/guest/debug_log_probe].freeze
+                      -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I . -I test/guest/debug_log_probe].freeze
     GUEST_SOURCES = %w[
       kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
-      kernel/generated/abi_decode.c kernel/generated/abi_run.c
-      liberx/backend/fiasco/arch/aarch64/clock.c liberx/backend/fiasco/generated/calls.c liberx/backend/fiasco/log.c
+      build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c
+      liberx/backend/fiasco/arch/aarch64/clock.c build/gen/liberx/backend/fiasco/generated/calls.c liberx/backend/fiasco/log.c
       test/guest/debug_log_probe/guest.c test/guest/debug_log_probe/probe.c
     ].freeze
-    GUEST_FLAGS = %w[-I kernel/generated -I kernel/core -I liberx/backend/fiasco/generated
+    GUEST_FLAGS = %w[-I build/gen/kernel/generated -I kernel/core -I build/gen/liberx/backend/fiasco/generated
                      -I test/guest/debug_log_probe].freeze
 
     module_function

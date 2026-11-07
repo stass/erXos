@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../fixtures/generated_tree'
 
 class AbiCallsTest < Minitest::Test
   def setup
@@ -14,7 +15,7 @@ class AbiCallsTest < Minitest::Test
     @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'), timeout_program: 'gtimeout')
     @compiler = ENV.fetch('ERX_CLANG', 'clang')
     @flags = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
-              '-I', File.join(@root, 'include'), '-I', @root]
+              *Erx::Generated.include_flags(root: @root), '-I', File.join(@root, 'include'), '-I', @root]
   end
 
   def teardown
@@ -30,7 +31,7 @@ class AbiCallsTest < Minitest::Test
   def test_kernel_shape_decoder_under_sanitizers
     output = File.join(@directory, 'call-probe')
     run_command([@compiler, *@flags, '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                 File.join(@root, 'kernel/generated/abi_decode.c'),
+                 Erx::Generated.path('kernel/generated/abi_decode.c', root: @root),
                  File.join(@root, 'test/fixtures/abi_call_probe.c'), '-o', output], name: 'compile-call-probe')
     record = run_command([output], name: 'call-probe')
     assert_equal "call shape checks passed\n", File.binread(record.fetch('log'))
@@ -45,7 +46,7 @@ class AbiCallsTest < Minitest::Test
   end
 
   def test_native_trap_and_note_compile_for_target
-    %w[liberx/backend/erx/arch/aarch64/generated/calls.c test/fixtures/abi_note_probe.c].each_with_index do |path, index|
+    %w[build/gen/liberx/backend/erx/arch/aarch64/generated/calls.c test/fixtures/abi_note_probe.c].each_with_index do |path, index|
       record = run_command([@compiler, *@flags, '--target=aarch64-none-elf', '-ffreestanding',
                             '-c', File.join(@root, path), '-o', File.join(@directory, "target#{index}.o")],
                            name: "target#{index}")
@@ -80,8 +81,8 @@ class AbiCallsTest < Minitest::Test
 
   def test_backend_wrappers_compile_without_implementing_authority
     %w[fiasco hosted].each do |backend|
-      path = "liberx/backend/#{backend}/generated/calls.c"
-      record = run_command([@compiler, *@flags, '-c', File.join(@root, path),
+      path = Erx::Generated.path("liberx/backend/#{backend}/generated/calls.c", root: @root)
+      record = run_command([@compiler, *@flags, '-c', path,
                             '-o', File.join(@directory, "#{backend}.o")], name: backend)
       assert_equal 0, record.fetch('exit_status')
     end
@@ -136,7 +137,8 @@ class AbiCallsTest < Minitest::Test
 
   def marshal_flags
     ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
-     '-I', File.join(@directory, 'include'), '-I', File.join(@root, 'include'), '-I', @directory]
+     '-I', File.join(@directory, 'include'), '-I', @directory, *Erx::Generated.include_flags(root: @root),
+     '-I', File.join(@root, 'include')]
   end
 
   def test_call_marshalling_under_sanitizers
@@ -180,7 +182,7 @@ class AbiCallsTest < Minitest::Test
   # zero, so the device-secret page has none in any language.
   def test_no_decoder_copies_the_device_secret
     %w[liberx/generated/abi_reader.c include/erx/abi_reader.h].each do |path|
-      refute_includes File.read(File.join(@root, path)), 'erx_device_secret_page', path
+      refute_includes File.read(Erx::Generated.path(path, root: @root)), 'erx_device_secret_page', path
     end
   end
 

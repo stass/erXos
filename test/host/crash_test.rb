@@ -8,6 +8,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/crash_frame'
 require_relative '../../tools/fuzz/crash_frame'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the crash record and the crash frame on both sides: the C17 core's
 # writer, checker and reader through test/fixtures/crash_driver.c, and the
@@ -62,7 +63,8 @@ class CrashTest < Minitest::Test
   def build_driver(sources, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, '-I', File.join(@root, 'include'), *sources,
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), *sources,
                  File.join(@root, 'test/fixtures/crash_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output

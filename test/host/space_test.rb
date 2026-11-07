@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/space_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the space core (kernel/core/space.c) against SpaceModel, which
 # keeps the tree as the design states it and checks the tree's invariants
@@ -546,8 +547,9 @@ class SpaceTest < Minitest::Test
   def build_driver(core, name:, flags:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
-                 '-I', File.join(@root, 'kernel/generated'), core, File.join(@root, 'kernel/core/cap.c'),
+                 *flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, File.join(@root, 'kernel/core/cap.c'),
                  File.join(@root, 'test/fixtures/space_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output
@@ -557,8 +559,9 @@ class SpaceTest < Minitest::Test
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                  '-fsanitize=thread', '-fno-omit-frame-pointer', '-pthread',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
-                 '-I', File.join(@root, 'kernel/generated'), core, File.join(@root, 'kernel/core/cap.c'),
+                 '-I', Erx::Generated.path('kernel/generated', root: @root), core, File.join(@root, 'kernel/core/cap.c'),
                  File.join(@root, 'test/fixtures/space_holds_race.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

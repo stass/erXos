@@ -8,6 +8,7 @@ require 'tmpdir'
 # Erx::ManifestSeeds builds its prefix seeds with Erx::PackFuzz.
 require_relative 'run_pack'
 require_relative 'manifest_seeds'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_manifest, the generated Erlang reader of the system manifest,
 # run differentially against the generated C reader on the same bytes. The corpus is the
@@ -23,7 +24,7 @@ module ErxManifestFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/generated/erx_manifest.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_manifest_fuzz.erl')
-  C_SOURCES = %w[liberx/generated/abi_reader.c tools/fuzz/manifest_fuzz.c tools/fuzz/manifest_verdicts.c].freeze
+  C_SOURCES = %w[build/gen/liberx/generated/abi_reader.c tools/fuzz/manifest_fuzz.c tools/fuzz/manifest_verdicts.c].freeze
   RESERVED = 'ensure((Unsigned band maps:get(zero, Field)) =:= 0,'
   WRONG_RESERVED = 'ensure((Unsigned band maps:get(zero, Field)) >= 0,'
   INPUTS = 20_000
@@ -95,7 +96,7 @@ module ErxManifestFuzz
     output, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror',
                                      '-pedantic', '-O1', '-g', '-fsanitize=address,undefined',
                                      '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer',
-                                     '-I', File.join(ROOT, 'include'),
+                                     *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'),
                                      *C_SOURCES.map { |source| File.join(ROOT, source) }, '-o', program,
                                      stdin_data: '')
     raise output unless status.success?

@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/run_pack'
+require_relative '../fixtures/generated_tree'
 
 # erx_bytes:crc32c's core (otp/erts/emulator/nifs/erxos/erx_crc32c.c): RFC 3720's values,
 # incremental calls against one-shot calls and a bitwise model (test/fixtures/erx_crc32c_harness.c),

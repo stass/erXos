@@ -17,12 +17,17 @@ module Erx
   class FiascoInputs
     # The inherited parts and their configuration, and the erXos sources the
     # stopgap kernel links: the C17 cores, their headers and the stack
-    # proof's declarations (CoreArchive).
-    ERXOS_ROOTS = %w[kernel include liberx].freeze
+    # proof's declarations (CoreArchive), with the generated C they include
+    # and compile (Generated), which the caller brings up to date. Only the
+    # generated C is captured: the tree's stamp and its other outputs would
+    # discard a build that none of them reaches.
+    GENERATED_ROOTS = %w[build/gen/include build/gen/kernel build/gen/liberx].freeze
+    ERXOS_ROOTS = (%w[kernel include liberx] + GENERATED_ROOTS).freeze
     ROOTS = (%w[fiasco config/fiasco] + ERXOS_ROOTS).freeze
     # The inputs only the kernel build reads; every other input is the user
     # build's. A change to one of them discards that build's outputs.
-    KERNEL_INPUTS = %w[fiasco/kernel config/fiasco/kernel.defconfig kernel include].freeze
+    KERNEL_INPUTS = %w[fiasco/kernel config/fiasco/kernel.defconfig kernel include
+                       build/gen/include build/gen/kernel].freeze
     MAX_FILE = 64 * 1024 * 1024
     MAX_TOTAL = 1024 * 1024 * 1024
     MAX_FILES = 100_000
@@ -199,8 +204,11 @@ module Erx
         unless File.directory?(start) && !File.symlink?(start) && File.realpath(start) == start
           raise Error, "missing or linked Fiasco input directory: #{relative_root}"
         end
-        if !snapshot && relative_root.include?('/')
-          parent = File.dirname(relative_root)
+        # A nested root's ancestors (config, build and build/gen) are directories
+        # of the copy too, as a snapshot of it lists them.
+        parts = relative_root.split('/')
+        ancestors = snapshot ? [] : (1...parts.length).map { |count| parts.first(count).join('/') }
+        ancestors.each do |parent|
           selected[parent] = { 'kind' => 'directory' }
           FileUtils.mkdir_p(File.join(destination, parent)) if destination
         end

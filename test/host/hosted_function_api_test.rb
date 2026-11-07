@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/function_api'
+require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
@@ -22,7 +23,7 @@ class HostedFunctionApiTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = Erx::FunctionApi::HOSTED_SOURCES
   FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
-             -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
+             -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
   STRICT_ASAN = 'detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1:' \
                 'allocator_may_return_null=1:halt_on_error=1'
   SANITIZERS = {

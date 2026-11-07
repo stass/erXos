@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/sched_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the scheduler core (kernel/sched/sched.c) against SchedModel. The
 # driver runs command scripts through the core and prints each decision and
@@ -600,6 +601,7 @@ class SchedTest < Minitest::Test
   def build_driver(core, name:, flags:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread', *flags,
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/sched'), core,
                  File.join(@root, 'test/fixtures/sched_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)

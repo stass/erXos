@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/budget_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the budget core (kernel/core/budget.c) against BudgetModel, which
 # recomputes every counter from the tree after each step. The driver runs
@@ -225,7 +226,8 @@ class BudgetTest < Minitest::Test
   def build_driver(core, name:, flags:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
-                 *flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'), core,
+                 *flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'), core,
                  File.join(@root, 'test/fixtures/budget_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output

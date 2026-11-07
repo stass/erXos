@@ -8,6 +8,7 @@
 # OUTPUT/report.txt (tools/lib/erx/stack_proof_run.rb).
 
 require 'optparse'
+require_relative 'lib/erx/generated'
 require_relative 'lib/erx/runner'
 require_relative 'lib/erx/stack_proof_run'
 
@@ -29,6 +30,7 @@ begin
   compiler = ENV.fetch('ERX_CLANG', '')
   raise Erx::Error, 'set ERX_CLANG to the installed LLVM 23.1.3 clang; see README.md' if compiler.empty?
 
+  Erx::Generated.ensure(root: root)
   runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs'))
   report = Erx::StackProofRun.call(root: root, compiler: compiler, runner: runner, output: options.fetch(:output))
   report.grep(/\AC17 cores: /).each { |line| Erx::Terminal.puts(line) }

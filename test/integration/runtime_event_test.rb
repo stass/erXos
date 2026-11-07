@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/generated_tree'
 
 # The event table's core and its sleep step (test/fixtures/runtime_event_harness.c), under
 # ThreadSanitizer and the other sanitizers, and with the seeded lost wake, which must show.
@@ -14,7 +15,8 @@ class RuntimeEventTest < Minitest::Test
   HARNESS = File.join(ROOT, 'test/fixtures/runtime_event_harness.c')
   CORE = File.join(ROOT, 'otp/erts/emulator/sys/erxos/erx_event_table.c')
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g', '-pthread',
-           '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'otp/erts/emulator/sys/erxos'),
+           *Erx::Generated.include_flags(root: ROOT), '-I', ROOT,
+           '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'otp/erts/emulator/sys/erxos'),
            '-DERX_EVENT_TEST_GAP(n)=erx_event_test_gap(n)'].freeze
   BUDGET_SECONDS = '120'
 

@@ -548,13 +548,22 @@ module Erx
 
     # The captured erXos source behind path: a C17 core, a header or a
     # stack-proof declaration of the private inputs, or either cores'
-    # archive's copy of include/erx/core/. nil for any other path.
+    # archive's copy of the seam's headers (CoreArchive.seam_headers). nil for
+    # any other path.
     def erxos_source(path)
       return nil unless @inputs
 
       seam = %w[cores boot-cores].map { |name| File.join(@build, name, CoreArchive::SEAM) + '/' }
                                  .find { |directory| path.start_with?(directory) }
-      captured = seam ? @inputs.path('include/' + path.delete_prefix(seam)) : path
+      if seam
+        # The seam holds erx/core/NAME.h, each copied from its seam header.
+        origin = CoreArchive.seam_headers(@inputs.tree)[path.delete_prefix(seam).delete_prefix('erx/core/')]
+        return nil unless origin
+
+        captured = @inputs.path(origin)
+      else
+        captured = path
+      end
       tree = @inputs.tree + '/'
       relative = captured.delete_prefix(tree)
       return nil unless captured.start_with?(tree) &&

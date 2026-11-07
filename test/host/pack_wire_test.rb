@@ -8,6 +8,7 @@ require_relative '../fixtures/pack_fixture'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/pack_wire'
+require_relative '../fixtures/generated_tree'
 
 class PackWireTest < Minitest::Test
   # The hashing program, compiled here rather than through PackTools.
@@ -25,6 +26,7 @@ class PackWireTest < Minitest::Test
     program = File.join(@directory, 'pack-hash')
     blake3 = File.join(@root, 'kernel/crypto/blake3')
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  File.join(blake3, 'blake3.c'), File.join(blake3, 'blake3_portable.c'),
                  File.join(@root, 'tools/host/input.c'), File.join(@root, 'tools/host/pack_hash.c'),

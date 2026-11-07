@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # kernel/core/dispatch.c and kernel/core/debug_log.c through
 # test/fixtures/dispatch_driver.c, which plays a kernel's trap handler and the
@@ -15,7 +16,7 @@ require_relative '../../tools/lib/erx/runner'
 class DispatchTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
-               kernel/generated/abi_decode.c kernel/generated/abi_run.c].freeze
+               build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
   DRIVER = 'test/fixtures/dispatch_driver.c'
   # A trap's status is two's complement in the low 32 bits of the word.
   EINVAL = -1
@@ -129,7 +130,8 @@ class DispatchTest < Minitest::Test
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     output = File.join(@directory, name)
     @runner.run([ENV.fetch('CC', 'cc'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,
-                 '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'kernel/generated'),
+                 *Erx::Generated.include_flags(root: ROOT),
+                 '-I', File.join(ROOT, 'include'), '-I', Erx::Generated.path('kernel/generated', root: ROOT),
                  '-I', File.join(ROOT, 'kernel/core'), *sources, File.join(ROOT, DRIVER), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output

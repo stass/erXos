@@ -8,6 +8,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/json_input'
 require_relative '../../tools/lib/erx/generated_terminal_tables'
+require_relative '../fixtures/generated_tree'
 
 class TerminalTablesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
@@ -38,7 +39,8 @@ class TerminalTablesTest < Minitest::Test
   def test_generated_c_byte_class_exhaustively
     program = File.join(@directory, 'ascii-probe')
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
-                 '-fsanitize=address,undefined', '-I', File.join(ROOT, 'include'),
+                 '-fsanitize=address,undefined', *Erx::Generated.include_flags(root: ROOT),
+                 '-I', File.join(ROOT, 'include'),
                  File.join(ROOT, 'test/fixtures/terminal_ascii_probe.c'), '-o', program],
                 name: 'compile-terminal-ascii', deadline: 60)
     result = @runner.run([program], name: 'terminal-ascii', deadline: 30)

@@ -35,7 +35,8 @@ module Erx
     READER_SOURCES = %w[otp/erts/preloaded/src/erx_verity.erl otp/erts/preloaded/src/erx_erofs.erl
                         otp/erts/preloaded/src/erx_erofs_file.erl test/erlang/erx_erofs_tests.erl
                         test/erlang/erx_erofs_manifest.erl].freeze
-    READER_INCLUDES = %w[erlang/apps/erx/include otp/lib/kernel/include].freeze
+    # The generated erx_abi.hrl's directory comes first.
+    READER_INCLUDES = %w[build/gen/erlang/apps/erx/include erlang/apps/erx/include otp/lib/kernel/include].freeze
 
     # One image's result: the files Linux saw (nil when it did not mount the image),
     # the reader's refusal, and what keeps the image from passing. Every outcome is of

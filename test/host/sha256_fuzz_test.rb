@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/run_pack'
+require_relative '../fixtures/generated_tree'
 
 # The SHA-256 fuzz target (tools/fuzz/sha256_fuzz.c), whose oracle is a
 # model written from FIPS 180-4 beside the cut-into-pieces check: built with

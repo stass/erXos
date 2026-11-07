@@ -519,6 +519,23 @@ it; git history is the record of completed work.
   of a regeneration that another process started because an input changed meanwhile. The Ruby loaders
   (`Erx::Generated.require_ruby`) read under the lock; for the compilers, either have long readers take the lock
   shared, or publish versioned trees behind a link replaced by rename.
+* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: a reader that does not hold `build/gen.lock`
+  (a compiler, the Fiasco input capture, `Checks#generated_sources` listing the tree for the chokepoint rules) can find
+  `build/gen/` missing or half swapped, between the two renames of a regeneration that another process started
+  because an input changed meanwhile; the chokepoint listing would then pass on no generated file. Have long readers
+  take the lock shared (a `Generated.reading(root:) { |tree| ... }` section), or publish versioned trees behind a link
+  replaced by rename, and take the chokepoint listing from the stamp's outputs, refusing a missing file.
+* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: whether `build/gen/` is current rests on
+  every reader's caller having run `Generated.ensure` (tools/erx before each command, `test/fixtures/generated_tree.rb`
+  in tests), because `Generated.path` and `include_flags` are pure functions of a root. A test or script that skips it
+  compiles against a stale tree, and `Runtime.source_digest` digests whatever is there. Make it hold by construction:
+  ensure returns a tree value (output root, paths, include flags, the stamp's outputs) that build libraries take
+  instead of a root, or readers check the stamp (no regeneration) and refuse a stale tree.
+* [Medium] build tree of generated files, `tools/lib/erx/chokepoints.rb`, `tools/lib/erx/core_archive.rb`: a
+  generated file silently stands in for a tracked file of the same name (the chokepoint `sources:` map, the seam
+  copy), and every C include list must put `build/gen` ahead of the tree's directories. Once the tracked copies are
+  deleted, refuse a listed file at a generated output's path in `Checks`; the include order then stops mattering and
+  its repetition across the FLAGS constants and host tests can go.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so

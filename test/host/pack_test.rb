@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/pack_fixture'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 class PackTest < Minitest::Test
   def setup
@@ -20,11 +21,12 @@ class PackTest < Minitest::Test
     end
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
+                 *flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  File.join(@root, 'kernel/core/pack.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
-                 File.join(@root, 'liberx/generated/abi_reader.c'),
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'tools/host/input.c'),
                  File.join(@root, 'tools/host/pack_check.c'), '-o', @checker],
                 name: 'compile-pack', deadline: 60)

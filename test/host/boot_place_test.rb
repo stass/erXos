@@ -14,6 +14,7 @@ require_relative '../../tools/lib/erx/native_root'
 require_relative '../../tools/lib/erx/oracle_qemu'
 require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # erx_boot_load_plan and the handoff record, from literal bytes. kernel/core/boot_place.c
 # liberx/elf_plan.c kernel/core/boot_handoff.c
@@ -42,9 +43,10 @@ class BootPlaceTest < Minitest::Test
     sanitizers = ENV.fetch('ERX_SANITIZERS', '').split(',').reject(&:empty?)
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer', '-fno-sanitize-recover=all']
     sources = %w[kernel/core/boot_place.c kernel/core/boot_handoff.c kernel/core/pack.c liberx/elf_plan.c
-                 liberx/generated/abi_reader.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
+                 build/gen/liberx/generated/abi_reader.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                  test/fixtures/boot_place_driver.c].map { |source| File.join(@root, source) }
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'), *sources, '-o', @driver],
                 name: 'compile-boot-place', deadline: 60)
   end

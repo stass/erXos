@@ -48,9 +48,9 @@ module Erx
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/end.c liberx/backend/core/trace_ring.c #{BACKEND}/trace.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
-                 kernel/generated/abi_decode.c kernel/generated/abi_run.c].freeze
+                 build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
-    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c liberx/generated/abi_reader.c].freeze
+    LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
     # A task's own program: its entry, its console and memcpy, and the stubs and
     # threads it reaches the service through.
     TASK = %W[#{BACKEND}/arch/aarch64/task_start.S #{BACKEND}/task_start.c #{BACKEND}/console.c #{BACKEND}/root_mem.c
@@ -71,7 +71,7 @@ module Erx
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
-               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I include -I kernel/crypto -I kernel/generated -I kernel/core -I .].freeze
+               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I build/gen -I build/gen/include -I include -I kernel/crypto -I build/gen/kernel/generated -I kernel/core -I .].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
 
     # source is the tree the C comes from, which a test may seed with a fault.

@@ -392,13 +392,15 @@ module Erx
 
     # Enforces rules over a checkout's listed names, reading each file once
     # through a guard: a listed link must resolve, inside the root, to a
-    # listed regular file, and every file is bounded. Diagnostics carry raw
-    # names; the CLI's sink escapes them.
-    def enforce(rules, root:, names:, imported:)
+    # listed regular file, and every file is bounded. sources maps a name
+    # to the root-relative file that holds its bytes when the two differ (a
+    # generated file, named by the path it mirrors); every other name is
+    # its own file. Diagnostics carry raw names; the CLI's sink escapes them.
+    def enforce(rules, root:, names:, imported:, sources: {})
       canonical = File.realpath(root)
-      listed = names.to_h { |name| [name, true] }
+      listed = names.to_h { |name| [sources.fetch(name, name), true] }
       read = lambda do |path|
-        target = File.realpath(File.join(root, path))
+        target = File.realpath(File.join(root, sources.fetch(path, path)))
         relative = target.delete_prefix("#{canonical}/")
         unless target.start_with?("#{canonical}/") && listed.key?(relative) && File.file?(target)
           raise Error, "chokepoint input is not a listed regular file: #{path}"
@@ -408,7 +410,10 @@ module Erx
       rescue Errno::ENOENT, Errno::ENOTDIR, Errno::ELOOP
         raise Error, "chokepoint input does not resolve: #{path}"
       end
-      present = names.select { |name| File.exist?(File.join(root, name)) || File.symlink?(File.join(root, name)) }
+      present = names.select do |name|
+        file = File.join(root, sources.fetch(name, name))
+        File.exist?(file) || File.symlink?(file)
+      end
       found = violations(rules, names: present, imported: imported, read: read)
       return true if found.empty?
 

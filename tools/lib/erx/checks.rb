@@ -8,6 +8,7 @@ require_relative 'chokepoint_rules'
 require_relative 'device_callers'
 require_relative 'device_posters'
 require_relative 'erofs_reads'
+require_relative 'generated'
 require_relative 'ns_writers'
 require_relative 'origin'
 require_relative 'runner'
@@ -102,11 +103,15 @@ module Erx
       names.uniq.sort.freeze
     end
 
-    def initialize(root:, runner:, required_imports: IMPORTS, chokepoints: ChokepointRules::ALL)
+    # generators: what Generated.ensure computes the generated tree with,
+    # whose files the chokepoint rules read beside the listed ones.
+    def initialize(root:, runner:, required_imports: IMPORTS, chokepoints: ChokepointRules::ALL,
+                   generators: Generated::GENERATORS)
       @root = File.expand_path(root)
       @runner = runner
       @required_imports = required_imports
       @chokepoints = chokepoints
+      @generators = generators
     end
 
     def run
@@ -131,7 +136,13 @@ module Erx
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
       # below kernel/ they read as erXos's own C (chokepoint_upstream?).
-      Chokepoints.enforce(@chokepoints, root: @root, names: listed, imported: method(:chokepoint_upstream?))
+      # They read the generated tree too, each file under the path it
+      # mirrors, so a rule's scope and sites hold for a generated file as for
+      # a tracked one, and no generated file escapes them by living in the
+      # build tree. A generated file stands in for a listed one of its name.
+      generated = generated_sources
+      Chokepoints.enforce(@chokepoints, root: @root, names: (listed | generated.keys).sort,
+                                        imported: method(:chokepoint_upstream?), sources: generated)
       true
     end
 
@@ -165,6 +176,15 @@ module Erx
 
     def imported?(relative)
       @required_imports.any? { |import| relative == import || relative.start_with?(import + '/') }
+    end
+
+    # Each generated file's mirrored path => its root-relative path in the
+    # generated tree, brought up to date first. The stamp is not a file
+    # the tree mirrors, and the glob does not list it.
+    def generated_sources
+      output = Generated.ensure(root: @root, generators: @generators).output
+      Dir.glob('**/*', base: output).sort.select { |relative| File.file?(File.join(output, relative)) }
+         .to_h { |relative| [relative, File.join(Generated::OUTPUT, relative)] }
     end
 
     # What the chokepoint rules treat as upstream code. An import below

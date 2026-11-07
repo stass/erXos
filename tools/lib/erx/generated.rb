@@ -41,6 +41,11 @@ module Erx
   # deletes nothing it did not write. Generators reach this module only
   # through GenerationPlan; adding an output to a generator's plan needs no
   # change here.
+  #
+  # Who calls ensure: tools/erx, once before any command, and a standalone
+  # script or test process that reads the tree (test/fixtures/generated_tree.rb).
+  # Build libraries take a root whose build/gen is current and read it as
+  # they read the source tree.
   module Generated
     class Error < Erx::Error; end
 
@@ -101,6 +106,12 @@ module Erx
       # The absolute path of one generated file beneath root's output tree.
       # Pure: callers that read the file call ensure first.
       def path(relative, root:) = File.join(File.expand_path(root), OUTPUT, checked_path(relative))
+
+      # The C compiler's include flags for root's generated tree, which go
+      # ahead of the tree's own -I . and -I include: the output root resolves
+      # an include of "liberx/generated/calls.h" and its include directory
+      # one of "erx/abi.h". Pure, like path.
+      def include_flags(root:) = ['-I', File.join(File.expand_path(root), OUTPUT), '-I', path('include', root: root)]
 
       # Makes output (by default root/build/gen) hold exactly what the
       # generators compute from root, regenerating only when the stamp no

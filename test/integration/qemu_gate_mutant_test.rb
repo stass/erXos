@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/debug_log_probe'
 require_relative '../../tools/lib/erx/qemu_gate'
+require_relative '../fixtures/generated_tree'
 
 # Proves the QEMU gate fails when a call's result on the target breaks. The
 # probe guest is built from a copy of the sources in which the Fiasco backend's
@@ -23,10 +24,15 @@ class QemuGateMutantTest < Minitest::Test
   STUB = 'liberx/backend/fiasco/log.c'
   CALL = '{ (uint64_t)len.raw };'
   MUTANT = '{ (uint64_t)len.raw + (len.raw == 504) };'
-  COPIED = %w[include kernel liberx test].freeze
+  # The generated tree (build/gen) comes too: the probes compile its sources.
+  COPIED = %w[include kernel liberx test build/gen].freeze
 
   def source_copy(directory, mutate:)
-    COPIED.each { |entry| FileUtils.cp_r(File.join(ROOT, entry), directory) }
+    COPIED.each do |entry|
+      parent = File.join(directory, File.dirname(entry))
+      FileUtils.mkdir_p(parent)
+      FileUtils.cp_r(File.join(ROOT, entry), parent)
+    end
     return unless mutate
 
     path = File.join(directory, STUB)

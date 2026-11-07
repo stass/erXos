@@ -38,9 +38,11 @@ class ChecksTest < Minitest::Test
 
   # The fixture trees hold none of the tests the Elsewhere rules name, so
   # they are checked against the active chokepoint rules alone.
-  def checks(imports: [], root: @root)
+  # The fixture checkouts hold no generator inputs, so by default their
+  # generated tree is computed by no generator and holds no file.
+  def checks(imports: [], root: @root, generators: [])
     Erx::Checks.new(root: root, runner: @runner, required_imports: imports,
-                    chokepoints: Erx::ChokepointRules::ACTIVE)
+                    chokepoints: Erx::ChokepointRules::ACTIVE, generators: generators)
   end
 
   # The source check runs the chokepoint rules over the git listing, so an
@@ -51,6 +53,18 @@ class ChecksTest < Minitest::Test
     write('kernel/core/b.c', "#include <l4/sys/ipc.h>\n")
     error = assert_raises(Erx::Error) { checks.run }
     assert_match(%r{fiasco-headers-in-backend: kernel/core/b.c:1}, error.message)
+  end
+
+  # A generated file is read under the path it mirrors, and stands in for
+  # a tracked file of that name.
+  def test_chokepoint_rules_read_generated_files_under_their_mirrored_paths
+    write('.gitignore', "/build/\n")
+    write('kernel/generated/b.c', "int value;\n")
+    plan = Erx::GenerationPlan.new(files: { 'kernel/generated/b.c' => "#include <l4/sys/ipc.h>\n" }, reads: {})
+    generator = Erx::Generated::Generator.new(name: 'fixture', code: {}, plan: ->(_root) { plan })
+    error = assert_raises(Erx::Error) { checks(generators: [generator]).run }
+    assert_match(%r{fiasco-headers-in-backend: kernel/generated/b.c:1}, error.message)
+    refute_match(%r{build/gen}, error.message)
   end
 
   # An import below kernel/ is linked into the kernel with the cores, so the

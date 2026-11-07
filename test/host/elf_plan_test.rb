@@ -8,6 +8,7 @@ require 'tmpdir'
 require_relative '../fixtures/elf_fixture'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/json_input'
+require_relative '../fixtures/generated_tree'
 
 class ElfPlanTest < Minitest::Test
   def setup
@@ -19,9 +20,9 @@ class ElfPlanTest < Minitest::Test
     raise Erx::Error, 'unsupported ELF-test sanitizer' unless (sanitizers - %w[address undefined]).empty?
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, '-I', File.join(@root, 'include'),
+                 *flags, *Erx::Generated.include_flags(root: @root), '-I', File.join(@root, 'include'),
                  File.join(@root, 'liberx/elf_plan.c'),
-                 File.join(@root, 'liberx/generated/abi_reader.c'),
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'tools/host/input.c'),
                  File.join(@root, 'tools/host/elf_plan.c'), '-o', @planner],
                 name: 'compile-elf', deadline: 60)

@@ -86,7 +86,9 @@ class FiascoTest < Minitest::Test
     %w[kernel mk l4re-core bootstrap libfdt drivers-frst].each do |name|
       FileUtils.mkdir_p(File.join(@directory, 'fiasco', name))
     end
-    %w[kernel include liberx].each { |name| FileUtils.mkdir_p(File.join(@directory, name)) }
+    [*%w[kernel include liberx], *Erx::FiascoInputs::GENERATED_ROOTS].each do |name|
+      FileUtils.mkdir_p(File.join(@directory, name))
+    end
     File.write(File.join(@directory, 'fiasco/mk/Makefile'), '# inherited')
     FileUtils.mkdir_p(File.join(@directory, 'config/fiasco'))
     File.write(kernel_config, KERNEL_CONFIG)

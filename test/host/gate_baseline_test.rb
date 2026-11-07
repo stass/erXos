@@ -8,6 +8,7 @@ require_relative '../../tools/lib/erx/checks'
 require_relative '../../tools/lib/erx/core_archive'
 require_relative '../../tools/lib/erx/qemu_gate'
 require_relative '../../tools/lib/erx/sanitizer_tests'
+require_relative '../fixtures/generated_tree'
 
 # The gates discover what they run, so a deleted or misnamed file could make
 # them quietly run less. These tables are floors under that: everything named
@@ -37,8 +38,8 @@ class GateBaselineTest < Minitest::Test
     'cap' => { seeds: 4, sources: %w[kernel/core/cap.c] },
     'chacha20' => { seeds: 16, sources: %w[kernel/crypto/chacha20/chacha.c] },
     'dispatch' => { seeds: 8, sources: %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
-                                          kernel/core/log.c kernel/generated/abi_decode.c
-                                          kernel/generated/abi_run.c] },
+                                          kernel/core/log.c build/gen/kernel/generated/abi_decode.c
+                                          build/gen/kernel/generated/abi_run.c] },
     'device_queue' => { seeds: 8, sources: %w[otp/erts/emulator/nifs/erxos/erx_device_queue.c] },
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
@@ -48,12 +49,12 @@ class GateBaselineTest < Minitest::Test
     'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
                                             kernel/crypto/blake3/blake3_portable.c] },
     'release' => { seeds: 16, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
-                                         kernel/crypto/blake3/blake3_portable.c liberx/generated/abi_reader.c
+                                         kernel/crypto/blake3/blake3_portable.c build/gen/liberx/generated/abi_reader.c
                                          liberx/release.c liberx/release_fs.c] },
     'release_names' => { seeds: 12, sources: %w[liberx/release_fs.c] },
     'rng' => { seeds: 6, sources: %w[kernel/core/rng.c kernel/crypto/chacha20/chacha.c kernel/crypto/blake3/blake3.c
                                      kernel/crypto/blake3/blake3_portable.c] },
-    'manifest' => { seeds: 12, sources: %w[liberx/generated/abi_reader.c] },
+    'manifest' => { seeds: 12, sources: %w[build/gen/liberx/generated/abi_reader.c] },
     'sched' => { seeds: 5, sources: %w[kernel/sched/sched.c] },
     'sha256' => { seeds: 8, sources: %w[kernel/crypto/sha2/sha256c.c] },
     'space' => { seeds: 4, sources: %w[kernel/core/space.c kernel/core/cap.c] },
@@ -61,7 +62,7 @@ class GateBaselineTest < Minitest::Test
   }.freeze
 
   # The include paths every target held.
-  FUZZ_INCLUDES = %w[include kernel/core kernel/generated kernel/crypto].freeze
+  FUZZ_INCLUDES = %w[include kernel/core build/gen/kernel/generated kernel/crypto].freeze
 
   # Each chokepoint rule's least seed count; a pending or elsewhere rule has
   # no seed, and 0 here.
@@ -86,7 +87,7 @@ class GateBaselineTest < Minitest::Test
                        kernel/core/dispatch.c kernel/core/log.c kernel/core/map.c kernel/core/rng.c
                        kernel/core/space.c kernel/core/tlb_plan.c kernel/core/watchdog.c kernel/crypto/blake3/blake3.c
                        kernel/crypto/blake3/blake3_portable.c kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
-                       kernel/generated/abi_decode.c kernel/generated/abi_run.c
+                       build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c
                        kernel/sched/sched.c].freeze
 
   # The suites the QEMU gate runs. The conformance roster's pending cases are

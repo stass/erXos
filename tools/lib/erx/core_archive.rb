@@ -24,8 +24,9 @@ module Erx
   #   Fiasco build audit reads like any inherited compile record;
   # * .erx-archive-inputs, the archive's members in order, the audit's
   #   construction record;
-  # * seam/erx/core/, a copy of include/erx/core/, the only erXos headers
-  #   the glue's include path reaches.
+  # * seam/erx/core/, a copy of include/erx/core/ and of its generated
+  #   headers in build/gen/include/erx/core/, the only erXos headers the
+  #   glue's include path reaches.
   module CoreArchive
     # The recipe is part of what the archive's bytes depend on, so a
     # change to it discards the kernel build as a source change does.
@@ -33,23 +34,25 @@ module Erx
     # The core directories: each C source here is a core, which the chokepoint
     # rules and the sanitizer gate also hold to their own requirements.
     CORE_PATTERNS = %w[kernel/core/*.c kernel/sched/*.c].freeze
-    PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'kernel/generated/*.c'].freeze
+    PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'build/gen/kernel/generated/*.c'].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
     BOOTSTRAP_SOURCES = %w[kernel/core/boot_place.c kernel/core/pack.c].freeze
     # What bootstrap links: those cores with what they call. Translation is off
     # when they run, so every load and store must be aligned.
     BOOT_SOURCES = [*BOOTSTRAP_SOURCES, 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
-                    'liberx/elf_plan.c', 'liberx/generated/abi_reader.c'].freeze
+                    'liberx/elf_plan.c', 'build/gen/liberx/generated/abi_reader.c'].freeze
     BOOT_FLAGS = %w[-mstrict-align].freeze
     BOOT_ARCHIVE = 'erx_boot.a'
     FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                -mgeneral-regs-only -mno-outline-atomics -fstack-usage -ffunction-sections
-               -I include -I kernel/generated -I kernel/crypto].freeze
+               -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/crypto].freeze
     LEVEL = '-O2'
     ARCHIVE = 'erx_cores.a'
     MEMBERS = '.erx-archive-inputs'
     SEAM = 'seam'
     SEAM_SOURCE = 'include/erx/core'
+    # The seam's generated headers (abi_trap.h, abi_crash.h).
+    SEAM_GENERATED = 'build/gen/include/erx/core'
     # The only symbols the archive may leave undefined: the effects its
     # host provides and Fiasco's memcpy and memset. Anything else would be
     # a call into Fiasco that no effect declares.
@@ -112,6 +115,8 @@ module Erx
     end
 
     # Builds the kernel cores' archive under output from the tree at root.
+    # The tree holds its generated files under build/gen, brought up to
+    # date by the caller (Fiasco captures them with its other inputs).
     # Before anything is installed, check is called with the built objects
     # (the stack proof), and the undefined symbols are checked; a refusal
     # leaves output as it was. An output whose files already equal the new
@@ -232,15 +237,25 @@ module Erx
       File.write(File.join(directory, MEMBERS), objects.map { |path| File.basename(path) }.join(' ') + "\n")
     end
 
+    # The seam's headers under root: each header's name => its root-relative
+    # path, in include/erx/core/ or, generated, in build/gen/include/erx/core/.
+    # A generated header wins over a same-named file in the source tree, so
+    # the copy and the build audit that traces it back agree on its origin.
+    def seam_headers(root)
+      [SEAM_SOURCE, SEAM_GENERATED].each_with_object({}) do |source, found|
+        Dir.glob('*.h', base: File.join(root, source)).each { |header| found[header] = File.join(source, header) }
+      end.sort.to_h
+    end
+
     def copy_seam(root:, directory:)
       target = File.join(directory, SEAM, SEAM_SOURCE.delete_prefix('include/'))
       FileUtils.mkdir_p(target)
-      headers = Dir.glob('*.h', base: File.join(root, SEAM_SOURCE)).sort
+      headers = seam_headers(root)
       raise Error, "C17 cores: no seam headers in #{SEAM_SOURCE}" if headers.empty?
 
-      headers.each do |header|
+      headers.each do |header, relative|
         File.binwrite(File.join(target, header),
-                      BoundedFile.read(File.join(root, SEAM_SOURCE, header), maximum: PackProvenance::MAX_METADATA))
+                      BoundedFile.read(File.join(root, relative), maximum: PackProvenance::MAX_METADATA))
       end
     end
 

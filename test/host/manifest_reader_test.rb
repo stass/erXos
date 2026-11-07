@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/abi_manifest_fixture'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 class ManifestReaderTest < Minitest::Test
   def setup
@@ -17,8 +18,8 @@ class ManifestReaderTest < Minitest::Test
     @driver = File.join(@directory, 'manifest-reader')
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
                  '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                 '-I', File.join(@root, 'include'),
-                 File.join(@root, 'liberx/generated/abi_reader.c'),
+                 *Erx::Generated.include_flags(root: @root), '-I', File.join(@root, 'include'),
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'test/fixtures/abi_manifest_driver.c'),
                  '-o', @driver], name: 'compile', deadline: 60)
   end

@@ -9,6 +9,7 @@ require 'set'
 require 'tmpdir'
 require_relative '../fixtures/cap_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges kernel/core/cap.c against CapModel, an independent model written
 # from the design. Every scenario is a script of driver commands whose
@@ -278,7 +279,7 @@ class CapTest < Minitest::Test
 
   # Only the capability core touches a slot's members (K1), by
   # construction: the slot's record, offsets and accessors are in the
-  # generated private header kernel/generated/cap_slot_impl.h, which the
+  # generated private header build/gen/kernel/generated/cap_slot_impl.h, which the
   # cap-slot-private chokepoint lets only the core and its host tests
   # include. Any other file sees an incomplete type, so a member write,
   # a generated offset or an accessor call fails to compile, while the
@@ -307,7 +308,8 @@ class CapTest < Minitest::Test
   def test_a_table_refuses_storage_it_cannot_own
     program = File.join(@directory, 'cap-storage')
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/generated'),
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', Erx::Generated.path('kernel/generated', root: @root),
                  File.join(@root, 'kernel/core/cap.c'), File.join(@root, 'test/fixtures/cap_storage.c'),
                  '-o', program], name: 'compile-cap-storage', deadline: 60)
     @runner.run([program], name: 'cap-storage', deadline: 60)
@@ -399,8 +401,9 @@ class CapTest < Minitest::Test
 
   def compiler = ENV.fetch('ERX_CLANG', 'clang')
 
-  def include_flags = ['-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
-                       '-I', File.join(@root, 'kernel/generated')]
+  def include_flags = [*Erx::Generated.include_flags(root: @root),
+                       '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/core'),
+                       '-I', Erx::Generated.path('kernel/generated', root: @root)]
 
   # Compiles body after the core's public header, as any file outside the
   # core sees it, with the private header's directory on the include path.

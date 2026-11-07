@@ -80,7 +80,7 @@ module Erx
     module_function
 
     # The include paths of a target that declares none of its own.
-    INCLUDES = %w[include kernel/core kernel/generated kernel/crypto].freeze
+    INCLUDES = %w[include kernel/core build/gen/kernel/generated kernel/crypto].freeze
     # Each kind's compile and run deadlines, in seconds.
     COMPILE_DEADLINE = 90
     RUN_DEADLINE = 120
@@ -121,13 +121,14 @@ module Erx
 
     # The command that builds target's fuzz program into program, public so a
     # target's own test builds it as the gate does. Every program links the
-    # generated ABI reader, so its header's directory, include, comes with it
-    # whatever paths the target declares.
+    # generated ABI reader, so the generated tree's directories (build/gen,
+    # then build/gen/include) and include come with it whatever paths the
+    # target declares, the generated ones first.
     def compile_command(target, root:, compiler:, program:)
       [compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
        '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
-       *[*target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] },
-       *[*target.sources, 'liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
+       *['build/gen', 'build/gen/include', *target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] },
+       *[*target.sources, 'build/gen/liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
        File.join(root, "tools/fuzz/#{target.kind}_fuzz.c"), '-o', program]
     end
 

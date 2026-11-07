@@ -10,6 +10,7 @@ require 'tmpdir'
 require_relative '../fixtures/manifest_context'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
@@ -19,7 +20,7 @@ require_relative '../../tools/lib/erx/manifest'
 # test/fixtures/boot_manifest_driver.c.
 class BootManifestTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[liberx/backend/core/boot_manifest.c liberx/generated/abi_reader.c test/fixtures/boot_manifest_driver.c].freeze
+  SOURCES = %w[liberx/backend/core/boot_manifest.c build/gen/liberx/generated/abi_reader.c test/fixtures/boot_manifest_driver.c].freeze
   # The fields of the source's runtime_limits system block, in the order the driver prints them.
   RUNTIME_LIMIT_FIELDS = %w[max_frame max_message_heap funnel_depth exports tmp overlay atoms foreign_atoms
                             processes].freeze
@@ -38,6 +39,7 @@ class BootManifestTest < Minitest::Test
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer', '-fno-sanitize-recover=all']
     output = File.join(@directory, 'driver')
     log, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', *flags,
+                                  *Erx::Generated.include_flags(root: ROOT),
                                   '-I', File.join(ROOT, 'include'), '-I', ROOT, *SOURCES.map { |source| File.join(ROOT, source) },
                                   '-o', output, stdin_data: '')
     assert status.success?, log
@@ -119,7 +121,7 @@ class BootManifestTest < Minitest::Test
   def test_each_record_names_a_generated_peripheral
     output, status = read(admitted)
     assert status.success?, output
-    table = File.read(File.join(ROOT, 'include/erx/hw/device_table.h'))
+    table = File.read(Erx::Generated.path('include/erx/hw/device_table.h', root: ROOT))
     peripherals = output.scan(/^device \S+ (\S+) /).flatten
     refute_empty peripherals
     peripherals.each { |name| assert_includes table, %(.name = "#{name}"), name }

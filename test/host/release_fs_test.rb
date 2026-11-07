@@ -11,6 +11,7 @@ require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/pack_tools'
 require_relative '../../tools/lib/erx/pack_wire'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges liberx/release_fs.c against a plain model of the design's rules
 # (design-files.md, Erlang clients and Resolving a path; design-runtime.md, Files):
@@ -171,7 +172,8 @@ class ReleaseFsTest < Minitest::Test
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-D_DARWIN_C_SOURCE', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *flags, '-I', File.join(@root, 'include'), '-I', File.join(@root, 'otp/erts/emulator/nifs/erxos'), source,
+                 *flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'otp/erts/emulator/nifs/erxos'), source,
                  File.join(@root, 'test/fixtures/release_fs_driver.c'), '-o', output],
                 name: "release-fs-#{name}", deadline: 120)
     output
@@ -223,9 +225,10 @@ class ReleaseFsTest < Minitest::Test
     sanitizers = ENV.fetch('ERX_SANITIZERS', '').split(',').reject(&:empty?)
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     output = File.join(@directory, 'release-driver')
-    sources = %w[liberx/release.c liberx/generated/abi_reader.c kernel/core/pack.c kernel/crypto/blake3/blake3.c
+    sources = %w[liberx/release.c build/gen/liberx/generated/abi_reader.c kernel/core/pack.c kernel/crypto/blake3/blake3.c
                  kernel/crypto/blake3/blake3_portable.c test/fixtures/release_driver.c]
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', *flags,
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
                  *sources.map { |source| File.join(@root, source) }, '-o', output],
                 name: 'release-driver-build', deadline: 120)

@@ -7,6 +7,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/stack_proof_run'
 require_relative 'stack_proof_claim'
+require_relative '../fixtures/generated_tree'
 
 # The stack proof over objects compiled for the target: seeded C fixtures
 # that each break one rule at the level that shows it, and the C17 cores

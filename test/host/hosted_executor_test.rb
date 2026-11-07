@@ -8,6 +8,7 @@ require 'open3'
 require 'timeout'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/function_api'
+require_relative '../fixtures/generated_tree'
 
 # erx_pthread_create_executor on the hosted backend (docs/design-runtime.md, "Making an
 # executor"), by test/fixtures/hosted_executor_driver.c. Each seed makes a case fail, so
@@ -18,7 +19,7 @@ class HostedExecutorTest < Minitest::Test
   DRIVER = 'test/fixtures/hosted_executor_driver.c'
   THREAD_SOURCE = 'liberx/backend/hosted/thread.c'
   FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g -pthread
-             -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
+             -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
   CASES = ['the clock is the uptime clock',
            'an executor has a slot and parks to its deadline', 'a plain pthread has no slot and may not park',
            "the creator's attributes are the thread's", 'slots return after a return',

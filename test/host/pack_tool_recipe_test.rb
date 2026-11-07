@@ -8,6 +8,7 @@ require_relative '../fixtures/elf_fixture'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/elf_plan'
+require_relative '../fixtures/generated_tree'
 
 class PackToolRecipeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__).freeze
@@ -15,7 +16,7 @@ class PackToolRecipeTest < Minitest::Test
   def copy_project(directory)
     files = (Erx::PackToolRecipe::PROGRAMS.values.flat_map { |_name, cores, main| [*cores, main] } +
              Erx::PackToolRecipe::COMMON_SOURCES + Erx::PackToolRecipe::RECIPE_SOURCES + ['tools/host/input.h'] +
-             Dir.glob(%w[include/erx/**/*.h kernel/crypto/blake3/*.h], base: ROOT)).uniq
+             Dir.glob(%w[include/erx/**/*.h build/gen/include/erx/**/*.h kernel/crypto/blake3/*.h], base: ROOT)).uniq
     files.each do |relative|
       target = File.join(directory, relative)
       FileUtils.mkdir_p(File.dirname(target))

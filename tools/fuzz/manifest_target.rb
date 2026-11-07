@@ -6,6 +6,6 @@ require_relative 'manifest_seeds'
 
 # The system manifest's generated C reader.
 Erx::PackFuzz.declare_target(
-  sources: ['liberx/generated/abi_reader.c'],
+  sources: ['build/gen/liberx/generated/abi_reader.c'],
   seeds: Erx::ManifestSeeds.all
 )

@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/native_memory'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # The Fiasco backend's page pool and the backends' range table, on the host: the driver
 # test/fixtures/fiasco_vm_driver.c runs them exhaustively against a fake memory
@@ -107,7 +108,8 @@ class FiascoVmTest < Minitest::Test
   def build(cores, name:)
     output = File.join(@directory, name.tr(' ', '-'))
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-D_DARWIN_C_SOURCE', '-D_GNU_SOURCE',
-                 *@sanitizer_flags, '-I', File.join(ROOT, 'include'), '-I', ROOT, *cores,
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: ROOT),
+                 '-I', File.join(ROOT, 'include'), '-I', ROOT, *cores,
                  File.join(ROOT, DRIVER), '-o', output],
                 name: "compile-#{name.tr(' ', '-')}", deadline: 60)
     output

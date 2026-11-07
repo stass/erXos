@@ -46,8 +46,12 @@ module Erx
   ROOT = File.expand_path('..', __dir__)
 
   module CLI
+    # Every command but help runs on a generated tree (build/gen) brought up
+    # to date first, so no build, check or boot reads stale generated files
+    # and no library it calls needs to ensure the tree again.
     def self.run(arguments, **collaborators)
       command, *command_arguments = arguments
+      Generated.ensure(root: ROOT) unless [nil, '--help', '-h'].include?(command)
       case command
       when 'check'
         check(command_arguments, **collaborators)
@@ -396,10 +400,10 @@ module Erx
                    name: 'abi-fuzz-corpus', deadline: 30, chdir: ROOT, env: environment)
         runner.run([environment.fetch('ERX_CLANG'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
                     '-O1', '-g', '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer',
-                    '-I', File.join(ROOT, 'include'), '-I', ROOT,
-                    File.join(ROOT, 'liberx/generated/abi_reader.c'),
-                    File.join(ROOT, 'kernel/generated/abi_decode.c'),
-                    File.join(ROOT, 'fuzz/generated/abi.c'), '-o', program],
+                    *Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'), '-I', ROOT,
+                    Generated.path('liberx/generated/abi_reader.c', root: ROOT),
+                    Generated.path('kernel/generated/abi_decode.c', root: ROOT),
+                    Generated.path('fuzz/generated/abi.c', root: ROOT), '-o', program],
                    name: 'compile-abi-fuzz', deadline: 90, chdir: ROOT, env: environment)
         runner.run([program, "-runs=#{runs}", "-seed=#{seed}", '-max_len=65536', '-timeout=5',
                     "-artifact_prefix=#{artifacts}/", corpus],

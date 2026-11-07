@@ -46,9 +46,12 @@ class FiascoInputsTest < Minitest::Test
       source = File.join(root, 'fiasco/kernel/src/banner.cpp')
       File.write(source, "// Modified by erXos\nint banner;\n")
       File.write(File.join(root, 'config/fiasco/kernel.defconfig'), 'CONFIG_ARM=y')
-      FileUtils.mkdir_p([File.join(root, 'kernel/core'), File.join(root, 'include/erx/core'), File.join(root, 'liberx')])
+      FileUtils.mkdir_p([File.join(root, 'kernel/core'), File.join(root, 'include/erx/core'), File.join(root, 'liberx'),
+                         File.join(root, 'build/gen/include/erx/core'), File.join(root, 'build/gen/kernel'),
+                         File.join(root, 'build/gen/liberx')])
       File.write(File.join(root, 'kernel/core/watchdog.c'), "int watchdog;\n")
       File.write(File.join(root, 'include/erx/core/watchdog.h'), "extern int watchdog;\n")
+      File.write(File.join(root, 'build/gen/include/erx/core/abi_trap.h'), "#define ERX_TRAP 1\n")
       inputs = Erx::FiascoInputs.new(root: root)
       record = inputs.prepare
       yield root, source, inputs, record
@@ -108,6 +111,17 @@ class FiascoInputsTest < Minitest::Test
   end
   # The cores and their headers are the kernel's inputs alone: editing one
   # discards the kernel build's outputs and keeps the user build's.
+  # The cores compile against the generated tree, so its headers are kernel inputs.
+  def test_a_changed_generated_header_invalidates_the_kernel_build_alone
+    with_inputs do |root, _source, inputs, record|
+      File.write(File.join(root, 'build/gen/include/erx/core/abi_trap.h'), "#define ERX_TRAP 2\n")
+      changed = inputs.prepare
+      refute_equal inputs.component_id(record, component: 'kernel'), inputs.component_id(changed, component: 'kernel')
+      assert_equal inputs.component_id(record, component: 'users'), inputs.component_id(changed, component: 'users')
+      assert_equal "#define ERX_TRAP 2\n", File.read(inputs.path('build/gen/include/erx/core/abi_trap.h'))
+    end
+  end
+
   def test_a_changed_core_header_invalidates_the_kernel_build_alone
     with_inputs do |root, _source, inputs, record|
       File.write(File.join(root, 'include/erx/core/watchdog.h'), "extern long watchdog;\n")

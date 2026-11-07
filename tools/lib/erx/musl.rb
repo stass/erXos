@@ -5,6 +5,7 @@
 require 'fileutils'
 require 'open3'
 require_relative 'error'
+require_relative 'generated'
 
 module Erx
   # erXos's musl, built out of its tree by its own Makefile for the erxos arch.
@@ -42,7 +43,7 @@ module Erx
       FileUtils.mkdir_p(directory)
       bin = File.dirname(@compiler)
       arguments = ['-f', File.join(source, 'Makefile'), "-j#{jobs}", "srcdir=#{source}", "ARCH=#{ARCH}", "CC=#{@compiler}",
-                   "CFLAGS_AUTO=#{CFLAGS.join(' ')}", "AR=#{bin}/llvm-ar", "RANLIB=#{bin}/llvm-ranlib", "ERX_ROOT=#{@root}",
+                   "CFLAGS_AUTO=#{CFLAGS.join(' ')}", "AR=#{bin}/llvm-ar", "RANLIB=#{bin}/llvm-ranlib", "ERX_ROOT=#{@root}", "ERX_GEN=#{File.join(@root, Generated::OUTPUT)}",
                    "ERX_COMPILER_INCLUDE=#{compiler_include}", 'lib/libc.a']
       @runner.run(['gmake', *arguments], name: 'musl-build', deadline: 900, chdir: directory)
       File.join(directory, 'lib/libc.a')

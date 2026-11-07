@@ -8,6 +8,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/hardware'
+require_relative '../fixtures/generated_tree'
 
 # erx_device's core and effects (test/fixtures/erx_device_harness.c), over the PL011's table
 # and over the table the generator makes of an invented peripheral with what the PL011 lacks,
@@ -44,7 +45,8 @@ class ErxDeviceTest < Minitest::Test
   def run_harness(*flags)
     Dir.mktmpdir('erx-device-harness-') do |directory|
       binary = File.join(directory, 'harness')
-      output, status = Open3.capture2e(COMPILER, *FLAGS, *flags, '-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', NIFS,
+      output, status = Open3.capture2e(COMPILER, *FLAGS, *flags, *Erx::Generated.include_flags(root: ROOT), '-I', ROOT,
+                                       '-I', File.join(ROOT, 'include'), '-I', NIFS,
                                        *SOURCES, '-o', binary, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e({ 'ASAN_OPTIONS' => 'detect_leaks=0' }, binary, stdin_data: '')

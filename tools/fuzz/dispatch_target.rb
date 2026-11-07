@@ -11,7 +11,7 @@ frame = ->(number, first, text = '') { [number, first, 0, 0, 0, 0, 0].pack('Q<7'
 
 Erx::PackFuzz.declare_target(
   sources: %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
-              kernel/generated/abi_decode.c kernel/generated/abi_run.c],
+              build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c],
   seeds: {
     'good' => frame.call(1, 5, 'hello'),
     'empty' => frame.call(1, 0),

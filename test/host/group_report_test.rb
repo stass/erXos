@@ -6,6 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
@@ -39,7 +40,8 @@ class GroupReportTest < Minitest::Test
     output = File.join(@directory, name.tr(' ', '-'))
     includes = [seeded_root, ROOT].compact.flat_map { |root| ['-I', root] }
     log, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                                  *flags, '-I', File.join(ROOT, 'include'), *includes, File.join(ROOT, DRIVER), '-o', output,
+                                  *flags, *Erx::Generated.include_flags(root: ROOT),
+                                  '-I', File.join(ROOT, 'include'), *includes, File.join(ROOT, DRIVER), '-o', output,
                                   stdin_data: '')
     assert status.success?, log
     output

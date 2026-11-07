@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../fixtures/tlb_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges erx_tlb_plan against TlbModel: random removals from random table
 # shapes must leave no stale translation or walk-cache copy once their plan
@@ -191,6 +192,7 @@ class TlbPlanTest < Minitest::Test
   def test_planner_builds_freestanding_for_the_target
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O2',
                  '--target=aarch64-none-elf', '-ffreestanding', '-mgeneral-regs-only',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-c', File.join(@root, 'kernel/core/tlb_plan.c'),
                  '-o', File.join(@directory, 'tlb_plan.o')], name: 'compile-target', deadline: 60)
   end
@@ -202,7 +204,8 @@ class TlbPlanTest < Minitest::Test
   def build_driver(core, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, '-I', File.join(@root, 'include'), core,
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), core,
                  File.join(@root, 'test/fixtures/tlb_plan_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output

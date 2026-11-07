@@ -28,12 +28,14 @@ module Erx
     LIBERX_SOURCES = [*HostedSources::ALL.reject { |source| source.start_with?(HostedSources::GUEST) },
                       'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/hosted/start.c'].freeze
-    # What the hosted archive is compiled from and the release's manifest, for the build record.
-    LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
+    # What the hosted archive is compiled from and the release's manifest, for the build record:
+    # the generated C among them is under build/gen.
+    LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 liberx
+                      build/gen/include build/gen/kernel build/gen/liberx].freeze
     # Every tree a runtime is built from, whose digest marks a build stale.
     SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
-                      -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
+                      -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
     # OTP's applications in the release, each built by both runtimes: what a shell needs,
     # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
     # loads without starting (ReleaseFiles::LOAD_ONLY). The build itself boots from the

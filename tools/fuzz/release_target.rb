@@ -14,7 +14,7 @@ end
 valid = archive.call('system/lib/a')
 Erx::PackFuzz.declare_target(
   sources: ['kernel/core/pack.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
-            'liberx/generated/abi_reader.c', 'liberx/release.c', 'liberx/release_fs.c'],
+            'build/gen/liberx/generated/abi_reader.c', 'liberx/release.c', 'liberx/release_fs.c'],
   seeds: Erx::PackFuzz.prefix_seeds(valid).merge(
     'valid-unfixed' => "\x00".b + valid.byteslice(1..),
     'longest-name' => archive.call("system/#{'z' * 255}"),

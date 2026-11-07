@@ -7,6 +7,7 @@ require 'json'
 require 'fileutils'
 require_relative '../../tools/lib/erx/pack_provenance'
 require_relative '../../tools/lib/erx/output_directory'
+require_relative 'generated_tree'
 
 # A real freestanding AArch64 ELF, with compiler dependency and linker map
 # receipts. No libc or compiler runtime enters this fixture's link closure.
@@ -28,7 +29,8 @@ module PackRootFixture
     artifact = File.join(directory, 'root.elf')
     map = File.join(directory, 'root.map')
     runner.run([compiler, '--target=aarch64-none-elf', '-std=c17', '-ffreestanding',
-                '-M', '-MF', dependency, '-MT', object, '-I', File.join(root, 'include'), source],
+                '-M', '-MF', dependency, '-MT', object, *Erx::Generated.include_flags(root: root),
+                '-I', File.join(root, 'include'), source],
                name: 'scan-pack-root', deadline: 60, chdir: root)
     _targets, sources = Erx::PackProvenance.dependencies(File.binread(dependency))
     inputs = sources.map { |path| reference(File.expand_path(path, root), root) }
@@ -36,6 +38,7 @@ module PackRootFixture
     runner.run([compiler, '--target=aarch64-none-elf', '-std=c17', '-Wall', '-Wextra', '-Werror',
                 '-pedantic', '-ffreestanding', '-fno-stack-protector', '-fno-unwind-tables',
                 '-fno-asynchronous-unwind-tables', '-O2', '-MD', '-MF', dependency,
+                *Erx::Generated.include_flags(root: root),
                 '-I', File.join(root, 'include'), '-c', source, '-o', object],
                name: 'compile-pack-root', deadline: 60, chdir: root)
     runner.run([linker, '--build-id=none',

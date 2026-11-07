@@ -7,6 +7,7 @@ require 'fileutils'
 require 'openssl'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
+require_relative 'generated_tree'
 
 # Builds test/fixtures/crypto_driver.c with the imported SHA-256, ChaCha20
 # and BLAKE3 and the entropy generator, runs batches of requests through it,
@@ -66,6 +67,7 @@ module CryptoFixture
     def compile_for_target(source)
       @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O2',
                    '--target=aarch64-none-elf', '-ffreestanding', '-mgeneral-regs-only', '-mno-outline-atomics',
+                   *Erx::Generated.include_flags(root: ROOT),
                    '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'kernel/crypto'), '-c', source,
                    '-o', File.join(@directory, "#{File.basename(source, '.c')}.o")],
                   name: "compile-target-#{File.basename(source, '.c')}", deadline: 60)

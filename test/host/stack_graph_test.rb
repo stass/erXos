@@ -7,6 +7,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/core_archive'
 require_relative '../../tools/lib/erx/stack_graph'
+require_relative '../fixtures/generated_tree'
 
 # Extracts the stack graph from small C fixtures compiled for the target,
 # each holding one edge or one refusal, and from the three C17 cores at
@@ -24,11 +25,11 @@ class StackGraphTest < Minitest::Test
   PURE_SOURCES = %w[kernel/core/pack.c kernel/core/rng.c kernel/core/tlb_plan.c kernel/core/watchdog.c
                     kernel/crypto/chacha20/chacha.c kernel/crypto/sha2/sha256c.c
                     kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
-                    liberx/generated/abi_reader.c].freeze
+                    build/gen/liberx/generated/abi_reader.c].freeze
 
   # The archive's sources, the bootstrap core it leaves out, and the reader.
   def core_sources
-    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/elf_plan.c', 'liberx/generated/abi_reader.c']
+    [*Erx::CoreArchive.sources(@root), *Erx::CoreArchive::BOOTSTRAP_SOURCES, 'liberx/elf_plan.c', 'build/gen/liberx/generated/abi_reader.c']
   end
 
   Name = Erx::StackGraph::Name
@@ -209,7 +210,8 @@ class StackGraphTest < Minitest::Test
   def compile(source, stem, level, function_sections: true)
     object = File.join(@directory, "#{stem}.o")
     @runner.run([@compiler, *TARGET_FLAGS, level, *(function_sections ? ['-ffunction-sections'] : []),
-                 '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/generated'),
+                 *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), '-I', Erx::Generated.path('kernel/generated', root: @root),
                  '-I', File.join(@root, 'kernel/crypto'), '-c', source,
                  '-o', object],
                 name: 'compile-stack-graph', deadline: 60)

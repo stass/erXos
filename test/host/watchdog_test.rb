@@ -8,6 +8,7 @@ require 'set'
 require 'tmpdir'
 require_relative '../fixtures/watchdog_model'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges kernel/core/watchdog.c. erx_watchdog_step is explored exhaustively
 # against WatchdogModel: every event kind at every time of a small time
@@ -254,6 +255,7 @@ class WatchdogTest < Minitest::Test
   def test_core_builds_freestanding_for_the_target
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O2',
                  '--target=aarch64-none-elf', '-ffreestanding', '-mgeneral-regs-only',
+                 *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-c', File.join(@root, 'kernel/core/watchdog.c'),
                  '-o', File.join(@directory, 'watchdog.o')], name: 'compile-target', deadline: 60)
   end
@@ -265,7 +267,8 @@ class WatchdogTest < Minitest::Test
   def build_driver(core, name:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-                 *@sanitizer_flags, '-I', File.join(@root, 'include'), core,
+                 *@sanitizer_flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), core,
                  File.join(@root, 'test/fixtures/watchdog_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 60)
     output

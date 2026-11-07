@@ -7,6 +7,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/generated_tree'
 
 # Judges the lane reader (liberx/erx_lane.c) through its host driver,
 # test/fixtures/lane_driver.c, which plays the producer and compares every
@@ -112,8 +113,9 @@ class LaneTest < Minitest::Test
   def build_driver(reader, name:, flags:)
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
-                 *flags, '-I', File.join(@root, 'include'), reader,
-                 File.join(@root, 'liberx/generated/abi_reader.c'),
+                 *flags, *Erx::Generated.include_flags(root: @root),
+                 '-I', File.join(@root, 'include'), reader,
+                 Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
                  File.join(@root, 'test/fixtures/lane_driver.c'), '-o', output],
                 name: "compile-#{name}", deadline: 120)
     output
