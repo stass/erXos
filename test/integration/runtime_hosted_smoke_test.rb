@@ -281,6 +281,25 @@ class RuntimeHostedSmokeTest < Minitest::Test
     end
   end
 
+  # M4's exit criterion "a module reloaded in a loop on four CPUs never runs stale code",
+  # through the release's code service: the probe (test/fixtures/erx_code_reload_probe.erl)
+  # loads 1,000 versions of a module through erx_code, one after another, while a caller on
+  # each of four schedulers calls it, and counts the calls that returned a version older
+  # than the last load that had returned before the call began. The answer names the
+  # schedulers online, the loads, the stale calls, the callers that ran to the end, whether
+  # each made more calls than there were loads, and the version current at the end.
+  def test_a_module_reloaded_in_a_loop_on_four_schedulers_never_runs_stale_code
+    Dir.mktmpdir('erx-hosted-reload-') do |directory|
+      probe = compiled_fixture('erx_code_reload_probe', directory)
+      assert_answers(
+        'is_pid(whereis(erx_code)) andalso erlang:system_info(schedulers_online) >= 4.' => /^true$/,
+        "{module, erx_code_reload_probe} = code:load_binary(erx_code_reload_probe, \"probe\", " \
+        "base64:decode(\"#{probe}\")), loaded." => /^loaded$/,
+        'erx_code_reload_probe:run(1000).' => /^\{reload,\d+,1000,0,4,true,1000\}$/
+      )
+    end
+  end
+
   # Stock's code server dies on a root directory in its path, with no version to split from
   # its empty base name, and three of those stop the node. Here the working directory is "/".
   def test_the_root_directory_on_the_code_path_leaves_the_code_server_running

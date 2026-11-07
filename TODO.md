@@ -2028,6 +2028,16 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] code service, atoms from loads (`erlang/apps/erx_code/src/erx_code.erl`):
+  `activate/1` makes each manifest name an atom before ERTS's loader checks it
+  against the module's bytes, so a load the loader refuses still leaves up to
+  1,024 atoms of at most 255 bytes, with no bound across loads; a holder of the
+  install facet can exhaust the system domain's atom table and reset the
+  machine. A successful load also makes every atom of each module's atom table.
+  The fix reads the module name from the blob's atom chunk with a bounded pure
+  parser, with a fuzz target, and compares it as a binary before any atom is
+  made; the install facet's holders can already run code in the system domain.
+
 * [Low] shell and console, who may take the console: any process of the
   system domain may call `erx_console:run_shell/1`, which gives a group
   of its choosing the operator's keystrokes, or `erx_console:write/1`,
@@ -2181,6 +2191,40 @@ Every other risk the design accepts is stated in its
 document's "residual risks accepted" paragraph.
 
 ## Planned features
+
+* [Medium] code service, installed storage (`erlang/apps/erx_code/src/erx_code.erl`):
+  the install arena, `erx_code:install_beam/2` and the runtime's
+  `ERX_BOOT_INSTALLED_ONLY` refusal with `{error, not_installed}`
+  ([design-runtime.md](docs/design-runtime.md#code-in-the-system-domain), V5 of
+  [design-live.md](docs/design-live.md#invariants)) wait for M5, where the flag
+  first takes effect. Until then `erx_code` loads the verified bytes from its own
+  heap with `code:prepare_loading/1` and `code:finish_loading/1`, and any code in
+  the system domain can still load bytes with `code:load_binary/3`; the
+  chokepoint check that only `erx_code` calls `install_beam/2` lands with it.
+* [Medium] code service, other domains and principals
+  (`erlang/apps/erx_code/src/erx_code_store.erl`): the store is one in-memory
+  store for the system domain's installs. Per-principal hot stores in memory
+  objects from the principal's budget, code facets and the code server's fetch
+  of pieces into other domains, overlays per supervised specification with
+  their revisions and release hash, overlays persisted on the data partition
+  and the bounded decoder of what is read back, with its fuzz target, are not
+  built ([design-live.md](docs/design-live.md#code-from-the-host)). The host
+  link and `root`'s session share the one store, so one holder's uploads can
+  drop or free the other's.
+* [Low] code service, load timeout (`erlang/apps/erx_code/src/erx_code.erl`): a
+  caller of `erx_code:call/1` waits 60 s; a load still running then goes on and
+  may finish, while the caller exits with a timeout. The install facet must
+  report such a call's outcome as unknown, not as failed.
+* [Low] code service, scope (`erlang/apps/erx_code/src/erx_code.erl`):
+  `erx_code:history/2` checks no inspect facet: any caller in the system domain
+  reads the system domain's history, and every other domain id answers
+  `{error, scope}`. It goes through the caller's inspect facet once facets
+  exist.
+* [Low] code service, start (`erlang/apps/erx_code/src/erx_code_app.erl`): the
+  release starts `erx_code` as an application, so every runtime that boots the
+  system release runs one; it belongs to the system release's supervisor
+  ([design-system.md](docs/design-system.md#system-services)) once ordinary
+  domains boot releases of their own.
 
 * [Medium] storage, the release medium for QEMU (`tools/lib/erx/medium_image.rb`,
   `tools/erx pack --medium`): its slots and the boot-selection record's

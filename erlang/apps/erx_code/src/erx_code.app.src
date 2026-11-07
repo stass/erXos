@@ -1,0 +1,14 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The system domain's code service (docs/design-live.md, "The code store"): erx_code, the
+%% service process that loads modules by hash, over erx_code_store, its pure core, under
+%% erx_code_sup, which erx_code_app starts.
+{application, erx_code,
+ [{description, "erXos code service"},
+  {vsn, "1"},
+  {modules, [erx_code, erx_code_app, erx_code_store, erx_code_sup]},
+  {registered, [erx_code, erx_code_sup]},
+  {applications, [kernel, stdlib, erx]},
+  {mod, {erx_code_app, []}},
+  {env, []}]}.
