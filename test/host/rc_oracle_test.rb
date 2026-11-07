@@ -203,6 +203,20 @@ end
     end
   end
 
+  # A build record that does not parse is stale, so ensure_rc_oracle rebuilds over it
+  # instead of failing check.
+  def test_a_build_with_a_corrupt_record_is_stale
+    Dir.mktmpdir do |root|
+      FileUtils.cp(File.join(ROOT, 'deps.lock'), root)
+      output = File.join(root, Erx::RcOracle::OUTPUT)
+      FileUtils.mkdir_p(output)
+      FileUtils.cp(File.join(@directory, 'rc'), output)
+      File.write(File.join(output, 'build.json'), '{"source": ')
+      error = assert_raises(Erx::RcOracle::StaleBuild) { Erx::RcOracle.locate(root: root) }
+      assert_match(%r{unreadable build record.*tools/erx build rc-oracle}, error.message)
+    end
+  end
+
   def test_a_build_without_the_fetched_source_says_how_to_fetch_it
     Dir.mktmpdir do |root|
       FileUtils.cp(File.join(ROOT, 'deps.lock'), root)

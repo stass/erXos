@@ -341,9 +341,15 @@ it; git history is the record of completed work.
 * [Low] tooling, `tools/lib/erx/qemu.rb`'s `machine_end` cannot tell a power-off
   from a reset under `-no-reboot`, and ignores lines after the last checkpoint.
   Settle both with the `erx_machine_end` case.
-* [Low] stopgap, `ERX_ROOT_KIP_WINDOW` and `root.ld`'s load address in
-  `liberx/backend/fiasco` fit QEMU `virt` only; they move to the platform layer
-  with the Raspberry Pi 4.
+* [Low] stopgap, `ERX_ROOT_KIP_WINDOW` in `liberx/backend/fiasco/root_open.c`
+  fits QEMU `virt` only; it moves to the platform layer with the Raspberry Pi 4.
+  The root's load address already comes from the machine an image is built for
+  (`ProductionImage::Machine`).
+* [Low] tooling, `tools/lib/erx/native_root.rb` (`build_system_receipted`): the
+  root's linked receipt does not name its place, the `--defsym` of
+  `erx_fiasco_image_start` that `place_flags` adds; only the link map it binds
+  by hash shows it. Record it, which needs a field in `PackProvenance`'s
+  `linked` schema (`exact_keys`), or bind the place as a link input.
 * [Medium] kernel, `kernel/core/debug_log.c` keeps the ring and its console
   buffers in file statics, and `tools/fuzz/dispatch_fuzz.c` a static UTCB and
   rate, so a fuzz crash can depend on earlier inputs. Make the log an object
@@ -415,11 +421,6 @@ it; git history is the record of completed work.
   of a regeneration that another process started because an input changed meanwhile. When consumers move to
   `build/gen/`, either have long readers take the lock shared, or publish versioned trees behind a link replaced by
   rename.
-* [Medium] `README.md` ("Current status" transcript): the demo's `Ring(50000, 20)` adds about 136 MB to
-  `erlang:memory(total)` on stock OTP, more than the 160 MiB development machine's pool (26170 pages, about
-  102 MiB, with ERTS already holding about 60 MiB at the shell), so typed at `tools/erx boot` it should end with ERTS
-  unable to allocate. Recapture the transcript from one boot at 160 MiB with a ring that fits (about 10,000
-  processes), or say which machine the demo needs.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so

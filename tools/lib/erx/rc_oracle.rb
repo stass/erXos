@@ -86,7 +86,8 @@ module Erx
     def quote(word) = "'#{word.gsub("'", "''")}'"
 
     # The oracle in build/rc-oracle, refused when it is missing or was built
-    # from another pin of plan9port.
+    # from another pin of plan9port. A build record that does not parse says
+    # nothing of what was built, so it is stale too, and a rebuild replaces it.
     def locate(root:)
       output = File.join(File.expand_path(root), OUTPUT)
       stamp_path = File.join(output, STAMP)
@@ -94,8 +95,13 @@ module Erx
         raise MissingBuild, "rc oracle is not built: #{output}/rc is missing; run tools/erx build rc-oracle"
       end
 
-      stamp = JsonInput.parse(BoundedFile.read(stamp_path, maximum: 65_536), max_bytes: 65_536,
-                              label: 'rc oracle build record')
+      stamp = begin
+        JsonInput.parse(BoundedFile.read(stamp_path, maximum: 65_536), max_bytes: 65_536,
+                        label: 'rc oracle build record')
+      rescue Error => e
+        raise StaleBuild, "rc oracle in #{output} has an unreadable build record (#{e.message}); " \
+                          'run tools/erx build rc-oracle'
+      end
       unless stamp.is_a?(Hash) && stamp['source'] == source_record(root: root) && stamp['recipe'] == Build::RECIPE
         raise StaleBuild, "rc oracle in #{output} was built from another source or recipe; run tools/erx build rc-oracle"
       end

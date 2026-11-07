@@ -158,6 +158,47 @@ class TopLevelCliTest < Minitest::Test
     assert_equal [[@directory, :runner]], builds
   end
 
+  # A current rc oracle is kept as it is: no build runs and its files stay untouched.
+  def test_ensure_rc_oracle_keeps_a_current_build
+    stamp = write_rc_oracle(commit: nil)
+    before = File.binread(stamp)
+    build_class = Class.new do
+      define_method(:initialize) { |**| raise 'a current oracle was rebuilt' }
+    end
+    oracle = Erx::CLI.ensure_rc_oracle(runner: :runner, root: @directory, build_class: build_class)
+    assert_equal File.join(@directory, Erx::RcOracle::OUTPUT, 'rc'), oracle.rc
+    assert_equal before, File.binread(stamp)
+  end
+
+  # A stale rc oracle, built from another pin, is rebuilt, and the rebuilt one is located.
+  def test_ensure_rc_oracle_rebuilds_a_stale_build
+    write_rc_oracle(commit: '0' * 40)
+    builds = []
+    test = self
+    build_class = Class.new do
+      define_method(:initialize) { |root:, runner:| builds << [root, runner] }
+      define_method(:call) { test.write_rc_oracle(commit: nil) }
+    end
+    oracle = Erx::CLI.ensure_rc_oracle(runner: :runner, root: @directory, build_class: build_class)
+    assert_equal [[@directory, :runner]], builds
+    assert_equal File.join(@directory, Erx::RcOracle::OUTPUT, 'rc'), oracle.rc
+  end
+
+  # An rc oracle build in the test's tree: its build record names the tree's plan9port pin,
+  # or that pin with another commit when commit is given. Returns the record's path.
+  def write_rc_oracle(commit:)
+    FileUtils.cp(File.expand_path('../../deps.lock', __dir__), @directory)
+    output = File.join(@directory, Erx::RcOracle::OUTPUT)
+    FileUtils.mkdir_p(output)
+    File.write(File.join(output, 'rc'), '', perm: 0o755)
+    File.write(File.join(output, 'rcmain'), '')
+    source = Erx::RcOracle.source_record(root: @directory)
+    source = source.merge('commit' => commit) if commit
+    File.join(output, 'build.json').tap do |path|
+      File.write(path, JSON.generate('source' => source, 'recipe' => Erx::RcOracle::Build::RECIPE))
+    end
+  end
+
   # Arm's archive is read only by `tools/erx sysreg refresh` and by
   # test/integration/sysreg_refresh_test.rb, which `make check` excuses, so
   # `make check` works in a tree that never fetched arm-registers. Host tests
