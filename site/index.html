@@ -61,34 +61,45 @@
 
 erXos
 development build: trusted code only
-Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
+Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1]
 
 Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
 
-<span class="c">% Write a file to /tmp, served by a RAM file system written in
-% Erlang, and read it back.</span>
-<span class="p">2&gt;</span> file:write_file("/tmp/hello.txt", &lt;&lt;"hello from erXos\n"&gt;&gt;), file:read_file("/tmp/hello.txt").
-{ok,&lt;&lt;"hello from erXos\n"&gt;&gt;}
+<span class="c">% Write a file to /tmp, a RAM file system written in</span>
+<span class="c">% Erlang, and read it back.</span>
+<span class="p">1&gt;</span> file:write_file(&quot;/tmp/hi&quot;, &lt;&lt;&quot;hello from erXos\n&quot;&gt;&gt;).
+ok
+<span class="p">2&gt;</span> file:read_file(&quot;/tmp/hi&quot;).
+{ok,&lt;&lt;&quot;hello from erXos\n&quot;&gt;&gt;}
 
-<span class="c">% Start a process that divides by zero, and catch its crash
-% with a monitor. The shell carries on.</span>
-<span class="p">3&gt;</span> {_, Ref} = spawn_monitor(fun() -&gt; 1 / erlang:list_to_integer("0") end), receive {'DOWN', Ref, process, _, {Reason, _}} -&gt; {crashed, Reason} end.
+<span class="c">% Crash a process that divides by zero, and catch it</span>
+<span class="c">% with a monitor. The shell carries on.</span>
+<span class="p">3&gt;</span> {_, R} = spawn_monitor(fun() -&gt; 1 / list_to_integer(&quot;0&quot;) end).
+{&lt;0.103.0&gt;,#Ref&lt;0.2715433271.3401580545.13457&gt;}
 =ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
 Error in process &lt;0.103.0&gt; with exit value:
-{badarith,[{erlang,'/',[1,0],[{error_info,#{module =&gt; erl_erts_errors}}]}]}
+{badarith,[{erlang,&#39;/&#39;,[1,0],[...]}]}
 
+<span class="p">4&gt;</span> receive {&#39;DOWN&#39;, R, _, _, {E, _}} -&gt; {crashed, E} end.
 {crashed,badarith}
 
-<span class="c">% Define a ring: N processes, each passing a counted-down
-% token to the next, until it reaches zero.</span>
-<span class="p">4&gt;</span> Ring = fun(N, Laps) -&gt; Last = lists:foldl(fun(_, Next) -&gt; spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0; T -&gt; Next ! T - 1, Loop() end end) end, self(), lists:seq(1, N)), Alive = erlang:system_info(process_count), Last ! N * Laps, (fun Wait() -&gt; receive 0 -&gt; ok; T -&gt; Last ! T - 1, Wait() end end)(), io:format("~b processes alive; one token went round a ring of ~b, ~b messages~n", [Alive, N, N * Laps]) end.
+<span class="c">% A ring of N processes passes a token round it Laps times.</span>
+<span class="p">5&gt;</span> Ring = fun(N, Laps) -&gt;
+     Last = lists:foldl(fun(_, Next) -&gt;
+         spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0;
+                   T -&gt; Next ! T - 1, Loop() end end)
+       end, self(), lists:seq(1, N)),
+     Alive = erlang:system_info(process_count),
+     Last ! N * Laps,
+     (fun Wait() -&gt; receive 0 -&gt; ok;
+                    T -&gt; Last ! T - 1, Wait() end end)(),
+     {Alive, N * Laps}
+   end.
 #Fun&lt;erl_eval.41.130099583&gt;
 
-<span class="c">% Run it: 50,000 processes alive at once, one token,
-% a million messages.</span>
-<span class="p">5&gt;</span> Ring(50000, 20).
-50039 processes alive; one token went round a ring of 50000, 1000000 messages
-ok</pre>
+<span class="c">% 10,000 processes alive at once, 200,000 messages.</span>
+<span class="p">6&gt;</span> Ring(10000, 20).
+{10039,200000}</pre>
         </div>
       </div>
       <div class="terminal-chin">
