@@ -525,7 +525,10 @@ by a fault, and the page-table walk belongs to M7.
 
 A budget counts the pages the pool handed out under it. `erx_object_info` reports `used` as **partial**,
 reporter `liberx pool`, scope "pages committed through `liberx`; not kernel objects, page tables or mapping
-records". `guarantee`, `cap`, `carved`, `lent` and `pinned` are `unsupported`.
+records". `guarantee`, `cap`, `carved`, `lent` and `pinned` are `unsupported`, from the same reporter. The
+reporter is the stopgap reporter `liberx_pool` of `abi/inspection.txt`, which stands in for `kernel` and
+declares that label and scope ([design-abi.md](design-abi.md#inspection-schema)); a record carries it as
+`{stopgap, liberx_pool}` ([design-live.md](design-live.md#inspection-records)).
 
 ### Kernel memory and the root budget
 

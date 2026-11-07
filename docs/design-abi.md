@@ -98,6 +98,7 @@ The declaration forms are:
 | `reader NAME ROOT_LAYOUT MAX_BYTES` | bounded tables and references described below |
 | `translation NAME SOURCE TARGET` | a complete directed mapping for one named consumer context |
 | `service NAME NUMBER` | a named interface, its operation identifiers and its typed manifest-parameter declarations; callable operations retain the admission contract of the service design |
+| `inspection SCHEMA` | the inspection schema, with its units, value types, stopgap reporters, kinds and paths as members described in [Inspection schema](#inspection-schema); exactly one, in `inspection.txt` |
 | `trap OPCODE IMMEDIATE` | the architecture's trap operation and its immediate, checked by its binding |
 | `reg ROLE REGISTERS` | the comma-separated architecture registers for `number`, `args`, `results` or `preserved`; no duplicate within a role |
 
@@ -448,6 +449,94 @@ remain binaries, and readers never create atoms. Ruby readers return
 immutable records or raise a typed error under `Erx::Error`. C readers
 use explicit little-endian loads into typed values, without packed
 structure casts, unaligned dereferences or host-endian assumptions.
+
+### Inspection schema
+
+`inspection.txt` holds the one `inspection SCHEMA` declaration, SCHEMA
+being the `schema` number every inspection record carries
+([design-live.md](design-live.md#inspection-records)). Its members, at
+two-space indentation, declare units, value types, stopgap reporters,
+kinds and paths; a kind's attributes and a path's marks are at four
+spaces beneath it. The members have one namespace of their own: a member
+names another by its bare name and a root declaration, a `limit`, a
+`scalar` or an `enum`, by `@name`. A name is declared once, and a unit,
+a value type or a kind that no member uses fails. Only the order of a
+kind's attributes has meaning.
+
+| Member | Meaning |
+| --- | --- |
+| `unit NAME LABEL` | a unit, and the quoted label a renderer prints after a value of it |
+| `integer NAME MIN MAX [unit UNIT]` | an integer within the inclusive bounds, each a literal or a `@limit` |
+| `text NAME MAX [utf8]` | bytes as reported, at most MAX of them; `utf8` refuses bytes that are not valid UTF-8 |
+| `atoms NAME ATOM...` | one atom of a closed set |
+| `list NAME TYPE MAX` | at most MAX values of TYPE, MAX at most 1,000 |
+| `tuple NAME TYPE...` | two to 16 values of the listed types, in order |
+| `stopgap NAME CATEGORY LABEL SCOPE` | a reporter that stands in for the reporter category CATEGORY, `kernel`, `service` or `runtime`; LABEL is the quoted name renderers print for it and SCOPE the quoted statement of what it can see |
+| `kind NAME` | an inspection kind; its `attr` members follow at four spaces |
+| `attr KEY TYPE reporters LIST visible CLASS build BUILD projections LIST` | an attribute of the kind, described below |
+| `path KIND SEGMENT...` | a path and the kind of its record, described below; an `append_only` member at four spaces marks it append-only |
+
+A value type is a member type, `boolean`, `pid`, or a `@` reference to a
+root `scalar`, which is an integer within its range, or a root `enum`,
+which is one of its member names as an atom. No type admits an arbitrary
+term or an atom from the input: names a domain reports are `text`. The
+generator refuses a type nested more than eight deep, as the web's
+`datum()` is ([design-web.md](design-web.md#the-protocol)). Kinds,
+attribute keys and the atoms of `atoms` and `enum` types become atoms of
+`erx_schema`, so a reader of a record refuses an unknown one without
+making it.
+
+An attribute names its KEY and TYPE and four required properties, so
+adding one never exposes it by default:
+
+* `reporters`, a comma-separated list of the categories `kernel`,
+  `service` and `runtime` that may report it; a stopgap reporter may
+  report it where the category it stands in for may;
+* `visible`, the inspect facets that see it: `owner`, any facet whose
+  scope covers the path's owner; `all`, a facet of scope `all`; or
+  `system_shell`, only a call presenting the system-shell facet;
+* `build`, `all` or `development`, the builds whose inspector reports it;
+* `projections`, a comma-separated list of `shell`, `host`, `proc` and
+  `web`, or `none`: the renderings that show it. A rendering shows no
+  attribute that does not list it.
+
+A kind's attributes appear in its records, in shell and host tables, in
+`/proc` `status` files and on the web in declaration order, which is the
+schema's field order.
+
+A path's SEGMENTs are literal segments, identifiers that become atoms of
+`erx_schema`, and variable segments `*TYPE`, each one segment holding a
+value of TYPE, which is an integer, text or `pid` type. `path machine`,
+with no segments, declares the root `[]`. The built-in kind `listing` has
+no attributes: its records, such as `[cpus]`'s, only list their children.
+Every proper prefix of a declared path is declared, and two paths that
+differ only in the type of a variable segment at one position fail, so
+each path a query names resolves to exactly one declaration or is
+refused. A record's children are derived from the declarations: the
+literal segments by which a declared path extends its path by one, and,
+for a variable segment, the values its collector reports.
+
+A stopgap reporter appears in a record as `{stopgap, NAME}`. Its label
+and scope come from the schema, so a record carries no free text about
+who reported it and a domain cannot invent a reporter. Each stands for a
+component that does a part's work in its place, such as the Phase 1
+backend of `liberx` counting a budget's pages in the kernel's place
+([design-stopgap.md](design-stopgap.md#reporting-a-budget)); replacing
+the component removes its declaration, and the attributes it reported
+come from the category it stood in for.
+
+```text
+inspection 1
+  unit pages "pages"
+  integer page_count 0 0xffffffffffffffff unit pages
+  integer budget_id 1 0xffffffff
+  stopgap liberx_pool kernel "liberx pool" "pages committed through liberx; not kernel objects, page tables or mapping records"
+  kind budget
+    attr kind @budget_kind reporters kernel visible owner build all projections shell,host,proc,web
+    attr used page_count reporters kernel visible owner build all projections shell,host,proc,web
+  path listing budgets
+  path budget budgets *budget_id
+```
 
 ## Numeric assignment and versions
 

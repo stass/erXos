@@ -323,6 +323,8 @@ function:
 %% Nesting is at most 8 deep; a deeper term is printed.
 
 -type wire_attr() :: {Key :: binary(), reporter(), status(), datum()}.
+-type reporter() :: kernel | service | runtime
+                  | {stopgap, Name :: binary()}.  % a stopgap reporter of abi/inspection.txt
 -type status() :: ok | partial | unknown | unsupported | {timeout, pos_integer()} | error.
 -type wire_record() :: #{path := [datum()], kind := binary(), id := datum(),
                          attrs := [wire_attr()],                  % in the schema's order
@@ -764,8 +766,10 @@ domain. **`abi/services/web.txt`**: `erx_web_login`'s `login` and
 `logout`, and the host link's `web` facet's `connect`, `data` and
 `close`.
 
-**`abi/inspection.txt`**: the presentation types' path table and the
-append-only mark, generated into TypeScript as into Erlang.
+**`abi/inspection.txt`**: the presentation types' path table, the
+append-only mark and the stopgap reporters' labels and scopes, generated
+into TypeScript as into Erlang; the decoder refuses a stopgap reporter
+the table does not name.
 
 **Erlang**: `erx_web_conn:step/2` and `perform/2`;
 `erx_web_value:project/1`; `erx_ui_model:delta/2`; the

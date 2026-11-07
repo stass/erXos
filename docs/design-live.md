@@ -46,8 +46,9 @@ Decisions every reader of this document needs:
 * **One schema, honest statuses.** An inspection record covers a kernel
   object, a domain, a program or a process; every attribute carries a
   status (`ok`, `partial`, `unknown`, `unsupported`, `timeout`, `error`),
-  and every value says who reported it: the kernel, a trusted service, or
-  the runtime of the domain it describes. A compromised domain can lie
+  and every value says who reported it: the kernel, a trusted service,
+  the runtime of the domain it describes, or, by its own name, a stopgap
+  that stands in for one of them. A compromised domain can lie
   about its own processes, and the record says so.
 * **The pid space is the inspector's index.** Any process is
   `[processes, Pid]`, whatever domain it lives in. Its owner is its pid's
@@ -234,7 +235,7 @@ with it.
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **V1.** A tty changes a program's bytes only as its `termios` says | every write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
-| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service` or `runtime`); renderers print the status and reporter of every value | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
+| **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a stopgap reporter the schema declares); renderers print the status and reporter of every value | a renderer that drops statuses, or an attribute filled with a default | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record |
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
@@ -256,7 +257,8 @@ with it.
                     children := children()}.
 
 -type attr() :: {reporter(), value()}.
--type reporter() :: kernel | service | runtime.
+-type reporter() :: kernel | service | runtime
+                  | {stopgap, Name :: atom()}.   % a stopgap reporter of the schema
 -type value() :: {ok, term()} | {partial, term()} | unknown | unsupported
                | {timeout, Milliseconds :: pos_integer()} | {error, term()}.
 
@@ -265,9 +267,23 @@ with it.
 -type segment() :: atom() | integer() | binary() | pid().
 ```
 
+A reporter is one of three categories, or a stopgap that does a part's
+work in its place and reports what it can see of that work under its own
+name: `liberx`'s Phase 1 backend counts the pages of a budget in the
+kernel's place, so a budget's `used` is `{{stopgap, liberx_pool},
+{partial, Pages}}`, which a renderer prints as the value `[partial]`
+with the reporter `liberx pool` ([design-stopgap.md](design-stopgap.md#reporting-a-budget)).
+The schema declares each stopgap reporter with the category it stands in
+for, its label and the scope of what it sees; a record carries only its
+name, an atom of `erx_schema`. A value a stopgap answers in another
+reporter's place, `unsupported` and `partial` included, carries the
+stopgap's name, and no stopgap reports as `kernel`, so a stopgap's
+observation never passes for the kernel's.
+
 `abi/inspection.txt`, included by the ABI root, declares the kinds, paths,
-attribute keys, types, units, bounds, reporter categories and visibility
-rules. Ruby generates bounded C builders, Erlang types and `erx_schema`,
+attribute keys, types, units, bounds, the reporter categories each
+attribute admits, the stopgap reporters and visibility rules, in the
+grammar of [design-abi.md](design-abi.md#inspection-schema). Ruby generates bounded C builders, Erlang types and `erx_schema`,
 Ruby bindings and validators, and shell/host/`/proc` projections from it
 ([design-generation.md](design-generation.md#inspection-and-diagnostics)).
 The maps above describe that generated interface. Kinds, attribute keys
@@ -941,8 +957,16 @@ these visibly, from the generated tables:
 
 A character is written as `<U+` and four to six upper-case hexadecimal
 digits and `>`, such as `<U+202E>`; a byte as `<0x` and two such digits
-and `>`, such as `<0xC0>`. Tokens are for the eye only: the data they
-render keeps its bytes. The escape takes whole text, since a record is
+and `>`, such as `<0xC0>`. Every other character passes unchanged, the
+backslash and `<` among them. Tokens are for the eye only: the data they
+render keeps its bytes, and a token is not an injective encoding, since
+text holding the eight characters `<U+202E>` looks like text that held
+U+202E. Where the exact data matters it travels in the framing toward
+bytes, which writes only tab, newline and backslash as `\t`, `\n` and
+`\\` ([Pipelines](design-shell.md#pipelines), [The /proc
+tree](#the-proc-tree)), or as a `/proc` name in its injective encoding.
+The two are separate steps: a value toward bytes passes the framing
+alone, and a value on a terminal passes the line escape alone. The escape takes whole text, since a record is
 whole when it is displayed, and holds no state between calls. One record is
 one line under its source's name.
 
@@ -1040,7 +1064,8 @@ source there even when no release carries it.
 
 `erx:i(Path)` renders a record as a table in the shell; `tools/erx inspect`
 renders the same record on the host. Both escape every string and show
-every value's reporter.
+every value's reporter, and below the table the scope of each stopgap
+reporter it names.
 
 ### The /proc tree
 
@@ -1091,7 +1116,8 @@ until the facet ends.
   `/dev` names its devices by the same encoding
   ([design-system.md](design-system.md#devices)).
 * **Content.** A `status` file has one line per attribute: its name, its
-  value and its reporter, separated by tabs. A value prints through
+  value and its reporter, a stopgap reporter by its label, separated by
+  tabs. A value prints through
   `erx_render`, as in records ([Pipelines](design-shell.md#pipelines)): an
   `ok` value bare and every other value as its status, `[unknown]`,
   `[partial]`, `[unsupported]`, `[timeout 500]` or `[error]`, so a file

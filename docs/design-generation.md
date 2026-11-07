@@ -86,7 +86,10 @@ program another domain's capabilities or facets.
 ## Inspection and diagnostics
 
 Each inspection kind declares its paths and attribute keys, value types,
-units, bounds, permitted reporter categories and visibility requirements.
+units, bounds, permitted reporter categories and visibility requirements,
+and the schema declares the stopgap reporters with the category each
+stands in for, its label and its scope, in the grammar of
+[design-abi.md](design-abi.md#inspection-schema).
 Builders and validators preserve the existing tagged statuses, including
 `partial`, `unknown`, `unsupported`, `timeout` and `error`, without filling
 missing observations with successful defaults. C declarations describe the
