@@ -121,6 +121,31 @@ class SetupDecisionsTest < Minitest::Test
     end
   end
 
+  # The rc oracle step is done only when the corpus test would accept the
+  # build: built from deps.lock's plan9port by the current recipe.
+  def test_rc_oracle_is_valid_only_when_built_from_the_pin_by_the_current_recipe
+    Dir.mktmpdir('erx-setup-') do |temporary|
+      root = File.realpath(temporary)
+      FileUtils.copy_file(File.expand_path('../../deps.lock', __dir__), File.join(root, 'deps.lock'))
+      setup = Erx::Setup.new(root: root)
+      refute setup.send(:rc_oracle_valid?), 'no build'
+      output = File.join(root, Erx::RcOracle::OUTPUT)
+      FileUtils.mkdir_p(output)
+      %w[rc rcmain].each do |name|
+        File.write(File.join(output, name), '')
+        File.chmod(0o755, File.join(output, name))
+      end
+      stamp = { 'source' => Erx::RcOracle.source_record(root: root), 'recipe' => Erx::RcOracle::Build::RECIPE }
+      write_stamp = ->(value) { File.write(File.join(output, Erx::RcOracle::STAMP), JSON.generate(value)) }
+      write_stamp.call(stamp.merge('recipe' => '0' * 64))
+      refute setup.send(:rc_oracle_valid?), 'another recipe'
+      write_stamp.call(stamp.merge('source' => stamp.fetch('source').merge('sha256' => '0' * 64)))
+      refute setup.send(:rc_oracle_valid?), 'another pin'
+      write_stamp.call(stamp)
+      assert setup.send(:rc_oracle_valid?)
+    end
+  end
+
   def test_leftovers_cleans_only_an_oracle_directory_without_a_build_record
     with_tree do |root, runner, _sample, _sha|
       setup = setup_for(root, runner)

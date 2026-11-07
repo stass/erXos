@@ -7,19 +7,20 @@ require_relative 'error'
 require_relative 'runner'
 require_relative 'dependencies'
 require_relative 'json_input'
-require_relative 'rc_oracle'
 require_relative 'bounded_file'
+require_relative 'rc_oracle'
 
 module Erx
   # Prepares a fresh checkout or worktree so `make check` can run: the sources
-  # the gates build from, the stock OTP oracle, and the native runtime. A step
+  # the gates build from, the stock OTP oracle, the native runtime and the
+  # command shell's rc oracle, which its corpus test runs. A step
   # whose output is already present and valid is skipped.
   #
   # The decision of what to run (Setup.plan) is a pure function of what exists;
   # Setup#call gathers that and performs the steps in order.
   class Setup
-    # Sources the gates need (libc-test is for the native libc canary suite, plan9port for the command shell's rc
-    # oracle, which `make check` compares the shell against). tla-tools is left out on purpose: only
+    # Sources the gates need (libc-test is for the native libc canary suite,
+    # plan9port for the rc oracle). tla-tools is left out on purpose: only
     # `make check-tla` uses it, and its pin is a separate matter. The OCI
     # oracle image is left out because the native oracle does not use it.
     SOURCE_IDS = %w[otp musl arm-registers libc-test plan9port].freeze
@@ -87,8 +88,18 @@ module Erx
       when 'oracle-jit' then File.file?(File.join(@root, 'build/oracle/jit/build.json'))
       when 'oracle-emu' then File.file?(File.join(@root, 'build/oracle/emu/build.json'))
       when 'runtime' then File.file?(File.join(@root, 'build/runtime/hosted/release/system.pack'))
-      when 'rc-oracle' then File.file?(File.join(@root, RcOracle::OUTPUT, 'rc'))
+      when 'rc-oracle' then rc_oracle_valid?
       end
+    end
+
+    # Built from the pinned plan9port by the current recipe, as the corpus test
+    # requires. Any refusal only means the step runs: `build rc-oracle` ends
+    # with the same RcOracle.locate, so an error that persists fails the step.
+    def rc_oracle_valid?
+      RcOracle.locate(root: @root)
+      true
+    rescue Error
+      false
     end
 
     def source_valid?(id)

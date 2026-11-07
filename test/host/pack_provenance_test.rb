@@ -438,6 +438,16 @@ class PackProvenanceTest < Minitest::Test
     end
   end
 
+  # stdlib's edlin_expand_SUITE_data holds visible<U+1F600>_file: a UTF-8 path
+  # label goes into the same notice as binary notice bytes.
+  def test_notices_join_a_non_ascii_path_with_binary_notice_bytes
+    record = { 'path' => "data/visible\u{1F600}_file", 'license' => 'MIT', 'evidence' => 'file SPDX',
+               'notice' => "\xC2\xA9 Example".b }
+    text = @resolver.notices([record])
+    assert_includes text, "data/visible\u{1F600}_file".b
+    assert_includes text, "\xC2\xA9 Example".b
+  end
+
   def test_notice_budget_is_checked_before_assembly
     records = resolve
     assert_raises(Erx::Error) { @resolver.notices(records, budget: 8) }

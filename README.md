@@ -308,9 +308,9 @@ ERX_SOURCE_CACHE=/path/to/other/checkout/build/third_party make setup
 ```
 
 `make setup` (`tools/erx setup --jobs N`) runs, in order: the pinned
-`otp`, `musl` and `arm-registers` sources, the JIT oracle
-(`make oracle-bootstrap`), the `emu` oracle, and
-`tools/erx build runtime`. A step whose output is already valid is
+`otp`, `musl`, `arm-registers`, `libc-test` and `plan9port` sources, the
+JIT oracle (`make oracle-bootstrap`), the `emu` oracle,
+`tools/erx build runtime` and `tools/erx build rc-oracle`. A step whose output is already valid is
 skipped, so a second run does nothing. Each build runs under a deadline
 with its own log in `build/logs/`.
 

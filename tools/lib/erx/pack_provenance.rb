@@ -76,7 +76,8 @@ module Erx
         parts << "\nEvidence: " << record.fetch('evidence') << "\n" << record.fetch('notice') << "\n\n"
       end
       raise Error, 'image notices exceed host budget' if parts.sum(&:bytesize) > budget
-      parts.join.b.freeze
+      # Path labels are UTF-8 and notice bytes binary: join them as bytes.
+      parts.map(&:b).join.freeze
     end
 
     # Make dependency syntax has escaped whitespace and continued lines. It is
@@ -424,6 +425,10 @@ module Erx
         end
         label = public_path
       end
+      unless label.is_a?(String) && !label.start_with?('/') && label.valid_encoding? &&
+             !label.match?(/[\x00-\x1f\x7f]/)
+        raise Error, 'invalid public provenance label'
+      end
       if item
         profile_path = File.join(@root, 'config/provenance/import-notices.json')
         references = if @catalog.include_path?(profile_path)
@@ -432,15 +437,11 @@ module Erx
                      else
                        []
                      end
-        raise Error, 'selected import grant has no checked notice document' if references.empty? && additions.empty?
+        raise Error, "selected import grant of #{label} (#{license}) has no checked notice document" if references.empty? && additions.empty?
         references.each do |reference|
           parts << verified_read(reference, maximum: @notice_limit)
           document_references << notice_reference(reference)
         end
-      end
-      unless label.is_a?(String) && !label.start_with?('/') && label.valid_encoding? &&
-             !label.match?(/[\x00-\x1f\x7f]/)
-        raise Error, 'invalid public provenance label'
       end
       notice = retain_notice(parts + additions)
       records[path] = { 'path' => label.freeze, 'sha256' => hash.freeze,
@@ -533,7 +534,7 @@ module Erx
       return @notice_documents.fetch(digest) if @notice_documents.key?(digest)
       raise Error, 'provenance notices exceed host budget' if size > @notice_limit - @notice_bytes
       @notice_bytes += size
-      @notice_documents[digest] = parts.join.b.freeze
+      @notice_documents[digest] = parts.map(&:b).join.freeze
     end
 
     def exact_keys(value, fields)
