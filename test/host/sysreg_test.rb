@@ -4,43 +4,81 @@
 
 require 'minitest/autorun'
 require 'rbconfig'
+require 'tmpdir'
+require 'fileutils'
 require_relative '../../tools/lib/erx/sysreg'
+require_relative '../../tools/lib/erx/runner'
 require_relative '../fixtures/sysreg_fixture'
 
 class SysregTest < Minitest::Test
-  def test_extractor_drift_includes_missing_modified_and_orphaned_output
-    repository = File.expand_path('../..', __dir__)
-    Dir.mktmpdir('erx-sysreg-drift-') do |root|
+  REPOSITORY = File.expand_path('../..', __dir__)
+
+  # A tree holding a policy-only specification and a synthetic Registers.json,
+  # so refresh and verify run without Arm's archive.
+  def with_synthetic_tree
+    Dir.mktmpdir('erx-sysreg-refresh-') do |root|
       FileUtils.mkdir_p(File.join(root, 'hw/sysreg'))
       FileUtils.mkdir_p(File.join(root, 'build/third_party/arm-registers'))
       bytes = JSON.generate([SysregFixture.record])
-      File.binwrite(File.join(root, 'build/third_party/arm-registers/Registers.json'), bytes)
-      File.binwrite(File.join(root, 'hw/sysreg/aarch64-policy.json'), JSON.generate(SysregFixture.policy(bytes)))
+      File.binwrite(File.join(root, Erx::Sysreg::SOURCE), bytes)
+      File.binwrite(File.join(root, Erx::Sysreg::SPECIFICATION), JSON.generate(SysregFixture.specification(bytes)))
+      yield root
+    end
+  end
+
+  def test_refresh_fills_the_facts_and_verify_catches_an_edit
+    with_synthetic_tree do |root|
+      assert_raises(Erx::Error) { Erx::Sysreg.verify(root: root) }
+      assert Erx::Sysreg.refresh(root: root)
+      assert Erx::Sysreg.verify(root: root)
+      refute Erx::Sysreg.refresh(root: root)
+      register = JSON.parse(File.binread(File.join(root, Erx::Sysreg::SPECIFICATION))).fetch('registers').first
+      assert_equal Erx::Sysreg::POLICY_KEYS + Erx::Sysreg::FACT_KEYS, register.keys
+      File.open(File.join(root, Erx::Sysreg::SPECIFICATION), 'ab') { |file| file.write(' ') }
+      assert_raises(Erx::Error) { Erx::Sysreg.verify(root: root) }
+      assert Erx::Sysreg.refresh(root: root)
+      assert Erx::Sysreg.verify(root: root)
+      assert_equal %w[aarch64.json], Dir.children(File.join(root, 'hw/sysreg'))
+    end
+  end
+
+  def test_refresh_without_the_archive_names_the_fetch
+    with_synthetic_tree do |root|
+      File.unlink(File.join(root, Erx::Sysreg::SOURCE))
+      before = File.binread(File.join(root, Erx::Sysreg::SPECIFICATION))
+      error = assert_raises(Erx::Error) { Erx::Sysreg.refresh(root: root) }
+      assert_includes error.message, 'tools/erx fetch --source arm-registers'
+      assert_equal before, File.binread(File.join(root, Erx::Sysreg::SPECIFICATION))
+    end
+  end
+
+  def test_symlinked_specification_is_refused
+    with_synthetic_tree do |root|
+      target = File.join(root, 'elsewhere.json')
+      File.rename(File.join(root, Erx::Sysreg::SPECIFICATION), target)
+      File.symlink(target, File.join(root, Erx::Sysreg::SPECIFICATION))
+      assert_raises(Erx::Error) { Erx::Sysreg.refresh(root: root) }
+    end
+  end
+
+  def test_cli_verifies_and_refreshes_a_given_tree
+    with_synthetic_tree do |root|
       runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
-      command = [RbConfig.ruby, File.join(repository, 'tools/sysreg_extract.rb'), '--root', root]
-      assert_raises(Erx::CommandError) { runner.run(command + ['--check'], name: 'missing-sysreg', deadline: 30) }
-      runner.run(command, name: 'generate-sysreg', deadline: 30)
-      runner.run(command + ['--check'], name: 'check-sysreg', deadline: 30)
-      File.open(File.join(root, 'hw/sysreg/aarch64.json'), 'ab') { |file| file.write(' ') }
-      assert_raises(Erx::CommandError) { runner.run(command + ['--check'], name: 'modified-sysreg', deadline: 30) }
-      runner.run(command, name: 'regenerate-sysreg', deadline: 30)
-      File.binwrite(File.join(root, 'hw/sysreg/orphan.json'), '{}')
-      assert_raises(Erx::CommandError) { runner.run(command + ['--check'], name: 'orphan-sysreg', deadline: 30) }
+      command = [RbConfig.ruby, File.join(REPOSITORY, 'tools/erx'), 'sysreg', 'refresh', '--root', root]
+      assert_raises(Erx::CommandError) { runner.run(command + ['--verify'], name: 'stale-sysreg', deadline: 60) }
+      runner.run(command, name: 'refresh-sysreg', deadline: 60)
+      runner.run(command + ['--verify'], name: 'verify-sysreg', deadline: 60)
     end
   end
 
   def test_nonregular_source_is_rejected_without_waiting_for_a_writer
-    repository = File.expand_path('../..', __dir__)
-    Dir.mktmpdir('erx-sysreg-fifo-') do |root|
-      FileUtils.mkdir_p(File.join(root, 'hw/sysreg'))
-      FileUtils.mkdir_p(File.join(root, 'build/third_party/arm-registers'))
-      bytes = JSON.generate([SysregFixture.record])
-      File.binwrite(File.join(root, 'hw/sysreg/aarch64-policy.json'), JSON.generate(SysregFixture.policy(bytes)))
+    with_synthetic_tree do |root|
+      File.unlink(File.join(root, Erx::Sysreg::SOURCE))
       runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
-      runner.run(['mkfifo', File.join(root, 'build/third_party/arm-registers/Registers.json')], name: 'fifo-source', deadline: 5)
+      runner.run(['mkfifo', File.join(root, Erx::Sysreg::SOURCE)], name: 'fifo-source', deadline: 5)
       error = assert_raises(Erx::CommandError) do
-        runner.run([RbConfig.ruby, File.join(repository, 'tools/sysreg_extract.rb'), '--root', root],
-                   name: 'nonregular-sysreg', deadline: 1)
+        runner.run([RbConfig.ruby, File.join(REPOSITORY, 'tools/erx'), 'sysreg', 'refresh', '--root', root],
+                   name: 'nonregular-sysreg', deadline: 30)
       end
       assert_equal 'failed', error.result.fetch('state')
       assert_equal 1, error.result.fetch('exit_status')
@@ -49,7 +87,7 @@ class SysregTest < Minitest::Test
 
   def extract(records)
     bytes = JSON.generate(records)
-    declaration = Erx::Sysreg.policy(JSON.generate(SysregFixture.policy(bytes)))
+    declaration = Erx::Sysreg.selection(JSON.generate(SysregFixture.specification(bytes)))
     Erx::Sysreg.extract(bytes, declaration: declaration)
   end
 
@@ -89,21 +127,44 @@ class SysregTest < Minitest::Test
 
   def test_source_pin_and_access_policy_are_enforced
     bytes = JSON.generate([SysregFixture.record])
-    declaration = Erx::Sysreg.policy(JSON.generate(SysregFixture.policy(bytes)))
+    declaration = Erx::Sysreg.selection(JSON.generate(SysregFixture.specification(bytes)))
     assert_raises(Erx::Error) { Erx::Sysreg.extract(bytes + ' ', declaration: declaration) }
-    bad_policy = SysregFixture.policy(bytes)
+    bad_policy = SysregFixture.specification(bytes)
     bad_policy.fetch('registers').first['write'] = true
-    assert_raises(Erx::Error) { Erx::Sysreg.policy(JSON.generate(bad_policy)) }
+    assert_raises(Erx::Error) { Erx::Sysreg.selection(JSON.generate(bad_policy)) }
   end
 
-  def test_pinned_arm_extraction_matches_checked_data_and_counter_facts
-    root = File.expand_path('../..', __dir__)
-    bytes = Erx::Sysreg.extract_file(source: File.join(root, 'build/third_party/arm-registers/Registers.json'),
-                                    policy_path: File.join(root, 'hw/sysreg/aarch64-policy.json'))
-    assert_equal File.binread(File.join(root, 'hw/sysreg/aarch64.json')), bytes
+  def test_selection_takes_policy_alone_or_policy_with_every_fact
+    bytes = JSON.generate([SysregFixture.record])
+    full = JSON.parse(JSON.generate(extract([SysregFixture.record])))
+    assert_equal SysregFixture.specification(bytes).fetch('registers'),
+                 Erx::Sysreg.selection(JSON.generate(full)).fetch('registers')
+    partial = JSON.parse(JSON.generate(full))
+    partial.fetch('registers').first.delete('fields')
+    assert_raises(Erx::Error) { Erx::Sysreg.selection(JSON.generate(partial)) }
+    extra = JSON.parse(JSON.generate(full))
+    extra.fetch('registers').first['note'] = 'x'
+    assert_raises(Erx::Error) { Erx::Sysreg.selection(JSON.generate(extra)) }
+  end
+
+  # The checked-in specification is an input every build can read without
+  # Arm's archive; these are the counter facts the kernel relies on.
+  def test_checked_in_specification_parses_with_counter_facts
+    bytes = File.binread(File.join(REPOSITORY, Erx::Sysreg::SPECIFICATION))
+    assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0],
+                 Erx::Sysreg.selection(bytes).fetch('registers').map { |register| register.fetch('name') }
     rows = JSON.parse(bytes).fetch('registers').to_h { |register| [register.fetch('name'), register] }
     assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 2 }, rows.fetch('CNTVCT_EL0').fetch('encoding'))
     assert_equal [{ 'name' => 'VirtualCount', 'offset' => 0, 'width' => 64 }], rows.fetch('CNTVCT_EL0').fetch('fields')
     assert_equal({ 'name' => 'ClockFreq', 'offset' => 0, 'width' => 32 }, rows.fetch('CNTFRQ_EL0').fetch('fields').first)
+  end
+
+  # Needs Arm's archive (tools/erx fetch --source arm-registers), which neither
+  # setup nor `make check` downloads.
+  def test_checked_in_specification_matches_the_pinned_arm_source
+    unless File.file?(File.join(REPOSITORY, Erx::Sysreg::SOURCE))
+      skip "Arm's archive is not fetched; run tools/erx fetch --source arm-registers to verify #{Erx::Sysreg::SPECIFICATION}"
+    end
+    assert Erx::Sysreg.verify(root: REPOSITORY)
   end
 end

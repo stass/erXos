@@ -319,9 +319,10 @@ It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/third_party`; the archives in the `downloads` directory beside it
 are copied only after their SHA-256 matches `deps.lock`. Without it, the
 sources must already be there from `make fetch`. It does not fetch
-`tla-tools`, the oracle image or the Linux guest's kernel and busybox
-(`Erx::Setup::SKIPPED_SOURCES`): only `make check-tla` uses the first,
-the native oracle does not use the second, and only
+`arm-registers`, `tla-tools`, the oracle image or the Linux guest's
+kernel and busybox (`Erx::Setup::SKIPPED_SOURCES`): only
+`tools/erx sysreg refresh` reads the first, only `make check-tla` uses
+the second, the native oracle does not use the third, and only
 `make check-erofs-oracle` boots the Linux guest. If `ERX_CLANG` or `ERX_LLD`
 is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
 `/opt/homebrew/bin/ld.lld`; export them yourself for later commands.

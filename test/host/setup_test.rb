@@ -38,7 +38,6 @@ class SetupTest < Minitest::Test
     assert_equal PINNED.sort, (fetched + Erx::Setup::SKIPPED_SOURCES.keys).sort
     assert_empty fetched & Erx::Setup::SKIPPED_SOURCES.keys
     Erx::Setup::SKIPPED_SOURCES.each_value { |reason| refute_empty reason.strip }
-    assert_includes Erx::Setup::SKIPPED_SOURCES.keys, 'tla-tools'
   end
 
   # Setup obtains a source offline from a downloaded archive, which an OCI
@@ -46,6 +45,15 @@ class SetupTest < Minitest::Test
   def test_every_fetched_source_is_of_a_kind_setup_obtains_offline
     fetched = LOCK.reject { |source| Erx::Setup::SKIPPED_SOURCES.key?(source.fetch('id')) }
     assert_empty fetched.map { |source| source.fetch('kind') } - %w[tar git file]
+  end
+
+  # Only tools/erx sysreg refresh reads Arm's archive; make check never does.
+  def test_arm_registers_is_not_a_step
+    refute(NAMES.any? { |name| name.include?('arm-registers') })
+  end
+
+  def test_tla_tools_is_not_a_step
+    refute(NAMES.any? { |name| name.include?('tla') })
   end
 
   def test_archive_directory_is_the_sibling_downloads_of_the_cache

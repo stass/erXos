@@ -11,7 +11,7 @@ DOCKER_CONTEXT ?=
 .DEFAULT_GOAL := all
 
 .PHONY: all build run check check-sources status setup fetch check-tla check-rc-oracle check-hw generate-hw check-arch-terms
-.PHONY: check-sysreg generate-sysreg oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
+.PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: check-generated check-abi generate-abi check-terminal generate-terminal
 .PHONY: check-reproducible check-fuzz check-erofs-oracle check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
@@ -136,12 +136,6 @@ check-arch-terms:
 
 check-stack-proof:
 	$(RUBY) tools/erx check-stack-proof
-
-check-sysreg:
-	$(RUBY) tools/sysreg_extract.rb --check
-
-generate-sysreg:
-	$(RUBY) tools/sysreg_extract.rb
 
 oracle-bootstrap:
 	$(RUBY) tools/erx oracle build --backend native --flavour jit --jobs $(JOBS)

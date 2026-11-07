@@ -23,7 +23,9 @@ module SysregFixture
                                           'op2' => { 'value' => "'010'" } } }] }] }
   end
 
-  def policy(bytes)
+  # A specification that carries each register's policy and no Arm facts yet,
+  # as one does before its first refresh.
+  def specification(bytes)
     { 'version' => 1, 'architecture' => 'aarch64', 'source_sha256' => Digest::SHA256.hexdigest(bytes),
       'registers' => [{ 'name' => 'COUNTER_EL0', 'read' => true, 'write' => false,
                        'read_side_effect' => 'none', 'read_barrier' => 'isb' }] }

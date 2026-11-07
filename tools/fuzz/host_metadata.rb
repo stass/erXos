@@ -15,7 +15,7 @@ require_relative '../../test/fixtures/sysreg_fixture'
 
 module Erx
   module HostMetadataFuzz
-    TARGETS = %w[tlc roster origin attribution dependencies svd toolchain arch_terms sysreg_policy sysreg_source].freeze
+    TARGETS = %w[tlc roster origin attribution dependencies svd toolchain arch_terms sysreg_specification sysreg_source].freeze
     module_function
 
     def mutate(bytes, random:)
@@ -50,7 +50,7 @@ module Erx
         'dependencies' => JSON.generate('version' => 1, 'sources' => [source]),
         'svd' => File.binread(File.expand_path('../../hw/svd/pl011/pl011.svd', __dir__)),
         'toolchain' => JSON.generate(toolchain), 'arch_terms' => "word EL1\nprefix ICC_\n",
-        'sysreg_policy' => JSON.generate(SysregFixture.policy('fixture')),
+        'sysreg_specification' => File.binread(File.expand_path('../../hw/sysreg/aarch64.json', __dir__)),
         'sysreg_source' => JSON.generate([SysregFixture.record]) }.freeze
     end
 
@@ -79,10 +79,10 @@ module Erx
         ToolchainProvenance.registry(profile: File.join(root, 'profile.json'), installation: root)
       when 'arch_terms'
         ArchTerms.parse(bytes)
-      when 'sysreg_policy'
-        Sysreg.policy(bytes)
+      when 'sysreg_specification'
+        Sysreg.selection(bytes)
       when 'sysreg_source'
-        declaration = Sysreg.policy(JSON.generate(SysregFixture.policy(bytes)))
+        declaration = Sysreg.selection(JSON.generate(SysregFixture.specification(bytes)))
         Sysreg.extract(bytes, declaration: declaration)
       end
     rescue Error

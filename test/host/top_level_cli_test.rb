@@ -109,9 +109,9 @@ class TopLevelCliTest < Minitest::Test
       status, output = run_cli('check', **collaborators)
       assert_equal 0, status, output
     end
-    generated = commands.select { |_argv, options| options.fetch(:name).start_with?('check-gen-', 'check-sysreg') }
+    generated = commands.select { |_argv, options| options.fetch(:name).start_with?('check-gen-') }
     scripts = generated.map { |argv, _options| File.basename(argv[1]) }.sort
-    assert_equal %w[gen_abi.rb gen_hw.rb gen_terminal.rb sysreg_extract.rb], scripts
+    assert_equal %w[gen_abi.rb gen_hw.rb gen_terminal.rb], scripts
     assert generated.all? { |argv, _options| argv.last == '--check' }
     proof = commands.find { |_argv, options| options.fetch(:name) == 'stack-proof' }
     assert proof, 'check runs the stack proof'
@@ -127,6 +127,21 @@ class TopLevelCliTest < Minitest::Test
     end
     assert integration.all? { |_argv, options| options.fetch(:env).fetch('ERX_ERL') == '/verified/erl' }
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
+  end
+
+  # Arm's archive is read only by `tools/erx sysreg refresh`, which no gate
+  # runs, so `make check` works in a tree that never fetched arm-registers.
+  # sysreg_test.rb, a host test, skips its one case that needs the archive.
+  def test_check_needs_no_arm_registers_download
+    commands = []
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check', **collaborators)
+      assert_equal 0, status, output
+    end
+    readers = commands.reject { |argv, _options| argv.last.end_with?('_test.rb') }.select do |argv, options|
+      (argv + [options.fetch(:name)]).any? { |word| word.to_s.match?(/sysreg|arm-registers|Registers\.json/) }
+    end
+    assert_empty readers
   end
 
   def test_check_stack_proof_runs_the_proof_with_the_verified_toolchain

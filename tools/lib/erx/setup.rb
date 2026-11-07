@@ -18,10 +18,11 @@ module Erx
   # Setup#call gathers that and performs the steps in order.
   class Setup
     # Setup fetches every source deps.lock pins except these, which only a
-    # gate of their own uses; each says which. A tar, git or file source
+    # gate or tool of their own uses; each says which. A tar, git or file source
     # deps.lock gains is fetched by setup without an edit here; setup cannot
     # obtain an OCI image offline, so one must be named here.
     SKIPPED_SOURCES = {
+      'arm-registers' => 'only `tools/erx sysreg refresh` reads it',
       'tla-tools' => 'only `make check-tla` runs TLC',
       'oracle-toolchain' => 'the OCI oracle image, which the native oracle does not use',
       'linux-guest-kernel' => 'only `make check-erofs-oracle` boots the Linux guest',

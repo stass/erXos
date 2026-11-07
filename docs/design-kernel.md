@@ -7878,17 +7878,21 @@ checked-in file per architecture holding every system register erXos code
 reads or writes: its encoding, width and fields as the architecture's
 machine-readable specification gives them, and erXos's attributes beside
 them: whether a read has a side effect, such as acknowledging an
-interrupt, and the synchronisation a write needs. A per-architecture
-extractor makes the file from the architecture's published data; the
-binding names AArch64's source, its version and its licence
+interrupt, and the synchronisation a write needs. The file is a
+checked-in input, as an SVD file is. A per-architecture refresh command
+(`tools/erx sysreg refresh` for AArch64) extracts the facts again from the
+architecture's published data, which is fetched at a pinned hash and read
+by nothing else; the binding names AArch64's source, its version and its
+licence
 ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)).
 `tools/gen_hw.rb` reads only the
 checked-in file and emits an inline accessor per register, field functions
 as for devices, and no read-modify-write function for a register whose
 reads have a side effect. These accessors and the named barrier and
 maintenance helpers are the only places system-register instructions
-appear. `make check-sysreg` extracts again and compares, so a hand-edited
-fact fails it.
+appear. `tools/erx sysreg refresh --verify` extracts again and compares,
+on demand rather than in `make check`, so a hand-edited fact fails it
+without every build downloading the published data.
 
 Both sources bind erXos's kernel and the C17 code erXos adds to the
 stopgap; Fiasco's inherited C++ keeps its own register code.
@@ -8533,7 +8537,7 @@ item, its files exist and the conformance suite passes on it.
 | Hardware register sources | a machine-readable specification of the system registers | [Hardware register sources](#hardware-register-sources) |
 
 A port adds `kernel/arch/<arch>/`, `liberx`'s trap stubs, `abi/arch/<arch>.txt`,
-`hw/sysreg/<arch>.json` with its extractor, `hw/arch_terms/<arch>.txt`,
+`hw/sysreg/<arch>.json` with its refresh command, `hw/arch_terms/<arch>.txt`,
 and its binding document; nothing above the architecture layer changes.
 
 ## Dependencies
@@ -8543,7 +8547,7 @@ and its binding document; nothing above the architecture layer changes.
 | Fiasco kernel `50bbe8a9`, with `bootstrap` `a4f4ad18`, `sigma0` and `l4sys` from `l4re-core` `e2e2d5af`, `libfdt` `5756062b` and `mk` `22cc26e5` | the stopgap kernel behind this interface | MIT (each package's `LICENSE.spdx`), with the GPL and LGPL parts listed above excluded, except the GPL-2.0 `kobject_rpc.h` and `jdb_object.cpp`, which the kernel needs, so no stopgap build is distributed outside the project; capstone in the kernel debugger is BSD-3-Clause-Attribution; the link closure of `bootstrap` and `sigma0` recorded at import | stopgap, replaced by erXos's kernel |
 | libfdt | device-tree parsing in erXos's kernel | BSD-2-Clause (dual GPL-2.0-or-later) | permanent |
 | BLAKE3's official C implementation | the boot image's index and file hashes, in its portable form in the kernel and `bootstrap` ([The boot image](#the-boot-image)) | CC0-1.0, Apache-2.0 or Apache-2.0 WITH LLVM-exception, used under Apache-2.0 WITH LLVM-exception | permanent |
-| Arm's machine-readable A-profile architecture specification | the source of the AArch64 port's `hw/sysreg/aarch64.json` ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)) | BSD-3-Clause | permanent, as a pinned generator input |
+| Arm's machine-readable A-profile architecture specification | the source of the AArch64 port's `hw/sysreg/aarch64.json` ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)) | BSD-3-Clause | permanent, as a pinned input of `tools/erx sysreg refresh`, which alone reads it |
 
 erXos's kernel carries code derived from Fiasco under Fiasco's MIT notice,
 as [The current implementation](#the-current-implementation-the-modified-fiasco)

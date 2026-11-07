@@ -636,9 +636,13 @@ generators produce every header, accessor and table from them:
   read has side effects gets no read-modify-write helper, and a write
   sequence the hardware requires is emitted as one function.
 * **`hw/sysreg/<arch>.json`** holds the system registers erXos uses on
-  each architecture, extracted by a Ruby tool from a pinned release of the
-  architecture's machine-readable specification; the file keeps its
-  publisher's notice, and the binding names the source and its licence
+  each architecture: erXos's access policy for each, and the facts a
+  pinned release of the architecture's machine-readable specification
+  gives for it. It is a checked-in input, as an SVD file is. An explicit
+  refresh command, never the build or `make check`, extracts the facts
+  again from the fetched release; the file keeps its publisher's notice,
+  its `ORIGIN.md` records the release, and the binding names the source
+  and its licence
   ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)).
 
 [Generated interfaces and representations](design-generation.md) defines
@@ -1549,7 +1553,7 @@ absence as a known difference.
 | Inspection records | schema 1 | [design-live.md](design-live.md#inspection-records) | the host tool's decoder |
 | Escape rules (`abi/terminal.txt`) | generated per build, checked by build identifier | [design-live.md](design-live.md#escape-rules) | generated escapers |
 | Register descriptions (`hw/svd/**/*.svd`, CMSIS-SVD) | the SVD schema's | [One source](#one-source-for-the-abi-and-the-hardware) | the generator and the drift check |
-| System-register specifications (`hw/sysreg/<arch>.json`) | the release of the architecture's specification each was extracted from | [One source](#one-source-for-the-abi-and-the-hardware) | the generator and the drift check |
+| System-register specifications (`hw/sysreg/<arch>.json`) | the release of the architecture's specification each was extracted from | [One source](#one-source-for-the-abi-and-the-hardware) | its reader; `tools/erx sysreg refresh --verify` compares it with the release on demand |
 
 ## Repository layout
 
@@ -1849,7 +1853,7 @@ trial request, is in
 | FreeBSD's SHA-256 (`sys/crypto/sha2/sha256c.c`, `sha256.h`) and ChaCha20 (`sys/crypto/chacha20/chacha.c`, `chacha.h`) at `release/15.1.0-p6` (`95719d8a`) | the entropy generator's ChaCha20, and the C SHA-256 of the per-byte primitives | SHA-256 BSD-2-Clause (Colin Percival); ChaCha20 public domain (D. J. Bernstein, via OpenBSD); erXos's changes BSD-2-Clause | permanent | imported into `kernel/crypto/sha2/` and `kernel/crypto/chacha20/` as erXos's code, each directory with an origin file recording each file's SHA-256 |
 | `drivers-frst` `6459d70997da1a2ad97775c8772b4a41284b0a9e`, PL011 UART subset | `bootstrap`'s console during the stopgap boot | MIT, from its package `LICENSE.spdx` and each retained file's notice | **stopgap**, replaced with the stopgap boot path | only the PL011 source and its required headers and build support are imported into `fiasco/`, with their own origin inventory; other drivers are excluded |
 | Raspberry Pi Pico SDK 1.5.1, `src/rp2040/hardware_regs/rp2040.svd`, UART0 peripheral only | the PL011's register layout (`hw/svd/pl011/pl011.svd`), from which the generator makes the accessors and `erx_device`'s table | BSD-3-Clause, Copyright (c) 2020 Raspberry Pi (Trading) Ltd., kept in the file | permanent | imported as erXos's code with an origin file that lists the edits; `tools/carve_pl011_svd.rb` makes it from the pinned upstream file |
-| Arm's machine-readable architecture specification (BSD package) | the source of the AArch64 port's `hw/sysreg/aarch64.json` | BSD-3-Clause | permanent, as a pinned generator input | fetched with a pinned SHA-256; only the extracted file is checked in |
+| Arm's machine-readable architecture specification (BSD package) | the source of the facts in the AArch64 port's `hw/sysreg/aarch64.json` | BSD-3-Clause | permanent, as a pinned refresh input | fetched with a pinned SHA-256 and read only by `tools/erx sysreg refresh`; only the extracted file is checked in, with `hw/sysreg/ORIGIN.md` |
 | LLVM libc++, libc++abi, compiler-rt builtins 23.1.x | BeamAsm's C++ runtime, in the BeamAsm image alone, never in the system domain's; compiler support routines | Apache-2.0 WITH LLVM-exception | permanent | fetched and built out of tree |
 | sDDF (0.7.0) | the model for the split between a driver, which touches registers and rings and parses nothing from clients, and the policy beside it; the oracle for the virtio drivers' behaviour and throughput | BSD-2-Clause | reference: model and oracle, nothing imported. If a board's driver proves hard, one of its drivers may run as a stopgap native shim in a sub-space port, imported as erXos's code with an origin file, a row of the driver table and a `TODO.md` item, and replaced by the Erlang driver behind the same interface; erXos keeps its own lane layout, a producer ring and a consumer reader page, which is stricter than sDDF's shared queue region | read, never fetched into a build |
 | lwIP 2.2.1 | TCP/IP in the network domain, as a NIF of its Erlang release | BSD-3-Clause | **stopgap**, replaced by erXos's own network stack, in Erlang | fetched, or imported as erXos's code if changed |

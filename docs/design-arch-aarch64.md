@@ -847,15 +847,19 @@ access sequences SVD cannot express are declared in erXos's own namespace:
 the redistributor's wake handshake through `GICR_WAKER`, the SMMU's `CR0`
 and `CR0ACK` handshake and waits on the distributor's `RWP`.
 
-**System registers** are described in `hw/sysreg/aarch64.json`, extracted
-by `tools/sysreg_extract.rb` from Arm's open-source machine-readable data
-(`AARCHMRS_OPENSOURCE_A_profile_FAT`, release 2026-09, schema 2.9.6),
-which `make fetch` downloads at a pinned SHA-256; its `Registers.json`
-declares itself "licensed under the BSD 3-clause license", so the
-extracted file keeps Arm's notice and records its origin. A read of
-`ICC_IAR1_EL1` acknowledges an interrupt, an example of a read with a side
-effect that the file records. `make check-sysreg` extracts again and
-compares.
+**System registers** are described in `hw/sysreg/aarch64.json`, a
+checked-in input holding erXos's access policy for each register and the
+facts Arm's open-source machine-readable data
+(`AARCHMRS_OPENSOURCE_A_profile_FAT`, release 2026-09, schema 2.9.6)
+gives for it. `tools/erx sysreg refresh` takes the policy from the file
+and extracts the facts again from that data, which
+`tools/erx fetch --source arm-registers` downloads at a pinned SHA-256
+and which no build or gate reads; `--verify` compares instead of
+rewriting. Its `Registers.json` declares itself "licensed under the BSD
+3-clause license", so the file keeps Arm's notice and
+`hw/sysreg/ORIGIN.md` records its origin. A read of `ICC_IAR1_EL1`
+acknowledges an interrupt, an example of a read with a side effect that
+the file records.
 
 ## Compatibility and migration
 
@@ -951,8 +955,8 @@ which a GICv3 ITS would close on boards that have one.
 * **Memory-ordering litmus tests** of the lanes' ring and reader-page
   protocol, which connections, channels and pipes share, checked with herd7
   under the AArch64 model ([design-domains.md](design-domains.md#connections)).
-* **`make check-sysreg`** and the chokepoint checks above, each with a
-  test that seeds a violation.
+* The chokepoint checks above, each with a test that seeds a violation,
+  and `tools/erx sysreg refresh --verify`, run on demand.
 
 ## Performance
 

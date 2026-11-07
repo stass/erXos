@@ -5,8 +5,23 @@
 require_relative 'hardware'
 
 module Erx
+  # hw/sysreg/aarch64.json is the checked-in system-register specification, an
+  # input like an SVD file. Each register in it is erXos's access policy (the
+  # POLICY_KEYS) followed by the facts Arm's machine-readable specification
+  # gives for it (the FACT_KEYS), and the file names the SHA-256 of the
+  # Registers.json those facts came from.
+  #
+  # Nothing in the build or `make check` reads Arm's archive. Only the explicit
+  # `tools/erx sysreg refresh` does: it takes the policy from the checked-in
+  # file, extracts the facts again from the fetched Registers.json, and either
+  # rewrites the file or, with --verify, compares it (hw/sysreg/ORIGIN.md).
   module Sysreg
+    SPECIFICATION = 'hw/sysreg/aarch64.json'
+    SOURCE = 'build/third_party/arm-registers/Registers.json'
+    MAX_SPECIFICATION_BYTES = 1024 * 1024
     MAX_SOURCE_BYTES = 128 * 1024 * 1024
+    POLICY_KEYS = %w[name read write read_side_effect read_barrier].freeze
+    FACT_KEYS = %w[width encoding fields copyright license source_version].freeze
     ENCODING_WIDTHS = { 'op0' => 2, 'op1' => 3, 'CRn' => 4, 'CRm' => 4, 'op2' => 3 }.freeze
     module_function
 
@@ -16,8 +31,11 @@ module Erx
       end
     end
 
-    def policy(bytes)
-      declaration = JsonInput.parse(bytes, max_bytes: 1024 * 1024, label: 'system-register policy')
+    # The selection a refresh extracts: the specification's identity and each
+    # register's policy, without the facts. A register may carry its policy
+    # alone, which is how a new register is added before its first refresh.
+    def selection(bytes)
+      declaration = JsonInput.parse(bytes, max_bytes: MAX_SPECIFICATION_BYTES, label: 'system-register specification')
       exact_keys(declaration, %w[version architecture source_sha256 registers])
       unless declaration['version'].is_a?(Integer) && declaration['version'] == 1 && declaration['architecture'] == 'aarch64' &&
              declaration['source_sha256'].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(declaration['source_sha256'])
@@ -27,17 +45,20 @@ module Erx
       unless entries.is_a?(Array) && entries.size.between?(1, 4096)
         raise Error, 'system-register selection requires 1..4096 registers'
       end
-      names = entries.map do |entry|
-        exact_keys(entry, %w[name read write read_side_effect read_barrier])
-        name = Hardware.identifier(entry.fetch('name'))
+      policies = entries.map do |entry|
+        unless entry.is_a?(Hash) && [POLICY_KEYS.sort, (POLICY_KEYS + FACT_KEYS).sort].include?(entry.keys.sort)
+          raise Error, 'unexpected system-register declaration shape'
+        end
+        Hardware.identifier(entry.fetch('name'))
         unless entry['read'] == true && entry['write'] == false &&
                entry['read_side_effect'] == 'none' && %w[none isb].include?(entry['read_barrier'])
           raise Error, 'unsupported system-register access sequence'
         end
-        name.downcase
+        entry.slice(*POLICY_KEYS)
       end
+      names = policies.map { |entry| entry.fetch('name').downcase }
       raise Error, 'system-register names collide' unless names.uniq == names
-      immutable_copy(declaration)
+      immutable_copy(declaration.merge('registers' => policies))
     end
 
     # The extractor reads facts, not the package's access pseudocode. erXos's
@@ -175,43 +196,61 @@ module Erx
     end
     private_class_method :immutable_copy
 
-    def extract_file(source:, policy_path:)
-      declaration = policy(BoundedFile.read(policy_path, maximum: 1024 * 1024))
-      bytes = BoundedFile.read(source, maximum: MAX_SOURCE_BYTES)
-      JSON.pretty_generate(extract(bytes, declaration: declaration), ascii_only: true) + "\n"
-    rescue SystemCallError => error
-      raise Error, "cannot extract Arm registers; run make fetch first: #{error.message}"
-    end
-
-    def plan(root:)
+    # The specification as Arm's pinned Registers.json gives it for the
+    # checked-in selection, as bytes, and the checked-in bytes beside it.
+    # Reads only; refuses a symlinked specification or directory.
+    def refreshed(root:)
       root = File.realpath(root)
-      directory = File.join(root, 'hw/sysreg')
-      raise Error, 'system-register output directory must not be a symlink' unless File.realpath(directory) == directory
-      expected = %w[aarch64-policy.json aarch64.json].map { |name| File.join(directory, name) }
-      unless (Dir.glob(File.join(directory, '*.json')) - expected).empty?
-        raise Error, 'orphaned or unsupported system-register declaration/output'
+      path = File.join(root, SPECIFICATION)
+      unless File.realpath(File.dirname(path)) == File.dirname(path) && File.file?(path) && !File.symlink?(path)
+        raise Error, "#{SPECIFICATION} must be a regular file, not a symlink"
       end
-      bytes = extract_file(source: File.join(root, 'build/third_party/arm-registers/Registers.json'),
-                           policy_path: File.join(directory, 'aarch64-policy.json'))
-      { 'hw/sysreg/aarch64.json' => bytes.freeze }.freeze
+      current = BoundedFile.read(path, maximum: MAX_SPECIFICATION_BYTES)
+      declaration = selection(current)
+      source = read_source(File.join(root, SOURCE))
+      [JSON.pretty_generate(extract(source, declaration: declaration), ascii_only: true) + "\n", current]
     rescue SystemCallError => error
-      raise Error, "cannot plan system-register extraction: #{error.message}"
+      raise Error, "cannot read #{SPECIFICATION}: #{error.message}"
     end
 
-    def check_outputs(plan, root:)
-      plan.each do |relative, bytes|
-        path = File.join(root, relative)
-        unless File.file?(path) && !File.symlink?(path) && BoundedFile.read(path, maximum: bytes.bytesize) == bytes
-          raise Error, "system-register extraction drift: #{relative}"
+    def read_source(path)
+      unless File.exist?(path) || File.symlink?(path)
+        raise Error, "Arm's Registers.json is not fetched; run tools/erx fetch --source arm-registers first"
+      end
+      BoundedFile.read(path, maximum: MAX_SOURCE_BYTES)
+    end
+    private_class_method :read_source
+
+    # Compares without writing: true when the checked-in specification is
+    # exactly what a refresh would write.
+    def verify(root:)
+      expected, current = refreshed(root: root)
+      raise Error, "#{SPECIFICATION} differs from Arm's pinned source; run tools/erx sysreg refresh" unless current == expected
+      true
+    end
+
+    # Rewrites the specification from Arm's pinned source through a temporary
+    # file renamed into place, so a failed refresh leaves the old file whole.
+    # Returns whether the bytes changed.
+    def refresh(root:)
+      expected, current = refreshed(root: root)
+      return false if current == expected
+
+      output = File.join(File.realpath(root), SPECIFICATION)
+      temporary = output + ".#{Process.pid}.tmp"
+      created = false
+      begin
+        File.open(temporary, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o644) do |file|
+          created = true
+          file.write(expected)
         end
+        File.rename(temporary, output)
+      ensure
+        File.unlink(temporary) if created && File.file?(temporary) && !File.symlink?(temporary)
       end
       true
     rescue SystemCallError => error
-      raise Error, "cannot check system-register extraction: #{error.message}"
-    end
-
-    def check(root:)
-      check_outputs(plan(root: root), root: File.realpath(root))
+      raise Error, "cannot write #{SPECIFICATION}: #{error.message}"
     end
   end
 end

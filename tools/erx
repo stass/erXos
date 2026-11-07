@@ -23,6 +23,7 @@ require_relative 'lib/erx/qemu_gate'
 require_relative 'lib/erx/checks'
 require_relative 'lib/erx/hardware'
 require_relative 'lib/erx/arch_terms'
+require_relative 'lib/erx/sysreg'
 require_relative 'lib/erx/oracle_container'
 require_relative 'lib/erx/oracle_hosted'
 require_relative 'lib/erx/oracle_qemu'
@@ -69,6 +70,8 @@ module Erx
         check_sources(command_arguments, **collaborators)
       when 'check-stack-proof'
         check_stack_proof(command_arguments, **collaborators)
+      when 'sysreg'
+        sysreg(command_arguments)
       when 'check-arch-terms'
         check_arch_terms(command_arguments, **collaborators)
       when 'build'
@@ -147,13 +150,13 @@ module Erx
     def self.check_generated(arguments, runner_class: Runner)
       no_arguments(arguments)
       generated(runner: runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
-      Terminal.puts('ABI, hardware, system-register and terminal artifacts match')
+      Terminal.puts('ABI, hardware and terminal artifacts match')
       0
     end
 
     def self.generated(runner:)
       { 'gen_abi.rb' => 60, 'gen_hw.rb' => 60,
-        'sysreg_extract.rb' => 120, 'gen_terminal.rb' => 120 }.each do |script, deadline|
+        'gen_terminal.rb' => 120 }.each do |script, deadline|
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools', script), '--check'],
                    name: "check-#{script.delete_suffix('.rb').tr('_', '-')}", deadline: deadline, chdir: ROOT)
       end
@@ -426,6 +429,31 @@ module Erx
       0
     end
 
+    # tools/erx sysreg refresh [--verify] [--root PATH]: the one reader of Arm's
+    # fetched archive. It rewrites hw/sysreg/aarch64.json from the pinned
+    # Registers.json, or with --verify only compares; no gate runs it.
+    def self.sysreg(input_arguments)
+      arguments = input_arguments.dup
+      verify = false
+      root = ROOT
+      parser = OptionParser.new do |options|
+        options.banner = 'usage: tools/erx sysreg refresh [--verify] [--root PATH]'
+        options.on('--verify', "Compare with Arm's pinned source without writing") { verify = true }
+        options.on('--root PATH', 'Tree to refresh (default: this checkout)') { |path| root = File.expand_path(path) }
+      end
+      parser.parse!(arguments)
+      raise OptionParser::InvalidArgument, parser.banner unless arguments == ['refresh']
+
+      if verify
+        Sysreg.verify(root: root)
+        Terminal.puts("#{Sysreg::SPECIFICATION} matches Arm's pinned source")
+      else
+        changed = Sysreg.refresh(root: root)
+        Terminal.puts("#{Sysreg::SPECIFICATION} #{changed ? 'rewritten' : 'unchanged'} from Arm's pinned source")
+      end
+      0
+    end
+
     # Runs musl's libc-test in tasks on one accelerator and CPU count: tools/erx check-libc-test ACCEL CPUS.
     # It fails on any result that differs from its line in test/conformance/libc-test-verdicts.txt,
     # and on a boot that leaked the pool or never said whether it did.
@@ -487,7 +515,7 @@ module Erx
     def self.word_list(words) = [words[0..-2].join(', '), words.last].reject(&:empty?).join(' and ')
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | gates | pack [--medium] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] | gates | pack [--medium] | status | setup [--jobs N]')
       0
     end
 
