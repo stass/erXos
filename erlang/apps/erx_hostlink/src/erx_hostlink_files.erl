@@ -14,10 +14,11 @@ any failure, makes each grant clunk them: a replaced session leaves nothing
 open on the machine. It ends too when `erx_hostlink` does.
 
 It takes the files stream's bodies as `{files_in, Link, Bytes}`, draws a
-fresh alias and a fid for each, and hands the core's host messages back as
-`{files_out, Bridge, Bytes}`. A grant's reply arrives at the alias of its
-request; anything else it receives is dropped. Each alias is made with
-`erlang:alias([reply])`, so it ends with its one reply.
+fid for each, and hands the core's host messages back as
+`{files_out, Bridge, Bytes}`. The core draws an alias for each message it
+sends a grant from `erlang:alias([reply])`, so each alias ends with its one
+reply, and a grant's reply arrives at the alias of its request or flush;
+anything else the bridge receives is dropped.
 
 Which trees the host may reach is the host-link configuration's:
 `files_trees` in `erx_hostlink`'s environment, a list of atoms, when it sets
@@ -35,7 +36,7 @@ grant mounted with that tree name and no root below it (`tree_grant/3`).
 -include("generated/erx_abi.hrl").
 
 %% The bridge's heap: its tables are bounded by the pool, 256 fids, and 64
-%% tags, and a message it holds by the stream's msize.
+%% slots, and a message it holds by the stream's msize.
 -define(MAX_HEAP_WORDS, 1048576).
 
 -doc """
@@ -61,14 +62,13 @@ init(Link, Options) ->
                     fun(Aname) -> tree_grant(Aname, Names, prim_file:erx_table()) end
             end,
     Draw = maps:get(draw_fid, Options, fun prim_file:erx_fid/0),
-    Bridge = erx_hostlink_9p:new((maps:with([pool], Options))#{trees => Trees}),
+    Bridge = erx_hostlink_9p:new((maps:with([pool], Options))#{trees => Trees, alias => fun new_alias/0}),
     loop(Link, Draw, Bridge).
 
 loop(Link, Draw, Bridge) ->
     receive
         {files_in, Link, Bytes} when is_binary(Bytes) ->
-            Alias = erlang:alias([reply]),
-            loop(Link, Draw, step({host, Bytes, Alias, Draw()}, Link, Bridge));
+            loop(Link, Draw, step({host, Bytes, Draw()}, Link, Bridge));
         {erx_9p, Alias, Reply} when is_reference(Alias) ->
             loop(Link, Draw, step({reply, Alias, Reply}, Link, Bridge));
         {'DOWN', _Ref, process, Link, _Reason} ->
@@ -91,11 +91,15 @@ act({grant, Grant, Alias, Request}, _Link) ->
 act({monitor, Grant}, _Link) ->
     _ = erlang:monitor(process, Grant);
 act({clunk, Grant, Fid}, _Link) ->
-    %% Nobody awaits this answer: it reaches a bridge that no longer knows
+    %% Nobody awaits this answer: it reaches a bridge that never knew
     %% the alias, which counts it as stray.
-    Grant ! {erx_9p, erlang:alias([reply]), self(), {clunk, Fid}};
+    Grant ! {erx_9p, new_alias(), self(), {clunk, Fid}};
 act({unalias, Alias}, _Link) ->
     _ = erlang:unalias(Alias).
+
+%% An alias that ends with the one reply it takes.
+new_alias() ->
+    erlang:alias([reply]).
 
 -doc """
 The grant of tree `Aname` when it is one of `Names` and the namespace `Table`

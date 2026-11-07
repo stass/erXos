@@ -27,12 +27,16 @@ core(Options) ->
     A = spawn(fun() -> receive stop -> ok end end),
     B = spawn(fun() -> receive stop -> ok end end),
     Trees = fun(<<"a">>) -> {ok, A}; (<<"b">>) -> {ok, B}; (_) -> error end,
-    {erx_hostlink_9p:new(Options#{trees => Trees}), A, B}.
+    {erx_hostlink_9p:new(Options#{trees => Trees, alias => fun make_ref/0}), A, B}.
 
-%% One host message, with a fresh alias and the drawn fid Drawn.
+%% One host message with the drawn fid Drawn; the alias is that of the one
+%% message the bridge sent a grant for it, or none.
 host(Tag, Request, Drawn, Bridge) ->
-    Alias = make_ref(),
-    {Bridge1, Effects} = erx_hostlink_9p:step({host, erx_9p:encode(Tag, Request), Alias, Drawn}, Bridge),
+    {Bridge1, Effects} = erx_hostlink_9p:step({host, erx_9p:encode(Tag, Request), Drawn}, Bridge),
+    Alias = case sent(Effects) of
+                [{_, Sent, _}] -> Sent;
+                _ -> none
+            end,
     {Bridge1, Alias, Effects}.
 
 %% The one 9P2000.L reply among Effects, decoded.
@@ -89,10 +93,9 @@ version_below_4096_and_other_protocols_open_no_session_test() ->
 
 nothing_is_served_before_version_test() ->
     {Bridge, _, _} = core(),
-    {_, Alias, Effects} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Bridge),
+    {_, _, Effects} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Bridge),
     ?assertEqual({2, {error, einval}}, answer(Effects)),
-    ?assert(lists:member({unalias, Alias}, Effects)),
-    ?assertEqual([], sent(Effects)).
+    ?assertMatch([{host, _}], Effects).
 
 auth_is_not_served_test() ->
     {Bridge, _, _} = core(),
@@ -183,10 +186,8 @@ a_failed_check_on_a_new_fid_clunks_what_the_grant_may_hold_test() ->
 
 discarded_messages_are_counted_not_answered_test() ->
     {Bridge, _, _} = attached(),
-    Alias = make_ref(),
-    {Bridge1, [{unalias, Alias}]} = erx_hostlink_9p:step({host, <<1, 2, 3>>, Alias, 0}, Bridge),
-    {Bridge2, [{unalias, _}]} =
-        erx_hostlink_9p:step({host, erx_9p:encode(3, {reply, clunk, ok}), make_ref(), 0}, Bridge1),
+    {Bridge1, []} = erx_hostlink_9p:step({host, <<1, 2, 3>>, 0}, Bridge),
+    {Bridge2, []} = erx_hostlink_9p:step({host, erx_9p:encode(3, {reply, clunk, ok}), 0}, Bridge1),
     {Bridge3, _, _} = host(3, {read, 1, 0, 4}, 102, Bridge2),
     {Bridge4, _, Repeat} = host(3, {read, 1, 0, 4}, 103, Bridge3),
     ?assertEqual([], answers(Repeat)),
@@ -260,11 +261,10 @@ flush_of_a_flush_at_the_grant_waits_behind_it_test() ->
     {Bridge, _, _} = attached(),
     {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
     {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
-    {Bridge3, Alias, Effects} = host(5, {flush, 4}, 0, Bridge2),
-    %% Tag 4 may still be answered, so tag 5's answer must not come first.
-    ?assertEqual([], answers(Effects)),
-    ?assertEqual([], sent(Effects)),
-    ?assert(lists:member({unalias, Alias}, Effects)),
+    {Bridge3, _, Effects} = host(5, {flush, 4}, 0, Bridge2),
+    %% Tag 4 may still be answered, so tag 5's answer must not come first,
+    %% and one flush of the read is at the grant already.
+    ?assertEqual([], Effects),
     {Bridge4, E4} = erx_hostlink_9p:step({reply, ReadAlias, {ok, <<"ab">>}}, Bridge3),
     ?assertEqual([{3, {ok, <<"ab">>}}], answers(E4)),
     {Bridge5, E5} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Bridge4),
@@ -272,15 +272,20 @@ flush_of_a_flush_at_the_grant_waits_behind_it_test() ->
     ?assertMatch(#{tags := 0, requests := 0}, erx_hostlink_9p:info(Bridge5)).
 
 flush_of_a_refused_flush_waits_behind_it_test() ->
-    {Bridge, _, _} = attached(),
+    {Bridge, A, _} = attached(),
     {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
     {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
     {Bridge3, []} = erx_hostlink_9p:step({reply, FlushAlias, {error, emfile}}, Bridge2),
-    {Bridge4, _, Effects} = host(5, {flush, 4}, 0, Bridge3),
+    %% The read's chain moves along: no flush of it is at the grant, so the
+    %% next one goes there, and its answer still waits behind tag 4's.
+    {Bridge4, Flush5Alias, Effects} = host(5, {flush, 4}, 0, Bridge3),
+    ?assertEqual([{A, Flush5Alias, {flush, ReadAlias}}], sent(Effects)),
     ?assertEqual([], answers(Effects)),
     {Bridge5, E5} = erx_hostlink_9p:step({reply, ReadAlias, {ok, <<>>}}, Bridge4),
-    ?assertEqual([{3, {ok, <<>>}}, {4, ok}, {5, ok}], answers(E5)),
-    ?assertMatch(#{tags := 0}, erx_hostlink_9p:info(Bridge5)).
+    ?assertEqual([{3, {ok, <<>>}}, {4, ok}], answers(E5)),
+    {Bridge6, E6} = erx_hostlink_9p:step({reply, Flush5Alias, ok}, Bridge5),
+    ?assertEqual([{5, ok}], answers(E6)),
+    ?assertMatch(#{tags := 0}, erx_hostlink_9p:info(Bridge6)).
 
 flush_of_an_abandoned_requests_flush_follows_it_test() ->
     {Bridge, _, _} = attached(),
@@ -291,6 +296,58 @@ flush_of_an_abandoned_requests_flush_follows_it_test() ->
     ?assertEqual([{4, ok}, {5, ok}], answers(E4)),
     ?assertMatch(#{tags := 0, requests := 0}, erx_hostlink_9p:info(Bridge4)).
 
+two_flushes_of_one_request_answer_in_order_whatever_the_grant_does_test() ->
+    {Bridge, A, _} = attached(),
+    {Bridge1, ReadAlias, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
+    {Bridge2, Flush4Alias, _} = host(4, {flush, 3}, 0, Bridge1),
+    %% One flush of the read is at the grant: the second waits.
+    {Bridge3, _, Held} = host(5, {flush, 3}, 0, Bridge2),
+    ?assertEqual([], Held),
+    %% The grant answers the first malformed: the second goes in its place.
+    {Bridge4, E4} = erx_hostlink_9p:step({reply, Flush4Alias, junk}, Bridge3),
+    [{A, Flush5Alias, {flush, ReadAlias}}] = sent(E4),
+    ?assertEqual([], answers(E4)),
+    %% The grant abandons the read at the second: both flushes, in order.
+    {Bridge5, E5} = erx_hostlink_9p:step({reply, Flush5Alias, ok}, Bridge4),
+    ?assertEqual([{4, ok}, {5, ok}], answers(E5)),
+    ?assert(lists:member({unalias, ReadAlias}, E5)),
+    ?assertMatch(#{tags := 0, requests := 0, awaited := 0}, erx_hostlink_9p:info(Bridge5)).
+
+a_grant_that_ends_answers_a_chain_in_order_test() ->
+    {Bridge, A, _} = attached(),
+    {Bridge1, _, _} = host(3, {read, 1, 0, 4}, 0, Bridge),
+    {Bridge2, Flush4Alias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, _, _} = host(5, {flush, 3}, 0, Bridge2),
+    {Bridge4, _} = erx_hostlink_9p:step({reply, Flush4Alias, {error, emfile}}, Bridge3),
+    {Bridge5, _, _} = host(6, {flush, 3}, 0, Bridge4),
+    {Bridge6, Effects} = erx_hostlink_9p:step({grant_down, A}, Bridge5),
+    ?assertEqual([{3, {error, eio}}, {4, ok}, {5, ok}, {6, ok}], answers(Effects)),
+    ?assertMatch(#{tags := 0, awaited := 0}, erx_hostlink_9p:info(Bridge6)).
+
+an_abandoned_walk_makes_no_fid_test() ->
+    {Bridge, A, _} = attached(),
+    {Bridge1, WalkAlias, _} = host(3, {walk, 1, 2, [<<"x">>]}, 102, Bridge),
+    {Bridge2, FlushAlias, _} = host(4, {flush, 3}, 0, Bridge1),
+    {Bridge3, Effects} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Bridge2),
+    ?assertEqual([{4, ok}], answers(Effects)),
+    ?assert(lists:member({unalias, WalkAlias}, Effects)),
+    %% Whatever the grant made of it is clunked, and fid 2 is free again.
+    ?assert(lists:member({clunk, A, 102}, Effects)),
+    ?assertMatch(#{fids := 1}, erx_hostlink_9p:info(Bridge3)).
+
+version_lets_a_waiting_lock_go_test() ->
+    {Bridge, A, _} = attached(),
+    {Bridge1, LockAlias, _} = host(3, {lock, 1, 1, 1, 0, 0, 1, <<"c">>}, 0, Bridge),
+    {Reset, _, Effects} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Bridge1),
+    %% The lock is flushed on a draining alias, before its fid is clunked.
+    [{A, FlushAlias, {flush, LockAlias}}] = sent(Effects),
+    ?assertMatch([{grant, A, FlushAlias, _}, {clunk, A, 101}, {host, _}], Effects),
+    ?assertMatch(#{requests := 1, draining := 2, tags := 0}, erx_hostlink_9p:info(Reset)),
+    %% The grant lets the lock go: its slot is free, and nothing reaches the host.
+    {Drained, Released} = erx_hostlink_9p:step({reply, FlushAlias, ok}, Reset),
+    ?assertEqual([{unalias, LockAlias}], Released),
+    ?assertMatch(#{requests := 0, draining := 0, load := 0}, erx_hostlink_9p:info(Drained)).
+
 version_counts_forgotten_requests_until_their_replies_test() ->
     {Bridge, _, _} = attached(),
     {Full, Aliases} = lists:foldl(fun(Tag, {Acc, As}) ->
@@ -298,15 +355,19 @@ version_counts_forgotten_requests_until_their_replies_test() ->
                                           {Acc1, [A | As]}
                                   end, {Bridge, []}, lists:seq(10, 41)),
     {Reset, _, Effects} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Full),
-    %% The grant still holds the 32 reads: their aliases stay open for the replies.
+    %% The grant still holds the 32 reads: their aliases stay open for the
+    %% replies, and each is flushed, so one that waits would be let go.
     ?assertEqual([], [A || {unalias, A} <- Effects, lists:member(A, Aliases)]),
-    ?assertMatch(#{requests := 32, draining := 32, tags := 0}, erx_hostlink_9p:info(Reset)),
+    Flushes = [{Alias, Read} || {grant, _, Alias, {flush, Read}} <- Effects],
+    ?assertEqual(lists:sort(Aliases), lists:sort([Read || {_, Read} <- Flushes])),
+    ?assertMatch(#{requests := 32, flushes := 32, draining := 64, tags := 0, load := 64},
+                 erx_hostlink_9p:info(Reset)),
     {_, _, Refused} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Reset),
     ?assertEqual({2, {error, emfile}}, answer(Refused)),
     Drained = lists:foldl(fun(A, Acc) ->
                                   {Acc1, []} = erx_hostlink_9p:step({reply, A, {ok, <<"x">>}}, Acc),
                                   Acc1
-                          end, Reset, Aliases),
+                          end, Reset, Aliases ++ [Alias || {Alias, _} <- Flushes]),
     ?assertMatch(#{requests := 0, draining := 0}, erx_hostlink_9p:info(Drained)),
     {_, _, Admitted} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}, 101, Drained),
     ?assertMatch([_], sent(Admitted)).
@@ -329,13 +390,18 @@ draining_requests_and_flushes_hold_tags_test() ->
     {Bridge, _, _} = attached(),
     Full = lists:foldl(fun(Tag, Acc) -> element(1, host(Tag, {read, 1, 0, 1}, 0, Acc)) end,
                        Bridge, lists:seq(10, 41)),
+    %% Each read kept room for its first flush, so all 32 are admitted.
     Flushed = lists:foldl(fun(Tag, Acc) -> element(1, host(Tag + 100, {flush, Tag}, 0, Acc)) end,
                           Full, lists:seq(10, 41)),
-    {Reset, _, _} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Flushed),
-    ?assertMatch(#{draining := 64}, erx_hostlink_9p:info(Reset)),
-    {Counted, _, Effects} = host(6, {flush, 1}, 0, Reset),
-    ?assertEqual([], answers(Effects)),
-    ?assertMatch(#{counts := #{tags_full := 1}}, erx_hostlink_9p:info(Counted)).
+    ?assertMatch(#{tags := 64, load := 64}, erx_hostlink_9p:info(Flushed)),
+    %% A second flush of a read would take the load past 64.
+    {Counted, _, Effects} = host(6, {flush, 10}, 0, Flushed),
+    ?assertEqual([], Effects),
+    ?assertMatch(#{counts := #{tags_full := 1}}, erx_hostlink_9p:info(Counted)),
+    %% A version sends no flush more: each read has its flush at the grant.
+    {Reset, _, ResetEffects} = host(5, {version, ?MSIZE, <<"9P2000.L">>}, 0, Counted),
+    ?assertEqual([], sent(ResetEffects)),
+    ?assertMatch(#{draining := 64, load := 64}, erx_hostlink_9p:info(Reset)).
 
 version_is_answered_on_a_pending_tag_and_with_every_tag_in_use_test() ->
     {Bridge, _, _} = attached(),

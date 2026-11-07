@@ -1453,30 +1453,29 @@ it; git history is the record of completed work.
   `tools/erx files` serves one client at a time and reaches only QEMU's UNIX
   socket, like `load` and `watch`.
 * [Low] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
-  review findings open: a flushed walk the grant abandons keeps its new fid;
-  the namespace entry's `ro` is not applied; the bridge's own clunk replies
+  review findings open: the namespace entry's `ro` is not applied; the bridge's own clunk replies
   count as stray; the tree lookup reads the namespace table on each attach;
   no `proc` tree is mounted yet; and the system manifest has no field for
   the trees a release build lists, so a release build serves none.
-* [Medium] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`),
-  second review's findings: (1) several flushes of one request each go to
-  the grant, and one the grant refuses is held behind the request, so its
-  `Rflush` can precede earlier flushes' and break flush(5)'s order: hold a
-  flush whose target already has one behind the last such flush, so at most
-  one reaches the grant, and have the fuzz model count earlier flushes of a
-  request answered with a later one; grant_down orders them the same way;
-  (2) `version` sends no flush for what it forgets, so a request that blocks
-  at the grant (a waiting `lock`) drains forever and holds the 32-request
-  bound: flush each forgotten request on a draining alias; (3) the bridge
-  shares the system domain's grants, whose 64 in-flight slots it can fill,
-  so "always has room for their flushes" holds only for the bridge's own use:
-  a grant of the bridge's own, or a smaller cap per grant; (4) the
-  `requests` count is kept by hand at six sites and `waiting` beside `tags`:
-  derive both from split request and flush maps. Low: the fuzz never checks
-  that every admitted tag is answered by a round's end; `info/1` does not
-  report `waiting`; the bridge reads the whole manifest at each session's
-  start; design-live.md still says the host tool counts credit from its
-  hello's first byte, where it now counts from the hello's reply.
+* [Low] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`):
+  the bridge reads the whole manifest at each session's start;
+  design-live.md still says the host tool counts credit from its hello's
+  first byte, where it now counts from the hello's reply.
+* [Medium] files, `erx_fs_grant` (`erlang/apps/erx_files/src/erx_fs_grant.erl`,
+  `admit/4`): a flush of a deferred request only waits behind it, and no
+  grant abandons a request at a flush, as design-files.md's Flush allows;
+  so a deferred request whose file process never answers (a stuck job, a
+  waiting lock once locks are served) holds its slot at the grant, and the
+  host link bridge's request place when a `version` forgot it, until the
+  session ends. Abandoning at a flush (answer only the flush, drop the
+  file process's late answer) makes the bridge's version flushes let it go.
+* [Medium] security residual, host link's 9P bridge
+  (`erlang/apps/erx_hostlink/src/erx_hostlink_files.erl`, `tree_grant/3`):
+  the bridge uses the system domain's own grants and its load bound, 64,
+  equals a grant's whole 64 requests in flight, so a host that keeps 32
+  slow reads and their flushes at the `data` grant makes that grant refuse
+  the system domain's own processes with `emfile`; a grant of the bridge's
+  own, or a per-grant cap below 64, closes it.
 * [Low] live, host-link driver (`erlang/apps/erx_uart/src/erx_pl011.erl`):
   the design's driver buffers at most 64 KiB of received bytes and drops
   and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends

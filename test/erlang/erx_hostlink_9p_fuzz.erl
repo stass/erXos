@@ -21,7 +21,11 @@ tags the host has in use, from each request the bridge admitted (one it did
 not count as discarded) until its answer, and a version frees them all. An
 answer on a tag not in use fails, and so does an answer on a tag after the
 `Rflush` of a flush that named it, until the host uses the tag again: the
-host may reuse a tag once a flush of it is answered (flush(5)).
+host may reuse a tag once a flush of it is answered (flush(5)). A flush's
+answer fails while the flush it names, or an earlier flush of the same
+request, is still unanswered. At each round's end the stand-in grants answer
+everything they still hold, after which every message the bridge admitted
+must have been answered.
 """.
 
 -export([run/1]).
@@ -37,23 +41,35 @@ run([Seed]) ->
     A = spawn(fun() -> receive stop -> ok end end),
     B = spawn(fun() -> receive stop -> ok end end),
     Trees = fun(<<"a">>) -> {ok, A}; (<<"b">>) -> {ok, B}; (_) -> error end,
-    lists:foreach(fun(_) -> round(erx_hostlink_9p:new(#{trees => Trees, pool => ?POOL}), [A, B]) end,
-                  lists:seq(1, ?ROUNDS)),
+    Options = #{trees => Trees, pool => ?POOL, alias => fun make_ref/0},
+    lists:foreach(fun(_) -> round(erx_hostlink_9p:new(Options), [A, B]) end, lists:seq(1, ?ROUNDS)),
     io:format("fuzz: ~b rounds ok~n", [?ROUNDS]).
 
 round(Bridge, Grants) ->
-    Open = {host, erx_9p:encode(0, {version, ?MSIZE, <<"9P2000.L">>}), make_ref(), 0},
+    Open = {host, erx_9p:encode(0, {version, ?MSIZE, <<"9P2000.L">>}), 0},
     {Opened, _} = erx_hostlink_9p:step(Open, Bridge),
-    lists:foldl(fun(_, {Br, Aliases, Host}) -> step(Br, Aliases, Host, Grants) end, {Opened, [], #{}},
-                lists:seq(1, ?STEPS)).
+    Ran = lists:foldl(fun(_, {Br, Aliases, Host}) -> step(random_event(Aliases, Host, Grants), Br, Aliases, Host) end,
+                      {Opened, [], #{}}, lists:seq(1, ?STEPS)),
+    drain(Ran).
 
-step(Bridge, Aliases, Host, Grants) ->
-    Event = case rand:uniform(40) of
-                N when N =< 24 -> {host, host_bytes(Host), make_ref(), rand:uniform(1000000)};
-                N when N =< 30, Aliases =/= [] -> {reply, pick(Aliases), reply()};
-                N when N =< 39 -> {reply, make_ref(), reply()};
-                40 -> {grant_down, pick(Grants)}
-            end,
+%% The grants answer what they still hold, the first sent first, until they
+%% hold nothing: then every message the bridge admitted has its answer.
+drain({Bridge, [], Host}) ->
+    map_size(Host) =:= 0 orelse erlang:error({unanswered, Host}),
+    #{awaited := 0} = erx_hostlink_9p:info(Bridge);
+drain({Bridge, Aliases, Host}) ->
+    %% Aliases holds the latest sent first.
+    drain(step({reply, lists:last(Aliases), reply()}, Bridge, Aliases, Host)).
+
+random_event(Aliases, Host, Grants) ->
+    case rand:uniform(40) of
+        N when N =< 24 -> {host, host_bytes(Host), rand:uniform(1000000)};
+        N when N =< 30, Aliases =/= [] -> {reply, pick(Aliases), reply()};
+        N when N =< 39 -> {reply, make_ref(), reply()};
+        40 -> {grant_down, pick(Grants)}
+    end.
+
+step(Event, Bridge, Aliases, Host) ->
     {Bridge1, Effects} = erx_hostlink_9p:step(Event, Bridge),
     lists:foreach(fun check_effect/1, Effects),
     check_bounds(erx_hostlink_9p:info(Bridge1)),
@@ -67,36 +83,44 @@ step(Bridge, Aliases, Host, Grants) ->
     {Bridge1, Sent ++ ((Aliases -- Answered) -- Forgotten), Host2}.
 
 %% The host's tags in use once the bridge took Event: a request it admitted
-%% enters, with a reference of its own and, for a flush, the reference of the
-%% request in use on the tag it names; a version the bridge serves frees
-%% every tag first, and one whose msize it refuses frees none.
-admitted({host, Bytes, _, _}, Before, After, Host) ->
+%% enters, with an id from a clock of its own and, for a flush, the id of what
+%% is in use on the tag it names and of the request its chain ends in; a
+%% version the bridge serves frees every tag first, and one whose msize it
+%% refuses frees none.
+admitted({host, Bytes, _}, Before, After, Host) ->
     Discarded = maps:get(counts, erx_hostlink_9p:info(Before)) =/= maps:get(counts, erx_hostlink_9p:info(After)),
+    Id = erlang:unique_integer([monotonic]),
     case erx_9p:decode(Bytes, ?MSIZE) of
         {ok, _, {reply, _, _}} -> Host;
         {ok, _, _} when Discarded -> Host;
-        {ok, Tag, {version, Msize, _}} when Msize >= 4096 -> #{Tag => {make_ref(), version}};
-        {ok, Tag, {flush, Old}} -> Host#{Tag => {make_ref(), {flush, Old, in_use(Old, Host)}}};
-        {ok, Tag, _} -> Host#{Tag => {make_ref(), request}};
+        {ok, Tag, {version, Msize, _}} when Msize >= 4096 -> #{Tag => {Id, version}};
+        {ok, Tag, {flush, Old}} -> Host#{Tag => {Id, flush_of(Old, Host)}};
+        {ok, Tag, _} -> Host#{Tag => {Id, request}};
         {error, _} -> Host
     end;
 admitted(_Event, _Before, _After, Host) ->
     Host.
 
-in_use(Tag, Host) ->
+flush_of(Old, Host) ->
     case Host of
-        #{Tag := {Ref, _}} -> Ref;
-        #{} -> none
+        #{Old := {Target, {flush, _, _, Root}}} -> {flush, Old, Target, Root};
+        #{Old := {Target, _}} -> {flush, Old, Target, Target};
+        #{} -> {flush, Old, none, none}
     end.
 
-%% One answer to the host: its tag must be in use; a flush's answer frees the
-%% tag it named too, when the request it flushed is still in use there.
+%% One answer to the host: its tag must be in use. A flush's answer must
+%% follow the flush it names and every earlier flush of the same request, and
+%% frees the tag it named too when the request it flushed is still in use
+%% there: the grant abandoned it.
 answered(Bytes, Host) ->
     {ok, Tag, {reply, _, _}} = erx_9p:decode(Bytes, ?MSIZE),
     case maps:take(Tag, Host) of
-        {{_, {flush, Old, Ref}}, Rest} when Ref =/= none ->
+        {{Id, {flush, Old, Target, Root}}, Rest} when Target =/= none ->
+            Earlier = [T || T := {E, {flush, _, _, R}} <- Rest, R =:= Root, E < Id],
+            Earlier =:= [] orelse erlang:error({flush_out_of_order, Tag, Earlier, Host}),
             case Rest of
-                #{Old := {Ref, _}} -> maps:remove(Old, Rest);
+                #{Old := {Target, {flush, _, _, _}}} -> erlang:error({answer_out_of_order, Tag, Host});
+                #{Old := {Target, _}} -> maps:remove(Old, Rest);
                 #{} -> Rest
             end;
         {_, Rest} ->
@@ -120,9 +144,8 @@ check_effect({clunk, Grant, Fid}) when is_pid(Grant), is_integer(Fid) -> ok;
 check_effect({unalias, Alias}) when is_reference(Alias) -> ok;
 check_effect(Effect) -> erlang:error({unknown_effect, Effect}).
 
-check_bounds(#{fids := Fids, tags := Tags, draining := Draining, requests := Requests} = Info) ->
-    case Fids =< ?POOL andalso Tags + Draining =< 64 andalso Requests >= 0 andalso Requests =< 32
-        andalso Requests =< Tags + Draining of
+check_bounds(#{fids := Fids, tags := Tags, draining := Draining, requests := Requests, load := Load} = Info) ->
+    case Fids =< ?POOL andalso Tags + Draining =< Load andalso Load =< 64 andalso Requests =< 32 of
         true -> ok;
         false -> erlang:error({out_of_bounds, Info})
     end.

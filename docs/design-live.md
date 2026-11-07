@@ -1624,15 +1624,23 @@ answers some messages without a grant: `version`, with the smaller
 names fids of two trees with `exdev`. It holds at most 256 fids, as many
 as a session's program holds on a grant
 ([design-files.md](design-files.md#bounds)), and a fid beyond them fails
-with `emfile`. It keeps at most 32 requests pending and 64 tags in use,
-so a grant, which admits 64 in flight with the flushes waiting on them,
-always has room for their flushes; a request beyond 32 fails with
-`emfile`, and a message beyond 64 tags or on a tag in use is discarded
-and counted. A `version` resets the session whatever tags are in use; the
-requests and flushes it forgets still count against both bounds until
-their grants answer them, since the grants still hold them. A flush of a
-flush is answered only after the flush it names, so the host never reuses
-a tag while an answer on it may still come. It cuts a `read`'s or
+with `emfile`. It keeps at most 32 requests pending and at most 64
+messages at its grants or held, a pending request counting twice until a
+flush of it is in use, so that it always keeps room to flush every request
+it sent; a request beyond 32 fails with `emfile`, and a message beyond 64,
+or on a tag in use, is discarded and counted. The grants are the system
+domain's own, shared with its processes, and a grant's 64 requests in
+flight cannot be reserved, so a flush the bridge sends may still be
+refused there, and it then waits behind its request. The flushes of one
+request are answered in the order they came, after the request is
+answered or abandoned, with at most one of them at the grant at a time,
+and a flush of a flush joins the flushes of the request it names, so the
+host never reuses a tag while an answer on it may still come. A `version`
+resets the session whatever tags are in use. What the grants still hold
+drains, and each forgotten request with no flush at its grant is flushed,
+so a grant that abandons a request at a flush lets one that waits there,
+a `lock`, go; what drains counts against both bounds until its grant
+answers it. It cuts a `read`'s or
 `readdir`'s `Count` to what an `Rread` of the session's `msize` holds
 and answers `lopen`'s and `lcreate`'s `Iounit` as `msize` less 24, so
 every reply fits a frame.
