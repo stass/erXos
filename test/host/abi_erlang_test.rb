@@ -136,4 +136,18 @@ class AbiErlangTest < Minitest::Test
     else value
     end
   end
+  # The generated erx_abi_events gives each trace event's name and typed
+  # arguments, and unknown for a value trace_event does not hold.
+  def test_generated_events_describe_each_trace_event
+    @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-o', @directory,
+                 File.join(@directory, 'erx_abi_events.erl')], name: 'erlc-events', deadline: 60, env: @environment)
+    script = 'io:format("~p~n", [[erx_abi_events:describe(trace_event, V) || V <- lists:seq(0, 6)]]), halt().'
+    record = @runner.run([File.join(@oracle, 'erl'), '+S', '1:1', '+SDcpu', '1', '+SDio', '1', '-noshell',
+                          '-noinput', '-pa', @directory, '-eval', script], name: 'events', deadline: 60, env: @environment)
+    expected = "[unknown,{park,[{slot,u64},{deadline,u64}]},\n {wake,[{slot,u64},{result,status}]},\n " \
+               "{irq_deliver,[{label,u64}]},\n {space_start,[{target,u64}]},\n " \
+               "{space_end,[{target,u64},{status,i64}]},\n unknown]\n"
+    assert_equal expected, File.binread(record.fetch('log'))
+  end
+
 end

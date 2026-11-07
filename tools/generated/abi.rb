@@ -179,6 +179,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["boot_flags"] = EnumType.new(
@@ -190,7 +191,8 @@ module Erx
           "root".b => 4
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["boot_kernel_path"] = BytesType.new(
         name: "boot_kernel_path".b,
@@ -283,6 +285,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["boot_sigma0_path"] = BytesType.new(
@@ -299,7 +302,8 @@ module Erx
           "none".b => 0
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["boot_stand_in_root_path"] = BytesType.new(
         name: "boot_stand_in_root_path".b,
@@ -315,7 +319,8 @@ module Erx
           "unknown".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["budget_kind"] = EnumType.new(
         name: "budget_kind".b,
@@ -325,7 +330,8 @@ module Erx
           "wall".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["cap"] = ScalarType.new(
         name: "cap".b,
@@ -471,6 +477,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_boot_root_extension"] = Layout.new(
@@ -638,6 +645,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_msg_item"] = Layout.new(
@@ -679,6 +687,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["cap_slot_state"] = EnumType.new(
@@ -691,7 +700,8 @@ module Erx
           "retired".b => 3
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["crash_cause"] = EnumType.new(
         name: "crash_cause".b,
@@ -703,7 +713,8 @@ module Erx
           "watchdog".b => 3
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["crash_form"] = EnumType.new(
         name: "crash_form".b,
@@ -713,7 +724,8 @@ module Erx
           "full".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["crash_frame_begin"] = BytesType.new(
         name: "crash_frame_begin".b,
@@ -740,7 +752,8 @@ module Erx
           "read_failed".b => 4
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["elf_magic"] = BytesType.new(
         name: "elf_magic".b,
@@ -755,7 +768,8 @@ module Erx
           "reset".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["entropy_flags"] = EnumType.new(
         name: "entropy_flags".b,
@@ -764,7 +778,8 @@ module Erx
           "credit".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["entropy_quality"] = EnumType.new(
         name: "entropy_quality".b,
@@ -775,7 +790,8 @@ module Erx
           "weak".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["entry_flags"] = EnumType.new(
         name: "entry_flags".b,
@@ -785,7 +801,8 @@ module Erx
           "system".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["entry_kind"] = EnumType.new(
         name: "entry_kind".b,
@@ -795,7 +812,8 @@ module Erx
           "image".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_pack_entry"] = Layout.new(
         name: "erx_pack_entry".b,
@@ -920,6 +938,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_cap_slot"] = Layout.new(
@@ -1072,6 +1091,7 @@ module Erx
           :line => source_line
         }.freeze,
         private_owner: "kernel/core/cap.c".b,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_device_secret_page"] = Layout.new(
@@ -1123,6 +1143,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_elf64_dyn"] = Layout.new(
@@ -1164,6 +1185,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_elf64_ehdr"] = Layout.new(
@@ -1373,6 +1395,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_elf64_nhdr"] = Layout.new(
@@ -1428,6 +1451,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_abi_note"] = Layout.new(
@@ -1483,6 +1507,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_elf64_phdr"] = Layout.new(
@@ -1608,6 +1633,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_erofs_dirent"] = Layout.new(
@@ -1677,6 +1703,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_erofs_inode_compact"] = Layout.new(
@@ -1830,6 +1857,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_erofs_inode_extended"] = Layout.new(
@@ -2011,6 +2039,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_erofs_super_block"] = Layout.new(
@@ -2374,6 +2403,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_erofs_xattr_ibody_header"] = Layout.new(
@@ -2415,6 +2445,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_exec_stat"] = Layout.new(
@@ -2561,6 +2592,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_group_stat"] = Layout.new(
@@ -2759,6 +2791,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_debug_log_request"] = Layout.new(
@@ -2800,6 +2833,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_entropy_add_request"] = Layout.new(
@@ -2897,6 +2931,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_entropy_read_request"] = Layout.new(
@@ -2924,6 +2959,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_image_map_request"] = Layout.new(
@@ -2993,6 +3029,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_irq_bind_request"] = Layout.new(
@@ -3062,6 +3099,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_irq_create_request"] = Layout.new(
@@ -3117,6 +3155,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_irq_request"] = Layout.new(
@@ -3158,6 +3197,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_log_read_request"] = Layout.new(
@@ -3227,6 +3267,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_machine_end_request"] = Layout.new(
@@ -3282,6 +3323,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_mem_contiguous_request"] = Layout.new(
@@ -3351,6 +3393,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_mem_create_request"] = Layout.new(
@@ -3420,6 +3463,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_mem_dma_request"] = Layout.new(
@@ -3475,6 +3519,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_mem_physical_request"] = Layout.new(
@@ -3558,6 +3603,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_object_info_request"] = Layout.new(
@@ -3655,6 +3701,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_reply"] = Layout.new(
@@ -3724,6 +3771,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_space_create_request"] = Layout.new(
@@ -3835,6 +3883,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_space_stop_request"] = Layout.new(
@@ -3890,6 +3939,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_task_join_request"] = Layout.new(
@@ -3931,6 +3981,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_task_write_request"] = Layout.new(
@@ -3972,6 +4023,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_thread_create_request"] = Layout.new(
@@ -4069,6 +4121,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_thread_reap_request"] = Layout.new(
@@ -4110,6 +4163,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_thread_set_affinity_request"] = Layout.new(
@@ -4165,6 +4219,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_thread_start_request"] = Layout.new(
@@ -4220,6 +4275,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_time_set_wall_request"] = Layout.new(
@@ -4261,6 +4317,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_vm_flagged_request"] = Layout.new(
@@ -4330,6 +4387,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_vm_map_request"] = Layout.new(
@@ -4441,6 +4499,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_fiasco_vm_range_request"] = Layout.new(
@@ -4496,6 +4555,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_frame_header"] = Layout.new(
@@ -4537,6 +4597,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_hostlink_control"] = Layout.new(
@@ -4620,6 +4681,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_hostlink_frame"] = Layout.new(
@@ -4717,6 +4779,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_lane_hdr"] = Layout.new(
@@ -4768,6 +4831,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_lane_rec"] = Layout.new(
@@ -4823,6 +4887,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_lane_rpage"] = Layout.new(
@@ -4874,6 +4939,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_machine_page"] = Layout.new(
@@ -5096,6 +5162,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mbr_entry"] = Layout.new(
@@ -5193,6 +5260,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_boot_order"] = Layout.new(
@@ -5220,6 +5288,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_extent"] = Layout.new(
@@ -5261,6 +5330,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_introduction"] = Layout.new(
@@ -5302,6 +5372,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_liveness"] = Layout.new(
@@ -5329,6 +5400,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_operation"] = Layout.new(
@@ -5356,6 +5428,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_shell_principal"] = Layout.new(
@@ -5383,6 +5456,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_span"] = Layout.new(
@@ -5424,6 +5498,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_str"] = Layout.new(
@@ -5465,6 +5540,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_facet"] = Layout.new(
@@ -5646,6 +5722,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_lane_class"] = Layout.new(
@@ -5701,6 +5778,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_partial_boot"] = Layout.new(
@@ -5756,6 +5834,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_runtime_limits"] = Layout.new(
@@ -5923,6 +6002,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_service"] = Layout.new(
@@ -5992,6 +6072,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_unit"] = Layout.new(
@@ -6061,6 +6142,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_msgtag"] = Layout.new(
@@ -6110,6 +6192,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_regs"] = Layout.new(
@@ -6179,6 +6262,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_runtime_limits"] = Layout.new(
@@ -6360,6 +6444,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_saved_thread"] = Layout.new(
@@ -6499,6 +6584,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_time_page"] = Layout.new(
@@ -6651,177 +6737,7 @@ module Erx
           :line => source_line
         }.freeze,
         private_owner: nil,
-        line: source_line
-      ).freeze
-      types["erx_trace_record"] = Layout.new(
-        name: "erx_trace_record".b,
-        storage: "shared".b,
-        alignment: 8,
-        size: 64,
-        fields: [
-          Field.new(
-            name: "seq".b,
-            type: types.fetch("u64"),
-            offset: 0,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "internal".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "time_ns".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "event".b,
-            type: types.fetch("u32"),
-            offset: 16,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 4294967295
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "cpu".b,
-            type: types.fetch("u16"),
-            offset: 20,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 65535
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "flags".b,
-            type: types.fetch("u16"),
-            offset: 22,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 65535
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "thread".b,
-            type: types.fetch("u64"),
-            offset: 24,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "space".b,
-            type: types.fetch("u64"),
-            offset: 32,
-            count: nil,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "arg".b,
-            type: types.fetch("u64"),
-            offset: 40,
-            count: 3,
-            bits: [].freeze,
-            atomic: {
-              :load => "acquire".b,
-              :store => "release".b
-            }.freeze,
-            writer: "trace_writer".b,
-            owners: {
-              "kernel".b => 18446744073709551615
-            }.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: "release".b,
-            line: source_line
-          ).freeze
-        ].freeze,
-        padding: [].freeze,
-        tail: nil,
-        sequence: {
-          :field => "seq".b,
-          :terminal => 18446744073709551615,
-          :exhaustion => "@limit".b,
-          :recovery => "none".b,
-          :line => source_line
-        }.freeze,
-        private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_uframe"] = Layout.new(
@@ -6911,6 +6827,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_vcpu"] = Layout.new(
@@ -7071,6 +6988,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_utcb"] = Layout.new(
@@ -7217,6 +7135,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_kupage"] = Layout.new(
@@ -7258,6 +7177,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_virtio_blk_req_header"] = Layout.new(
@@ -7313,6 +7233,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_virtq_desc"] = Layout.new(
@@ -7382,6 +7303,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_virtq_ring_head"] = Layout.new(
@@ -7423,6 +7345,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_virtq_used_elem"] = Layout.new(
@@ -7464,6 +7387,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["exec_state"] = EnumType.new(
@@ -7479,7 +7403,8 @@ module Erx
           "throttled".b => 5
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["exit_kind"] = EnumType.new(
         name: "exit_kind".b,
@@ -7490,7 +7415,8 @@ module Erx
           "released".b => -9223372036854775806
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["fault_kind"] = EnumType.new(
         name: "fault_kind".b,
@@ -7507,7 +7433,8 @@ module Erx
           "undefined".b => 3
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_fault"] = Layout.new(
         name: "erx_fault".b,
@@ -7618,6 +7545,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_crash_brief"] = Layout.new(
@@ -7827,6 +7755,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_crash_record"] = Layout.new(
@@ -7882,6 +7811,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["fiasco_call"] = EnumType.new(
@@ -7920,7 +7850,8 @@ module Erx
           "vm_reserve".b => 4
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["group_flags"] = EnumType.new(
         name: "group_flags".b,
@@ -7932,7 +7863,8 @@ module Erx
           "status".b => 4
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["hostlink_control_flags"] = EnumType.new(
         name: "hostlink_control_flags".b,
@@ -7941,7 +7873,8 @@ module Erx
           "more".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["hostlink_kind"] = EnumType.new(
         name: "hostlink_kind".b,
@@ -7952,7 +7885,8 @@ module Erx
           "reply".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["hostlink_stream"] = EnumType.new(
         name: "hostlink_stream".b,
@@ -7965,7 +7899,8 @@ module Erx
           "terminal".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["image_flags"] = EnumType.new(
         name: "image_flags".b,
@@ -7975,7 +7910,8 @@ module Erx
           "jit".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["info_budget_reported"] = EnumType.new(
         name: "info_budget_reported".b,
@@ -7990,7 +7926,8 @@ module Erx
           "used".b => 8
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_info_budget"] = Layout.new(
         name: "erx_info_budget".b,
@@ -8115,6 +8052,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["info_cpu_reported"] = EnumType.new(
@@ -8128,7 +8066,8 @@ module Erx
           "throttled_groups".b => 16
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_info_cpu"] = Layout.new(
         name: "erx_info_cpu".b,
@@ -8225,6 +8164,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["info_group_reported"] = EnumType.new(
@@ -8238,7 +8178,8 @@ module Erx
           "used_ns".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_info_group"] = Layout.new(
         name: "erx_info_group".b,
@@ -8335,6 +8276,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["info_kind"] = EnumType.new(
@@ -8350,7 +8292,8 @@ module Erx
           "thread".b => 5
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["info_machine_reported"] = EnumType.new(
         name: "info_machine_reported".b,
@@ -8365,7 +8308,8 @@ module Erx
           "uptime".b => 32
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_info_machine"] = Layout.new(
         name: "erx_info_machine".b,
@@ -8490,6 +8434,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["info_thread_reported"] = EnumType.new(
@@ -8500,7 +8445,8 @@ module Erx
           "wait".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_info_thread"] = Layout.new(
         name: "erx_info_thread".b,
@@ -8569,6 +8515,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["irq_kind"] = EnumType.new(
@@ -8580,7 +8527,8 @@ module Erx
           "soft".b => 0
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["log_level"] = EnumType.new(
         name: "log_level".b,
@@ -8592,7 +8540,8 @@ module Erx
           "warning".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["log_record_flags"] = EnumType.new(
         name: "log_record_flags".b,
@@ -8601,7 +8550,8 @@ module Erx
           "truncated".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_log_record"] = Layout.new(
         name: "erx_log_record".b,
@@ -8704,6 +8654,7 @@ module Erx
         ).freeze,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["machine_flags"] = EnumType.new(
@@ -8714,7 +8665,8 @@ module Erx
           "det".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["manifest_flags"] = EnumType.new(
         name: "manifest_flags".b,
@@ -8724,7 +8676,8 @@ module Erx
           "partial_boot".b => 2
         }.freeze,
         flags: true,
-        allowed: [0, 1, 3].freeze
+        allowed: [0, 1, 3].freeze,
+        args: {}.freeze
       ).freeze
       types["manifest_mode"] = EnumType.new(
         name: "manifest_mode".b,
@@ -8735,7 +8688,8 @@ module Erx
           "release".b => 0
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["medium_record_a"] = BytesType.new(
         name: "medium_record_a".b,
@@ -8754,7 +8708,8 @@ module Erx
           "device".b => 0
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mem_flags"] = EnumType.new(
         name: "mem_flags".b,
@@ -8763,7 +8718,8 @@ module Erx
           "jit".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_device_flags"] = EnumType.new(
         name: "mf_device_flags".b,
@@ -8772,7 +8728,8 @@ module Erx
           "hostile".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_device_role"] = EnumType.new(
         name: "mf_device_role".b,
@@ -8786,7 +8743,8 @@ module Erx
           "uart".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_dma"] = EnumType.new(
         name: "mf_dma".b,
@@ -8797,7 +8755,8 @@ module Erx
           "unconfined".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_domain_flags"] = EnumType.new(
         name: "mf_domain_flags".b,
@@ -8807,7 +8766,8 @@ module Erx
           "rescue".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_hash_algorithm"] = EnumType.new(
         name: "mf_hash_algorithm".b,
@@ -8817,7 +8777,8 @@ module Erx
           "sha256".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_image_format"] = EnumType.new(
         name: "mf_image_format".b,
@@ -8827,7 +8788,8 @@ module Erx
           "erofs_verity".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_mf_image"] = Layout.new(
         name: "erx_mf_image".b,
@@ -9036,6 +8998,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["mf_kind"] = EnumType.new(
@@ -9046,7 +9009,8 @@ module Erx
           "service".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_mf_domain"] = Layout.new(
         name: "erx_mf_domain".b,
@@ -9241,6 +9205,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["mf_limits_flags"] = EnumType.new(
@@ -9250,7 +9215,8 @@ module Erx
           "spaces".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_parameter_kind"] = EnumType.new(
         name: "mf_parameter_kind".b,
@@ -9267,7 +9233,8 @@ module Erx
           "u64".b => 1
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_mf_parameter"] = Layout.new(
         name: "erx_mf_parameter".b,
@@ -9364,6 +9331,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["mf_selector"] = EnumType.new(
@@ -9374,7 +9342,8 @@ module Erx
           "pci".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_mf_device"] = Layout.new(
         name: "erx_mf_device".b,
@@ -9597,6 +9566,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["mf_window_rights"] = EnumType.new(
@@ -9607,7 +9577,8 @@ module Erx
           "write".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["mf_window_role"] = EnumType.new(
         name: "mf_window_role".b,
@@ -9623,7 +9594,8 @@ module Erx
           "verified_image".b => 8
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_mf_window"] = Layout.new(
         name: "erx_mf_window".b,
@@ -9734,6 +9706,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["p9_getattr_mask"] = EnumType.new(
@@ -9756,7 +9729,8 @@ module Erx
           "uid".b => 4
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["p9_setattr_valid"] = EnumType.new(
         name: "p9_setattr_valid".b,
@@ -9773,7 +9747,8 @@ module Erx
           "uid".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["pack_flags"] = EnumType.new(
         name: "pack_flags".b,
@@ -9784,7 +9759,8 @@ module Erx
           "unconfined_dma".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_boot_handoff"] = Layout.new(
         name: "erx_boot_handoff".b,
@@ -10021,6 +9997,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_boot_info"] = Layout.new(
@@ -10412,6 +10389,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["pack_magic"] = BytesType.new(
@@ -10598,6 +10576,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["pack_offset"] = ScalarType.new(
@@ -10617,7 +10596,8 @@ module Erx
           "rx".b => 5
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["seal"] = EnumType.new(
         name: "seal".b,
@@ -10628,7 +10608,8 @@ module Erx
           "tpm".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["sealing_secret_label"] = BytesType.new(
         name: "sealing_secret_label".b,
@@ -10642,7 +10623,8 @@ module Erx
           "guarded".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["erx_image_segment"] = Layout.new(
         name: "erx_image_segment".b,
@@ -10739,6 +10721,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_image_manifest"] = Layout.new(
@@ -10912,6 +10895,7 @@ module Erx
         ).freeze,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["space_flags"] = EnumType.new(
@@ -10921,7 +10905,8 @@ module Erx
           "jit".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["system_manifest_path"] = BytesType.new(
         name: "system_manifest_path".b,
@@ -10936,7 +10921,8 @@ module Erx
           "worker".b => 0
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["thread_state"] = EnumType.new(
         name: "thread_state".b,
@@ -10949,7 +10935,8 @@ module Erx
           "waiting".b => 3
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["trace_event"] = EnumType.new(
         name: "trace_event".b,
@@ -10962,7 +10949,51 @@ module Erx
           "wake".b => 2
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {
+          "irq_deliver".b => [
+            EventArgument.new(
+              name: "label".b,
+              type: "u64".b
+            ).freeze
+          ].freeze,
+          "park".b => [
+            EventArgument.new(
+              name: "slot".b,
+              type: "u64".b
+            ).freeze,
+            EventArgument.new(
+              name: "deadline".b,
+              type: "u64".b
+            ).freeze
+          ].freeze,
+          "space_end".b => [
+            EventArgument.new(
+              name: "target".b,
+              type: "u64".b
+            ).freeze,
+            EventArgument.new(
+              name: "status".b,
+              type: "i64".b
+            ).freeze
+          ].freeze,
+          "space_start".b => [
+            EventArgument.new(
+              name: "target".b,
+              type: "u64".b
+            ).freeze
+          ].freeze,
+          "wake".b => [
+            EventArgument.new(
+              name: "slot".b,
+              type: "u64".b
+            ).freeze,
+            EventArgument.new(
+              name: "result".b,
+              type: "status".b
+            ).freeze
+          ].freeze
+        }.freeze
       ).freeze
       types["trace_record_flags"] = EnumType.new(
         name: "trace_record_flags".b,
@@ -10971,7 +11002,189 @@ module Erx
           "cpu_unknown".b => 1
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
+      ).freeze
+      types["erx_trace_record"] = Layout.new(
+        name: "erx_trace_record".b,
+        storage: "shared".b,
+        alignment: 8,
+        size: 64,
+        fields: [
+          Field.new(
+            name: "seq".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "internal".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "time_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "event".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 4294967295
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cpu".b,
+            type: types.fetch("u16"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 65535
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("u16"),
+            offset: 22,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 65535
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "thread".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "space".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "arg".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: 3,
+            bits: [].freeze,
+            atomic: {
+              :load => "acquire".b,
+              :store => "release".b
+            }.freeze,
+            writer: "trace_writer".b,
+            owners: {
+              "kernel".b => 18446744073709551615
+            }.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: "release".b,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: {
+          :field => "seq".b,
+          :terminal => 18446744073709551615,
+          :exhaustion => "@limit".b,
+          :recovery => "none".b,
+          :line => source_line
+        }.freeze,
+        private_owner: nil,
+        bindings: {
+          "event".b => FieldBinding.new(
+            type: "trace_event".b,
+            args: "arg".b
+          ).freeze,
+          "flags".b => FieldBinding.new(
+            type: "trace_record_flags".b,
+            args: nil
+          ).freeze
+        }.freeze,
+        line: source_line
       ).freeze
       types["uaddr"] = ScalarType.new(
         name: "uaddr".b,
@@ -11145,6 +11358,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_manifest"] = Layout.new(
@@ -11788,6 +12002,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_limits"] = Layout.new(
@@ -11983,6 +12198,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["erx_mf_principal"] = Layout.new(
@@ -12094,6 +12310,7 @@ module Erx
         tail: nil,
         sequence: nil,
         private_owner: nil,
+        bindings: {}.freeze,
         line: source_line
       ).freeze
       types["utcb_length"] = ScalarType.new(
@@ -12111,7 +12328,8 @@ module Erx
           "noreplace".b => 2
         }.freeze,
         flags: true,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       types["wait_kind"] = EnumType.new(
         name: "wait_kind".b,
@@ -12127,7 +12345,8 @@ module Erx
           "umtx".b => 3
         }.freeze,
         flags: false,
-        allowed: nil
+        allowed: nil,
+        args: {}.freeze
       ).freeze
       SCHEMA = Model.freeze_value(Schema.new(
         version: 1,
@@ -12270,7 +12489,6 @@ module Erx
           "erx_runtime_limits".b,
           "erx_saved_thread".b,
           "erx_time_page".b,
-          "erx_trace_record".b,
           "erx_uframe".b,
           "erx_vcpu".b,
           "erx_utcb".b,
@@ -12350,6 +12568,7 @@ module Erx
           "thread_state".b,
           "trace_event".b,
           "trace_record_flags".b,
+          "erx_trace_record".b,
           "uaddr".b,
           "upage".b,
           "urgency".b,

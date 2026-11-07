@@ -706,4 +706,132 @@ class AbiSchemaTest < Minitest::Test
       flunk(File.binread(error.result.fetch('log')))
     end
   end
+  # An enum's args lines type the arg words of the record a layout's
+  # names line binds it to; each form below is refused with its own
+  # message, so a generator that accepts one fails here.
+  def event_schema(args: "  args park slot:u64 deadline:u64\n  args wake result:status\n",
+                   enum: "enum trace_event u32\n  value park 1\n  value wake 2\n",
+                   names: "  names event trace_event args arg\n  names flags trace_record_flags\n")
+    schema(<<~ABI + enum + args + <<~LAYOUT + names)
+      flags trace_record_flags u16
+        bit cpu_unknown 0
+    ABI
+      layout erx_trace_record wire_le 8 48
+        field seq u64 0
+        field event u32 8
+        field flags u16 12
+        padding 14 2
+        field status u64 16
+        field arg u64 24 count 3
+    LAYOUT
+  end
+
+  def assert_event_refused(pattern, **source)
+    error = assert_raises(Erx::ABI::SchemaError) { event_schema(**source) }
+    assert_match pattern, error.message
+  end
+
+  def test_event_arguments_are_typed_in_order
+    model = event_schema
+    events = model.types.fetch('trace_event').args
+    assert_equal [%w[slot u64], %w[deadline u64]], events.fetch('park').map { |item| [item.name, item.type] }
+    assert_equal [%w[result status]], events.fetch('wake').map { |item| [item.name, item.type] }
+    bindings = model.types.fetch('erx_trace_record').bindings
+    assert_equal({ 'event' => %w[trace_event arg], 'flags' => ['trace_record_flags', nil] },
+                 bindings.transform_values { |binding| [binding.type, binding.args] })
+    assert_predicate model.types.fetch('trace_event').args, :frozen?
+  end
+
+  def test_args_naming_no_member_is_refused
+    assert_event_refused(/args names no member of trace_event: sleep/, args: "  args sleep slot:u64\n")
+  end
+
+  def test_second_args_line_for_a_member_is_refused
+    assert_event_refused(/duplicate args line for member park/,
+                         args: "  args park slot:u64\n  args park deadline:u64\n")
+  end
+
+  def test_more_than_three_arguments_are_refused
+    assert_event_refused(/an event has at most 3 arguments/, args: "  args park a:u64 b:u64 c:u64 d:u64\n")
+  end
+
+  def test_argument_named_like_a_record_field_is_refused
+    assert_event_refused(/event argument status is named like a field of the layout/,
+                         args: "  args park status:i64\n")
+    assert_event_refused(/event argument arg is named like a field of the layout/,
+                         args: "  args wake arg:u64\n")
+  end
+
+  def test_unknown_argument_type_is_refused
+    assert_event_refused(/unknown event argument type u32/, args: "  args park slot:u32\n")
+  end
+
+  def test_malformed_argument_is_refused
+    assert_event_refused(/args requires NAME:TYPE, not slot/, args: "  args park slot\n")
+    assert_event_refused(/args requires NAME:TYPE, not slot:u64:u64/, args: "  args park slot:u64:u64\n")
+  end
+
+  def test_repeated_argument_name_is_refused
+    assert_event_refused(/duplicate event argument slot/, args: "  args park slot:u64 slot:i64\n")
+  end
+
+  def test_args_line_without_arguments_is_refused
+    assert_event_refused(/args requires a member and at least one NAME:TYPE/, args: "  args park\n")
+  end
+
+  def test_args_on_flags_are_refused
+    error = assert_raises(Erx::ABI::SchemaError) do
+      schema("flags trace_record_flags u16\n  bit cpu_unknown 0\n  args cpu_unknown slot:u64\n")
+    end
+    assert_match(/args belong to an enum, not to flags/, error.message)
+  end
+
+  def test_args_on_a_sparse_or_negative_enum_are_refused
+    assert_event_refused(/an enum with args has an unsigned base and members from 0 to 1023/,
+                         enum: "enum trace_event u32\n  value park 1\n  value wake 1024\n")
+    assert_event_refused(/an enum with args has an unsigned base and members from 0 to 1023/,
+                         enum: "enum trace_event i32\n  value park -1\n  value wake 2\n")
+  end
+
+  def test_names_binds_the_arg_words_of_an_enum_with_args
+    assert_event_refused(/trace_event has args lines, so names requires args ARRAY/,
+                         names: "  names event trace_event\n")
+    assert_event_refused(/trace_record_flags has no args lines to place in arg/,
+                         names: "  names event trace_event args arg\n  names flags trace_record_flags args arg\n")
+    assert_event_refused(/args status is not an array of at least 2 u64 words/,
+                         names: "  names event trace_event args status\n")
+    assert_event_refused(/args seq is not an array of at least 2 u64 words/,
+                         names: "  names event trace_event args seq\n")
+    assert_event_refused(/names requires FIELD TYPE \[args ARRAY\]/, names: "  names event trace_event words arg\n")
+  end
+
+  def test_args_line_is_a_member_line
+    assert_event_refused(/args is a member line of its enum/,
+                         enum: "enum trace_event u32\n  value park 1\n    args park slot:u64\n  value wake 2\n", args: '')
+  end
+
+  def test_args_accept_members_numbered_from_zero_to_the_bound
+    model = event_schema(enum: "enum trace_event u32\n  value park 0\n  value wake 1023\n")
+    assert_equal [0, 1023], model.types.fetch('trace_event').members.values.sort
+  end
+
+  def test_args_on_a_signed_enum_are_refused
+    assert_event_refused(/an enum with args has an unsigned base/,
+                         enum: "enum trace_event i32\n  value park 1\n  value wake 2\n")
+  end
+
+  def test_enum_with_args_that_no_layout_names_is_refused
+    assert_event_refused(/enum trace_event has args but no layout names it/,
+                         names: "  names flags trace_record_flags\n")
+  end
+
+  def test_names_line_is_checked_against_its_field
+    assert_event_refused(/names requires a field of the layout: kind/, names: "  names kind trace_event args arg\n")
+    assert_event_refused(/field flags is not one u32, the base of trace_event/, names: "  names flags trace_event args arg\n")
+    assert_event_refused(/field arg is not one u32, the base of trace_event/, names: "  names arg trace_event args arg\n")
+    assert_event_refused(/duplicate names line for field event/,
+                         names: "  names event trace_event args arg\n  names event trace_event args arg\n")
+    assert_event_refused(/names requires an enum or flags type: u32/, names: "  names event u32\n")
+  end
+
 end

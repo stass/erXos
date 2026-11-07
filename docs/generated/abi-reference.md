@@ -624,6 +624,16 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_WATCHDOG_PERIOD_MAX` | 60 |
 | `ERX_WATCHDOG_PERIOD_MIN` | 1 |
 
+## Events of `trace_event`
+
+| Event | Value | Arguments |
+| --- | ---: | --- |
+| `park` | 1 | `slot:u64`, `deadline:u64` |
+| `wake` | 2 | `slot:u64`, `result:status` |
+| `irq_deliver` | 3 | `label:u64` |
+| `space_start` | 4 | `target:u64` |
+| `space_end` | 5 | `target:u64`, `status:i64` |
+
 ## Layouts
 
 ### `erx_arch_boot_header_t`
@@ -1518,21 +1528,6 @@ Storage: `shared`. Prefix size: 48. Alignment: 8.
 | `reserved` | `u32` | 36 | 1 |
 | `wall_offset_ns` | `i64` | 40 | 1 |
 
-### `erx_trace_record_t`
-
-Storage: `shared`. Prefix size: 64. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `seq` | `u64` | 0 | 1 |
-| `time_ns` | `u64` | 8 | 1 |
-| `event` | `u32` | 16 | 1 |
-| `cpu` | `u16` | 20 | 1 |
-| `flags` | `u16` | 22 | 1 |
-| `thread` | `u64` | 24 | 1 |
-| `space` | `u64` | 32 | 1 |
-| `arg` | `u64` | 40 | 3 |
-
 ### `erx_uframe_t`
 
 Storage: `shared`. Prefix size: 272. Alignment: 8.
@@ -1944,6 +1939,21 @@ Storage: `wire_le`. Prefix size: 56. Alignment: 8.
 | `phnum` | `u32` | 48 | 1 |
 | `base_alignment` | `u32` | 52 | 1 |
 | `segments` | `erx_image_segment` | 56 | `nsegments` (maximum 8) |
+
+### `erx_trace_record_t`
+
+Storage: `shared`. Prefix size: 64. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `seq` | `u64` | 0 | 1 |
+| `time_ns` | `u64` | 8 | 1 |
+| `event` | `u32` | 16 | 1 |
+| `cpu` | `u16` | 20 | 1 |
+| `flags` | `u16` | 22 | 1 |
+| `thread` | `u64` | 24 | 1 |
+| `space` | `u64` | 32 | 1 |
+| `arg` | `u64` | 40 | 3 |
 
 ### `erx_share_t`
 

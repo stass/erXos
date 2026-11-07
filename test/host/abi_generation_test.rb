@@ -184,7 +184,7 @@ class AbiGenerationTest < Minitest::Test
       File.write(File.join(include_dir, 'abi_reader.h'), Erx::ABI::CEmitter.reader_header(schema))
       path = File.join(directory, 'reader.c')
       File.write(path, Erx::ABI::CEmitter.prefix_source(schema) + Erx::ABI::CReaderEmitter.source(schema))
-      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: '/opt/homebrew/bin/gtimeout')
+      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
       begin
         record = runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
                              '-I', File.join(directory, 'include'), '-I', File.join(@root, 'include'),
@@ -195,4 +195,99 @@ class AbiGenerationTest < Minitest::Test
       end
     end
   end
+  # A member without an args line has an empty argument list, which C17
+  # cannot spell as an empty initializer: the lookup still builds.
+  def test_event_without_arguments_compiles
+    text = <<~ABI
+      abi 1
+      enum ev u32
+        value park 1
+        value wake 2
+        args park slot:u64
+      layout rec wire_le 8 16
+        field event u32 0
+        padding 4 4
+        field arg u64 8 count 1
+        names event ev args arg
+    ABI
+    source = Erx::ABI::SourceSet.new(declarations: Erx::ABI::Syntax.parse(text), inputs: {}).freeze
+    header = Erx::ABI::CEmitter.header(Erx::ABI::Model.validate(source))
+    assert_includes header, '[ERX_EV_WAKE] = { .name = "wake", .nargs = 0 },'
+    Dir.mktmpdir('erx-abi-noargs-') do |directory|
+      FileUtils.mkdir_p(File.join(directory, 'erx'))
+      File.write(File.join(directory, 'erx/abi.h'), header)
+      File.write(File.join(directory, 'use.c'), "#include <erx/abi.h>\nconst erx_abi_event_t *use(void) { return (erx_ev_describe(2)); }\n")
+      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
+      begin
+        runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-ffreestanding', '-I', directory,
+                    '-fsyntax-only', File.join(directory, 'use.c')], name: 'noargs', deadline: 60)
+      rescue Erx::CommandError => error
+        flunk(File.binread(error.result.fetch('log')))
+      end
+    end
+  end
+
+  # The tree's trace_event lookup gives each event's name and typed
+  # arguments, and NULL for a value the enum does not hold, the largest
+  # included; the header also builds freestanding.
+  def test_trace_event_lookup_describes_each_event
+    program = <<~C
+      #include <stdio.h>
+      #include <erx/abi.h>
+
+      static void
+      show(uint32_t value)
+      {
+      	static const char *const tags[] = { "none", "u64", "i64", "status" };
+      	const erx_abi_event_t *event = erx_trace_event_describe(value);
+
+      	if (event == NULL) {
+      		printf("%u unknown\\n", value);
+      		return;
+      	}
+      	printf("%u %s", value, event->name);
+      	for (uint32_t i = 0; i < event->nargs; i++)
+      		printf(" %s:%s", event->args[i].name, tags[event->args[i].type]);
+      	printf("\\n");
+      }
+
+      int
+      main(void)
+      {
+      	for (uint32_t value = 0; value <= 6; value++)
+      		show(value);
+      	show(UINT32_MAX);
+      	return (0);
+      }
+    C
+    Dir.mktmpdir('erx-abi-events-') do |directory|
+      include_dir = File.join(directory, 'include/erx')
+      FileUtils.mkdir_p(include_dir)
+      File.write(File.join(include_dir, 'abi.h'), @plan.files.fetch('include/erx/abi.h'))
+      File.write(File.join(directory, 'events.c'), program)
+      File.write(File.join(directory, 'freestanding.c'), "#include <erx/abi.h>\n")
+      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
+      flags = ['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', File.join(directory, 'include')]
+      begin
+        runner.run(flags + ['-ffreestanding', '-fsyntax-only', File.join(directory, 'freestanding.c')],
+                   name: 'freestanding', deadline: 60)
+        runner.run(flags + ['-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-o', File.join(directory, 'events'),
+                            File.join(directory, 'events.c')], name: 'build', deadline: 60)
+        record = runner.run([File.join(directory, 'events')], name: 'events', deadline: 60)
+      rescue Erx::CommandError => error
+        flunk(File.binread(error.result.fetch('log')))
+      end
+      assert_equal <<~TEXT, File.binread(record.fetch('log'))
+        0 unknown
+        1 park slot:u64 deadline:u64
+        2 wake slot:u64 result:status
+        3 irq_deliver label:u64
+        4 space_start target:u64
+        5 space_end target:u64 status:i64
+        6 unknown
+        4294967295 unknown
+      TEXT
+    end
+  end
+
 end

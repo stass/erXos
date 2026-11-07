@@ -68,6 +68,7 @@ module Erx
           type = schema.types.fetch(type_name)
           out.concat(layout_operations(type, schema)) if type.is_a?(Layout) && !type.private?
         end
+        out.concat(event_tables(schema))
         out.concat(rights_tables(schema)) if schema.objects.any?
         out.concat(['#endif /* ERX_ABI_H */', ''])
         out.join("\n")
@@ -98,6 +99,55 @@ module Erx
           bit_accessors(layout, field) + (field.atomic ? atomic_accessors(layout, field) : [])
         end
         layout.sequence ? out + sequence_accessors(layout, schema) : out
+      end
+
+      # For each enum with args lines, erx_<enum>_describe(value): the
+      # member's name and typed arguments, or NULL for a value the enum
+      # does not hold. A member without an args line has no arguments.
+      # Like the rights lookups below, it indexes a constant table, and
+      # its bound check comes before the index.
+      def event_tables(schema)
+        enums = schema.event_enums
+        return [] if enums.empty?
+
+        ['/* An event argument: an arg word read as a u64, an i64 or an erx_status_t; 0 marks an unused slot. */',
+         'typedef enum erx_abi_arg_type {',
+         *Model::EVENT_ARGUMENT_TYPES.each_with_index.map { |type, index| "\t#{event_type_tag(type)} = #{index + 1}," },
+         '} erx_abi_arg_type_t;', '',
+         'typedef struct erx_abi_event_arg {', "\tconst char\t\t*name;", "\terx_abi_arg_type_t\ttype;",
+         '} erx_abi_event_arg_t;', '',
+         '/* An event: its name and its first nargs arguments, in arg word order. */',
+         'typedef struct erx_abi_event {', "\tconst char\t\t*name;", "\tuint32_t\t\tnargs;",
+         "\terx_abi_event_arg_t\targs[#{Model::MAX_EVENT_ARGUMENTS}];",
+         '} erx_abi_event_t;', '',
+         *enums.flat_map { |type| event_lookup(type) }]
+      end
+
+      def event_type_tag(type) = constant("abi_arg_#{type}")
+
+      def event_lookup(type)
+        entries = type.members.sort_by { |_member, value| value }.map do |member, _value|
+          arguments = type.args.fetch(member, []).map do |argument|
+            "{ #{c_string(argument.name)}, #{event_type_tag(argument.type)} }"
+          end
+          # C17 has no empty initializer; a static table zero-fills args.
+          slots = arguments.empty? ? '' : ", .args = { #{arguments.join(', ')} }"
+          label = constant("#{Model.constant_prefix(type.name)}_#{member}")
+          "\t\t[#{label}] = { .name = #{c_string(member)}, .nargs = #{arguments.size}#{slots} },"
+        end
+        ["/* #{type.name}'s member numbered value, or NULL. */",
+         'static inline const erx_abi_event_t *',
+         "#{name(type.name)}_describe(#{c_type(type.base)} value)", '{',
+         "\tstatic const erx_abi_event_t table[] = {", *entries, "\t};", '',
+         "\tif (value >= sizeof(table) / sizeof(table[0]) || table[value].name == NULL)",
+         "\t\treturn (NULL);", "\treturn (&table[value]);", '}', '']
+      end
+
+      # A validated identifier as a C string literal: it holds only
+      # [a-z0-9_], so it needs no escaping.
+      def c_string(identifier)
+        raise SchemaError, "cannot quote #{identifier.inspect}" unless identifier.match?(/\A[a-z][a-z0-9_]*\z/)
+        "\"#{identifier}\""
       end
 
       # The object types' carryable and pass sets and the creation kinds'

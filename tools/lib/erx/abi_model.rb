@@ -41,7 +41,14 @@ module Erx
       end
     end
 
-    EnumType = Struct.new(:name, :base, :members, :flags, :allowed, keyword_init: true) do
+    # One typed argument of an event: an enum member's args line names and
+    # types the arg words its record uses, in order. A u64 or i64 is the
+    # word read as that integer; a status decodes to the status's name.
+    EventArgument = Struct.new(:name, :type, keyword_init: true)
+
+    # args maps an enum member to its EventArgument list; an enum without
+    # args lines, and every flags type, has none.
+    EnumType = Struct.new(:name, :base, :members, :flags, :allowed, :args, keyword_init: true) do
       def size
         base.size
       end
@@ -82,7 +89,10 @@ module Erx
                       keyword_init: true)
     Layout = Struct.new(:name, :storage, :alignment, :size,
                         :fields, :padding, :tail, :sequence, :private_owner,
-                        :line, keyword_init: true) do
+                        :bindings, :line, keyword_init: true) do
+      # bindings maps an integer field to the FieldBinding its names line
+      # declares: a shared field is a plain integer, so the type it holds
+      # is declared beside it rather than in its type.
       # A private layout's members are its owner's alone: private_owner is
       # the one source file the ABI file names as its owner, nil for a
       # public layout. Its definition, offsets and accessors go to its own
@@ -98,13 +108,23 @@ module Erx
         false
       end
     end
+    # One `names FIELD TYPE [args ARRAY]` line: the enum or flags type a
+    # field holds, by name, and for an enum with args lines the u64 array
+    # that holds its events' arg words.
+    FieldBinding = Struct.new(:type, :args, keyword_init: true)
     Reader = Struct.new(:name, :root, :maximum, :tables, :strings, :rules,
                         :order, :source_role, :extent, :line, keyword_init: true)
     Constant = Struct.new(:name, :value, :type, :description, keyword_init: true)
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :protocols, :inspection, :inputs, keyword_init: true)
+                        :protocols, :inspection, :inputs, keyword_init: true) do
+      # The enums with args lines, in type order: the ones the generator
+      # emits event tables for.
+      def event_enums
+        type_order.map { |name| types.fetch(name) }.select { |type| type.is_a?(EnumType) && type.args.any? }
+      end
+    end
 
     # Resolve types before readers and calls. No emitter receives an unchecked
     # declaration, and no output depends on hash insertion or include order.
@@ -123,6 +143,14 @@ module Erx
       UINT64_MAX = (1 << 64) - 1
       MAX_LAYOUT_SIZE = 16 * 1024 * 1024
       MAX_TYPE_DEPTH = 64
+      # The most arg words an event uses; the C table's argument array
+      # has this many slots, and each carrier's args array at least as
+      # many words as its enum's longest args line.
+      MAX_EVENT_ARGUMENTS = 3
+      EVENT_ARGUMENT_TYPES = %w[u64 i64 status].freeze
+      # An enum with args lines numbers its members below this, so the
+      # generated lookups index a table of at most this many entries.
+      MAX_EVENT_VALUE = 1024
 
       module_function
 
@@ -165,6 +193,7 @@ module Erx
         projections = validate_projections(by_kind.fetch('projection', []), types)
         protocols = validate_protocols(by_kind.fetch('protocol', []), constants)
         inspection = validate_inspection(by_kind, types, rights, objects)
+        validate_event_bindings(types, definitions)
         all_constants = constants.dup
         [type_constants(types), right_constants(rights)].each do |addition|
           addition.each do |name, value|
@@ -327,7 +356,7 @@ module Erx
           names = case declaration.kind
                   when 'scalar', 'enum', 'flags' then [declaration.args[1]]
                   when 'layout'
-                    declaration.members.select { |line| %w[field tail].include?(line.words.first) }
+                    declaration.members.select { |line| %w[field tail names].include?(line.words.first) }
                                .map { |line| line.words[2] }
                   else []
                   end
@@ -407,7 +436,13 @@ module Erx
         declaration.fail!('flags require an unsigned base') if flags && base.signed
         members = {}
         allowed = nil
+        args_lines = []
         declaration.members.each do |line|
+          if line.words.first == 'args'
+            line.fail!('args belong to an enum, not to flags') if flags
+            args_lines << line
+            next
+          end
           if line.words.first == 'allow'
             arity(line, 2)
             line.fail!('allow is one closed flag-combination set') unless flags && !allowed
@@ -438,7 +473,51 @@ module Erx
           declaration.fail!('flag combination includes an undeclared bit')
         end
         EnumType.new(name: name, base: base, members: members.sort.to_h.freeze,
-                     flags: flags, allowed: allowed&.sort&.freeze).freeze
+                     flags: flags, allowed: allowed&.sort&.freeze,
+                     args: event_arguments(args_lines, name: name, base: base, members: members)).freeze
+      end
+
+      # Each args line: `args MEMBER NAME:TYPE...`, one per member of the
+      # enum, at most MAX_EVENT_ARGUMENTS arguments, each name once.
+      def event_arguments(lines, name:, base:, members:)
+        if lines.any? && (base.signed || !members.each_value.all? { |value| value.between?(0, MAX_EVENT_VALUE - 1) })
+          lines.first.fail!("an enum with args has an unsigned base and members from 0 to #{MAX_EVENT_VALUE - 1}")
+        end
+        lines.each_with_object({}) do |line, result|
+          member, *pairs = line.words.drop(1)
+          line.fail!('args is a member line of its enum') unless line.indent == 2
+          line.fail!('args requires a member and at least one NAME:TYPE') unless member && pairs.any?
+          line.fail!("args names no member of #{name}: #{member}") unless members.key?(member)
+          line.fail!("duplicate args line for member #{member}") if result.key?(member)
+          line.fail!("an event has at most #{MAX_EVENT_ARGUMENTS} arguments") if pairs.size > MAX_EVENT_ARGUMENTS
+          arguments = pairs.map { |pair| event_argument(pair, line) }
+          names = arguments.map(&:name)
+          duplicate = names.find { |item| names.count(item) > 1 }
+          line.fail!("duplicate event argument #{duplicate}") if duplicate
+          result[member] = arguments.freeze
+        end.sort.to_h.freeze
+      end
+
+      def event_argument(pair, line)
+        match = pair.match(/\A([a-z][a-z0-9_]*):([a-z0-9]+)\z/)
+        line.fail!("args requires NAME:TYPE, not #{pair}") unless match
+        argument, type = match.captures
+        Names.local(argument, line: line)
+        unless EVENT_ARGUMENT_TYPES.include?(type)
+          line.fail!("unknown event argument type #{type}: #{EVENT_ARGUMENT_TYPES.join(', ')}")
+        end
+        EventArgument.new(name: argument.freeze, type: type.freeze).freeze
+      end
+
+      # An enum with args lines describes the arg words of a record, so
+      # some layout's names line binds it (field_bindings checks each
+      # binding); without one its arguments would describe nothing.
+      def validate_event_bindings(types, definitions)
+        bound = types.values.grep(Layout).flat_map { |layout| layout.bindings.values.map(&:type) }
+        types.each_value do |type|
+          next unless type.is_a?(EnumType) && type.args.any? && !bound.include?(type.name)
+          definitions.fetch(type.name).fail!("enum #{type.name} has args but no layout names it")
+        end
       end
 
       def build_bytes(declaration)
@@ -470,6 +549,7 @@ module Erx
         current_field = nil
         metadata = []
         private_owner = nil
+        names = []
         declaration.members.each do |line|
           keyword, *words = line.words
           if line.indent == 4
@@ -522,6 +602,10 @@ module Erx
           when 'atomic', 'writer', 'owner', 'zero', 'input_mask', 'visibility'
             metadata << line
             current_field = nil
+          when 'names'
+            line.fail!('names requires FIELD TYPE [args ARRAY]') unless words.size == 2 || (words.size == 4 && words[2] == 'args')
+            names << line
+            current_field = nil
           else line.fail!("unknown layout member #{keyword}")
           end
         end
@@ -543,7 +627,42 @@ module Erx
                    alignment: alignment, size: size, fields: completed.freeze,
                    padding: padding.freeze, tail: tail, sequence: sequence,
                    private_owner: private_owner,
+                   bindings: field_bindings(names, completed, types, tail: tail),
                    line: declaration.line).freeze
+      end
+
+      # Each `names FIELD TYPE [args ARRAY]` line: FIELD is one integer
+      # field of the layout and TYPE an enum or flags type over that same
+      # integer, built before the layout. An enum with args lines also
+      # names ARRAY, the u64 array holding its arg words, long enough for
+      # its longest args line; no argument is named like a field or the
+      # tail, so a decoded record never has two members of one name.
+      def field_bindings(lines, fields, types, tail:)
+        lines.each_with_object({}) do |line, result|
+          field_name, type_name, _args, array_name = line.words.drop(1)
+          field = fields.find { |item| item.name == field_name }
+          line.fail!("names requires a field of the layout: #{field_name}") unless field
+          line.fail!("duplicate names line for field #{field_name}") if result.key?(field_name)
+          type = types.fetch(type_name)
+          line.fail!("names requires an enum or flags type: #{type_name}") unless type.is_a?(EnumType)
+          unless field.type.is_a?(IntegerType) && !field.array? && field.type.name == type.base.name
+            line.fail!("field #{field_name} is not one #{type.base.name}, the base of #{type_name}")
+          end
+          line.fail!("#{type_name} has args lines, so names requires args ARRAY") if type.args.any? && !array_name
+          line.fail!("#{type_name} has no args lines to place in #{array_name}") if array_name && type.args.empty?
+          if array_name
+            array = fields.find { |item| item.name == array_name }
+            words = type.args.each_value.map(&:size).max
+            unless array && array.array? && array.type.equal?(BASE_TYPES.fetch('u64')) && array.count >= words
+              line.fail!("args #{array_name} is not an array of at least #{words} u64 words")
+            end
+            taken = fields.map(&:name) + [tail&.name].compact
+            type.args.each_value.to_a.flatten.find { |argument| taken.include?(argument.name) }&.then do |clash|
+              line.fail!("event argument #{clash.name} is named like a field of the layout")
+            end
+          end
+          result[field_name] = FieldBinding.new(type: type_name, args: array_name).freeze
+        end.sort.to_h.freeze
       end
 
       # The owner of a private layout: one C source of erXos's own, by a

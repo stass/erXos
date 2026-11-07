@@ -7590,11 +7590,11 @@ the generator gives the C type above, the readers and the name tables:
 
 ```
 # A trace record ("Trace ring"): one event, written by its ring's one
-# writer as a sequence-counted record. event holds a trace_event and
-# flags trace_record_flags; a shared field is a plain integer, so they
-# are named here. thread and space are 0 when there is none. An args
-# line names and types the arg words an event uses, in order; the rest
-# are 0.
+# writer as a sequence-counted record. A shared field is a plain
+# integer, so the layout's names lines say that event holds a
+# trace_event and flags trace_record_flags. thread and space are 0 when
+# there is none. An args line names and types the arg words an event
+# uses, in order; the rest are 0.
 enum trace_event u32
   value park 1
   value wake 2
@@ -7617,6 +7617,8 @@ layout erx_trace_record shared 8 64
   field thread u64 24
   field space u64 32
   field arg u64 40 count 3
+  names event trace_event args arg
+  names flags trace_record_flags
   atomic seq load acquire store release
   writer seq trace_writer
   owner seq kernel all
@@ -7627,14 +7629,29 @@ layout erx_trace_record shared 8 64
 Every other field has `atomic NAME load acquire store release`, `writer NAME
 trace_writer`, `owner NAME kernel all` and `visibility NAME release` (`arg[]`
 for the array), as [Sequence-counted records](#sequence-counted-records)
-requires. `args` is the one member line `enum` gains. Each argument is
-`NAME:TYPE`, the type `u64`, `i64` or `status`, which decodes to the status's
-name and an undeclared value to unknown. The generator refuses an `args` line
-that names no member of its enum, repeats a member, has more than three
-arguments, or names an argument like a field of the record, and emits each
-event's name and typed arguments into the C, Erlang and Ruby tables; its
-tests give it each refused form, and a generator seeded to accept one
-fails them. `wake`'s
+requires. `args` is the one member line `enum` gains, and `names` the one
+member line `layout` gains. `args MEMBER NAME:TYPE...` types the arg words of
+one member, each argument `NAME:TYPE`, the type `u64`, `i64` or `status`,
+which decodes to the status's name and an undeclared value to unknown.
+`names FIELD TYPE [args ARRAY]` says that an integer field holds an enum or
+flags type over the same integer, since a shared field's own type is a plain
+integer; for an enum with `args` lines it also names the `u64` array that
+holds the arg words, so the binding fixes both where an event is and where
+its arguments are. The generator refuses an `args` line that names no member
+of its enum, repeats a member, has more than three arguments, names an
+argument like a field or the tail of a record that binds the enum (the
+`arg` array included), has no argument, repeats an argument name, gives a
+malformed `NAME:TYPE` or an unknown type, or sits under `flags`; an enum
+with `args` lines that no layout binds, that has a signed base, or whose
+members are not numbered from 0 to 1023; and a `names` line whose field is
+not one integer of the type's base, that binds an enum with `args` lines
+without `args ARRAY` or one without them with it, or whose array is not one
+of `u64` long enough for the enum's longest `args` line. It
+emits each event's name and typed arguments into C
+(`erx_trace_event_describe`, a table lookup that returns NULL for a value the
+enum does not hold), Erlang (`erx_abi_events:describe/2`), the Ruby model and
+the ABI reference; its tests give it each refused form, and a generator
+seeded to accept one fails them. `wake`'s
 `result` is the park's status, `ERX_OK` or `ERX_ETIMEDOUT`; `target` is the
 space started or ended, and `status` its exit status. `cpu_unknown` marks a
 record whose writer cannot name its CPU; the kernel always can and never sets

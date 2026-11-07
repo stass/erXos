@@ -23,13 +23,16 @@ module Erx
       module_function
 
       def outputs(schema)
-        result = { 'erlang/apps/erx/include/generated/erx_abi.hrl' => header(schema) }
+        result = { 'erlang/apps/erx/include/generated/erx_abi.hrl' => header(schema),
+                   'erlang/apps/erx/src/generated/erx_abi_events.erl' => events(schema) }
         schema.readers.each do |specification|
           module_name = Names.c(specification.name)
           unless module_name.match?(/\Aerx_[a-z][a-z0-9_]*\z/) && module_name.bytesize <= 255
             raise SchemaError, 'reader has no supported Erlang module name'
           end
-          result["erlang/apps/erx/src/generated/#{module_name}.erl"] = reader(schema, specification)
+          path = "erlang/apps/erx/src/generated/#{module_name}.erl"
+          raise SchemaError, "reader module #{module_name} collides with a generated module" if result.key?(path)
+          result[path] = reader(schema, specification)
         end
         result.freeze
       end
@@ -67,6 +70,33 @@ module Erx
           end
         end
         (lines + ['', '-endif.', '']).join("\n")
+      end
+
+      # erx_abi_events:describe(Enum, Value): for each enum with args
+      # lines, its member numbered Value as {Name, [{ArgName, Type}]}, or
+      # unknown for a value the enum does not hold.
+      def events(schema)
+        enums = schema.event_enums
+        enum_type = enums.empty? ? 'atom()' : enums.map { |type| literal(atom(type.name)) }.join(' | ')
+        clauses = enums.flat_map do |type|
+          enum = literal(atom(type.name))
+          type.members.sort_by { |_member, value| value }.map do |member, value|
+            arguments = type.args.fetch(member, []).map do |argument|
+              "{#{literal(atom(argument.name))}, #{literal(atom(argument.type))}}"
+            end
+            "describe(#{enum}, #{value}) -> {#{literal(atom(member))}, [#{arguments.join(', ')}]}"
+          end + ["describe(#{enum}, _Value) -> unknown"]
+        end
+        clauses = ['describe(_Enum, _Value) -> unknown'] if enums.empty?
+        argument_type = Model::EVENT_ARGUMENT_TYPES.map { |type| literal(atom(type)) }.join(' | ')
+        [NOTICE, '-module(erx_abi_events).',
+         '-moduledoc "The events of the ABI file\'s enums with args lines and their typed arguments.".',
+         '-export([describe/2]).', '-export_type([argument_type/0]).', '',
+         '%% An arg word read as an unsigned or signed 64-bit integer, or as a status.',
+         "-type argument_type() :: #{argument_type}.", '',
+         "-spec describe(#{enum_type}, integer()) ->",
+         '    {atom(), [{atom(), argument_type()}]} | unknown.',
+         clauses.join(";\n") + '.', ''].join("\n")
       end
 
       def reader(schema, specification)

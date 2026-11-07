@@ -638,12 +638,12 @@ layout erx_cap_slot shared 8 64
   sequence seq terminal 0xffffffffffffffff exhaustion @stale recovery none
 
 # A trace record ("Trace ring"): one event, written by its ring's one
-# writer as a sequence-counted record. event holds a trace_event and
-# flags trace_record_flags; a shared field is a plain integer, so they
-# are named here. thread and space are 0 when there is none. An args
-# line names and types the arg words an event uses, in order; the rest
-# are 0. A ring holds trace_ring_records records, and one read copies at
-# most trace_read_max.
+# writer as a sequence-counted record. A shared field is a plain
+# integer, so the layout's names lines say that event holds a
+# trace_event and flags trace_record_flags. thread and space are 0 when
+# there is none. An args line names and types the arg words an event
+# uses, in order; the rest are 0. A ring holds trace_ring_records
+# records, and one read copies at most trace_read_max.
 limit trace_ring_records u32 4096
 limit trace_read_max u32 512
 enum trace_event u32
@@ -652,6 +652,11 @@ enum trace_event u32
   value irq_deliver 3
   value space_start 4
   value space_end 5
+  args park slot:u64 deadline:u64
+  args wake slot:u64 result:status
+  args irq_deliver label:u64
+  args space_start target:u64
+  args space_end target:u64 status:i64
 flags trace_record_flags u16
   bit cpu_unknown 0
 layout erx_trace_record shared 8 64
@@ -663,6 +668,8 @@ layout erx_trace_record shared 8 64
   field thread u64 24
   field space u64 32
   field arg u64 40 count 3
+  names event trace_event args arg
+  names flags trace_record_flags
   atomic seq load acquire store release
   atomic time_ns load acquire store release
   atomic event load acquire store release

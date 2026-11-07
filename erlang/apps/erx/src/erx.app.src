@@ -16,6 +16,7 @@
   {vsn, "1"},
   {modules, [erx,
              erx_9p,
+             erx_abi_events,
              erx_bytes,
              erx_console,
              erx_device,

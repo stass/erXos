@@ -2779,46 +2779,6 @@ _Static_assert(offsetof(erx_time_page_t, reserved) ==
 _Static_assert(offsetof(erx_time_page_t, wall_offset_ns) ==
     ERX_TIME_PAGE_OFF_WALL_OFFSET_NS, "erx_time_page.wall_offset_ns offset");
 
-#define ERX_TRACE_RECORD_SIZE 64
-#define ERX_TRACE_RECORD_ALIGN 8
-#define ERX_TRACE_RECORD_OFF_SEQ 0
-#define ERX_TRACE_RECORD_OFF_TIME_NS 8
-#define ERX_TRACE_RECORD_OFF_EVENT 16
-#define ERX_TRACE_RECORD_OFF_CPU 20
-#define ERX_TRACE_RECORD_OFF_FLAGS 22
-#define ERX_TRACE_RECORD_OFF_THREAD 24
-#define ERX_TRACE_RECORD_OFF_SPACE 32
-#define ERX_TRACE_RECORD_OFF_ARG 40
-typedef struct erx_trace_record erx_trace_record_t;
-struct erx_trace_record {
-	_Alignas(8) _Atomic uint64_t	seq;
-	_Atomic uint64_t	time_ns;
-	_Atomic uint32_t	event;
-	_Atomic uint16_t	cpu;
-	_Atomic uint16_t	flags;
-	_Atomic uint64_t	thread;
-	_Atomic uint64_t	space;
-	_Atomic uint64_t	arg[3];
-};
-_Static_assert(sizeof(erx_trace_record_t) == ERX_TRACE_RECORD_SIZE, "erx_trace_record size");
-_Static_assert(_Alignof(erx_trace_record_t) == ERX_TRACE_RECORD_ALIGN, "erx_trace_record alignment");
-_Static_assert(offsetof(erx_trace_record_t, seq) ==
-    ERX_TRACE_RECORD_OFF_SEQ, "erx_trace_record.seq offset");
-_Static_assert(offsetof(erx_trace_record_t, time_ns) ==
-    ERX_TRACE_RECORD_OFF_TIME_NS, "erx_trace_record.time_ns offset");
-_Static_assert(offsetof(erx_trace_record_t, event) ==
-    ERX_TRACE_RECORD_OFF_EVENT, "erx_trace_record.event offset");
-_Static_assert(offsetof(erx_trace_record_t, cpu) ==
-    ERX_TRACE_RECORD_OFF_CPU, "erx_trace_record.cpu offset");
-_Static_assert(offsetof(erx_trace_record_t, flags) ==
-    ERX_TRACE_RECORD_OFF_FLAGS, "erx_trace_record.flags offset");
-_Static_assert(offsetof(erx_trace_record_t, thread) ==
-    ERX_TRACE_RECORD_OFF_THREAD, "erx_trace_record.thread offset");
-_Static_assert(offsetof(erx_trace_record_t, space) ==
-    ERX_TRACE_RECORD_OFF_SPACE, "erx_trace_record.space offset");
-_Static_assert(offsetof(erx_trace_record_t, arg) ==
-    ERX_TRACE_RECORD_OFF_ARG, "erx_trace_record.arg offset");
-
 #define ERX_UFRAME_SIZE 272
 #define ERX_UFRAME_ALIGN 8
 #define ERX_UFRAME_OFF_GPR 0
@@ -4053,6 +4013,46 @@ typedef uint32_t erx_trace_event_t;
 
 typedef uint16_t erx_trace_record_flags_t;
 
+#define ERX_TRACE_RECORD_SIZE 64
+#define ERX_TRACE_RECORD_ALIGN 8
+#define ERX_TRACE_RECORD_OFF_SEQ 0
+#define ERX_TRACE_RECORD_OFF_TIME_NS 8
+#define ERX_TRACE_RECORD_OFF_EVENT 16
+#define ERX_TRACE_RECORD_OFF_CPU 20
+#define ERX_TRACE_RECORD_OFF_FLAGS 22
+#define ERX_TRACE_RECORD_OFF_THREAD 24
+#define ERX_TRACE_RECORD_OFF_SPACE 32
+#define ERX_TRACE_RECORD_OFF_ARG 40
+typedef struct erx_trace_record erx_trace_record_t;
+struct erx_trace_record {
+	_Alignas(8) _Atomic uint64_t	seq;
+	_Atomic uint64_t	time_ns;
+	_Atomic uint32_t	event;
+	_Atomic uint16_t	cpu;
+	_Atomic uint16_t	flags;
+	_Atomic uint64_t	thread;
+	_Atomic uint64_t	space;
+	_Atomic uint64_t	arg[3];
+};
+_Static_assert(sizeof(erx_trace_record_t) == ERX_TRACE_RECORD_SIZE, "erx_trace_record size");
+_Static_assert(_Alignof(erx_trace_record_t) == ERX_TRACE_RECORD_ALIGN, "erx_trace_record alignment");
+_Static_assert(offsetof(erx_trace_record_t, seq) ==
+    ERX_TRACE_RECORD_OFF_SEQ, "erx_trace_record.seq offset");
+_Static_assert(offsetof(erx_trace_record_t, time_ns) ==
+    ERX_TRACE_RECORD_OFF_TIME_NS, "erx_trace_record.time_ns offset");
+_Static_assert(offsetof(erx_trace_record_t, event) ==
+    ERX_TRACE_RECORD_OFF_EVENT, "erx_trace_record.event offset");
+_Static_assert(offsetof(erx_trace_record_t, cpu) ==
+    ERX_TRACE_RECORD_OFF_CPU, "erx_trace_record.cpu offset");
+_Static_assert(offsetof(erx_trace_record_t, flags) ==
+    ERX_TRACE_RECORD_OFF_FLAGS, "erx_trace_record.flags offset");
+_Static_assert(offsetof(erx_trace_record_t, thread) ==
+    ERX_TRACE_RECORD_OFF_THREAD, "erx_trace_record.thread offset");
+_Static_assert(offsetof(erx_trace_record_t, space) ==
+    ERX_TRACE_RECORD_OFF_SPACE, "erx_trace_record.space offset");
+_Static_assert(offsetof(erx_trace_record_t, arg) ==
+    ERX_TRACE_RECORD_OFF_ARG, "erx_trace_record.arg offset");
+
 typedef struct erx_uaddr erx_uaddr_t;
 struct erx_uaddr {
 	uint64_t	raw;
@@ -5167,184 +5167,6 @@ erx_time_page_seq_status(uint64_t captured)
 
 /* Each successful accessor performs one atomic element access. */
 static inline bool
-erx_trace_record_seq_load(const erx_trace_record_t *record, uint64_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->seq,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_seq_store(erx_trace_record_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->seq, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_time_ns_load(const erx_trace_record_t *record, uint64_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->time_ns,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_time_ns_store(erx_trace_record_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->time_ns, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_event_load(const erx_trace_record_t *record, uint32_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->event,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_event_store(erx_trace_record_t *record, uint32_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->event, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_cpu_load(const erx_trace_record_t *record, uint16_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->cpu,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_cpu_store(erx_trace_record_t *record, uint16_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->cpu, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_flags_load(const erx_trace_record_t *record, uint16_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->flags,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_flags_store(erx_trace_record_t *record, uint16_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->flags, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_thread_load(const erx_trace_record_t *record, uint64_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->thread,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_thread_store(erx_trace_record_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->thread, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_space_load(const erx_trace_record_t *record, uint64_t *value)
-{
-	if (record == NULL || value == NULL)
-		return (false);
-	*value = atomic_load_explicit(&record->space,
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_space_store(erx_trace_record_t *record, uint64_t value)
-{
-	if (record == NULL)
-		return (false);
-	atomic_store_explicit(&record->space, value,
-	    memory_order_release);
-	return (true);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
-erx_trace_record_arg_load(const erx_trace_record_t *record, size_t index, uint64_t *value)
-{
-	if (record == NULL || value == NULL || index >= 3)
-		return (false);
-	*value = atomic_load_explicit(&record->arg[index],
-	    memory_order_acquire);
-	return (true);
-}
-
-static inline bool
-erx_trace_record_arg_store(erx_trace_record_t *record, size_t index, uint64_t value)
-{
-	if (record == NULL || index >= 3)
-		return (false);
-	atomic_store_explicit(&record->arg[index], value,
-	    memory_order_release);
-	return (true);
-}
-
-#define ERX_TRACE_RECORD_SEQ_TERMINAL UINT64_C(18446744073709551615)
-#define ERX_TRACE_RECORD_SEQ_EXHAUSTION ERX_ELIMIT
-
-/* Tests a captured sequence value; it does not validate a snapshot. */
-static inline erx_status_t
-erx_trace_record_seq_status(uint64_t captured)
-{
-	return (captured == ERX_TRACE_RECORD_SEQ_TERMINAL ? ERX_TRACE_RECORD_SEQ_EXHAUSTION : ERX_OK);
-}
-
-/* Each successful accessor performs one atomic element access. */
-static inline bool
 erx_uframe_gpr_load(const erx_uframe_t *record, size_t index, uint64_t *value)
 {
 	if (record == NULL || value == NULL || index >= 31)
@@ -5689,6 +5511,220 @@ erx_utcb_user_store(erx_utcb_t *record, size_t index, uint64_t value)
 	atomic_store_explicit(&record->user[index], value,
 	    memory_order_release);
 	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_seq_load(const erx_trace_record_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->seq,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_seq_store(erx_trace_record_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->seq, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_time_ns_load(const erx_trace_record_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->time_ns,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_time_ns_store(erx_trace_record_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->time_ns, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_event_load(const erx_trace_record_t *record, uint32_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->event,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_event_store(erx_trace_record_t *record, uint32_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->event, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_cpu_load(const erx_trace_record_t *record, uint16_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->cpu,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_cpu_store(erx_trace_record_t *record, uint16_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->cpu, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_flags_load(const erx_trace_record_t *record, uint16_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->flags,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_flags_store(erx_trace_record_t *record, uint16_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->flags, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_thread_load(const erx_trace_record_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->thread,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_thread_store(erx_trace_record_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->thread, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_space_load(const erx_trace_record_t *record, uint64_t *value)
+{
+	if (record == NULL || value == NULL)
+		return (false);
+	*value = atomic_load_explicit(&record->space,
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_space_store(erx_trace_record_t *record, uint64_t value)
+{
+	if (record == NULL)
+		return (false);
+	atomic_store_explicit(&record->space, value,
+	    memory_order_release);
+	return (true);
+}
+
+/* Each successful accessor performs one atomic element access. */
+static inline bool
+erx_trace_record_arg_load(const erx_trace_record_t *record, size_t index, uint64_t *value)
+{
+	if (record == NULL || value == NULL || index >= 3)
+		return (false);
+	*value = atomic_load_explicit(&record->arg[index],
+	    memory_order_acquire);
+	return (true);
+}
+
+static inline bool
+erx_trace_record_arg_store(erx_trace_record_t *record, size_t index, uint64_t value)
+{
+	if (record == NULL || index >= 3)
+		return (false);
+	atomic_store_explicit(&record->arg[index], value,
+	    memory_order_release);
+	return (true);
+}
+
+#define ERX_TRACE_RECORD_SEQ_TERMINAL UINT64_C(18446744073709551615)
+#define ERX_TRACE_RECORD_SEQ_EXHAUSTION ERX_ELIMIT
+
+/* Tests a captured sequence value; it does not validate a snapshot. */
+static inline erx_status_t
+erx_trace_record_seq_status(uint64_t captured)
+{
+	return (captured == ERX_TRACE_RECORD_SEQ_TERMINAL ? ERX_TRACE_RECORD_SEQ_EXHAUSTION : ERX_OK);
+}
+
+/* An event argument: an arg word read as a u64, an i64 or an erx_status_t; 0 marks an unused slot. */
+typedef enum erx_abi_arg_type {
+	ERX_ABI_ARG_U64 = 1,
+	ERX_ABI_ARG_I64 = 2,
+	ERX_ABI_ARG_STATUS = 3,
+} erx_abi_arg_type_t;
+
+typedef struct erx_abi_event_arg {
+	const char		*name;
+	erx_abi_arg_type_t	type;
+} erx_abi_event_arg_t;
+
+/* An event: its name and its first nargs arguments, in arg word order. */
+typedef struct erx_abi_event {
+	const char		*name;
+	uint32_t		nargs;
+	erx_abi_event_arg_t	args[3];
+} erx_abi_event_t;
+
+/* trace_event's member numbered value, or NULL. */
+static inline const erx_abi_event_t *
+erx_trace_event_describe(uint32_t value)
+{
+	static const erx_abi_event_t table[] = {
+		[ERX_TRACE_EVENT_PARK] = { .name = "park", .nargs = 2, .args = { { "slot", ERX_ABI_ARG_U64 }, { "deadline", ERX_ABI_ARG_U64 } } },
+		[ERX_TRACE_EVENT_WAKE] = { .name = "wake", .nargs = 2, .args = { { "slot", ERX_ABI_ARG_U64 }, { "result", ERX_ABI_ARG_STATUS } } },
+		[ERX_TRACE_EVENT_IRQ_DELIVER] = { .name = "irq_deliver", .nargs = 1, .args = { { "label", ERX_ABI_ARG_U64 } } },
+		[ERX_TRACE_EVENT_SPACE_START] = { .name = "space_start", .nargs = 1, .args = { { "target", ERX_ABI_ARG_U64 } } },
+		[ERX_TRACE_EVENT_SPACE_END] = { .name = "space_end", .nargs = 2, .args = { { "target", ERX_ABI_ARG_U64 }, { "status", ERX_ABI_ARG_I64 } } },
+	};
+
+	if (value >= sizeof(table) / sizeof(table[0]) || table[value].name == NULL)
+		return (NULL);
+	return (&table[value]);
 }
 
 /* An object type and a creation kind, numbered by the ABI file. */
