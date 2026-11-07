@@ -300,7 +300,9 @@ shell and for `erx:` functions that run commands:
    implements the `erx_cmd` behaviour and declares its name
    (`-erx_command(ps)`), such as `ps`, `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount`, `unmount`, `where`, `select`, `sort` and
-   `count`;
+   `count`, and the file utilities `echo`, `cat`, `ls`, `pwd`, `mkdir`,
+   `rm`, `mv`, `cp`, `true` and `false`, which follow FreeBSD's utilities
+   of the same names, so toybox's applets of those names are never built;
 3. a **program command**: one of toybox's applets or another program of
    the boot image, each of which the session's export also lists in
    `/bin` ([design-programs.md](design-programs.md#what-a-program-can-start)).

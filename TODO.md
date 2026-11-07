@@ -1422,6 +1422,10 @@ to the corpus and follow rc
   output is bounded by the evaluator's heap alone; the first Erlang commands lack `i`, `bind`,
   `unmount` and `mount` with arguments, which change the namespace through `erx_ns`
   (`erlang/apps/erx_shell/src/erx_shell_runner.erl`).
+* [Medium] shell, the Erlang file utilities (`erlang/apps/erx_shell/src/erx_cmd_*.erl`): `echo`, `cat`, `ls`,
+  `pwd`, `mkdir`, `rm`, `mv` and `cp` are erXos's own and replace toybox's applets of those names, but each takes
+  only a few of FreeBSD's flags (`ls -l`, `mkdir -p`, `rm -rf`; no `ls -a`, `cp -R`, `mv -i` and the like). Grow each toward
+  FreeBSD's utility, flag by flag, with FreeBSD's manual page as the reference and a test per flag.
 * [Medium] shell, the runner's review findings left open (`erlang/apps/erx_shell/src/erx_shell_runner.erl`):
   a stream has no direction, so `` x=`{cat >[0=1]} `` reads the write end of its own pipe and hangs the
   session; give `{pipe, Pid}` a direction and answer `ebadf` to a read of a write end. Stage, command and
