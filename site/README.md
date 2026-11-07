@@ -117,20 +117,28 @@ The page sends no tracking or analytics requests.
 ## The console window
 
 The console window sits in the hero, above the fold on a desktop screen.
-Its screen, `<div id="erx-terminal">`, holds a recorded session in a
-`<pre>`: that is what readers without JavaScript see, and what everyone
-sees before booting.
+It is drawn as a stylised VT100: a putty case (graphite in the dark
+theme), dark glass around the screen, and a chin below the screen with
+the name plate, a lamp labelled with the console's state, a readout and
+the keys. Only the guest's output appears on the screen. The screen,
+`<div id="erx-terminal">`, holds a recorded session in a `<pre>`: that is
+what readers without JavaScript see, and what everyone sees before
+booting. The hint and the source line are page text below the case.
 
-With JavaScript, `terminal.js` shows a "Boot erXos" button and the
-download size. On a click it loads xterm.js (from jsDelivr, pinned to an
-exact version and checked by Subresource Integrity), v64 and the image,
-showing a progress bar; checks the image against `boot.json`; and boots
-it with 512 MiB of guest memory (`RAM_MIB`, the one place to change it),
-one core, v64's page-tier JIT on and the kernel command line
-`erx.watchdog=1,30,600`. The machine's serial console is attached to the
-terminal, and the status line follows boot milestones in the serial
-output. Reset destroys the machine and boots the same image again
-without downloading it. Under reduced motion the cursor does not blink.
+With JavaScript, `terminal.js` shows a "Boot erXos" key, the download
+size and the simulated machine, `ARMv8-A · 1 core · 512 MiB RAM`. On a
+click it loads xterm.js (from jsDelivr, pinned to an exact version and
+checked by Subresource Integrity), v64 and the image, showing a progress
+bar on the case; checks the image against `boot.json`; and boots it with
+512 MiB of guest memory and one core (`RAM_MIB` and `CPU_CORES`, the one
+place to change each, from which the readout is built too), v64's
+page-tier JIT on and the kernel command line `erx.watchdog=1,30,600`.
+The machine's serial console is attached to the terminal, and the status
+line follows boot milestones in the serial output. The case's
+`data-erx-phase` (booting, live or stopped) colours the lamp and the
+status. Reset destroys the machine and boots the same image again without
+downloading it. Under reduced motion the cursor and the lamp do not
+blink.
 
 Browsers without WebAssembly or `DecompressionStream` keep the recorded
 session and say so.

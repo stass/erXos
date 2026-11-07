@@ -42,17 +42,17 @@
     UNIX.</p>
   </div>
   <div class="hero-side">
+    <!--
+      The console is drawn as a terminal: a case, curved glass around the
+      screen, and a chin below the screen that carries the lamp, the
+      readout and the keys. Without JavaScript the screen shows a recorded
+      session. terminal.js replaces the <pre> with an xterm.js terminal
+      attached to erXos running in the browser under v64, and drives the
+      chin. See site/README.md.
+    -->
     <div class="terminal" id="console">
-      <div class="terminal-bar">
-        <span><span class="dot"></span><span class="name">erXos</span> console</span>
-        <span data-erx-state>Recorded session</span>
-      </div>
-      <!--
-        Without JavaScript this window shows a recorded session. terminal.js
-        replaces the <pre> with an xterm.js terminal attached to erXos
-        running in the browser under v64. See site/README.md.
-      -->
-      <div id="erx-terminal" data-erx-terminal="recorded">
+      <div class="terminal-glass">
+        <div id="erx-terminal" data-erx-terminal="recorded">
 <pre>             __  __
    ___  _ __ \ \/ /  ___   ___
   / _ \| '__| \  /  / _ \ / __|
@@ -89,16 +89,27 @@ Error in process &lt;0.103.0&gt; with exit value:
 <span class="p">5&gt;</span> Ring(50000, 20).
 50039 processes alive; one token went round a ring of 50000, 1000000 messages
 ok</pre>
+        </div>
       </div>
-      <div class="terminal-controls" data-erx-controls hidden>
-        <div class="progress" data-erx-progress hidden><span></span></div>
-        <button type="button" class="boot" data-erx-boot>Boot erXos</button>
-        <button type="button" class="reset" data-erx-reset hidden>Reset</button>
-        <span class="status" role="status" aria-live="polite" data-erx-status>Runs in your browser</span>
+      <div class="terminal-chin">
+        <span class="terminal-plate">erXos</span>
+        <span class="terminal-lamp"><span class="led" aria-hidden="true"></span><span data-erx-state>Recorded session</span></span>
+        <div class="terminal-controls" data-erx-controls hidden>
+          <div class="terminal-readout">
+            <span class="status" role="status" aria-live="polite" data-erx-status></span>
+            <span class="machine" data-erx-machine></span>
+            <div class="progress" data-erx-progress hidden><span></span></div>
+          </div>
+          <div class="terminal-keys">
+            <button type="button" class="key reset" data-erx-reset hidden>Reset</button>
+            <button type="button" class="key boot" data-erx-boot>Boot erXos</button>
+          </div>
+        </div>
       </div>
-      <p class="terminal-hint" data-erx-hint hidden>At the <code>1&gt;</code> prompt, try <code>erx_shell:start().</code>, then <code>ls /</code> and <code>ps</code>.</p>
-      <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
+      <div class="terminal-grille" aria-hidden="true"></div>
     </div>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>1&gt;</code> prompt, try <code>erx_shell:start().</code>, then <code>ls /</code> and <code>ps</code>.</p>
+    <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>
 

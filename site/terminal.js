@@ -14,8 +14,10 @@
 // kept in memory, so Reset reboots without downloading again. Boot progress
 // comes from milestones in the serial output.
 
-// Guest memory. One constant, so a smaller image can lower it in one place.
+// Guest memory and cores. One constant each, so either changes in one
+// place; the readout on the case is built from the same two.
 const RAM_MIB = 512;
+const CPU_CORES = 1;
 const CMDLINE = "erx.watchdog=1,30,600";
 const MANIFEST = "boot.json";
 
@@ -40,19 +42,34 @@ const MILESTONES = [
 // fills an equal share of the rest.
 const DOWNLOAD_SHARE = 0.6;
 
+// What the readout on the case says the machine is.
+const MACHINE = `ARMv8-A \u00b7 ${CPU_CORES} ${CPU_CORES === 1 ? "core" : "cores"} \u00b7 ${RAM_MIB} MiB RAM`;
+
 const reduced_motion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const mib = bytes => (bytes / (1 << 20)).toFixed(1);
 
 const ui = {
+    console: document.getElementById("console"),
     screen: document.getElementById("erx-terminal"),
     state: document.querySelector("[data-erx-state]"),
     controls: document.querySelector("[data-erx-controls]"),
     boot: document.querySelector("[data-erx-boot]"),
     reset: document.querySelector("[data-erx-reset]"),
     status: document.querySelector("[data-erx-status]"),
+    machine: document.querySelector("[data-erx-machine]"),
     progress: document.querySelector("[data-erx-progress]"),
     hint: document.querySelector("[data-erx-hint]"),
 };
+
+// The phases of the console and the label each shows beside the lamp. The
+// phase colours the lamp and the readout; see .terminal[data-erx-phase] in
+// style.css. Before the first boot the case has no phase.
+const PHASE_LABELS = { booting: "Booting", live: "Live", stopped: "Stopped" };
+
+function show_state(phase) {
+    ui.state.textContent = PHASE_LABELS[phase];
+    ui.console.dataset.erxPhase = phase;
+}
 
 function show_status(text, fraction) {
     ui.status.textContent = text;
@@ -179,10 +196,10 @@ const machine = {
             this.term.write(Uint8Array.from(queued));
             queued = [];
         };
-        ui.state.textContent = "Booting";
+        show_state("booting");
         show_status("Starting the machine", DOWNLOAD_SHARE);
         session.emulator = new this.V86({
-            cpu_type: "arm64", graphics_adapter: "none", cpu_cores: 1,
+            cpu_type: "arm64", graphics_adapter: "none", cpu_cores: CPU_CORES,
             memory_size: RAM_MIB << 20, log_level: 0, wasm_path: this.manifest.emulator.wasm,
             kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE,
             jit_switches: { a64_page: 1 }, autostart: true,
@@ -202,7 +219,7 @@ const machine = {
                 show_status(label, DOWNLOAD_SHARE + (1 - DOWNLOAD_SHARE) * stage / MILESTONES.length);
                 if(stage === MILESTONES.length) {
                     ui.progress.hidden = true;
-                    ui.state.textContent = "Live";
+                    show_state("live");
                     window.erx_ready_at = performance.now();
                     this.term.focus();
                 }
@@ -213,6 +230,7 @@ const machine = {
     async boot() {
         ui.boot.disabled = true;
         window.erx_boot_clicked_at = performance.now();
+        show_state("booting");
         try {
             show_status("Loading", 0);
             const xterm = load_xterm();
@@ -250,7 +268,7 @@ const machine = {
     // Reset is the way back.
     fail(error) {
         show_status(`Could not start: ${error?.message ?? error}`);
-        ui.state.textContent = "Stopped";
+        show_state("stopped");
         if(this.image && this.V86 && this.term) return;
         ui.boot.textContent = "Try again";
         ui.boot.disabled = false;
@@ -260,6 +278,7 @@ const machine = {
 function init() {
     if(!ui.screen || !ui.controls) return;
     ui.controls.hidden = false;
+    ui.machine.textContent = MACHINE;
     const supported = typeof WebAssembly === "object" && typeof DecompressionStream === "function" &&
         globalThis.crypto?.subtle;
     if(!supported) {
@@ -271,7 +290,7 @@ function init() {
     ui.boot.addEventListener("click", () => machine.boot());
     ui.reset.addEventListener("click", () => machine.reset());
     fetch_manifest().then(manifest =>
-        show_status(`${mib(manifest.compressed_bytes + manifest.emulator.bytes)} MB download, runs in your browser`)).catch(() => undefined);
+        show_status(`${mib(manifest.compressed_bytes + manifest.emulator.bytes)} MB download`)).catch(() => undefined);
 }
 
 init();

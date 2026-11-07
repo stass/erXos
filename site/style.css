@@ -22,6 +22,28 @@
   --code-dim: #8f8b80;
   --code-prompt: #ff6a3d;
 
+  /* The console's case: see Terminal below. */
+  --case: #d8d3c4;
+  --case-hi: #ebe7da;
+  --case-lo: #b9b3a2;
+  --case-edge: #a49d8a;
+  --case-shadow: rgba(0, 0, 0, 0.18);
+  --plate-ink: #3b3a35;
+  --case-text: #23221f;
+  --case-muted: #55534d;
+  --case-alert: #9a2d0b;
+  --lamp-off: #9e9886;
+  --progress-groove: #f1eee6;
+  --glass: #1b1b19;
+  --glass-rim: #0c0c0b;
+  --key: #ece8dc;
+  --key-ink: #121211;
+  --key-edge: #9d9784;
+  --key-go-ink: #121211;
+  --key-go-edge: #9e3010;
+  --grille: #c7c1b0;
+  --grille-slot: #b3ad9b;
+
   --sans: "Archivo", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue",
     Helvetica, Arial, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
@@ -47,6 +69,26 @@
     --code-bg: #050505;
     --code-ink: #e9e6dd;
     --code-dim: #858176;
+    --case: #3a3935;
+    --case-hi: #4a4944;
+    --case-lo: #2a2926;
+    --case-edge: #1f1e1c;
+    --case-shadow: rgba(0, 0, 0, 0.5);
+    --plate-ink: #d6d2c6;
+    --case-text: #ece9e1;
+    --case-muted: #b3aea2;
+    --case-alert: #ff8a65;
+    --lamp-off: #23221f;
+    --progress-groove: #23221f;
+    --glass: #121211;
+    --glass-rim: #050505;
+    --key: #55534d;
+    --key-ink: #ece9e1;
+    --key-edge: #23221f;
+    --key-go-ink: #121211;
+  --key-go-edge: #9e3010;
+    --grille: #34332f;
+    --grille-slot: #262522;
   }
 }
 
@@ -63,6 +105,26 @@
   --code-bg: #050505;
   --code-ink: #e9e6dd;
   --code-dim: #858176;
+  --case: #3a3935;
+  --case-hi: #4a4944;
+  --case-lo: #2a2926;
+  --case-edge: #1f1e1c;
+  --case-shadow: rgba(0, 0, 0, 0.5);
+  --plate-ink: #d6d2c6;
+  --case-text: #ece9e1;
+  --case-muted: #b3aea2;
+  --case-alert: #ff8a65;
+  --lamp-off: #23221f;
+  --progress-groove: #23221f;
+  --glass: #121211;
+  --glass-rim: #050505;
+  --key: #55534d;
+  --key-ink: #ece9e1;
+  --key-edge: #23221f;
+  --key-go-ink: #121211;
+  --key-go-edge: #9e3010;
+  --grille: #34332f;
+  --grille-slot: #262522;
 }
 
 /* ---- Base -------------------------------------------------------------- */
@@ -216,10 +278,6 @@ p:last-child {
 
 .hero-side {
   padding: 48px 0 40px 40px;
-}
-
-.hero .terminal {
-  margin-top: 0;
 }
 
 .spec {
@@ -488,47 +546,44 @@ p:last-child {
 /* ---- Terminal ---------------------------------------------------------- */
 
 /*
- * The console window. It holds a recorded session until the visitor boots
- * erXos; terminal.js then puts an xterm.js terminal in #erx-terminal (see
- * site/README.md). The screen keeps one height, about 24 rows, in both
- * states, so booting does not move the page.
+ * The console, drawn as a stylised VT100: a putty case (graphite in the
+ * dark theme), dark curved glass around the screen, and a chin below the
+ * screen with the name plate, the lamp, the readout and the keys, then a
+ * vent grille. Every control and status line terminal.js shows sits on the
+ * case, and only the guest's output is on the screen, so the two never
+ * share a colour.
+ *
+ * The screen, #erx-terminal, holds a recorded session until the visitor
+ * boots erXos; terminal.js then puts an xterm.js terminal in it (see
+ * site/README.md). It keeps one height, about 24 rows, in both states; the
+ * readout reserves its status line and the progress bar's room, and the
+ * lamp's label its longest text, so booting moves neither the page nor
+ * the readout. The case's lamp and status colour follow its data-erx-phase,
+ * which terminal.js sets to booting, live or stopped.
  */
 .terminal {
-  margin-top: 36px;
-  border: 1px solid var(--rule);
-  background: var(--code-bg);
-  color: var(--code-ink);
+  padding: 22px 22px 0;
+  border-radius: 14px 14px 6px 6px;
+  background: var(--case);
+  box-shadow: inset 0 2px 0 var(--case-hi), inset 0 -3px 0 var(--case-lo),
+    0 2px 0 var(--case-edge), 0 14px 30px var(--case-shadow);
 }
 
-.terminal-bar {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px;
-  border-bottom: 1px solid #2c2b28;
-  font: 500 12px/1.4 var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--code-dim);
-}
-
-.terminal-bar .name {
-  text-transform: none;
-  letter-spacing: 0.02em;
-}
-
-.terminal-bar .dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 8px;
-  background: var(--code-prompt);
-  vertical-align: 0;
+.terminal-glass {
+  padding: 10px;
+  border-radius: 18px / 14px;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 2px var(--glass-rim), inset 0 6px 18px rgba(0, 0, 0, 0.8);
 }
 
 #erx-terminal {
   position: relative;
   height: 400px;
+  overflow: hidden;
+  border-radius: 12px / 9px;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
 }
 
 .terminal pre {
@@ -545,14 +600,86 @@ p:last-child {
   inset: 12px 4px 12px 14px;
 }
 
-.terminal-controls {
-  position: relative;
+.terminal .c {
+  color: var(--code-dim);
+}
+
+.terminal .p {
+  color: var(--code-prompt);
+}
+
+/* The chin: plate, lamp, then the readout and keys, wrapping on a phone. */
+.terminal-chin {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 10px 18px;
+  min-height: 68px;
+  padding: 12px 4px 14px;
+  color: var(--case-text);
+}
+
+.terminal-plate {
+  font: 800 15px/1 var(--sans);
+  font-stretch: 125%;
+  letter-spacing: 0.04em;
+  color: var(--plate-ink);
+}
+
+/* Wide enough for "Recorded session": 16 characters of 0.7em, the lamp and the gap. */
+.terminal-lamp {
+  min-width: calc(11.2em + 16px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--case-muted);
+}
+
+.terminal-lamp .led {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lamp-off);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+.terminal[data-erx-phase="booting"] .led,
+.terminal[data-erx-phase="live"] .led {
+  background: var(--signal);
+}
+
+.terminal[data-erx-phase="live"] .led {
+  box-shadow: 0 0 6px var(--signal);
+}
+
+/* Stopped is a hollow ring, so it differs from a lit lamp by shape too. */
+.terminal[data-erx-phase="stopped"] .led {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--case-alert);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .terminal[data-erx-phase="booting"] .led {
+    animation: lamp-blink 1s steps(1) infinite;
+  }
+}
+
+@keyframes lamp-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.terminal-controls {
+  flex: 1 1 18em;
+  display: flex;
+  align-items: center;
   gap: 10px 14px;
-  padding: 12px 14px;
-  border-top: 1px solid #2c2b28;
+  min-width: 0;
 }
 
 .terminal-controls[hidden],
@@ -561,58 +688,49 @@ p:last-child {
   display: none;
 }
 
-.terminal-controls button {
-  font: 500 12px/1 var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 9px 14px;
-  border: 1px solid var(--code-prompt);
-  border-radius: 0;
-  cursor: pointer;
+/* Status above the machine line; the progress groove sits under both. */
+.terminal-readout {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-bottom: 9px;
 }
 
-.terminal-controls .boot {
-  background: var(--code-prompt);
-  color: #121211;
+.terminal-readout .status {
+  min-height: 1.35em;
+  font: 12px/1.35 var(--mono);
+  color: var(--case-text);
 }
 
-.terminal-controls .reset {
-  background: transparent;
-  color: var(--code-ink);
-  border-color: var(--code-dim);
+.terminal[data-erx-phase="stopped"] .status {
+  color: var(--case-alert);
 }
 
-.terminal-controls button:disabled {
-  opacity: 0.6;
-  cursor: default;
+.terminal-readout .machine {
+  font: 500 10.5px/1.35 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--case-muted);
 }
 
-.terminal-controls button:focus-visible {
-  outline: 2px solid var(--code-ink);
-  outline-offset: 2px;
-}
-
-.terminal-controls .status {
-  flex: 1 1 12em;
-  font: 12px/1.4 var(--mono);
-  color: var(--code-dim);
-}
-
-/* A thin bar along the top edge of the controls. */
 .progress {
   position: absolute;
-  top: -1px;
   left: 0;
   right: 0;
-  height: 2px;
-  background: #2c2b28;
+  bottom: 0;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--progress-groove);
 }
 
 .progress span {
   display: block;
   width: 0;
   height: 100%;
-  background: var(--code-prompt);
+  background: var(--signal);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -621,17 +739,76 @@ p:last-child {
   }
 }
 
+.terminal-keys {
+  flex: none;
+  display: flex;
+  gap: 10px;
+}
+
+.key {
+  font: 600 12px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--key);
+  color: var(--key-ink);
+  box-shadow: 0 3px 0 var(--key-edge), 0 4px 6px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+
+.key.boot {
+  background: var(--signal);
+  color: var(--key-go-ink);
+  box-shadow: 0 3px 0 var(--key-go-edge), 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+.key:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--key-edge);
+}
+
+.key.boot:active:not(:disabled) {
+  box-shadow: 0 1px 0 var(--key-go-edge);
+}
+
+.key:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.key:focus-visible {
+  outline: 2px solid var(--case-text);
+  outline-offset: 3px;
+}
+
+.terminal-grille {
+  height: 10px;
+  margin: 0 -22px;
+  border-radius: 0 0 6px 6px;
+  background: repeating-linear-gradient(90deg, var(--grille) 0 3px, var(--grille-slot) 3px 5px);
+}
+
+/* The hint and the source line are page text below the case. */
 .terminal-hint {
-  margin: 0;
-  padding: 0 14px 12px;
+  margin: 14px 0 0;
   font: 12px/1.5 var(--mono);
-  color: var(--code-dim);
+  color: var(--muted);
+}
+
+.terminal-hint + .terminal-hint {
+  margin-top: 6px;
 }
 
 .terminal-hint code {
   background: none;
   padding: 0;
-  color: var(--code-ink);
+  color: var(--ink);
+}
+
+.terminal-source a {
+  color: var(--ink);
 }
 
 /* "Try it": what runs, beside the front panel of lights. */
@@ -644,14 +821,6 @@ p:last-child {
 
 .try .spec {
   margin-top: 24px;
-}
-
-.terminal .c {
-  color: var(--code-dim);
-}
-
-.terminal .p {
-  color: var(--code-prompt);
 }
 
 /* ---- Footer ------------------------------------------------------------ */
@@ -750,6 +919,39 @@ p:last-child {
     height: 340px;
   }
 
+  .terminal {
+    padding: 10px 10px 0;
+    border-radius: 10px 10px 5px 5px;
+  }
+
+  .terminal-glass {
+    padding: 6px;
+    border-radius: 14px / 11px;
+  }
+
+  .terminal-chin {
+    gap: 8px 14px;
+    padding: 10px 2px 12px;
+  }
+
+  .terminal-readout .status {
+    font-size: 11px;
+  }
+
+  .terminal-readout .machine {
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+
+  .key {
+    padding: 9px 12px;
+  }
+
+  .terminal-grille {
+    margin: 0 -10px;
+    border-radius: 0 0 5px 5px;
+  }
+
   .xterm-host {
     inset: 10px 2px 10px 10px;
   }
@@ -774,8 +976,4 @@ h2,
   text-transform: none;
   letter-spacing: 0.02em;
   color: var(--ink);
-}
-
-.terminal-source a {
-  color: var(--code-ink);
 }
