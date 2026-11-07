@@ -643,6 +643,26 @@ erx_fiasco_mem_physical_request_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_fiasco_object_info_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_object_info_request_t *result)
+{
+	erx_fiasco_object_info_request_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_FIASCO_OBJECT_INFO_REQUEST_SIZE)
+		return (false);
+
+	value.caller = erx_abi_load_u64(bytes + 0);
+	value.object = erx_abi_load_u64(bytes + 8);
+	value.topic = erx_abi_load_u64(bytes + 16);
+	value.index = erx_abi_load_u64(bytes + 24);
+	value.window = erx_abi_load_u64(bytes + 32);
+	value.size = erx_abi_load_u64(bytes + 40);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_reply_t *result)
 {
@@ -1468,7 +1488,7 @@ erx_info_budget_decode(const uint8_t *bytes, size_t length,
 	value.used = erx_abi_load_u64(bytes + 24);
 	value.carved = erx_abi_load_u64(bytes + 32);
 	value.lent = erx_abi_load_u64(bytes + 40);
-	value.watch = erx_abi_load_u64(bytes + 48);
+	value.threshold = erx_abi_load_u64(bytes + 48);
 
 	*result = value;
 	return (true);

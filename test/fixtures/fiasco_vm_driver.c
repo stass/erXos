@@ -144,7 +144,7 @@ world_reset(unsigned pool_pages)
 	erx_backend_vm_table_init(&table, 0, ranges, RANGES_MAX, index_slots, SLOTS, AREA_START,
 	    AREA_START + RANDOM_AREA_PAGES * PAGE);
 	for (unsigned page = 0; page < pool_pages; page++)
-		erx_fiasco_pool_put(&pool, (uintptr_t)(window_memory + page * PAGE));
+		erx_fiasco_pool_add(&pool, (uintptr_t)(window_memory + page * PAGE));
 }
 
 static uint32_t
@@ -203,6 +203,8 @@ world_check(const model_page_t *model, size_t npages, uint64_t pool_total)
 	}
 	if (pool.free_pages + committed != pool_total)
 		fail("the pool's count does not add up", pool.free_pages);
+	if (pool.held_pages != committed)
+		fail("the pool's held count is not the committed pages", pool.held_pages);
 }
 
 static void
@@ -549,16 +551,28 @@ check_pool(void)
 	if (erx_fiasco_pool_take(&small) != 0)
 		fail("an empty pool gave a page", 0);
 	memset(window_memory, 0x5a, 2 * (size_t)PAGE);
-	erx_fiasco_pool_put(&small, (uintptr_t)window_memory);
-	erx_fiasco_pool_put(&small, (uintptr_t)(window_memory + PAGE));
+	erx_fiasco_pool_add(&small, (uintptr_t)window_memory);
+	erx_fiasco_pool_add(&small, (uintptr_t)(window_memory + PAGE));
+	if (small.held_pages != 0)
+		fail("building the pool counted a page as held", small.held_pages);
 	first = erx_fiasco_pool_take(&small);
 	second = erx_fiasco_pool_take(&small);
 	if (first == 0 || second == 0 || first == second || small.free_pages != 0 ||
 	    erx_fiasco_pool_take(&small) != 0)
 		fail("the pool lost count", small.free_pages);
+	if (small.held_pages != 2)
+		fail("a take did not count the page as held", small.held_pages);
 	for (size_t offset = 0; offset < PAGE; offset++)
 		if (((uint8_t *)first)[offset] != 0 || ((uint8_t *)second)[offset] != 0)
 			fail("a taken page is not zero", offset);
+	erx_fiasco_pool_put(&small, first);
+	if (small.held_pages != 1 || small.free_pages != 1)
+		fail("a put did not take the page off the held count", small.held_pages);
+	erx_fiasco_pool_put(&small, second);
+	/* A page that was never taken: the count stays at 0 rather than wrap. */
+	erx_fiasco_pool_put(&small, first + PAGE * 2);
+	if (small.held_pages != 0 || small.free_pages != 3)
+		fail("the held count wrapped", small.held_pages);
 }
 
 /* Where a table's effects landed, for the cases over more than one table. */

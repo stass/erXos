@@ -307,19 +307,19 @@ class AbiInspectionTest < Minitest::Test
   end
 
   # The build's own generator refuses the checked-in ABI with one seeded
-  # mismatch: the budget layout's watch field spelt threshold.
+  # mismatch: the budget layout's threshold field spelt watch.
   def test_the_checked_in_abi_fails_with_a_seeded_mismatch
     Dir.mktmpdir('erx-inspection-seed-') do |root|
       FileUtils.cp_r(File.join(ROOT, 'abi'), root)
       path = File.join(root, 'abi/erx_abi.txt')
       text = File.read(path)
-      seeded = text.sub("  field watch u64 48\n", "  field threshold u64 48\n")
+      seeded = text.sub("  field threshold u64 48\n", "  field watch u64 48\n")
       refute_equal text, seeded
       File.write(path, seeded)
       error = assert_raises(Erx::ABI::SchemaError) do
         Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root, architecture: 'aarch64'))
       end
-      assert_match(/erx_info_budget field threshold names no attribute of its kind that lists kernel/, error.message)
+      assert_match(/erx_info_budget field watch names no attribute of its kind that lists kernel/, error.message)
     end
   end
 

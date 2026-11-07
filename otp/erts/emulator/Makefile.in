@@ -1244,6 +1244,7 @@ NIF_OBJS = \
 	$(OBJDIR)/erx_bytes_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
 	$(OBJDIR)/erx_log_nif.o \
+	$(OBJDIR)/erx_object_info_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \
 	$(OBJDIR)/erl_tracer_nif.o \
 	$(OBJDIR)/prim_buffer_nif.o \

@@ -21,7 +21,7 @@ class ErxSchemaTest < Minitest::Test
 
   def test_every_form_passes_under_eunit
     schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: FORMS, architecture: nil))
-    eunit('erx_schema_forms_tests', Erx::ABI::InspectionEmitter.erlang(schema.inspection))
+    eunit('erx_schema_forms_tests', Erx::ABI::InspectionEmitter.erlang(schema.inspection, schema))
   end
 
   private

@@ -18,6 +18,7 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "erx/abi_reader.h"
 #include "liberx/backend/core/group_report.h"
 #include "test/guest/function_api/cases.h"
 
@@ -597,6 +598,61 @@ case_group_info_and_configure(void)
 	return (ok && report.cpuset == UINT64_C(0x5));
 }
 
+/*
+ * Each topic's reported bits as docs/design-stopgap.md, "Reporting kernel objects", lists
+ * them: the machine's CPU count, a budget's used moving with a commit and a decommit with
+ * its bit clear and erx_info_partial naming it alone, threads listed up to ERX_ERANGE, and
+ * the refusals.
+ */
+static bool
+case_object_info(void)
+{
+	_Alignas(8) uint8_t window[512];
+	erx_info_machine_t machine;
+	erx_info_cpu_t cpu;
+	erx_info_group_t group;
+	erx_info_budget_t before, after, freed;
+	erx_info_thread_t thread;
+	uint64_t addr = 0, listed = 0;
+	int status = ERX_OK;
+	bool ok;
+
+	ok = erx_object_info(0, ERX_INFO_MACHINE, 0, window, sizeof(window)) == ERX_OK &&
+	    erx_info_machine_decode(window, sizeof(window), &machine) &&
+	    machine.reported == ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE && machine.cpus_online > 0 &&
+	    machine.cpus_online < 64;
+	/* Both backends' maps are dense: CPUs 0 to the count less one. */
+	ok = ok && erx_object_info(0, ERX_INFO_CPU, machine.cpus_online - 1, window, sizeof(window)) == ERX_OK &&
+	    erx_info_cpu_decode(window, sizeof(window), &cpu) && cpu.reported == 0 &&
+	    erx_object_info(0, ERX_INFO_CPU, machine.cpus_online, window, sizeof(window)) == ERX_ERANGE;
+	ok = ok && erx_object_info(function_api_group(), ERX_INFO_GROUP, 0, window, sizeof(window)) == ERX_OK &&
+	    erx_info_group_decode(window, sizeof(window), &group) &&
+	    (group.reported & ~(ERX_INFO_GROUP_REPORTED_CPUSET | ERX_INFO_GROUP_REPORTED_PARKED |
+	    ERX_INFO_GROUP_REPORTED_READY)) == 0 &&
+	    erx_object_info(ERX_CAP_NULL, ERX_INFO_GROUP, 0, window, sizeof(window)) == ERX_ENOTSUP;
+	ok = ok && erx_info_partial(ERX_INFO_BUDGET) == ERX_INFO_BUDGET_REPORTED_USED &&
+	    erx_info_partial(ERX_INFO_MACHINE) == 0 && erx_info_partial(ERX_INFO_THREAD) == 0;
+	ok = ok && erx_vm_reserve(0, 4 * PAGE, 0, &addr) == ERX_OK &&
+	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
+	    erx_info_budget_decode(window, sizeof(window), &before) && erx_vm_commit(addr, 4 * PAGE) == ERX_OK &&
+	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
+	    erx_info_budget_decode(window, sizeof(window), &after) && erx_vm_decommit(addr, 4 * PAGE) == ERX_OK &&
+	    erx_object_info(ERX_CAP_SELF, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_OK &&
+	    erx_info_budget_decode(window, sizeof(window), &freed) && erx_vm_release(addr, 4 * PAGE) == ERX_OK;
+	ok = ok && before.reported == 0 && after.used == before.used + 4 && freed.used == before.used &&
+	    erx_object_info(ERX_CAP_NULL, ERX_INFO_BUDGET, 0, window, sizeof(window)) == ERX_ENOTSUP;
+	while (ok && listed <= 128 &&
+	    (status = erx_object_info(ERX_CAP_SELF, ERX_INFO_THREAD, listed, window, sizeof(window))) == ERX_OK) {
+		ok = erx_info_thread_decode(window, sizeof(window), &thread) && thread.reported == 0;
+		listed++;
+	}
+	ok = ok && status == ERX_ERANGE && listed > 0;
+	return (ok && erx_object_info(ERX_CAP_SELF, ERX_INFO_BASIC, 0, window, sizeof(window)) == ERX_ENOTSUP &&
+	    erx_object_info(ERX_CAP_SELF, ERX_INFO_IMAGE_ENTRY, 0, window, sizeof(window)) == ERX_ENOTSUP &&
+	    erx_object_info(0, ERX_INFO_MACHINE, 0, window, sizeof(erx_info_machine_t) - 1) == ERX_EINVAL &&
+	    erx_object_info(0, UINT32_C(99), 0, window, sizeof(window)) == ERX_EINVAL);
+}
+
 static bool
 case_umtx_word_differs(void)
 {
@@ -1169,6 +1225,7 @@ static const function_api_case_t shared_cases[] = {
 	{ "bad_handle_refused", case_bad_handle_refused },
 	{ "unsupported_refused", case_unsupported_refused },
 	{ "group_info_and_configure", case_group_info_and_configure },
+	{ "object_info", case_object_info },
 	{ "umtx_word_differs", case_umtx_word_differs },
 	{ "umtx_past_deadline", case_umtx_past_deadline },
 	{ "umtx_timeout_not_early", case_umtx_timeout_not_early },

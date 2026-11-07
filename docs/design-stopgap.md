@@ -463,8 +463,8 @@ masks. The ABI's layouts carry `reported`, but no partial bit and no reporter.
 | machine | the resource, which is ignored; a task other than the root `ERX_ENOTSUP` | `cpus_online`, the count of `l4_scheduler_info`'s CPU map, clear when that call fails; nothing else, since no machine page is mapped ([Image windows](#image-windows)) | none |
 | cpu | as machine; a CPU outside that map `ERX_ERANGE` | nothing | none |
 | group | `ERX_CAP_SELF` or what `erx_group_create` returned, as in the call table; any other handle, `ERX_CAP_NULL` included, `ERX_ENOTSUP` | `cpuset`, once a set was configured, `parked` and `ready`; not `capacity_mcpu`, since the grant's capacity is ignored, nor `used_ns` | none |
-| budget | a budget's handle | nothing ([Reporting a budget](#reporting-a-budget)) | `used` |
-| thread | a task's space; `index` counts the task's created and started threads in the order of the service's task table, and one past the last is `ERX_ERANGE` | nothing: no state or wait kind, which only the kernel has | none |
+| budget | `ERX_CAP_SELF`, the root's one budget, since `erx_budget_create` makes none; any other handle `ERX_ENOTSUP` | nothing ([Reporting a budget](#reporting-a-budget)) | `used` |
+| thread | `ERX_CAP_SELF` or a live task's space, any other handle `ERX_ENOTSUP`; `index` counts the task's created and started threads in the order of the service's task table, and one past the last is `ERX_ERANGE` | nothing: no state or wait kind, which only the kernel has | none |
 | image entry | the boot image | the topic is `ERX_ENOTSUP`; `erx_release_entry` reads the index | none |
 
 The root holds no handle to another task's group, so the inspector shows another domain's group as
@@ -563,7 +563,7 @@ The pool counts, for each budget, the pages it handed out under it and has not t
 writes that count as `used` with every bit of `reported` clear, and `erx_info_partial` names `used`, so the
 inspector shows it as **partial**, reporter `liberx pool`, scope "pages committed through `liberx`; not kernel
 objects, page tables or mapping records", and a reader of the report alone sees `used` as not reported. `kind`,
-`guarantee`, `cap`, `carved`, `lent`, `pinned` and `watch` are `unsupported`, reported as `kernel`'s, since
+`guarantee`, `cap`, `carved`, `lent`, `pinned` and `threshold` are `unsupported`, reported as `kernel`'s, since
 the kernel interface answers that it does not report them. The reporter of `used` is the stopgap reporter `liberx_pool` of `abi/inspection.txt`, which stands in for `kernel` and
 declares that label and scope ([design-abi.md](design-abi.md#inspection-schema)); a record carries it as
 `{stopgap, liberx_pool}` ([design-live.md](design-live.md#inspection-records)).

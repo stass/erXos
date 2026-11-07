@@ -28,6 +28,7 @@
 #include "erx/abi.h"
 #include "erx/core/debug_log.h"
 #include "erx/core/dispatch.h"
+#include "liberx/backend/core/object_info.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/entropy.h"
 #include "liberx/backend/fiasco/group.h"
@@ -83,6 +84,7 @@ static const char *service_thread_table_init(void);
 static int service_debug_log(uint32_t, const erx_fiasco_debug_log_request_t *);
 static int service_task_write(uint32_t, const erx_fiasco_task_write_request_t *);
 static int service_log_read(uint32_t, const erx_fiasco_log_read_request_t *, erx_fiasco_reply_t *);
+static int service_object_info(uint32_t, const erx_fiasco_object_info_request_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
 static void	service_fault(uint32_t, const erx_crash_fault_t *);
@@ -302,6 +304,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (service_task_write(decoded->task, words));
 	case ERX_FIASCO_CALL_LOG_READ:
 		return (service_log_read(decoded->task, words, reply));
+	case ERX_FIASCO_CALL_OBJECT_INFO:
+		return (service_object_info(decoded->task, words));
 	case ERX_FIASCO_CALL_THREAD_CREATE:
 		return (service_thread_create(decoded->task, words, reply));
 	case ERX_FIASCO_CALL_THREAD_START:
@@ -398,6 +402,44 @@ service_log_read(uint32_t task, const erx_fiasco_log_read_request_t *request, er
 	return (ERX_OK);
 }
 
+/*
+ * erx_object_info's topics but group, which erx_object_info answers locally
+ * (docs/design-stopgap.md, "Reporting kernel objects"). The facts come from the service's
+ * own tables and the kernel, never from a task's memory, and the report is written in
+ * place, as erx_log_read's records are, so only the root may ask.
+ */
+static int
+service_object_info(uint32_t task, const erx_fiasco_object_info_request_t *request)
+{
+	erx_info_facts_t facts = { 0 };
+	uint32_t space = ERX_FIASCO_TASK_ROOT;
+
+	if (task != ERX_FIASCO_TASK_ROOT)
+		return (ERX_ENOTSUP);
+	if (request->topic > UINT32_MAX || request->window == 0 || request->size > UINT64_MAX - request->window)
+		return (ERX_EINVAL);
+	switch (request->topic) {
+	case ERX_INFO_MACHINE:
+	case ERX_INFO_CPU:
+		facts.cpus_online = service_cpus_online();
+		break;
+	case ERX_INFO_GROUP:
+		return (ERX_ENOTSUP);
+	case ERX_INFO_BUDGET:
+		if (request->object != ERX_CAP_SELF)
+			return (ERX_ENOTSUP);
+		facts.budget_used = erx_fiasco_vm_used_pages();
+		break;
+	case ERX_INFO_THREAD:
+		if (request->object != ERX_CAP_SELF && !(erx_fiasco_task_space_decode(request->object, &space) &&
+		    erx_fiasco_task(space)->state == ERX_FIASCO_TASK_LIVE))
+			return (ERX_ENOTSUP);
+		erx_fiasco_task_thread_map(space, facts.threads);
+		break;
+	}
+	return (erx_info_report((uint32_t)request->topic, request->index, &facts, (void *)(uintptr_t)request->window,
+	    request->size));
+}
 /*
  * The text stays in the caller's public UTCB, and the kernel's dispatch and log cores
  * read it through the window, loading each word once. Every byte passes their escape,

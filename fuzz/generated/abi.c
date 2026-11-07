@@ -130,6 +130,10 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_fiasco_mem_physical_request_decode(bytes, length, &value);
 	}
 	{
+		erx_fiasco_object_info_request_t value;
+		(void)erx_fiasco_object_info_request_decode(bytes, length, &value);
+	}
+	{
 		erx_fiasco_reply_t value;
 		(void)erx_fiasco_reply_decode(bytes, length, &value);
 	}

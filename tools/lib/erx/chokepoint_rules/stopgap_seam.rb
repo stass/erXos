@@ -21,12 +21,15 @@ module Erx
         liberx/backend/erx/arch/aarch64/generated/calls.c
         liberx/backend/core/mem.h
         liberx/backend/core/refused.c
+        liberx/backend/core/object_info.c
+        liberx/backend/core/object_info.h
         liberx/backend/core/device_check.h
         liberx/backend/api.h
         liberx/backend/fiasco/api_names.c
         liberx/backend/hosted/arch/aarch64/switch_stack.S
         liberx/backend/hosted/group.c
         liberx/backend/hosted/internal.h
+        liberx/backend/hosted/object_info.c
         liberx/backend/hosted/thread.c
         liberx/backend/hosted/vm.c
         liberx/backend/hosted/wait.c

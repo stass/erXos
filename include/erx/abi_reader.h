@@ -69,6 +69,8 @@ bool erx_fiasco_mem_dma_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_mem_dma_request_t *result);
 bool erx_fiasco_mem_physical_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_mem_physical_request_t *result);
+bool erx_fiasco_object_info_request_decode(const uint8_t *bytes, size_t length,
+    erx_fiasco_object_info_request_t *result);
 bool erx_fiasco_reply_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_reply_t *result);
 bool erx_fiasco_space_create_request_decode(const uint8_t *bytes, size_t length,

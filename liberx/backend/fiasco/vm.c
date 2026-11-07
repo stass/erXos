@@ -156,7 +156,7 @@ erx_fiasco_vm_init(void)
 	erx_backend_vm_index_init(vm_index, vm_index_slots);
 	erx_fiasco_vm_task_open(0);
 	for (uint64_t page = layout.index_pages; page < window_pages; page++)
-		erx_fiasco_pool_put(&vm_pool, (uintptr_t)(VM_WINDOW_BASE + (page << L4_PAGESHIFT)));
+		erx_fiasco_pool_add(&vm_pool, (uintptr_t)(VM_WINDOW_BASE + (page << L4_PAGESHIFT)));
 	return (NULL);
 }
 
@@ -164,6 +164,12 @@ uint64_t
 erx_fiasco_vm_free_pages(void)
 {
 	return (vm_pool.free_pages);
+}
+
+uint64_t
+erx_fiasco_vm_used_pages(void)
+{
+	return (vm_pool.held_pages);
 }
 
 void

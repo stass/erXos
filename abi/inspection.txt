@@ -81,7 +81,7 @@ inspection 1
     attr carved page_count reporters kernel visible owner build all projections shell,host,proc,web
     attr lent page_count reporters kernel visible owner build all projections shell,host,proc,web
     attr pinned page_count reporters kernel visible owner build all projections shell,host,proc,web
-    attr watch page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr threshold page_count reporters kernel visible owner build all projections shell,host,proc,web
     attr spending page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived used,carved,lent
     attr borrowing page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived guarantee,used,carved,lent
     attr room page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived cap,used,carved,lent

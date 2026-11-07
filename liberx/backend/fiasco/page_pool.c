@@ -11,11 +11,19 @@
 #include "liberx/backend/fiasco/root_mem.h"
 
 void
-erx_fiasco_pool_put(erx_fiasco_pool_t *pool, uintptr_t page)
+erx_fiasco_pool_add(erx_fiasco_pool_t *pool, uintptr_t page)
 {
 	*(uintptr_t *)page = pool->head;
 	pool->head = page;
 	pool->free_pages++;
+}
+
+void
+erx_fiasco_pool_put(erx_fiasco_pool_t *pool, uintptr_t page)
+{
+	erx_fiasco_pool_add(pool, page);
+	if (pool->held_pages > 0)
+		pool->held_pages--;
 }
 
 uintptr_t
@@ -28,6 +36,7 @@ erx_fiasco_pool_take(erx_fiasco_pool_t *pool)
 		return (0);
 	pool->head = *(uintptr_t *)page;
 	pool->free_pages--;
+	pool->held_pages++;
 	bzero((void *)page, ERX_PAGE_SIZE);
 	return (page);
 }

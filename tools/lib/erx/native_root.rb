@@ -41,6 +41,7 @@ module Erx
     # crash writer comes in source, since Fiasco's boot archive holds no crash core.
     SERVICE = %W[#{BACKEND}/service.c #{BACKEND}/service_task.c #{BACKEND}/service_wire.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/service_stubs.c #{BACKEND}/thread.c
                  #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c
+                 liberx/backend/core/object_info.c
                  #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/group.c #{BACKEND}/irq.c #{BACKEND}/time.c #{BACKEND}/time_table.c
                  #{BACKEND}/entropy.c kernel/core/rng.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                  kernel/crypto/chacha20/chacha.c

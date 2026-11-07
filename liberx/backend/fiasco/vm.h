@@ -31,6 +31,8 @@ const char	*erx_fiasco_vm_init(void);
 
 /* How many pages the pool holds now. */
 uint64_t	erx_fiasco_vm_free_pages(void);
+/* How many pages the pool has handed out and not taken back: the root budget's used. */
+uint64_t	erx_fiasco_vm_used_pages(void);
 
 /* Readies a task's empty range table, before the task's first page. */
 void	erx_fiasco_vm_task_open(uint32_t task);

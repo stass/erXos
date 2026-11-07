@@ -537,7 +537,7 @@ module Erx
               unit: 'pages'
             },
             {
-              key: 'watch',
+              key: 'threshold',
               type: 'page_count',
               reporters: ['kernel'],
               visible: 'owner',

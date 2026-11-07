@@ -21,6 +21,11 @@ void	erx_hosted_vm_report_runs(void);
 /* Says why on the console and ends the process, as a fault ends the machine natively. */
 _Noreturn void	erx_hosted_fatal(const char *why);
 
+/* The committed pages of the area: the one budget's used, as the pool counts it. */
+uint64_t	erx_hosted_vm_used_pages(void);
+/* Sets bit n of map for each created or started thread n. */
+void	erx_hosted_thread_map(uint64_t map[2]);
+
 /* A semaphore over one word: an up never blocks, and the down is false at the deadline, never before it. */
 void	erx_hosted_semaphore_up(_Atomic uint32_t *);
 bool	erx_hosted_semaphore_down(_Atomic uint32_t *, uint64_t deadline);

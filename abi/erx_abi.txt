@@ -347,6 +347,7 @@ enum fiasco_call u32
   value entropy_add 22
   value task_write 23
   value log_read 24
+  value object_info 25
   value irq_create 32
   value irq_bind 33
   value irq_ack 34
@@ -442,8 +443,8 @@ layout erx_info_group wire_le 8 32
   field ready u32 24
   field reported info_group_reported 28
 
-# ERX_INFO_BUDGET: kind holds a budget_kind, and watch the threshold in pages
-# that erx_budget_watch set, 0 when none is: never the watch's IRQ object.
+# ERX_INFO_BUDGET: kind holds a budget_kind, and threshold the pages at which
+# erx_budget_watch fires, 0 when none is set: never the watch's IRQ object.
 flags info_budget_reported u32
   bit kind 0
   bit guarantee 1
@@ -451,7 +452,7 @@ flags info_budget_reported u32
   bit used 3
   bit carved 4
   bit lent 5
-  bit watch 6
+  bit threshold 6
 layout erx_info_budget wire_le 8 56
   field kind u32 0
   field reported info_budget_reported 4
@@ -460,7 +461,7 @@ layout erx_info_budget wire_le 8 56
   field used u64 24
   field carved u64 32
   field lent u64 40
-  field watch u64 48
+  field threshold u64 48
 
 # ERX_INFO_THREAD, for the thread erx_object_info's index counts: id is the
 # thread's object id, which names the record rather than an attribute;
@@ -507,6 +508,15 @@ layout erx_fiasco_log_read_request wire_le 8 32
   field cursor u64 8
   field window u64 16
   field size u64 24
+
+# erx_object_info: the window is the root's own memory, so only the root may ask.
+layout erx_fiasco_object_info_request wire_le 8 48
+  field caller u64 0
+  field object u64 8
+  field topic u64 16
+  field index u64 24
+  field window u64 32
+  field size u64 40
 
 layout erx_fiasco_thread_reap_request wire_le 8 16
   field caller u64 0

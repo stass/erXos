@@ -3560,6 +3560,103 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_fiasco_object_info_request"] = Layout.new(
+        name: "erx_fiasco_object_info_request".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 48,
+        fields: [
+          Field.new(
+            name: "caller".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "object".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "topic".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "index".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "window".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "size".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_fiasco_reply"] = Layout.new(
         name: "erx_fiasco_reply".b,
         storage: "wire_le".b,
@@ -7634,6 +7731,7 @@ module Erx
           "mem_create_contiguous".b => 19,
           "mem_create_physical".b => 18,
           "mem_dma_addr".b => 20,
+          "object_info".b => 25,
           "space_create".b => 14,
           "space_protect".b => 8,
           "space_stop".b => 16,
@@ -7717,8 +7815,8 @@ module Erx
           "guarantee".b => 2,
           "kind".b => 1,
           "lent".b => 32,
-          "used".b => 8,
-          "watch".b => 64
+          "threshold".b => 64,
+          "used".b => 8
         }.freeze,
         flags: true,
         allowed: nil
@@ -7828,7 +7926,7 @@ module Erx
             line: source_line
           ).freeze,
           Field.new(
-            name: "watch".b,
+            name: "threshold".b,
             type: types.fetch("u64"),
             offset: 48,
             count: nil,
@@ -11938,6 +12036,7 @@ module Erx
           "erx_fiasco_mem_create_request".b,
           "erx_fiasco_mem_dma_request".b,
           "erx_fiasco_mem_physical_request".b,
+          "erx_fiasco_object_info_request".b,
           "erx_fiasco_reply".b,
           "erx_fiasco_space_create_request".b,
           "erx_fiasco_space_stop_request".b,
@@ -13099,6 +13198,12 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "fiasco_call_object_info".b => Constant.new(
+            name: "fiasco_call_object_info".b,
+            value: 25,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "fiasco_call_space_create".b => Constant.new(
             name: "fiasco_call_space_create".b,
             value: 14,
@@ -13645,15 +13750,15 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "info_budget_reported_used".b => Constant.new(
-            name: "info_budget_reported_used".b,
-            value: 8,
+          "info_budget_reported_threshold".b => Constant.new(
+            name: "info_budget_reported_threshold".b,
+            value: 64,
             type: types.fetch("u32"),
             description: nil
           ).freeze,
-          "info_budget_reported_watch".b => Constant.new(
-            name: "info_budget_reported_watch".b,
-            value: 64,
+          "info_budget_reported_used".b => Constant.new(
+            name: "info_budget_reported_used".b,
+            value: 8,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

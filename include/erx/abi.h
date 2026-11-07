@@ -192,6 +192,7 @@ struct erx_rights {
 #define ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS UINT32_C(19)
 #define ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL UINT32_C(18)
 #define ERX_FIASCO_CALL_MEM_DMA_ADDR UINT32_C(20)
+#define ERX_FIASCO_CALL_OBJECT_INFO UINT32_C(25)
 #define ERX_FIASCO_CALL_SPACE_CREATE UINT32_C(14)
 #define ERX_FIASCO_CALL_SPACE_PROTECT UINT32_C(8)
 #define ERX_FIASCO_CALL_SPACE_STOP UINT32_C(16)
@@ -283,8 +284,8 @@ struct erx_rights {
 #define ERX_INFO_BUDGET_REPORTED_KIND UINT32_C(1)
 #define ERX_INFO_BUDGET_REPORTED_KNOWN UINT32_C(127)
 #define ERX_INFO_BUDGET_REPORTED_LENT UINT32_C(32)
+#define ERX_INFO_BUDGET_REPORTED_THRESHOLD UINT32_C(64)
 #define ERX_INFO_BUDGET_REPORTED_USED UINT32_C(8)
-#define ERX_INFO_BUDGET_REPORTED_WATCH UINT32_C(64)
 #define ERX_INFO_CPU UINT32_C(2)
 #define ERX_INFO_CPU_REPORTED_IDLE_TIME UINT32_C(2)
 #define ERX_INFO_CPU_REPORTED_INTERRUPTS UINT32_C(8)
@@ -1746,6 +1747,38 @@ _Static_assert(offsetof(erx_fiasco_mem_physical_request_t, size) ==
 _Static_assert(offsetof(erx_fiasco_mem_physical_request_t, attr) ==
     ERX_FIASCO_MEM_PHYSICAL_REQUEST_OFF_ATTR, "erx_fiasco_mem_physical_request.attr offset");
 
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_SIZE 48
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_ALIGN 8
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_CALLER 0
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_OBJECT 8
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_TOPIC 16
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_INDEX 24
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_WINDOW 32
+#define ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_SIZE 40
+typedef struct erx_fiasco_object_info_request erx_fiasco_object_info_request_t;
+struct erx_fiasco_object_info_request {
+	_Alignas(8) uint64_t	caller;
+	uint64_t	object;
+	uint64_t	topic;
+	uint64_t	index;
+	uint64_t	window;
+	uint64_t	size;
+};
+_Static_assert(sizeof(erx_fiasco_object_info_request_t) == ERX_FIASCO_OBJECT_INFO_REQUEST_SIZE, "erx_fiasco_object_info_request size");
+_Static_assert(_Alignof(erx_fiasco_object_info_request_t) == ERX_FIASCO_OBJECT_INFO_REQUEST_ALIGN, "erx_fiasco_object_info_request alignment");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, caller) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_CALLER, "erx_fiasco_object_info_request.caller offset");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, object) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_OBJECT, "erx_fiasco_object_info_request.object offset");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, topic) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_TOPIC, "erx_fiasco_object_info_request.topic offset");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, index) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_INDEX, "erx_fiasco_object_info_request.index offset");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, window) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_WINDOW, "erx_fiasco_object_info_request.window offset");
+_Static_assert(offsetof(erx_fiasco_object_info_request_t, size) ==
+    ERX_FIASCO_OBJECT_INFO_REQUEST_OFF_SIZE, "erx_fiasco_object_info_request.size offset");
+
 #define ERX_FIASCO_REPLY_SIZE 32
 #define ERX_FIASCO_REPLY_ALIGN 8
 #define ERX_FIASCO_REPLY_OFF_STATUS 0
@@ -3080,7 +3113,7 @@ typedef uint32_t erx_info_budget_reported_t;
 #define ERX_INFO_BUDGET_OFF_USED 24
 #define ERX_INFO_BUDGET_OFF_CARVED 32
 #define ERX_INFO_BUDGET_OFF_LENT 40
-#define ERX_INFO_BUDGET_OFF_WATCH 48
+#define ERX_INFO_BUDGET_OFF_THRESHOLD 48
 typedef struct erx_info_budget erx_info_budget_t;
 struct erx_info_budget {
 	_Alignas(8) uint32_t	kind;
@@ -3090,7 +3123,7 @@ struct erx_info_budget {
 	uint64_t	used;
 	uint64_t	carved;
 	uint64_t	lent;
-	uint64_t	watch;
+	uint64_t	threshold;
 };
 _Static_assert(sizeof(erx_info_budget_t) == ERX_INFO_BUDGET_SIZE, "erx_info_budget size");
 _Static_assert(_Alignof(erx_info_budget_t) == ERX_INFO_BUDGET_ALIGN, "erx_info_budget alignment");
@@ -3108,8 +3141,8 @@ _Static_assert(offsetof(erx_info_budget_t, carved) ==
     ERX_INFO_BUDGET_OFF_CARVED, "erx_info_budget.carved offset");
 _Static_assert(offsetof(erx_info_budget_t, lent) ==
     ERX_INFO_BUDGET_OFF_LENT, "erx_info_budget.lent offset");
-_Static_assert(offsetof(erx_info_budget_t, watch) ==
-    ERX_INFO_BUDGET_OFF_WATCH, "erx_info_budget.watch offset");
+_Static_assert(offsetof(erx_info_budget_t, threshold) ==
+    ERX_INFO_BUDGET_OFF_THRESHOLD, "erx_info_budget.threshold offset");
 
 typedef uint32_t erx_info_cpu_reported_t;
 

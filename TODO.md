@@ -125,12 +125,11 @@ it; git history is the record of completed work.
   the native suites inspect only data after protection changes. The `native_memory` suite needs
   that case once BeamAsm's JIT alias exists.
 * [Medium] stopgap, `liberx/backend/fiasco`, call table of `docs/design-stopgap.md`: `erx_cap_dup`, `erx_cap_close`,
-  `erx_object_destroy`, `erx_object_info`, `erx_budget_create`, `erx_log_read`, `erx_group_configure` and
+  `erx_object_destroy`, `erx_budget_create`, `erx_log_read`, `erx_group_configure` and
   `erx_group_info` have no body. Their consumers are the Erlang NIF handles, the launcher, the domain library's root
   entry and the Erlang log reader, which arrive with M3; each gets its body and a `test/guest/function_api` row then.
-  `erx_object_info`'s body is the service request of
-  [Reporting kernel objects](docs/design-stopgap.md#reporting-kernel-objects), with `erx_info_partial` and the
-  pool's count of pages for each budget.
+  The pool counts pages for the root's one budget only, which the budget topic names `ERX_CAP_SELF`; a count for
+  each budget follows `erx_budget_create`'s body.
 * [Low] stopgap, `test/guest/native_task/guest.c`, `request_against_exit`: no seed shows the dropped-request
   count can move, as the thread deletion seed stops the suite at its earlier `service` case.
 * [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
@@ -448,10 +447,21 @@ it; git history is the record of completed work.
   variable segment), ignores an attribute's `build` (a release record may carry a `development` attribute), and
   has no fuzz target over random terms. `cpu_index`'s bound 63 is written beside `@cpu_limit` because the grammar
   has no `@limit - 1`. The domain kind lacks design-live's death record and group usage.
+* [Medium] kernel reports, tests and collector (`erlang/apps/erx/src/erx_kernel_records.erl`,
+  `liberx/backend/core/object_info.c`): design-live's host test that every bit of each backend's `erx_info_partial`
+  names an attribute listing a stopgap for `kernel` (seeded on `guarantee`) is missing, as are design-stopgap's
+  Kernel reports seeds for `capacity_mcpu`'s bit and for a failed `l4_scheduler_info` through a test hook, and any
+  mutant of the Fiasco-only `service_object_info` and `erx_fiasco_task_thread_map`. `derive/2` restates the budget's
+  derived formulas apart from `abi/inspection.txt`'s `derived` inputs; emit them from the schema, or at least test
+  every derived attribute with all-ok inputs. `erx_fiasco_pool_put` holds `held_pages` at 0 on a put of a page never
+  taken, a liberx bug it hides rather than reports. The group topic maps every `erx_group_info` failure to
+  `ERX_ENOTSUP`, not `ERX_EINVAL` alone; a CPU listing ends at the first gap in the map; the root's window to
+  `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
+  calls `erx_kernel_records` from `erl` at the console is not written yet.
 * [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
-  [Inspection schema](docs/design-abi.md#inspection-schema)): `erx_info_partial` is not in `liberx/backend/api.h`.
+  [Inspection schema](docs/design-abi.md#inspection-schema)):
   `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on
-  (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `watch`); `pinned` or `freeing` follows that redesign, and
+  (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `threshold`); `pinned` or `freeing` follows that redesign, and
   until then shows `unsupported`. `erx_info_machine` has no field for `development` or `dma_profile`, since the
   design does not say how a boolean or a closed atom set travels in a report, so both read as clear bits; and the
   `group` kind declares only the five attributes `erx_info_group` carries, not design-live's throttling,

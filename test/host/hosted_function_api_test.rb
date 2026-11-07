@@ -33,6 +33,10 @@ class HostedFunctionApiTest < Minitest::Test
 
   # name => [file, original, replacement, the case that must notice].
   SEEDS = {
+    'used reported as exact' => ['liberx/backend/core/object_info.c', "\t\treport.budget.used = facts->budget_used;\n",
+                                "\t\treport.budget.used = facts->budget_used;\n\t\treport.budget.reported = ERX_INFO_BUDGET_REPORTED_USED;\n", 'object_info'],
+    'no machine bit' => ['liberx/backend/core/object_info.c', 'facts->cpus_online != 0 ? ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE : 0', '0', 'object_info'],
+    'a listing never ends' => ['liberx/backend/core/object_info.c', "\t\tif (!nth_thread(facts->threads, index, &id))\n\t\t\treturn (ERX_ERANGE);\n", "\t\tid = 0;\n\t\t(void)nth_thread;\n", 'object_info'],
     'a decommitted page keeps its bytes' => ['liberx/backend/hosted/vm.c', "\tif ((*byte & PAGE_DIRTY) != 0)\n\t\tpage_clean(addr);\n", '', 'decommit_recommit_reads_zeros'],
     'a thread starts twice' => ['liberx/backend/hosted/thread.c', 'self->state == THREAD_CREATED', 'true', 'double_start_refused'],
     'the thread stays on the host stack' => ['liberx/backend/hosted/thread.c', "\terx_hosted_switch_stack(self->start.regs.sp, thread_run, self, &self->host_sp);\n", "\tthread_run(self);\n", 'tls_and_arg'],

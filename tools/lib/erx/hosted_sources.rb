@@ -12,7 +12,8 @@ module Erx
       kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
       kernel/generated/abi_decode.c kernel/generated/abi_run.c
       liberx/generated/abi_reader.c liberx/release.c liberx/release_fs.c
-      liberx/backend/core/park_table.c liberx/backend/core/refused.c liberx/backend/core/vm_table.c
+      liberx/backend/core/object_info.c liberx/backend/core/park_table.c liberx/backend/core/refused.c
+      liberx/backend/core/vm_table.c liberx/backend/hosted/object_info.c
       liberx/backend/hosted/arch/aarch64/switch_stack.S liberx/backend/hosted/generated/calls.c
       liberx/backend/hosted/group.c liberx/backend/hosted/log.c liberx/backend/hosted/thread.c
       liberx/backend/hosted/vm.c liberx/backend/hosted/wait.c

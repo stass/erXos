@@ -349,12 +349,14 @@ module Erx
 
       def outputs(schema)
         inspection = schema.inspection || raise(SchemaError, 'the ABI root includes no inspection schema')
-        { ERLANG_PATH => erlang(inspection), RUBY_PATH => ruby(inspection) }.freeze
+        { ERLANG_PATH => erlang(inspection, schema), RUBY_PATH => ruby(inspection) }.freeze
       end
 
-      def erlang(inspection)
+      def erlang(inspection, schema)
         kinds = inspection.kinds.keys + ['listing']
-        [erlang_head(inspection, kinds), erlang_data(inspection, kinds), ERLANG_CODE].join("\n")
+        [erlang_head(inspection, kinds), erlang_data(inspection, kinds), report_functions(inspection, schema.types),
+         status_function(schema.constants),
+         ERLANG_CODE].join("\n")
       end
 
       def erlang_head(inspection, kinds)
@@ -369,7 +371,8 @@ module Erx
           -moduledoc "The inspection schema: kinds, attributes, reporters, types and paths, with their validators.".
           -export([schema/0, kinds/0, attributes/1, attribute/2, fields/3, stopgaps/0, stopgap/1,
                    reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
-                   validate_record/1, resolve/1, resolve_text/1]).
+                   validate_record/1, resolve/1, resolve_text/1, report_layout/1, decode_report/2,
+                   status_name/1]).
           -export_type([record/0, attr/0, reporter/0, value/0, segment/0, descriptor/0, declaration/0]).
           %% record() is the inspection record's name in docs/design-live.md.
           -compile({nowarn_redefined_builtin_type, [{record, 0}]}).
@@ -555,6 +558,80 @@ module Erx
       def map(fields, column)
         pad = ' ' * (column + 2)
         '#{' + fields.map { |key, value| "#{key} => #{value}" }.join(",\n#{pad}") + '}'
+      end
+
+      # Each report layout erx_info_<kind> (docs/design-abi.md, "Kernel
+      # reports") as two functions. report_layout(Kind) gives the topic that
+      # writes it, its size and the reported bit of each attribute field;
+      # decode_report(Kind, Bytes) takes exactly that many bytes apart into
+      # {ok, Reported, Fields}, Fields a map of every field but reported, so
+      # the collector maps fields and bits to attributes by name. The model's
+      # report check has tied every name to the kind before this runs.
+      def report_functions(inspection, types)
+        topics = types[Inspection::TOPICS]
+        reports = inspection.kinds.keys.filter_map do |kind|
+          layout = types["erx_info_#{kind}"]
+          [kind, layout] if layout.is_a?(Layout)
+        end
+        layouts = reports.map { |kind, layout| report_layout_clause(kind, layout, topics) }
+        decoders = reports.map { |kind, layout| decode_report_clause(kind, layout) }
+        "%% A kernel report's topic, size and reported bit of each field.\n" \
+          "-spec report_layout(atom()) ->\n" \
+          "          {ok, \#{topic := non_neg_integer(), size := pos_integer(), bits := \#{atom() => pos_integer()}}}\n" \
+          "          | error.\n" +
+          (layouts + ["report_layout(_Kind) ->\n    error"]).join(";\n") + ".\n\n" \
+          "%% A kernel report of Kind taken apart: exactly its layout's bytes, or error.\n" \
+          "-spec decode_report(atom(), binary()) -> {ok, non_neg_integer(), \#{atom() => term()}} | error.\n" +
+          (decoders + ["decode_report(_Kind, _Bytes) ->\n    error"]).join(";\n") + ".\n"
+      end
+
+      # The ABI's error statuses by name, for a record's {error, S}: the status
+      # constants are the ones the model gives a description.
+      def status_function(constants)
+        clauses = constants.values.select { |constant| constant.description && constant.value.negative? }
+                           .sort_by(&:value).reverse
+                           .map { |constant| "status_name(#{constant.value}) -> {ok, #{atom(constant.name)}}" }
+        "%% An error status's name, as erx_abi.txt declares it.\n" \
+          "-spec status_name(integer()) -> {ok, atom()} | error.\n" +
+          (clauses + ['status_name(_Status) -> error']).join(";\n") + ".\n"
+      end
+
+      def report_layout_clause(kind, layout, topics)
+        bits = layout.fetch_field(Inspection::REPORTED).type.members.map { |name, mask| [atom(name), mask] }
+        fields = [['topic', topics.members.fetch(kind)], ['size', layout.size], ['bits', map(bits, 19)]]
+        "report_layout(#{atom(kind)}) ->\n    {ok, #{map(fields, 9)}}"
+      end
+
+      # One binary segment for each field in offset order, a skipped segment
+      # for each gap, and a value bound to F<n> for the field at position n.
+      def decode_report_clause(kind, layout)
+        fields = layout.fields.sort_by(&:offset)
+        ends = [0] + fields.map { |field| field.offset + field.size }
+        segments = fields.each_with_index.flat_map do |field, index|
+          gap = field.offset - ends[index]
+          [*(gap.positive? ? ["_:#{gap}/binary"] : []), report_segment(field, "F#{index}")]
+        end
+        segments << "_:#{layout.size - ends.last}/binary" if layout.size > ends.last
+        reported = fields.index { |field| field.name == Inspection::REPORTED }
+        values = fields.each_with_index.filter_map do |field, index|
+          [atom(field.name), report_value(field, "F#{index}")] unless index == reported
+        end
+        "decode_report(#{atom(kind)},\n              <<#{segments.join(",\n                ")}>>) ->\n" \
+          "    {ok, F#{reported}, #{map(values, 12 + reported.to_s.size)}}"
+      end
+
+      def report_segment(field, variable)
+        return "#{variable}:#{field.size}/binary" if field.array?
+
+        "#{variable}:#{field.type.integer.bits}/#{field.type.integer.signed ? 'little-signed' : 'little'}"
+      end
+
+      # An array of bytes stays a binary; any wider array becomes a list.
+      def report_value(field, variable)
+        integer = field.type.integer
+        return variable if !field.array? || integer.size == 1
+
+        "[X || <<X:#{integer.bits}/#{integer.signed ? 'little-signed' : 'little'}>> <= #{variable}]"
       end
 
       def ruby(inspection)

@@ -138,6 +138,18 @@ erx_fiasco_task_gate_cap(uint32_t task)
 	return (task != ERX_FIASCO_TASK_ROOT ? task_slot(task, TASK_SLOT_GATE) : erx_fiasco_service_gate());
 }
 
+void
+erx_fiasco_task_thread_map(uint32_t task, uint64_t map[2])
+{
+	_Static_assert(ERX_FIASCO_THREADS_MAX <= 2 * 64, "a task's threads fit the map");
+	const erx_fiasco_task_t *const row = erx_fiasco_task(task);
+
+	map[0] = map[1] = 0;
+	for (uint32_t index = 0; index < ERX_FIASCO_THREADS_MAX; index++)
+		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT)
+			map[index / 64] |= UINT64_C(1) << (index % 64);
+}
+
 uint64_t
 erx_fiasco_task_gate_slot(uint32_t task)
 {

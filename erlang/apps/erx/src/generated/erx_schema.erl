@@ -7,7 +7,8 @@
 -moduledoc "The inspection schema: kinds, attributes, reporters, types and paths, with their validators.".
 -export([schema/0, kinds/0, attributes/1, attribute/2, fields/3, stopgaps/0, stopgap/1,
          reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
-         validate_record/1, resolve/1, resolve_text/1]).
+         validate_record/1, resolve/1, resolve_text/1, report_layout/1, decode_report/2,
+         status_name/1]).
 -export_type([record/0, attr/0, reporter/0, value/0, segment/0, descriptor/0, declaration/0]).
 %% record() is the inspection record's name in docs/design-live.md.
 -compile({nowarn_redefined_builtin_type, [{record, 0}]}).
@@ -68,7 +69,7 @@ attributes(budget) ->
           carved,
           lent,
           pinned,
-          watch,
+          threshold,
           spending,
           borrowing,
           room,
@@ -317,7 +318,7 @@ attribute(budget, pinned) ->
            build => all,
            projections => [shell, host, proc, web],
            derived => []}};
-attribute(budget, watch) ->
+attribute(budget, threshold) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
@@ -784,6 +785,145 @@ declarations() ->
        entries => none,
        append_only => false,
        children => {literals, []}}].
+
+%% A kernel report's topic, size and reported bit of each field.
+-spec report_layout(atom()) ->
+          {ok, #{topic := non_neg_integer(), size := pos_integer(), bits := #{atom() => pos_integer()}}}
+          | error.
+report_layout(machine) ->
+    {ok, #{topic => 1,
+           size => 48,
+           bits => #{boot_value => 64,
+                     build => 1,
+                     cpus_online => 4,
+                     entropy_quality => 2,
+                     memory_free => 16,
+                     memory_total => 8,
+                     uptime => 32}}};
+report_layout(cpu) ->
+    {ok, #{topic => 2,
+           size => 288,
+           bits => #{idle_time => 2,
+                     interrupts => 8,
+                     ready_threads => 4,
+                     running_thread => 1,
+                     throttled_groups => 16}}};
+report_layout(group) ->
+    {ok, #{topic => 3,
+           size => 32,
+           bits => #{capacity_mcpu => 4,
+                     cpuset => 1,
+                     parked => 8,
+                     ready => 16,
+                     used_ns => 2}}};
+report_layout(budget) ->
+    {ok, #{topic => 4,
+           size => 56,
+           bits => #{cap => 4,
+                     carved => 16,
+                     guarantee => 2,
+                     kind => 1,
+                     lent => 32,
+                     threshold => 64,
+                     used => 8}}};
+report_layout(thread) ->
+    {ok, #{topic => 5,
+           size => 24,
+           bits => #{state => 1,
+                     wait => 2}}};
+report_layout(_Kind) ->
+    error.
+
+%% A kernel report of Kind taken apart: exactly its layout's bytes, or error.
+-spec decode_report(atom(), binary()) -> {ok, non_neg_integer(), #{atom() => term()}} | error.
+decode_report(machine,
+              <<F0:8/binary,
+                F1:32/little,
+                F2:32/little,
+                F3:64/little,
+                F4:64/little,
+                F5:64/little,
+                F6:32/little,
+                F7:32/little>>) ->
+    {ok, F7, #{build => F0,
+               entropy_quality => F1,
+               cpus_online => F2,
+               memory_total => F3,
+               memory_free => F4,
+               uptime => F5,
+               boot_value => F6}};
+decode_report(cpu,
+              <<F0:64/little,
+                F1:64/little,
+                F2:256/binary,
+                F3:64/little,
+                F4:32/little,
+                F5:32/little>>) ->
+    {ok, F5, #{running_thread => F0,
+               idle_time => F1,
+               ready_threads => [X || <<X:32/little>> <= F2],
+               interrupts => F3,
+               throttled_groups => F4}};
+decode_report(group,
+              <<F0:64/little,
+                F1:64/little,
+                F2:32/little,
+                F3:32/little,
+                F4:32/little,
+                F5:32/little>>) ->
+    {ok, F5, #{cpuset => F0,
+               used_ns => F1,
+               capacity_mcpu => F2,
+               parked => F3,
+               ready => F4}};
+decode_report(budget,
+              <<F0:32/little,
+                F1:32/little,
+                F2:64/little,
+                F3:64/little,
+                F4:64/little,
+                F5:64/little,
+                F6:64/little,
+                F7:64/little>>) ->
+    {ok, F1, #{kind => F0,
+               guarantee => F2,
+               cap => F3,
+               used => F4,
+               carved => F5,
+               lent => F6,
+               threshold => F7}};
+decode_report(thread,
+              <<F0:64/little,
+                F1:32/little,
+                F2:32/little,
+                F3:32/little,
+                _:4/binary>>) ->
+    {ok, F3, #{id => F0,
+               state => F1,
+               wait => F2}};
+decode_report(_Kind, _Bytes) ->
+    error.
+
+%% An error status's name, as erx_abi.txt declares it.
+-spec status_name(integer()) -> {ok, atom()} | error.
+status_name(-1) -> {ok, einval};
+status_name(-2) -> {ok, estale};
+status_name(-3) -> {ok, etype};
+status_name(-4) -> {ok, erights};
+status_name(-5) -> {ok, erange};
+status_name(-6) -> {ok, enomem};
+status_name(-7) -> {ok, elimit};
+status_name(-8) -> {ok, ebusy};
+status_name(-9) -> {ok, etimedout};
+status_name(-10) -> {ok, efault};
+status_name(-11) -> {ok, eexist};
+status_name(-12) -> {ok, enotsup};
+status_name(-13) -> {ok, enocaller};
+status_name(-14) -> {ok, ewouldblock};
+status_name(-15) -> {ok, edead};
+status_name(-16) -> {ok, eintr};
+status_name(-17) -> {ok, ecorrupt};
+status_name(_Status) -> error.
 
 %% The attribute Reporter reports: Value checked against its type, every
 %% status and the reporter kept. The collector of a source passes the

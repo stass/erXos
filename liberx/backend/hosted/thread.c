@@ -291,6 +291,19 @@ erx_pthread_create_executor(pthread_t *thread, const pthread_attr_t *attr, void 
 	return (result);
 }
 
+void
+erx_hosted_thread_map(uint64_t map[2])
+{
+	_Static_assert(THREADS_MAX <= 2 * 64, "the threads fit the map");
+
+	map[0] = map[1] = 0;
+	(void)pthread_mutex_lock(&thread_lock);
+	for (uint32_t index = 0; index < THREADS_MAX; index++)
+		if (threads[index].state != THREAD_FREE)
+			map[index / 64] |= UINT64_C(1) << (index % 64);
+	(void)pthread_mutex_unlock(&thread_lock);
+}
+
 /*
  * A mask is checked as natively, so it must hold a CPU that exists, and is otherwise
  * kept to the host: macOS has no way to hold a thread to a CPU, and a caller can tell

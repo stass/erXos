@@ -61,6 +61,9 @@ uint64_t	erx_fiasco_task_thread_cap(uint32_t task, uint32_t index);
 uint64_t	erx_fiasco_task_semaphore_cap(uint32_t task, uint32_t index);
 uint64_t	erx_fiasco_task_gate_cap(uint32_t task);
 
+/* Sets bit n of map for each thread n the task has created and not reaped, from the table alone. */
+void		erx_fiasco_task_thread_map(uint32_t task, uint64_t map[2]);
+
 /* The slot in a task's own space that its threads name the gate by. */
 uint64_t	erx_fiasco_task_gate_slot(uint32_t task);
 

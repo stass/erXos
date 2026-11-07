@@ -186,6 +186,7 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS` | 19 |
 | `ERX_FIASCO_CALL_MEM_CREATE_PHYSICAL` | 18 |
 | `ERX_FIASCO_CALL_MEM_DMA_ADDR` | 20 |
+| `ERX_FIASCO_CALL_OBJECT_INFO` | 25 |
 | `ERX_FIASCO_CALL_SPACE_CREATE` | 14 |
 | `ERX_FIASCO_CALL_SPACE_PROTECT` | 8 |
 | `ERX_FIASCO_CALL_SPACE_STOP` | 16 |
@@ -277,8 +278,8 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_INFO_BUDGET_REPORTED_KIND` | 1 |
 | `ERX_INFO_BUDGET_REPORTED_KNOWN` | 127 |
 | `ERX_INFO_BUDGET_REPORTED_LENT` | 32 |
+| `ERX_INFO_BUDGET_REPORTED_THRESHOLD` | 64 |
 | `ERX_INFO_BUDGET_REPORTED_USED` | 8 |
-| `ERX_INFO_BUDGET_REPORTED_WATCH` | 64 |
 | `ERX_INFO_CPU` | 2 |
 | `ERX_INFO_CPU_REPORTED_IDLE_TIME` | 2 |
 | `ERX_INFO_CPU_REPORTED_INTERRUPTS` | 8 |
@@ -1048,6 +1049,19 @@ Storage: `wire_le`. Prefix size: 40. Alignment: 8.
 | `size` | `u64` | 24 | 1 |
 | `attr` | `u64` | 32 | 1 |
 
+### `erx_fiasco_object_info_request_t`
+
+Storage: `wire_le`. Prefix size: 48. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `caller` | `u64` | 0 | 1 |
+| `object` | `u64` | 8 | 1 |
+| `topic` | `u64` | 16 | 1 |
+| `index` | `u64` | 24 | 1 |
+| `window` | `u64` | 32 | 1 |
+| `size` | `u64` | 40 | 1 |
+
 ### `erx_fiasco_reply_t`
 
 Storage: `wire_le`. Prefix size: 32. Alignment: 8.
@@ -1641,7 +1655,7 @@ Storage: `wire_le`. Prefix size: 56. Alignment: 8.
 | `used` | `u64` | 24 | 1 |
 | `carved` | `u64` | 32 | 1 |
 | `lent` | `u64` | 40 | 1 |
-| `watch` | `u64` | 48 | 1 |
+| `threshold` | `u64` | 48 | 1 |
 
 ### `erx_info_cpu_t`
 

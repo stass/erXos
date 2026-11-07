@@ -19,6 +19,7 @@
 
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/group_report.h"
+#include "liberx/backend/core/object_info.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/park.h"
@@ -194,4 +195,25 @@ erx_irq_trigger(uint64_t irq)
 	erx_fiasco_reply_t reply;
 
 	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_TRIGGER, &request, sizeof(request), &reply));
+}
+
+/*
+ * Group runs erx_group_info's local body; every other topic is the service's
+ * (docs/design-stopgap.md, "Reporting kernel objects"). Only the root links it, as
+ * every topic is the root's alone.
+ */
+int
+erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *window, uint64_t size)
+{
+	const erx_fiasco_object_info_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .object = object, .topic = topic, .index = index, .window = (uint64_t)(uintptr_t)window, .size = size };
+	erx_fiasco_reply_t reply;
+	erx_info_facts_t facts = { 0 };
+
+	if (topic != ERX_INFO_GROUP)
+		return (erx_fiasco_service_call(ERX_FIASCO_CALL_OBJECT_INFO, &request, sizeof(request), &reply));
+	if (erx_group_info(object) != ERX_OK)
+		return (ERX_ENOTSUP);
+	facts.group = erx_info_group_load(erx_utcb_self());
+	return (erx_info_report(topic, index, &facts, window, size));
 }

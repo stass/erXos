@@ -182,6 +182,27 @@ typedef struct erx_log_read_result {
 int	erx_log_read(uint64_t res, uint64_t cursor, void *window, uint64_t size,
 	    erx_log_read_result_t *result) ERX_WARN_UNUSED_RESULT;
 
+/*
+ * A kernel object's report (docs/design-stopgap.md, "Reporting kernel objects"): writes
+ * the topic's erx_info_<kind> into the window of size bytes, the caller's own memory.
+ * Machine and cpu ignore object; group takes ERX_CAP_SELF or what erx_group_create
+ * returned, budget ERX_CAP_SELF, the root's one budget, and thread ERX_CAP_SELF or a
+ * space erx_space_create returned; any other handle is ERX_ENOTSUP. Natively every
+ * topic but group is the root's alone, and a task's call ERX_ENOTSUP. basic and image
+ * entry are ERX_ENOTSUP; a CPU off the map or a thread index past the last is
+ * ERX_ERANGE, which ends a listing. A clear reported bit disowns its field. It stands
+ * for the kernel call until abi/erx_abi.txt can declare a capability of any type.
+ */
+int	erx_object_info(uint64_t object, uint32_t topic, uint64_t index, void *window, uint64_t size)
+	    ERX_WARN_UNUSED_RESULT;
+/*
+ * The fields of a topic's report that the backend counts only partly, as reported bits
+ * whose bits in the report itself stay clear: a budget's used, from the pool's count.
+ * The inspector shows them as partial, under the stopgap reporter the schema lists. On
+ * erXos's kernel it is 0.
+ */
+uint32_t	erx_info_partial(uint32_t topic);
+
 /* how is ERX_END_OFF or ERX_END_RESET, and res is ignored. Returns only on a refusal. */
 int	erx_machine_end(uint64_t res, uint32_t how);
 
