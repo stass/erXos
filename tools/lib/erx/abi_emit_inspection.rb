@@ -370,6 +370,7 @@ module Erx
           -module(erx_schema).
           -moduledoc "The inspection schema: kinds, attributes, reporters, types and paths, with their validators.".
           -export([schema/0, kinds/0, attributes/1, attribute/2, fields/3, stopgaps/0, stopgap/1,
+                   trace_rows/0, trace_row/1,
                    reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
                    validate_record/1, resolve/1, resolve_text/1, report_layout/1, decode_report/2,
                    status_name/1]).
@@ -414,6 +415,7 @@ module Erx
           attributes_function(inspection),
           attribute_function(inspection),
           stopgap_functions(inspection),
+          trace_row_functions(inspection),
           label_functions(inspection),
           type_function(inspection),
           declarations_function(inspection)
@@ -459,6 +461,16 @@ module Erx
         clauses << "stopgap(_Name) ->\n    error"
         "%% The stopgap reporters, each with the category it stands in for, its\n" \
           "%% label and the scope of what it sees.\n#{names}\n\n" + clauses.join(";\n") + '.'
+      end
+
+      def trace_row_functions(inspection)
+        names = "trace_rows() ->\n    #{list(inspection.trace_rows.keys.map { |name| atom(name) }, 4)}."
+        clauses = inspection.trace_rows.values.map do |row|
+          "trace_row(#{atom(row.name)}) ->\n    {ok, #{reporter(inspection, row.reporter)}}"
+        end
+        clauses << "trace_row(_Row) ->\n    error"
+        "%% The trace rows of docs/design-live.md, \"Tracing\", each with the reporter\n" \
+          "%% its collector assigns to its events.\n#{names}\n\n" + clauses.join(";\n") + '.'
       end
 
       def label_functions(inspection)
@@ -643,7 +655,8 @@ module Erx
           'TYPES' => inspection.types.transform_values { |type| ruby_type(type) },
           'KINDS' => (inspection.kinds.transform_values { |attrs| attrs.map { |attr| ruby_attribute(inspection, attr) } })
                        .merge('listing' => []),
-          'PATHS' => inspection.paths.map { |path| ruby_path(path) }
+          'PATHS' => inspection.paths.map { |path| ruby_path(path) },
+          'TRACE_ROWS' => inspection.trace_rows.transform_values(&:reporter)
         }
         constants = ["        SCHEMA = #{inspection.version}"] +
                     table.map { |name, value| "        #{name} = Model.freeze_value(#{ruby_literal(value, 8)})" }

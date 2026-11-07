@@ -5691,6 +5691,36 @@ erx_trace_record_seq_status(uint64_t captured)
 	return (captured == ERX_TRACE_RECORD_SEQ_TERMINAL ? ERX_TRACE_RECORD_SEQ_EXHAUSTION : ERX_OK);
 }
 
+/* The name of a status, as the ABI file spells it, or NULL. */
+static inline const char *
+erx_status_name(erx_status_t status)
+{
+	static const char *const table[] = {
+		[0] = "ok",
+		[1] = "inval",
+		[2] = "stale",
+		[3] = "type",
+		[4] = "rights",
+		[5] = "range",
+		[6] = "nomem",
+		[7] = "limit",
+		[8] = "busy",
+		[9] = "timedout",
+		[10] = "fault",
+		[11] = "exist",
+		[12] = "notsup",
+		[13] = "nocaller",
+		[14] = "wouldblock",
+		[15] = "dead",
+		[16] = "intr",
+		[17] = "corrupt",
+	};
+
+	if (status > 0 || (uint64_t)-(int64_t)status >= sizeof(table) / sizeof(table[0]))
+		return (NULL);
+	return (table[-(int64_t)status]);
+}
+
 /* An event argument: an arg word read as a u64, an i64 or an erx_status_t; 0 marks an unused slot. */
 typedef enum erx_abi_arg_type {
 	ERX_ABI_ARG_U64 = 1,

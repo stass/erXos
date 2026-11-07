@@ -5,7 +5,7 @@
 
 -module(erx_abi_events).
 -moduledoc "The events of the ABI file's enums with args lines and their typed arguments.".
--export([describe/2]).
+-export([describe/2, status/1, flags/1]).
 -export_type([argument_type/0]).
 
 %% An arg word read as an unsigned or signed 64-bit integer, or as a status.
@@ -19,3 +19,30 @@ describe('trace_event', 3) -> {'irq_deliver', [{'label', 'u64'}]};
 describe('trace_event', 4) -> {'space_start', [{'target', 'u64'}]};
 describe('trace_event', 5) -> {'space_end', [{'target', 'u64'}, {'status', 'i64'}]};
 describe('trace_event', _Value) -> unknown.
+
+%% The name of a status value, or unknown for a value no status holds.
+-spec status(integer()) -> atom() | unknown.
+status(0) -> 'ok';
+status(-1) -> 'inval';
+status(-2) -> 'stale';
+status(-3) -> 'type';
+status(-4) -> 'rights';
+status(-5) -> 'range';
+status(-6) -> 'nomem';
+status(-7) -> 'limit';
+status(-8) -> 'busy';
+status(-9) -> 'timedout';
+status(-10) -> 'fault';
+status(-11) -> 'exist';
+status(-12) -> 'notsup';
+status(-13) -> 'nocaller';
+status(-14) -> 'wouldblock';
+status(-15) -> 'dead';
+status(-16) -> 'intr';
+status(-17) -> 'corrupt';
+status(_Value) -> unknown.
+
+%% Each bit of a flags type a layout binds, as {Name, Mask}; [] for any other.
+-spec flags(atom()) -> [{atom(), pos_integer()}].
+flags('trace_record_flags') -> [{'cpu_unknown', 1}];
+flags(_Flags) -> [].

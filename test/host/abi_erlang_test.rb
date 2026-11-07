@@ -141,12 +141,14 @@ class AbiErlangTest < Minitest::Test
   def test_generated_events_describe_each_trace_event
     @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-o', @directory,
                  File.join(@directory, 'erx_abi_events.erl')], name: 'erlc-events', deadline: 60, env: @environment)
-    script = 'io:format("~p~n", [[erx_abi_events:describe(trace_event, V) || V <- lists:seq(0, 6)]]), halt().'
+    script = 'io:format("~p~n", [[erx_abi_events:describe(trace_event, V) || V <- lists:seq(0, 6)]]), ' \
+             'io:format("~p~n", [{erx_abi_events:status(-12), erx_abi_events:status(1), ' \
+             'erx_abi_events:flags(trace_record_flags), erx_abi_events:flags(trace_event)}]), halt().'
     record = @runner.run([File.join(@oracle, 'erl'), '+S', '1:1', '+SDcpu', '1', '+SDio', '1', '-noshell',
                           '-noinput', '-pa', @directory, '-eval', script], name: 'events', deadline: 60, env: @environment)
     expected = "[unknown,{park,[{slot,u64},{deadline,u64}]},\n {wake,[{slot,u64},{result,status}]},\n " \
                "{irq_deliver,[{label,u64}]},\n {space_start,[{target,u64}]},\n " \
-               "{space_end,[{target,u64},{status,i64}]},\n unknown]\n"
+               "{space_end,[{target,u64},{status,i64}]},\n unknown]\n{notsup,unknown,[{cpu_unknown,1}],[]}\n"
     assert_equal expected, File.binread(record.fetch('log'))
   end
 

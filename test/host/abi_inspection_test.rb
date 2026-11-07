@@ -124,7 +124,7 @@ class AbiInspectionTest < Minitest::Test
     assert_refused(with('unit pages "pages"'), /unit pages is not used/)
     assert_refused(with('integer spare 0 1'), /type spare is not used/)
     assert_refused(BASE.sub("  kind thing\n", "  kind spare\n  kind thing\n"), /kind spare has no path/)
-    assert_refused(with('stopgap gap kernel "gap" "scope"'), /stopgap gap reports no attribute/)
+    assert_refused(with('stopgap gap kernel "gap" "scope"'), /stopgap gap reports no attribute or trace row/)
   end
 
   def test_integer_bounds
@@ -199,6 +199,23 @@ class AbiInspectionTest < Minitest::Test
     stopgap = model(with_attr('n index reporters kernel,gap visible any build all projections shell') + "  #{gap}\n")
               .inspection.stopgaps.fetch('gap')
     assert_equal ['kernel', 'gap', 'what it sees'], [stopgap.category, stopgap.label, stopgap.scope]
+  end
+
+  # A trace row names one reporter; a stopgap a row lists is used, and the
+  # kernel's row shares the category's name without declaring a member.
+  def test_trace_rows_name_one_declared_reporter
+    gap = 'stopgap gap kernel "gap" "what it sees"'
+    rows = model(with("#{gap}\ntrace kernel kernel\ntrace backend gap")).inspection.trace_rows
+    assert_equal({ 'kernel' => 'kernel', 'backend' => 'gap' }, rows.transform_values(&:reporter))
+    assert_refused(with('trace backend gap'), /undefined reporter gap/)
+    assert_refused(with('trace backend device'), /undefined reporter device/)
+    assert_refused(with("trace erts runtime\ntrace erts runtime"), /duplicate trace row erts/)
+    assert_refused(with('trace erts'), /expected trace ROW REPORTER/)
+    assert_refused(with('trace erts runtime kernel'), /expected trace ROW REPORTER/)
+    assert_refused(with('trace erts "runtime"'), /quoted token is not permitted/)
+    assert_refused(with('trace Erts runtime'), /invalid inspection name/)
+    assert_refused(with("trace erts runtime\n  extra"), /trace takes no four-space members/)
+    assert_refused(with("#{gap}\ntrace erts runtime"), /stopgap gap reports no attribute or trace row/)
   end
 
   def test_paths_have_declared_prefixes_and_resolve_uniquely
@@ -332,6 +349,9 @@ class AbiInspectionTest < Minitest::Test
     assert_equal %w[machine cpu group budget domain thread process module], inspection.kinds.keys
     derived = inspection.kinds.fetch('budget').reject { |attr| attr.derived.empty? }.map(&:key)
     assert_equal %w[spending borrowing room deficit give_back], derived
+    assert_equal({ 'erts' => 'runtime', 'backend' => 'liberx_trace', 'kernel' => 'kernel' },
+                 inspection.trace_rows.transform_values(&:reporter))
+    assert_equal %w[kernel liberx\ trace], inspection.stopgaps.fetch('liberx_trace').then { |gap| [gap.category, gap.label] }
   end
 
   # The checked-in table, which the drift check holds to the plan.
@@ -343,6 +363,7 @@ class AbiInspectionTest < Minitest::Test
     assert_equal inspection.kinds.transform_values { |attrs| attrs.map(&:key) }.merge('listing' => []),
                  generated::KINDS.transform_values { |attrs| attrs.map { |attr| attr.fetch(:key) } }
     assert_equal 'liberx pool', generated::STOPGAPS.fetch('liberx_pool').fetch(:label)
+    assert_equal inspection.trace_rows.transform_values(&:reporter), generated::TRACE_ROWS
     assert_equal ['processes', { type: 'pid' }], generated::PATHS.last.fetch(:segments)
     assert generated::PATHS.frozen? && generated::PATHS.last.fetch(:segments).last.frozen?
   end

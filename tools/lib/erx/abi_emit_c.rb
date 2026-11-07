@@ -68,6 +68,7 @@ module Erx
           type = schema.types.fetch(type_name)
           out.concat(layout_operations(type, schema)) if type.is_a?(Layout) && !type.private?
         end
+        out.concat(status_table(schema))
         out.concat(event_tables(schema))
         out.concat(rights_tables(schema)) if schema.objects.any?
         out.concat(['#endif /* ERX_ABI_H */', ''])
@@ -121,6 +122,22 @@ module Erx
          "\terx_abi_event_arg_t\targs[#{Model::MAX_EVENT_ARGUMENTS}];",
          '} erx_abi_event_t;', '',
          *enums.flat_map { |type| event_lookup(type) }]
+      end
+
+      # erx_status_name(status): the ABI file's name of a status, or NULL
+      # for a value no status holds. Statuses are 0 and negative, so the
+      # table is indexed by the negated value, after its bound check.
+      def status_table(schema)
+        return [] if schema.statuses.nil? || schema.statuses.empty?
+
+        entries = schema.statuses.sort_by { |_name, value| -value }.map do |name, value|
+          "\t\t[#{-value}] = #{c_string(name)},"
+        end
+        ['/* The name of a status, as the ABI file spells it, or NULL. */',
+         'static inline const char *', 'erx_status_name(erx_status_t status)', '{',
+         "\tstatic const char *const table[] = {", *entries, "\t};", '',
+         "\tif (status > 0 || (uint64_t)-(int64_t)status >= sizeof(table) / sizeof(table[0]))",
+         "\t\treturn (NULL);", "\treturn (table[-(int64_t)status]);", '}', '']
       end
 
       def event_type_tag(type) = constant("abi_arg_#{type}")

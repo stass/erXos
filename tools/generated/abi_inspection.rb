@@ -26,6 +26,11 @@ module Erx
             category: 'kernel',
             label: 'liberx pool',
             scope: 'pages committed through liberx; not kernel objects, page tables or mapping records'
+          },
+          'liberx_trace' => {
+            category: 'kernel',
+            label: 'liberx trace',
+            scope: "the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events"
           }
         })
         TYPES = Model.freeze_value({
@@ -1134,6 +1139,11 @@ module Erx
             variable_child: nil
           }
         ])
+        TRACE_ROWS = Model.freeze_value({
+          'erts' => 'runtime',
+          'backend' => 'liberx_trace',
+          'kernel' => 'kernel'
+        })
       end
     end
   end

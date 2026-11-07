@@ -456,7 +456,7 @@ structure casts, unaligned dereferences or host-endian assumptions.
 being the `schema` number every inspection record carries
 ([design-live.md](design-live.md#inspection-records)). Its members, at
 two-space indentation, declare units, value types, stopgap reporters,
-kinds and paths; a kind's attributes and a path's marks are at four
+trace rows, kinds and paths; a kind's attributes and a path's marks are at four
 spaces beneath it. The members have one namespace of their own. A member
 refers to another member by its bare name, and to a root `limit`,
 `scalar`, `enum` or `flags` by `@name`. A name is declared once, and a
@@ -474,6 +474,7 @@ its name, never by its position, so adding a member renumbers nothing.
 | `list NAME TYPE MAX` | at most MAX values of TYPE, MAX at most 1,000 |
 | `tuple NAME TYPE...` | two to 16 values of the listed types, in order |
 | `stopgap NAME CATEGORY LABEL SCOPE` | a reporter that stands in for the reporter category CATEGORY, `kernel`, `service` or `runtime`; LABEL is the quoted name renderers print for it and SCOPE the quoted statement of what it can see |
+| `trace ROW REPORTER` | a row of `erx:trace`'s stream ([design-live.md](design-live.md#tracing)) and the one reporter, a category or a stopgap, that its collector assigns to every event of the row; ROW names a namespace of its own, so the `kernel` row may share the category's name, and becomes an atom of `erx_schema` |
 | `kind NAME` | an inspection kind; its `attr` members follow at four spaces |
 | `attr KEY TYPE reporters LIST visible CLASS build BUILD projections LIST` | an attribute of the kind, described below |
 | `path KIND SEGMENT...` | a path and the kind of its record, described below, with its marks at four spaces |
@@ -501,8 +502,8 @@ adding one never exposes it by default:
   A stopgap reporter is listed by its name, only on the attributes it
   answers, so a validator refuses it anywhere else, and always beside
   the category it stands in for, so removing the stopgap leaves the
-  attribute declared for that category; a stopgap no attribute lists
-  fails;
+  attribute declared for that category; a stopgap that no attribute
+  and no `trace` row lists fails;
 * `visible`, the inspect facets that see it: `any`, every inspect facet;
   `owner`, a facet whose scope covers the path's owner, which for a path
   the machine owns is a facet of scope `all`; `all`, a facet of scope
@@ -615,6 +616,9 @@ inspection 1
   integer page_count 0 0xffffffffffffffff unit pages
   integer budget_id 1 0xffffffff
   stopgap liberx_pool kernel "liberx pool" "pages committed through liberx; not kernel objects, page tables or mapping records"
+  stopgap liberx_trace kernel "liberx trace" "the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events"
+  trace backend liberx_trace
+  trace kernel kernel
   kind budget
     attr kind @budget_kind reporters kernel visible owner build all projections shell,host,proc,web
     attr used page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web

@@ -15,6 +15,9 @@ module Erx
     InspectionType = Struct.new(:name, :form, :minimum, :maximum, :multiple, :unit,
                                 :utf8, :atoms, :element, :elements, :member, keyword_init: true)
     InspectionStopgap = Struct.new(:name, :category, :label, :scope, keyword_init: true)
+    # A trace row (docs/design-live.md, "Tracing") and the one reporter, a
+    # category or a stopgap name, that its collector assigns to its events.
+    InspectionTraceRow = Struct.new(:name, :reporter, keyword_init: true)
     # REPORTERS holds category names and stopgap names, as the schema lists them.
     # DERIVED holds the keys of the attributes the inspector computes this one
     # from, and is empty for an attribute a report carries.
@@ -33,7 +36,7 @@ module Erx
                                 :visibility, :literal_children, :variable_child,
                                 keyword_init: true)
     InspectionSchema = Struct.new(:version, :units, :types, :member_types, :stopgaps,
-                                  :kinds, :paths, keyword_init: true)
+                                  :kinds, :paths, :trace_rows, keyword_init: true)
 
     # The reader of the one `inspection SCHEMA` declaration
     # (docs/design-abi.md, "Inspection schema"). It refuses every source the
@@ -106,6 +109,7 @@ module Erx
           values = {}
           kind_lines = {}
           paths = []
+          rows = []
           @groups.each do |line, children|
             case line.words.first
             when 'unit' then units[declare(line)] = unit(line, children)
@@ -113,6 +117,7 @@ module Erx
             when 'stopgap' then stopgaps[declare(line)] = stopgap(line, children)
             when 'kind' then kind_lines[declare(line)] = [line, children]
             when 'path' then paths << [line, children]
+            when 'trace' then rows << [line, children]
             else line.fail!("unknown inspection member #{line.words.first}")
             end
           end
@@ -121,10 +126,11 @@ module Erx
           kinds = kind_lines.to_h { |name, (line, children)| [name, attributes(line, children, types, stopgaps)] }
           check_reports(kinds)
           paths = resolve_paths(paths, kinds, types)
-          check_used(units, values, stopgaps, kinds, types, paths)
+          trace_rows = trace_rows(rows, stopgaps)
+          check_used(units, values, stopgaps, kinds, types, paths, trace_rows)
           InspectionSchema.new(version: version, units: units, types: types,
                                member_types: values.keys, stopgaps: stopgaps,
-                               kinds: kinds, paths: paths)
+                               kinds: kinds, paths: paths, trace_rows: trace_rows)
         end
 
         private
@@ -200,9 +206,24 @@ module Erx
           end
         end
 
-        # The line that declares member NAME; paths declare nothing.
+        # A trace row's name is its own namespace, not a member's, since the
+        # kernel's row shares the category's name. Its reporter is a category
+        # or a stopgap; a row has exactly one, since a row's collector is one.
+        def trace_rows(rows, stopgaps)
+          rows.each_with_object({}) do |(line, children), result|
+            no_children(line, children)
+            _keyword, name, reporter = unquoted(line)
+            line.fail!('expected trace ROW REPORTER') unless line.words.size == 3
+            plain(name, line)
+            line.fail!("duplicate trace row #{name}") if result.key?(name)
+            line.fail!("undefined reporter #{reporter}") unless CATEGORIES.include?(reporter) || stopgaps.key?(reporter)
+            result[name] = InspectionTraceRow.new(name: name, reporter: reporter)
+          end
+        end
+
+        # The line that declares member NAME; paths and trace rows declare nothing.
         def line_of(name)
-          @groups.find { |line, _children| line.words.first != 'path' && line.words[1] == name }.first
+          @groups.find { |line, _children| !%w[path trace].include?(line.words.first) && line.words[1] == name }.first
         end
 
         # Member value types first, then every reference they make; a cycle
@@ -557,7 +578,7 @@ module Erx
           reported.line.fail!("#{name} field #{unmarked.first} has no #{REPORTED} bit") unless unmarked.empty?
         end
 
-        def check_used(units, values, stopgaps, kinds, types, paths)
+        def check_used(units, values, stopgaps, kinds, types, paths, trace_rows)
           used_units = types.values.filter_map(&:unit)
           units.each_key { |name| line_of(name).fail!("unit #{name} is not used") unless used_units.include?(name) }
           used_types = types.values.flat_map { |type| [type.element, *type.elements].compact } +
@@ -566,8 +587,8 @@ module Erx
           values.each_key { |name| line_of(name).fail!("type #{name} is not used") unless used_types.include?(name) }
           used_kinds = paths.map(&:kind)
           kinds.each_key { |name| line_of(name).fail!("kind #{name} has no path") unless used_kinds.include?(name) }
-          listed = kinds.values.flatten.flat_map(&:reporters)
-          stopgaps.each_key { |name| line_of(name).fail!("stopgap #{name} reports no attribute") unless listed.include?(name) }
+          listed = kinds.values.flatten.flat_map(&:reporters) + trace_rows.values.map(&:reporter)
+          stopgaps.each_key { |name| line_of(name).fail!("stopgap #{name} reports no attribute or trace row") unless listed.include?(name) }
         end
       end
     end

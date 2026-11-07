@@ -118,7 +118,7 @@ module Erx
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :protocols, :inspection, :inputs, keyword_init: true) do
+                        :protocols, :inspection, :inputs, :statuses, keyword_init: true) do
       # The enums with args lines, in type order: the ones the generator
       # emits event tables for.
       def event_enums
@@ -213,7 +213,8 @@ module Erx
                    calls: calls.freeze, readers: readers.sort_by(&:name).freeze,
                    translations: translations.freeze, services: services.freeze,
                    projections: projections.freeze, protocols: protocols,
-                   inspection: inspection, inputs: source.inputs).freeze
+                   inspection: inspection, inputs: source.inputs,
+                   statuses: status_values(by_kind)).freeze
         freeze_value(result)
       end
 
@@ -311,6 +312,12 @@ module Erx
           definitions[name] = declaration
         end
         definitions.freeze
+      end
+
+      # Each status's name and its value, in declaration order; the
+      # constants hold them too, under their C names.
+      def status_values(by_kind)
+        by_kind.fetch('status', []).to_h { |item| [item.args[0], Syntax.integer(item.args[1], line: item.line)] }.freeze
       end
 
       def collect_constants(by_kind)

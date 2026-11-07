@@ -74,7 +74,9 @@ module Erx
 
       # erx_abi_events:describe(Enum, Value): for each enum with args
       # lines, its member numbered Value as {Name, [{ArgName, Type}]}, or
-      # unknown for a value the enum does not hold.
+      # unknown for a value the enum does not hold. status(Value) names a
+      # status argument, and flags(Flags) gives each bit of a flags type a
+      # layout binds, so a reader of a record decodes no word by hand.
       def events(schema)
         enums = schema.event_enums
         enum_type = enums.empty? ? 'atom()' : enums.map { |type| literal(atom(type.name)) }.join(' | ')
@@ -91,12 +93,33 @@ module Erx
         argument_type = Model::EVENT_ARGUMENT_TYPES.map { |type| literal(atom(type)) }.join(' | ')
         [NOTICE, '-module(erx_abi_events).',
          '-moduledoc "The events of the ABI file\'s enums with args lines and their typed arguments.".',
-         '-export([describe/2]).', '-export_type([argument_type/0]).', '',
+         '-export([describe/2, status/1, flags/1]).', '-export_type([argument_type/0]).', '',
          '%% An arg word read as an unsigned or signed 64-bit integer, or as a status.',
          "-type argument_type() :: #{argument_type}.", '',
          "-spec describe(#{enum_type}, integer()) ->",
          '    {atom(), [{atom(), argument_type()}]} | unknown.',
-         clauses.join(";\n") + '.', ''].join("\n")
+         clauses.join(";\n") + '.', '', status_function(schema), '', flags_function(schema), ''].join("\n")
+      end
+
+      def status_function(schema)
+        clauses = (schema.statuses || {}).map { |name, value| "status(#{value}) -> #{literal(atom(name))}" }
+        ['%% The name of a status value, or unknown for a value no status holds.',
+         '-spec status(integer()) -> atom() | unknown.',
+         (clauses + ['status(_Value) -> unknown']).join(";\n") + '.'].join("\n")
+      end
+
+      # The flags types a layout's names lines bind, each bit with its mask.
+      def flags_function(schema)
+        bound = schema.types.values.grep(Layout).flat_map { |layout| (layout.bindings || {}).values.map(&:type) }
+        flags = schema.type_order.select { |name| bound.include?(name) }.map { |name| schema.types.fetch(name) }
+                      .select(&:flags)
+        clauses = flags.map do |type|
+          bits = type.members.sort_by { |_name, mask| mask }.map { |name, mask| "{#{literal(atom(name))}, #{mask}}" }
+          "flags(#{literal(atom(type.name))}) -> [#{bits.join(', ')}]"
+        end
+        ['%% Each bit of a flags type a layout binds, as {Name, Mask}; [] for any other.',
+         '-spec flags(atom()) -> [{atom(), pos_integer()}].',
+         (clauses + ['flags(_Flags) -> []']).join(";\n") + '.'].join("\n")
       end
 
       def reader(schema, specification)

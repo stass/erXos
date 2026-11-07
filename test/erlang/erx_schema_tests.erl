@@ -46,6 +46,17 @@ budget_on_the_stopgap_test() ->
     {ok, #{unit := Unit}} = erx_schema:attribute(budget, used),
     ?assertEqual(<<"pages">>, Unit).
 
+%% docs/design-live.md, "Tracing": each row's reporter comes from the schema, the
+%% backend's from the liberx trace stopgap, which stands in for the kernel.
+trace_rows_test() ->
+    ?assertEqual([erts, backend, kernel], erx_schema:trace_rows()),
+    ?assertEqual({ok, runtime}, erx_schema:trace_row(erts)),
+    ?assertEqual({ok, {stopgap, liberx_trace}}, erx_schema:trace_row(backend)),
+    ?assertEqual({ok, kernel}, erx_schema:trace_row(kernel)),
+    ?assertEqual(error, erx_schema:trace_row(frames)),
+    ?assertEqual({ok, <<"liberx trace">>}, erx_schema:reporter_label({stopgap, liberx_trace})),
+    {ok, #{category := kernel}} = erx_schema:stopgap(liberx_trace).
+
 values_outside_their_type_are_invalid_test() ->
     Cases = [{budget, used, {partial, -1}}, {domain, name, {ok, <<16#ff>>}}, {domain, state, {ok, dead}},
              {process, links, {ok, [self() | self()]}}, {process, location, {ok, {lists, <<"map">>, 2, <<>>, 1}}},

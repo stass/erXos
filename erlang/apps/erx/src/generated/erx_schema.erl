@@ -6,6 +6,7 @@
 -module(erx_schema).
 -moduledoc "The inspection schema: kinds, attributes, reporters, types and paths, with their validators.".
 -export([schema/0, kinds/0, attributes/1, attribute/2, fields/3, stopgaps/0, stopgap/1,
+         trace_rows/0, trace_row/1,
          reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
          validate_record/1, resolve/1, resolve_text/1, report_layout/1, decode_report/2,
          status_name/1]).
@@ -20,7 +21,7 @@
 -define(U32, 16#ffffffff).
 
 -type kind() :: machine | cpu | group | budget | domain | thread | process | module | listing.
--type reporter() :: kernel | service | runtime | {stopgap, liberx_pool}.
+-type reporter() :: kernel | service | runtime | {stopgap, liberx_pool} | {stopgap, liberx_trace}.
 -type value() :: {ok, term()} | {partial, term()} | unknown | unsupported
                | {timeout, pos_integer()} | {error, term()}.
 -type attr() :: {reporter(), value()}.
@@ -604,13 +605,31 @@ attribute(_Kind, _Key) ->
 %% The stopgap reporters, each with the category it stands in for, its
 %% label and the scope of what it sees.
 stopgaps() ->
-    [liberx_pool].
+    [liberx_pool, liberx_trace].
 
 stopgap(liberx_pool) ->
     {ok, #{category => kernel,
            label => <<"liberx pool">>,
            scope => <<"pages committed through liberx; not kernel objects, page tables or mapping records">>}};
+stopgap(liberx_trace) ->
+    {ok, #{category => kernel,
+           label => <<"liberx trace">>,
+           scope => <<"the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events">>}};
 stopgap(_Name) ->
+    error.
+
+%% The trace rows of docs/design-live.md, "Tracing", each with the reporter
+%% its collector assigns to its events.
+trace_rows() ->
+    [erts, backend, kernel].
+
+trace_row(erts) ->
+    {ok, runtime};
+trace_row(backend) ->
+    {ok, {stopgap, liberx_trace}};
+trace_row(kernel) ->
+    {ok, kernel};
+trace_row(_Row) ->
     error.
 
 %% The name a renderer prints for a reporter.
@@ -618,6 +637,7 @@ reporter_label(kernel) -> {ok, <<"kernel">>};
 reporter_label(service) -> {ok, <<"service">>};
 reporter_label(runtime) -> {ok, <<"runtime">>};
 reporter_label({stopgap, liberx_pool}) -> {ok, <<"liberx pool">>};
+reporter_label({stopgap, liberx_trace}) -> {ok, <<"liberx trace">>};
 reporter_label(_Reporter) -> error.
 
 %% The label a renderer prints after a value of a unit.

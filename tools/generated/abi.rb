@@ -19495,6 +19495,26 @@ module Erx
             ].freeze
           }.freeze
         ].freeze,
+        statuses: {
+          "ok".b => 0,
+          "inval".b => -1,
+          "stale".b => -2,
+          "type".b => -3,
+          "rights".b => -4,
+          "range".b => -5,
+          "nomem".b => -6,
+          "limit".b => -7,
+          "busy".b => -8,
+          "timedout".b => -9,
+          "fault".b => -10,
+          "exist".b => -11,
+          "notsup".b => -12,
+          "nocaller".b => -13,
+          "wouldblock".b => -14,
+          "dead".b => -15,
+          "intr".b => -16,
+          "corrupt".b => -17
+        }.freeze,
         types: types.freeze,
         inputs: {}.freeze
       ))

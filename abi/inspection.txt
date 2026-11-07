@@ -1,9 +1,9 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 # The inspection schema (docs/design-abi.md, "Inspection schema"): units,
-# value types, stopgap reporters, kinds with their attributes in field
-# order, and paths. Its members have one namespace of their own; a root
-# limit, scalar, enum or flags is named by @name. An attribute marked
+# value types, stopgap reporters, trace rows, kinds with their attributes
+# in field order, and paths. Its members have one namespace of their own; a
+# root limit, scalar, enum or flags is named by @name. An attribute marked
 # derived is one the inspector computes from the inputs it lists. A kind
 # that erx_object_info reports has a root layout erx_info_<kind>, whose
 # fields and reported bits are named after the kind's kernel attributes.
@@ -47,6 +47,11 @@ inspection 1
   tuple location module_name name arity file_name line_number
 
   stopgap liberx_pool kernel "liberx pool" "pages committed through liberx; not kernel objects, page tables or mapping records"
+  stopgap liberx_trace kernel "liberx trace" "the root's parks, wakes, IRQ deliveries and task starts and ends; not test tasks' parks or the kernel's events"
+
+  trace erts runtime
+  trace backend liberx_trace
+  trace kernel kernel
 
   kind machine
     attr build build_id reporters kernel visible any build all projections shell,host,proc,web
