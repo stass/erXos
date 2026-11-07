@@ -24,6 +24,10 @@ module Erx
       @catalog = catalog
       @external = {}
       @registered_paths = {}
+      # Each licence document a record cites, by SHA-256, over every resolve of
+      # this resolver: a pack resolves its entries in turn and renders one
+      # NOTICES from all of their records.
+      @document_texts = {}
       register_external(external)
       @origins = {}
       @runner = runner
@@ -44,7 +48,7 @@ module Erx
       end
       @notice_limit = [notice_budget, MAX_METADATA].min
       @notice_bytes = 0
-      @notice_documents = {}
+      @retained_notices = {}
       @metadata = {}
       @origins = {}
       @verified = {}
@@ -68,16 +72,50 @@ module Erx
       @catalog.entry(path).fetch('sha256')
     end
 
+    NOTICES_PREAMBLE = <<~TEXT
+      erXos image source notices
+
+      Files that carry the same notice are listed together, with their licence,
+      how it was found, the licence documents the notice cites and the files'
+      own notice text, which holds their copyright lines. Each cited document
+      follows once, after every group, under its name.
+
+    TEXT
+
+    # NOTICES, laid out as a FreeBSD or Debian copyright file is: one group per
+    # distinct file notice, naming every file that carries it, then each
+    # licence document once. A record's own notice is the file's leading
+    # comment, so every distinct copyright line appears in its group.
     def notices(records, budget: MAX_METADATA)
       raise Error, 'invalid image notice budget' unless budget.is_a?(Integer) && budget.positive?
-      parts = ["erXos image source notices\n\n".b]
-      records.each do |record|
-        parts << record.fetch('path') << "\nLicense: " << record.fetch('license')
-        parts << "\nEvidence: " << record.fetch('evidence') << "\n" << record.fetch('notice') << "\n\n"
+      parts = [NOTICES_PREAMBLE.b]
+      groups = records.group_by { |record| record.values_at('license', 'evidence', 'notice_documents', 'notice') }
+      groups.each do |(license, evidence, cited, notice), members|
+        parts << "Files:\n"
+        members.each { |record| parts << '  ' << record.fetch('path') << "\n" }
+        parts << 'License: ' << license << "\nEvidence: " << evidence << "\n"
+        parts << 'Documents: ' << cited.map { |document| document.fetch('path') }.join(', ') << "\n" unless cited.empty?
+        parts << notice << "\n" unless notice.empty?
+        parts << "\n"
+      end
+      document_sections(records).each do |names, text|
+        parts << 'Document: ' << names.join(', ') << "\n" << text << "\n\n"
       end
       raise Error, 'image notices exceed host budget' if parts.sum(&:bytesize) > budget
       # Path labels are UTF-8 and notice bytes binary: join them as bytes.
       parts.map(&:b).join.freeze
+    end
+
+    # Each document the records cite, once: the names it is cited under and its
+    # checked text, ordered by those names.
+    def document_sections(records)
+      named = records.flat_map { |record| record.fetch('notice_documents') }.uniq
+                     .group_by { |document| document.fetch('sha256') }
+      named.map do |digest, documents|
+        names = documents.map { |document| document.fetch('path').b }.sort
+        text = @document_texts.fetch(digest) { raise Error, "notice cites a document this resolver did not read: #{names.first}" }
+        [names, digest, text]
+      end.sort_by { |names, digest, _text| [names, digest] }.map { |names, _digest, text| [names, text] }
     end
 
     # Make dependency syntax has escaped whitespace and continued lines. It is
@@ -358,15 +396,11 @@ module Erx
 
     def attribute(path, records, build_kind, additional_notices: [], public_path: nil, audited: nil)
       path = authorized_path(path)
-      additions = additional_notices.map { |notice| verified_read(notice, maximum: @notice_limit) }
-      document_references = additional_notices.map { |notice| notice_reference(notice) }
+      document_references = additional_notices.map { |notice| notice_document(notice) }
       if records.key?(path)
         existing = records.fetch(path)
-        missing = additions.reject { |text| existing.fetch('notice').include?(text) }
-        unless missing.empty?
-          records[path] = existing.merge('notice' => retain_notice([existing.fetch('notice'), *missing]),
-            'notice_documents' => (existing.fetch('notice_documents') + document_references).uniq.freeze).freeze
-        end
+        cited = (existing.fetch('notice_documents') + document_references).uniq
+        records[path] = existing.merge('notice_documents' => cited.freeze).freeze unless cited == existing.fetch('notice_documents')
         return
       end
       if @external.key?(path)
@@ -384,8 +418,9 @@ module Erx
         label = external.fetch('label')
         evidence = external.fetch('evidence')
         status = external.fetch('status')
-        parts = external.fetch('notices').flat_map { |item| [verified_read(item, maximum: @notice_limit), "\n"] }
-        document_references.concat(external.fetch('notices').map { |item| notice_reference(item) })
+        # An external input is a binary or an archive: its notices are documents alone.
+        own_notice = ''.b
+        document_references.concat(external.fetch('notices').map { |item| notice_document(item) })
       elsif path.start_with?(@root + '/')
         label = path.delete_prefix(@root + '/')
         origin_root = find_origin(File.dirname(path))
@@ -398,7 +433,7 @@ module Erx
         if item
           license = item.fetch('license')
           evidence = item.fetch('evidence')
-          parts = [leading_notice(bytes)]
+          own_notice = leading_notice(bytes)
         else
           # Build outputs have no stable staging directory. Content identifies
           # a generated source while preserving its readable file name.
@@ -408,8 +443,8 @@ module Erx
                                                    'default_evidence' => '' }).fetch('license')
           evidence = 'file SPDX'
           license_document = File.join(@root, 'LICENSE')
-          parts = [leading_notice(bytes), snapshot_bytes(license_document, maximum: @notice_limit)]
-          document_references << notice_reference('path' => license_document,
+          own_notice = leading_notice(bytes)
+          document_references << notice_document('path' => license_document,
             'sha256' => @catalog.entry(license_document).fetch('sha256'))
         end
       else
@@ -425,10 +460,7 @@ module Erx
         end
         label = public_path
       end
-      unless label.is_a?(String) && !label.start_with?('/') && label.valid_encoding? &&
-             !label.match?(/[\x00-\x1f\x7f]/)
-        raise Error, 'invalid public provenance label'
-      end
+      raise Error, 'invalid public provenance label' unless public_label?(label)
       if item
         profile_path = File.join(@root, 'config/provenance/import-notices.json')
         references = if @catalog.include_path?(profile_path)
@@ -437,13 +469,10 @@ module Erx
                      else
                        []
                      end
-        raise Error, "selected import grant of #{label} (#{license}) has no checked notice document" if references.empty? && additions.empty?
-        references.each do |reference|
-          parts << verified_read(reference, maximum: @notice_limit)
-          document_references << notice_reference(reference)
-        end
+        raise Error, "selected import grant of #{label} (#{license}) has no checked notice document" if references.empty? && additional_notices.empty?
+        document_references.concat(references.map { |reference| notice_document(reference) })
       end
-      notice = retain_notice(parts + additions)
+      notice = retain_notice(own_notice)
       records[path] = { 'path' => label.freeze, 'sha256' => hash.freeze,
                         'license' => selected.fetch('license'), 'declared_license' => license.freeze,
                         'evidence' => evidence.freeze,
@@ -466,6 +495,15 @@ module Erx
       item
     end
 
+    # Reads a licence document a record cites, checked against its hash, and
+    # keeps its text once for NOTICES; returns the record's reference.
+    def notice_document(reference)
+      text = verified_read(reference, maximum: @notice_limit)
+      cited = notice_reference(reference)
+      @document_texts[cited.fetch('sha256')] ||= retain_notice(text)
+      cited
+    end
+
     def notice_reference(reference)
       canonical = authorized_path(reference.fetch('path'), expected: reference.fetch('sha256'))
       label = if canonical.start_with?(@root + '/')
@@ -473,7 +511,13 @@ module Erx
               else
                 "external-notice/#{reference.fetch('sha256')}/#{File.basename(canonical)}"
               end
+      raise Error, 'invalid notice document label' unless public_label?(label)
       { 'path' => label.freeze, 'sha256' => reference.fetch('sha256').dup.freeze }.freeze
+    end
+
+    # A name NOTICES prints on a line of its own: relative, UTF-8, no controls.
+    def public_label?(label)
+      label.is_a?(String) && !label.start_with?('/') && label.valid_encoding? && !label.match?(/[\x00-\x1f\x7f]/)
     end
 
     def find_origin(directory)
@@ -527,14 +571,14 @@ module Erx
       @catalog.read(path, maximum: maximum)
     end
 
-    def retain_notice(parts)
-      size = parts.sum(&:bytesize)
+    def retain_notice(text)
+      size = text.bytesize
       raise Error, 'provenance notice exceeds host budget' if size > @notice_limit
-      digest = parts.each_with_object(Digest::SHA256.new) { |part, state| state.update(part) }.hexdigest
-      return @notice_documents.fetch(digest) if @notice_documents.key?(digest)
+      digest = Digest::SHA256.hexdigest(text)
+      return @retained_notices.fetch(digest) if @retained_notices.key?(digest)
       raise Error, 'provenance notices exceed host budget' if size > @notice_limit - @notice_bytes
       @notice_bytes += size
-      @notice_documents[digest] = parts.map(&:b).join.freeze
+      @retained_notices[digest] = text.b.freeze
     end
 
     def exact_keys(value, fields)

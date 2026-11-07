@@ -1931,7 +1931,11 @@ hold by construction:
   the header comment of every third-party file that carries a copyright
   notice, since BSD and MIT notices are per file; a file of erXos's whose
   SPDX line also names a third-party licence, as a file translated from
-  Fiasco does, counts as third-party for its notice. A licence allowlist
+  Fiasco does, counts as third-party for its notice. `NOTICES` is laid
+  out as FreeBSD's and Debian's copyright files are: each distinct header
+  comment once, under the files that carry it, their licence and the
+  licence files they cite, and then each licence file once, so a licence
+  that thousands of files share costs one copy. A licence allowlist
   check fails the build when a closure holds a licence outside it, so an
   excluded file, such as one of Fiasco's excluded GPL parts, cannot come
   back unnoticed. The allowlist admits a copyleft licence only for a file

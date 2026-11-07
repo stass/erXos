@@ -138,7 +138,7 @@ class PackProvenanceTest < Minitest::Test
     resolver.instance_variable_set(:@catalog, build_catalog.merge(Erx::BuildInputs.imported(root: directory)))
     records = resolver.resolve(receipt: receipt, artifact: image, build_kind: 'development')
     assert_equal 'stopgap', records.first.fetch('status')
-    assert_includes records.first.fetch('notice'), 'Complete fixture GPL version 2 license text'
+    assert_includes resolver.notices(records), 'Complete fixture GPL version 2 license text'
     assert_raises(Erx::Error) { resolver.resolve(receipt: receipt, artifact: image, build_kind: 'release') }
   end
 
@@ -265,6 +265,41 @@ class PackProvenanceTest < Minitest::Test
     refute_includes JSON.generate(records), @root
   end
 
+  # Many files under one licence: NOTICES carries the licence document once, each
+  # distinct file notice once, and every file's name, as a FreeBSD or Debian
+  # copyright file does.
+  def test_notices_give_each_text_once_with_the_files_it_covers
+    headers = { 'a.c' => 'Copyright (c) 2026, First Author', 'b.c' => 'Copyright (c) 2026, First Author',
+                'c.c' => 'Copyright (c) 2025, Second Author' }
+    sources = headers.map do |name, line|
+      reference(write(name, "/* #{line}\n * SPDX-License-Identifier: BSD-2-Clause */\nint #{name[0]};\n"))
+    end
+    text = @resolver.notices(resolve_compiled('sources' => sources))
+    assert_equal 1, text.scan('project BSD licence text').size
+    assert_equal 1, text.scan('First Author').size
+    assert_equal 1, text.scan('Second Author').size
+    assert_includes text, "Files:\n  a.c\n  b.c\nLicense: BSD-2-Clause\nEvidence: file SPDX\nDocuments: LICENSE\n" \
+                          "/* Copyright (c) 2026, First Author\n"
+    assert_includes text, "Files:\n  c.c\nLicense: BSD-2-Clause\nEvidence: file SPDX\nDocuments: LICENSE\n" \
+                          "/* Copyright (c) 2025, Second Author\n"
+  end
+
+  # A pack resolves each of its entries in turn and renders NOTICES from all of
+  # their records, so a document only an earlier entry cites is still printed.
+  def test_notices_cover_every_resolve_of_a_pack
+    blob = write('blob.bin', 'external bytes')
+    notice = write('blob-NOTICE', 'external MIT text')
+    external = { 'path' => blob, 'sha256' => Digest::SHA256.file(blob).hexdigest, 'license' => 'MIT',
+                 'label' => 'ext/blob.bin', 'evidence' => 'reviewed registry', 'status' => 'permanent',
+                 'notices' => [reference(notice)] }
+    @resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog, external: [external])
+    first = resolve_compiled('sources' => [reference(@source)])
+    second = resolve_compiled('sources' => [reference(blob)])
+    text = @resolver.notices((first + second).sort_by { |record| record.fetch('path').b })
+    assert_includes text, 'project BSD licence text'
+    assert_includes text, 'external MIT text'
+  end
+
   ADDITION = "/* Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
              " * SPDX-License-Identifier: BSD-2-Clause */\nint added;\n"
 
@@ -285,18 +320,19 @@ class PackProvenanceTest < Minitest::Test
     @receipt.fetch('compiles').first['sources'] = [reference(source)]
     @receipt.fetch('compiles').first['dependency'] = reference(File.join(@root, 'root.d'))
     receipt = write('receipt.json', JSON.generate(@receipt))
-    resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog.merge(checked), imports: imports)
-    resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'release')
+    @resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog.merge(checked), imports: imports)
+    @resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'release')
   end
 
   def test_file_erxos_added_to_an_import_is_attributed_as_erxos_code
-    record = resolve_vendor_source.first
+    records = resolve_vendor_source
+    record = records.first
     assert_equal 'vendor/added.c', record.fetch('path')
     assert_equal 'BSD-2-Clause', record.fetch('license')
     assert_equal 'BSD-2-Clause', record.fetch('declared_license')
     assert_equal 'file SPDX', record.fetch('evidence')
     assert_includes record.fetch('notice'), 'SPDX-License-Identifier: BSD-2-Clause'
-    assert_includes record.fetch('notice'), 'project BSD licence text'
+    assert_includes @resolver.notices(records), 'project BSD licence text'
     assert_equal ['LICENSE'], record.fetch('notice_documents').map { |document| document.fetch('path') }
   end
 
@@ -442,7 +478,7 @@ class PackProvenanceTest < Minitest::Test
   # label goes into the same notice as binary notice bytes.
   def test_notices_join_a_non_ascii_path_with_binary_notice_bytes
     record = { 'path' => "data/visible\u{1F600}_file", 'license' => 'MIT', 'evidence' => 'file SPDX',
-               'notice' => "\xC2\xA9 Example".b }
+               'notice' => "\xC2\xA9 Example".b, 'notice_documents' => [] }
     text = @resolver.notices([record])
     assert_includes text, "data/visible\u{1F600}_file".b
     assert_includes text, "\xC2\xA9 Example".b
