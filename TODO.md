@@ -585,6 +585,21 @@ it; git history is the record of completed work.
   group run that booted OTP's bootstrap `start.boot` (erxos-history `oracle-hosted/2026-11-06-kernel`) and agree with
   stock in one run that boots the tree's start_clean (`2026-11-06-kernel-boot`); file_SUITE bench `tiny_writes`
   failed on stock once. No cause is established; if any recurs, trace it before giving it a row.
+* [Medium] `tools/lib/erx/oracle_suites.rb` (`run_stock`), `test/oracle/hosted_known_differences/kernel.txt`: stock's
+  distributed peers do not always start on the development host. In hosted kernel runs (erxos-history
+  `oracle-hosted/2026-11-06-kernel-boot`, stock's `events.jsonl.gz`) init_SUITE `get_arguments`, `get_argument`, `boot_var`,
+  `get_plain_arguments`, `dot_erlang`, `boot/boot1`, `boot/boot2`, logger_filters_SUITE `remote_gl` and every
+  rpc_SUITE case that starts a peer failed with `timeout` from `peer:start_it`, and global_SUITE `names` skipped; in the QEMU kernel run
+  of 2026-11-07 they all passed, but stock failed rpc_SUITE `call`, `block_call` and `async_call` with
+  `{badrpc,nodedown}`, so those three are never compared. Where stock fails a case erXos cannot run, its exact row is
+  reported stale. Find what stops stock's peers (host load is a guess), so stock gives a result for these cases.
+  QEMU report: erxos-history `oracle-qemu/kernel/2026-11-07`.
+* [Medium] `tools/lib/erx/oracle_comparison.rb`, `erx_oracle_events`: a row names a case and erXos's status, not why
+  the case fails, so a `*` row accepts any failure of any case it covers. global_SUITE's `*` row (no distribution)
+  would also accept a failure of `bad_input`, `otp_5737` or `re_register_name`, which pass on erXos and need no peer;
+  heart_SUITE's, global_group_SUITE's and error_logger_warn_SUITE's rows are the same. Carry a failure class (such as
+  `not_alive`, or `badarg` from `open_port`) in the case events and let a row name the class it expects, so a
+  different failure is reported.
 * [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
   parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
   `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page

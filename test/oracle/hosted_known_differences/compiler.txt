@@ -1,6 +1,7 @@
-# The known differences of `tools/erx oracle hosted` for OTP's compiler
-# suites: cases whose result on erXos's hosted runtime differs from stock
-# OTP 29.1.2's, each for a reason erXos's design states, a cause it
+# The known differences of `tools/erx oracle hosted` and
+# `tools/erx oracle qemu` for OTP's compiler suites: cases whose result
+# on erXos's hosted runtime or in a QEMU guest differs from stock OTP
+# 29.1.2's, each for a reason erXos's design states, a cause it
 # cannot run in Phase 1, or a bug that TODO.md names. Any other
 # difference fails the comparison, and so does a row that then accounts
 # for no difference, or whose cases show another status on erXos.

@@ -1,6 +1,7 @@
-# The known differences of `tools/erx oracle hosted` for OTP's kernel
-# suites: cases whose result on erXos's hosted runtime differs from stock
-# OTP 29.1.2's, each for a reason erXos's design states, a cause it
+# The known differences of `tools/erx oracle hosted` and
+# `tools/erx oracle qemu` for OTP's kernel suites: cases whose result
+# on erXos's hosted runtime or in a QEMU guest differs from stock OTP
+# 29.1.2's, each for a reason erXos's design states, a cause it
 # cannot run in Phase 1, or a bug that TODO.md names. Any other
 # difference fails the comparison, and so does a row that then accounts
 # for no difference, or whose cases show another status on erXos.
@@ -228,7 +229,8 @@ gen_udp_SUITE                inet_backend_default/local local_unbound           
 gen_udp_SUITE                inet_backend_default/local local_fdopen                 auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                inet_backend_default/local local_fdopen_unbound         auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_udp_SUITE                inet_backend_default/local local_abstract               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-global_SUITE                 -        name_exit                    failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+global_SUITE                 *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+global_SUITE                 -        names                        user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node; kernel_test_lib turns the failure into a skip when its global system monitor, which is not running, answers with an error
 global_group_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 heart_SUITE                  *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 inet_SUITE                   *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
@@ -240,11 +242,18 @@ inet_res_SUITE               -        servfail_retry_timeout_default failed     
 inet_res_SUITE               -        servfail_retry_timeout_1000  failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 inet_res_SUITE               -        tsig_baderror                failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 inet_sockopt_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-init_SUITE                   -        many_restarts                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        get_arguments                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        get_argument                 failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        boot_var                     failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+init_SUITE                   -        get_plain_arguments          failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        dot_erlang                   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   boot     boot1                        failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   boot     boot2                        failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        many_restarts                failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 init_SUITE                   -        restart_with_mode            failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 init_SUITE                   -        init_group_history_deadlock  failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
-init_SUITE                   -        restart                      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-init_SUITE                   -        stop_flush                   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+init_SUITE                   -        restart                      failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+init_SUITE                   -        stop_flush                   failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 init_SUITE                   -        unknown_module               failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 init_SUITE                   -        dash_S                       failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 init_SUITE                   -        dash_extra                   failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
@@ -257,6 +266,7 @@ interactive_shell_SUITE      ssh      init_per_group               failed     ca
 kernel_config_SUITE          *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_SUITE                 *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_env_var_SUITE         *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+logger_filters_SUITE         -        remote_gl                    failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_proxy_SUITE           -        remote                       failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 logger_proxy_SUITE           -        remote_disconnect            failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 logger_proxy_SUITE           -        remote_emulator              failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
@@ -265,6 +275,13 @@ logger_simple_h_SUITE        -        replace_file                 failed     ca
 logger_simple_h_SUITE        -        replace_disk_log             failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 logger_simple_h_SUITE        -        start_debug                  failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_simple_h_SUITE        -        start_crash                  failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
+rpc_SUITE                    -        call_reqtmo                  failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        multicall                    failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        multicall_timeout            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        multicall_dies               failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        called_dies                  failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        called_throws                failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+rpc_SUITE                    -        call_benchmark               failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 rpc_SUITE                    -        called_node_dies             failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 rpc_SUITE                    -        multicall_node_dies          failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 rpc_SUITE                    -        multicall_mix                failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
@@ -321,7 +338,6 @@ logger_std_h_SUITE           -        crash_std_h_to_disk_log      failed     ca
 application_SUITE            -        script_start                 failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 application_SUITE            distr_changed distr_changed_tc1            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 application_SUITE            distr_changed distr_changed_tc2            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-global_SUITE                 -        global_groups_change         failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 
 # No network stack in Phase 1: cases that skip where their suite's other
 # cases fail, and group functions.
