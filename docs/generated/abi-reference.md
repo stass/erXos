@@ -212,6 +212,23 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_GROUP_HINTS` | 1 |
 | `ERX_GROUP_PLACE` | 8 |
 | `ERX_GROUP_STATUS` | 4 |
+| `ERX_HOSTLINK_BODY_MAX` | 8192 |
+| `ERX_HOSTLINK_CALL` | 1 |
+| `ERX_HOSTLINK_CAST` | 3 |
+| `ERX_HOSTLINK_CONTROL_FLAGS_KNOWN` | 1 |
+| `ERX_HOSTLINK_CONTROL_MORE` | 1 |
+| `ERX_HOSTLINK_CRC_SIZE` | 4 |
+| `ERX_HOSTLINK_CREDIT_INITIAL` | 16384 |
+| `ERX_HOSTLINK_ENCODED_MAX` | 8300 |
+| `ERX_HOSTLINK_MESSAGE_MAX` | 16777216 |
+| `ERX_HOSTLINK_MESSAGE_MAX_RELEASE` | 8192 |
+| `ERX_HOSTLINK_REPLY` | 2 |
+| `ERX_HOSTLINK_STREAM_CONTROL` | 0 |
+| `ERX_HOSTLINK_STREAM_CREDIT` | 3 |
+| `ERX_HOSTLINK_STREAM_EVENTS` | 2 |
+| `ERX_HOSTLINK_STREAM_FILES` | 4 |
+| `ERX_HOSTLINK_STREAM_TERMINAL` | 1 |
+| `ERX_HOSTLINK_VERSION` | 2 |
 | `ERX_HR_ACK` | 268435456 |
 | `ERX_HR_ALLOC` | 8192 |
 | `ERX_HR_ATTACH` | 4194304 |
@@ -1140,6 +1157,31 @@ Storage: `wire_le`. Prefix size: 32. Alignment: 8.
 | `parked` | `u32` | 20 | 1 |
 | `ready` | `u32` | 24 | 1 |
 | `usage_known` | `u32` | 28 | 1 |
+
+### `erx_hostlink_control_t`
+
+Storage: `wire_le`. Prefix size: 16. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `kind` | `u8` | 0 | 1 |
+| `flags` | `u8` | 1 | 1 |
+| `reserved` | `u16` | 2 | 1 |
+| `total` | `u32` | 4 | 1 |
+| `id` | `u64` | 8 | 1 |
+
+### `erx_hostlink_frame_t`
+
+Storage: `wire_le`. Prefix size: 28. Alignment: 4.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `version` | `u8` | 0 | 1 |
+| `stream` | `u8` | 1 | 1 |
+| `reserved` | `u16` | 2 | 1 |
+| `session` | `u8` | 4 | 16 |
+| `seq` | `u32` | 20 | 1 |
+| `target` | `u32` | 24 | 1 |
 
 ### `erx_lane_hdr_t`
 

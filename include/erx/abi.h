@@ -218,6 +218,23 @@ struct erx_rights {
 #define ERX_GROUP_HINTS UINT16_C(1)
 #define ERX_GROUP_PLACE UINT16_C(8)
 #define ERX_GROUP_STATUS UINT16_C(4)
+#define ERX_HOSTLINK_BODY_MAX UINT32_C(8192)
+#define ERX_HOSTLINK_CALL UINT8_C(1)
+#define ERX_HOSTLINK_CAST UINT8_C(3)
+#define ERX_HOSTLINK_CONTROL_FLAGS_KNOWN UINT8_C(1)
+#define ERX_HOSTLINK_CONTROL_MORE UINT8_C(1)
+#define ERX_HOSTLINK_CRC_SIZE UINT32_C(4)
+#define ERX_HOSTLINK_CREDIT_INITIAL UINT32_C(16384)
+#define ERX_HOSTLINK_ENCODED_MAX UINT32_C(8300)
+#define ERX_HOSTLINK_MESSAGE_MAX UINT32_C(16777216)
+#define ERX_HOSTLINK_MESSAGE_MAX_RELEASE UINT32_C(8192)
+#define ERX_HOSTLINK_REPLY UINT8_C(2)
+#define ERX_HOSTLINK_STREAM_CONTROL UINT8_C(0)
+#define ERX_HOSTLINK_STREAM_CREDIT UINT8_C(3)
+#define ERX_HOSTLINK_STREAM_EVENTS UINT8_C(2)
+#define ERX_HOSTLINK_STREAM_FILES UINT8_C(4)
+#define ERX_HOSTLINK_STREAM_TERMINAL UINT8_C(1)
+#define ERX_HOSTLINK_VERSION UINT8_C(2)
 #define ERX_HR_ACK UINT32_C(268435456)
 #define ERX_HR_ALLOC UINT32_C(8192)
 #define ERX_HR_ATTACH UINT32_C(4194304)
@@ -2022,6 +2039,66 @@ _Static_assert(offsetof(erx_group_report_t, ready) ==
 _Static_assert(offsetof(erx_group_report_t, usage_known) ==
     ERX_GROUP_REPORT_OFF_USAGE_KNOWN, "erx_group_report.usage_known offset");
 
+#define ERX_HOSTLINK_CONTROL_SIZE 16
+#define ERX_HOSTLINK_CONTROL_ALIGN 8
+#define ERX_HOSTLINK_CONTROL_OFF_KIND 0
+#define ERX_HOSTLINK_CONTROL_OFF_FLAGS 1
+#define ERX_HOSTLINK_CONTROL_OFF_RESERVED 2
+#define ERX_HOSTLINK_CONTROL_OFF_TOTAL 4
+#define ERX_HOSTLINK_CONTROL_OFF_ID 8
+typedef struct erx_hostlink_control erx_hostlink_control_t;
+struct erx_hostlink_control {
+	_Alignas(8) uint8_t	kind;
+	uint8_t	flags;
+	uint16_t	reserved;
+	uint32_t	total;
+	uint64_t	id;
+};
+_Static_assert(sizeof(erx_hostlink_control_t) == ERX_HOSTLINK_CONTROL_SIZE, "erx_hostlink_control size");
+_Static_assert(_Alignof(erx_hostlink_control_t) == ERX_HOSTLINK_CONTROL_ALIGN, "erx_hostlink_control alignment");
+_Static_assert(offsetof(erx_hostlink_control_t, kind) ==
+    ERX_HOSTLINK_CONTROL_OFF_KIND, "erx_hostlink_control.kind offset");
+_Static_assert(offsetof(erx_hostlink_control_t, flags) ==
+    ERX_HOSTLINK_CONTROL_OFF_FLAGS, "erx_hostlink_control.flags offset");
+_Static_assert(offsetof(erx_hostlink_control_t, reserved) ==
+    ERX_HOSTLINK_CONTROL_OFF_RESERVED, "erx_hostlink_control.reserved offset");
+_Static_assert(offsetof(erx_hostlink_control_t, total) ==
+    ERX_HOSTLINK_CONTROL_OFF_TOTAL, "erx_hostlink_control.total offset");
+_Static_assert(offsetof(erx_hostlink_control_t, id) ==
+    ERX_HOSTLINK_CONTROL_OFF_ID, "erx_hostlink_control.id offset");
+
+#define ERX_HOSTLINK_FRAME_SIZE 28
+#define ERX_HOSTLINK_FRAME_ALIGN 4
+#define ERX_HOSTLINK_FRAME_OFF_VERSION 0
+#define ERX_HOSTLINK_FRAME_OFF_STREAM 1
+#define ERX_HOSTLINK_FRAME_OFF_RESERVED 2
+#define ERX_HOSTLINK_FRAME_OFF_SESSION 4
+#define ERX_HOSTLINK_FRAME_OFF_SEQ 20
+#define ERX_HOSTLINK_FRAME_OFF_TARGET 24
+typedef struct erx_hostlink_frame erx_hostlink_frame_t;
+struct erx_hostlink_frame {
+	_Alignas(4) uint8_t	version;
+	uint8_t	stream;
+	uint16_t	reserved;
+	uint8_t	session[16];
+	uint32_t	seq;
+	uint32_t	target;
+};
+_Static_assert(sizeof(erx_hostlink_frame_t) == ERX_HOSTLINK_FRAME_SIZE, "erx_hostlink_frame size");
+_Static_assert(_Alignof(erx_hostlink_frame_t) == ERX_HOSTLINK_FRAME_ALIGN, "erx_hostlink_frame alignment");
+_Static_assert(offsetof(erx_hostlink_frame_t, version) ==
+    ERX_HOSTLINK_FRAME_OFF_VERSION, "erx_hostlink_frame.version offset");
+_Static_assert(offsetof(erx_hostlink_frame_t, stream) ==
+    ERX_HOSTLINK_FRAME_OFF_STREAM, "erx_hostlink_frame.stream offset");
+_Static_assert(offsetof(erx_hostlink_frame_t, reserved) ==
+    ERX_HOSTLINK_FRAME_OFF_RESERVED, "erx_hostlink_frame.reserved offset");
+_Static_assert(offsetof(erx_hostlink_frame_t, session) ==
+    ERX_HOSTLINK_FRAME_OFF_SESSION, "erx_hostlink_frame.session offset");
+_Static_assert(offsetof(erx_hostlink_frame_t, seq) ==
+    ERX_HOSTLINK_FRAME_OFF_SEQ, "erx_hostlink_frame.seq offset");
+_Static_assert(offsetof(erx_hostlink_frame_t, target) ==
+    ERX_HOSTLINK_FRAME_OFF_TARGET, "erx_hostlink_frame.target offset");
+
 #define ERX_LANE_HDR_SIZE 16
 #define ERX_LANE_HDR_ALIGN 8
 #define ERX_LANE_HDR_OFF_WPOS 0
@@ -2964,6 +3041,12 @@ _Static_assert(offsetof(erx_crash_record_t, frames) ==
 typedef uint32_t erx_fiasco_call_t;
 
 typedef uint16_t erx_group_flags_t;
+
+typedef uint8_t erx_hostlink_control_flags_t;
+
+typedef uint8_t erx_hostlink_kind_t;
+
+typedef uint8_t erx_hostlink_stream_t;
 
 typedef uint32_t erx_image_flags_t;
 

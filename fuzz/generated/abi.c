@@ -190,6 +190,14 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_group_report_decode(bytes, length, &value);
 	}
 	{
+		erx_hostlink_control_t value;
+		(void)erx_hostlink_control_decode(bytes, length, &value);
+	}
+	{
+		erx_hostlink_frame_t value;
+		(void)erx_hostlink_frame_decode(bytes, length, &value);
+	}
+	{
 		erx_lane_rec_t value;
 		(void)erx_lane_rec_decode(bytes, length, &value);
 	}

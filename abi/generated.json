@@ -3,7 +3,7 @@
   "architecture": "aarch64",
   "inputs": {
     "abi/arch/aarch64.txt": "c8dc02d9f86e48ec36c93a90e020a216c2cdaaade5a7d4e6e2aeba6830f2bebb",
-    "abi/erx_abi.txt": "b13114c12311530ddc0dde7c48d889da84c2ae67d336de8429198e9e3e81d8dd",
+    "abi/erx_abi.txt": "e00df18153b77045d07b06c0ac94f7c9d4b6d5c51ec8e03400117de704cdd3f0",
     "abi/formats/elf64.txt": "2f94a4ae3151b6fbe1047ba77a03de6e7220aefc2147e349b694f76deb9e5562",
     "abi/formats/erofs.txt": "34e03e4dd27df42821d3b49a1632d5cef8f61914d2702942228e8b5c26f1f154",
     "abi/formats/mbr.txt": "df6638490ea485f3c412ca4920ef8c52094a1b5090a0b7a1d2c08ab051d3b526",
@@ -13,6 +13,7 @@
     "abi/manifest.txt": "942fe33326a3ff2aa7c00fd4fc67dd842a7070aaa656760ca90c57fb0788f682",
     "abi/medium.txt": "3ace7b53911ceb8b005e16eaa2c122eef036f1911d39152a1fa6ad95a52903a7",
     "abi/protocols/9p.txt": "3881214ebc81cdfe0396affd0b93cc8784e9962e7a4e132943432df955b6bd60",
+    "abi/protocols/hostlink.txt": "468378bc39dcad950bcea9086d8892b6587d4bb6801823f686a32001ce05115f",
     "abi/services/console.txt": "67df2f5a331a042ca54edbab1a625f18d6eab48ce0c5274158a50edf875b9152",
     "tools/gen_abi.rb": "2a98988190d0400e6d31a0ffeb00e530c3e51eae5e31bfd63d09694f2f242af5",
     "tools/lib/erx/abi.rb": "16787b70e36f7ca5d66aa08543323d0423c0e710db28538ba98f5605f49f97ff",

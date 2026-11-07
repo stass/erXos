@@ -1,0 +1,62 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The host link's frame layer (docs/design-live.md#host-link-frames): the
+# header of a decoded frame, the header of a piece of a control message, and
+# the bounds both ends hold the wire to. erx_hostlink_frame (Erlang, in the
+# system domain) and tools/lib/erx/hostlink_frame.rb (the host tool) read
+# them through the generated header and schema.
+#
+# A frame on the wire is the COBS encoding of header, body and CRC-32C,
+# followed by one zero byte. The CRC covers header and body, and is stored
+# little-endian after the body.
+#
+# hostlink_encoded_max bounds the COBS bytes of one frame before its zero;
+# a frame of the largest body encodes to fewer. hostlink_message_max is a
+# control message's largest total, and hostlink_message_max_release the
+# largest in a release build whose configuration lists no facet for the
+# host. hostlink_credit_initial is the bytes the host may send at the start
+# of a session, before any credit frame grants more.
+
+limit hostlink_version u8 2
+limit hostlink_body_max u32 8192
+limit hostlink_encoded_max u32 8300
+limit hostlink_crc_size u32 4
+limit hostlink_message_max u32 16777216
+limit hostlink_message_max_release u32 8192
+limit hostlink_credit_initial u32 16384
+
+enum hostlink_stream u8
+  value control 0
+  value terminal 1
+  value events 2
+  value credit 3
+  value files 4
+
+enum hostlink_kind u8
+  value call 1
+  value reply 2
+  value cast 3
+
+flags hostlink_control_flags u8
+  bit more 0
+
+# target is the facet number on the control stream (0 for the root), the
+# total granted in the session, modulo 2^32, on the credit stream, and 0 on
+# every other stream.
+layout erx_hostlink_frame wire_le 4 28
+  field version u8 0
+  field stream u8 1
+  field reserved u16 2
+  field session u8 4 count 16
+  field seq u32 20
+  field target u32 24
+
+# The header of each piece of a control message, at the start of its
+# frame's body. total and id are the same in every piece of one message;
+# id is nonzero for calls and replies and 0 for casts.
+layout erx_hostlink_control wire_le 8 16
+  field kind u8 0
+  field flags u8 1
+  field reserved u16 2
+  field total u32 4
+  field id u64 8

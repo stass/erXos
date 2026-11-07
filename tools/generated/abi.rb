@@ -4539,6 +4539,186 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
+      types["erx_hostlink_control"] = Layout.new(
+        name: "erx_hostlink_control".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 16,
+        fields: [
+          Field.new(
+            name: "kind".b,
+            type: types.fetch("u8"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "flags".b,
+            type: types.fetch("u8"),
+            offset: 1,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u16"),
+            offset: 2,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "total".b,
+            type: types.fetch("u32"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "id".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["erx_hostlink_frame"] = Layout.new(
+        name: "erx_hostlink_frame".b,
+        storage: "wire_le".b,
+        alignment: 4,
+        size: 28,
+        fields: [
+          Field.new(
+            name: "version".b,
+            type: types.fetch("u8"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "stream".b,
+            type: types.fetch("u8"),
+            offset: 1,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reserved".b,
+            type: types.fetch("u16"),
+            offset: 2,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "session".b,
+            type: types.fetch("u8"),
+            offset: 4,
+            count: 16,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "seq".b,
+            type: types.fetch("u32"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "target".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["erx_lane_hdr"] = Layout.new(
         name: "erx_lane_hdr".b,
         storage: "shared".b,
@@ -7580,6 +7760,39 @@ module Erx
           "status".b => 4
         }.freeze,
         flags: true,
+        allowed: nil
+      ).freeze
+      types["hostlink_control_flags"] = EnumType.new(
+        name: "hostlink_control_flags".b,
+        base: types.fetch("u8"),
+        members: {
+          "more".b => 1
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["hostlink_kind"] = EnumType.new(
+        name: "hostlink_kind".b,
+        base: types.fetch("u8"),
+        members: {
+          "call".b => 1,
+          "cast".b => 3,
+          "reply".b => 2
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
+      types["hostlink_stream"] = EnumType.new(
+        name: "hostlink_stream".b,
+        base: types.fetch("u8"),
+        members: {
+          "control".b => 0,
+          "credit".b => 3,
+          "events".b => 2,
+          "files".b => 4,
+          "terminal".b => 1
+        }.freeze,
+        flags: false,
         allowed: nil
       ).freeze
       types["image_flags"] = EnumType.new(
@@ -11214,6 +11427,8 @@ module Erx
           "erx_fiasco_vm_range_request".b,
           "erx_frame_header".b,
           "erx_group_report".b,
+          "erx_hostlink_control".b,
+          "erx_hostlink_frame".b,
           "erx_lane_hdr".b,
           "erx_lane_rec".b,
           "erx_lane_rpage".b,
@@ -11254,6 +11469,9 @@ module Erx
           "erx_crash_record".b,
           "fiasco_call".b,
           "group_flags".b,
+          "hostlink_control_flags".b,
+          "hostlink_kind".b,
+          "hostlink_stream".b,
           "image_flags".b,
           "irq_kind".b,
           "log_level".b,
@@ -12497,6 +12715,108 @@ module Erx
             name: "group_status".b,
             value: 4,
             type: types.fetch("u16"),
+            description: nil
+          ).freeze,
+          "hostlink_body_max".b => Constant.new(
+            name: "hostlink_body_max".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_call".b => Constant.new(
+            name: "hostlink_call".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_cast".b => Constant.new(
+            name: "hostlink_cast".b,
+            value: 3,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_control_flags_known".b => Constant.new(
+            name: "hostlink_control_flags_known".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_control_more".b => Constant.new(
+            name: "hostlink_control_more".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_crc_size".b => Constant.new(
+            name: "hostlink_crc_size".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_credit_initial".b => Constant.new(
+            name: "hostlink_credit_initial".b,
+            value: 16384,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_encoded_max".b => Constant.new(
+            name: "hostlink_encoded_max".b,
+            value: 8300,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_message_max".b => Constant.new(
+            name: "hostlink_message_max".b,
+            value: 16777216,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_message_max_release".b => Constant.new(
+            name: "hostlink_message_max_release".b,
+            value: 8192,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "hostlink_reply".b => Constant.new(
+            name: "hostlink_reply".b,
+            value: 2,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_stream_control".b => Constant.new(
+            name: "hostlink_stream_control".b,
+            value: 0,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_stream_credit".b => Constant.new(
+            name: "hostlink_stream_credit".b,
+            value: 3,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_stream_events".b => Constant.new(
+            name: "hostlink_stream_events".b,
+            value: 2,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_stream_files".b => Constant.new(
+            name: "hostlink_stream_files".b,
+            value: 4,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_stream_terminal".b => Constant.new(
+            name: "hostlink_stream_terminal".b,
+            value: 1,
+            type: types.fetch("u8"),
+            description: nil
+          ).freeze,
+          "hostlink_version".b => Constant.new(
+            name: "hostlink_version".b,
+            value: 2,
+            type: types.fetch("u8"),
             description: nil
           ).freeze,
           "hr_ack" => Constant.new(

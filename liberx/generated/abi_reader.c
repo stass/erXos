@@ -919,6 +919,47 @@ erx_group_report_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
+erx_hostlink_control_decode(const uint8_t *bytes, size_t length,
+    erx_hostlink_control_t *result)
+{
+	erx_hostlink_control_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_HOSTLINK_CONTROL_SIZE)
+		return (false);
+
+	value.kind = bytes[0];
+	value.flags = bytes[1];
+	value.reserved = erx_abi_load_u16(bytes + 2);
+	value.total = erx_abi_load_u32(bytes + 4);
+	value.id = erx_abi_load_u64(bytes + 8);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_hostlink_frame_decode(const uint8_t *bytes, size_t length,
+    erx_hostlink_frame_t *result)
+{
+	erx_hostlink_frame_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_HOSTLINK_FRAME_SIZE)
+		return (false);
+
+	value.version = bytes[0];
+	value.stream = bytes[1];
+	value.reserved = erx_abi_load_u16(bytes + 2);
+	for (size_t index = 0; index < 16; index++) {
+		value.session[index] = bytes[4 + index * 1];
+	}
+	value.seq = erx_abi_load_u32(bytes + 20);
+	value.target = erx_abi_load_u32(bytes + 24);
+
+	*result = value;
+	return (true);
+}
+
+bool
 erx_lane_rec_decode(const uint8_t *bytes, size_t length,
     erx_lane_rec_t *result)
 {
