@@ -668,11 +668,11 @@ complete.
 calls, credit, the 1,025th facet) pass; a module reloaded in a loop on four
 CPUs never runs stale code; a blob one bit off its hash
 never loads; every character class of the line escape has its test at each
-display; `file:read_file("/proc/processes/4.N.S/status")` in the
-system shell, where 4 is the system domain's id, returns every status the
-inspector can report; every value only the kernel could report shows
-`unsupported` with its reporter, and budget `used` shows `partial` with
-reporter `liberx pool`, each with a test; a file read through
+display; `file:read_file("/proc/processes/D.N.S/status")` in the
+system shell, where `D.N.S` is a pid as `pid_to_list` writes it, less its
+brackets, returns every status the inspector can report; every value only
+the kernel could report shows `unsupported` with its reporter, and budget
+`used` shows `partial` with reporter `liberx pool`, each with a test; a file read through
 `tools/erx files` equals its
 source on the machine; the fuzz targets of the deframer, `erx_path`,
 the 9P2000.L codec and each escaper run their budgets clean; the oracle's
@@ -811,7 +811,9 @@ no upcall and that a resume over a cleared pending flag still takes the
 queued event; a domain the system manifest names reads a file of the
 host's tree under `/host` through the host-tree domain, whose bridge
 fails a reply that fails the codec with `eio` and leaves `/host`
-mounted.
+mounted; `file:read_file("/proc/processes/4.N.S/status")` in the
+system shell, where 4 is the system domain's id, returns every status the
+inspector can report.
 
 **Gate G5.** Measures E-D1 to E-D4, with
 `tools/erx bench xdomain-pingpong`, `xdomain-throughput`, `xdomain-stall`

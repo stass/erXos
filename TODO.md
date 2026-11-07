@@ -479,7 +479,7 @@ it; git history is the record of completed work.
   it at `/proc` in every runtime, since every Phase 1 runtime is the system domain's; when domains come (M5), start
   a tree per inspect facet, linked to it, and the system shell's tree with the console, presenting the system-shell
   facet. A pid's directory is its pid's text, `0.N.S` until pids print their domain id (the inspector item above),
-  so plan.md's `4.N.S` names nothing yet. The design leaves open: a text entry spelled `status`, a module of that
+  so M5's exit check of `4.N.S` in plan.md waits for them. The design leaves open: a text entry spelled `status`, a module of that
   name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
   inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
   answers `{error, unsupported}` holds (one line, `[unsupported]`). Not built: `source`, `crash`,
