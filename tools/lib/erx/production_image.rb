@@ -406,6 +406,26 @@ module Erx
         @qemu = qemu
       end
 
+      # The native_trace cell: the tracer's case (trace_checkpoints) at count CPUs under
+      # accel, on an image of its own. A backend line that names a CPU names one the machine
+      # has. No executor of the production image is pinned to one CPU, so its lines say
+      # cpu=unknown; the CPUs named are kept with the cell for whoever pins one.
+      def trace(accel:, count:, jobs: 4, build: true)
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build(jobs: jobs) if build
+        built = image(fiasco, directory: 'build/production-image/trace')
+        run = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.trace_checkpoints,
+                                        command_line: COMMAND_LINES[accel])
+        serial = File.binread(run.fetch('serial_log'))
+        problems = Run.trace_problems(serial)
+        raise Error, "the tracer's case: #{problems.join('; ')}" unless problems.empty?
+
+        cpus = Run.trace_cpus(serial)
+        raise Error, "a backend trace line names CPU #{cpus.max} on a machine of #{count}" if cpus.any? { |cpu| cpu >= count }
+
+        { "#{accel}-#{count}cpu" => { serial: run.fetch('serial_log'), cpus: cpus }.freeze }
+      end
+
       # accels run the whole matrix: every boot below at each CPU count. TCG is not one of them;
       # it runs only the smoke, which smoke: true adds as SMOKE_CELLS: the plain boot to the command shell
       # at one CPU, and the deterministic transcript, without the boots that probe refusals, the
@@ -587,6 +607,74 @@ module Erx
         { name: name, pattern: pattern, seconds: EVAL_SECONDS, **{ type: type, verify: verify }.compact }.freeze
       end
       private_class_method :console_point
+
+      # The tracer's case on four CPUs (docs/design-stopgap.md, Verification, "Trace on four
+      # CPUs"). At the Erlang shell the person spawns a workload, which waits for a message
+      # or 20 ms and loops, and starts erx:trace over it with the kernel's rows; the shell
+      # prints {workload, Pid}. The kernel row is one unsupported line reported by kernel;
+      # a message sent to the workload, then the workload's first erts in, not late; then
+      # the trace is stopped. Each checkpointed trace line is checked whole; the shell's
+      # line editor may redraw its prompt and pending input, ending in ESC [J, before a
+      # line another process writes. Run#trace checks the rest on the serial log
+      # (trace_problems).
+      TRACE_START = 'W=spawn(fun F()->receive _->F() after 20->F() end end),' \
+                    "{ok,R}=erx:trace(\#{select=>[W],kernel=>true}),{workload,W}.\r"
+      TRACE_SEND = "W!hello,sent.\r"
+      TRACE_STOP = "erx:trace_stop(R),trace_stopped.\r"
+      TRACE_REDRAW = '(?:[^\n]*\e\[J)?'
+      TRACE_TIME = "\\A#{TRACE_REDRAW} *[0-9]+\\.[0-9]{9}".freeze
+      def self.trace_checkpoints
+        boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
+          point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
+        end
+        [*boot, SLOGAN,
+         console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
+         console_point('shell', ERLANG_SHELL.fetch(:pattern), type: TRACE_START),
+         console_point('trace-unsupported', / kernel unsupported /n,
+                       whole: /#{TRACE_TIME} kernel unsupported \[kernel\]\r*\n\z/n, type: TRACE_SEND),
+         console_point('trace-workload-in', / erts in /n,
+                       whole: %r{#{TRACE_TIME} erts in pid=<0\.[0-9]+\.0> domain=4 mfa=[^ ]+ \[runtime\]\r*\n\z}n,
+                       type: TRACE_STOP),
+         console_point('trace-stopped', /\A(?:[^\n]*\e\[J)?(?:[0-9]+> )?trace_stopped\r*\n\z/n)].freeze
+      end
+
+      # What the tracer's case got wrong on its serial log, beyond the checkpoints: the
+      # kernel row's unsupported line exactly once; a backend park followed by a wake of the
+      # same slot; and the workload's pid, as the shell printed it, on an erts in that is not
+      # late, and on every erts line, since the trace selects the workload alone.
+      def self.trace_problems(serial)
+        lines = serial.b.lines
+        unsupported = lines.count { |line| line.include?(' kernel unsupported [kernel]') }
+        workload = serial.b[/\{workload,(<0\.[0-9]+\.0>)\}/n, 1]
+        traced = lines.filter_map { |line| line[/ erts [a-z_]+ pid=(<[0-9.]+>) /n, 1] }.uniq
+        on_time_in = / erts in pid=#{Regexp.escape(workload.to_s)} .*\[runtime\]\r*$/n
+        [("#{unsupported} unsupported lines, not one" unless unsupported == 1),
+         ('no backend park followed by a wake of the same slot' unless park_then_wake?(lines)),
+         ('the shell printed no {workload, Pid}' unless workload),
+         ("erts lines name #{traced.join(' ')}, not the workload alone" unless traced == [workload]),
+         ('no erts in of the workload that is not late' unless lines.any? { |line| line.match?(on_time_in) })].compact
+      end
+
+      # Whether some backend wake names a slot an earlier backend park named.
+      def self.park_then_wake?(lines)
+        parked = Set.new
+        lines.any? do |line|
+          if (slot = line[/ backend park .*slot=([0-9]+) /n, 1])
+            parked << slot
+            false
+          else
+            parked.include?(line[/ backend wake .*slot=([0-9]+) /n, 1])
+          end
+        end
+      end
+      private_class_method :park_then_wake?
+
+      # The CPUs the backend's trace lines name, from a serial log: the integers, since a
+      # record whose writer's affinity names no one CPU says cpu=unknown.
+      def self.trace_cpus(serial)
+        serial.b.scan(/ backend [a-z_]+ .* cpu=([0-9]+) thread=[0-9]+ space=[0-9]+ \[liberx trace\]/n)
+              .flatten.map { |cpu| Integer(cpu, 10) }.uniq.sort
+      end
 
       # The release's boot with its children named, then the line that outlived the deadlines.
       # init's -eval writes beside the command shell, so a line of its may follow the unended prompt.
