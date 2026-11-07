@@ -212,24 +212,29 @@ module Erx
     private :assemble
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
-    # after regenerating build/gen, so neither reuses the other's generated files, and packed into
-    # a clean directory of its own name with its release medium, compared
-    # part by part by SHA-256, read as a stream. A path under those directories that
-    # reached an output shows; OTP and musl build at one path both times, so a path of
-    # theirs does not. Fiasco's own assembly has its own test
+    # from a clean runtime directory and packed into a clean directory of its own name
+    # with its release medium, compared part by part by SHA-256, read as a stream. A path
+    # under those directories that reached an output shows; OTP and musl build at one path
+    # both times, so a path of theirs does not. Fiasco's own assembly has its own test
     # (test/integration/fiasco_reproducible_test.rb); both builds here pack its one result.
+    # Both builds read build/gen, which the check never replaces while its inputs are
+    # unchanged, so it moves no tree from under another build reading it. That the tree
+    # is a function of its inputs shows instead in a tree of the check's own, generated
+    # into gen/ beside the images and compared file by file with build/gen, whose
+    # differences count as differing parts.
     def check_reproducible(directory:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a reproducibility check needs a clean directory' unless Dir.empty?(directory)
 
+      generated = Generated.regeneration_differences(root: @root, scratch: File.join(directory, 'gen'))
       (first, first_medium), (second, second_medium) = %w[first second].map do |name|
         @runtime.clean
-        Generated.ensure(root: @root, regenerate: true)
         build_medium(directory: File.join(directory, name))
       end
       first_digests = digests(first, first_medium)
       second_digests = digests(second, second_medium)
-      differing = first_digests.keys.reject { |part| first_digests.fetch(part) == second_digests.fetch(part) }
+      differing = generated.map { |relative| File.join(Generated::OUTPUT, relative) } +
+                  first_digests.keys.reject { |part| first_digests.fetch(part) == second_digests.fetch(part) }
       report = { 'kind' => 'production_image_reproducibility', 'byte_identical' => differing.empty?,
                  'differing' => differing, 'first' => first_digests, 'second' => second_digests,
                  'manifest' => first.report.fetch('manifest') }

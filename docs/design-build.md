@@ -228,9 +228,16 @@ and files whose bytes are unchanged keep their modification time. An
 edited or missing output fails the stamp and is regenerated. `ensure`
 holds an exclusive lock on `build/gen.lock` for its check and publish,
 writes a new tree into a staging directory beside `build/gen/` and moves
-it into place by rename, so every caller of `ensure` finds one complete
-tree; it replaces only a directory that is empty or carries a stamp, and
-refuses an output that contains its source root. Every output, and the
+it into place by rename, so a caller of `ensure`, and a block it runs
+while the lock is held, finds one complete tree; it replaces only a
+directory that is empty or carries a stamp, and refuses an output that
+contains its source root. It replaces a tree only when the stamp fails,
+since no caller can ask for a fresh tree to be replaced. A reader that
+does not hold the lock, such as a compiler a build starts after its
+`ensure` returned, is protected only by that: when another process
+regenerates the tree because an input changed meanwhile, such a reader
+can find `build/gen/` missing between the two renames, or read files of
+the old tree and of the new one in one pass. Every output, and the
 stamp, is ASCII-only, checked by its generator and again by `ensure`. The generator
 libraries load no generated file, so a tree without `build/gen/` can
 always build it; `test/host/generated_test.rb` checks that, the stamp,
@@ -256,8 +263,11 @@ No generated file is checked in or edited. Its properties hold as follows:
   times, generates each from a different working directory and time zone into
   differently named output roots, and requires both trees to be
   byte-identical to each other and to the build's own. A generator that
-  reads an unrecorded input fails it. `make check-reproducible` regenerates
-  `build/gen/` before each of its two builds.
+  reads an unrecorded input fails it. `make check-reproducible` generates a
+  tree of its own into its output directory and requires it byte-identical
+  to `build/gen/`, read under the lock (`Erx::Generated.regeneration_differences`),
+  and both its builds read `build/gen/`, which it never replaces while the
+  inputs are unchanged.
 * `Erx::Generated` refuses any output that is not ASCII before anything is
   written.
 * `Erx::Generated.ensure` refuses the repository's own tree while any file of

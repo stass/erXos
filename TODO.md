@@ -512,13 +512,19 @@ it; git history is the record of completed work.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).
-* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: a reader that does not hold `build/gen.lock`
-  (a compiler, the Fiasco input capture, `Checks#generated_sources` listing the tree for the chokepoint rules) can find
-  `build/gen/` missing or half swapped, between the two renames of a regeneration that another process started
-  because an input changed meanwhile; the chokepoint listing would then pass on no generated file. The Ruby loaders
-  (`Erx::Generated.require_ruby`) already read under the lock. For the rest, have long readers take the lock shared
-  (a `Generated.reading(root:) { |tree| ... }` section), or publish versioned trees behind a link replaced by rename,
-  and take the chokepoint listing from the stamp's outputs, refusing a missing file.
+* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: `tools/erx`'s entry `ensure` releases
+  `build/gen.lock` before any compiler runs, so the long readers that follow do not hold it: the hosted liberx
+  compiles and OTP's make with `-I$(ERX_GEN)` in `runtime.rb`, the fuzz compiles, the test pool's compilers, the
+  Fiasco input capture, and `Checks#generated_sources`, which lists the tree after its `ensure` returned. With a build
+  running in one terminal, an edit to a generator's input followed by any `tools/erx` command in another regenerates
+  the tree under it, and `swap`'s two renames leave no `build/gen/` between them: a compile fails with `ENOENT`, or,
+  silently, the chokepoint listing finds no or few generated files and `Chokepoints.enforce` passes having checked
+  less. A translation unit that opened one generated header before the swap and resolves another after it compiles
+  against two trees at once, which still builds while the two agree on types. The Ruby loaders
+  (`Erx::Generated.require_ruby`) already read under the lock. Fix: have `ensure` return a tree value that the
+  libraries take, over versioned, never-rewritten trees (`build/gen.d/<digest>` behind a link replaced by rename,
+  each resolved once per build), or have long readers take the lock shared (a `Generated.reading(root:) { |tree| ... }`
+  section); and take the chokepoint listing from the stamp's outputs, refusing a missing file.
 * [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: whether `build/gen/` is current when a
   compiler reads it rests on the process entry having run `Generated.ensure` (tools/erx before it loads its
   libraries, `test/fixtures/generated_tree.rb` in tests, each standalone script), because `Generated.path` and

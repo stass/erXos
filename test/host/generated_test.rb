@@ -71,13 +71,46 @@ class GeneratedTest < Minitest::Test
     assert_equal "/* alpha */\n", output('out/a.h')
   end
 
-  # check-reproducible's builds each regenerate the tree, fresh or not.
-  def test_regenerate_rewrites_a_fresh_tree
-    ensure_tree
-    result = Erx::Generated.ensure(root: @root, output: @output, generators: [fake], regenerate: true)
-    assert_equal :generated, result.status
-    assert_equal 2, calls
-    assert_equal :fresh, ensure_tree.status
+  # A tree is replaced only when its stamp fails, so no caller, check-reproducible
+  # among them, moves a tree from under a reader while the inputs are unchanged.
+  def test_no_caller_can_replace_a_fresh_tree
+    refute_includes Erx::Generated.method(:ensure).parameters.map(&:last), :regenerate
+  end
+
+  # check-reproducible compares a tree generated into a scratch directory with root's
+  # own build/gen, which it brings up to date but does not replace when fresh.
+  def test_regeneration_differences_compare_a_scratch_tree_with_the_build_tree
+    root_tree = File.join(@root, Erx::Generated::OUTPUT)
+    Erx::Generated.ensure(root: @root, generators: [fake])
+    inode = File.stat(File.join(root_tree, 'out/a.h')).ino
+    scratch = File.join(@directory, 'scratch')
+    assert_empty Erx::Generated.regeneration_differences(root: @root, scratch: scratch, generators: [fake])
+    assert_equal inode, File.stat(File.join(root_tree, 'out/a.h')).ino
+    assert_match(/not an empty directory/,
+                 assert_raises(Erx::Generated::Error) do
+                   Erx::Generated.regeneration_differences(root: @root, scratch: scratch, generators: [fake])
+                 end.message)
+  end
+
+  # A generator whose bytes depend on more than its recorded inputs (here, how many
+  # times it ran) shows as the files that differ.
+  def test_regeneration_differences_name_the_files_a_generator_does_not_reproduce
+    runs = 0
+    drifting = static('fake', {}).with(plan: lambda do |_root|
+      runs += 1
+      Erx::GenerationPlan.new(files: { 'out/run.txt' => "#{runs}\n", 'out/same.txt' => "same\n" }, reads: {})
+    end)
+    Erx::Generated.ensure(root: @root, generators: [drifting])
+    differences = Erx::Generated.regeneration_differences(root: @root, scratch: File.join(@directory, 'scratch'),
+                                                          generators: [drifting])
+    assert_equal [Erx::Generated::STAMP, 'out/run.txt'], differences
+  end
+
+  # A system error while a generator reads its inputs names the generator and the file.
+  def test_a_generator_that_cannot_read_its_input_is_named
+    broken = static('broken', {}).with(plan: ->(root) { File.binread(File.join(root, 'in/missing.txt')) })
+    error = assert_raises(Erx::Generated::Error) { ensure_tree([broken]) }
+    assert_match(%r{the broken generator cannot read its input: .*in/missing\.txt}, error.message)
   end
 
   # A file of the root at a generated file's path is refused on root's own

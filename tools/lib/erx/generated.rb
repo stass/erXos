@@ -32,9 +32,11 @@ module Erx
   # all but the first find the tree fresh. A new tree is written into a
   # staging directory beside the output and moved into place by directory
   # rename, so no caller of ensure sees a partial tree. A reader that does
-  # not hold the lock can see the tree missing for the moment between the
-  # two renames of a regeneration; regeneration happens only when an input
-  # changed. Files whose bytes did not change keep their modification time,
+  # not hold the lock, such as a compiler, can see the tree missing for the
+  # moment between the two renames of a regeneration, or read files of the
+  # old tree and of the new one in one pass; regeneration happens only when
+  # an input or a generator changed (TODO.md records the residual). Files
+  # whose bytes did not change keep their modification time,
   # so make-style consumers rebuild only against outputs that changed.
   #
   # ensure replaces only a directory that is empty or carries a stamp, so it
@@ -118,36 +120,54 @@ module Erx
 
       # Makes output (by default root/build/gen) hold exactly what the
       # generators compute from root, regenerating only when the stamp no
-      # longer matches, or always with regenerate: true (a build that must not
-      # reuse an earlier build's tree, as check-reproducible's two builds).
-      # Safe to call from many processes at once. A block runs with the
-      # result while the lock is still held, so another caller's
-      # regeneration cannot move the tree away while it reads. root's own
-      # tree (no output given) is refused while a file of root sits at the
-      # path of one of its files (refuse_shadowing).
-      def ensure(root:, output: nil, generators: GENERATORS, regenerate: false)
-        root = File.realpath(root)
+      # longer matches, so a tree is replaced only when an input or a
+      # generator changed. Safe to call from many processes at once. A block
+      # runs with the result while the lock is still held, so another
+      # caller's regeneration cannot move the tree away while it reads.
+      # root's own tree (no output given) is refused while a file of root
+      # sits at the path of one of its files (refuse_shadowing). A system
+      # error of ensure's own file operations becomes an Error naming the
+      # tree; one of a generator names the generator, and one of the block
+      # reaches the caller as it is.
+      def ensure(root:, output: nil, generators: GENERATORS)
         own = output.nil?
-        output = resolved(output || File.join(root, OUTPUT))
+        root, output = filesystem(output || root) { [File.realpath(root), resolved(output || File.join(root, OUTPUT))] }
         if root == output || root.start_with?(File.join(output, ''))
           raise Error, "generated output #{output} would hold its own source root"
         end
 
         with_lock(output) do
-          remove_leftovers(output)
-          result = if !regenerate && fresh?(output, root: root, generators: generators)
+          filesystem(output) { remove_leftovers(output) }
+          result = if filesystem(output) { fresh?(output, root: root, generators: generators) }
                      Result.new(status: :fresh, output: output)
                    else
-                     plans = generators.map { |generator| [generator.name, generator.plan.call(root)] }
-                     publish(output, files: combine(plans, generators: generators))
+                     files = combine(generators.map { |generator| [generator.name, plan(generator, root: root)] },
+                                     generators: generators)
+                     filesystem(output) { publish(output, files: files) }
                      Result.new(status: :generated, output: output)
                    end
-          refuse_shadowing(root, output) if own
+          filesystem(output) { refuse_shadowing(root, output) } if own
           yield result if block_given?
           result
         end
-      rescue SystemCallError => error
-        raise Error, "cannot generate into #{output || root}: #{error.message}"
+      end
+
+      # The files, relative to the tree, in which root's own build/gen and a
+      # tree generated into scratch, an empty directory of the caller's
+      # choosing, differ in bytes or presence; build/gen is brought up to
+      # date first and read under its lock. How check-reproducible shows
+      # that the tree is a function of its inputs without replacing the tree
+      # other builds read.
+      def regeneration_differences(root:, scratch:, generators: GENERATORS)
+        unless !File.exist?(scratch) || (File.directory?(scratch) && Dir.empty?(scratch))
+          raise Error, "#{scratch} is not an empty directory to generate into"
+        end
+
+        regenerated = self.ensure(root: root, output: scratch, generators: generators)
+                          .then { |tree| filesystem(tree.output) { tree_digests(tree.output) } }
+        built = nil
+        self.ensure(root: root, generators: generators) { |tree| built = filesystem(tree.output) { tree_digests(tree.output) } }
+        (regenerated.keys | built.keys).sort.reject { |relative| regenerated[relative] == built[relative] }
       end
 
       # Generates the files of the one generator named into output, a
@@ -437,8 +457,10 @@ module Erx
       # Held locks are named by the lock file's real path, so another
       # spelling of the same tree is the same lock.
       def with_lock(output)
-        FileUtils.mkdir_p(File.dirname(output))
-        lock_path = File.join(File.realpath(File.dirname(output)), "#{File.basename(output)}.lock")
+        lock_path = filesystem(output) do
+          FileUtils.mkdir_p(File.dirname(output))
+          File.join(File.realpath(File.dirname(output)), "#{File.basename(output)}.lock")
+        end
         held = Thread.current.thread_variable_get(:erx_generated_locks) ||
                Thread.current.thread_variable_set(:erx_generated_locks, [])
         if held.include?(lock_path)
@@ -446,15 +468,41 @@ module Erx
                        'a generator or a generated file loads a generated file'
         end
 
-        File.open(lock_path, File::RDWR | File::CREAT, 0o644) do |lock|
-          lock.flock(File::LOCK_EX)
-          held.push(lock_path)
-          begin
-            yield
-          ensure
-            held.delete(lock_path)
-          end
+        lock = filesystem(output) do
+          File.open(lock_path, File::RDWR | File::CREAT, 0o644).tap { |file| file.flock(File::LOCK_EX) }
         end
+        held.push(lock_path)
+        begin
+          yield
+        ensure
+          held.delete(lock_path)
+          lock.close
+        end
+      end
+
+      # Runs one of ensure's own file operations on the tree at where; a
+      # system error becomes an Error naming the tree, and the operation's
+      # own message names the file.
+      def filesystem(where)
+        yield
+      rescue SystemCallError => error
+        raise Error, "cannot generate into #{where}: #{error.message}"
+      end
+
+      # One generator's plan; a system error while it reads its inputs
+      # becomes an Error naming the generator, with the file in its message.
+      def plan(generator, root:)
+        generator.plan.call(root)
+      rescue SystemCallError => error
+        raise Error, "the #{generator.name} generator cannot read its input: #{error.message}"
+      end
+
+      # Each regular file beneath output, relative to it => its SHA-256.
+      def tree_digests(output)
+        Dir.glob('**/*', File::FNM_DOTMATCH, base: output).sort.filter_map do |relative|
+          path = File.join(output, relative)
+          [relative, Digest::SHA256.file(path).hexdigest] if File.file?(path)
+        end.to_h
       end
 
       def merge_agreeing(into, table, what:)
