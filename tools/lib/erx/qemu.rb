@@ -65,8 +65,8 @@ module Erx
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
       end
-      unless memory_mib.is_a?(Integer) && memory_mib.between?(128, 4096)
-        raise Error, 'guest memory must be between 128 and 4096 MiB'
+      unless memory_mib.is_a?(Integer) && memory_mib.between?(96, 4096)
+        raise Error, 'guest memory must be between 96 and 4096 MiB'
       end
       unless disks.is_a?(Array) && disks.size <= MAX_DISKS && disks.all?(Disk)
         raise Error, "disks are up to #{MAX_DISKS} QemuPlan::Disk values"

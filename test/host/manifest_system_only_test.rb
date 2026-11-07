@@ -179,12 +179,12 @@ class ManifestSystemOnlyTest < Minitest::Test
 
   # Property 4: budgets, grants and the root startup rule.
   def test_budgets_over_root_memory_are_refused
-    refused(Erx::Manifest::Invalid, 4, 'principals.memory', @source.sub('memory 134217728', 'memory 335544321'))
+    refused(Erx::Manifest::Invalid, 4, 'principals.memory', @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - 81_788_928 + 4096}"))
   end
 
   def test_device_memory_counts_against_root_memory
     # Principal and baseline alone fit by exactly the device's reservation less one page.
-    source = @source.sub('memory 134217728', "memory #{402_653_184 - 251_658_240 - 2_097_152 + 4096}")
+    source = @source.sub("principal system\n  memory 16777216", "principal system\n  memory #{100_663_296 - 81_788_928 - 2_097_152 + 4096}")
     refused(Erx::Manifest::Invalid, 4, 'principals.memory', source)
   end
 
@@ -201,7 +201,7 @@ class ManifestSystemOnlyTest < Minitest::Test
   end
 
   def test_root_memory_over_ram_less_the_reserve_is_refused
-    refused(Erx::Manifest::Invalid, 4, 'root_startup', @source.sub('root_memory 402653184', 'root_memory 469766144'), message: /fiasco_reserve/)
+    refused(Erx::Manifest::Invalid, 4, 'root_startup', @source.sub('root_memory 100663296', 'root_memory 150999040'), message: /fiasco_reserve/)
   end
 
   def test_loadable_segments_and_baseline_over_root_memory_are_refused
@@ -345,7 +345,7 @@ class ManifestSystemOnlyTest < Minitest::Test
   end
 
   def test_root_memory_up_to_ram_less_the_reserve_is_admitted
-    assert_instance_of Erx::Manifest::Admitted, admit(@source.sub('root_memory 402653184', 'root_memory 469762048'))
+    assert_instance_of Erx::Manifest::Admitted, admit(@source.sub('root_memory 100663296', 'root_memory 150994944'))
   end
 
   # Property 9: release builds wait for the confinement check.

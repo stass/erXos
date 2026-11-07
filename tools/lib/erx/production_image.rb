@@ -36,9 +36,12 @@ module Erx
     MANIFEST = 'config/manifest/qemu-virt-development.txt'
     ROOT_ENTRY_PATH = 'system/root'
     NOTICES_PATH = 'system/NOTICES'
-    MEMORY_MIB = 512
-    # Below root_memory on QEMU virt, so the root must refuse the boot.
-    TOO_LITTLE_MEMORY_MIB = 256
+    MEMORY_MIB = 160
+    # No more RAM than root_memory, of which Fiasco and the archive take their part first,
+    # so the pool falls short and the root must refuse the boot. It is also clear of the
+    # band where QEMU's device tree, at half of RAM below 256 MiB, lands on the root's
+    # fixed place (liberx/backend/fiasco/root.ld), so the root, not bootstrap, refuses.
+    TOO_LITTLE_MEMORY_MIB = 96
     LICENSE = 'LICENSE'
     # The trees imported into the source tree that the root builds from: BLAKE3 for its
     # reader of the archive and the entropy generator's mixing, ChaCha20 for that
@@ -70,28 +73,33 @@ module Erx
 
     # The QEMU virt machine an image boots on: its RAM, the part of it Fiasco keeps
     # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
-    # 6% of it), and system_growth_mib, which is added to both root_memory and
-    # system_baseline of the development manifest. What the growth leaves of the added
-    # RAM widens the room bootstrap keeps for the archive. The production image boots
-    # on DEVELOPMENT_MACHINE; a test image whose suites need more memory or carry a
+    # 6% of it), system_growth_mib, which is added to both root_memory and
+    # system_baseline of the development manifest, and tmp_growth_mib, which is added
+    # to /tmp's cap and is part of the system growth, since /tmp lives in the baseline.
+    # What the system growth leaves of the added RAM widens the room bootstrap keeps
+    # for the archive. The production image boots on DEVELOPMENT_MACHINE, the
+    # platform record's own; a test image whose suites need more memory or carry a
     # larger archive (OracleQemu) names a larger one, and Pack's manifest check proves
     # the grown manifest against the platform record of that machine as it proves the
     # development one.
-    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib) do
+    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib, :tmp_growth_mib) do
       def platform(record) = record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
 
       # The development manifest's text with root_memory and system_baseline each grown
-      # by system_growth_mib; any other line is unchanged.
+      # by system_growth_mib and /tmp's cap by tmp_growth_mib; any other line is unchanged.
       def manifest(source)
-        %w[root_memory system_baseline].reduce(source) do |text, field|
-          pattern = /^(  #{field} )([0-9]+)$/
-          raise Error, "the manifest does not have exactly one #{field} line" unless text.scan(pattern).size == 1
+        raise Error, "/tmp's growth is more than the system's" if tmp_growth_mib > system_growth_mib
 
-          text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + (system_growth_mib << 20)}" }
-        end
+        { 'root_memory' => system_growth_mib, 'system_baseline' => system_growth_mib, 'tmp' => tmp_growth_mib }
+          .reduce(source) do |text, (field, growth_mib)|
+            pattern = /^(  #{field} )([0-9]+)$/
+            raise Error, "the manifest does not have exactly one #{field} line" unless text.scan(pattern).size == 1
+
+            text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + (growth_mib << 20)}" }
+          end
       end
     end
-    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 64, system_growth_mib: 0)
+    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 16, system_growth_mib: 0, tmp_growth_mib: 0)
 
     def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
                    runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco))
@@ -490,7 +498,7 @@ module Erx
          { name: 'past-the-deadlines', pattern: /\A(?:% )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
       end
 
-      # A machine with less RAM than root_memory: the same image boots to the root, which
+      # A machine with no more RAM than root_memory: the same image boots to the root, which
       # says so and ends the machine before anything would start.
       def self.refusal_checkpoints
         [*Qemu.boot_transcript(memory_mib: TOO_LITTLE_MEMORY_MIB),

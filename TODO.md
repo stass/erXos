@@ -184,6 +184,34 @@ it; git history is the record of completed work.
   `stdlib_SUITE_data` and two doctest guides. A code generation bug that shows only under `no_opt` or `r26` passes
   the oracle. Building each group's suite directory from its own `release_tests_spec` would run the group as stock
   defines it, and replace `RELEASED_HEADERS`.
+* [High] `config/provenance/import-notices.json`, `tools/lib/erx/pack_provenance.rb`: the tree holds no copy of the
+  Unicode License v3 text, so no file whose license is `Unicode-3.0` can enter an image: the pack refuses
+  `otp/lib/stdlib/test/unicode_util_SUITE_data/GraphemeBreakTest.txt` (and its `LineBreakTest.txt` and
+  `NormalizationTest.txt`, OTP's `uc_spec/vendor.info`) with "selected import grant ... has no checked notice
+  document", and the QEMU oracle cannot run stdlib's `unicode_util_SUITE`, which blocks adding stdlib to
+  `CHECKED_GROUPS`. The fix is a checked-in notice document for `Unicode-3.0`, its bytes pinned (for example from
+  the SPDX license list or unicode.org's `license.txt`) and listed in the profile; its source and pin are the owner's
+  call.
+* [High] `liberx/backend/fiasco/root.ld` (`erx_fiasco_image_start = 0x44000000`): `boot/stopgap-root` is a fixed
+  `EXEC` image linked 64 MiB above the start of QEMU `virt`'s RAM, and the boot archive is loaded from near the start
+  of RAM, so an archive over about 62 MiB overlaps it and `erx_boot_place_role` (`kernel/core/boot_place.c`) stops
+  the boot with `boot/stopgap-root: place_overlap`. The QEMU oracle's stdlib image (stdlib's suites with their 25 MB
+  of `_data`, 82 MB in all) does not boot, which blocks adding stdlib to `CHECKED_GROUPS`. Linking the root
+  position-independent, as the kernel is, would let the plan place it after the archive and remove the size limit;
+  `tools/lib/erx/native_crash.rb` (`IMAGE_FIRST`) assumes the fixed address and changes with it. The fixed address
+  also bounds small machines. Below 256 MiB QEMU puts the device tree at half of RAM, so some machines near 128 MiB
+  stop with the same `place_overlap`: 128 and 136 MiB do, 112 and 144 MiB place the root (the band's edges are not
+  measured). And a root linked higher, as a move for larger archives would link it, sets the smallest machine that
+  boots above its address, past the 160 MiB development machine. A position-independent root removes both limits.
+* [Medium] `test/oracle/erx_ct_oracle.erl`, `tools/lib/erx/oracle_qemu.rb` (`MACHINE`, /tmp's 160 MiB cap): a whole
+  group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
+  `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
+  in the 160 MiB cap without `enospc`. The emulator group, run in three parts, fits too; a whole run of it has not been
+  measured. The kernel group cannot run whole on erXos: in one runtime it fills `/tmp` in `sendfile_SUITE` (what filled it
+  is not measured), and then `erx_oracle_events` crashes on `enospc`, Common
+  Test terminates and the suites after `sendfile_SUITE` never run (1029 cases; erxos-history
+  `oracle-hosted/2026-11-06-kernel-boot`). Copying each suite's `_data` on entry and deleting it and its `priv_dir`
+  on exit (a Common Test hook in the reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
   case, trace why `dbg` is not found, and fix it or reword the row with its cause.
@@ -415,6 +443,11 @@ it; git history is the record of completed work.
   of a regeneration that another process started because an input changed meanwhile. When consumers move to
   `build/gen/`, either have long readers take the lock shared, or publish versioned trees behind a link replaced by
   rename.
+* [Medium] `README.md` ("Current status" transcript): the demo's `Ring(50000, 20)` adds about 136 MB to
+  `erlang:memory(total)` on stock OTP, more than the 160 MiB development machine's pool (26170 pages, about
+  102 MiB, with ERTS already holding about 60 MiB at the shell), so typed at `tools/erx boot` it should end with ERTS
+  unable to allocate. Recapture the transcript from one boot at 160 MiB with a ring that fits (about 10,000
+  processes), or say which machine the demo needs.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so
@@ -515,6 +548,16 @@ it; git history is the record of completed work.
   failed, which is only noted) stays there, and once that fills `/tmp`, every later suite's job ends in
   `start_log_file`, where `filelib:ensure_path/1` cannot make its `priv_dir` (the hosted run answered `enoent`). Making
   a `priv_dir` that cannot be made fail only its suite would close that.
+* [Medium] `test/oracle/erx_oracle_events.erl`, `test/oracle/common_test/test_server_ctrl.erl` (`start_minor_log_file`),
+  `tools/lib/erx/oracle_qemu.rb` (`MACHINE`, /tmp's 160 MiB cap): the oracle reporter's event file (`events.jsonl`) and the
+  controller's logs share `/tmp` with the suites under test, so a suite that fills `/tmp` ends the reporting of the whole
+  run: the run dies when the reporter's own write is the one refused. `/tmp` gives back the space of deleted files; the
+  fill is real use: kernel's `file_SUITE` bench group writes a 256 MiB scratch file (`large_writes`, deleted only in
+  `end_per_group`) and `sendfile_SUITE`'s `init_per_suite` writes one file in 51 writes of 10 MiB (510 MiB) without checking the results.
+  Fix: put the reporter's output outside the suites' file system, or make the reporter survive `enospc` and report the
+  loss. Until then the kernel group's erXos side runs one runtime per suite, and those two suites cannot finish within the
+  cap: the erXos run never reaches sendfile_SUITE's last 7 cases (`t_sendfile_recvafter_remoteclose` to `end_per_suite`),
+  which the kernel table therefore cannot classify.
 * [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
   for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
   `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its
@@ -584,6 +627,12 @@ it; git history is the record of completed work.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.
+* [Medium] `erlang/apps/erx_files/src/erx_fs.erl` (`MAX_HEAP_WORDS`, 4 Mi words with shared binaries): one
+  `file:write_file("/tmp/big", binary:copy(<<1>>, 16777216))` at the shell kills `/tmp`'s grant process on
+  `maximum heap size reached`; the caller gets `{error, eio}` and the supervisor restarts the grant. On FreeBSD a
+  single 16 MiB `write` to tmpfs succeeds. The same 16 MiB in 1 MiB writes succeeds. Split a large write into
+  bounded jobs (or bound the binary a grant holds per request) so a write within the cap never kills the grant, and
+  add the one-call 16 MiB write as a regression test.
 * [Medium] `erlang/apps/erx_files/src/erx_fs_grant.erl`: a fid's path has no depth bound, and `repath/3` counts every
   step of it, so a clone, clunk or walk in place of a fid at depth D costs O(D) and building the path by walks in place
   O(D^2); renames of two directories grow a path without bound. Cap a fid's path length (a walk past it refuses), or

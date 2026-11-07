@@ -3,12 +3,15 @@
 #
 # The development manifest of QEMU virt: the system domain alone, as
 # docs/design-stopgap.md's "The Phase 1 manifest check" admits it. Fixed
-# medium roles carry partition 0, as docs/design-abi.md says, and root_memory
-# leaves 64 MiB below RAM less fiasco_reserve for the boot archive. /tmp's cap,
-# 160 MiB, holds a whole OTP suite group under Common Test: stdlib's copied
-# suites, logs and priv_dir directories charge about 97 MiB at the end of a
-# stock run. The system baseline, 240 MiB, holds that cap and ERTS, and with
-# the system principal's 128 MiB leaves 16 MiB of root_memory for devices.
+# medium roles carry partition 0, as docs/design-abi.md says. The machine is
+# QEMU virt with 160 MiB of RAM (config/platforms/qemu-virt.json), small for the
+# browser emulator yet roomy at the shell; root_memory, 96 MiB, leaves 48 MiB
+# below RAM less fiasco_reserve for bootstrap and the boot archive. The system
+# baseline, 78 MiB, holds ERTS at the shell with a few hundred processes (about
+# 60 MiB of allocator carriers) and /tmp, whose cap is 16 MiB; with the system
+# principal's 16 MiB it leaves root_memory the block device's 2 MiB. A test
+# image that needs more names a larger machine (ProductionImage::Machine), which
+# grows root_memory, the baseline and /tmp's cap.
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
 # (ReleaseMedium.image), and the system domain holds a read-only window on it.
@@ -40,7 +43,7 @@ runtime_limits system
   max_message_heap 1048576
   funnel_depth 64
   exports 256
-  tmp 167772160
+  tmp 16777216
   overlay 0
   atoms 65536
   foreign_atoms 1024
@@ -58,7 +61,7 @@ limits native
   peer_held 4096
   peer_held_total 4096
 principal system
-  memory 134217728
+  memory 16777216
   grant @share.users
   domains 0
   names 0
@@ -70,8 +73,8 @@ machine
   console "/pl011@9000000"
   hostlink "/pl011@9040000"
   platform "qemu-virt"
-  root_memory 402653184
-  system_baseline 251658240
+  root_memory 100663296
+  system_baseline 81788928
   system_share @share.system
   users_share @share.users
   system_principal @principal.system

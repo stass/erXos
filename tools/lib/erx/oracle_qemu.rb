@@ -48,18 +48,18 @@ module Erx
     WORK = '/tmp/ct'
     # The machine the suites run on. OTP's suites need more than the development
     # manifest's system domain holds: compiler's beam_ssa_check_SUITE asks for a
-    # 98 MiB heap, which the 240 MiB baseline, /tmp's 160 MiB cap within it, cannot
-    # give, and ERTS then ends the whole run. The archive, which carries a group's
-    # suites, their data and stock's applications, is 55 MB for the compiler group,
-    # near the 64 MiB the development layout leaves bootstrap for it. A 2 GiB
-    # machine, whose Fiasco keeps about 123 MiB for kernel memory where the
-    # development machine's keeps 32 MiB, gives the system domain 1 GiB more;
-    # nothing else of the manifest changes, and that 1 GiB also holds the 256 MiB
-    # cap of Common Test's log tree (OracleSuites::ERXOS_LOG_CAP) beside /tmp's.
-    # The manifest's arithmetic would leave
-    # the archive 480 MiB; the root's fixed place holds it to about 187 MiB
+    # 98 MiB heap, which the 78 MiB baseline cannot give, and ERTS then ends the
+    # whole run; stdlib's suites fill about 97 MiB of /tmp, past its 16 MiB cap. The
+    # archive, which carries a group's suites, their data and stock's applications,
+    # is 55 MB for the compiler group, past the 48 MiB the development layout leaves
+    # bootstrap for it. A 2 GiB machine, whose Fiasco keeps about 123 MiB for kernel
+    # memory where the development machine's keeps 10 MiB, gives the system domain
+    # 1 GiB more and /tmp a 160 MiB cap; nothing else of the manifest changes, and
+    # that 1 GiB also holds the 256 MiB cap of Common Test's log tree
+    # (OracleSuites::ERXOS_LOG_CAP) beside /tmp's. The manifest's arithmetic would
+    # leave the archive 768 MiB; the root's fixed place holds it to about 187 MiB
     # (liberx/backend/fiasco/root.ld).
-    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
+    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 144)
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'
     # The line erx_ct_oracle prints when Common Test returns; the machine ends

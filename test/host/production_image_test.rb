@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'pathname'
 require 'rbconfig'
+require_relative '../../tools/lib/erx/oracle_qemu'
 require_relative '../../tools/lib/erx/production_image'
 
 # The production image's host-side rules. Its boot is the QEMU gate's production_image suite.
@@ -221,31 +222,52 @@ class ProductionImageTest < Minitest::Test
                  Erx::ProductionImage.instance_method(:build_test_image).parameters
   end
 
-  # A larger machine grows root_memory and system_baseline by the same amount and
-  # leaves every other line alone, so the manifest check proves the same properties.
-  def test_a_larger_machine_grows_the_root_and_the_system_baseline_alone
+  # A larger machine grows root_memory and system_baseline by the same amount and /tmp's
+  # cap by its own, and leaves every other line alone, so the manifest check proves the
+  # same properties.
+  def test_a_larger_machine_grows_the_root_the_system_baseline_and_tmp_alone
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64)
     grown = machine.manifest(source)
-    number = ->(text, field) { Integer(text[/^  #{field} ([0-9]+)$/, 1], 10) }
-    %w[root_memory system_baseline].each do |field|
-      assert_equal number.call(source, field) + (1024 << 20), number.call(grown, field)
+    { 'root_memory' => 1024, 'system_baseline' => 1024, 'tmp' => 64 }.each do |field, growth|
+      assert_equal manifest_number(source, field) + (growth << 20), manifest_number(grown, field)
     end
     changed = source.lines.zip(grown.lines).reject { |old, new| old == new }.map { |old, _| old[/\A *[a-z_]+/].strip }
-    assert_equal %w[root_memory system_baseline], changed
+    assert_equal %w[tmp root_memory system_baseline], changed
     assert_equal source, Erx::ProductionImage::DEVELOPMENT_MACHINE.manifest(source)
     record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
     assert_equal record, Erx::ProductionImage::DEVELOPMENT_MACHINE.platform(record), 'the development machine is the record'
     assert_equal({ 'ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20, 'units' => [] },
                  machine.platform('ram_bytes' => 1, 'fiasco_reserve' => 1, 'units' => []))
+    wider = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 0, tmp_growth_mib: 64)
+    assert_raises(Erx::Error) { wider.manifest(source) }
   end
 
-  # A manifest without exactly one line of a field is refused, never left ungrown.
+  # A manifest without exactly one line of a grown field is refused, never left ungrown.
   def test_a_manifest_without_one_line_of_a_grown_field_is_refused
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256)
-    ["  system_baseline 1\n", "  root_memory 1\n  root_memory 2\n  system_baseline 1\n"].each do |source|
+    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256, tmp_growth_mib: 0)
+    ["  root_memory 1\n  system_baseline 1\n", "  system_baseline 1\n  tmp 1\n", "  root_memory 1\n  tmp 1\n",
+     "  root_memory 1\n  root_memory 2\n  system_baseline 1\n  tmp 1\n"].each do |source|
       assert_raises(Erx::Error) { machine.manifest(source) }
     end
+  end
+
+  # The oracle's machine keeps the /tmp cap OTP's suite groups fill (stdlib's charge
+  # about 97 MiB), whatever the development manifest's own cap.
+  def test_the_oracle_machine_gives_tmp_its_160_mib
+    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    assert_equal 160 << 20, manifest_number(Erx::OracleQemu::MACHINE.manifest(source), 'tmp')
+  end
+
+  # The refusal boot means something only on a machine that cannot give root_memory:
+  # one no larger than root_memory, of which Fiasco and the archive take a part first.
+  # The default machine leaves room for both below RAM less fiasco_reserve.
+  def test_the_too_little_machine_cannot_hold_root_memory_and_the_default_can
+    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    root_memory = manifest_number(source, 'root_memory')
+    assert_operator Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB << 20, :<=, root_memory
+    machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    assert_operator root_memory, :<, (machine.memory_mib - machine.fiasco_reserve_mib) << 20
   end
 
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.
@@ -303,8 +325,8 @@ class ProductionImageTest < Minitest::Test
 
   def test_the_manifest_line_must_carry_the_sources_numbers
     verify = checkpoint_verifier('root-manifest')
-    verify.call("erx: root task: manifest root_memory 402653184 baseline 251658240 units 3 pool pages 12\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 251658240 units 3 pool pages 12\n") }
+    verify.call("erx: root task: manifest root_memory 100663296 baseline 81788928 units 3 pool pages 12\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline 81788928 units 3 pool pages 12\n") }
   end
 
   # A build/production-image that links out of the tree is refused before
@@ -334,4 +356,8 @@ class ProductionImageTest < Minitest::Test
     assert_match(/TCG runs only the smoke/, error.message)
     assert_raises(Erx::Error) { run.call(accels: %w[kvm]) }
   end
+
+  private
+
+  def manifest_number(text, field) = Integer(text[/^  #{field} ([0-9]+)$/, 1], 10)
 end

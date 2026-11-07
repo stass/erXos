@@ -3,8 +3,8 @@
   "cpuset": 15,
   "console": "/pl011@9000000",
   "hostlink": "/pl011@9040000",
-  "ram_bytes": 536870912,
-  "fiasco_reserve": 67108864,
+  "ram_bytes": 167772160,
+  "fiasco_reserve": 16777216,
   "units": [
     {
       "key": "console-uart",
