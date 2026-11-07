@@ -635,7 +635,8 @@ erXos's kernel supplies its trace ring.
 **Scope.** The generated inspection schema and its C/Erlang/Ruby bindings,
 status/reporter-preserving renderers and `/proc` projections; generated
 Ruby clients for host-exposed service operations, with their bounded
-request/reply checks; the inspector, the tracer, the host link with its
+request/reply checks; the inspector, the tracer in the system domain
+(its trace facet and relay come with M5's connections), the host link with its
 sessions and deframer (and their fuzz targets), on the UART that the system manifest
 names by its device-tree path, the code service with the install arena
 ([design-live.md](design-live.md),
@@ -724,6 +725,9 @@ and watch the machine come back from the reset with nothing to reconcile.
   plumbing (urgency in records); `erx_etf` in `liberx`
   ([design-runtime.md](design-runtime.md#connections-in-erts),
   [design-domains.md](design-domains.md#exports)).
+* **Tracing across domains**: the trace facet and the trace relay in each
+  traced domain, tracing of cross-domain frames, and the host link's
+  events stream ([design-live.md](design-live.md#tracing)).
 * **The domain library and the system services**: the domain library's
   full creation plan with undo, its fault thread and gate, end
   classification and `{domain_down, D, Info}`, connection down with its

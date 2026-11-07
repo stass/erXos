@@ -2450,8 +2450,8 @@ document's "residual risks accepted" paragraph.
   process during its start raises in the caller of `start/3` instead of returning an
   error; `expect()`'s `session` boolean shares a name with the session handle; and
   `park_then_wake?` mutates a set inside `any?`. P4, the trace facet, the
-  relay, frame tracing and the host link's events stream, which need M5's connections, since
-  the stopgap offers no lanes.
+  relay, frame tracing and the host link's events stream, is M5's in plan.md: it needs M5's
+  connections, since the stopgap offers no lanes.
 * [Medium] code service, installed storage (`erlang/apps/erx_code/src/erx_code.erl`):
   the install arena, `erx_code:install_beam/2` and the runtime's
   `ERX_BOOT_INSTALLED_ONLY` refusal with `{error, not_installed}`
