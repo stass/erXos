@@ -354,6 +354,16 @@ class TopLevelCliTest < Minitest::Test
     assert_includes output, 'outside bounds'
   end
 
+  # generate reports what tools/erx's one ensure, before any command, did.
+  def test_generate_reports_the_ensure_tools_erx_ran
+    %i[generated fresh].zip(['regenerated', 'up to date']).each do |status, said|
+      tree = Erx::Generated::Result.new(status: status, output: '/tree/build/gen')
+      code, output = run_cli('generate', tree: tree)
+      assert_equal 0, code
+      assert_includes output, "generated files in /tree/build/gen: #{said}"
+    end
+  end
+
   def test_generate_refuses_trailing_arguments
     status, output = run_cli('generate', 'ignored')
     assert_equal 2, status

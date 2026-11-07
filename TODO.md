@@ -514,23 +514,19 @@ it; git history is the record of completed work.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).
-* [Low] build tree of generated files, `tools/lib/erx/generated.rb`: a reader that does not hold `build/gen.lock`
-  (a compiler started after `Erx::Generated.ensure` returned) can find `build/gen/` missing, between the two renames
-  of a regeneration that another process started because an input changed meanwhile. The Ruby loaders
-  (`Erx::Generated.require_ruby`) read under the lock; for the compilers, either have long readers take the lock
-  shared, or publish versioned trees behind a link replaced by rename.
 * [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: a reader that does not hold `build/gen.lock`
   (a compiler, the Fiasco input capture, `Checks#generated_sources` listing the tree for the chokepoint rules) can find
   `build/gen/` missing or half swapped, between the two renames of a regeneration that another process started
-  because an input changed meanwhile; the chokepoint listing would then pass on no generated file. Have long readers
-  take the lock shared (a `Generated.reading(root:) { |tree| ... }` section), or publish versioned trees behind a link
-  replaced by rename, and take the chokepoint listing from the stamp's outputs, refusing a missing file.
-* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: whether `build/gen/` is current rests on
-  every reader's caller having run `Generated.ensure` (tools/erx before each command, `test/fixtures/generated_tree.rb`
-  in tests), because `Generated.path` and `include_flags` are pure functions of a root. A test or script that skips it
-  compiles against a stale tree, and `Runtime.source_digest` digests whatever is there. Make it hold by construction:
-  ensure returns a tree value (output root, paths, include flags, the stamp's outputs) that build libraries take
-  instead of a root, or readers check the stamp (no regeneration) and refuse a stale tree.
+  because an input changed meanwhile; the chokepoint listing would then pass on no generated file. The Ruby loaders
+  (`Erx::Generated.require_ruby`) already read under the lock. For the rest, have long readers take the lock shared
+  (a `Generated.reading(root:) { |tree| ... }` section), or publish versioned trees behind a link replaced by rename,
+  and take the chokepoint listing from the stamp's outputs, refusing a missing file.
+* [Medium] build tree of generated files, `tools/lib/erx/generated.rb`: whether `build/gen/` is current when a
+  compiler reads it rests on the process entry having run `Generated.ensure` (tools/erx before it loads its
+  libraries, `test/fixtures/generated_tree.rb` in tests, each standalone script), because `Generated.path` and
+  `include_flags` are pure functions of a root. A test or script that skips it compiles against a stale tree. Make it
+  hold by construction: ensure returns a tree value (output root, paths, include flags, the stamp's outputs) that
+  build libraries take instead of a root, or readers check the stamp (no regeneration) and refuse a stale tree.
 * [Medium] build tree of generated files, `tools/lib/erx/chokepoints.rb`, `tools/lib/erx/core_archive.rb`: a
   generated file silently stands in for a tracked file of the same name (the chokepoint `sources:` map, the seam
   copy), and every C include list must put `build/gen` ahead of the tree's directories. Once the tracked copies are

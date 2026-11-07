@@ -6,9 +6,14 @@
 require 'optparse'
 require 'rbconfig'
 require_relative 'lib/erx/runner'
-# The libraries load generated Ruby from build/gen, generating it first, so
-# an input a generator refuses stops every command here, with its diagnostic.
+# Every command runs on a generated tree (build/gen) brought up to date
+# here, before the libraries load: the libraries and builds rely on this
+# ensure (the loaders ensure again, under the lock, and find it fresh). An
+# input a generator refuses stops every command here, with its diagnostic.
 begin
+  require_relative 'lib/erx/generated'
+  # What that ensure did when this file loaded, which `generate` reports.
+  Erx::ENTRY_TREE = Erx::Generated.ensure(root: File.expand_path('..', __dir__))
   require_relative 'lib/erx/release'
   require_relative 'lib/erx/output_directory'
   require_relative 'lib/erx/dependencies'
@@ -25,7 +30,6 @@ begin
   require_relative 'lib/erx/qemu_gate'
   require_relative 'lib/erx/checks'
   require_relative 'lib/erx/hardware'
-  require_relative 'lib/erx/generated'
   require_relative 'lib/erx/arch_terms'
   require_relative 'lib/erx/sysreg'
   require_relative 'lib/erx/oracle_container'
@@ -46,12 +50,8 @@ module Erx
   ROOT = File.expand_path('..', __dir__)
 
   module CLI
-    # Every command but help runs on a generated tree (build/gen) brought up
-    # to date first, so no build, check or boot reads stale generated files
-    # and no library it calls needs to ensure the tree again.
     def self.run(arguments, **collaborators)
       command, *command_arguments = arguments
-      Generated.ensure(root: ROOT) unless [nil, '--help', '-h'].include?(command)
       case command
       when 'check'
         check(command_arguments, **collaborators)
@@ -180,12 +180,11 @@ module Erx
       tests.map { |test| File.join(root, 'test/integration', test) }
     end
 
-    # Brings build/gen up to date with the generators' inputs; a no-op when
-    # its stamp still matches.
-    def self.generate(arguments)
+    # Reports what bringing build/gen up to date did, which tools/erx does
+    # before any command: regenerated, or found it current.
+    def self.generate(arguments, tree: ENTRY_TREE)
       no_arguments(arguments)
-      result = Generated.ensure(root: ROOT)
-      Terminal.puts("generated files in #{result.output}: #{result.status == :fresh ? 'up to date' : 'regenerated'}")
+      Terminal.puts("generated files in #{tree.output}: #{tree.status == :fresh ? 'up to date' : 'regenerated'}")
       0
     end
 

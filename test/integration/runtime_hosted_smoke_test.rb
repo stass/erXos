@@ -11,6 +11,7 @@ require 'io/wait'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
 require_relative '../../tools/lib/erx/medium_boot'
+require_relative '../fixtures/generated_tree'
 
 # ERTS built with ERLANG_OSTYPE=erxos, driven through a terminal as a person would:
 # the command shell, `erl`, `1>`, an expression, its answer, then halt, over erx_console
@@ -175,6 +176,8 @@ class RuntimeHostedSmokeTest < Minitest::Test
                                     '-I', File.join(OUTPUT.root, 'erts/include/internal'),
                                     '-I', File.join(OUTPUT.root, 'erts/include/internal', Erx::Runtime::TARGET),
                                     '-I', File.join(OUTPUT.root, 'erts/include', Erx::Runtime::TARGET),
+                                    '-iquote', File.join(ROOT, Erx::Generated::OUTPUT),
+                                    '-iquote', Erx::Generated.path('include', root: ROOT),
                                     '-iquote', ROOT, '-iquote', File.join(ROOT, 'include'),
                                     File.join(ROOT, 'test/fixtures/ethr_event_storm.c'),
                                     File.join(internal, 'libethread.a'), File.join(internal, 'liberts_internal_r.a'),

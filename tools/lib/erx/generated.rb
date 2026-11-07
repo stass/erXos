@@ -42,10 +42,13 @@ module Erx
   # through GenerationPlan; adding an output to a generator's plan needs no
   # change here.
   #
-  # Who calls ensure: tools/erx, once before any command, and a standalone
-  # script or test process that reads the tree (test/fixtures/generated_tree.rb).
-  # Build libraries take a root whose build/gen is current and read it as
-  # they read the source tree.
+  # Who calls ensure: every process entry, before anything reads build/gen
+  # (tools/erx before it loads its libraries; in a test process
+  # test/fixtures/generated_tree.rb or an ensure at the top of the test file;
+  # a standalone script in its main block). require_ruby calls it as well,
+  # because a loader runs at require time and loads under the lock. Any other
+  # ensure in a library is a guard that finds the tree fresh, not part of the
+  # contract; a fresh tree is checked in milliseconds.
   module Generated
     class Error < Erx::Error; end
 

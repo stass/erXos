@@ -6,6 +6,7 @@ require 'fileutils'
 require 'tmpdir'
 require_relative '../lib/erx/declaration_files'
 require_relative '../lib/erx/runner'
+require_relative '../lib/erx/generated'
 require_relative '../lib/erx/output_directory'
 
 module Erx
@@ -179,6 +180,8 @@ end
 
 if $PROGRAM_NAME == __FILE__
   root = File.expand_path('../..', __dir__)
+  # The fuzzer compiles the ABI reader from build/gen.
+  Erx::Generated.ensure(root: root)
   runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs/pack-fuzz'))
   Erx::PackFuzz.run(root: root, runner: runner,
                    compiler: ENV.fetch('CC', 'clang'), runs: Integer(ENV.fetch('RUNS', '20000'), 10))

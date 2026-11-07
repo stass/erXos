@@ -4,6 +4,8 @@
 
 require 'fileutils'
 require 'minitest/autorun'
+require 'open3'
+require 'rbconfig'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 
@@ -107,6 +109,20 @@ class GeneratedLoadingTest < Minitest::Test
     assert_equal :fresh, ensure_one(output).status
   end
 
+  # The process entries that ensure the tree (the test fixture, tools/erx)
+  # and the loaders, which ensure it again and load under the lock, run in
+  # one process in either order: each ensure returns before the next, so
+  # none waits on the lock its own process holds. Each runs in a process of
+  # its own under a deadline, so a wait shows as a failure, not a hang.
+  def test_entries_and_loaders_ensure_one_after_another
+    fixture = File.join(ROOT, 'test/fixtures/generated_tree.rb')
+    loader = File.join(ROOT, 'tools/lib/erx/generated_abi.rb')
+    [[fixture, loader], [loader, fixture]].each do |first, second|
+      assert_runs(RbConfig.ruby, '-e', 'ARGV.each { |file| require file }', first, second)
+    end
+    assert_match(/^generated files in .*: up to date$/, assert_runs(RbConfig.ruby, File.join(ROOT, 'tools/erx'), 'generate'))
+  end
+
   def test_a_generator_reaching_a_loader_is_caught
     plant('tools/lib/erx/abi_model.rb', "require_relative 'generated_abi'")
     assert_includes generator_violations(@directory),
@@ -162,6 +178,12 @@ class GeneratedLoadingTest < Minitest::Test
   end
 
   private
+
+  def assert_runs(*command)
+    output, status = Open3.capture2e('gtimeout', '-k', '5', '120', *command, stdin_data: '', chdir: ROOT)
+    assert status.success?, "#{command.join(' ')} ended with #{status.inspect}\n#{output}"
+    output
+  end
 
   # ensure of a one-file tree generated from an empty root into output.
   def ensure_one(output, &)
