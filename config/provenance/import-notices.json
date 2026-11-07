@@ -42,6 +42,9 @@
     }},
     {"path": "kernel/crypto/chacha20", "notices": [], "grants": {
       "BSD-2-Clause": [{"path": "LICENSE", "sha256": "a2b42923d123f08e75819a3e5d96e55fbdf5b804a71f286f74e1d00123ade388"}]
+    }},
+    {"path": "littlefs", "notices": [], "grants": {
+      "BSD-3-Clause": [{"path": "littlefs/LICENSE.md", "sha256": "0cb4ff1daf5fdc1359c6a6ee3116092f08fc100c9d58b1b77ab17bfd801f856d"}]
     }}
   ]
 }

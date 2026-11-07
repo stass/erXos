@@ -38,6 +38,7 @@ module Erx
       kernel/crypto/blake3
       kernel/crypto/chacha20
       kernel/crypto/sha2
+      littlefs
       musl
       otp
       test/oracle/common_test
