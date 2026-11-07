@@ -411,9 +411,9 @@ scripts live in `~/erxos-scratch/tools/`.
   architecture's call registers and hardware layouts in `abi/arch/<arch>.txt`.
   Memory-mapped device registers are defined in CMSIS-SVD files and each
   architecture's system registers in one checked-in specification. Ruby
-  generators produce every header, accessor and table from these sources,
-  and a drift check fails the build when a generated file is stale. Never
-  edit a generated file, hand-pack register bits or copy a constant by hand.
+  generators produce every header, accessor and table from these sources
+  during the build. Never edit a generated file, hand-pack register bits or
+  copy a constant by hand.
 * **Untrusted input.** Everything a domain hands the kernel (registers,
   addresses, lengths, capabilities), every message from another domain,
   everything a device writes to shared memory, every byte from the host
@@ -451,6 +451,10 @@ scripts live in `~/erxos-scratch/tools/`.
   guest) escapes tab and newline too. A program's own output is not such
   text: as on UNIX and QNX, `write` and stdio deliver its bytes unchanged to
   a tty, which does only `termios`-style processing.
+* **Generated files are not checked in.** The build generates them into the
+  build tree from their checked-in inputs (the ABI files, the hardware
+  specifications, the generators themselves), so the inputs are the only
+  copy. Commit the input and the generator, never the output.
 * **Generated code is code too.** Generated C, Erlang and headers must be
   readable, ASCII-only and free of undefined behavior, and are produced by a
   Ruby generator checked into the tree.
