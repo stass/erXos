@@ -57,7 +57,29 @@ class SysregTest < Minitest::Test
       target = File.join(root, 'elsewhere.json')
       File.rename(File.join(root, Erx::Sysreg::SPECIFICATION), target)
       File.symlink(target, File.join(root, Erx::Sysreg::SPECIFICATION))
+      before = File.binread(target)
+      error = assert_raises(Erx::Error) { Erx::Sysreg.refresh(root: root) }
+      assert_includes error.message, 'not a symlink'
+      assert_equal before, File.binread(target)
+    end
+  end
+
+  def test_symlinked_directory_is_refused_and_its_target_untouched
+    with_synthetic_tree do |root|
+      File.rename(File.join(root, 'hw/sysreg'), File.join(root, 'elsewhere'))
+      File.symlink(File.join(root, 'elsewhere'), File.join(root, 'hw/sysreg'))
+      before = File.binread(File.join(root, 'elsewhere/aarch64.json'))
       assert_raises(Erx::Error) { Erx::Sysreg.refresh(root: root) }
+      assert_equal before, File.binread(File.join(root, 'elsewhere/aarch64.json'))
+      assert_equal %w[aarch64.json], Dir.children(File.join(root, 'elsewhere'))
+    end
+  end
+
+  def test_missing_specification_says_so
+    with_synthetic_tree do |root|
+      File.unlink(File.join(root, Erx::Sysreg::SPECIFICATION))
+      error = assert_raises(Erx::Error) { Erx::Sysreg.verify(root: root) }
+      assert_includes error.message, 'is missing'
     end
   end
 
@@ -65,7 +87,8 @@ class SysregTest < Minitest::Test
     with_synthetic_tree do |root|
       runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
       command = [RbConfig.ruby, File.join(REPOSITORY, 'tools/erx'), 'sysreg', 'refresh', '--root', root]
-      assert_raises(Erx::CommandError) { runner.run(command + ['--verify'], name: 'stale-sysreg', deadline: 60) }
+      stale = assert_raises(Erx::CommandError) { runner.run(command + ['--verify'], name: 'stale-sysreg', deadline: 60) }
+      assert_equal 1, stale.result.fetch('exit_status')
       runner.run(command, name: 'refresh-sysreg', deadline: 60)
       runner.run(command + ['--verify'], name: 'verify-sysreg', deadline: 60)
     end
@@ -147,24 +170,45 @@ class SysregTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::Sysreg.selection(JSON.generate(extra)) }
   end
 
-  # The checked-in specification is an input every build can read without
-  # Arm's archive; these are the counter facts the kernel relies on.
+  # The checked-in specification is an input every build reads without Arm's
+  # archive: its one reader checks every fact, and these are the counter facts
+  # the kernel relies on. The comparison with the archive itself is
+  # test/integration/sysreg_refresh_test.rb, which `make check` excuses.
   def test_checked_in_specification_parses_with_counter_facts
     bytes = File.binread(File.join(REPOSITORY, Erx::Sysreg::SPECIFICATION))
+    specification = Erx::Sysreg.specification(bytes)
     assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0],
-                 Erx::Sysreg.selection(bytes).fetch('registers').map { |register| register.fetch('name') }
-    rows = JSON.parse(bytes).fetch('registers').to_h { |register| [register.fetch('name'), register] }
+                 specification.fetch('registers').map { |register| register.fetch('name') }
+    rows = specification.fetch('registers').to_h { |register| [register.fetch('name'), register] }
+    assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 1 }, rows.fetch('CNTPCT_EL0').fetch('encoding'))
+    assert_equal [{ 'name' => 'PhysicalCount', 'offset' => 0, 'width' => 64 }], rows.fetch('CNTPCT_EL0').fetch('fields')
     assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 2 }, rows.fetch('CNTVCT_EL0').fetch('encoding'))
     assert_equal [{ 'name' => 'VirtualCount', 'offset' => 0, 'width' => 64 }], rows.fetch('CNTVCT_EL0').fetch('fields')
     assert_equal({ 'name' => 'ClockFreq', 'offset' => 0, 'width' => 32 }, rows.fetch('CNTFRQ_EL0').fetch('fields').first)
   end
 
-  # Needs Arm's archive (tools/erx fetch --source arm-registers), which neither
-  # setup nor `make check` downloads.
-  def test_checked_in_specification_matches_the_pinned_arm_source
-    unless File.file?(File.join(REPOSITORY, Erx::Sysreg::SOURCE))
-      skip "Arm's archive is not fetched; run tools/erx fetch --source arm-registers to verify #{Erx::Sysreg::SPECIFICATION}"
+  # Each mutation of a valid specification that a consumer must not trust.
+  def test_specification_refuses_bad_facts_and_policy_only_registers
+    valid = JSON.parse(File.binread(File.join(REPOSITORY, Erx::Sysreg::SPECIFICATION)))
+    assert Erx::Sysreg.specification(JSON.generate(valid))
+    mutations = {
+      'encoding out of range' => ->(spec) { spec['registers'][1]['encoding']['op0'] = 4 },
+      'encoding not an integer' => ->(spec) { spec['registers'][1]['encoding']['CRn'] = 'x' },
+      'fields not a list' => ->(spec) { spec['registers'][1]['fields'] = 'garbage' },
+      'fields leave bits' => ->(spec) { spec['registers'][1]['fields'][0]['width'] = 63 },
+      'fields out of order' => ->(spec) { spec['registers'][0]['fields'].reverse! },
+      'bad reserved value' => ->(spec) { spec['registers'][0]['fields'][1]['reserved'] = 'RAZ' },
+      'width not 64' => ->(spec) { spec['registers'][1]['width'] = 7 },
+      'control byte in copyright' => ->(spec) { spec['registers'][1]['copyright'] = "\e]0;pwn\a" },
+      'other licence' => ->(spec) { spec['registers'][1]['license'] = 'MIT' },
+      'other schema' => ->(spec) { spec['registers'][1]['source_version']['schema'] = '3.0' },
+      'policy only' => ->(spec) { spec['registers'][1].select! { |key, _| Erx::Sysreg::POLICY_KEYS.include?(key) } },
+      'unsorted' => ->(spec) { spec['registers'].reverse! }
+    }
+    mutations.each do |label, mutate|
+      spec = JSON.parse(JSON.generate(valid))
+      mutate.call(spec)
+      assert_raises(Erx::Error, label) { Erx::Sysreg.specification(JSON.generate(spec)) }
     end
-    assert Erx::Sysreg.verify(root: REPOSITORY)
   end
 end

@@ -129,16 +129,18 @@ class TopLevelCliTest < Minitest::Test
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
   end
 
-  # Arm's archive is read only by `tools/erx sysreg refresh`, which no gate
-  # runs, so `make check` works in a tree that never fetched arm-registers.
-  # sysreg_test.rb, a host test, skips its one case that needs the archive.
+  # Arm's archive is read only by `tools/erx sysreg refresh` and by
+  # test/integration/sysreg_refresh_test.rb, which `make check` excuses, so
+  # `make check` works in a tree that never fetched arm-registers. Host tests
+  # are exempt by path: test/host/sysreg_test.rb works on synthetic trees.
   def test_check_needs_no_arm_registers_download
     commands = []
     with_checks(commands) do |collaborators|
       status, output = run_cli('check', **collaborators)
       assert_equal 0, status, output
     end
-    readers = commands.reject { |argv, _options| argv.last.end_with?('_test.rb') }.select do |argv, options|
+    host = File.join(Erx::ROOT, 'test/host/')
+    readers = commands.reject { |argv, _options| argv.last.start_with?(host) }.select do |argv, options|
       (argv + [options.fetch(:name)]).any? { |word| word.to_s.match?(/sysreg|arm-registers|Registers\.json/) }
     end
     assert_empty readers

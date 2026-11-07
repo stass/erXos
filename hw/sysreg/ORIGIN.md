@@ -34,7 +34,8 @@ dependency table in `docs/design.md`.
 has two parts:
 
 * erXos's access policy, which the refresh reads from the file itself and
-  writes back unchanged: `name`, `read`, `write`, `read_side_effect` and
+  writes back with the same values (registers sorted by name, keys in this
+  order): `name`, `read`, `write`, `read_side_effect` and
   `read_barrier`. Arm's data does not decide these; the refresh takes Arm's
   facts, not its access pseudocode.
 * Arm's facts for the register's `AArch64` record, which the refresh
@@ -47,7 +48,11 @@ has two parts:
 The refresh refuses a `Registers.json` whose SHA-256 differs from
 `source_sha256`, a register with a conditional or feature-dependent layout,
 split or overlapping fields, fields that leave bits undeclared, and field
-enumerations, rather than guessing at them.
+enumerations, rather than guessing at them. Without the archive,
+`Erx::Sysreg.specification`, the file's one reader, checks every policy
+field and fact of the checked-in file (a host test runs it in `make check`),
+so a malformed edit fails there; whether the facts are Arm's is what
+`--verify` alone can tell.
 
 ## Refreshing
 

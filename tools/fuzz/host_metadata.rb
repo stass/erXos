@@ -80,7 +80,12 @@ module Erx
       when 'arch_terms'
         ArchTerms.parse(bytes)
       when 'sysreg_specification'
-        Sysreg.selection(bytes)
+        # Both readers of the file; each must refuse through the error boundary.
+        %i[specification selection].each do |reader|
+          Sysreg.public_send(reader, bytes)
+        rescue Error
+          nil
+        end
       when 'sysreg_source'
         declaration = Sysreg.selection(JSON.generate(SysregFixture.specification(bytes)))
         Sysreg.extract(bytes, declaration: declaration)

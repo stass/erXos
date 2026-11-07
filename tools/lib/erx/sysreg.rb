@@ -9,12 +9,15 @@ module Erx
   # input like an SVD file. Each register in it is erXos's access policy (the
   # POLICY_KEYS) followed by the facts Arm's machine-readable specification
   # gives for it (the FACT_KEYS), and the file names the SHA-256 of the
-  # Registers.json those facts came from.
+  # Registers.json those facts came from. Sysreg.specification is its one
+  # reader: it checks every policy field and every fact, so a consumer and
+  # `make check` rely on the file without Arm's archive.
   #
   # Nothing in the build or `make check` reads Arm's archive. Only the explicit
   # `tools/erx sysreg refresh` does: it takes the policy from the checked-in
-  # file, extracts the facts again from the fetched Registers.json, and either
-  # rewrites the file or, with --verify, compares it (hw/sysreg/ORIGIN.md).
+  # file (Sysreg.selection), extracts the facts again from the fetched
+  # Registers.json, and either rewrites the file or, with --verify, compares
+  # it (hw/sysreg/ORIGIN.md).
   module Sysreg
     SPECIFICATION = 'hw/sysreg/aarch64.json'
     SOURCE = 'build/third_party/arm-registers/Registers.json'
@@ -23,6 +26,9 @@ module Erx
     POLICY_KEYS = %w[name read write read_side_effect read_barrier].freeze
     FACT_KEYS = %w[width encoding fields copyright license source_version].freeze
     ENCODING_WIDTHS = { 'op0' => 2, 'op1' => 3, 'CRn' => 4, 'CRm' => 4, 'op2' => 3 }.freeze
+    # Text the specification carries from Arm (copyright, release names) is
+    # printable ASCII of bounded length, so no consumer has to escape it.
+    PRINTABLE = /\A[\x20-\x7e]{1,256}\z/
     module_function
 
     def exact_keys(value, keys)
@@ -31,42 +37,122 @@ module Erx
       end
     end
 
+    # The checked-in specification, whole: every register carries its policy
+    # and every fact, the facts are well formed and registers are sorted by
+    # name, as a refresh writes them.
+    def specification(bytes)
+      declaration = identity(bytes)
+      registers = declaration.fetch('registers').map do |entry|
+        exact_keys(entry, POLICY_KEYS + FACT_KEYS)
+        policy(entry)
+        check_facts(entry)
+        entry
+      end
+      distinct_names(registers)
+      names = registers.map { |entry| entry.fetch('name') }
+      raise Error, 'system registers are not sorted by name' unless names == names.sort
+      immutable_copy(declaration)
+    end
+
     # The selection a refresh extracts: the specification's identity and each
-    # register's policy, without the facts. A register may carry its policy
-    # alone, which is how a new register is added before its first refresh.
+    # register's policy, without the facts, which a refresh replaces. A
+    # register may carry its policy alone, which is how a new register is
+    # added before its first refresh.
     def selection(bytes)
+      declaration = identity(bytes)
+      policies = declaration.fetch('registers').map do |entry|
+        unless entry.is_a?(Hash) && [POLICY_KEYS.sort, (POLICY_KEYS + FACT_KEYS).sort].include?(entry.keys.sort)
+          raise Error, 'unexpected system-register declaration shape'
+        end
+        policy(entry)
+      end
+      distinct_names(policies)
+      immutable_copy(declaration.merge('registers' => policies))
+    end
+
+    def identity(bytes)
       declaration = JsonInput.parse(bytes, max_bytes: MAX_SPECIFICATION_BYTES, label: 'system-register specification')
       exact_keys(declaration, %w[version architecture source_sha256 registers])
       unless declaration['version'].is_a?(Integer) && declaration['version'] == 1 && declaration['architecture'] == 'aarch64' &&
              declaration['source_sha256'].is_a?(String) && /\A[0-9a-f]{64}\z/.match?(declaration['source_sha256'])
         raise Error, 'unsupported system-register source identity'
       end
-      entries = declaration.fetch('registers')
-      unless entries.is_a?(Array) && entries.size.between?(1, 4096)
+      unless declaration['registers'].is_a?(Array) && declaration['registers'].size.between?(1, 4096)
         raise Error, 'system-register selection requires 1..4096 registers'
       end
-      policies = entries.map do |entry|
-        unless entry.is_a?(Hash) && [POLICY_KEYS.sort, (POLICY_KEYS + FACT_KEYS).sort].include?(entry.keys.sort)
-          raise Error, 'unexpected system-register declaration shape'
-        end
-        Hardware.identifier(entry.fetch('name'))
-        unless entry['read'] == true && entry['write'] == false &&
-               entry['read_side_effect'] == 'none' && %w[none isb].include?(entry['read_barrier'])
-          raise Error, 'unsupported system-register access sequence'
-        end
-        entry.slice(*POLICY_KEYS)
-      end
-      names = policies.map { |entry| entry.fetch('name').downcase }
-      raise Error, 'system-register names collide' unless names.uniq == names
-      immutable_copy(declaration.merge('registers' => policies))
+      declaration
     end
+    private_class_method :identity
+
+    # A register's policy fields, checked: the access sequences erXos's
+    # accessors support are a side-effect-free read, with or without an ISB.
+    def policy(entry)
+      unless identifier?(entry['name'])
+        raise Error, 'system-register name is not an identifier'
+      end
+      unless entry['read'] == true && entry['write'] == false &&
+             entry['read_side_effect'] == 'none' && %w[none isb].include?(entry['read_barrier'])
+        raise Error, 'unsupported system-register access sequence'
+      end
+      entry.slice(*POLICY_KEYS)
+    end
+    private_class_method :policy
+
+    def distinct_names(entries)
+      names = entries.map { |entry| entry.fetch('name').downcase }
+      raise Error, 'system-register names collide' unless names.uniq == names
+      names
+    end
+    private_class_method :distinct_names
+
+    # The facts a refresh writes, checked as extract_register checks Arm's
+    # record: a 64-bit register, a fixed MRS encoding, and fields listed from
+    # bit 0 up that tile all 64 bits, each a named field or a RES0/RES1 range.
+    def check_facts(entry)
+      raise Error, 'system register is not 64 bits wide' unless entry['width'] == 64
+      encoding = entry['encoding']
+      exact_keys(encoding, ENCODING_WIDTHS.keys)
+      ENCODING_WIDTHS.each do |name, width|
+        value = encoding.fetch(name)
+        raise Error, 'invalid system-register encoding' unless value.is_a?(Integer) && value.between?(0, (1 << width) - 1)
+      end
+      check_layout(entry['fields'])
+      unless entry['license'] == 'BSD-3-Clause' && entry['copyright'].is_a?(String) && PRINTABLE.match?(entry['copyright'])
+        raise Error, 'system register lacks its source notice'
+      end
+      version = entry['source_version']
+      unless version.is_a?(Hash) && version.size.between?(1, 8) && version['schema'] == '2.9.6' &&
+             version.all? { |key, value| PRINTABLE.match?(key) && value.is_a?(String) && PRINTABLE.match?(value) }
+        raise Error, 'system register has an unsupported source version'
+      end
+    end
+    private_class_method :check_facts
+
+    def check_layout(fields)
+      raise Error, 'invalid system-register field inventory' unless fields.is_a?(Array) && fields.size.between?(1, 64)
+      next_offset = fields.reduce(0) do |offset, field|
+        kind = field.is_a?(Hash) && field.key?('reserved') ? 'reserved' : 'name'
+        exact_keys(field, [kind, 'offset', 'width'])
+        width = field['width']
+        unless field['offset'] == offset && width.is_a?(Integer) && width.between?(1, 64 - offset)
+          raise Error, 'system-register fields must tile the register from bit 0 up'
+        end
+        valid = kind == 'reserved' ? %w[RES0 RES1].include?(field['reserved']) : identifier?(field['name'])
+        raise Error, 'invalid system-register field' unless valid
+        offset + width
+      end
+      raise Error, 'system-register fields leave bits undeclared' unless next_offset == 64
+      names = fields.filter_map { |field| field['name']&.downcase }
+      raise Error, 'system-register field names collide' unless names.uniq == names
+    end
+    private_class_method :check_layout
 
     # The extractor reads facts, not the package's access pseudocode. erXos's
     # explicit policy owns the permitted operation and its synchronization.
     # A feature-dependent field layout cannot be selected implicitly.
     def extract(bytes, declaration:)
       unless Digest::SHA256.hexdigest(bytes) == declaration.fetch('source_sha256')
-        raise Error, 'Arm Registers.json differs from its pinned source'
+        raise Error, 'Registers.json is not the release the specification names in source_sha256'
       end
       source = JsonInput.parse(bytes, max_bytes: MAX_SOURCE_BYTES, label: 'Arm register source')
       unless source.is_a?(Array) && source.size.between?(1, 65_536)
@@ -196,19 +282,34 @@ module Erx
     end
     private_class_method :immutable_copy
 
-    # The specification as Arm's pinned Registers.json gives it for the
-    # checked-in selection, as bytes, and the checked-in bytes beside it.
-    # Reads only; refuses a symlinked specification or directory.
+
+    def identifier?(value)
+      value.is_a?(String) && value.bytesize.between?(1, 63) && Hardware::IDENTIFIER.match?(value)
+    end
+    private_class_method :identifier?
+
+    # What a refresh found: the checked-in specification's path and bytes, and
+    # the bytes Arm's pinned Registers.json gives for its selection.
+    Refresh = Data.define(:path, :checked_in, :refreshed) do
+      def current? = checked_in == refreshed
+    end
+
+    # Reads only. Refuses a missing or symlinked specification and a
+    # symlinked hw/sysreg, and checks what it would write with the
+    # specification's own reader before anyone writes it.
     def refreshed(root:)
       root = File.realpath(root)
       path = File.join(root, SPECIFICATION)
+      raise Error, "#{SPECIFICATION} is missing" unless File.exist?(path) || File.symlink?(path)
       unless File.realpath(File.dirname(path)) == File.dirname(path) && File.file?(path) && !File.symlink?(path)
-        raise Error, "#{SPECIFICATION} must be a regular file, not a symlink"
+        raise Error, "#{SPECIFICATION} must be a regular file in a real directory, not a symlink"
       end
-      current = BoundedFile.read(path, maximum: MAX_SPECIFICATION_BYTES)
-      declaration = selection(current)
-      source = read_source(File.join(root, SOURCE))
-      [JSON.pretty_generate(extract(source, declaration: declaration), ascii_only: true) + "\n", current]
+      checked_in = BoundedFile.read(path, maximum: MAX_SPECIFICATION_BYTES)
+      declaration = selection(checked_in)
+      extracted = extract(read_source(File.join(root, SOURCE)), declaration: declaration)
+      bytes = JSON.pretty_generate(extracted, ascii_only: true) + "\n"
+      specification(bytes)
+      Refresh.new(path: path, checked_in: checked_in, refreshed: bytes)
     rescue SystemCallError => error
       raise Error, "cannot read #{SPECIFICATION}: #{error.message}"
     end
@@ -224,33 +325,54 @@ module Erx
     # Compares without writing: true when the checked-in specification is
     # exactly what a refresh would write.
     def verify(root:)
-      expected, current = refreshed(root: root)
-      raise Error, "#{SPECIFICATION} differs from Arm's pinned source; run tools/erx sysreg refresh" unless current == expected
+      raise Error, "#{SPECIFICATION} differs from Arm's pinned source; run tools/erx sysreg refresh" unless refreshed(root: root).current?
+
       true
     end
 
-    # Rewrites the specification from Arm's pinned source through a temporary
-    # file renamed into place, so a failed refresh leaves the old file whole.
-    # Returns whether the bytes changed.
+    # Rewrites the specification from Arm's pinned source. Returns whether
+    # the bytes changed.
     def refresh(root:)
-      expected, current = refreshed(root: root)
-      return false if current == expected
+      result = refreshed(root: root)
+      return false if result.current?
 
-      output = File.join(File.realpath(root), SPECIFICATION)
-      temporary = output + ".#{Process.pid}.tmp"
+      replace(result.path, result.refreshed)
+      true
+    end
+
+    # Writes through a temporary file beside the target and renames it into
+    # place, so a failed refresh leaves the old file whole. The directory is
+    # checked again once the temporary exists, so a directory swapped for a
+    # symlink after refreshed's check is refused before the rename.
+    def replace(path, bytes)
+      directory = File.dirname(path)
+      temporary = "#{path}.#{Process.pid}.tmp"
       created = false
       begin
         File.open(temporary, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o644) do |file|
           created = true
-          file.write(expected)
+          file.write(bytes)
+          file.fsync
         end
-        File.rename(temporary, output)
+        raise Error, "#{SPECIFICATION}'s directory changed during the refresh" unless File.realpath(directory) == directory
+
+        File.rename(temporary, path)
+        created = false
       ensure
-        File.unlink(temporary) if created && File.file?(temporary) && !File.symlink?(temporary)
+        remove_temporary(temporary) if created
       end
-      true
     rescue SystemCallError => error
       raise Error, "cannot write #{SPECIFICATION}: #{error.message}"
     end
+    private_class_method :replace
+
+    # Cleanup after a failed write; its own failure must not replace the
+    # error that got here.
+    def remove_temporary(temporary)
+      File.unlink(temporary) if File.file?(temporary) && !File.symlink?(temporary)
+    rescue SystemCallError
+      nil
+    end
+    private_class_method :remove_temporary
   end
 end
