@@ -212,7 +212,7 @@ module Erx
     private :assemble
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
-    # from a generated tree of its own (build/gen regenerated before it) and packed into
+    # after regenerating build/gen, so neither reuses the other's generated files, and packed into
     # a clean directory of its own name with its release medium, compared
     # part by part by SHA-256, read as a stream. A path under those directories that
     # reached an output shows; OTP and musl build at one path both times, so a path of

@@ -260,12 +260,11 @@ No generated file is checked in or edited. Its properties hold as follows:
   `build/gen/` before each of its two builds.
 * `Erx::Generated` refuses any output that is not ASCII before anything is
   written.
-* `Erx::Checks`, the source check of `make check`, refuses a listed file
-  (tracked, or untracked and not ignored) at a generated output's path;
-  `ErlangApps.modules` refuses an application source file at a generated
-  module's path; and the runtime build's OTP copy refuses an `otp/` file at
-  the path of a generated `build/gen/otp/` file. An edit to a file in
-  `build/gen/` fails the stamp and is regenerated.
+* `Erx::Generated.ensure` refuses the repository's own tree while any file of
+  the repository sits at the path of one of its outputs, fresh or not, so no
+  include path, glob or copy of any consumer can take a stale copy in the
+  generated file's place. An edit to a file in `build/gen/` fails the stamp
+  and is regenerated over.
 
 `ruby tools/gen_abi.rb --output DIR [--root PATH]` (likewise
 `tools/gen_hw.rb` and `tools/gen_terminal.rb`) writes that one generator's

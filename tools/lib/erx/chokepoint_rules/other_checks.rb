@@ -19,7 +19,7 @@ module Erx
         Chokepoints::Elsewhere.new(
           name: 'generated-files', rule: 'generated files are never checked in or edited',
           design: "#{KERNEL}#chokepoint-checks",
-          check: 'Checks (no listed file at a generated path) and Erx::Generated (an edited output fails its stamp)',
+          check: 'Erx::Generated.ensure (refuses a tree file at a generated path; regenerates over an edited output)',
           test: 'test/host/generated_test.rb'
         ),
         Chokepoints::Elsewhere.new(

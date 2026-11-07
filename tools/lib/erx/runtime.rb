@@ -171,27 +171,21 @@ module Erx
     # OTP's build holds no record of what its tree held. A change to what configure
     # reads starts again from an empty copy, and a file that left otp/ or the generated
     # tree's otp/ leaves the copy. These records live in the copy, so removing the copy
-    # forgets them too. A file of otp/ at a generated file's path is refused, so
-    # neither silently stands in for the other in the copy.
+    # forgets them too. otp/ and the generated tree share no path (Generated.ensure
+    # refuses a file of the tree at a generated file's path), and a generated tree
+    # without otp/ is refused rather than copied as if it held nothing.
     def copy_sources
       otp = File.join(@root, 'otp')
       generated = File.join(@root, GENERATED_OTP)
       inputs = self.class.configure_inputs(otp: otp)
       stamp = self.class.configure_stamp(otp: otp, inputs: inputs, sdk_root: sdk_root)
-      shadowing = Dir.glob('**/*', base: generated).select do |relative|
-        File.file?(File.join(generated, relative)) && File.exist?(File.join(otp, relative))
-      end
-      unless shadowing.empty?
-        raise Error, "otp/#{shadowing.first} is at the path of the generated #{GENERATED_OTP}/#{shadowing.first}; remove it"
-      end
+      raise Error, "the generated tree has no otp/ (#{GENERATED_OTP}); regenerate it" unless File.directory?(generated)
 
       FileUtils.rm_rf(@output.root) unless stored(in_copy('.erx-configure-stamp')) == stamp
       FileUtils.mkdir_p(@output.root)
       @runner.run(['rsync', '-a', *BUILT_BEAMS, "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
-      if File.directory?(generated)
-        @runner.run(['rsync', '-a', "#{generated}/", "#{@output.root}/"], name: 'runtime-copy-generated',
-                                                                            deadline: DEADLINES.fetch(:copy))
-      end
+      @runner.run(['rsync', '-a', "#{generated}/", "#{@output.root}/"], name: 'runtime-copy-generated',
+                                                                          deadline: DEADLINES.fetch(:copy))
       paths = [otp, generated].flat_map { |tree| Dir.glob('**/*', File::FNM_DOTMATCH, base: tree) }.uniq.sort
       (stored(in_copy('.erx-paths')).to_s.lines(chomp: true) - paths).each { |path| FileUtils.rm_f(in_copy(path)) }
       File.write(in_copy('.erx-paths'), paths.join("\n"))

@@ -300,18 +300,9 @@ class RuntimeBuildTest < Minitest::Test
     assert_equal 'generated', File.read(File.join(@output.root, GRAMMAR))
   end
 
-  # A file of otp/ at a generated file's path is refused before the copy, so
-  # neither stands in for the other.
-  def test_an_otp_file_at_a_generated_path_is_refused
-    write_otp(GRAMMAR, 'tracked')
-    error = assert_raises(Erx::Error) { build }
-    assert_match(/otp\/#{Regexp.escape(GRAMMAR)} is at the path of the generated/, error.message)
-    refute_includes @runner.steps, 'runtime-copy'
-  end
-
   def test_a_file_that_left_the_generated_tree_leaves_the_copy
     build
-    @generated.files = {}
+    @generated.files = { File.join('otp', 'erts/preloaded/src/other.erl') => 'generated' }
     build
     refute_path_exists File.join(@output.root, GRAMMAR)
   end

@@ -655,7 +655,7 @@ release metadata; neither adds another configuration source.
 Generated files are never checked in: the build generates every output into
 `build/gen/` from the inputs, regenerates it whole when an input, a
 generator or an output changes, refuses an output that is not ASCII, and
-the source check refuses a file at a generated output's path. A test
+`Erx::Generated.ensure` refuses a repository file at a generated output's path. A test
 generates the tree from the same inputs in different places and times and
 requires identical bytes. Nobody edits a generated file, hand-packs register bits or copies a constant.
 
@@ -696,7 +696,7 @@ tests.
 | only `erx_dom_destroy` and `erx_dom_retire` destroy a domain's budgets, and the domain library installs into a domain's table only through `erx_dom_install`, never a gate of another domain | a source check over `liberx`'s system layer that budget destruction and the install calls are referenced only from those functions, with a seeded violation | [design-system.md](design-system.md#the-domain-library) |
 | only the manifest's two readers, the generated C reader and the Erlang module `erx_manifest`, read the system manifest | a source check and a check over the system release's BEAM files that the manifest is read only through them, each with a seeded violation | [design-system.md](design-system.md#the-manifest) |
 | no release lets `global` or `pg` span domains | a release-build check that fails the build on a release that sets `connect_all` to true, with a seeded violation | [design-runtime.md](design-runtime.md#erlang-visible-behaviour) |
-| no generated file is checked in or edited | the source check's refusal of a file at a generated output's path; the stamp of `build/gen/`, which regenerates an edited output | [One source](#one-source-for-the-abi-and-the-hardware) |
+| no generated file is checked in or edited | the generated tree's refusal of a repository file at a generated output's path (`Erx::Generated.ensure`); the stamp of `build/gen/`, which regenerates an edited output | [One source](#one-source-for-the-abi-and-the-hardware) |
 | a file of an imported tree that differs from its import says so, and every file in an image has known provenance and an allowed licence | each file's SHA-256 against the record in its tree's `ORIGIN.md`, and its header searched for erXos's notice; every packed file's provenance and licence, from the linker's maps, the compiler's dependency files and the packer's list | [Licences and notices](#licences-and-notices) |
 | only the domain library's one ending function destroys a domain's budget, which deletes its space with everything else it paid for, and the domain service reaches it only after it has let go of everything it was given of the domain | a source check over `liberx`'s system layer that a domain's budget is destroyed only in that function, with a seeded violation; a check over the system release's BEAM files with the compiler's call graph that the NIF behind it is called only from the domain service's ending path | [design-system.md](design-system.md#ending-a-domain) |
 | only the slot writer writes a slot or the boot-selection record | the device service derives those windows from the medium layout and grants them to the slot writer alone; a test that every other request for them fails | [design-storage.md](design-storage.md#system-updates) |

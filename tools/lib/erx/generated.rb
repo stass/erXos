@@ -122,11 +122,14 @@ module Erx
       # reuse an earlier build's tree, as check-reproducible's two builds).
       # Safe to call from many processes at once. A block runs with the
       # result while the lock is still held, so another caller's
-      # regeneration cannot move the tree away while it reads.
+      # regeneration cannot move the tree away while it reads. root's own
+      # tree (no output given) is refused while a file of root sits at the
+      # path of one of its files (refuse_shadowing).
       def ensure(root:, output: nil, generators: GENERATORS, regenerate: false)
         root = File.realpath(root)
-        output = File.expand_path(output || File.join(root, OUTPUT))
-        if root == output || root.start_with?("#{output}/")
+        own = output.nil?
+        output = resolved(output || File.join(root, OUTPUT))
+        if root == output || root.start_with?(File.join(output, ''))
           raise Error, "generated output #{output} would hold its own source root"
         end
 
@@ -139,6 +142,7 @@ module Erx
                      publish(output, files: combine(plans, generators: generators))
                      Result.new(status: :generated, output: output)
                    end
+          refuse_shadowing(root, output) if own
           yield result if block_given?
           result
         end
@@ -149,16 +153,25 @@ module Erx
       # Generates the files of the one generator named into output, a
       # directory of the caller's choosing that is empty or an earlier such
       # tree: what tools/gen_abi.rb, gen_hw.rb and gen_terminal.rb run, to
-      # read one generator's files outside a build. root's own build/gen is
-      # refused, because ensure keeps that tree whole.
+      # read one generator's files outside a build. Any other directory is
+      # refused, root's own build/gen among them, since ensure replaces what
+      # it writes into whole.
       def generate_one(name, root:, output:)
         generator = GENERATORS.find { |candidate| candidate.name == name }
         raise Error, "no generator is named #{name}" unless generator
-        if resolved(output) == File.join(File.realpath(root), OUTPUT)
+
+        output = resolved(output)
+        if output == resolved(File.join(root, OUTPUT))
           raise Error, "#{output} is the build's generated tree, which holds every generator's files"
+        end
+        unless !File.exist?(output) || (File.directory?(output) && Dir.empty?(output)) ||
+               read_stamp(output)&.generators == [name]
+          raise Error, "#{output} is neither empty nor an earlier output of the #{name} generator"
         end
 
         self.ensure(root: root, output: output, generators: [generator])
+      rescue SystemCallError => error
+        raise Error, "cannot generate the #{name} files into #{output}: #{error.message}"
       end
 
       # Loads one generated Ruby file (a path of tools/generated/) from the
@@ -222,6 +235,24 @@ module Erx
         end
 
         files.merge(STAMP => bytes).sort.to_h.freeze
+      end
+
+      # No file of root sits at the path of a file of its generated tree: the
+      # generated file is the only copy, so no include path, glob, merge or
+      # copy of any consumer can take a stale one in its place. Checked on
+      # every ensure, fresh or not, so it holds for every process that reads
+      # the tree.
+      def refuse_shadowing(root, output)
+        stamp = read_stamp(output)
+        raise Error, "generated tree #{output} has no readable #{STAMP}" unless stamp
+
+        shadowing = stamp.outputs.keys.select do |relative|
+          File.exist?(File.join(root, relative)) || File.symlink?(File.join(root, relative))
+        end
+        return if shadowing.empty?
+
+        raise Error, "these files are at the paths of generated files, which the build generates into " \
+                     "#{OUTPUT}; remove them: #{shadowing.first(8).join(', ')}"
       end
 
       # Whether output holds exactly the tree its stamp describes and every

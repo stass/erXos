@@ -7901,8 +7901,8 @@ dispatch depends on (calls, rights, types, pass sets, charged budgets,
 executor rules) is closed by the generator rather than kept complete by
 hand.
 Generated files are ASCII and readable, are generated into `build/gen/`
-and never checked in, and nothing edits them by hand: the source check
-refuses a file at a generated output's path. The same declarations produce
+and never checked in, and nothing edits them by hand: `Erx::Generated.ensure`
+refuses a repository file at a generated output's path. The same declarations produce
 typed log/trace emitters and decoders, diagnostic names, API reference
 tables and parser test/fuzz scaffolding under
 [Generated interfaces and representations](design-generation.md). Emitter
@@ -8466,7 +8466,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | data holds no code pointer outside an allowlist | every absolute relocation in a data section of the image that targets text belongs to an allowlisted table: the generated handler table | relocations of the linked image |
 | only `liberx`'s `fiasco` backend issues Fiasco calls | outside `liberx/backend/fiasco/`, no object includes an `l4sys` header or contains a system-call trap other than erXos's, and no erXos source outside it references `l4_` symbols | syntax trees, disassembly |
 | an architecture's terms appear only in its layer and its documents | `make check-arch-terms`: no term of an architecture's checked-in term list, `hw/arch_terms/<arch>.txt`, appears in generic sources, generic generated files, `abi/erx_abi.txt` or a generic design document; `kernel/arch/<arch>/`, `liberx`'s per-architecture directories, `abi/arch/<arch>.txt`, `hw/sysreg/<arch>.json`, the term list itself, the architecture's binding document, the platform binding, the research records and [design.md](design.md#dependencies)'s dependency table, which names every dependency, board firmware included, are exempt; an architecture's name is not one of its terms | text search |
-| generated files are never checked in or edited | the source check's refusal of a file at a generated output's path | regeneration of `build/gen/` |
+| generated files are never checked in or edited | the generated tree's refusal of a repository file at a generated output's path (`Erx::Generated.ensure`) | regeneration of `build/gen/` |
 | kernel C recurses only through `musttail` | the stack proof's cycle rule | disassembly |
 
 The checks bind erXos's kernel and the C17 code erXos adds to the stopgap;

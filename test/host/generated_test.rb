@@ -80,6 +80,17 @@ class GeneratedTest < Minitest::Test
     assert_equal :fresh, ensure_tree.status
   end
 
+  # A file of the root at a generated file's path is refused on root's own
+  # tree, fresh or not, so no consumer can read it in the generated one's place.
+  def test_a_root_file_at_a_generated_path_is_refused
+    assert_equal :generated, Erx::Generated.ensure(root: @root, generators: [fake]).status
+    FileUtils.mkdir_p(File.join(@root, 'out'))
+    File.binwrite(File.join(@root, 'out/a.h'), 'stale')
+    error = assert_raises(Erx::Generated::Error) { Erx::Generated.ensure(root: @root, generators: [fake]) }
+    assert_match(%r{at the paths of generated files.*out/a\.h}, error.message)
+    assert_equal :generated, ensure_tree.status, 'a tree of another output is not root\'s own'
+  end
+
   # The generator scripts write one generator's files into a directory of the
   # caller's choosing, never into the build's own tree, which holds them all.
   def test_generate_one_writes_one_generator_and_refuses_the_build_tree
@@ -96,6 +107,16 @@ class GeneratedTest < Minitest::Test
     end
     assert_match(/holds every generator's files/, error.message)
     assert_raises(Erx::Generated::Error) { Erx::Generated.generate_one('nothing', root: ROOT, output: output) }
+    # Only an empty directory or an earlier output of the same generator is replaced.
+    foreign = File.join(@directory, 'foreign')
+    FileUtils.mkdir_p(foreign)
+    File.binwrite(File.join(foreign, Erx::Generated::STAMP), '{}')
+    [foreign, output].each do |taken|
+      error = assert_raises(Erx::Generated::Error) { Erx::Generated.generate_one('terminal', root: ROOT, output: taken) }
+      assert_match(/neither empty nor an earlier output of the terminal generator/, error.message)
+    end
+    assert_path_exists File.join(foreign, Erx::Generated::STAMP)
+    Erx::Generated.generate_one('hardware', root: ROOT, output: output)
   end
 
   def test_an_edited_input_regenerates
@@ -325,7 +346,8 @@ class GeneratedTest < Minitest::Test
   # roots at different paths, with different modification times, and
   # generated from different working directories and time zones into
   # differently named output roots; the two trees are byte-identical to each
-  # other and to the build's own. A generator reading an unrecorded file
+  # other and to a reference generated from the tree. A generator reading an
+  # unrecorded file
   # fails here. otp/ORIGIN.md, which the terminal generator checks its inputs
   # against without recording it (TerminalRules.generation), is copied too.
   def test_generation_depends_only_on_its_recorded_inputs
