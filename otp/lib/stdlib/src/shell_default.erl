@@ -79,10 +79,12 @@ code:load_abs("$PATH/user_default").
 %% test/erlang/erx_shortcut_tests.erl fails if one has the name of a shell
 %% command or the name and arity of one of OTP's own exports here. OTP exports
 %% i/0 and i/3 here but not i/1, so i() and i(X, Y, Z) keep OTP's meaning.
-%% trace/1 waits for the shell to resolve calls by name and arity: it
-%% resolves a call in a function defined at the prompt by name alone, so an
-%% export named trace would take erlang:trace/2,3's calls (TODO.md).
--export([i/1, source/1, trace_stop/1]).
+%% The erx_shortcuts attribute lists them again for edlin_expand, which
+%% resolves a call of a function defined at the prompt by name and arity for
+%% a shortcut and as stock does otherwise, so trace/1 leaves erlang:trace/3's
+%% calls to erlang. The test checks that the two lists agree.
+-export([i/1, source/1, trace/1, trace_stop/1]).
+-erx_shortcuts([{i, 1}, {source, 1}, {trace, 1}, {trace_stop, 1}]).
 -import(io, [format/1]).
 
 -doc "Print the help for all shell commands.".
@@ -266,6 +268,13 @@ information.
 """.
 -spec i(list()) -> ok | {error, term()}.
 i(Path) -> erx:i(Path).
+
+-doc """
+erXos: starts a trace that prints in the shell, as `erx:trace/1` does.
+A call of `trace/3` at the prompt stays `erlang:trace/3`.
+""".
+-spec trace(term()) -> {ok, reference()} | {error, term()}.
+trace(Spec) -> erx:trace(Spec).
 
 -doc """
 erXos: ends a trace that `erx:trace/1` started, as `erx:trace_stop/1` does.

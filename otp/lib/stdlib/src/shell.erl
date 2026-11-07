@@ -18,6 +18,8 @@
 %% limitations under the License.
 %%
 %% Modified by erXos: prompt_width/1 asks no group from erx_console, as from user_drv.
+%% Modified by erXos: a function defined at the prompt resolves its calls, and
+%% is refused, by name and arity (edlin_expand:shell_default_or_bif/2).
 %% q() ends the shell it is typed at, as exit() does, instead of stopping the runtime
 %% (docs/design-shell.md, "Compatibility and migration").
 %%
@@ -457,9 +459,9 @@ get_command(Prompt, Eval, Bs, RT, FT, Ds) ->
                                   end;
                               [{atom, _, FunName}, {'(', _}|_] ->
                                   case erl_parse:parse_form(Toks) of
-                                      {ok, FunDef} ->
+                                      {ok, {function, _, _, Arity, _} = FunDef} ->
                                           FunName1 = lists:flatten(io_lib:fwrite("~tw",[FunName])),
-                                          case {edlin_expand:shell_default_or_bif(FunName1), shell:local_func(FunName1)} of
+                                          case {edlin_expand:shell_default_or_bif(FunName, Arity), shell:local_func(FunName1)} of
                                               {"user_defined", false} ->
                                                 FunDef1 = lists:flatten(escape_quotes(lists:flatten(erl_pp:form(FunDef)))),
                                                 FakeLine = reconstruct(FunDef, FunName),
@@ -522,7 +524,7 @@ reconstruct1([{call, Anno, {atom, Anno1, Name}, Args}|Body], Name, Arity) -> % a
     [{call, Anno, {remote, Anno1, {atom, Anno1, shell_default}, {atom, Anno1, Name}}, reconstruct1(Args, Name, Arity)}|
      reconstruct1(Body, Name, Arity)];
 reconstruct1([{call, Anno, {atom, Anno1, Fun}, Args}|Body], Name, Arity) -> % Name not the same
-    case {edlin_expand:shell_default_or_bif(atom_to_list(Fun)), shell:local_func(Fun)} of
+    case {edlin_expand:shell_default_or_bif(Fun, length(Args)), shell:local_func(Fun)} of
         {"user_defined", false} ->
             [{call, Anno, {remote, Anno1, {atom, Anno1, shell_default}, {atom, Anno1, Fun}}, reconstruct1(Args, Name, Arity)}|
              reconstruct1(Body, Name, Arity)];

@@ -1879,27 +1879,32 @@ prefix in every domain's Erlang shell: `ps()`, `i(Path)`, `domains()`,
 `source(X)`, `trace(Spec)`, `trace_stop(Ref)` and `attach(Domain)` are
 exports of erXos's `shell_default`, which the shell consults for a local
 call it does not recognise, after `user_default` and before the functions
-defined in the shell (`lib/stdlib/src/shell.erl:1604-1633`). Each is a
+defined in the shell (`lib/stdlib/src/shell.erl`, `non_builtin_local_func/4`). Each is a
 one-line call of its `erx` function, with the same facets and no
 authority of its own. Living in `shell_default`, they survive a release
 that brings its own `user_default`. None shadows OTP's own commands: the
 shell's commands (`v`, `h`, `b`, `f`, `rd`, `rf`, `rl`, `rp`, `rr`,
-`history`, `results` and the rest, `shell.erl:1304`) come first, and
+`history`, `results` and the rest, `shell:local_func/0`) come first, and
 OTP's `shell_default` exports `i/0` and `i/3`, its process listing and
 process information, but not `i/1`, so `i()` and `i(X, Y, Z)` keep OTP's
 meaning and `i(Path)` is the inspector; `erx:i()` keeps its prefix. A
-function of the same name and arity that a user defines in the shell is
-shadowed by a shortcut, a documented difference with a test. A test
-derives the shell's command list and OTP's `shell_default` exports from
-OTP's modules and fails if a shortcut collides with either, and fails
-if the shell would resolve a shortcut's name differently from stock:
-it resolves each call in a function defined at the prompt by name
-alone (`shell.erl`, `reconstruct1/3`, through
-`edlin_expand:shell_default_or_bif/1`), so a shortcut whose name stock
-resolves to `erlang` would take that BIF's calls. `trace` is such a
-name, for `erlang:trace/2,3`, so `trace(Spec)` waits until the shell
-resolves those calls by name and arity; until then `erx:trace(Spec)`
-keeps its prefix.
+function defined at the prompt has each of its calls resolved by name
+and arity (`shell.erl`, `reconstruct1/3`, through
+`edlin_expand:shell_default_or_bif/2`): a call of a shortcut's name and
+arity goes to `shell_default`, and every other call where stock sends
+it, by name alone over OTP's own exports, so `trace(Spec)` is the
+shortcut while `trace(P, true, [send])` stays `erlang:trace/3`, and
+argument completion, by name alone, completes `trace(` as stock does.
+`shell_default`'s `erx_shortcuts` attribute lists the shortcuts for
+that resolution. A function of a shortcut's name and arity cannot be
+defined at the prompt, as one of the name of an OTP export cannot, a
+documented difference with a test; one of a shortcut's name at another
+arity is defined or refused as on stock. A test derives the shell's command list and
+OTP's `shell_default` exports from OTP's modules and fails if a
+shortcut collides with either or with an auto-imported BIF, and compares erXos's resolution with
+stock's for every name stock exports from `shell_default` or `erlang`,
+every shell command and every shortcut, at every arity, and fails on
+any difference but a shortcut's own name and arity.
 
 ### The host tool
 
@@ -1945,8 +1950,8 @@ know:
   ([The /proc tree](#the-proc-tree)).
 * **A module's version is its hash.** The store's hash is the SHA-256 of
   the whole file; OTP's `module_info(md5)` keeps its meaning.
-* **The shortcuts live in `shell_default`.** A function a user defines in
-  the shell under one of their names and arities is shadowed by it.
+* **The shortcuts live in `shell_default`.** A function of one of their
+  names and arities cannot be defined at the prompt.
 
 The startup message carries version 1 as well, and a reader refuses
 another version. The file protocol is 9P2000.L, whose `version` names it,

@@ -17,6 +17,10 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: shell_default_or_bif/2 resolves a call by name and arity
+%% for erXos's shell_default shortcuts, and both resolvers leave the shortcuts
+%% out of the name-only answer, which stays stock's.
+%%
 %% %CopyrightEnd%
 %%
 -module(edlin_expand).
@@ -37,7 +41,7 @@ This module provides an expand_fun for the erlang shell
 -include_lib("kernel/include/eep48.hrl").
 
 -export([expand/1, expand/2, expand/3, format_matches/2, number_matches/1, get_exports/1,
-         shell_default_or_bif/1, bif/1, over_word/1]).
+         shell_default_or_bif/1, shell_default_or_bif/2, bif/1, over_word/1]).
 -export([is_type/3, match_arguments1/3]).
 -record(shell_state,{
                      bindings = [],
@@ -743,7 +747,8 @@ shell(Fun) ->
 
 -doc false.
 shell_default_or_bif(Fun) when is_atom(Fun) ->
-    case lists:member(Fun, [E || {E,_} <- get_exports(shell_default)]) of
+    OtpExports = get_exports(shell_default) -- erx_shortcuts(),
+    case lists:member(Fun, [E || {E,_} <- OtpExports]) of
         true -> "shell_default";
         false -> bif(Fun)
     end;
@@ -752,6 +757,35 @@ shell_default_or_bif(Fun) ->
         {ok, [{atom, _, Fun1}], _} -> shell_default_or_bif(Fun1);
         _ -> []
     end.
+
+%% erXos: where a call of a function defined at the prompt goes, by its name
+%% and arity (docs/design-live.md, "Shortcuts"). An erXos shortcut answers
+%% shell_default at its own arity only; every other call gets stock's answer
+%% by name alone, which leaves the shortcuts out, so trace/3 stays erlang's
+%% although shell_default exports trace/1.
+-doc false.
+shell_default_or_bif(Fun, Arity) when is_atom(Fun), is_integer(Arity) ->
+    case lists:member({Fun, Arity}, erx_shortcuts()) of
+        true -> "shell_default";
+        false -> shell_default_or_bif(Fun)
+    end.
+
+%% erXos: the shortcuts erXos's shell_default adds to OTP's exports, which its
+%% erx_shortcuts attribute lists. Read as get_exports/1 reads the exports, so
+%% resolving a call loads no module.
+erx_shortcuts() ->
+    Attributes =
+        case erlang:module_loaded(shell_default) of
+            true ->
+                shell_default:module_info(attributes);
+            false ->
+                case beam_lib:chunks(code:which(shell_default), [attributes]) of
+                    {ok, {shell_default, [{attributes, A}]}} -> A;
+                    _ -> []
+                end
+        end,
+    [Shortcut || {erx_shortcuts, Shortcuts} <- Attributes, is_list(Shortcuts),
+                 Shortcut <- Shortcuts].
 
 -doc false.
 bif(Fun) when is_atom(Fun) ->

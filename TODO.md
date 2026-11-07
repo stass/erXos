@@ -394,13 +394,14 @@ it; git history is the record of completed work.
   ("its module's version") implies.
 * [Medium] live, the shortcuts' collision test (`test/erlang/erx_shortcut_tests.erl`): the shell's commands
   come from `shell:local_func/0`, which leaves out `ft`, `td` and `exit` that `local_func/8` handles before
-  `shell_default`; derive the names from `local_func/8`'s clauses and add auto-imported BIFs
-  (`erl_internal:bif/2`). The design's test that a shortcut shadows a shell-defined function of its name and
-  arity is not written either.
-* [Low] live, the shortcuts (`otp/lib/stdlib/src/shell_default.erl`): a function defined at the prompt is
-  refused for every arity of an exported shortcut's name (`shell.erl:462`), not only the shortcut's arity, as
-  design-live's "Shortcuts" paragraph says; say so there, or resolve by arity with the planned item on
-  `trace/1`.
+  `shell_default`; derive the names from `local_func/8`'s clauses, in the collision check and in the
+  resolution test's names.
+* [Low] live, the shortcuts' resolution (`otp/lib/stdlib/src/edlin_expand.erl`, `erx_shortcuts/0`): the
+  shortcuts reach `edlin_expand` through `shell_default`'s `erx_shortcuts` attribute, read at each call, and
+  `beam_lib:strip` drops the attribute chunk, so a stripped `shell_default` would silently resolve
+  `trace(P, true, [send])` in a function defined at the prompt to `shell_default:trace/3`. Nothing strips
+  beams today; a compile-time single source shared by `shell_default`'s export and `edlin_expand` (an
+  `.hrl` cannot serve both, since `-export` takes `F/A` and the resolver tuples) would remove the read.
 * [Low] live, `erx_source`: the source read follows symbolic links and checks the size before reading rather
   than reading at most the cap, and a rendered line is not cut at a width, so a 4 MiB line (32 MiB of
   expanded tabs) reaches the console whole. Read with `file:read(Fd, Max + 1)` after `read_link_info`, and cut
