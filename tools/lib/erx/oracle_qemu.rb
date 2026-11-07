@@ -94,7 +94,7 @@ module Erx
     # Runs `suites`, names of the group's suites (OracleSuites), on stock and in the guest
     # under `accel` with `cpus` CPUs, and compares them.
     def run(suites, accel:, cpus:, jobs: 4)
-      raise Error, "a guest has #{Qemu::CPUS.min} to #{Qemu::CPUS.max} CPUs, not #{cpus}" unless Qemu::CPUS.include?(cpus)
+      raise Error, "a guest has #{QemuPlan::CPUS.min} to #{QemuPlan::CPUS.max} CPUs, not #{cpus}" unless QemuPlan::CPUS.include?(cpus)
 
       # Stock runs as many schedulers as the system domain's ERTS gets.
       schedulers = ProductionImage::Run.schedulers(File.read(File.join(@root, ProductionImage::MANIFEST)), cpus: cpus)
