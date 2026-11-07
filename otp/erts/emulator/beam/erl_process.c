@@ -12191,6 +12191,18 @@ erts_parse_spawn_opts(ErlSpawnOpts *sop, Eterm opts_list, Eterm *tag,
                 else {
                     result = -1;
                 }
+	    } else if (arg == am_sensitive) {
+                /* erXos: a process spawned sensitive is sensitive from its
+                 * first instruction, so no trace session ever sees it run
+                 * (erx_trace's own processes). */
+                if (sop->flags & SPO_SENSITIVE)
+                    sop->multi_set = !0;
+                if (val == am_true)
+                    sop->flags |= SPO_SENSITIVE;
+                else if (val == am_false)
+                    sop->flags &= ~SPO_SENSITIVE;
+                else
+                    result = -1;
 	    } else if (arg == am_message_queue_data) {
                 if (sop->flags & (SPO_OFF_HEAP_MSGQ|SPO_ON_HEAP_MSGQ))
                     sop->multi_set = !0;
@@ -12607,6 +12619,14 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
         }
     }
     ERTS_P_ALL_TRACE_FLAGS(p) = erts_sum_all_trace_flags(&p->common);
+    if (so->flags & SPO_SENSITIVE) {
+        /* erXos: as process_flag(sensitive, true) does, before the process
+         * first runs: a session may hold flags for it but sees no event. */
+        ErtsTracerRef *ref;
+        for (ref = p->common.tracee.first_ref; ref; ref = ref->next)
+            ref->flags |= F_SENSITIVE;
+        ERTS_P_ALL_TRACE_FLAGS(p) = F_SENSITIVE;
+    }
 
     p->uniq = 0;
     p->sig_qs.first = NULL;

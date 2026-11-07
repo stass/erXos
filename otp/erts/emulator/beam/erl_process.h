@@ -1488,8 +1488,9 @@ void erts_check_for_holes(Process* p);
 #define SPO_IX_NO_SMSG          12
 #define SPO_IX_NO_EMSG          13
 #define SPO_IX_ASYNC_DIST       14
+#define SPO_IX_SENSITIVE        15
 
-#define SPO_NO_INDICES          (SPO_IX_ASYNC_DIST+1)
+#define SPO_NO_INDICES          (SPO_IX_SENSITIVE+1)
 
 #define SPO_LINK                (1 << SPO_IX_LINK)
 #define SPO_MONITOR             (1 << SPO_IX_MONITOR)
@@ -1506,8 +1507,9 @@ void erts_check_for_holes(Process* p);
 #define SPO_NO_SMSG             (1 << SPO_IX_NO_SMSG)
 #define SPO_NO_EMSG             (1 << SPO_IX_NO_EMSG)
 #define SPO_ASYNC_DIST          (1 << SPO_IX_ASYNC_DIST)
+#define SPO_SENSITIVE           (1 << SPO_IX_SENSITIVE)
 
-#define SPO_MAX_FLAG            SPO_ASYNC_DIST
+#define SPO_MAX_FLAG            SPO_SENSITIVE
 
 #define SPO_USE_ARGS                 \
     (SPO_MIN_HEAP_SIZE               \

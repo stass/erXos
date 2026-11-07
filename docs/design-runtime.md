@@ -413,8 +413,9 @@ of behaviour, however many lines it touches:
 | `emulator/Makefile.in` | 49. `erl_compile_flags.h` holds `N/A` for the flags and `config.h` on erXos's targets, since they name host paths and `erlang:system_info(compile_info)` would serve them from the image |
 | `lib/stdlib/src/shell_default.erl` | 50. exports erXos's shortcuts, each a one-line call of its `erx` function ([design-live.md](design-live.md#erlang-in-every-domain)) |
 | `beam/bif.tab`, `beam/atom.names`, `emulator/Makefile.in` | 51. `erx_trace_ring:read/3` and `clocks/0` are BIFs (`nifs/erxos/erx_trace_ring_bif.c`), with the atoms `backend`, `kernel`, `present` and `unknown` they match and return ([design-live.md](design-live.md#tracing)) |
+| `beam/erl_process.h`, `beam/erl_process.c` | 52. the spawn option `{sensitive, true}` makes a process sensitive from its first instruction, as `process_flag(sensitive, true)` would if it ran first, so no trace session sees it run; `erx_trace` spawns its own processes so ([design-live.md](design-live.md#tracing)) |
 
-Fifty-one edits outside `sys/erxos`, in fifty files, the JIT's
+Fifty-two edits outside `sys/erxos`, in fifty files, the JIT's
 directory and asmjit's `VirtMem`; the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
