@@ -331,4 +331,16 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   constant. Fixes on the table: a byte-at-a-time table of 256 entries, slicing by eight,
   then the AArch64 instructions chosen by feature detection in the architecture layer,
   the portable code staying as their oracle in the same test.
+* **[Low] per-byte primitives, `erx_bytes:sha256/1` runs FreeBSD's portable C only.**
+  It does not use the CPU's SHA-256 instructions (AArch64's FEAT_SHA256) that
+  [the design](design-runtime.md#per-byte-primitives) puts behind the architecture
+  layer; the portable code took about 240 microseconds over 64 KiB in a one-off loop
+  on the development host (Apple M-series, macOS, native, clang -O2, 2026-11-06), not
+  a benchmark. Measure: the time the code server spends checking blobs during a boot
+  that loads every module by hash (`tools/erx bench` of that boot, on HVF), against
+  the same boot with the check stubbed to the expected digest. If the check is a
+  visible share of the boot, add the instructions, chosen by feature detection in the
+  architecture layer, with the portable code as their oracle in the same test. The
+  same run should time one 64 KiB call on each target board, since `erx_bytes_nif.c`
+  charges it a quarter of a reduction slice from the host's number.
 * [Low] `erlang/apps/erx_shell/src/erx_shell.erl`, `end_line/3`: every unit the command shell runs, a refused one included, ends with at least one pass over `erlang:processes()` with a `process_info/2` per process, so its cost grows with the system domain's process table. Settled by the time of an empty line's unit at the console with the domain's usual process count and with ten times as many.

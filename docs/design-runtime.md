@@ -2137,9 +2137,15 @@ done once per packet, per block and per file around them.
 | `erx_device:complete/2`'s copy | copies a completed buffer's returned bytes into a fresh binary ([The device NIF](#the-device-nif)) | drivers | a byte-for-byte comparison |
 | the pipe NIF's record copy | copies a record between a pipe's ring and a binary | the session's pipe ends | the pipe tests |
 
-* **Bounded.** A call works on at most 64 KiB of hashing or checksumming
+* **Bounded.** A NIF call works on at most 64 KiB of hashing or checksumming
   or 16 blocks, so it stays within a reduction slice and runs on a normal
-  scheduler; the caller streams longer inputs.
+  scheduler; the caller streams longer inputs. The SHA-256 calls take a
+  binary of any size and stream it through calls of 64 KiB themselves,
+  each charged reductions for its bytes, so a blob is checked in one call
+  and the process is still preempted between its pieces; a state of
+  `sha256_init/0` and `sha256_update/2` is an immutable value, so the
+  same state may be extended or finished more than once, within the
+  runtime that made it.
 * **Never blocking.** No primitive waits; every event a driver or a pipe
   end waits for is a message through the event table.
 * **Only checked blocks reach the reader.** The EROFS reader takes blocks

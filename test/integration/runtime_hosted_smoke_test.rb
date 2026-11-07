@@ -262,6 +262,25 @@ class RuntimeHostedSmokeTest < Minitest::Test
     )
   end
 
+  # The SHA-256 per-byte primitive runs in the release and agrees with the oracle: the probe
+  # (test/fixtures/erx_sha256_probe.erl) digests its messages on stock OTP with crypto:hash/2,
+  # then checks erx_bytes's calls against those digests and FIPS 180-4's examples, over random
+  # cuts and reused states, and their refusals; the answer is all empty lists only if each
+  # check passed.
+  def test_the_sha256_primitive_runs_in_the_release_and_agrees_with_the_oracle
+    Dir.mktmpdir('erx-hosted-sha256-') do |directory|
+      probe = compiled_fixture('erx_sha256_probe', directory)
+      digests = oracle_sha256_digests(directory)
+      assert_equal 15, digests.size
+      assert_answers(
+        "{module, erx_sha256_probe} = code:load_binary(erx_sha256_probe, \"probe\", base64:decode(\"#{probe}\")), " \
+        'loaded.' => /^loaded$/,
+        "erx_sha256_probe:check([#{digests.map { |digest| "<<\"#{digest}\">>" }.join(',')}])." =>
+          /^\{sha256,\[\],\[\],\[\],\[\]\}$/
+      )
+    end
+  end
+
   # Stock's code server dies on a root directory in its path, with no version to split from
   # its empty base name, and three of those stop the node. Here the working directory is "/".
   def test_the_root_directory_on_the_code_path_leaves_the_code_server_running
@@ -444,12 +463,27 @@ class RuntimeHostedSmokeTest < Minitest::Test
   # The fixture's BEAM, in base64, compiled on the host by the oracle's erlc, so the probe
   # depends on nothing in the release but the loader it tests.
   def compiled_load_nif_probe
-    Dir.mktmpdir('erx-hosted-probe-') do |directory|
-      log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '-o', directory,
-                                    File.join(ROOT, 'test/fixtures/load_nif_probe.erl'))
-      assert status.success?, log
-      [File.binread(File.join(directory, 'load_nif_probe.beam'))].pack('m0')
-    end
+    Dir.mktmpdir('erx-hosted-probe-') { |directory| compiled_fixture('load_nif_probe', directory) }
+  end
+
+  # The BEAM of test/fixtures/NAME.erl, compiled by the oracle's erlc into directory without
+  # its documentation, in base64.
+  def compiled_fixture(name, directory)
+    log, status = Open3.capture2e(File.join(ROOT, 'build/oracle/emu/install/bin/erlc'), '+no_docs', '-o', directory,
+                                  File.join(ROOT, "test/fixtures/#{name}.erl"), stdin_data: '')
+    assert status.success?, log
+    [File.binread(File.join(directory, "#{name}.beam"))].pack('m0')
+  end
+
+  # The probe's digests by stock OTP's crypto:hash/2, from the probe compiled in directory.
+  def oracle_sha256_digests(directory)
+    expression = 'io:format("~s~n", [lists:join(",", erx_sha256_probe:digests(fun(Data) -> ' \
+                 'crypto:hash(sha256, Data) end))]), halt().'
+    output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
+                                     File.join(ROOT, 'build/oracle/emu/install/bin/erl'), '-noshell', '-pa', directory,
+                                     '-eval', expression, stdin_data: '')
+    assert status.success?, output
+    output.chomp.split(',')
   end
 
   # The release's manifest holds every argument, and nothing of the host's environment reaches the page.

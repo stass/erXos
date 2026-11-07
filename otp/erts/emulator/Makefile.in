@@ -1013,6 +1013,11 @@ $(OBJDIR)/lfs.o $(OBJDIR)/lfs_util.o: $(OBJDIR)/%.o: $(LFS_DIR)/%.c
 
 $(OBJDIR)/erx_littlefs_nif.o: CFLAGS += $(LFS_CFLAGS)
 
+# FreeBSD SHA-256 as erXos imported it, the core of erx_bytes:sha256/1 (docs/design-runtime.md,
+# "Per-byte primitives"), built from its one copy in the tree.
+$(OBJDIR)/sha256c.o: $(ERX_TREE)/kernel/crypto/sha2/sha256c.c
+	$(V_CC) $(CFLAGS) -I$(ERX_TREE)/include -c $< -o $@
+
 $(OBJDIR)/%.o: nifs/erxos/%.c
 	$(V_CC) $(CFLAGS) -I$(ERX_TREE) -I$(ERX_TREE)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
@@ -1271,6 +1276,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \
 	$(OBJDIR)/erx_crc32c.o \
+	$(OBJDIR)/sha256c.o \
 	$(OBJDIR)/erx_device_bif.o \
 	$(OBJDIR)/sys_env.o \
 	$(OBJDIR)/driver_tab.o \
@@ -1513,6 +1519,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(NIF_COMMON_SRC) > $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -DLIBSCTP=$(LIBSCTP) -I../etc/$(STOCK_OSTYPE) $(NIF_OSTYPE_SRC) >> $@.tmp
 	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_TREE) -I$(ERX_TREE)/include $(LFS_CFLAGS) $(wildcard nifs/erxos/*.c) >> $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -I$(ERX_TREE)/include $(ERX_TREE)/kernel/crypto/sha2/sha256c.c >> $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
