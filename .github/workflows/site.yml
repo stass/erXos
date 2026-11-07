@@ -7,7 +7,9 @@
 # The erXos image needs the full erXos toolchain (the cross compilers, the
 # OTP and Fiasco builds), which this job does not set up. It takes the image
 # from a URL instead, normally a release asset, and checks it against the
-# SHA-256 given with it.
+# SHA-256 given with it. The image carries the stopgap kernel's GPL-2.0
+# files, so the page links the erXos source it was built from, the release
+# tag or commit given as image_source.
 #
 # Each action is pinned to the commit of the tag named beside it.
 name: site
@@ -21,15 +23,33 @@ on:
       image_sha256:
         description: SHA-256 of that image.boot
         required: true
+      image_source:
+        description: the erXos release tag or full commit the image was built from; the page links its source
+        required: true
 
 permissions:
   contents: read
+
+# One deployment at a time; a queued run waits rather than cancelling one
+# in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
+      - name: Check the inputs
+        env:
+          IMAGE_SHA256: ${{ inputs.image_sha256 }}
+          IMAGE_SOURCE: ${{ inputs.image_source }}
+        run: |
+          [[ "$IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "image_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
+          [[ "$IMAGE_SOURCE" =~ ^[0-9a-f]{40}$ ]] ||
+            { [[ "$IMAGE_SOURCE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] && [[ "$IMAGE_SOURCE" != *..* ]]; } ||
+            { echo "image_source must be a release tag or a 40-hex commit" >&2; exit 1; }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -41,6 +61,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ruby clang lld default-jre-headless make
           rustup target add wasm32-unknown-unknown
+          # erXos's tools run each subprocess under GNU timeout by its Homebrew name.
+          sudo ln -sf /usr/bin/timeout /usr/local/bin/gtimeout
       - name: Fetch the pinned v64 and Closure Compiler
         run: |
           tools/erx fetch --source v64
@@ -51,9 +73,11 @@ jobs:
           IMAGE_SHA256: ${{ inputs.image_sha256 }}
         run: |
           curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --output image.boot "$IMAGE_URL"
-          echo "$IMAGE_SHA256  image.boot" | sha256sum --check
+          echo "$IMAGE_SHA256  image.boot" | sha256sum --check --strict
       - name: Build v64 and assemble the site
-        run: ruby tools/build_site.rb --image image.boot
+        env:
+          IMAGE_SOURCE: ${{ inputs.image_source }}
+        run: ruby tools/build_site.rb --image image.boot --source "$IMAGE_SOURCE"
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: build/site

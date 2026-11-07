@@ -19,21 +19,41 @@ tools/erx fetch --source closure-compiler
 ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
 ```
 
-* Building v64 runs `npm ci` (its build tools, from its
-  `package-lock.json`) and its own Makefile for `build/libv86.mjs` and
-  `build/v86-arm64.wasm`. It needs Node with npm, clang with the wasm32
-  target, Rust with the `wasm32-unknown-unknown` target, and Java. v64's
-  `LICENSE` and `LICENSE.MIT` are copied beside the built files, as their
-  BSD and MIT licenses require. `--v64 DIR` instead takes a v64 tree whose
-  `build/` already holds both files, and builds nothing. `npm ci` fetches
-  from the npm registry: the site build alone is exempt from the rule that
-  npm packages install offline from a fetched store, because v64 pins its
+* Building v64 copies the fetched tree, after checking its download
+  record against `deps.lock`, to a fresh `build/site-v64/`, and runs
+  `npm ci --ignore-scripts` (its build tools, from its
+  `package-lock.json`, without their install scripts) and its own
+  Makefile for `build/libv86.mjs` and `build/v86-arm64.wasm` there, each
+  under a deadline with its output in `build/logs/`. It needs Node with
+  npm, clang with the wasm32 target, Rust with the
+  `wasm32-unknown-unknown` target, and Java. `npm ci` fetches from the
+  npm registry: the site build alone is exempt from the rule that npm
+  packages install offline from a fetched store, because v64 pins its
   tools with its own lockfile and nothing it fetches reaches an erXos
-  image.
+  image. `--v64 DIR` instead takes a tree an earlier run built, such as
+  `build/site-v64`, and builds nothing.
+* The licence notices of what the two files contain ship beside them in
+  `v64/`: v64's `LICENSE` (BSD-2-Clause) and `LICENSE.MIT`; `NOTICES`,
+  every copyright block of the third-party C compiled into the core
+  (Berkeley SoftFloat, BSD-3-Clause, and zstd, BSD-3-Clause, with zstd's
+  licence text from `otp/erts/emulator/zstd/LICENSE`, which zstd's
+  headers refer to); and `COPYRIGHT-rust-library.html`, the Rust
+  toolchain's notices for the standard library the core links. The
+  build scans the sources v64's Makefile compiles and fails on one that
+  states a licence `Erx::SiteV64` does not list, so a new third-party
+  input cannot ship without its notice.
 * `--image` is the erXos boot image, by default
   `build/production-image/interactive/image.boot`. It is stored
-  gzip-compressed as `image-<digest>.boot.gz`; `boot.json` gives the page
-  its name, its sizes and its SHA-256.
+  gzip-compressed as `image-<digest>.boot.gz`.
+* `--source REF` is the erXos release tag or full commit the image was
+  built from, by default this tree's `HEAD`. The image carries the
+  stopgap kernel's GPL-2.0 files, so the page links that source on
+  github.com beside the console, and `boot.json` records it.
+* `terminal.js`, `libv86.mjs` and `v86-arm64.wasm` are published under
+  names that carry their digests. `index.html` names the script and
+  `boot.json`, which the page fetches past the browser's cache, names
+  the image and v64's two files, so after a redeploy a browser never
+  pairs one deployment's module with another's core.
 * `--serve PORT` then serves `build/site/` on `127.0.0.1:PORT` until
   interrupted. Any static file server works too; the page needs no
   special headers, because the guest has one core and the page
@@ -46,14 +66,16 @@ recorded session; the Boot button needs the built site.
 and publishes `build/site` to GitHub Pages. It does not build the erXos
 image, which needs the whole erXos toolchain; it downloads a release
 asset's `image.boot`, named by its URL and SHA-256 as the workflow's
-inputs, and refuses one whose digest differs.
+inputs, and refuses one whose digest differs. Its third input names the
+release tag or commit the image was built from, for the source link.
+Runs queue in one `pages` group, so two deployments never overlap.
 
 To publish: in the repository settings, set Pages to deploy from GitHub
 Actions; attach an interactive production `image.boot` to a release; then
 run the `site` workflow with that asset's URL and SHA-256:
 
 ```
-gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST
+gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source=TAG
 ```
 
 `ruby test/host/site_test.rb` tests the build step.

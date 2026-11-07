@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'cgi'
 require 'digest'
 require 'fileutils'
 require 'json'
@@ -9,76 +10,102 @@ require 'socket'
 require 'tmpdir'
 require 'zlib'
 require_relative 'error'
+require_relative 'site_v64'
 
 module Erx
-  # Assembles the static website in build/site from three inputs: the page
-  # sources in site/, v64's build outputs (the emulator the page runs erXos
-  # on), and an erXos boot image. None of the built files is checked in.
+  # Assembles the static website in build/site from four inputs: the page
+  # sources in site/, a v64 tree SiteV64 built (the emulator the page runs
+  # erXos on, with its licence notices), an erXos boot image, and the
+  # source the image was built from. None of the built files is checked in.
   #
-  # The image is stored gzip-compressed under a name that carries its digest,
-  # so a cache never serves a stale image, and boot.json tells the page its
-  # name, sizes and SHA-256. The page decompresses it with
-  # DecompressionStream, so the static host needs no Content-Encoding setup.
+  # The image, terminal.js and v64's two files are stored under names that
+  # carry their digests, and boot.json (fetched without the cache's copy)
+  # and index.html name them, so a cache never serves a stale file and
+  # files of two deployments never mix. The image is gzip-compressed; the
+  # page decompresses it with DecompressionStream, so the static host needs
+  # no Content-Encoding setup.
+  #
+  # The image carries the stopgap kernel's GPL-2.0 code, so the page links
+  # the erXos source it was built from, a release tag or a commit, beside
+  # the console (docs/design.md, "Licences and notices").
   module Site
     PAGE_FILES = %w[index.html style.css terminal.js].freeze
-    # The v64 files the page loads, from its build directory, and the license
-    # texts that must accompany them, from its checkout.
-    V64_BUILD_FILES = %w[libv86.mjs v86-arm64.wasm].freeze
-    V64_LICENSES = %w[LICENSE LICENSE.MIT].freeze
     MANIFEST = 'boot.json'
     # Marks a directory this step built; the server's route table skips it.
     MARKER = '.erx-site'
-    # v64 is used unmodified: deps.lock pins its commit and Closure Compiler,
-    # which its JavaScript build needs, and `tools/erx fetch` places them here.
-    V64_SOURCE = 'build/third_party/v64/v64-87d26de'
-    CLOSURE_JAR = 'build/third_party/closure-compiler/closure-compiler-v20210601.jar'
-    V64_TARGETS = %w[build/libv86.mjs build/v86-arm64.wasm].freeze
+    REPOSITORY = 'https://github.com/stass/erXos'
+    TAG = /\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/
+    COMMIT = /\A[0-9a-f]{40}\z/
 
     # One output file: where it goes under the site directory, where it comes
     # from, and whether it is stored gzip-compressed.
     Entry = Data.define(:path, :source, :gzip)
-    Image = Data.define(:name, :bytes, :sha256)
-    Plan = Data.define(:entries, :image)
+    # The erXos source an image was built from: a release tag or a commit.
+    Source = Data.define(:ref) do
+      def url = "#{REPOSITORY}/tree/#{ref}"
+      def label = COMMIT.match?(ref) ? ref[0, 12] : ref
+    end
+    # entries: the files copied as they are; index: index.html's template;
+    # names: the digest names; manifest: boot.json without compressed_bytes,
+    # which only the written image gives.
+    Plan = Data.define(:entries, :index, :names, :manifest)
 
     module_function
 
-    # Builds v64's release bundle and ARM64 core in its fetched source tree
-    # with v64's own Makefile. Needs Node with npm, clang with the wasm32
-    # target, Rust with the wasm32-unknown-unknown target, and Java. `npm ci`
-    # installs v64's build tools from its package-lock.json, from the npm
-    # registry, and replaces any half-finished install; make then skips
-    # Closure Compiler's download because CLOSURE names the pinned jar.
-    def build_v64(root:)
-      source = File.join(root, V64_SOURCE)
-      closure = File.join(root, CLOSURE_JAR)
-      missing = [source, closure].reject { |path| File.exist?(path) }
-      unless missing.empty?
-        raise Error, "missing #{missing.first}: run tools/erx fetch --source v64 and --source closure-compiler"
+    # A release tag (letters, digits, '.', '_' and '-', no '..') or a full
+    # commit hash; anything else is refused, since it lands in a URL and in
+    # the page.
+    def source(ref)
+      unless ref.is_a?(String) && (COMMIT.match?(ref) || (TAG.match?(ref) && !ref.include?('..')))
+        raise Error, "image source must be a release tag or a 40-hex commit: #{ref.inspect}"
       end
 
-      run(['npm', 'ci', '--no-audit', '--no-fund'], chdir: source)
-      run(['make', '-C', source, "CLOSURE=#{closure}", *V64_TARGETS])
-      source
+      Source.new(ref:)
     end
 
-    def run(argv, chdir: Dir.pwd)
-      system(*argv, chdir:, in: File::NULL, exception: false) or raise Error, "#{argv.first} failed: #{argv.join(' ')}"
+    # The name under which a file is published: its digest's first 16 hex
+    # digits before its extension.
+    def digest_name(name, digest)
+      extension = File.extname(name)
+      "#{File.basename(name, extension)}-#{digest[0, 16]}#{extension}"
     end
-    private_class_method :run
 
-    # The pure part: which files go where. Raises Erx::Error naming the first
-    # missing input.
-    def plan(root:, v64:, image:)
-      page = PAGE_FILES.map { |name| Entry.new(path: name, source: File.join(root, 'site', name), gzip: false) }
-      emulator = V64_BUILD_FILES.map { |name| Entry.new(path: "v64/#{name}", source: File.join(v64, 'build', name), gzip: false) }
-      licenses = V64_LICENSES.map { |name| Entry.new(path: "v64/#{name}", source: File.join(v64, name), gzip: false) }
-      missing = [*page, *emulator, *licenses].map(&:source).push(image).reject { |path| File.file?(path) }
+    # Reads the inputs' sizes and digests and decides which file goes where.
+    # Raises Erx::Error naming the first missing input.
+    def inventory(root:, v64:, image:, source:)
+      page = PAGE_FILES.to_h { |name| [name, File.join(root, 'site', name)] }
+      emulator = SiteV64::TARGETS.transform_values { |path| File.join(v64, path) }
+      notices = SiteV64::NOTICES.transform_values { |path| File.join(v64, path) }
+      missing = [*page.values, *emulator.values, *notices.values, image].reject { |path| File.file?(path) }
       raise Error, "site input missing: #{missing.first}" unless missing.empty?
 
-      digest = Digest::SHA256.file(image).hexdigest
-      boot = Image.new(name: "image-#{digest[0, 16]}.boot.gz", bytes: File.size(image), sha256: digest)
-      Plan.new(entries: [*page, *emulator, *licenses, Entry.new(path: boot.name, source: image, gzip: true)],
-               image: boot)
+      digest = ->(path) { Digest::SHA256.file(path).hexdigest }
+      image_sha256 = digest.(image)
+      names = { 'terminal.js' => digest_name('terminal.js', digest.(page.fetch('terminal.js'))),
+                'image' => "image-#{image_sha256[0, 16]}.boot.gz" }
+              .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
+      entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
+                 Entry.new(path: names.fetch('terminal.js'), source: page.fetch('terminal.js'), gzip: false),
+                 *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, gzip: false) },
+                 *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, gzip: false) },
+                 Entry.new(path: names.fetch('image'), source: image, gzip: true)]
+      manifest = { image: names.fetch('image'), bytes: File.size(image), sha256: image_sha256,
+                   emulator: { module: names.fetch('libv86.mjs'), wasm: names.fetch('v86-arm64.wasm'),
+                               bytes: emulator.values.sum { |path| File.size(path) } },
+                   source: { ref: source.ref, url: source.url } }
+      Plan.new(entries:, index: page.fetch('index.html'), names:, manifest:)
+    end
+
+    # index.html with its {{name}} placeholders filled in. Every value is
+    # HTML-escaped; an unknown placeholder raises.
+    def render_index(template, terminal:, source:)
+      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label }
+      template.gsub(/\{\{([a-z_]+)\}\}/) do
+        key = Regexp.last_match(1)
+        raise Error, "index.html: unknown placeholder {{#{key}}}" unless values.key?(key)
+
+        CGI.escapeHTML(values.fetch(key))
+      end
     end
 
     # The effects: builds the site in a fresh sibling of out and renames it
@@ -102,10 +129,10 @@ module Erx
 
     def assemble(plan, out:)
       plan.entries.each { |entry| write(entry, out:) }
-      compressed = File.size(File.join(out, plan.image.name))
-      emulator = V64_BUILD_FILES.sum { |name| File.size(File.join(out, 'v64', name)) }
-      manifest = { image: plan.image.name, bytes: plan.image.bytes, compressed_bytes: compressed,
-                   emulator_bytes: emulator, sha256: plan.image.sha256 }
+      index = render_index(File.read(plan.index), terminal: plan.names.fetch('terminal.js'),
+                                                  source: Source.new(ref: plan.manifest.dig(:source, :ref)))
+      File.write(File.join(out, 'index.html'), index)
+      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))))
       File.write(File.join(out, MANIFEST), "#{JSON.pretty_generate(manifest)}\n")
       File.write(File.join(out, MARKER), "built by tools/build_site.rb\n")
       manifest
@@ -132,9 +159,9 @@ module Erx
 
     # Maps each URL path to a file of the site directory, listed once at
     # start: a request names an entry of this table or gets 404, so no
-    # request path ever reaches the file system.
+    # request path ever reaches the file system. The MARKER is not served.
     def routes(dir)
-      Dir.glob('**/*', base: dir).select { |path| File.file?(File.join(dir, path)) }
+      Dir.glob('**/*', base: dir).select { |path| path != MARKER && File.file?(File.join(dir, path)) }
          .to_h { |path| ["/#{path}", File.join(dir, path)] }
          .then { |table| table.merge('/' => table.fetch('/index.html')) }
     end

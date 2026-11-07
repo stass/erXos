@@ -775,3 +775,7 @@ h2,
   letter-spacing: 0.02em;
   color: var(--ink);
 }
+
+.terminal-source a {
+  color: var(--code-ink);
+}

@@ -7,8 +7,9 @@
 // boots the image, and attaches the machine's serial console (the PL011,
 // v64's serial0) to an xterm.js terminal.
 //
-// Flow: boot.json (written by tools/build_site.rb) names the image, its
-// sizes and its SHA-256. The image is downloaded with a progress bar,
+// Flow: boot.json (written by tools/build_site.rb, fetched past the cache)
+// names the image, its sizes and its SHA-256, and v64's module and core,
+// all under names that carry their digests. The image is downloaded with a progress bar,
 // decompressed with DecompressionStream, checked against the SHA-256 and
 // kept in memory, so Reset reboots without downloading again. Boot progress
 // comes from milestones in the serial output.
@@ -16,8 +17,6 @@
 // Guest memory. One constant, so a smaller image can lower it in one place.
 const RAM_MIB = 512;
 const CMDLINE = "erx.watchdog=1,30,600";
-const V64_MODULE = "v64/libv86.mjs";
-const V64_WASM = "v64/v86-arm64.wasm";
 const MANIFEST = "boot.json";
 
 // xterm.js from a CDN, pinned to exact versions and checked by Subresource
@@ -86,7 +85,7 @@ function load_xterm() {
 }
 
 async function fetch_manifest() {
-    const response = await fetch(MANIFEST);
+    const response = await fetch(MANIFEST, { cache: "no-cache" });
     if(!response.ok) throw new Error(`boot manifest: HTTP ${response.status}`);
     return response.json();
 }
@@ -165,7 +164,9 @@ function open_terminal() {
 // machine Reset destroyed never reaches the terminal.
 const machine = {
     V86: null,
+    manifest: null,
     image: null,
+    term: null,
     current: null,
 
     start() {
@@ -175,14 +176,14 @@ const machine = {
         const flush = () => {
             flush_scheduled = false;
             if(this.current !== session) return;
-            term.write(Uint8Array.from(queued));
+            this.term.write(Uint8Array.from(queued));
             queued = [];
         };
         ui.state.textContent = "Booting";
         show_status("Starting the machine", DOWNLOAD_SHARE);
         session.emulator = new this.V86({
             cpu_type: "arm64", graphics_adapter: "none", cpu_cores: 1,
-            memory_size: RAM_MIB << 20, log_level: 0, wasm_path: V64_WASM,
+            memory_size: RAM_MIB << 20, log_level: 0, wasm_path: this.manifest.emulator.wasm,
             kernel: { buffer: this.image.slice(0) }, cmdline: CMDLINE,
             jit_switches: { a64_page: 1 }, autostart: true,
         });
@@ -203,7 +204,7 @@ const machine = {
                     ui.progress.hidden = true;
                     ui.state.textContent = "Live";
                     window.erx_ready_at = performance.now();
-                    term.focus();
+                    this.term.focus();
                 }
             }
         });
@@ -215,13 +216,13 @@ const machine = {
         try {
             show_status("Loading", 0);
             const xterm = load_xterm();
-            const v64 = import(new URL(V64_MODULE, document.baseURI).href);
-            const manifest = await fetch_manifest();
+            const manifest = this.manifest = await fetch_manifest();
+            const v64 = import(new URL(manifest.emulator.module, document.baseURI).href);
             this.image = await fetch_image(manifest, received =>
                 show_status(`Downloading ${mib(Math.min(received, manifest.compressed_bytes))} of ` +
                             `${mib(manifest.compressed_bytes)} MB`, received / manifest.compressed_bytes * DOWNLOAD_SHARE));
             [{ V86: this.V86 }] = await Promise.all([v64, xterm]);
-            term ??= open_terminal();
+            this.term ??= open_terminal();
             ui.boot.hidden = true;
             ui.reset.hidden = false;
             this.start();
@@ -236,7 +237,7 @@ const machine = {
         this.current = null;
         try {
             await old?.emulator.destroy();
-            term.reset();
+            this.term.reset();
             this.start();
         } catch(error) {
             this.fail(error);
@@ -250,12 +251,11 @@ const machine = {
     fail(error) {
         show_status(`Could not start: ${error?.message ?? error}`);
         ui.state.textContent = "Stopped";
-        if(this.image && this.V86 && term) return;
+        if(this.image && this.V86 && this.term) return;
         ui.boot.textContent = "Try again";
         ui.boot.disabled = false;
     },
 };
-let term = null;
 
 function init() {
     if(!ui.screen || !ui.controls) return;
@@ -271,7 +271,7 @@ function init() {
     ui.boot.addEventListener("click", () => machine.boot());
     ui.reset.addEventListener("click", () => machine.reset());
     fetch_manifest().then(manifest =>
-        show_status(`${mib(manifest.compressed_bytes + manifest.emulator_bytes)} MB download, runs in your browser`)).catch(() => undefined);
+        show_status(`${mib(manifest.compressed_bytes + manifest.emulator.bytes)} MB download, runs in your browser`)).catch(() => undefined);
 }
 
 init();

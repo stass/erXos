@@ -1926,6 +1926,23 @@ to the corpus and follow rc
   outside the project is likewise judged by name; checking it against the
   compiler's own roots (SDK path, resource directory) would also refuse
   credential files whose directory is not on the list.
+* [Low] website, `.github/workflows/site.yml` and `tools/lib/erx/site_v64.rb`:
+  the tools that build v64 are not pinned: the workflow installs whatever
+  clang, lld, Java, Ruby and Rust the runner's apt and rustup give, and
+  `setup-node` takes the newest Node 22, so two runs of the same inputs
+  can ship different `libv86.mjs` and `v86-arm64.wasm`. Pin each to a
+  version (a Rust toolchain file or `rustup toolchain install` of an exact
+  release, exact apt package versions or a pinned container image).
+* [Low] website, `site/terminal.js`: `machine.boot()` and `machine.reset()`
+  catch their own errors, but the `import()` of v64's module and
+  `load_xterm()` start before the manifest and image downloads they are
+  awaited after, so when a download fails first, a later failure of either
+  promise is an unhandled rejection in the console. Attach a handler where
+  each starts.
+* [Low] website, `site/terminal.js`: "Try again" after a failed boot
+  downloads the image again even when the image arrived and checked out
+  and only xterm.js or v64 failed to load; keep a checked image across
+  retries.
 
 ## Security residuals
 
@@ -2065,6 +2082,17 @@ to the corpus and follow rc
   does, list it among the bus masters of the DMA contract; the system
   manifest gives it to no domain
   ([design-platforms.md](docs/design-platforms.md#dma)).
+* [Medium] website, `site/index.html`: the page has no Content Security
+  Policy. It loads scripts only from itself and jsDelivr (with
+  Subresource Integrity) and styles and fonts from Google Fonts, so a
+  `<meta http-equiv="Content-Security-Policy">` naming exactly those
+  origins, `'wasm-unsafe-eval'` for v64's core and `worker-src` for its
+  workers would bound what an injected script could load.
+* [Low] website, `site/index.html` and `site/style.css`: the fonts load
+  from Google Fonts, so every visit hands the visitor's address and the
+  page's address to Google before any consent. Self-host Archivo and IBM
+  Plex Mono (both SIL Open Font License 1.1) beside the page, fetched at a
+  pinned version and hash like any other dependency.
 
 Every other risk the design accepts is stated in its
 [threat model](docs/design.md#threat-model) and in each subsystem
