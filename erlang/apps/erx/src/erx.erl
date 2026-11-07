@@ -29,7 +29,7 @@ source(Target) ->
 %% The scope of the caller's inspect facet. In Phase 1 every shell runs in
 %% the system domain, whose facet is the system shell's, of scope `all`;
 %% a session's own facet replaces it when sessions run in their domains.
--define(SCOPE, all).
+-define(INSPECT_SCOPE, all).
 
 -doc """
 Prints the machine (erx_inspector:overview/1): the machine's record, the
@@ -38,7 +38,7 @@ each value with its reporter, at most 80 columns wide.
 """.
 -spec i() -> ok.
 i() ->
-    Sections = erx_inspector:overview(?SCOPE),
+    Sections = erx_inspector:overview(?INSPECT_SCOPE),
     io:put_chars(erx_render:overview(Sections, build(Sections))).
 
 -doc """
@@ -49,9 +49,9 @@ see, `{error, unsupported}` for one the inspector cannot collect.
 """.
 -spec i([erx_schema:segment()]) -> ok | {error, scope | unsupported}.
 i(Path) ->
-    case erx_inspector:inspect(Path, ?SCOPE) of
+    case erx_inspector:inspect(Path, ?INSPECT_SCOPE) of
         {ok, Record} ->
-            {ok, Machine} = erx_inspector:inspect([], ?SCOPE),
+            {ok, Machine} = erx_inspector:inspect([], ?INSPECT_SCOPE),
             io:put_chars(erx_render:record(Record, build([{[], {ok, Machine}}])));
         {error, _Reason} = Error ->
             Error
