@@ -264,6 +264,7 @@ class RuntimeBuildTest < Minitest::Test
     assert_operator rules.size, :>=, 9
     rules.each { |name, prerequisites| assert_includes prerequisites.split, '$(PRELOAD_SRC)', name }
     assert_match(/^\$\(PRELOAD_SRC\): \$\(PRELOAD_BEAM\) /, makefile)
+    assert_match(%r{^-include \$\(TTF_DIR\)/depend\.mk$}, makefile, 'make remakes an included makefile first')
   end
 
   # erts/ebin holds only what this build's preloaded make wrote: no beam of a module

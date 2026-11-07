@@ -226,15 +226,18 @@ module Erx
     # The emulator embeds the preloaded modules, so they are compiled first, by
     # erts/preloaded/src's own opt target, into erts/ebin, where the emulator's
     # PRELOAD_BEAM names them and make_preload strips each one as it embeds it. The copy
-    # takes nothing from erts/ebin (BUILD_OUTPUTS), and every build empties it first, so
-    # what is embedded is compiled by this build from the copy's sources, the generated
-    # grammar among them, and from the generated headers they include. make's rule for a
-    # beam names only its .erl, so a kept beam would survive a change to such a header,
-    # to the preloaded Makefile's flags or to the module list. Compiling the two dozen
-    # modules again also makes the emulator's preload.c new on every build, and with it
-    # the dependency files (each has preload.c as a prerequisite in
-    # erts/emulator/Makefile.in), so they learn every header a source includes now,
-    # generated ones among them.
+    # takes nothing from erts/ebin (BUILD_OUTPUTS).
+    #
+    # Every build empties erts/ebin first, so what is embedded is compiled by this build
+    # from the copy's sources, the generated grammar among them, and from the generated
+    # headers they include. make's rule for a beam names only its .erl, so a kept beam
+    # would survive a change to such a header, to the preloaded Makefile's flags or to
+    # the module list.
+    #
+    # One consequence: preload.c is made again on every build, and each of the emulator's
+    # dependency files has it as a prerequisite (erts/emulator/Makefile.in), so make
+    # computes them again before it judges any object, and they name every header a
+    # source includes at that build, generated ones among them.
     def build_emulator(jobs:)
       FileUtils.rm_rf(in_copy('erts/ebin'))
       @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/preloaded/src', 'opt', "TARGET=#{self.class::TARGET}"],

@@ -211,6 +211,14 @@ module Erx
     end
     private :assemble
 
+    # build/gen's stamp, read under its lock after the tree is brought up to date.
+    def generated_stamp
+      stamp = nil
+      Generated.ensure(root: @root) { |tree| stamp = File.binread(File.join(tree.output, Generated::STAMP)) }
+      stamp
+    end
+    private :generated_stamp
+
     # The same inputs give byte-identical images: two whole builds of the runtime, each
     # from a clean runtime directory and packed into a clean directory of its own name
     # with its release medium, compared part by part by SHA-256, read as a stream. A path
@@ -221,16 +229,20 @@ module Erx
     # unchanged, so it moves no tree from under another build reading it. That the tree
     # is a function of its inputs shows instead in a tree of the check's own, generated
     # into gen/ beside the images and compared file by file with build/gen, whose
-    # differences count as differing parts.
+    # differences count as differing parts. build/gen's stamp must be the same after
+    # both builds as at that comparison, so the builds read the tree it compared.
     def check_reproducible(directory:)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a reproducibility check needs a clean directory' unless Dir.empty?(directory)
 
       generated = Generated.regeneration_differences(root: @root, scratch: File.join(directory, 'gen'))
+      compared = generated_stamp
       (first, first_medium), (second, second_medium) = %w[first second].map do |name|
         @runtime.clean
         build_medium(directory: File.join(directory, name))
       end
+      raise Error, 'build/gen was regenerated during the reproducibility check; run it again' unless generated_stamp == compared
+
       first_digests = digests(first, first_medium)
       second_digests = digests(second, second_medium)
       differing = generated.map { |relative| File.join(Generated::OUTPUT, relative) } +

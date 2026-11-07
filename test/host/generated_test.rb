@@ -73,7 +73,7 @@ class GeneratedTest < Minitest::Test
 
   # A tree is replaced only when its stamp fails, so no caller, check-reproducible
   # among them, moves a tree from under a reader while the inputs are unchanged.
-  def test_no_caller_can_replace_a_fresh_tree
+  def test_ensure_takes_no_request_to_replace_a_fresh_tree
     refute_includes Erx::Generated.method(:ensure).parameters.map(&:last), :regenerate
   end
 

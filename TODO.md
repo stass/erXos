@@ -786,6 +786,13 @@ it; git history is the record of completed work.
   build/gen, and make decides staleness from times, so a source whose new bytes carry a time older than its beam (an
   edit during a build, a file restored with `cp -p`, `tar` or `rsync -a`) is never recompiled, and the record, taken
   over the bytes, still says current. Copy with `rsync -rlpc`, so a file whose bytes changed gets the copy's time.
+* [Medium] `tools/lib/erx/runtime.rb` (`build_application`): the build copy keeps each shipped application's
+  `lib/<app>/ebin` from one build to the next, and OTP's beam rule (`otp/make/otp.mk.in`) names only the `.erl`, so a
+  module of `otp/lib/*/src` that includes a generated header (none does) would keep its old beam over a change to
+  that header alone, as would every module over a flags-only edit of its application's Makefile, while the record
+  says current. The preloaded modules are compiled again on every build for this reason; for the applications, have
+  erlc write dependency files (`+makedep`) that their makefiles include, or a build check, with its test, that refuses
+  a `generated/` include under `otp/lib`.
 * [Low] `otp/erts/preloaded/src`: the runtime build compiles the preloaded modules without OTP's
   `ERL_COMPILE_WARNINGS_AS_ERRORS=yes`, because the generated `erx_9p_grammar.erl` has no `-spec` for its documented
   request functions (`statfs_request/1` and others, from `tools/lib/erx/abi_emit_protocol.rb`). Emit the specs and pass it.

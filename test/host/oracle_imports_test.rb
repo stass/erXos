@@ -82,6 +82,20 @@ class OracleImportsTest < Minitest::Test
     end
   end
 
+  # An exclusion is removed at the path it names, never through a link in the
+  # archive to another place, nor outside the tree.
+  def test_an_exclusion_through_a_link_is_refused
+    Dir.mktmpdir('erx-otp-exclusion-link-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'lib/kernel/ebin'))
+      File.symlink('lib/kernel', File.join(root, 'erts'))
+      error = assert_raises(Erx::Error) { Erx::ImportOrigins.send(:remove_exclusion, root, 'erts/ebin') }
+      assert_match(/passes through a link/, error.message)
+      assert File.directory?(File.join(root, 'lib/kernel/ebin'))
+      assert_raises(Erx::Error) { Erx::ImportOrigins.send(:remove_exclusion, root, '../outside') }
+      Erx::ImportOrigins.send(:remove_exclusion, root, 'absent/ebin')
+    end
+  end
+
   def test_mixed_musl_grants_are_recorded_together
     Dir.mktmpdir('erx-musl-review-') do |root|
       FileUtils.mkdir_p(File.join(root, 'src/math'))

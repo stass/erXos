@@ -133,13 +133,23 @@ module Erx
 
     # An excluded path leaves the unpacked tree whole, file or directory, so the
     # origin record lists nothing beneath it. The profile is checked in, but its
-    # path still names only a place inside root.
+    # path still names only a place inside root, and through no link the archive
+    # holds, so what goes is the path the record names (a link at the end goes
+    # itself).
     def remove_exclusion(root, relative)
       if !relative.is_a?(String) || relative.start_with?('/') ||
          relative.split('/', -1).any? { |part| ['', '.', '..'].include?(part) }
         raise Error, "invalid import exclusion #{relative.inspect}"
       end
 
+      parts = relative.split('/')
+      parents = parts[0...-1].each_index.map { |index| File.join(root, *parts[0..index]) }
+      parents.each do |parent|
+        return unless File.exist?(parent) || File.symlink?(parent)
+        next if File.directory?(parent) && !File.symlink?(parent)
+
+        raise Error, "import exclusion #{relative} passes through a link or a file in the archive"
+      end
       path = File.join(root, relative)
       FileUtils.remove_entry(path) if File.exist?(path) || File.symlink?(path)
     end

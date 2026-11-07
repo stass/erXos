@@ -35,7 +35,7 @@ module Erx
   # not hold the lock, such as a compiler, can see the tree missing for the
   # moment between the two renames of a regeneration, or read files of the
   # old tree and of the new one in one pass; regeneration happens only when
-  # an input or a generator changed (TODO.md records the residual). Files
+  # the stamp fails (TODO.md records the residual). Files
   # whose bytes did not change keep their modification time,
   # so make-style consumers rebuild only against outputs that changed.
   #
@@ -119,34 +119,25 @@ module Erx
       def include_flags(root:) = ['-I', File.join(File.expand_path(root), OUTPUT), '-I', path('include', root: root)]
 
       # Makes output (by default root/build/gen) hold exactly what the
-      # generators compute from root, regenerating only when the stamp no
-      # longer matches, so a tree is replaced only when an input or a
-      # generator changed. Safe to call from many processes at once. A block
-      # runs with the result while the lock is still held, so another
-      # caller's regeneration cannot move the tree away while it reads.
-      # root's own tree (no output given) is refused while a file of root
-      # sits at the path of one of its files (refuse_shadowing). A system
-      # error of ensure's own file operations becomes an Error naming the
-      # tree; one of a generator names the generator, and one of the block
-      # reaches the caller as it is.
+      # generators compute from root, regenerating only when the stamp
+      # fails, so no caller can have a fresh tree replaced. Safe to call
+      # from many processes at once. A block runs with the result while the
+      # lock is still held, so another caller's regeneration cannot move the
+      # tree away while it reads. root's own tree (no output given) is
+      # refused while a file of root sits at the path of one of its files
+      # (refuse_shadowing). A system error of ensure's own file operations
+      # becomes an Error naming the tree, one of a generator an Error naming
+      # the generator (plan), and one of the block reaches the caller as it is.
       def ensure(root:, output: nil, generators: GENERATORS)
         own = output.nil?
-        root, output = filesystem(output || root) { [File.realpath(root), resolved(output || File.join(root, OUTPUT))] }
-        if root == output || root.start_with?(File.join(output, ''))
+        source = filesystem(output || root) { File.realpath(root) }
+        output = filesystem(output || root) { resolved(output || File.join(source, OUTPUT)) }
+        if source == output || source.start_with?(File.join(output, ''))
           raise Error, "generated output #{output} would hold its own source root"
         end
 
         with_lock(output) do
-          filesystem(output) { remove_leftovers(output) }
-          result = if filesystem(output) { fresh?(output, root: root, generators: generators) }
-                     Result.new(status: :fresh, output: output)
-                   else
-                     files = combine(generators.map { |generator| [generator.name, plan(generator, root: root)] },
-                                     generators: generators)
-                     filesystem(output) { publish(output, files: files) }
-                     Result.new(status: :generated, output: output)
-                   end
-          filesystem(output) { refuse_shadowing(root, output) } if own
+          result = filesystem(output) { bring_up_to_date(output, root: source, generators: generators, own: own) }
           yield result if block_given?
           result
         end
@@ -154,19 +145,19 @@ module Erx
 
       # The files, relative to the tree, in which root's own build/gen and a
       # tree generated into scratch, an empty directory of the caller's
-      # choosing, differ in bytes or presence; build/gen is brought up to
-      # date first and read under its lock. How check-reproducible shows
-      # that the tree is a function of its inputs without replacing the tree
-      # other builds read.
+      # choosing, differ in bytes or presence. scratch is generated first,
+      # then build/gen is brought up to date and read under its lock. How
+      # check-reproducible shows that the tree is a function of its inputs
+      # without replacing the tree other builds read.
       def regeneration_differences(root:, scratch:, generators: GENERATORS)
         unless !File.exist?(scratch) || (File.directory?(scratch) && Dir.empty?(scratch))
           raise Error, "#{scratch} is not an empty directory to generate into"
         end
 
-        regenerated = self.ensure(root: root, output: scratch, generators: generators)
-                          .then { |tree| filesystem(tree.output) { tree_digests(tree.output) } }
+        digests = ->(tree) { filesystem(tree.output) { tree_digests(tree.output) } }
+        regenerated = digests.call(self.ensure(root: root, output: scratch, generators: generators))
         built = nil
-        self.ensure(root: root, generators: generators) { |tree| built = filesystem(tree.output) { tree_digests(tree.output) } }
+        self.ensure(root: root, generators: generators) { |tree| built = digests.call(tree) }
         (regenerated.keys | built.keys).sort.reject { |relative| regenerated[relative] == built[relative] }
       end
 
@@ -217,6 +208,21 @@ module Erx
       end
 
       private
+
+      # ensure's work under the lock: leftovers of a killed run go, and the
+      # tree is checked against its stamp and published again if it fails.
+      def bring_up_to_date(output, root:, generators:, own:)
+        remove_leftovers(output)
+        result = if fresh?(output, root: root, generators: generators)
+                   Result.new(status: :fresh, output: output)
+                 else
+                   plans = generators.map { |generator| [generator.name, plan(generator, root: root)] }
+                   publish(output, files: combine(plans, generators: generators))
+                   Result.new(status: :generated, output: output)
+                 end
+        refuse_shadowing(root, output) if own
+        result
+      end
 
       # Pure: every plan's files plus the stamp, refused whole if any output
       # path is malformed, claimed twice or not ASCII, if two generators
@@ -468,11 +474,10 @@ module Erx
                        'a generator or a generated file loads a generated file'
         end
 
-        lock = filesystem(output) do
-          File.open(lock_path, File::RDWR | File::CREAT, 0o644).tap { |file| file.flock(File::LOCK_EX) }
-        end
-        held.push(lock_path)
+        lock = filesystem(output) { File.open(lock_path, File::RDWR | File::CREAT, 0o644) }
         begin
+          filesystem(output) { lock.flock(File::LOCK_EX) }
+          held.push(lock_path)
           yield
         ensure
           held.delete(lock_path)
