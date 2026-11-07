@@ -106,12 +106,12 @@ module Erx
     # pattern here matches; it rings the bell at a `}` with no `{` on its line.
     COMMAND_SHELL = [
       ['rc-banner', /\Arc: the command shell; exit ends it\r*\n\z/n, "x=(a b c)\r"],
-      ['rc-assign', /\A; x=\(a b c\)\r*\n\z/n, "for(i in $x) echo $i\r"],
-      ['rc-loop', /\A; for\(i in \$x\) echo \$i\r*\n\z/n, nil],
+      ['rc-assign', /\A% x=\(a b c\)\r*\n\z/n, "for(i in $x) echo $i\r"],
+      ['rc-loop', /\A% for\(i in \$x\) echo \$i\r*\n\z/n, nil],
       ['rc-loop-a', /\Aa\r*\n\z/n, nil],
       ['rc-loop-b', /\Ab\r*\n\z/n, nil],
       ['rc-loop-c', /\Ac\r*\n\z/n, "{\r"],
-      ['rc-open', /\A; \{\r*\n\z/n, "echo con tinued}\r"],
+      ['rc-open', /\A% \{\r*\n\z/n, "echo con tinued}\r"],
       ['rc-continued-line', /\Aecho con tinued\}\a?\r*\n\z/n, nil],
       ['rc-continued', /\Acon tinued\r*\n\z/n, "echo a)\r"],
       ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n,
@@ -122,7 +122,7 @@ module Erx
       ['rc-ls-file', /\Ax\r*\n\z/n, "nosuch\r"],
       ['rc-not-found', /\Anosuch: not found\r*\n\z/n, "cd /tmp; pwd\r"],
       ['rc-pwd', %r{\A/tmp\r*\n\z}n, "exit\r"],
-      ['rc-exit', /\A; exit\r*\n\z/n, nil],
+      ['rc-exit', /\A% exit\r*\n\z/n, nil],
       ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
       ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]
     ].map { |name, pattern, type| { name: name, pattern: pattern, seconds: 30, **{ type: type }.compact }.freeze }.freeze

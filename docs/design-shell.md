@@ -180,7 +180,7 @@ what a terminal needs added:
   completion of command names and paths through `edlin`'s expansion hook,
   and job control ([Job control](#job-control)). vi-style editing is not
   provided. The shell is a group's shell, as the Erlang shell is, and reads
-  a line at a time under `$prompt(1)`, `; ` by default; a unit that only
+  a line at a time under `$prompt(1)`, `% ` by default; a unit that only
   more lines can complete reads on under `$prompt(2)`, empty by default. A
   whole unit runs in an evaluator process of its own, so `Ctrl-C` ends it
   and the shell reads on with the variables it had before it and `$status`

@@ -78,8 +78,9 @@ erx_shell_runner, the runner of the session's domain, is the default.
                 | {refuse, erx_shell_parse:diagnostic()}
                 | stop.                      % the input ended, and nothing is left
 
-%% rc's own `$prompt`: the primary prompt, and the continuation prompt.
--define(DEFAULT_PROMPT, [<<"; ">>, <<>>]).
+%% The default `$prompt`: the primary prompt, `% ` as csh shows it,
+%% where rc shows `; `, and the continuation prompt, empty as in rc.
+-define(DEFAULT_PROMPT, [<<"% ">>, <<>>]).
 %% Each unit runs within the heap the design gives every evaluator.
 -define(UNIT_HEAP_BYTES, (4 * 1024 * 1024)).
 -define(BANNER, <<"rc: the command shell; exit ends it\n">>).

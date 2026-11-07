@@ -351,49 +351,49 @@ class RuntimeConsoleTest < Minitest::Test
   # continued on the next, a syntax error, rubbing out, and exit back to the Erlang shell,
   # whose own history the command shell's lines did not join.
   RC_SESSION = [
-    ["erx_shell:start().\r", /^rc: the command shell; exit ends it\n; \z/],
-    ["x=(a b c)\r", /^; x=\(a b c\)\n; \z/],
-    ["for(i in $x) echo $i\r", /^a\nb\nc\n; \z/],
-    [UP, /^; for\(i in \$x\) echo \$i\z/],
-    [CTRL_C, /^; for\(i in \$x\) echo \$i\n; \z/],
-    ["{\r", /^; \{\n\z/],
-    ["echo con tinued}\r", /^echo con tinued\}\ncon tinued\n; \z/],
-    ["echo a)\r", /^rc: syntax error at line 1, column 7: unexpected '\)'\n; \z/],
-    ["echo $status\r", /^unexpected '\)'\n; \z/],
-    ["while(true) true\r", /^; while\(true\) true\n\z/],
-    [CTRL_C, /^\^C\n; \z/],
-    ["echo xy#{BACKSPACE}z\r", /^xz\n; \z/],
-    ["exit\r", /^; exit\nok\n2> \z/],
+    ["erx_shell:start().\r", /^rc: the command shell; exit ends it\n% \z/],
+    ["x=(a b c)\r", /^% x=\(a b c\)\n% \z/],
+    ["for(i in $x) echo $i\r", /^a\nb\nc\n% \z/],
+    [UP, /^% for\(i in \$x\) echo \$i\z/],
+    [CTRL_C, /^% for\(i in \$x\) echo \$i\n% \z/],
+    ["{\r", /^% \{\n\z/],
+    ["echo con tinued}\r", /^echo con tinued\}\ncon tinued\n% \z/],
+    ["echo a)\r", /^rc: syntax error at line 1, column 7: unexpected '\)'\n% \z/],
+    ["echo $status\r", /^unexpected '\)'\n% \z/],
+    ["while(true) true\r", /^% while\(true\) true\n\z/],
+    [CTRL_C, /^\^C\n% \z/],
+    ["echo xy#{BACKSPACE}z\r", /^xz\n% \z/],
+    ["exit\r", /^% exit\nok\n2> \z/],
     [UP, /^2> erx_shell:start\(\)\.\z/],
-    ["\r", /\n; \z/],
-    ["exit\r", /^; exit\nok\n3> \z/]
+    ["\r", /\n% \z/],
+    ["exit\r", /^% exit\nok\n3> \z/]
   ].freeze
 
   RC_TRANSCRIPT = <<~SCREEN.chomp
     1> erx_shell:start().
     rc: the command shell; exit ends it
-    ; x=(a b c)
-    ; for(i in $x) echo $i
+    % x=(a b c)
+    % for(i in $x) echo $i
     a
     b
     c
-    ; for(i in $x) echo $i
-    ; {
+    % for(i in $x) echo $i
+    % {
     echo con tinued}
     con tinued
-    ; echo a)
+    % echo a)
     rc: syntax error at line 1, column 7: unexpected ')'
-    ; echo $status
+    % echo $status
     unexpected ')'
-    ; while(true) true
+    % while(true) true
     ^C
-    ; echo xz
+    % echo xz
     xz
-    ; exit
+    % exit
     ok
     2> erx_shell:start().
     rc: the command shell; exit ends it
-    ; exit
+    % exit
     ok
     3>
   SCREEN
@@ -413,11 +413,11 @@ class RuntimeConsoleTest < Minitest::Test
   # file in the runtime's own /tmp that a redirection writes and cat reads back.
   def test_the_command_shell_runs_erlang_commands
     with_erxos do |session|
-      [["erx_shell:start().\r", /^rc: the command shell; exit ends it\n; \z/],
-       ["echo a b | cat\r", /^; echo a b \| cat\na b\n; \z/],
-       ["nosuch\r", /^nosuch: not found\n; \z/],
-       ["echo hello >/tmp/x; cat /tmp/x\r", /^; echo hello >\/tmp\/x; cat \/tmp\/x\nhello\n; \z/],
-       ["exit\r", /^; exit\nok\n2> \z/]].each do |keys, pattern|
+      [["erx_shell:start().\r", /^rc: the command shell; exit ends it\n% \z/],
+       ["echo a b | cat\r", /^% echo a b \| cat\na b\n% \z/],
+       ["nosuch\r", /^nosuch: not found\n% \z/],
+       ["echo hello >/tmp/x; cat /tmp/x\r", /^% echo hello >\/tmp\/x; cat \/tmp\/x\nhello\n% \z/],
+       ["exit\r", /^% exit\nok\n2> \z/]].each do |keys, pattern|
         session.type(keys)
         session.wait_for(pattern)
       end

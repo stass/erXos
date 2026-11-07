@@ -30,8 +30,8 @@ after_parse_test_() ->
                    erx_shell:after_parse({error, Bad, <<>>}, erx_shell:reader(<<"x(\n">>), open))].
 
 prompt_test_() ->
-    Prompt = [<<"; ">>, <<"> ">>],
-    [?_assertEqual(<<"; ">>, erx_shell:prompt(Prompt, erx_shell:reader(<<>>))),
+    Prompt = [<<"% ">>, <<"> ">>],
+    [?_assertEqual(<<"% ">>, erx_shell:prompt(Prompt, erx_shell:reader(<<>>))),
      ?_assertEqual(<<"> ">>, erx_shell:prompt(Prompt, erx_shell:reader(<<"{\n">>))),
      ?_assertEqual(<<>>, erx_shell:prompt([<<"% ">>], erx_shell:reader(<<"{\n">>))),
      ?_assertEqual(<<>>, erx_shell:prompt([], erx_shell:reader(<<>>)))].
@@ -41,7 +41,7 @@ prompt_test_() ->
 session_test_() ->
     {timeout, 30,
      [?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"a b c\n">>},
+         [{prompt, <<"% ">>}, {out, <<"a b c\n">>},
           {prompt, <<"; ">>}, {out, <<"1\n">>}, {out, <<"2\n">>},
           {prompt, <<"; ">>}, {prompt, <<"> ">>}, {out, <<"in braces\n">>},
           {prompt, <<"; ">>}, {out, <<"rc: syntax error at line 1, column 7: unexpected ')'\n">>},
@@ -56,61 +56,61 @@ session_test_() ->
       %% Ctrl-C while editing drops the unit read so far; the end of input ends
       %% the shell.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {prompt, <<>>}, {out, <<"\n">>},
-          {prompt, <<"; ">>}, {out, <<"after\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {prompt, <<>>}, {out, <<"\n">>},
+          {prompt, <<"% ">>}, {out, <<"after\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"{ echo before\n">>}, interrupted,
                   {line, <<"echo after\n">>}, eof])),
       %% Ctrl-C while a unit runs ends the unit, not the shell, which keeps
       %% what it had before the unit.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {prompt, <<"; ">>}, {out, <<"^C\n">>},
-          {prompt, <<"; ">>}, {out, <<"kept\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {prompt, <<"% ">>}, {out, <<"^C\n">>},
+          {prompt, <<"% ">>}, {out, <<"kept\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"y=kept\n">>},
                   {interrupt, 1, <<"y=lost; while(true) true\n">>},
                   {line, <<"echo $y\n">>}, eof])),
       %% The input ending inside a unit reports what is missing.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {prompt, <<>>},
+         [{prompt, <<"% ">>}, {prompt, <<>>},
           {out, <<"rc: syntax error at line 2, column 1: expected '}'\n">>}],
          session([{line, <<"{\n">>}, eof])),
       %% A line the end of input ended, as the group's editor ends one when
       %% its input ends, has no newline: it runs, and the shell ends.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"last\n">>}],
+         [{prompt, <<"% ">>}, {out, <<"last\n">>}],
          session([{line, <<"echo last">>}])),
-      ?_assertEqual([{prompt, <<"; ">>}], session([{line, <<>>}])),
+      ?_assertEqual([{prompt, <<"% ">>}], session([{line, <<>>}])),
       %% A second Ctrl-C while the first ends the line comes before the next line
       %% is read, and ends nothing.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"^C\n">>},
-          {prompt, <<"; ">>}, {out, <<"after\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {out, <<"^C\n">>},
+          {prompt, <<"% ">>}, {out, <<"after\n">>}, {prompt, <<"% ">>}],
          session([{interrupt, 2, <<"while(true) true\n">>},
                   {line, <<"echo after\n">>}, eof])),
       %% After an `if`, a unit starting `if not` may follow; a bad one is reported
       %% with what is wrong with it, which `$status` then holds.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {prompt, <<"; ">>}, {out, <<"b\n">>},
-          {prompt, <<"; ">>}, {prompt, <<"; ">>},
+         [{prompt, <<"% ">>}, {prompt, <<"% ">>}, {out, <<"b\n">>},
+          {prompt, <<"% ">>}, {prompt, <<"% ">>},
           {out, <<"rc: syntax error at line 1, column 14: unexpected ')'\n">>},
-          {prompt, <<"; ">>}, {out, <<"unexpected ')'\n">>}, {prompt, <<"; ">>}],
+          {prompt, <<"% ">>}, {out, <<"unexpected ')'\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"if(false) echo a\n">>}, {line, <<"if not echo b\n">>},
                   {line, <<"if(true) true\n">>}, {line, <<"if not echo b)\n">>},
                   {line, <<"echo $status\n">>}, eof])),
       %% A line that passes its heap limit ends with a diagnostic, and the shell
       %% keeps what it had before the line.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"rc: the line passed its heap limit\n">>},
-          {prompt, <<"; ">>}, {out, <<"\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {out, <<"rc: the line passed its heap limit\n">>},
+          {prompt, <<"% ">>}, {out, <<"\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"x=a; while(true) x=($x $x)\n">>},
                   {line, <<"echo $x\n">>}, eof])),
       %% A line whose runner crashes ends with a diagnostic, and the shell reads on.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"rc: the line crashed\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {out, <<"rc: the line crashed\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"crash\n">>}, eof], ?MODULE)),
       %% A runner that crashes while the shell reports a unit that does not
       %% parse ends that report alone, and the shell reads on.
       ?_assertEqual(
-         [{prompt, <<"; ">>}, {out, <<"rc: the line crashed\n">>}, {prompt, <<"; ">>}],
+         [{prompt, <<"% ">>}, {out, <<"rc: the line crashed\n">>}, {prompt, <<"% ">>}],
          session([{line, <<"echo a)\n">>}, eof], ?MODULE)),
       %% Neither crash reaches a log: a crash's reason and stack would carry
       %% the shell's variables and the runner's state.
@@ -132,8 +132,8 @@ line_processes_test_() ->
              Left = [whereis(b), whereis(b_child)],
              Leaders = [process_info(Pid, group_leader) || Pid <- Left],
              [exit(Pid, kill) || Pid <- Left, is_pid(Pid)],
-             ?assertEqual([{prompt, <<"; ">>}, {out, <<"^C\n">>},
-                           {prompt, <<"; ">>}, {prompt, <<"; ">>}], Shown),
+             ?assertEqual([{prompt, <<"% ">>}, {out, <<"^C\n">>},
+                           {prompt, <<"% ">>}, {prompt, <<"% ">>}], Shown),
              ?assertEqual([undefined, undefined], [whereis(a), whereis(a_child)]),
              ?assertEqual([{group_leader, Group}, {group_leader, Group}], Leaders)
      end}.
