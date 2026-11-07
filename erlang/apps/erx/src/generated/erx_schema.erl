@@ -18,7 +18,7 @@
 -define(MAX_PATH_TEXT, 12304).
 -define(U32, 16#ffffffff).
 
--type kind() :: machine | cpu | budget | domain | process | module | listing.
+-type kind() :: machine | cpu | group | budget | domain | thread | process | module | listing.
 -type reporter() :: kernel | service | runtime | {stopgap, liberx_pool}.
 -type value() :: {ok, term()} | {partial, term()} | unknown | unsupported
                | {timeout, pos_integer()} | {error, term()}.
@@ -39,7 +39,7 @@
 schema() -> 1.
 
 kinds() ->
-    [machine, cpu, budget, domain, process, module, listing].
+    [machine, cpu, group, budget, domain, thread, process, module, listing].
 
 %% A kind's attribute keys in field order.
 attributes(machine) ->
@@ -58,6 +58,8 @@ attributes(cpu) ->
           ready_threads,
           interrupts,
           throttled_groups]};
+attributes(group) ->
+    {ok, [cpuset, used_ns, capacity_mcpu, parked, ready]};
 attributes(budget) ->
     {ok, [kind,
           guarantee,
@@ -82,6 +84,8 @@ attributes(domain) ->
           ets_tables,
           modules,
           processes]};
+attributes(thread) ->
+    {ok, [state, wait]};
 attributes(process) ->
     {ok, [domain,
           state,
@@ -104,385 +108,495 @@ attributes(_Kind) ->
     error.
 
 %% An attribute's declaration: type, unit label, reporters, visibility,
-%% build and projections.
+%% build, projections and the inputs it is derived from.
 attribute(machine, build) ->
     {ok, #{type => {type, build_id},
            unit => none,
            reporters => [kernel],
            visible => any,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, development) ->
     {ok, #{type => boolean,
            unit => none,
            reporters => [kernel],
            visible => any,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, dma_profile) ->
     {ok, #{type => {type, dma_profile},
            unit => none,
            reporters => [kernel],
            visible => any,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, entropy_quality) ->
     {ok, #{type => {atoms, [fixed, good, weak]},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, cpus_online) ->
     {ok, #{type => {type, cpus_online},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, memory_total) ->
     {ok, #{type => {type, byte_count},
            unit => <<"bytes">>,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, memory_free) ->
     {ok, #{type => {type, byte_count},
            unit => <<"bytes">>,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, uptime) ->
     {ok, #{type => {type, duration},
            unit => <<"ns">>,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(machine, boot_value) ->
     {ok, #{type => {atoms, [normal, trial, unknown]},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(cpu, running_thread) ->
     {ok, #{type => {type, thread_id},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(cpu, idle_time) ->
     {ok, #{type => {type, duration},
            unit => <<"ns">>,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(cpu, ready_threads) ->
     {ok, #{type => {type, urgency_counts},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(cpu, interrupts) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(cpu, throttled_groups) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [kernel],
            visible => all,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(group, cpuset) ->
+    {ok, #{type => {type, cpu_mask},
+           unit => none,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(group, used_ns) ->
+    {ok, #{type => {type, duration},
+           unit => <<"ns">>,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(group, capacity_mcpu) ->
+    {ok, #{type => {type, capacity},
+           unit => <<"mCPU">>,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(group, parked) ->
+    {ok, #{type => {type, count},
+           unit => none,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(group, ready) ->
+    {ok, #{type => {type, count},
+           unit => none,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, kind) ->
     {ok, #{type => {atoms, [elastic, wall]},
            unit => none,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, guarantee) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, cap) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, used) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, carved) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, lent) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, pinned) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, watch) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(budget, spending) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => [used, carved, lent]}};
 attribute(budget, borrowing) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => [guarantee, used, carved, lent]}};
 attribute(budget, room) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => [cap, used, carved, lent]}};
 attribute(budget, deficit) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => [cap, used, carved, lent]}};
 attribute(budget, give_back) ->
     {ok, #{type => {type, page_count},
            unit => <<"pages">>,
            reporters => [kernel, {stopgap, liberx_pool}],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => [guarantee, used, carved, lent, pinned]}};
 attribute(budget, domain) ->
     {ok, #{type => {type, domain_id},
            unit => none,
            reporters => [service],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, name) ->
     {ok, #{type => {type, name},
            unit => none,
            reporters => [service],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, principal) ->
     {ok, #{type => {type, principal_id},
            unit => none,
            reporters => [service],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, state) ->
     {ok, #{type => {type, domain_state},
            unit => none,
            reporters => [service],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, threads) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [kernel],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, atoms) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, ets_tables) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, modules) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(domain, processes) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(thread, state) ->
+    {ok, #{type => {atoms, [dead, ready, running, stopped, waiting]},
+           unit => none,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
+attribute(thread, wait) ->
+    {ok, #{type => {atoms, [none, park, paused, quiesce, recv, send, stop, umtx]},
+           unit => none,
+           reporters => [kernel],
+           visible => owner,
+           build => all,
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, domain) ->
     {ok, #{type => {type, domain_id},
            unit => none,
            reporters => [service],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, state) ->
     {ok, #{type => {type, process_state},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, priority) ->
     {ok, #{type => {type, priority},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, reductions) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, location) ->
     {ok, #{type => {type, location},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, heap_size) ->
     {ok, #{type => {type, word_count},
            unit => <<"words">>,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, stack_size) ->
     {ok, #{type => {type, word_count},
            unit => <<"words">>,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, message_queue_len) ->
     {ok, #{type => {type, count},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, registered_name) ->
     {ok, #{type => {type, name},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, group_leader) ->
     {ok, #{type => pid,
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, trap_exit) ->
     {ok, #{type => boolean,
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, links) ->
     {ok, #{type => {type, pids},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(process, monitors) ->
     {ok, #{type => {type, pids},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(module, version) ->
     {ok, #{type => {type, digest},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(module, md5) ->
     {ok, #{type => {type, digest},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(module, source_file) ->
     {ok, #{type => {type, file_name},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(module, origin) ->
     {ok, #{type => {type, module_origin},
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(module, source_in_image) ->
     {ok, #{type => boolean,
            unit => none,
            reporters => [runtime],
            visible => owner,
            build => all,
-           projections => [shell, host, proc, web]}};
+           projections => [shell, host, proc, web],
+           derived => []}};
 attribute(_Kind, _Key) ->
     error.
 
@@ -510,6 +624,7 @@ unit_label(pages) -> {ok, <<"pages">>};
 unit_label(bytes) -> {ok, <<"bytes">>};
 unit_label(ns) -> {ok, <<"ns">>};
 unit_label(words) -> {ok, <<"words">>};
+unit_label(mcpu) -> {ok, <<"mCPU">>};
 unit_label(_Unit) -> error.
 
 %% The schema's value types.
@@ -521,6 +636,9 @@ type(word_count) -> {ok, {integer, 0, 18446744073709551615, 1}};
 type(cpu_index) -> {ok, {integer, 0, 63, 1}};
 type(cpus_online) -> {ok, {integer, 0, 64, 1}};
 type(budget_id) -> {ok, {integer, 1, 4294967295, 1}};
+type(group_id) -> {ok, {integer, 1, 4294967295, 1}};
+type(cpu_mask) -> {ok, {integer, 0, 18446744073709551615, 1}};
+type(capacity) -> {ok, {integer, 0, 64000, 1}};
 type(domain_id) -> {ok, {integer, 0, 4294967295, 1}};
 type(principal_id) -> {ok, {integer, 1, 4294967295, 1}};
 type(thread_id) -> {ok, {integer, 0, 18446744073709551615, 1}};
@@ -557,7 +675,7 @@ declarations() ->
        visible => [],
        entries => none,
        append_only => false,
-       children => {literals, [cpus, budgets, domains, processes]}},
+       children => {literals, [cpus, groups, budgets, domains, processes]}},
      #{kind => listing,
        pattern => [cpus],
        visible => [all],
@@ -566,6 +684,18 @@ declarations() ->
        children => {variable, {type, cpu_index}}},
      #{kind => cpu,
        pattern => [cpus, {variable, {type, cpu_index}}],
+       visible => [all],
+       entries => none,
+       append_only => false,
+       children => {literals, []}},
+     #{kind => listing,
+       pattern => [groups],
+       visible => [all],
+       entries => none,
+       append_only => false,
+       children => {variable, {type, group_id}}},
+     #{kind => group,
+       pattern => [groups, {variable, {type, group_id}}],
        visible => [all],
        entries => none,
        append_only => false,
@@ -593,9 +723,30 @@ declarations() ->
        visible => [],
        entries => none,
        append_only => false,
-       children => {literals, [budget, modules, processes]}},
+       children => {literals, [budget, group, threads, modules, processes]}},
      #{kind => budget,
        pattern => [domains, {variable, {type, domain_id}}, budget],
+       visible => [],
+       entries => none,
+       append_only => false,
+       children => {literals, []}},
+     #{kind => group,
+       pattern => [domains, {variable, {type, domain_id}}, group],
+       visible => [],
+       entries => none,
+       append_only => false,
+       children => {literals, []}},
+     #{kind => listing,
+       pattern => [domains, {variable, {type, domain_id}}, threads],
+       visible => [],
+       entries => none,
+       append_only => false,
+       children => {variable, {type, thread_id}}},
+     #{kind => thread,
+       pattern => [domains,
+                   {variable, {type, domain_id}},
+                   threads,
+                   {variable, {type, thread_id}}],
        visible => [],
        entries => none,
        append_only => false,

@@ -119,12 +119,12 @@ sys_gettimeofday(SysTimeval *tv)
 int
 erts_sys_cpu_time_ms(ErtsMonotonicTime *user, ErtsMonotonicTime *sys)
 {
-    erx_group_report_t report;
+    erx_info_group_t report;
 
     if (erx_group_info(ERX_CAP_SELF) != ERX_OK)
         return 0;
-    report = erx_group_report_load(erx_utcb_self());
-    if (report.usage_known == 0)
+    report = erx_info_group_load(erx_utcb_self());
+    if ((report.reported & ERX_INFO_GROUP_REPORTED_USED_NS) == 0)
         return 0;
     *user = (ErtsMonotonicTime) (report.used_ns / 1000000);
     *sys = 0;

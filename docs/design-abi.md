@@ -594,7 +594,10 @@ clear bit says it does not, so the field's value means nothing to a
 reader that knows no more. The generator checks these names, so the
 collector maps fields and bits to attributes by name and keeps no table
 of its own; an attribute that lists `kernel`, is not `derived` and has
-no field in the layout reads as a clear bit. No report layout names a
+no field in the layout reads as a clear bit. A field that holds an
+enum value is a plain integer, its enum named in a comment, so that a
+reader never refuses a report over a value its clear bit disowns. No
+report layout names a
 reporter or a `partial` status. A field that a stopgap backend counts
 only partly has its `reported` bit clear, and that backend names it
 through `liberx` in the inspector's own domain; its reporter is the one

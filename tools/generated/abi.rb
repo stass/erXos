@@ -4442,103 +4442,6 @@ module Erx
         private_owner: nil,
         line: source_line
       ).freeze
-      types["erx_group_report"] = Layout.new(
-        name: "erx_group_report".b,
-        storage: "wire_le".b,
-        alignment: 8,
-        size: 32,
-        fields: [
-          Field.new(
-            name: "cpuset".b,
-            type: types.fetch("u64"),
-            offset: 0,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "used_ns".b,
-            type: types.fetch("u64"),
-            offset: 8,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "capacity_mcpu".b,
-            type: types.fetch("u32"),
-            offset: 16,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "parked".b,
-            type: types.fetch("u32"),
-            offset: 20,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "ready".b,
-            type: types.fetch("u32"),
-            offset: 24,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze,
-          Field.new(
-            name: "usage_known".b,
-            type: types.fetch("u32"),
-            offset: 28,
-            count: nil,
-            bits: [].freeze,
-            atomic: nil,
-            writer: nil,
-            owners: {}.freeze,
-            zero_mask: 0,
-            input_masks: {}.freeze,
-            visibility: nil,
-            line: source_line
-          ).freeze
-        ].freeze,
-        padding: [].freeze,
-        tail: nil,
-        sequence: nil,
-        private_owner: nil,
-        line: source_line
-      ).freeze
       types["erx_hostlink_control"] = Layout.new(
         name: "erx_hostlink_control".b,
         storage: "wire_le".b,
@@ -7805,6 +7708,600 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["info_budget_reported"] = EnumType.new(
+        name: "info_budget_reported".b,
+        base: types.fetch("u32"),
+        members: {
+          "cap".b => 4,
+          "carved".b => 16,
+          "guarantee".b => 2,
+          "kind".b => 1,
+          "lent".b => 32,
+          "used".b => 8,
+          "watch".b => 64
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_info_budget"] = Layout.new(
+        name: "erx_info_budget".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 56,
+        fields: [
+          Field.new(
+            name: "kind".b,
+            type: types.fetch("u32"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reported".b,
+            type: types.fetch("info_budget_reported"),
+            offset: 4,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "guarantee".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cap".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "used".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "carved".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "lent".b,
+            type: types.fetch("u64"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "watch".b,
+            type: types.fetch("u64"),
+            offset: 48,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["info_cpu_reported"] = EnumType.new(
+        name: "info_cpu_reported".b,
+        base: types.fetch("u32"),
+        members: {
+          "idle_time".b => 2,
+          "interrupts".b => 8,
+          "ready_threads".b => 4,
+          "running_thread".b => 1,
+          "throttled_groups".b => 16
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_info_cpu"] = Layout.new(
+        name: "erx_info_cpu".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 288,
+        fields: [
+          Field.new(
+            name: "running_thread".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "idle_time".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ready_threads".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: 64,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "interrupts".b,
+            type: types.fetch("u64"),
+            offset: 272,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "throttled_groups".b,
+            type: types.fetch("u32"),
+            offset: 280,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reported".b,
+            type: types.fetch("info_cpu_reported"),
+            offset: 284,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["info_group_reported"] = EnumType.new(
+        name: "info_group_reported".b,
+        base: types.fetch("u32"),
+        members: {
+          "capacity_mcpu".b => 4,
+          "cpuset".b => 1,
+          "parked".b => 8,
+          "ready".b => 16,
+          "used_ns".b => 2
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_info_group"] = Layout.new(
+        name: "erx_info_group".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 32,
+        fields: [
+          Field.new(
+            name: "cpuset".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "used_ns".b,
+            type: types.fetch("u64"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "capacity_mcpu".b,
+            type: types.fetch("u32"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "parked".b,
+            type: types.fetch("u32"),
+            offset: 20,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "ready".b,
+            type: types.fetch("u32"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reported".b,
+            type: types.fetch("info_group_reported"),
+            offset: 28,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["info_kind"] = EnumType.new(
+        name: "info_kind".b,
+        base: types.fetch("u32"),
+        members: {
+          "basic".b => 0,
+          "budget".b => 4,
+          "cpu".b => 2,
+          "group".b => 3,
+          "image_entry".b => 6,
+          "machine".b => 1,
+          "thread".b => 5
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
+      types["info_machine_reported"] = EnumType.new(
+        name: "info_machine_reported".b,
+        base: types.fetch("u32"),
+        members: {
+          "boot_value".b => 64,
+          "build".b => 1,
+          "cpus_online".b => 4,
+          "entropy_quality".b => 2,
+          "memory_free".b => 16,
+          "memory_total".b => 8,
+          "uptime".b => 32
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_info_machine"] = Layout.new(
+        name: "erx_info_machine".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 48,
+        fields: [
+          Field.new(
+            name: "build".b,
+            type: types.fetch("u8"),
+            offset: 0,
+            count: 8,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "entropy_quality".b,
+            type: types.fetch("u32"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "cpus_online".b,
+            type: types.fetch("u32"),
+            offset: 12,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "memory_total".b,
+            type: types.fetch("u64"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "memory_free".b,
+            type: types.fetch("u64"),
+            offset: 24,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "uptime".b,
+            type: types.fetch("u64"),
+            offset: 32,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "boot_value".b,
+            type: types.fetch("u32"),
+            offset: 40,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reported".b,
+            type: types.fetch("info_machine_reported"),
+            offset: 44,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
+      types["info_thread_reported"] = EnumType.new(
+        name: "info_thread_reported".b,
+        base: types.fetch("u32"),
+        members: {
+          "state".b => 1,
+          "wait".b => 2
+        }.freeze,
+        flags: true,
+        allowed: nil
+      ).freeze
+      types["erx_info_thread"] = Layout.new(
+        name: "erx_info_thread".b,
+        storage: "wire_le".b,
+        alignment: 8,
+        size: 24,
+        fields: [
+          Field.new(
+            name: "id".b,
+            type: types.fetch("u64"),
+            offset: 0,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "state".b,
+            type: types.fetch("u32"),
+            offset: 8,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "wait".b,
+            type: types.fetch("u32"),
+            offset: 12,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze,
+          Field.new(
+            name: "reported".b,
+            type: types.fetch("info_thread_reported"),
+            offset: 16,
+            count: nil,
+            bits: [].freeze,
+            atomic: nil,
+            writer: nil,
+            owners: {}.freeze,
+            zero_mask: 0,
+            input_masks: {}.freeze,
+            visibility: nil,
+            line: source_line
+          ).freeze
+        ].freeze,
+        padding: [[20, 4].freeze].freeze,
+        tail: nil,
+        sequence: nil,
+        private_owner: nil,
+        line: source_line
+      ).freeze
       types["irq_kind"] = EnumType.new(
         name: "irq_kind".b,
         base: types.fetch("u32"),
@@ -10172,6 +10669,19 @@ module Erx
         flags: false,
         allowed: nil
       ).freeze
+      types["thread_state"] = EnumType.new(
+        name: "thread_state".b,
+        base: types.fetch("u32"),
+        members: {
+          "dead".b => 4,
+          "ready".b => 1,
+          "running".b => 2,
+          "stopped".b => 0,
+          "waiting".b => 3
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       types["uaddr"] = ScalarType.new(
         name: "uaddr".b,
         base: types.fetch("u64"),
@@ -11312,6 +11822,22 @@ module Erx
         flags: true,
         allowed: nil
       ).freeze
+      types["wait_kind"] = EnumType.new(
+        name: "wait_kind".b,
+        base: types.fetch("u32"),
+        members: {
+          "none".b => 0,
+          "park".b => 4,
+          "paused".b => 7,
+          "quiesce".b => 5,
+          "recv".b => 2,
+          "send".b => 1,
+          "stop".b => 6,
+          "umtx".b => 3
+        }.freeze,
+        flags: false,
+        allowed: nil
+      ).freeze
       SCHEMA = Model.freeze_value(Schema.new(
         version: 1,
         architecture: {
@@ -11426,7 +11952,6 @@ module Erx
           "erx_fiasco_vm_map_request".b,
           "erx_fiasco_vm_range_request".b,
           "erx_frame_header".b,
-          "erx_group_report".b,
           "erx_hostlink_control".b,
           "erx_hostlink_frame".b,
           "erx_lane_hdr".b,
@@ -11473,6 +11998,17 @@ module Erx
           "hostlink_kind".b,
           "hostlink_stream".b,
           "image_flags".b,
+          "info_budget_reported".b,
+          "erx_info_budget".b,
+          "info_cpu_reported".b,
+          "erx_info_cpu".b,
+          "info_group_reported".b,
+          "erx_info_group".b,
+          "info_kind".b,
+          "info_machine_reported".b,
+          "erx_info_machine".b,
+          "info_thread_reported".b,
+          "erx_info_thread".b,
           "irq_kind".b,
           "log_level".b,
           "log_record_flags".b,
@@ -11518,6 +12054,7 @@ module Erx
           "space_flags".b,
           "system_manifest_path".b,
           "thread_class".b,
+          "thread_state".b,
           "uaddr".b,
           "upage".b,
           "urgency".b,
@@ -11526,7 +12063,8 @@ module Erx
           "erx_mf_limits".b,
           "erx_mf_principal".b,
           "utcb_length".b,
-          "vm_flags".b
+          "vm_flags".b,
+          "wait_kind".b
         ].freeze,
         constants: {
           "abi_note_type".b => Constant.new(
@@ -13059,6 +13597,234 @@ module Erx
             type: types.fetch("u64"),
             description: nil
           ).freeze,
+          "info_basic".b => Constant.new(
+            name: "info_basic".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget".b => Constant.new(
+            name: "info_budget".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_cap".b => Constant.new(
+            name: "info_budget_reported_cap".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_carved".b => Constant.new(
+            name: "info_budget_reported_carved".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_guarantee".b => Constant.new(
+            name: "info_budget_reported_guarantee".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_kind".b => Constant.new(
+            name: "info_budget_reported_kind".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_known".b => Constant.new(
+            name: "info_budget_reported_known".b,
+            value: 127,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_lent".b => Constant.new(
+            name: "info_budget_reported_lent".b,
+            value: 32,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_used".b => Constant.new(
+            name: "info_budget_reported_used".b,
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_budget_reported_watch".b => Constant.new(
+            name: "info_budget_reported_watch".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu".b => Constant.new(
+            name: "info_cpu".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_idle_time".b => Constant.new(
+            name: "info_cpu_reported_idle_time".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_interrupts".b => Constant.new(
+            name: "info_cpu_reported_interrupts".b,
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_known".b => Constant.new(
+            name: "info_cpu_reported_known".b,
+            value: 31,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_ready_threads".b => Constant.new(
+            name: "info_cpu_reported_ready_threads".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_running_thread".b => Constant.new(
+            name: "info_cpu_reported_running_thread".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_cpu_reported_throttled_groups".b => Constant.new(
+            name: "info_cpu_reported_throttled_groups".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group".b => Constant.new(
+            name: "info_group".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_capacity_mcpu".b => Constant.new(
+            name: "info_group_reported_capacity_mcpu".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_cpuset".b => Constant.new(
+            name: "info_group_reported_cpuset".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_known".b => Constant.new(
+            name: "info_group_reported_known".b,
+            value: 31,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_parked".b => Constant.new(
+            name: "info_group_reported_parked".b,
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_ready".b => Constant.new(
+            name: "info_group_reported_ready".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_group_reported_used_ns".b => Constant.new(
+            name: "info_group_reported_used_ns".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_image_entry".b => Constant.new(
+            name: "info_image_entry".b,
+            value: 6,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine".b => Constant.new(
+            name: "info_machine".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_boot_value".b => Constant.new(
+            name: "info_machine_reported_boot_value".b,
+            value: 64,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_build".b => Constant.new(
+            name: "info_machine_reported_build".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_cpus_online".b => Constant.new(
+            name: "info_machine_reported_cpus_online".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_entropy_quality".b => Constant.new(
+            name: "info_machine_reported_entropy_quality".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_known".b => Constant.new(
+            name: "info_machine_reported_known".b,
+            value: 127,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_memory_free".b => Constant.new(
+            name: "info_machine_reported_memory_free".b,
+            value: 16,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_memory_total".b => Constant.new(
+            name: "info_machine_reported_memory_total".b,
+            value: 8,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_machine_reported_uptime".b => Constant.new(
+            name: "info_machine_reported_uptime".b,
+            value: 32,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_thread".b => Constant.new(
+            name: "info_thread".b,
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_thread_reported_known".b => Constant.new(
+            name: "info_thread_reported_known".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_thread_reported_state".b => Constant.new(
+            name: "info_thread_reported_state".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "info_thread_reported_wait".b => Constant.new(
+            name: "info_thread_reported_wait".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "irq_line".b => Constant.new(
             name: "irq_line".b,
             value: 1,
@@ -14541,6 +15307,36 @@ module Erx
             type: types.fetch("u32"),
             description: nil
           ).freeze,
+          "thread_state_dead".b => Constant.new(
+            name: "thread_state_dead".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_state_ready".b => Constant.new(
+            name: "thread_state_ready".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_state_running".b => Constant.new(
+            name: "thread_state_running".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_state_stopped".b => Constant.new(
+            name: "thread_state_stopped".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "thread_state_waiting".b => Constant.new(
+            name: "thread_state_waiting".b,
+            value: 3,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
           "time_page_version".b => Constant.new(
             name: "time_page_version".b,
             value: 1,
@@ -14766,6 +15562,54 @@ module Erx
           "vm_noreplace".b => Constant.new(
             name: "vm_noreplace".b,
             value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_none".b => Constant.new(
+            name: "wait_none".b,
+            value: 0,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_park".b => Constant.new(
+            name: "wait_park".b,
+            value: 4,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_paused".b => Constant.new(
+            name: "wait_paused".b,
+            value: 7,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_quiesce".b => Constant.new(
+            name: "wait_quiesce".b,
+            value: 5,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_recv".b => Constant.new(
+            name: "wait_recv".b,
+            value: 2,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_send".b => Constant.new(
+            name: "wait_send".b,
+            value: 1,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_stop".b => Constant.new(
+            name: "wait_stop".b,
+            value: 6,
+            type: types.fetch("u32"),
+            description: nil
+          ).freeze,
+          "wait_umtx".b => Constant.new(
+            name: "wait_umtx".b,
+            value: 3,
             type: types.fetch("u32"),
             description: nil
           ).freeze,

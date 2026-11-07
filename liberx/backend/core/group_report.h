@@ -9,7 +9,9 @@
 /*
  * erx_group_configure and erx_group_info over a caller's UTCB, the same on both backends
  * (docs/design-stopgap.md, "Interrupts and readiness"). Of a grant only the CPU set is
- * kept; the report's usage says it is not measured, and its counts are the status page's.
+ * kept. The report, an erx_info_group, marks reported only what the backend has with its
+ * full meaning (docs/design-stopgap.md, "Reporting kernel objects"): the kept set once one
+ * is configured, and the status page's counts; never capacity_mcpu or used_ns.
  *
  * It also holds the reporters' console line, apart from erx_group_info's report: the
  * executors a status page holds, and erx_group_report_line, the "parked N of M" line both
@@ -24,20 +26,20 @@
 #include "erx/abi.h"
 
 #define ERX_GROUP_GRANT_WORDS	(sizeof(erx_share_t) / sizeof(uint64_t))
-#define ERX_GROUP_REPORT_WORDS	(sizeof(erx_group_report_t) / sizeof(uint64_t))
+#define ERX_INFO_GROUP_WORDS	(sizeof(erx_info_group_t) / sizeof(uint64_t))
 
 typedef union erx_group_grant_words {
 	erx_share_t	grant;
 	uint64_t	words[ERX_GROUP_GRANT_WORDS];
 } erx_group_grant_words_t;
 
-typedef union erx_group_report_words {
-	erx_group_report_t report;
-	uint64_t	words[ERX_GROUP_REPORT_WORDS];
-} erx_group_report_words_t;
+typedef union erx_info_group_words {
+	erx_info_group_t report;
+	uint64_t	words[ERX_INFO_GROUP_WORDS];
+} erx_info_group_words_t;
 
 _Static_assert(sizeof(erx_group_grant_words_t) == sizeof(erx_share_t), "a grant is whole message registers");
-_Static_assert(sizeof(erx_group_report_words_t) == sizeof(erx_group_report_t), "a report is whole message registers");
+_Static_assert(sizeof(erx_info_group_words_t) == sizeof(erx_info_group_t), "a report is whole message registers");
 
 /* What a caller of erx_group_configure puts in its UTCB. */
 static inline void
@@ -50,12 +52,12 @@ erx_group_grant_store(erx_utcb_t *utcb, const erx_share_t *grant)
 }
 
 /* What a caller of erx_group_info takes from its UTCB. */
-static inline erx_group_report_t
-erx_group_report_load(const erx_utcb_t *utcb)
+static inline erx_info_group_t
+erx_info_group_load(const erx_utcb_t *utcb)
 {
-	erx_group_report_words_t copy;
+	erx_info_group_words_t copy;
 
-	for (size_t word = 0; word < ERX_GROUP_REPORT_WORDS; word++)
+	for (size_t word = 0; word < ERX_INFO_GROUP_WORDS; word++)
 		copy.words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
 	return (copy.report);
 }
@@ -170,17 +172,18 @@ erx_group_report_line(char *line, size_t size, const char *head, uint32_t parked
 	return (used);
 }
 
-/* A CPU set no one configured reports as zero capacity: nothing is known of it. */
+/* A CPU set no one configured is zero and not reported: nothing is known of it. */
 static inline void
 erx_backend_group_report(erx_utcb_t *utcb, const erx_group_stat_t *status, const _Atomic uint64_t *cpuset)
 {
 	const uint64_t kept = atomic_load_explicit(cpuset, memory_order_relaxed);
-	const erx_group_report_words_t copy = { .report = { .cpuset = kept,
-	    .capacity_mcpu = (uint32_t)__builtin_popcountll(kept) * UINT32_C(1000),
+	const uint32_t reported = (kept != 0 ? ERX_INFO_GROUP_REPORTED_CPUSET : 0) |
+	    ERX_INFO_GROUP_REPORTED_PARKED | ERX_INFO_GROUP_REPORTED_READY;
+	const erx_info_group_words_t copy = { .report = { .cpuset = kept,
 	    .parked = atomic_load_explicit(&status->parked, memory_order_relaxed),
-	    .ready = atomic_load_explicit(&status->ready, memory_order_relaxed) } };
+	    .ready = atomic_load_explicit(&status->ready, memory_order_relaxed), .reported = reported } };
 
-	for (size_t word = 0; word < ERX_GROUP_REPORT_WORDS; word++)
+	for (size_t word = 0; word < ERX_INFO_GROUP_WORDS; word++)
 		atomic_store_explicit(&utcb->mr[word], copy.words[word], memory_order_relaxed);
 }
 

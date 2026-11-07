@@ -102,7 +102,7 @@ const erx_group_stat_t *erx_group_status(void);
  * returned, and anything else is ERX_EINVAL.
  */
 int	erx_group_configure(uint64_t group) ERX_WARN_UNUSED_RESULT;
-/* Writes an erx_group_report_t to the caller's UTCB. usage_known 0 means used_ns is not measured. */
+/* Writes an erx_info_group_t to the caller's UTCB; a clear bit of its reported field disowns that field. */
 int	erx_group_info(uint64_t group) ERX_WARN_UNUSED_RESULT;
 /* The caller's slot in the group, or ERX_NO_EXECUTOR_SLOT. */
 uint32_t	erx_executor_slot(void);

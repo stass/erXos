@@ -186,10 +186,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		(void)erx_frame_header_decode(bytes, length, &value);
 	}
 	{
-		erx_group_report_t value;
-		(void)erx_group_report_decode(bytes, length, &value);
-	}
-	{
 		erx_hostlink_control_t value;
 		(void)erx_hostlink_control_decode(bytes, length, &value);
 	}
@@ -300,6 +296,26 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	{
 		erx_crash_record_t value;
 		(void)erx_crash_record_decode(bytes, length, &value);
+	}
+	{
+		erx_info_budget_t value;
+		(void)erx_info_budget_decode(bytes, length, &value);
+	}
+	{
+		erx_info_cpu_t value;
+		(void)erx_info_cpu_decode(bytes, length, &value);
+	}
+	{
+		erx_info_group_t value;
+		(void)erx_info_group_decode(bytes, length, &value);
+	}
+	{
+		erx_info_machine_t value;
+		(void)erx_info_machine_decode(bytes, length, &value);
+	}
+	{
+		erx_info_thread_t value;
+		(void)erx_info_thread_decode(bytes, length, &value);
 	}
 	{
 		erx_log_record_t value;

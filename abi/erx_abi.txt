@@ -354,13 +354,125 @@ enum fiasco_call u32
   value time_set_wall 36
   value irq_unbind 37
 
-layout erx_group_report wire_le 8 32
+# erx_object_info's topics and the report each writes (docs/design-abi.md,
+# "Inspection schema"; docs/design-kernel.md, "Failure handling, diagnostics
+# and debuggability"). A topic the inspector shows is named after the schema
+# kind it reports, and its layout erx_info_<kind> has a field for each of
+# that kind's kernel attributes the kernel can report, named after it, and a
+# reported field with one bit per such field, named after it. A set bit says
+# the field holds the attribute with its full meaning; a clear bit says the
+# value means nothing. So a field that holds an enum is a plain integer
+# here, its enum named in a comment: a reader never refuses a report over a
+# value its clear bit disowns. tools/lib/erx/abi_inspection.rb checks the
+# names against abi/inspection.txt.
+enum info_kind u32
+  value basic 0
+  value machine 1
+  value cpu 2
+  value group 3
+  value budget 4
+  value thread 5
+  value image_entry 6
+
+# A thread's state and what it waits in (docs/design-kernel.md, "Threads").
+enum thread_state u32
+  value stopped 0
+  value ready 1
+  value running 2
+  value waiting 3
+  value dead 4
+enum wait_kind u32
+  value none 0
+  value send 1
+  value recv 2
+  value umtx 3
+  value park 4
+  value quiesce 5
+  value stop 6
+  value paused 7
+
+# ERX_INFO_MACHINE: entropy_quality holds an entropy_quality, boot_value a
+# boot_value, and build the machine page's build identifier.
+flags info_machine_reported u32
+  bit build 0
+  bit entropy_quality 1
+  bit cpus_online 2
+  bit memory_total 3
+  bit memory_free 4
+  bit uptime 5
+  bit boot_value 6
+layout erx_info_machine wire_le 8 48
+  field build u8 0 count 8
+  field entropy_quality u32 8
+  field cpus_online u32 12
+  field memory_total u64 16
+  field memory_free u64 24
+  field uptime u64 32
+  field boot_value u32 40
+  field reported info_machine_reported 44
+
+# ERX_INFO_CPU, for the CPU erx_object_info's index names: ready_threads
+# counts the ready threads of each urgency, 0 to @urgency_max.
+flags info_cpu_reported u32
+  bit running_thread 0
+  bit idle_time 1
+  bit ready_threads 2
+  bit interrupts 3
+  bit throttled_groups 4
+layout erx_info_cpu wire_le 8 288
+  field running_thread u64 0
+  field idle_time u64 8
+  field ready_threads u32 16 count 64
+  field interrupts u64 272
+  field throttled_groups u32 280
+  field reported info_cpu_reported 284
+
+# ERX_INFO_GROUP, the report erx_group_info writes (docs/design-scheduler.md).
+flags info_group_reported u32
+  bit cpuset 0
+  bit used_ns 1
+  bit capacity_mcpu 2
+  bit parked 3
+  bit ready 4
+layout erx_info_group wire_le 8 32
   field cpuset u64 0
   field used_ns u64 8
   field capacity_mcpu u32 16
   field parked u32 20
   field ready u32 24
-  field usage_known u32 28
+  field reported info_group_reported 28
+
+# ERX_INFO_BUDGET: kind holds a budget_kind.
+flags info_budget_reported u32
+  bit kind 0
+  bit guarantee 1
+  bit cap 2
+  bit used 3
+  bit carved 4
+  bit lent 5
+  bit watch 6
+layout erx_info_budget wire_le 8 56
+  field kind u32 0
+  field reported info_budget_reported 4
+  field guarantee u64 8
+  field cap u64 16
+  field used u64 24
+  field carved u64 32
+  field lent u64 40
+  field watch u64 48
+
+# ERX_INFO_THREAD, for the thread erx_object_info's index counts: id is the
+# thread's object id, which names the record rather than an attribute;
+# state holds a thread_state and wait a wait_kind.
+flags info_thread_reported u32
+  bit state 0
+  bit wait 1
+layout erx_info_thread wire_le 8 24
+  field id u64 0
+  field state u32 8
+  field wait u32 12
+  field reported info_thread_reported 16
+  padding 20 4
 
 layout erx_fiasco_thread_create_request wire_le 8 48
   field caller u64 0

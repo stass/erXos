@@ -3,14 +3,18 @@
 # The inspection schema (docs/design-abi.md, "Inspection schema"): units,
 # value types, stopgap reporters, kinds with their attributes in field
 # order, and paths. Its members have one namespace of their own; a root
-# limit, scalar, enum or flags is named by @name. tools/gen_abi.rb
-# generates erx_schema and the host tool's table from it.
+# limit, scalar, enum or flags is named by @name. An attribute marked
+# derived is one the inspector computes from the inputs it lists. A kind
+# that erx_object_info reports has a root layout erx_info_<kind>, whose
+# fields and reported bits are named after the kind's kernel attributes.
+# tools/gen_abi.rb generates erx_schema and the host tool's table from it.
 
 inspection 1
   unit pages "pages"
   unit bytes "bytes"
   unit ns "ns"
   unit words "words"
+  unit mcpu "mCPU"
 
   integer count 0 0xffffffffffffffff
   integer page_count 0 0xffffffffffffffff unit pages
@@ -20,6 +24,9 @@ inspection 1
   integer cpu_index 0 63
   integer cpus_online 0 @cpu_limit
   integer budget_id 1 0xffffffff
+  integer group_id 1 0xffffffff
+  integer cpu_mask 0 0xffffffffffffffff
+  integer capacity 0 64000 unit mcpu
   integer domain_id 0 0xffffffff
   integer principal_id 1 0xffffffff
   integer thread_id 0 0xffffffffffffffff
@@ -59,6 +66,13 @@ inspection 1
     attr interrupts count reporters kernel visible all build all projections shell,host,proc,web
     attr throttled_groups count reporters kernel visible all build all projections shell,host,proc,web
 
+  kind group
+    attr cpuset cpu_mask reporters kernel visible owner build all projections shell,host,proc,web
+    attr used_ns duration reporters kernel visible owner build all projections shell,host,proc,web
+    attr capacity_mcpu capacity reporters kernel visible owner build all projections shell,host,proc,web
+    attr parked count reporters kernel visible owner build all projections shell,host,proc,web
+    attr ready count reporters kernel visible owner build all projections shell,host,proc,web
+
   kind budget
     attr kind @budget_kind reporters kernel visible owner build all projections shell,host,proc,web
     attr guarantee page_count reporters kernel visible owner build all projections shell,host,proc,web
@@ -68,11 +82,11 @@ inspection 1
     attr lent page_count reporters kernel visible owner build all projections shell,host,proc,web
     attr pinned page_count reporters kernel visible owner build all projections shell,host,proc,web
     attr watch page_count reporters kernel visible owner build all projections shell,host,proc,web
-    attr spending page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
-    attr borrowing page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
-    attr room page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
-    attr deficit page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
-    attr give_back page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr spending page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived used,carved,lent
+    attr borrowing page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived guarantee,used,carved,lent
+    attr room page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived cap,used,carved,lent
+    attr deficit page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived cap,used,carved,lent
+    attr give_back page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web derived guarantee,used,carved,lent,pinned
     attr domain domain_id reporters service visible owner build all projections shell,host,proc,web
 
   kind domain
@@ -84,6 +98,10 @@ inspection 1
     attr ets_tables count reporters runtime visible owner build all projections shell,host,proc,web
     attr modules count reporters runtime visible owner build all projections shell,host,proc,web
     attr processes count reporters runtime visible owner build all projections shell,host,proc,web
+
+  kind thread
+    attr state @thread_state reporters kernel visible owner build all projections shell,host,proc,web
+    attr wait @wait_kind reporters kernel visible owner build all projections shell,host,proc,web
 
   kind process
     attr domain domain_id reporters service visible owner build all projections shell,host,proc,web
@@ -111,12 +129,18 @@ inspection 1
   path listing cpus
     visible all
   path cpu cpus *cpu_index
+  path listing groups
+    visible all
+  path group groups *group_id
   path listing budgets
     visible all
   path budget budgets *budget_id
   path listing domains
   path domain domains *domain_id
   path budget domains *domain_id budget
+  path group domains *domain_id group
+  path listing domains *domain_id threads
+  path thread domains *domain_id threads *thread_id
   path listing domains *domain_id modules
   path module domains *domain_id modules *module_name
   path listing domains *domain_id processes

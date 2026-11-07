@@ -567,7 +567,10 @@ case_unsupported_refused(void)
 	    erx_irq_route(0, 0) == ERX_ENOTSUP);
 }
 
-/* A grant keeps its CPU set and a report gives it back as capacity, with usage not measured. */
+/*
+ * A grant keeps its CPU set and a report gives it back, marked reported only once configured,
+ * with the status page's counts; capacity and usage are never reported.
+ */
 static bool
 case_group_info_and_configure(void)
 {
@@ -575,19 +578,22 @@ case_group_info_and_configure(void)
 	erx_utcb_t *const utcb = erx_utcb_self();
 	const erx_share_t grant = { .cpuset = UINT64_C(0x5) };
 	const erx_share_t empty = { .cpuset = 0 };
-	erx_group_report_t report;
+	erx_info_group_t report;
 	bool ok = erx_group_info(ERX_CAP_NULL) == ERX_EINVAL && erx_group_configure(ERX_CAP_NULL) == ERX_EINVAL &&
 	    erx_group_info(UINT64_C(42)) == ERX_EINVAL && erx_group_configure(UINT64_C(42)) == ERX_EINVAL;
 
+	ok = ok && erx_group_info(group) == ERX_OK;
+	report = erx_info_group_load(utcb);
+	ok = ok && report.cpuset == 0 && report.reported == (ERX_INFO_GROUP_REPORTED_PARKED | ERX_INFO_GROUP_REPORTED_READY);
 	erx_group_grant_store(utcb, &grant);
 	ok = ok && erx_group_configure(group) == ERX_OK && erx_group_info(group) == ERX_OK;
-	report = erx_group_report_load(utcb);
-	ok = ok && report.cpuset == UINT64_C(0x5) && report.capacity_mcpu == 2000 && report.usage_known == 0 &&
-	    report.used_ns == 0;
+	report = erx_info_group_load(utcb);
+	ok = ok && report.cpuset == UINT64_C(0x5) && report.reported == (ERX_INFO_GROUP_REPORTED_CPUSET |
+	    ERX_INFO_GROUP_REPORTED_PARKED | ERX_INFO_GROUP_REPORTED_READY);
 	/* An empty set changes nothing. */
 	erx_group_grant_store(utcb, &empty);
 	ok = ok && erx_group_configure(group) == ERX_EINVAL && erx_group_info(group) == ERX_OK;
-	report = erx_group_report_load(utcb);
+	report = erx_info_group_load(utcb);
 	return (ok && report.cpuset == UINT64_C(0x5));
 }
 

@@ -435,14 +435,15 @@ module Erx
               'reporters' => list(attr.reporters.map { |name| reporter(inspection, name) }, 24),
               'visible' => atom(attr.visible),
               'build' => atom(attr.build),
-              'projections' => list(attr.projections.map { |name| atom(name) }, 26)
+              'projections' => list(attr.projections.map { |name| atom(name) }, 26),
+              'derived' => list(attr.derived.map { |name| atom(name) }, 22)
             }
             "attribute(#{atom(kind)}, #{atom(attr.key)}) ->\n    {ok, #{map(fields, 9)}}"
           end
         end
         clauses << "attribute(_Kind, _Key) ->\n    error"
         "%% An attribute's declaration: type, unit label, reporters, visibility,\n" \
-          "%% build and projections.\n" + clauses.join(";\n") + '.'
+          "%% build, projections and the inputs it is derived from.\n" + clauses.join(";\n") + '.'
       end
 
       def stopgap_functions(inspection)

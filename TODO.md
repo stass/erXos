@@ -448,20 +448,14 @@ it; git history is the record of completed work.
   variable segment), ignores an attribute's `build` (a release record may carry a `development` attribute), and
   has no fuzz target over random terms. `cpu_index`'s bound 63 is written beside `@cpu_limit` because the grammar
   has no `@limit - 1`. The domain kind lacks design-live's death record and group usage.
-* [Medium] kernel reports, `abi/erx_abi.txt`, `abi/inspection.txt` and `liberx` (design-abi's
-  [Inspection schema](docs/design-abi.md#inspection-schema)): the topic enum and the `erx_info_<kind>` layouts with
-  their `reported` flags are not declared, and the generator does not check their names against the schema or
-  refuse two stopgap reporters for one category on an attribute. `erx_group_report` becomes `erx_info_group`, with
-  `reported` in place of `usage_known`, which `otp/erts/emulator/sys/erxos/sys_time.c` reads; its
-  `capacity_mcpu` bit stays clear, and `cpuset`'s until a set is configured, where
-  `liberx/backend/core/group_report.h` writes 1,000 times the CPU count and a zero. The schema lacks the `group`
-  and `thread` kinds and their paths in design-live's [Paths](docs/design-live.md#paths) (a thread's `state` and
-  `wait` typed by root enums of the kernel's thread states and wait kinds, with their visibility), names the
-  budget's threshold `watch`, and has no `derived` property, which the budget's `spending`, `borrowing`, `room`,
-  `deficit` and `give_back` need.
-  `erx_info_partial` is not in `liberx/backend/api.h`. The budget layout declares only the fields master and the
-  budget redesign on branch `design-budget-caps` agree on (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `threshold`);
-  `pinned` or `freeing` follows that redesign, and until then shows `unsupported`.
+* [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
+  [Inspection schema](docs/design-abi.md#inspection-schema)): `erx_info_partial` is not in `liberx/backend/api.h`.
+  `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on
+  (`kind`, `guarantee`, `cap`, `used`, `carved`, `lent`, `watch`); `pinned` or `freeing` follows that redesign, and
+  until then shows `unsupported`. `erx_info_machine` has no field for `development` or `dma_profile`, since the
+  design does not say how a boolean or a closed atom set travels in a report, so both read as clear bits; and the
+  `group` kind declares only the five attributes `erx_info_group` carries, not design-live's throttling,
+  executors, child groups or the policy's intent.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).

@@ -275,6 +275,44 @@ struct erx_rights {
 #define ERX_IMAGE_SPAN_MAX UINT64_C(4294963200)
 #define ERX_IMAGE_VERSION UINT16_C(1)
 #define ERX_IMAGE_WRITABLE_MAX UINT64_C(67108864)
+#define ERX_INFO_BASIC UINT32_C(0)
+#define ERX_INFO_BUDGET UINT32_C(4)
+#define ERX_INFO_BUDGET_REPORTED_CAP UINT32_C(4)
+#define ERX_INFO_BUDGET_REPORTED_CARVED UINT32_C(16)
+#define ERX_INFO_BUDGET_REPORTED_GUARANTEE UINT32_C(2)
+#define ERX_INFO_BUDGET_REPORTED_KIND UINT32_C(1)
+#define ERX_INFO_BUDGET_REPORTED_KNOWN UINT32_C(127)
+#define ERX_INFO_BUDGET_REPORTED_LENT UINT32_C(32)
+#define ERX_INFO_BUDGET_REPORTED_USED UINT32_C(8)
+#define ERX_INFO_BUDGET_REPORTED_WATCH UINT32_C(64)
+#define ERX_INFO_CPU UINT32_C(2)
+#define ERX_INFO_CPU_REPORTED_IDLE_TIME UINT32_C(2)
+#define ERX_INFO_CPU_REPORTED_INTERRUPTS UINT32_C(8)
+#define ERX_INFO_CPU_REPORTED_KNOWN UINT32_C(31)
+#define ERX_INFO_CPU_REPORTED_READY_THREADS UINT32_C(4)
+#define ERX_INFO_CPU_REPORTED_RUNNING_THREAD UINT32_C(1)
+#define ERX_INFO_CPU_REPORTED_THROTTLED_GROUPS UINT32_C(16)
+#define ERX_INFO_GROUP UINT32_C(3)
+#define ERX_INFO_GROUP_REPORTED_CAPACITY_MCPU UINT32_C(4)
+#define ERX_INFO_GROUP_REPORTED_CPUSET UINT32_C(1)
+#define ERX_INFO_GROUP_REPORTED_KNOWN UINT32_C(31)
+#define ERX_INFO_GROUP_REPORTED_PARKED UINT32_C(8)
+#define ERX_INFO_GROUP_REPORTED_READY UINT32_C(16)
+#define ERX_INFO_GROUP_REPORTED_USED_NS UINT32_C(2)
+#define ERX_INFO_IMAGE_ENTRY UINT32_C(6)
+#define ERX_INFO_MACHINE UINT32_C(1)
+#define ERX_INFO_MACHINE_REPORTED_BOOT_VALUE UINT32_C(64)
+#define ERX_INFO_MACHINE_REPORTED_BUILD UINT32_C(1)
+#define ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE UINT32_C(4)
+#define ERX_INFO_MACHINE_REPORTED_ENTROPY_QUALITY UINT32_C(2)
+#define ERX_INFO_MACHINE_REPORTED_KNOWN UINT32_C(127)
+#define ERX_INFO_MACHINE_REPORTED_MEMORY_FREE UINT32_C(16)
+#define ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL UINT32_C(8)
+#define ERX_INFO_MACHINE_REPORTED_UPTIME UINT32_C(32)
+#define ERX_INFO_THREAD UINT32_C(5)
+#define ERX_INFO_THREAD_REPORTED_KNOWN UINT32_C(3)
+#define ERX_INFO_THREAD_REPORTED_STATE UINT32_C(1)
+#define ERX_INFO_THREAD_REPORTED_WAIT UINT32_C(2)
 #define ERX_IRQ_LINE UINT32_C(1)
 #define ERX_IRQ_MSI UINT32_C(2)
 #define ERX_IRQ_SOFT UINT32_C(0)
@@ -522,6 +560,11 @@ struct erx_rights {
 #define ERX_SPACE_JIT UINT32_C(1)
 #define ERX_THREAD_CLASS_EXECUTOR UINT32_C(1)
 #define ERX_THREAD_CLASS_WORKER UINT32_C(0)
+#define ERX_THREAD_STATE_DEAD UINT32_C(4)
+#define ERX_THREAD_STATE_READY UINT32_C(1)
+#define ERX_THREAD_STATE_RUNNING UINT32_C(2)
+#define ERX_THREAD_STATE_STOPPED UINT32_C(0)
+#define ERX_THREAD_STATE_WAITING UINT32_C(3)
 #define ERX_TIME_PAGE_VERSION UINT32_C(1)
 #define ERX_TLB_BY_ADDRESS_MAX UINT32_C(64)
 #define ERX_URGENCY_MAX UINT8_C(63)
@@ -560,6 +603,14 @@ struct erx_rights {
 #define ERX_VM_FIXED UINT32_C(1)
 #define ERX_VM_FLAGS_KNOWN UINT32_C(3)
 #define ERX_VM_NOREPLACE UINT32_C(2)
+#define ERX_WAIT_NONE UINT32_C(0)
+#define ERX_WAIT_PARK UINT32_C(4)
+#define ERX_WAIT_PAUSED UINT32_C(7)
+#define ERX_WAIT_QUIESCE UINT32_C(5)
+#define ERX_WAIT_RECV UINT32_C(2)
+#define ERX_WAIT_SEND UINT32_C(1)
+#define ERX_WAIT_STOP UINT32_C(6)
+#define ERX_WAIT_UMTX UINT32_C(3)
 #define ERX_WATCHDOG_BOOT_DEFAULT UINT32_C(60)
 #define ERX_WATCHDOG_BOOT_MAX UINT32_C(600)
 #define ERX_WATCHDOG_DEADLINE_DEFAULT UINT32_C(5)
@@ -2007,38 +2058,6 @@ _Static_assert(offsetof(erx_frame_header_t, ctl_len) ==
 _Static_assert(offsetof(erx_frame_header_t, payload_len) ==
     ERX_FRAME_HEADER_OFF_PAYLOAD_LEN, "erx_frame_header.payload_len offset");
 
-#define ERX_GROUP_REPORT_SIZE 32
-#define ERX_GROUP_REPORT_ALIGN 8
-#define ERX_GROUP_REPORT_OFF_CPUSET 0
-#define ERX_GROUP_REPORT_OFF_USED_NS 8
-#define ERX_GROUP_REPORT_OFF_CAPACITY_MCPU 16
-#define ERX_GROUP_REPORT_OFF_PARKED 20
-#define ERX_GROUP_REPORT_OFF_READY 24
-#define ERX_GROUP_REPORT_OFF_USAGE_KNOWN 28
-typedef struct erx_group_report erx_group_report_t;
-struct erx_group_report {
-	_Alignas(8) uint64_t	cpuset;
-	uint64_t	used_ns;
-	uint32_t	capacity_mcpu;
-	uint32_t	parked;
-	uint32_t	ready;
-	uint32_t	usage_known;
-};
-_Static_assert(sizeof(erx_group_report_t) == ERX_GROUP_REPORT_SIZE, "erx_group_report size");
-_Static_assert(_Alignof(erx_group_report_t) == ERX_GROUP_REPORT_ALIGN, "erx_group_report alignment");
-_Static_assert(offsetof(erx_group_report_t, cpuset) ==
-    ERX_GROUP_REPORT_OFF_CPUSET, "erx_group_report.cpuset offset");
-_Static_assert(offsetof(erx_group_report_t, used_ns) ==
-    ERX_GROUP_REPORT_OFF_USED_NS, "erx_group_report.used_ns offset");
-_Static_assert(offsetof(erx_group_report_t, capacity_mcpu) ==
-    ERX_GROUP_REPORT_OFF_CAPACITY_MCPU, "erx_group_report.capacity_mcpu offset");
-_Static_assert(offsetof(erx_group_report_t, parked) ==
-    ERX_GROUP_REPORT_OFF_PARKED, "erx_group_report.parked offset");
-_Static_assert(offsetof(erx_group_report_t, ready) ==
-    ERX_GROUP_REPORT_OFF_READY, "erx_group_report.ready offset");
-_Static_assert(offsetof(erx_group_report_t, usage_known) ==
-    ERX_GROUP_REPORT_OFF_USAGE_KNOWN, "erx_group_report.usage_known offset");
-
 #define ERX_HOSTLINK_CONTROL_SIZE 16
 #define ERX_HOSTLINK_CONTROL_ALIGN 8
 #define ERX_HOSTLINK_CONTROL_OFF_KIND 0
@@ -3050,6 +3069,187 @@ typedef uint8_t erx_hostlink_stream_t;
 
 typedef uint32_t erx_image_flags_t;
 
+typedef uint32_t erx_info_budget_reported_t;
+
+#define ERX_INFO_BUDGET_SIZE 56
+#define ERX_INFO_BUDGET_ALIGN 8
+#define ERX_INFO_BUDGET_OFF_KIND 0
+#define ERX_INFO_BUDGET_OFF_REPORTED 4
+#define ERX_INFO_BUDGET_OFF_GUARANTEE 8
+#define ERX_INFO_BUDGET_OFF_CAP 16
+#define ERX_INFO_BUDGET_OFF_USED 24
+#define ERX_INFO_BUDGET_OFF_CARVED 32
+#define ERX_INFO_BUDGET_OFF_LENT 40
+#define ERX_INFO_BUDGET_OFF_WATCH 48
+typedef struct erx_info_budget erx_info_budget_t;
+struct erx_info_budget {
+	_Alignas(8) uint32_t	kind;
+	erx_info_budget_reported_t	reported;
+	uint64_t	guarantee;
+	uint64_t	cap;
+	uint64_t	used;
+	uint64_t	carved;
+	uint64_t	lent;
+	uint64_t	watch;
+};
+_Static_assert(sizeof(erx_info_budget_t) == ERX_INFO_BUDGET_SIZE, "erx_info_budget size");
+_Static_assert(_Alignof(erx_info_budget_t) == ERX_INFO_BUDGET_ALIGN, "erx_info_budget alignment");
+_Static_assert(offsetof(erx_info_budget_t, kind) ==
+    ERX_INFO_BUDGET_OFF_KIND, "erx_info_budget.kind offset");
+_Static_assert(offsetof(erx_info_budget_t, reported) ==
+    ERX_INFO_BUDGET_OFF_REPORTED, "erx_info_budget.reported offset");
+_Static_assert(offsetof(erx_info_budget_t, guarantee) ==
+    ERX_INFO_BUDGET_OFF_GUARANTEE, "erx_info_budget.guarantee offset");
+_Static_assert(offsetof(erx_info_budget_t, cap) ==
+    ERX_INFO_BUDGET_OFF_CAP, "erx_info_budget.cap offset");
+_Static_assert(offsetof(erx_info_budget_t, used) ==
+    ERX_INFO_BUDGET_OFF_USED, "erx_info_budget.used offset");
+_Static_assert(offsetof(erx_info_budget_t, carved) ==
+    ERX_INFO_BUDGET_OFF_CARVED, "erx_info_budget.carved offset");
+_Static_assert(offsetof(erx_info_budget_t, lent) ==
+    ERX_INFO_BUDGET_OFF_LENT, "erx_info_budget.lent offset");
+_Static_assert(offsetof(erx_info_budget_t, watch) ==
+    ERX_INFO_BUDGET_OFF_WATCH, "erx_info_budget.watch offset");
+
+typedef uint32_t erx_info_cpu_reported_t;
+
+#define ERX_INFO_CPU_SIZE 288
+#define ERX_INFO_CPU_ALIGN 8
+#define ERX_INFO_CPU_OFF_RUNNING_THREAD 0
+#define ERX_INFO_CPU_OFF_IDLE_TIME 8
+#define ERX_INFO_CPU_OFF_READY_THREADS 16
+#define ERX_INFO_CPU_OFF_INTERRUPTS 272
+#define ERX_INFO_CPU_OFF_THROTTLED_GROUPS 280
+#define ERX_INFO_CPU_OFF_REPORTED 284
+typedef struct erx_info_cpu erx_info_cpu_t;
+struct erx_info_cpu {
+	_Alignas(8) uint64_t	running_thread;
+	uint64_t	idle_time;
+	uint32_t	ready_threads[64];
+	uint64_t	interrupts;
+	uint32_t	throttled_groups;
+	erx_info_cpu_reported_t	reported;
+};
+_Static_assert(sizeof(erx_info_cpu_t) == ERX_INFO_CPU_SIZE, "erx_info_cpu size");
+_Static_assert(_Alignof(erx_info_cpu_t) == ERX_INFO_CPU_ALIGN, "erx_info_cpu alignment");
+_Static_assert(offsetof(erx_info_cpu_t, running_thread) ==
+    ERX_INFO_CPU_OFF_RUNNING_THREAD, "erx_info_cpu.running_thread offset");
+_Static_assert(offsetof(erx_info_cpu_t, idle_time) ==
+    ERX_INFO_CPU_OFF_IDLE_TIME, "erx_info_cpu.idle_time offset");
+_Static_assert(offsetof(erx_info_cpu_t, ready_threads) ==
+    ERX_INFO_CPU_OFF_READY_THREADS, "erx_info_cpu.ready_threads offset");
+_Static_assert(offsetof(erx_info_cpu_t, interrupts) ==
+    ERX_INFO_CPU_OFF_INTERRUPTS, "erx_info_cpu.interrupts offset");
+_Static_assert(offsetof(erx_info_cpu_t, throttled_groups) ==
+    ERX_INFO_CPU_OFF_THROTTLED_GROUPS, "erx_info_cpu.throttled_groups offset");
+_Static_assert(offsetof(erx_info_cpu_t, reported) ==
+    ERX_INFO_CPU_OFF_REPORTED, "erx_info_cpu.reported offset");
+
+typedef uint32_t erx_info_group_reported_t;
+
+#define ERX_INFO_GROUP_SIZE 32
+#define ERX_INFO_GROUP_ALIGN 8
+#define ERX_INFO_GROUP_OFF_CPUSET 0
+#define ERX_INFO_GROUP_OFF_USED_NS 8
+#define ERX_INFO_GROUP_OFF_CAPACITY_MCPU 16
+#define ERX_INFO_GROUP_OFF_PARKED 20
+#define ERX_INFO_GROUP_OFF_READY 24
+#define ERX_INFO_GROUP_OFF_REPORTED 28
+typedef struct erx_info_group erx_info_group_t;
+struct erx_info_group {
+	_Alignas(8) uint64_t	cpuset;
+	uint64_t	used_ns;
+	uint32_t	capacity_mcpu;
+	uint32_t	parked;
+	uint32_t	ready;
+	erx_info_group_reported_t	reported;
+};
+_Static_assert(sizeof(erx_info_group_t) == ERX_INFO_GROUP_SIZE, "erx_info_group size");
+_Static_assert(_Alignof(erx_info_group_t) == ERX_INFO_GROUP_ALIGN, "erx_info_group alignment");
+_Static_assert(offsetof(erx_info_group_t, cpuset) ==
+    ERX_INFO_GROUP_OFF_CPUSET, "erx_info_group.cpuset offset");
+_Static_assert(offsetof(erx_info_group_t, used_ns) ==
+    ERX_INFO_GROUP_OFF_USED_NS, "erx_info_group.used_ns offset");
+_Static_assert(offsetof(erx_info_group_t, capacity_mcpu) ==
+    ERX_INFO_GROUP_OFF_CAPACITY_MCPU, "erx_info_group.capacity_mcpu offset");
+_Static_assert(offsetof(erx_info_group_t, parked) ==
+    ERX_INFO_GROUP_OFF_PARKED, "erx_info_group.parked offset");
+_Static_assert(offsetof(erx_info_group_t, ready) ==
+    ERX_INFO_GROUP_OFF_READY, "erx_info_group.ready offset");
+_Static_assert(offsetof(erx_info_group_t, reported) ==
+    ERX_INFO_GROUP_OFF_REPORTED, "erx_info_group.reported offset");
+
+typedef uint32_t erx_info_kind_t;
+
+typedef uint32_t erx_info_machine_reported_t;
+
+#define ERX_INFO_MACHINE_SIZE 48
+#define ERX_INFO_MACHINE_ALIGN 8
+#define ERX_INFO_MACHINE_OFF_BUILD 0
+#define ERX_INFO_MACHINE_OFF_ENTROPY_QUALITY 8
+#define ERX_INFO_MACHINE_OFF_CPUS_ONLINE 12
+#define ERX_INFO_MACHINE_OFF_MEMORY_TOTAL 16
+#define ERX_INFO_MACHINE_OFF_MEMORY_FREE 24
+#define ERX_INFO_MACHINE_OFF_UPTIME 32
+#define ERX_INFO_MACHINE_OFF_BOOT_VALUE 40
+#define ERX_INFO_MACHINE_OFF_REPORTED 44
+typedef struct erx_info_machine erx_info_machine_t;
+struct erx_info_machine {
+	_Alignas(8) uint8_t	build[8];
+	uint32_t	entropy_quality;
+	uint32_t	cpus_online;
+	uint64_t	memory_total;
+	uint64_t	memory_free;
+	uint64_t	uptime;
+	uint32_t	boot_value;
+	erx_info_machine_reported_t	reported;
+};
+_Static_assert(sizeof(erx_info_machine_t) == ERX_INFO_MACHINE_SIZE, "erx_info_machine size");
+_Static_assert(_Alignof(erx_info_machine_t) == ERX_INFO_MACHINE_ALIGN, "erx_info_machine alignment");
+_Static_assert(offsetof(erx_info_machine_t, build) ==
+    ERX_INFO_MACHINE_OFF_BUILD, "erx_info_machine.build offset");
+_Static_assert(offsetof(erx_info_machine_t, entropy_quality) ==
+    ERX_INFO_MACHINE_OFF_ENTROPY_QUALITY, "erx_info_machine.entropy_quality offset");
+_Static_assert(offsetof(erx_info_machine_t, cpus_online) ==
+    ERX_INFO_MACHINE_OFF_CPUS_ONLINE, "erx_info_machine.cpus_online offset");
+_Static_assert(offsetof(erx_info_machine_t, memory_total) ==
+    ERX_INFO_MACHINE_OFF_MEMORY_TOTAL, "erx_info_machine.memory_total offset");
+_Static_assert(offsetof(erx_info_machine_t, memory_free) ==
+    ERX_INFO_MACHINE_OFF_MEMORY_FREE, "erx_info_machine.memory_free offset");
+_Static_assert(offsetof(erx_info_machine_t, uptime) ==
+    ERX_INFO_MACHINE_OFF_UPTIME, "erx_info_machine.uptime offset");
+_Static_assert(offsetof(erx_info_machine_t, boot_value) ==
+    ERX_INFO_MACHINE_OFF_BOOT_VALUE, "erx_info_machine.boot_value offset");
+_Static_assert(offsetof(erx_info_machine_t, reported) ==
+    ERX_INFO_MACHINE_OFF_REPORTED, "erx_info_machine.reported offset");
+
+typedef uint32_t erx_info_thread_reported_t;
+
+#define ERX_INFO_THREAD_SIZE 24
+#define ERX_INFO_THREAD_ALIGN 8
+#define ERX_INFO_THREAD_OFF_ID 0
+#define ERX_INFO_THREAD_OFF_STATE 8
+#define ERX_INFO_THREAD_OFF_WAIT 12
+#define ERX_INFO_THREAD_OFF_REPORTED 16
+typedef struct erx_info_thread erx_info_thread_t;
+struct erx_info_thread {
+	_Alignas(8) uint64_t	id;
+	uint32_t	state;
+	uint32_t	wait;
+	erx_info_thread_reported_t	reported;
+	uint8_t	padding_0[4];
+};
+_Static_assert(sizeof(erx_info_thread_t) == ERX_INFO_THREAD_SIZE, "erx_info_thread size");
+_Static_assert(_Alignof(erx_info_thread_t) == ERX_INFO_THREAD_ALIGN, "erx_info_thread alignment");
+_Static_assert(offsetof(erx_info_thread_t, id) ==
+    ERX_INFO_THREAD_OFF_ID, "erx_info_thread.id offset");
+_Static_assert(offsetof(erx_info_thread_t, state) ==
+    ERX_INFO_THREAD_OFF_STATE, "erx_info_thread.state offset");
+_Static_assert(offsetof(erx_info_thread_t, wait) ==
+    ERX_INFO_THREAD_OFF_WAIT, "erx_info_thread.wait offset");
+_Static_assert(offsetof(erx_info_thread_t, reported) ==
+    ERX_INFO_THREAD_OFF_REPORTED, "erx_info_thread.reported offset");
+
 typedef uint32_t erx_irq_kind_t;
 
 typedef uint32_t erx_log_level_t;
@@ -3765,6 +3965,8 @@ typedef uint8_t erx_system_manifest_path_t[15];
 
 typedef uint32_t erx_thread_class_t;
 
+typedef uint32_t erx_thread_state_t;
+
 typedef struct erx_uaddr erx_uaddr_t;
 struct erx_uaddr {
 	uint64_t	raw;
@@ -4123,6 +4325,8 @@ struct erx_utcb_length {
 _Static_assert(sizeof(erx_utcb_length_t) == 4, "erx_utcb_length size");
 
 typedef uint32_t erx_vm_flags_t;
+
+typedef uint32_t erx_wait_kind_t;
 
 /* Emit once from target startup; the linker keeps this note section. */
 #define ERX_DECLARE_ABI_NOTE(symbol) \

@@ -40,14 +40,24 @@ class AbiInspectionTest < Minitest::Test
       path thing things *index
   INSPECTION
 
-  def model(text, path: 'abi/inspection.txt')
-    declarations = Erx::ABI::Syntax.parse(ROOT_SOURCE, path: 'abi/erx_abi.txt') +
+  # A report of kind thing: its one kernel attribute size, and the mask.
+  REPORT = <<~ABI
+    flags info_thing_reported u32
+      bit size 0
+    layout erx_info_thing wire_le 4 8
+      field size u32 0
+      field reported info_thing_reported 4
+  ABI
+
+  # ROOT, root declarations added to ROOT_SOURCE, such as a report layout.
+  def model(text, path: 'abi/inspection.txt', root: '')
+    declarations = Erx::ABI::Syntax.parse(ROOT_SOURCE + root, path: 'abi/erx_abi.txt') +
                    Erx::ABI::Syntax.parse(text, path: path)
     Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations.freeze, inputs: {}.freeze))
   end
 
-  def assert_refused(text, pattern, path: 'abi/inspection.txt')
-    error = assert_raises(Erx::ABI::SchemaError) { model(text, path: path) }
+  def assert_refused(text, pattern, path: 'abi/inspection.txt', root: '')
+    error = assert_raises(Erx::ABI::SchemaError) { model(text, path: path, root: root) }
     assert_match(pattern, error.message)
   end
 
@@ -225,13 +235,98 @@ class AbiInspectionTest < Minitest::Test
     assert_equal({ 0 => [], 1 => ['all'], 2 => ['all'], 3 => %w[all system_shell] }, visibility)
   end
 
+  def test_a_derived_attribute_names_its_inputs
+    total = 'total index reporters kernel visible any build all projections shell'
+    attrs = model(with_attr("#{total} derived size")).inspection.kinds.fetch('thing')
+    assert_equal [%w[size], []], attrs.map(&:derived)
+    assert_refused(with_attr("#{total} derived nothing"), /derived input nothing is no attribute of the kind/)
+    assert_refused(with_attr("#{total} derived total"), /derived input total is itself derived/)
+    # Two attributes derived from each other: the first in field order is refused.
+    cycle = with_attr("#{total} derived size").sub("projections shell\n  path listing\n",
+                                                   "projections shell derived total\n  path listing\n")
+    assert_refused(cycle, /derived input size is itself derived/)
+    assert_refused(with_attr("#{total} derived size,size"), /duplicate or empty/)
+    assert_refused(with_attr("#{total} derived"), /expected attr KEY TYPE .* \[derived INPUTS\]/)
+    assert_refused(with_attr("#{total} from size"), /expected attr KEY TYPE/)
+    assert_refused(with_attr("#{total} derived size extra"), /expected attr KEY TYPE/)
+  end
+
+  def test_an_attribute_lists_one_stopgap_for_each_category
+    gaps = "  stopgap gap kernel \"gap\" \"scope\"\n  stopgap other kernel \"other\" \"scope\"\n" \
+           "  stopgap svc service \"svc\" \"scope\"\n"
+    assert_refused(with_attr('n index reporters kernel,gap,other visible any build all projections shell') + gaps,
+                   /stopgaps gap and other both stand in for kernel/)
+    two = with_attr("n index reporters kernel,gap,service,svc visible any build all projections shell\n    " \
+                    'attr m index reporters kernel,other visible any build all projections shell')
+    model(two + gaps)
+  end
+
+  def test_a_report_layout_is_named_after_its_kinds_kernel_attributes
+    model(BASE, root: REPORT)
+    model(BASE, root: REPORT.sub("  field size u32 0\n", "  field size u32 0\n  field id u32 8\n")
+                            .sub('wire_le 4 8', 'wire_le 4 12'))
+    model(with_attr('spare index reporters kernel visible any build all projections shell'), root: REPORT)
+    renamed = REPORT.gsub(/\bsize\b/, 'weight')
+    assert_refused(BASE, /erx_info_thing field weight names no attribute of its kind that lists kernel/, root: renamed)
+    assert_refused(BASE.sub('size index reporters kernel', 'size index reporters service'),
+                   /erx_info_thing field size names no attribute of its kind that lists kernel/, root: REPORT)
+    with_total = REPORT.sub("  bit size 0\n", "  bit size 0\n  bit total 1\n")
+                       .sub('field reported info_thing_reported 4', "field total u32 4\n  field reported info_thing_reported 8")
+                       .sub('wire_le 4 8', 'wire_le 4 12')
+    assert_refused(with_attr('total index reporters kernel visible any build all projections shell derived size'),
+                   /erx_info_thing field total is a derived attribute/, root: with_total)
+  end
+
+  def test_a_report_layouts_reported_bits_are_exactly_its_attribute_fields
+    assert_refused(BASE, /reported bit spare of erx_info_thing names no attribute field/,
+                   root: REPORT.sub("  bit size 0\n", "  bit size 0\n  bit spare 1\n"))
+    assert_refused(BASE, /reported bit id of erx_info_thing names no attribute field/,
+                   root: REPORT.sub("  bit size 0\n", "  bit size 0\n  bit id 1\n")
+                               .sub("  field size u32 0\n", "  field size u32 0\n  field id u32 8\n")
+                               .sub('wire_le 4 8', 'wire_le 4 12'))
+    assert_refused(with_attr('spare index reporters kernel visible any build all projections shell'),
+                   /erx_info_thing field spare has no reported bit/,
+                   root: REPORT.sub("  field size u32 0\n", "  field size u32 0\n  field spare u32 8\n")
+                               .sub('wire_le 4 8', 'wire_le 4 12'))
+    assert_refused(BASE, /erx_info_thing has no reported field/,
+                   root: REPORT.sub('field reported info_thing_reported 4', 'padding 4 4'))
+    assert_refused(BASE, /reported of erx_info_thing is not a flags field/,
+                   root: REPORT.sub('field reported info_thing_reported 4', 'field reported u32 4'))
+  end
+
+  def test_a_topic_named_after_a_kind_needs_its_report_layout
+    topics = "enum info_kind u32\n  value basic 0\n  value thing 1\n"
+    assert_refused(BASE, /topic thing has no report layout erx_info_thing/, root: topics)
+    model(BASE, root: topics + REPORT)
+    model(BASE, root: "enum info_kind u32\n  value basic 0\n")
+  end
+
+  # The build's own generator refuses the checked-in ABI with one seeded
+  # mismatch: the budget layout's watch field spelt as the design once did.
+  def test_the_checked_in_abi_fails_with_a_seeded_mismatch
+    Dir.mktmpdir('erx-inspection-seed-') do |root|
+      FileUtils.cp_r(File.join(ROOT, 'abi'), root)
+      path = File.join(root, 'abi/erx_abi.txt')
+      text = File.read(path)
+      seeded = text.sub("  field watch u64 48\n", "  field threshold u64 48\n")
+      refute_equal text, seeded
+      File.write(path, seeded)
+      error = assert_raises(Erx::ABI::SchemaError) do
+        Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root, architecture: 'aarch64'))
+      end
+      assert_match(/erx_info_budget field threshold names no attribute of its kind that lists kernel/, error.message)
+    end
+  end
+
   def test_the_checked_in_schema_declares_the_budget_stopgap
     inspection = Erx::ABI::Generator.plan(root: ROOT).schema.inspection
     used = inspection.kinds.fetch('budget').find { |attr| attr.key == 'used' }
     assert_equal %w[kernel liberx_pool], used.reporters
     stopgap = inspection.stopgaps.fetch('liberx_pool')
     assert_equal %w[kernel liberx\ pool], [stopgap.category, stopgap.label]
-    assert_equal %w[machine cpu budget domain process module], inspection.kinds.keys
+    assert_equal %w[machine cpu group budget domain thread process module], inspection.kinds.keys
+    derived = inspection.kinds.fetch('budget').reject { |attr| attr.derived.empty? }.map(&:key)
+    assert_equal %w[spending borrowing room deficit give_back], derived
   end
 
   # The checked-in table, which the drift check holds to the plan.

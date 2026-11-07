@@ -16,8 +16,10 @@ module Erx
                                 :utf8, :atoms, :element, :elements, :member, keyword_init: true)
     InspectionStopgap = Struct.new(:name, :category, :label, :scope, keyword_init: true)
     # REPORTERS holds category names and stopgap names, as the schema lists them.
+    # DERIVED holds the keys of the attributes the inspector computes this one
+    # from, and is empty for an attribute a report carries.
     InspectionAttribute = Struct.new(:key, :type, :reporters, :visible, :build,
-                                     :projections, keyword_init: true)
+                                     :projections, :derived, keyword_init: true)
     # A literal segment has LITERAL; a variable segment has TYPE.
     InspectionSegment = Struct.new(:literal, :type, keyword_init: true) do
       def variable? = literal.nil?
@@ -61,6 +63,14 @@ module Erx
       MAX_SCOPE = 1024
       INTEGER_RANGE = (-(1 << 63))..((1 << 64) - 1)
       ATTRIBUTE_WORDS = %w[attr KEY TYPE reporters LIST visible CLASS build BUILD projections LIST].freeze
+      DERIVED_WORDS = %w[derived INPUTS].freeze
+      # The root enum of erx_object_info's topics; a topic named after a kind
+      # reports it in the root layout erx_info_<kind>.
+      TOPICS = 'info_kind'
+      # Fields of a report layout that are not attribute fields: the mask
+      # itself, and the object id that names a listed record.
+      REPORTED = 'reported'
+      RECORD_ID = 'id'
 
       module_function
 
@@ -109,6 +119,7 @@ module Erx
           check_stopgap_labels(stopgaps)
           types = resolve_values(values, units)
           kinds = kind_lines.to_h { |name, (line, children)| [name, attributes(line, children, types, stopgaps)] }
+          check_reports(kinds)
           paths = resolve_paths(paths, kinds, types)
           check_used(units, values, stopgaps, kinds, types, paths)
           InspectionSchema.new(version: version, units: units, types: types,
@@ -320,19 +331,33 @@ module Erx
           unquoted(line)
           line.fail!('expected kind NAME') unless line.words.size == 2
           keys = {}
-          children.map do |child|
+          attrs = children.map do |child|
             attribute(child, types, stopgaps).tap do |attr|
               child.fail!("duplicate attribute #{attr.key}") if keys.key?(attr.key)
-              keys[attr.key] = true
+              keys[attr.key] = attr
             end
+          end
+          children.zip(attrs).each { |child, attr| check_inputs(child, attr, keys) }
+          attrs
+        end
+
+        # A derived attribute is computed from attributes a report or another
+        # source carries, never from another derived one, so one pass over
+        # the kind's record computes every derived value.
+        def check_inputs(line, attr, keys)
+          attr.derived.each do |input|
+            source = keys[input] || line.fail!("derived input #{input} is no attribute of the kind")
+            line.fail!("derived input #{input} is itself derived") unless source.derived.empty?
           end
         end
 
         def attribute(line, types, stopgaps)
           words = unquoted(line)
           keywords = [0, 3, 5, 7, 9]
-          unless words.size == ATTRIBUTE_WORDS.size && words.values_at(*keywords) == ATTRIBUTE_WORDS.values_at(*keywords)
-            line.fail!("expected #{ATTRIBUTE_WORDS.join(' ')}")
+          optional = words.drop(ATTRIBUTE_WORDS.size)
+          unless words.size >= ATTRIBUTE_WORDS.size && words.values_at(*keywords) == ATTRIBUTE_WORDS.values_at(*keywords) &&
+                 (optional.empty? || (optional.size == DERIVED_WORDS.size && optional.first == DERIVED_WORDS.first))
+            line.fail!("expected #{ATTRIBUTE_WORDS.join(' ')} [#{DERIVED_WORDS.join(' ')}]")
           end
           key = plain(words[1], line)
           type = reference(words[2], line)
@@ -340,7 +365,8 @@ module Erx
           InspectionAttribute.new(key: key, type: type, reporters: reporters(words[4], line, stopgaps),
                                   visible: choice(words[6], VISIBILITY, 'visibility', line),
                                   build: choice(words[8], BUILDS, 'build', line),
-                                  projections: projections(words[10], line))
+                                  projections: projections(words[10], line),
+                                  derived: optional.empty? ? [] : names(optional.last, line))
         end
 
         def choice(word, allowed, label, line)
@@ -355,13 +381,19 @@ module Erx
 
         # A stopgap is listed beside the category it stands in for, so the
         # attribute stays declared for that category when the stopgap goes.
+        # At most one stopgap stands in for each category, so a collector that
+        # learns a value is partial knows whose count it is.
         def reporters(text, line, stopgaps)
-          names(text, line).each do |name|
+          listed = names(text, line).each do |name|
             next if CATEGORIES.include?(name)
 
             stopgap = stopgaps[name] || line.fail!("undefined reporter #{name}")
             line.fail!("stopgap #{name} is listed without its category #{stopgap.category}") unless text.split(',').include?(stopgap.category)
           end
+          listed.filter_map { |name| stopgaps[name] }.group_by(&:category).each do |category, group|
+            line.fail!("stopgaps #{group.map(&:name).join(' and ')} both stand in for #{category}") if group.size > 1
+          end
+          listed
         end
 
         def projections(text, line)
@@ -474,6 +506,49 @@ module Erx
             result.literal_children = children.reject(&:variable?).map(&:literal)
             result.variable_child = children.find(&:variable?)&.type
           end
+        end
+
+        # Each report layout's names against its kind (docs/design-abi.md,
+        # "Kernel reports"), so the collector maps fields and reported bits to
+        # attributes by name and keeps no table of its own. A topic named
+        # after a kind must have the layout; a kind no topic reports needs none.
+        def check_reports(kinds)
+          types = @root.fetch(:types)
+          topics = types[TOPICS]
+          kinds.each do |kind, attrs|
+            name = "erx_info_#{kind}"
+            layout = types[name]
+            if layout
+              check_report(name, layout, attrs)
+            elsif topics.is_a?(EnumType) && topics.members.key?(kind)
+              line_of(kind).fail!("topic #{kind} has no report layout #{name}")
+            end
+          end
+        end
+
+        # Every field but REPORTED and RECORD_ID names an attribute of the kind
+        # that lists kernel and is not derived, and REPORTED is a flags type
+        # whose bits are exactly those fields' names.
+        def check_report(name, layout, attrs)
+          line_of(name.delete_prefix('erx_info_')).fail!("#{name} is not a layout") unless layout.is_a?(Layout)
+          fields = [*layout.fields, layout.tail].compact
+          reported = fields.find { |field| field.name == REPORTED } || layout.line.fail!("#{name} has no #{REPORTED} field")
+          unless reported.type.is_a?(EnumType) && reported.type.flags && !reported.array?
+            reported.line.fail!("#{REPORTED} of #{name} is not a flags field")
+          end
+          attribute_fields = fields.reject { |field| [REPORTED, RECORD_ID].include?(field.name) }
+          attribute_fields.each do |field|
+            attr = attrs.find { |item| item.key == field.name }
+            unless attr&.reporters&.include?('kernel')
+              field.line.fail!("#{name} field #{field.name} names no attribute of its kind that lists kernel")
+            end
+            field.line.fail!("#{name} field #{field.name} is a derived attribute") unless attr.derived.empty?
+          end
+          bits = reported.type.members.keys
+          stray = bits - attribute_fields.map(&:name)
+          reported.line.fail!("#{REPORTED} bit #{stray.first} of #{name} names no attribute field") unless stray.empty?
+          unmarked = attribute_fields.map(&:name) - bits
+          reported.line.fail!("#{name} field #{unmarked.first} has no #{REPORTED} bit") unless unmarked.empty?
         end
 
         def check_used(units, values, stopgaps, kinds, types, paths)

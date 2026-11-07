@@ -563,7 +563,7 @@ The pool counts, for each budget, the pages it handed out under it and has not t
 writes that count as `used` with every bit of `reported` clear, and `erx_info_partial` names `used`, so the
 inspector shows it as **partial**, reporter `liberx pool`, scope "pages committed through `liberx`; not kernel
 objects, page tables or mapping records", and a reader of the report alone sees `used` as not reported. `kind`,
-`guarantee`, `cap`, `carved`, `lent`, `pinned` and `threshold` are `unsupported`, reported as `kernel`'s, since
+`guarantee`, `cap`, `carved`, `lent`, `pinned` and `watch` are `unsupported`, reported as `kernel`'s, since
 the kernel interface answers that it does not report them. The reporter of `used` is the stopgap reporter `liberx_pool` of `abi/inspection.txt`, which stands in for `kernel` and
 declares that label and scope ([design-abi.md](design-abi.md#inspection-schema)); a record carries it as
 `{stopgap, liberx_pool}` ([design-live.md](design-live.md#inspection-records)).

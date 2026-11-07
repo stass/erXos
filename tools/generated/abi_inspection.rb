@@ -18,7 +18,8 @@ module Erx
           'pages' => 'pages',
           'bytes' => 'bytes',
           'ns' => 'ns',
-          'words' => 'words'
+          'words' => 'words',
+          'mcpu' => 'mCPU'
         })
         STOPGAPS = Model.freeze_value({
           'liberx_pool' => {
@@ -86,6 +87,28 @@ module Erx
             minimum: 1,
             maximum: 4294967295,
             multiple: 1,
+            member: true
+          },
+          'group_id' => {
+            form: 'integer',
+            minimum: 1,
+            maximum: 4294967295,
+            multiple: 1,
+            member: true
+          },
+          'cpu_mask' => {
+            form: 'integer',
+            minimum: 0,
+            maximum: 18446744073709551615,
+            multiple: 1,
+            member: true
+          },
+          'capacity' => {
+            form: 'integer',
+            minimum: 0,
+            maximum: 64000,
+            multiple: 1,
+            unit: 'mcpu',
             member: true
           },
           'domain_id' => {
@@ -224,6 +247,25 @@ module Erx
             form: 'atoms',
             atoms: ['elastic', 'wall'],
             member: false
+          },
+          '@thread_state' => {
+            form: 'atoms',
+            atoms: ['dead', 'ready', 'running', 'stopped', 'waiting'],
+            member: false
+          },
+          '@wait_kind' => {
+            form: 'atoms',
+            atoms: [
+              'none',
+              'park',
+              'paused',
+              'quiesce',
+              'recv',
+              'send',
+              'stop',
+              'umtx'
+            ],
+            member: false
           }
         })
         KINDS = Model.freeze_value({
@@ -235,6 +277,7 @@ module Erx
               visible: 'any',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -244,6 +287,7 @@ module Erx
               visible: 'any',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -253,6 +297,7 @@ module Erx
               visible: 'any',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -262,6 +307,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -271,6 +317,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -280,6 +327,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'bytes'
             },
             {
@@ -289,6 +337,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'bytes'
             },
             {
@@ -298,6 +347,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'ns'
             },
             {
@@ -307,6 +357,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -318,6 +369,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -327,6 +379,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'ns'
             },
             {
@@ -336,6 +389,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -345,6 +399,7 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -354,6 +409,59 @@ module Erx
               visible: 'all',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: nil
+            }
+          ],
+          'group' => [
+            {
+              key: 'cpuset',
+              type: 'cpu_mask',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: nil
+            },
+            {
+              key: 'used_ns',
+              type: 'duration',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: 'ns'
+            },
+            {
+              key: 'capacity_mcpu',
+              type: 'capacity',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: 'mCPU'
+            },
+            {
+              key: 'parked',
+              type: 'count',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: nil
+            },
+            {
+              key: 'ready',
+              type: 'count',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -365,6 +473,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -374,6 +483,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -383,6 +493,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -392,6 +503,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -401,6 +513,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -410,6 +523,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -419,6 +533,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -428,6 +543,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'pages'
             },
             {
@@ -437,6 +553,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: ['used', 'carved', 'lent'],
               unit: 'pages'
             },
             {
@@ -446,6 +563,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: ['guarantee', 'used', 'carved', 'lent'],
               unit: 'pages'
             },
             {
@@ -455,6 +573,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: ['cap', 'used', 'carved', 'lent'],
               unit: 'pages'
             },
             {
@@ -464,6 +583,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: ['cap', 'used', 'carved', 'lent'],
               unit: 'pages'
             },
             {
@@ -473,6 +593,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: ['guarantee', 'used', 'carved', 'lent', 'pinned'],
               unit: 'pages'
             },
             {
@@ -482,6 +603,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -493,6 +615,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -502,6 +625,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -511,6 +635,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -520,6 +645,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -529,6 +655,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -538,6 +665,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -547,6 +675,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -556,6 +685,29 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: nil
+            }
+          ],
+          'thread' => [
+            {
+              key: 'state',
+              type: '@thread_state',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
+              unit: nil
+            },
+            {
+              key: 'wait',
+              type: '@wait_kind',
+              reporters: ['kernel'],
+              visible: 'owner',
+              build: 'all',
+              projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -567,6 +719,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -576,6 +729,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -585,6 +739,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -594,6 +749,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -603,6 +759,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -612,6 +769,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'words'
             },
             {
@@ -621,6 +779,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: 'words'
             },
             {
@@ -630,6 +789,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -639,6 +799,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -648,6 +809,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -657,6 +819,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -666,6 +829,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -675,6 +839,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -686,6 +851,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -695,6 +861,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -704,6 +871,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -713,6 +881,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             },
             {
@@ -722,6 +891,7 @@ module Erx
               visible: 'owner',
               build: 'all',
               projections: ['shell', 'host', 'proc', 'web'],
+              derived: [],
               unit: nil
             }
           ],
@@ -734,7 +904,7 @@ module Erx
             entries: nil,
             append_only: false,
             visibility: [],
-            literal_children: ['cpus', 'budgets', 'domains', 'processes'],
+            literal_children: ['cpus', 'groups', 'budgets', 'domains', 'processes'],
             variable_child: nil
           },
           {
@@ -752,6 +922,29 @@ module Erx
               'cpus',
               {
                 type: 'cpu_index'
+              }
+            ],
+            entries: nil,
+            append_only: false,
+            visibility: ['all'],
+            literal_children: [],
+            variable_child: nil
+          },
+          {
+            kind: 'listing',
+            segments: ['groups'],
+            entries: nil,
+            append_only: false,
+            visibility: ['all'],
+            literal_children: [],
+            variable_child: 'group_id'
+          },
+          {
+            kind: 'group',
+            segments: [
+              'groups',
+              {
+                type: 'group_id'
               }
             ],
             entries: nil,
@@ -803,7 +996,7 @@ module Erx
             entries: nil,
             append_only: false,
             visibility: [],
-            literal_children: ['budget', 'modules', 'processes'],
+            literal_children: ['budget', 'group', 'threads', 'modules', 'processes'],
             variable_child: nil
           },
           {
@@ -814,6 +1007,54 @@ module Erx
                 type: 'domain_id'
               },
               'budget'
+            ],
+            entries: nil,
+            append_only: false,
+            visibility: [],
+            literal_children: [],
+            variable_child: nil
+          },
+          {
+            kind: 'group',
+            segments: [
+              'domains',
+              {
+                type: 'domain_id'
+              },
+              'group'
+            ],
+            entries: nil,
+            append_only: false,
+            visibility: [],
+            literal_children: [],
+            variable_child: nil
+          },
+          {
+            kind: 'listing',
+            segments: [
+              'domains',
+              {
+                type: 'domain_id'
+              },
+              'threads'
+            ],
+            entries: nil,
+            append_only: false,
+            visibility: [],
+            literal_children: [],
+            variable_child: 'thread_id'
+          },
+          {
+            kind: 'thread',
+            segments: [
+              'domains',
+              {
+                type: 'domain_id'
+              },
+              'threads',
+              {
+                type: 'thread_id'
+              }
             ],
             entries: nil,
             append_only: false,

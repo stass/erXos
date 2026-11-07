@@ -899,26 +899,6 @@ erx_frame_header_decode(const uint8_t *bytes, size_t length,
 }
 
 bool
-erx_group_report_decode(const uint8_t *bytes, size_t length,
-    erx_group_report_t *result)
-{
-	erx_group_report_t value = {0};
-
-	if (bytes == NULL || result == NULL || length < ERX_GROUP_REPORT_SIZE)
-		return (false);
-
-	value.cpuset = erx_abi_load_u64(bytes + 0);
-	value.used_ns = erx_abi_load_u64(bytes + 8);
-	value.capacity_mcpu = erx_abi_load_u32(bytes + 16);
-	value.parked = erx_abi_load_u32(bytes + 20);
-	value.ready = erx_abi_load_u32(bytes + 24);
-	value.usage_known = erx_abi_load_u32(bytes + 28);
-
-	*result = value;
-	return (true);
-}
-
-bool
 erx_hostlink_control_decode(const uint8_t *bytes, size_t length,
     erx_hostlink_control_t *result)
 {
@@ -1467,6 +1447,112 @@ erx_crash_record_decode(const uint8_t *bytes, size_t length,
 	for (size_t index = 0; index < 64; index++) {
 		value.frames[index] = erx_abi_load_u64(bytes + 392 + index * 8);
 	}
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_info_budget_decode(const uint8_t *bytes, size_t length,
+    erx_info_budget_t *result)
+{
+	erx_info_budget_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_INFO_BUDGET_SIZE)
+		return (false);
+
+	value.kind = erx_abi_load_u32(bytes + 0);
+	value.reported = erx_abi_load_u32(bytes + 4);
+	value.guarantee = erx_abi_load_u64(bytes + 8);
+	value.cap = erx_abi_load_u64(bytes + 16);
+	value.used = erx_abi_load_u64(bytes + 24);
+	value.carved = erx_abi_load_u64(bytes + 32);
+	value.lent = erx_abi_load_u64(bytes + 40);
+	value.watch = erx_abi_load_u64(bytes + 48);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_info_cpu_decode(const uint8_t *bytes, size_t length,
+    erx_info_cpu_t *result)
+{
+	erx_info_cpu_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_INFO_CPU_SIZE)
+		return (false);
+
+	value.running_thread = erx_abi_load_u64(bytes + 0);
+	value.idle_time = erx_abi_load_u64(bytes + 8);
+	for (size_t index = 0; index < 64; index++) {
+		value.ready_threads[index] = erx_abi_load_u32(bytes + 16 + index * 4);
+	}
+	value.interrupts = erx_abi_load_u64(bytes + 272);
+	value.throttled_groups = erx_abi_load_u32(bytes + 280);
+	value.reported = erx_abi_load_u32(bytes + 284);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_info_group_decode(const uint8_t *bytes, size_t length,
+    erx_info_group_t *result)
+{
+	erx_info_group_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_INFO_GROUP_SIZE)
+		return (false);
+
+	value.cpuset = erx_abi_load_u64(bytes + 0);
+	value.used_ns = erx_abi_load_u64(bytes + 8);
+	value.capacity_mcpu = erx_abi_load_u32(bytes + 16);
+	value.parked = erx_abi_load_u32(bytes + 20);
+	value.ready = erx_abi_load_u32(bytes + 24);
+	value.reported = erx_abi_load_u32(bytes + 28);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_info_machine_decode(const uint8_t *bytes, size_t length,
+    erx_info_machine_t *result)
+{
+	erx_info_machine_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_INFO_MACHINE_SIZE)
+		return (false);
+
+	for (size_t index = 0; index < 8; index++) {
+		value.build[index] = bytes[0 + index * 1];
+	}
+	value.entropy_quality = erx_abi_load_u32(bytes + 8);
+	value.cpus_online = erx_abi_load_u32(bytes + 12);
+	value.memory_total = erx_abi_load_u64(bytes + 16);
+	value.memory_free = erx_abi_load_u64(bytes + 24);
+	value.uptime = erx_abi_load_u64(bytes + 32);
+	value.boot_value = erx_abi_load_u32(bytes + 40);
+	value.reported = erx_abi_load_u32(bytes + 44);
+
+	*result = value;
+	return (true);
+}
+
+bool
+erx_info_thread_decode(const uint8_t *bytes, size_t length,
+    erx_info_thread_t *result)
+{
+	erx_info_thread_t value = {0};
+
+	if (bytes == NULL || result == NULL || length < ERX_INFO_THREAD_SIZE)
+		return (false);
+
+	value.id = erx_abi_load_u64(bytes + 0);
+	value.state = erx_abi_load_u32(bytes + 8);
+	value.wait = erx_abi_load_u32(bytes + 12);
+	value.reported = erx_abi_load_u32(bytes + 16);
 
 	*result = value;
 	return (true);

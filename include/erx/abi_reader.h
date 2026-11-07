@@ -97,8 +97,6 @@ bool erx_fiasco_vm_range_request_decode(const uint8_t *bytes, size_t length,
     erx_fiasco_vm_range_request_t *result);
 bool erx_frame_header_decode(const uint8_t *bytes, size_t length,
     erx_frame_header_t *result);
-bool erx_group_report_decode(const uint8_t *bytes, size_t length,
-    erx_group_report_t *result);
 bool erx_hostlink_control_decode(const uint8_t *bytes, size_t length,
     erx_hostlink_control_t *result);
 bool erx_hostlink_frame_decode(const uint8_t *bytes, size_t length,
@@ -155,6 +153,16 @@ bool erx_crash_brief_decode(const uint8_t *bytes, size_t length,
     erx_crash_brief_t *result);
 bool erx_crash_record_decode(const uint8_t *bytes, size_t length,
     erx_crash_record_t *result);
+bool erx_info_budget_decode(const uint8_t *bytes, size_t length,
+    erx_info_budget_t *result);
+bool erx_info_cpu_decode(const uint8_t *bytes, size_t length,
+    erx_info_cpu_t *result);
+bool erx_info_group_decode(const uint8_t *bytes, size_t length,
+    erx_info_group_t *result);
+bool erx_info_machine_decode(const uint8_t *bytes, size_t length,
+    erx_info_machine_t *result);
+bool erx_info_thread_decode(const uint8_t *bytes, size_t length,
+    erx_info_thread_t *result);
 bool erx_log_record_decode(const uint8_t *bytes, size_t length,
     erx_log_record_t *result);
 bool erx_mf_image_decode(const uint8_t *bytes, size_t length,

@@ -269,6 +269,44 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_IMAGE_SPAN_MAX` | 4294963200 |
 | `ERX_IMAGE_VERSION` | 1 |
 | `ERX_IMAGE_WRITABLE_MAX` | 67108864 |
+| `ERX_INFO_BASIC` | 0 |
+| `ERX_INFO_BUDGET` | 4 |
+| `ERX_INFO_BUDGET_REPORTED_CAP` | 4 |
+| `ERX_INFO_BUDGET_REPORTED_CARVED` | 16 |
+| `ERX_INFO_BUDGET_REPORTED_GUARANTEE` | 2 |
+| `ERX_INFO_BUDGET_REPORTED_KIND` | 1 |
+| `ERX_INFO_BUDGET_REPORTED_KNOWN` | 127 |
+| `ERX_INFO_BUDGET_REPORTED_LENT` | 32 |
+| `ERX_INFO_BUDGET_REPORTED_USED` | 8 |
+| `ERX_INFO_BUDGET_REPORTED_WATCH` | 64 |
+| `ERX_INFO_CPU` | 2 |
+| `ERX_INFO_CPU_REPORTED_IDLE_TIME` | 2 |
+| `ERX_INFO_CPU_REPORTED_INTERRUPTS` | 8 |
+| `ERX_INFO_CPU_REPORTED_KNOWN` | 31 |
+| `ERX_INFO_CPU_REPORTED_READY_THREADS` | 4 |
+| `ERX_INFO_CPU_REPORTED_RUNNING_THREAD` | 1 |
+| `ERX_INFO_CPU_REPORTED_THROTTLED_GROUPS` | 16 |
+| `ERX_INFO_GROUP` | 3 |
+| `ERX_INFO_GROUP_REPORTED_CAPACITY_MCPU` | 4 |
+| `ERX_INFO_GROUP_REPORTED_CPUSET` | 1 |
+| `ERX_INFO_GROUP_REPORTED_KNOWN` | 31 |
+| `ERX_INFO_GROUP_REPORTED_PARKED` | 8 |
+| `ERX_INFO_GROUP_REPORTED_READY` | 16 |
+| `ERX_INFO_GROUP_REPORTED_USED_NS` | 2 |
+| `ERX_INFO_IMAGE_ENTRY` | 6 |
+| `ERX_INFO_MACHINE` | 1 |
+| `ERX_INFO_MACHINE_REPORTED_BOOT_VALUE` | 64 |
+| `ERX_INFO_MACHINE_REPORTED_BUILD` | 1 |
+| `ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE` | 4 |
+| `ERX_INFO_MACHINE_REPORTED_ENTROPY_QUALITY` | 2 |
+| `ERX_INFO_MACHINE_REPORTED_KNOWN` | 127 |
+| `ERX_INFO_MACHINE_REPORTED_MEMORY_FREE` | 16 |
+| `ERX_INFO_MACHINE_REPORTED_MEMORY_TOTAL` | 8 |
+| `ERX_INFO_MACHINE_REPORTED_UPTIME` | 32 |
+| `ERX_INFO_THREAD` | 5 |
+| `ERX_INFO_THREAD_REPORTED_KNOWN` | 3 |
+| `ERX_INFO_THREAD_REPORTED_STATE` | 1 |
+| `ERX_INFO_THREAD_REPORTED_WAIT` | 2 |
 | `ERX_IRQ_LINE` | 1 |
 | `ERX_IRQ_MSI` | 2 |
 | `ERX_IRQ_SOFT` | 0 |
@@ -516,6 +554,11 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_SPACE_JIT` | 1 |
 | `ERX_THREAD_CLASS_EXECUTOR` | 1 |
 | `ERX_THREAD_CLASS_WORKER` | 0 |
+| `ERX_THREAD_STATE_DEAD` | 4 |
+| `ERX_THREAD_STATE_READY` | 1 |
+| `ERX_THREAD_STATE_RUNNING` | 2 |
+| `ERX_THREAD_STATE_STOPPED` | 0 |
+| `ERX_THREAD_STATE_WAITING` | 3 |
 | `ERX_TIME_PAGE_VERSION` | 1 |
 | `ERX_TLB_BY_ADDRESS_MAX` | 64 |
 | `ERX_URGENCY_MAX` | 63 |
@@ -554,6 +597,14 @@ their declared structural constraints; policy admission is a separate contract.
 | `ERX_VM_FIXED` | 1 |
 | `ERX_VM_FLAGS_KNOWN` | 3 |
 | `ERX_VM_NOREPLACE` | 2 |
+| `ERX_WAIT_NONE` | 0 |
+| `ERX_WAIT_PARK` | 4 |
+| `ERX_WAIT_PAUSED` | 7 |
+| `ERX_WAIT_QUIESCE` | 5 |
+| `ERX_WAIT_RECV` | 2 |
+| `ERX_WAIT_SEND` | 1 |
+| `ERX_WAIT_STOP` | 6 |
+| `ERX_WAIT_UMTX` | 3 |
 | `ERX_WATCHDOG_BOOT_DEFAULT` | 60 |
 | `ERX_WATCHDOG_BOOT_MAX` | 600 |
 | `ERX_WATCHDOG_DEADLINE_DEFAULT` | 5 |
@@ -1145,19 +1196,6 @@ Storage: `wire_le`. Prefix size: 8. Alignment: 4.
 | `ctl_len` | `u32` | 0 | 1 |
 | `payload_len` | `u32` | 4 | 1 |
 
-### `erx_group_report_t`
-
-Storage: `wire_le`. Prefix size: 32. Alignment: 8.
-
-| Field | Type | Offset | Count |
-| --- | --- | ---: | ---: |
-| `cpuset` | `u64` | 0 | 1 |
-| `used_ns` | `u64` | 8 | 1 |
-| `capacity_mcpu` | `u32` | 16 | 1 |
-| `parked` | `u32` | 20 | 1 |
-| `ready` | `u32` | 24 | 1 |
-| `usage_known` | `u32` | 28 | 1 |
-
 ### `erx_hostlink_control_t`
 
 Storage: `wire_le`. Prefix size: 16. Alignment: 8.
@@ -1589,6 +1627,73 @@ Storage: `wire_le`. Prefix size: 904. Alignment: 8.
 | `header` | `erx_crash_brief` | 0 | 1 |
 | `regs` | `erx_regs` | 120 | 1 |
 | `frames` | `u64` | 392 | 64 |
+
+### `erx_info_budget_t`
+
+Storage: `wire_le`. Prefix size: 56. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `kind` | `u32` | 0 | 1 |
+| `reported` | `info_budget_reported` | 4 | 1 |
+| `guarantee` | `u64` | 8 | 1 |
+| `cap` | `u64` | 16 | 1 |
+| `used` | `u64` | 24 | 1 |
+| `carved` | `u64` | 32 | 1 |
+| `lent` | `u64` | 40 | 1 |
+| `watch` | `u64` | 48 | 1 |
+
+### `erx_info_cpu_t`
+
+Storage: `wire_le`. Prefix size: 288. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `running_thread` | `u64` | 0 | 1 |
+| `idle_time` | `u64` | 8 | 1 |
+| `ready_threads` | `u32` | 16 | 64 |
+| `interrupts` | `u64` | 272 | 1 |
+| `throttled_groups` | `u32` | 280 | 1 |
+| `reported` | `info_cpu_reported` | 284 | 1 |
+
+### `erx_info_group_t`
+
+Storage: `wire_le`. Prefix size: 32. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `cpuset` | `u64` | 0 | 1 |
+| `used_ns` | `u64` | 8 | 1 |
+| `capacity_mcpu` | `u32` | 16 | 1 |
+| `parked` | `u32` | 20 | 1 |
+| `ready` | `u32` | 24 | 1 |
+| `reported` | `info_group_reported` | 28 | 1 |
+
+### `erx_info_machine_t`
+
+Storage: `wire_le`. Prefix size: 48. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `build` | `u8` | 0 | 8 |
+| `entropy_quality` | `u32` | 8 | 1 |
+| `cpus_online` | `u32` | 12 | 1 |
+| `memory_total` | `u64` | 16 | 1 |
+| `memory_free` | `u64` | 24 | 1 |
+| `uptime` | `u64` | 32 | 1 |
+| `boot_value` | `u32` | 40 | 1 |
+| `reported` | `info_machine_reported` | 44 | 1 |
+
+### `erx_info_thread_t`
+
+Storage: `wire_le`. Prefix size: 24. Alignment: 8.
+
+| Field | Type | Offset | Count |
+| --- | --- | ---: | ---: |
+| `id` | `u64` | 0 | 1 |
+| `state` | `u32` | 8 | 1 |
+| `wait` | `u32` | 12 | 1 |
+| `reported` | `info_thread_reported` | 16 | 1 |
 
 ### `erx_log_record_t`
 
