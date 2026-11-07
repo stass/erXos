@@ -121,34 +121,159 @@ session_test_() ->
 
 %% Every process a line starts, and those they start, ends with the line
 %% when Ctrl-C ends it; those a line leaves running when it ends of itself
-%% stay, under the session's group. `start` returns once both of its
-%% processes run, before `hang`, so the interrupt finds them.
+%% run on, still under the line's leader, until the session ends, and
+%% then end with it. `start` returns once both of its processes run,
+%% before `hang`, so the interrupt finds them.
 line_processes_test_() ->
     {timeout, 30,
      fun() ->
+             Leader = fun() -> element(2, process_info(whereis(b), group_leader)) end,
              {Group, Shown} = session_group([{interrupt, 1, <<"start a; hang\n">>},
-                                             {line, <<"start b\n">>}, eof],
+                                             {line, <<"start b\n">>},
+                                             {check, Leader, eof}],
                                             erx_shell_basic_runner),
-             Left = [whereis(b), whereis(b_child)],
-             Leaders = [process_info(Pid, group_leader) || Pid <- Left],
-             [exit(Pid, kill) || Pid <- Left, is_pid(Pid)],
-             ?assertEqual([{prompt, <<"% ">>}, {out, <<"^C\n">>},
-                           {prompt, <<"% ">>}, {prompt, <<"% ">>}], Shown),
+             ?assertMatch([{prompt, <<"% ">>}, {out, <<"^C\n">>},
+                           {prompt, <<"% ">>}, {prompt, <<"% ">>}, {checked, _}], Shown),
+             [{checked, LineLeader}] = [C || C = {checked, _} <- Shown],
+             ?assert(is_pid(LineLeader) andalso LineLeader =/= Group),
              ?assertEqual([undefined, undefined], [whereis(a), whereis(a_child)]),
-             ?assertEqual([{group_leader, Group}, {group_leader, Group}], Leaders)
+             ?assertEqual(gone, gone([b, b_child]))
      end}.
 
-%% A process the line leaves may end before it is handed over to the
-%% session's group; handing it over then is no fault of the shell's.
-hand_over_ended_test() ->
-    {Pid, Ref} = spawn_monitor(fun() -> ok end),
-    receive {'DOWN', Ref, process, Pid, _} -> ok end,
-    ?assertEqual(ok, erx_shell:hand_over(self(), Pid)).
+%%% Job control
+
+%% The exit criterion's case (docs/plan.md, track S): a job whose block
+%% starts a block that starts a block, three generations of processes, is
+%% stopped, continued and ended, and each generation is seen paused,
+%% running and gone.
+three_generations_test_() ->
+    {timeout, 30,
+     fun() ->
+             Names = [a, b, c],
+             Shown = session([{line, <<"{ { spin c & spin b } & spin a } &\n">>},
+                              {check, fun() -> started(Names) end, {line, <<"kill -STOP %1\n">>}},
+                              {check, fun() -> statuses(Names) end, {line, <<"jobs\n">>}},
+                              {check, fun() -> statuses(Names) end, {line, <<"bg %1\n">>}},
+                              {check, fun() -> statuses(Names) end, {line, <<"kill %1\n">>}},
+                              {check, fun() -> gone(Names) end, {line, <<"jobs\n">>}},
+                              eof]),
+             Checked = [C || {checked, C} <- Shown],
+             Text = <<"{ { spin c & spin b } & spin a } &">>,
+             ?assertEqual([generations, [suspended, suspended, suspended],
+                           [suspended, suspended, suspended], [waiting, waiting, waiting],
+                           gone], Checked),
+             Out = iolist_to_binary([O || {out, O} <- Shown]),
+             ?assertEqual(<<"[1]\n",
+                            "[1] + Suspended               ", Text/binary, "\n",
+                            "[1] + Suspended               ", Text/binary, "\n",
+                            "[1] ", Text/binary, "\n",
+                            "[1] + Terminated              ", Text/binary, "\n">>, Out)
+     end}.
+
+%% Ctrl-Z stops the line in the foreground and numbers it; `fg` brings it
+%% back, Ctrl-Z stops it again and `fg` returns that status; Ctrl-C ends a
+%% job `fg` brought forward together with the line.
+stop_line_test_() ->
+    {timeout, 30,
+     fun() ->
+             Shown = session([{suspend, <<"spin z\n">>},
+                              {check, fun() -> statuses([z]) end, {suspend, <<"fg\n">>}},
+                              {check, fun() -> statuses([z]) end, {line, <<"echo $status\n">>}},
+                              {interrupt, 1, <<"fg %1\n">>},
+                              {check, fun() -> gone([z]) end, {line, <<"jobs\n">>}},
+                              eof]),
+             ?assertEqual([[suspended], [suspended], gone], [C || {checked, C} <- Shown]),
+             ?assertEqual(<<"^Z\n[1] + Suspended               spin z\n",
+                            "spin z\n^Z\n[1] + Suspended               spin z\n",
+                            "sigtstp\n",
+                            "spin z\n^C\n">>,
+                          iolist_to_binary([O || {out, O} <- Shown]))
+     end}.
+
+%% Ctrl-C ends the line, while the job its `&` started runs on, as rc's `&`
+%% jobs ignore the interrupt; the job ends when the session does.
+background_ignores_interrupt_test_() ->
+    {timeout, 30,
+     fun() ->
+             Shown = session([{interrupt, 1, <<"spin bgx & hang\n">>},
+                              {check, fun() -> statuses([bgx]) end, {line, <<"jobs\n">>}},
+                              eof]),
+             ?assertEqual([[waiting]], [C || {checked, C} <- Shown]),
+             ?assertEqual(<<"[1]\n^C\n[1] + Running                 spin bgx & hang\n">>,
+                          iolist_to_binary([O || {out, O} <- Shown])),
+             ?assertEqual(gone, gone([bgx]))
+     end}.
+
+%% A background job that ends is reported before the next prompt, and the
+%% job builtins refuse what names no job.
+reports_and_refusals_test_() ->
+    {timeout, 30,
+     fun() ->
+             Shown = session([{line, <<"{ true } &\n">>},
+                              {check, fun() -> timer:sleep(200) end, {line, <<"true\n">>}},
+                              {line, <<"fg %3; kill %x; jobs extra; bg\n">>},
+                              eof]),
+             ?assertEqual(<<"[1]\n[1] + Done                    { true } &\n",
+                            "fg: no such job\nkill: %x: no such job\nusage: jobs\n",
+                            "bg: no current job\n">>,
+                          iolist_to_binary([O || {out, O} <- Shown]))
+     end}.
+
+%% Waits until each named process runs, and returns `generations` once each
+%% was started by the one before it.
+started(Names) ->
+    case [whereis(N) || N <- Names] of
+        [A, B, C] when is_pid(A), is_pid(B), is_pid(C) ->
+            {parent, A} = process_info(B, parent),
+            {parent, B} = process_info(C, parent),
+            generations;
+        _ ->
+            timer:sleep(10),
+            started(Names)
+    end.
+
+statuses(Names) ->
+    [element(2, process_info(whereis(N), status)) || N <- Names].
+
+%% Waits until none of the named processes is left.
+gone(Names) -> gone(Names, 100).
+
+gone(Names, 0) -> {left, [N || N <- Names, whereis(N) =/= undefined]};
+gone(Names, Tries) ->
+    case [N || N <- Names, whereis(N) =/= undefined] of
+        [] -> gone;
+        _ -> timer:sleep(20), gone(Names, Tries - 1)
+    end.
+
+%% Starting or moving a job is the line's alone, and the shell refuses a
+%% malformed request: neither reaches the table, and the shell runs on.
+refused_requests_test_() ->
+    {timeout, 30,
+     fun() ->
+             Ask = fun() ->
+                           Shell = get(shell),
+                           [ask(Shell, R) || R <- [{fg, current}, {fg, bogus},
+                                                   {signal, {terminate, 1}, current}]]
+                   end,
+             Shown = session([{check, Ask, {line, <<"echo still here\n">>}}, eof]),
+             ?assertEqual([[{error, <<"no job control">>}, {error, <<"malformed request">>},
+                            {error, <<"malformed request">>}]],
+                          [C || {checked, C} <- Shown]),
+             ?assertEqual(<<"still here\n">>, iolist_to_binary([O || {out, O} <- Shown]))
+     end}.
+
+ask(Shell, Request) ->
+    Ref = make_ref(),
+    Shell ! {erx_shell, self(), Ref, Request},
+    receive {Ref, Reply} -> Reply after 5000 -> timeout end.
 
 %% Runs the shell over Script, a list of what each get_line gets: `{line,
-%% Bytes}`, `interrupted`, `eof`, or `{interrupt, Count, Bytes}`, a line
-%% after which the group interrupts the shell Count times. Returns what the
-%% shell showed once it has ended.
+%% Bytes}`, `interrupted`, `eof`, `{interrupt, Count, Bytes}`, a line
+%% after which the group interrupts the shell Count times, `{suspend,
+%% Bytes}`, a line after which the group stops the foreground job, or
+%% `{check, Fun, Step}`, which calls Fun when the prompt for Step shows and
+%% records its result as `{checked, Result}`. Returns what the shell showed
+%% once it has ended.
 session(Script) ->
     session(Script, erx_shell_basic_runner).
 
@@ -173,6 +298,8 @@ group(Parent, Script, Runner) ->
             end,
     Shell = erx_shell:server({Runner, #{write => Write}}),
     link(Shell),
+    %% For checks, which run in this process.
+    put(shell, Shell),
     Shown = serve(Shell, Script, []),
     %% The banner comes first, and is the shell's own.
     [{out, <<"rc: ", _/binary>>} | Rest] = Shown,
@@ -185,13 +312,21 @@ serve(Shell, Script, Shown) ->
             serve(Shell, Script, [{out, Bytes} | Shown]);
         {io_request, From, ReplyAs, {get_line, unicode, Prompt}} ->
             Shown1 = [{prompt, unicode:characters_to_binary(Prompt)} | Shown],
-            [Step | Rest] = Script,
+            {Step, Rest, Shown2} = case Script of
+                                       [{check, Check, Then} | More] -> {Then, More, [{checked, Check()} | Shown1]};
+                                       [Then | More] -> {Then, More, Shown1}
+                                   end,
             From ! {io_reply, ReplyAs, answer(Step)},
-            %% As OTP's group: an interrupt while no line is read goes to the shell.
+            %% As OTP's group: an interrupt while no line is read goes to the
+            %% shell, and so does the terminal's stop, which erx_console sends.
             [erlang:send_after(300, self(), {interrupt, Count}) || {interrupt, Count, _} <- [Step]],
-            serve(Shell, Rest, Shown1);
+            [erlang:send_after(300, self(), suspend) || {suspend, _} <- [Step]],
+            serve(Shell, Rest, Shown2);
         {interrupt, Count} ->
             [exit(Shell, interrupt) || _ <- lists:seq(1, Count)],
+            serve(Shell, Script, Shown);
+        suspend ->
+            Shell ! {self(), suspend},
             serve(Shell, Script, Shown);
         {'EXIT', Shell, normal} ->
             lists:reverse(Shown)
@@ -199,6 +334,7 @@ serve(Shell, Script, Shown) ->
 
 answer({line, Bytes}) -> unicode:characters_to_list(Bytes);
 answer({interrupt, _Count, Bytes}) -> unicode:characters_to_list(Bytes);
+answer({suspend, Bytes}) -> unicode:characters_to_list(Bytes);
 answer(interrupted) -> {error, interrupted};
 answer(eof) -> eof.
 

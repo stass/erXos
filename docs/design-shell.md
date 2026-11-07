@@ -689,6 +689,25 @@ the job table never shows a running program as stopped
 terminal; a background job that reads it waits until it is brought to the
 foreground.
 
+**Numbers, names and reports.** Only the shell's own line makes jobs: its
+`&` starts a numbered job, and a line that `Ctrl-Z` stops becomes one. An
+`&` inside a job, a stage, a substitution or a subshell keeps its block in
+that job, as an `&` inside a UNIX subshell stays in its process group. A
+job takes the lowest free number, and `%N`, `%%`, `%+`, `%` and `%-` name
+jobs as FreeBSD sh reads them, the current job being the one most recently
+started, stopped or continued. `fg` and `bg` act only from the shell's own
+line; `jobs` and `kill` act from any piece of it; a script has no job
+control. What the shell shows follows FreeBSD sh: `[N]` when `&` starts a
+job, `[N] + State  command` for `jobs` and for a job that stops, and the
+report of a background job that is done before the next prompt; a job's
+command and status reach the terminal through the line escape. `fg`
+returns when its job ends, with the job's status, or stops, with the
+stopping signal's name as rc names one (`sigtstp`). `kill` takes FreeBSD
+kill's `-s NAME`, `-NAME`, `-NUMBER` and `-l`; on a job of Erlang commands
+`HUP`, `INT`, `QUIT`, `KILL` and `TERM` end it, `STOP` and `TSTP` stop it
+and `CONT` continues it in the background. When the shell ends, for any
+reason, its jobs end with it, so no job outlives its session.
+
 ## Interfaces
 
 **Erlang commands** implement `erx_cmd`:

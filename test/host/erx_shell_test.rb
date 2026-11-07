@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_shell_tests.erl, the EUnit cases of the command shell's
 # interactive layer (erx_shell), over the parser, the evaluator and a test runner (erx_shell_basic_runner),
@@ -13,15 +14,19 @@ require 'tmpdir'
 # test/integration/runtime_console_test.rb's.
 class ErxShellTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
-               erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
-               erlang/apps/erx_shell/src/erx_shell.erl
-               test/erlang/erx_shell_basic_runner.erl
-               test/erlang/erx_shell_tests.erl].map { |path| File.join(ROOT, path) }.freeze
+  # The generated sources named here are in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
+             *%w[erlang/apps/erx/src/erx_text.erl
+                 erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
+                 erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
+                 erlang/apps/erx_shell/src/erx_shell.erl erlang/apps/erx_shell/src/erx_shell_jobs.erl
+                 test/erlang/erx_shell_basic_runner.erl
+                 test/erlang/erx_shell_tests.erl].map { |path| File.join(ROOT, path) }].freeze
 
   def test_interactive_layer_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *SOURCES, stdin_data: '')
       assert status.success?, output
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

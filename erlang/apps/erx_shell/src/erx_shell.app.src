@@ -33,6 +33,7 @@
              erx_shell,
              erx_shell_eval,
              erx_shell_glob,
+             erx_shell_jobs,
              erx_shell_lex,
              erx_shell_namespace,
              erx_shell_parse,

@@ -24,7 +24,12 @@
 %% A nesting of N levels must parse to a tree of exactly N levels when N is at
 %% most 256 and fail with too_deep when it is more. The seed comes from make
 %% check-fuzz.
-
+%%
+%% The job builtins' arguments are the other text a person types that the
+%% shell reads: random lists of job specifications, signal options and
+%% random bytes go through erx_shell_jobs:parse_spec/1 and parse_kill/1,
+%% which must answer in the shapes their types give, name only signals of
+%% their table and jobs from the arguments, and make no atom.
 -module(erx_shell_parse_fuzz).
 -export([run/1]).
 
@@ -32,6 +37,12 @@
 -define(MUTATIONS, 150000).
 -define(MIXED, 3000).
 -define(MAX_LEVELS, 256).
+-define(JOB_ARGUMENTS, 20000).
+-define(JOB_FRAGMENTS,
+        [<<"%">>, <<"%%">>, <<"%+">>, <<"%-">>, <<"%1">>, <<"%0">>, <<"%01">>, <<"%x">>,
+         <<"-s">>, <<"-l">>, <<"--">>, <<"-">>, <<"-9">>, <<"-19">>, <<"-0">>, <<"-999">>,
+         <<"-TERM">>, <<"-sigstop">>, <<"-SIGcont">>, <<"-WINCH">>, <<"KILL">>, <<"tstp">>,
+         <<"-s", 0>>, <<"%", 16#ff>>, <<"\e[2J">>]).
 -define(MAX_COMMAND, 4096).
 -define(IS_FD(F), (is_integer(F) andalso F >= 0 andalso F =< 16#7fffffff)).
 
@@ -72,12 +83,59 @@ run([Seed]) ->
                           Counts3, kinds()),
     Counts5 = lists:foldl(fun(Source, Acc) -> count(check(Source), Acc) end,
                           Counts4, bounds()),
+    ok = job_arguments(?JOB_ARGUMENTS),
     io:format("results: ~p~n", [Counts5]),
     case Counts5 of
         #{ok := Ok, error := Error} when Ok >= 2000, Error >= 2000 -> ok;
         _ -> error({one_sided, Counts5})
     end,
     io:format("fuzz: ~p inputs ok~n", [maps:get(ok, Counts5) + maps:get(error, Counts5)]).
+
+%% The job builtins' arguments: no input makes an atom, and every answer
+%% has its type's shape.
+job_arguments(N) ->
+    %% Loading the modules makes their own atoms, before the count.
+    [job_argument_check(Args) || Args <- [[<<"-l">>], [<<"-9">>, <<"%1">>], [<<"%x">>]]],
+    Atoms = erlang:system_info(atom_count),
+    lists:foreach(fun(_) -> job_argument_check(job_argument_list()) end, lists:seq(1, N)),
+    case erlang:system_info(atom_count) of
+        Atoms -> ok;
+        After -> error({atoms_made, After - Atoms})
+    end.
+
+job_argument_list() ->
+    [job_argument() || _ <- lists:seq(1, rand:uniform(4) - 1)].
+
+job_argument() ->
+    case rand:uniform(3) of
+        1 -> lists:nth(rand:uniform(length(?JOB_FRAGMENTS)), ?JOB_FRAGMENTS);
+        2 -> <<"%", (integer_to_binary(rand:uniform(10000000) - 1))/binary>>;
+        3 -> << <<(rand:uniform(256) - 1)>> || _ <- lists:seq(1, rand:uniform(8) - 1) >>
+    end.
+
+job_argument_check(Args) ->
+    [case erx_shell_jobs:parse_spec(Arg) of
+         {ok, current} -> ok;
+         {ok, previous} -> ok;
+         {ok, {id, Id}} when is_integer(Id), Id >= 1, Id =< 999999 -> ok;
+         error -> ok;
+         Other -> error({bad_spec, Arg, Other})
+     end || Arg <- Args],
+    Names = [<<"HUP">>, <<"INT">>, <<"QUIT">>, <<"KILL">>, <<"TERM">>, <<"STOP">>, <<"TSTP">>,
+             <<"CONT">>],
+    case erx_shell_jobs:parse_kill(Args) of
+        list ->
+            ok;
+        usage ->
+            ok;
+        {ok, {Action, Name}, Jobs = [_ | _]} ->
+            true = lists:member(Action, [terminate, stop, continue]),
+            true = lists:member(Name, Names),
+            true = lists:suffix(Jobs, Args),
+            ok;
+        Bad ->
+            error({bad_kill, Args, Bad})
+    end.
 
 repeat(0, _Generate, Counts) ->
     Counts;

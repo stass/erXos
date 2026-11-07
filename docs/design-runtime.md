@@ -371,8 +371,8 @@ fails until the list names it.
 ### The edits outside `sys/erxos`
 
 Everything the adapter adds lives in `sys/erxos`, the drivers and NIFs
-included. The edits to ERTS's own files, and those to eight files of
-`kernel`, two of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
+included. The edits to ERTS's own files, and those to nine files of
+`kernel`, four of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
 of behaviour, however many lines it touches:
 
 | File | Edit |
@@ -422,8 +422,9 @@ of behaviour, however many lines it touches:
 | `beam/erl_process.h`, `beam/erl_process.c`, `beam/erl_ptab.h`, `beam/erl_trace.c`, `beam/bif.c`, `beam/beam_bp.c`, `beam/emu/trace_instrs.tab`, `beam/jit/beam_jit_common.cpp`, `beam/atom.names`, `erts/preloaded/src/erlang.erl` | 52. the spawn option `{erx_untraced, true}` keeps a process out of every trace session for its whole life: the new process's trace flags hold `F_ERX_UNTRACED`, and it takes no session's flags at creation, neither new-process tracing nor its parent's `set_on_spawn`, which it does not use up; `erts_sum_all_trace_flags` keeps it as it keeps `sensitive`, so no session's flags take effect, whenever the session opened, and the call-trace breakpoint, meta-trace and return-to paths skip the process as they skip a sensitive one, through one macro, `ERTS_IS_P_TRACE_HIDDEN`; `process_flag(sensitive, _)` leaves it set. Unlike `sensitive` it hides nothing from `process_info` or crash dumps and leaves `save_calls` and `seq_trace`, which is no session, as they are. `erx_trace` spawns its own processes so ([design-live.md](design-live.md#tracing)) |
 | `lib/stdlib/src/shell.erl`, `lib/stdlib/src/edlin_expand.erl` | 53. a function defined at the prompt has each of its calls resolved, and is itself refused, by name and arity, through `edlin_expand:shell_default_or_bif/2`: a shortcut that `shell_default`'s `erx_shortcuts` attribute lists answers `shell_default` at its own arity only, and every other call gets stock's answer by name alone over OTP's exports, which `shell_default_or_bif/1`, and so argument completion, keeps. A call of a quoted name resolves by its atom: stock's shell resolves it by the name's unquoted text, which for `'Foo'(X)` scans to no atom, so its server dies of a `case_clause`, and for `'self%x'(X)` scans to another atom, `self`, so the call goes to `erlang` ([design-live.md](design-live.md#erlang-in-every-domain)) |
 | `lib/kernel/src/inet.erl` | 54. `inet_backend` takes a third value, `erx`, and it is the default: `gen_tcp_module/2` and `gen_udp_module/2` return `erx_gen_tcp` and `erx_gen_udp` for it, whose sockets are `{'$inet', Module, Pid}` terms that `gen_tcp`, `gen_udp` and `inet` already dispatch on, and `getifaddrs/0` and `gethostname/0` ask the domain's network grant ([design-network-stack.md](design-network-stack.md#the-backend)) |
+| `lib/kernel/src/group.erl` | 55. the driver's `suspend`, which `erx_console` sends for `Ctrl-Z`, reaches the group's shell as `{Group, suspend}`, as an interrupt reaches it as an exit signal, so the command shell can stop its foreground job ([design-shell.md](design-shell.md#job-control)) |
 
-Fifty-four edits outside `sys/erxos`, in fifty-seven named files outside
+Fifty-five edits outside `sys/erxos`, in fifty-eight named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
 the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock

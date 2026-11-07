@@ -51,7 +51,7 @@
 
 -export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0]).
 
--type input_event() :: {data, unicode:unicode_binary()} | interrupt | menu.
+-type input_event() :: {data, unicode:unicode_binary()} | interrupt | suspend | menu.
 %% The shell the console starts on its first group: the command shell, or none when
 %% init was told -noshell or -noinput, and `user` then gets the input.
 -type first_shell() :: {erx_shell, console, []} | none.
@@ -388,7 +388,7 @@ encoding(false) -> latin1.
 %% -- Input ----------------------------------------------------------------------------
 
 %% A pure decision: what the bytes read so far mean, and what must wait for more.
-%% Ctrl-C and Ctrl-G are single bytes that no UTF-8 sequence contains. Text reaches the
+%% Ctrl-C, Ctrl-Z and Ctrl-G are single bytes that no UTF-8 sequence contains. Text reaches the
 %% group as UTF-8, and a byte that is not part of a character reads as latin-1, as
 %% prim_tty's reader does for stock's terminal.
 -spec input(Pending :: binary(), Bytes :: binary()) -> {[input_event()], Left :: binary()}.
@@ -396,7 +396,7 @@ input(Pending, Bytes) ->
     events(<<Pending/binary, Bytes/binary>>).
 
 events(Bin) ->
-    case binary:match(Bin, [<<$\^C>>, <<$\^G>>]) of
+    case binary:match(Bin, [<<$\^C>>, <<$\^Z>>, <<$\^G>>]) of
         nomatch ->
             text(Bin);
         {At, 1} ->
@@ -423,6 +423,7 @@ data(Utf8) -> [{data, Utf8}].
 latin1(Bin) -> unicode:characters_to_binary(Bin, latin1).
 
 control($\^C) -> interrupt;
+control($\^Z) -> suspend;
 control($\^G) -> menu.
 
 deliver({data, Utf8}, State) ->
@@ -430,6 +431,13 @@ deliver({data, Utf8}, State) ->
 deliver(interrupt, State) ->
     %% As ssh_cli does: the group turns this into an interrupt of the shell's evaluator.
     exit(current(State), interrupt);
+deliver(suspend, State = #state{shells = Shells}) ->
+    %% Ctrl-Z stops a command shell's foreground job: the group passes it on to its
+    %% shell, which alone knows its jobs. The Erlang shell has none, and never sees it.
+    case Shells of
+        [{_Group, _Caller, {shell, start, _}} | _] -> ok;
+        _ -> current(State) ! {self(), suspend}
+    end;
 deliver(menu, #state{driver = Driver, tty = TTY}) ->
     %% Ctrl-G belongs to the console's menu and no session reads it. With no sessions to
     %% list, the menu is a bell.

@@ -21,6 +21,7 @@ on purpose: `crashy`, `yes` and `hog`.
 
 run([<<"crash">>], _Ctx) -> error(on_purpose);
 run([<<"yes">>], Ctx) -> yes(Ctx);
+run([<<"marker">>], _Ctx) -> runner_tests_marker ! {marker, self()}, ok;
 run([<<"hog">>], _Ctx) -> {error, length(lists:seq(1, 1 bsl 26))};
 run(_Args, _Ctx) -> {error, usage}.
 
@@ -122,7 +123,9 @@ namespace_refuses_malformed_metadata_test() ->
                            {m_needs, attributes(c, "c") ++ [{erx_needs, ["x"]}], [{run, 2}]}]),
     ?assertEqual([{m_nousage, malformed_metadata}, {m_norun, no_run},
                   {m_needs, malformed_metadata}], Problems),
-    ?assertEqual(#{<<"cd">> => {builtin, cd}}, Table).
+    ?assertEqual(#{<<"cd">> => {builtin, cd}, <<"jobs">> => {builtin, jobs},
+                   <<"fg">> => {builtin, fg}, <<"bg">> => {builtin, bg},
+                   <<"kill">> => {builtin, kill}}, Table).
 
 %%% The renderer and the context
 
@@ -216,6 +219,46 @@ runner_rm_dot_test() ->
     {ok, Shell} = run_source(<<"rm -r ", Dir/binary, "/.">>),
     ?assertEqual(<<"invalid argument">>, erx_shell_eval:status(Shell)),
     ?assert(filelib:is_dir(Dir)).
+
+%% A state with no job control, as a script's, has the job builtins refuse,
+%% each with its diagnostic, and kill reports a malformed job by name,
+%% escaped.
+runner_no_job_control_test() ->
+    Me = self(),
+    State = runner_state(#{}, {tty, fun(Bytes) -> Me ! {err, iolist_to_binary(Bytes)}, ok end}),
+    ?assertEqual([<<"no job control">>, <<"no job control">>, <<"no job control">>,
+                  <<"no job control">>],
+                 [run_status(Argv, State) || Argv <- [[<<"jobs">>], [<<"fg">>], [<<"bg">>, <<"%1">>],
+                                                      [<<"kill">>, <<"%1">>]]]),
+    ?assertEqual(<<"jobs: no job control\nfg: no job control\nbg: no job control\n"
+                   "kill: no job control\n">>, drain(<<>>)),
+    {Status, _Out, Err} = erx_shell:builtin(<<"kill">>, [<<"%\e[2J">>], {self(), apart}),
+    ?assertEqual(<<"%<U+001B>[2J: no such job">>, Status),
+    ?assertEqual(nomatch, binary:match(iolist_to_binary(Err), <<"\e">>)).
+
+drain(Acc) ->
+    receive
+        {err, Bytes} -> drain(<<Acc/binary, Bytes/binary>>)
+    after 0 ->
+        Acc
+    end.
+
+%% A background block whose request the shell refuses, as when Ctrl-Z has
+%% just stopped the line that sent it, runs in place in the line's job
+%% instead of failing the line.
+runner_background_refused_runs_in_place_test() ->
+    true = register(runner_tests_marker, self()),
+    Shell = spawn_link(fun() ->
+                               receive
+                                   {erx_shell, From, Ref, {background, _Run}} ->
+                                       From ! {Ref, {error, <<"no job control">>}}
+                               end
+                       end),
+    State = (runner_state(#{}, null))#{job_control => {Shell, line}},
+    Sh = erx_shell_eval:new(#{}, erx_shell_runner:runner(), State),
+    {ok, _} = erx_shell_eval:run_source(<<"{ testcmd marker } &">>, Sh),
+    receive {marker, Pid} -> ?assert(is_pid(Pid)) after 5000 -> error(not_run) end,
+    true = unregister(runner_tests_marker).
 
 %% A background block leaves no message in the evaluator's mailbox.
 runner_background_leaves_no_message_test() ->

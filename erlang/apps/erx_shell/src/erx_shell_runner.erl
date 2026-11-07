@@ -16,7 +16,9 @@ made absolute against it (erx_cmd:path/2). A descriptor holds a stream
 (erx_cmd:stream()): a file's io device, the terminal, a pipe or nothing.
 
 Commands. A name runs the builtin `cd`, which changes the state's
-working directory, or an Erlang command, which runs in a process of its
+working directory, a job builtin (`jobs`, `fg`, `bg`, `kill`), which
+erx_shell:builtin/3 runs against the interactive shell's job table, or
+an Erlang command, which runs in a process of its
 own with a heap limit, reached by its context alone (erx_cmd). A command
 whose declared facets the session lacks fails with `no_facet` before it
 starts. Anything else is `not found`: programs, and names that hold `/`,
@@ -25,7 +27,10 @@ are Phase 2's (docs/plan.md).
 Pieces of the tree. A pipeline's stages, a substitution, a subshell and
 a background block each run apart, in a stage process with a heap limit
 whose descriptors the runner set before it starts, and give back only
-their status. Stages are joined by pipes (erx_shell_pipe), each end
+their status. A background block on the interactive shell's own line
+is a job of its own (erx_shell:background/2); one inside a piece run
+apart, or in a script, which has no job control, runs apart in place.
+Stages are joined by pipes (erx_shell_pipe), each end
 attached to the stage that holds it, so the reader sees the end of input
 when its writer's stage ends and the writer `epipe` when its reader's
 stage ends. A substitution reads its body's standard output from a pipe
@@ -56,7 +61,10 @@ that matches nothing stays as written.
 -type state() :: #{cwd := binary(),
                    fds := #{fd() => erx_cmd:stream()},
                    table := erx_shell_namespace:table(),
-                   facets := #{atom() => term()}}.
+                   facets := #{atom() => term()},
+                   %% The interactive shell's job control, and whether this state
+                   %% is its line's or a piece's run apart; `none` in a script.
+                   job_control => {erx_shell:job_control(), line | apart} | none}.
 
 %% Each command and stage process: a heap limit, counting the binaries it
 %% references, past which it alone is killed (docs/design-shell.md, SH2).
@@ -70,10 +78,15 @@ whose write function takes a command's bytes unchanged, the command
 namespace of the shell's release and the session's facets.
 """.
 -spec new(#{write := fun((iodata()) -> ok)}) -> {erx_shell_eval:runner(), state()}.
-new(#{write := Write}) ->
+new(Terminal = #{write := Write}) ->
     {Table, _Problems} = erx_shell_namespace:from_applications([erx_shell]),
-    {runner(), state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
-                       table => Table, facets => erx_shell_script:session_facets()})}.
+    S = state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
+                table => Table, facets => erx_shell_script:session_facets()}),
+    JobControl = case Terminal of
+                     #{job_control := Shell} -> {Shell, line};
+                     _ -> none
+                 end,
+    {runner(), S#{job_control => JobControl}}.
 
 -doc "A runner state from a working directory, descriptors, table and facets.".
 -spec state(#{cwd := binary(), fds := #{fd() => erx_cmd:stream()},
@@ -95,6 +108,7 @@ guarded(Request, S) ->
 request({run, [Name | Args], Vars}, #{table := Table} = S) ->
     case erx_shell_namespace:lookup(Name, Table) of
         {builtin, cd} -> cd(Args, Vars, S);
+        {builtin, _Job} -> {job_builtin(Name, Args, S), S};
         {erlang, Entry} -> {command(Entry, Args, Vars, S), S};
         _NotFoundOrConflict -> {<<"not found">>, diagnose(S, [Name, <<": not found\n">>])}
     end;
@@ -112,9 +126,25 @@ request({subshell, Body}, S) ->
     {Pid, Ref} = start_apart(Body, S, []),
     {await(Pid, Ref), S};
 request({background, Body}, S) ->
-    %% Nothing waits for a background block yet (`wait` and `jobs` are to
-    %% come), so it is not monitored: its end leaves no message behind.
-    _ = spawn_opt(fun() -> _ = Body(S) end, [heap_limit()]),
+    Apart = apart(S),
+    Run = fun() -> {Status, _} = Body(Apart), Status end,
+    InPlace = fun() ->
+                      %% Nothing waits for it, so it is not monitored: its end
+                      %% leaves no message behind.
+                      _ = spawn_opt(fun() -> _ = Run() end, [heap_limit()])
+              end,
+    case maps:get(job_control, S, none) of
+        {Shell, line} ->
+            %% The shell refuses once the line is no longer its line, as when
+            %% Ctrl-Z stopped it while the request was on its way: the block
+            %% then runs in the job the line has become.
+            case erx_shell:background(Shell, Run) of
+                {ok, _Id} -> ok;
+                {error, _Reason} -> InPlace()
+            end;
+        _ ->
+            InPlace()
+    end,
     {<<>>, S};
 request({pipefd, _Direction, _Body}, S) ->
     {{fault, <<"<{...} and >{...} are not supported">>}, S};
@@ -142,6 +172,17 @@ cd_to([], S) ->
 
 cant_cd(Dir, Reason, S) ->
     {<<"can't cd">>, diagnose(S, [<<"cd: ">>, Dir, <<": ">>, erx_cmd:format_error(Reason), $\n])}.
+
+%% A job builtin's status, with its output and diagnostic written.
+job_builtin(Name, Args, S) ->
+    {Status, Out, Err} = erx_shell:builtin(Name, Args, maps:get(job_control, S, none)),
+    [_ = write_fd(Fd, Bytes, S) || {Fd, Bytes} <- [{1, Out}, {2, Err}], iolist_size(Bytes) > 0],
+    Status.
+
+%% The state a piece run apart starts from: it may list and signal jobs,
+%% but not start or move them.
+apart(S = #{job_control := {Shell, _Where}}) -> S#{job_control := {Shell, apart}};
+apart(S) -> S.
 
 %%% Erlang commands
 
@@ -228,7 +269,7 @@ heap_limit() ->
 start_apart(Body, S, Ends) ->
     {Pid, Ref} = spawn_opt(fun() ->
                                    receive go -> ok end,
-                                   {Status, _} = Body(S),
+                                   {Status, _} = Body(apart(S)),
                                    exit({status, Status})
                            end, [monitor, heap_limit()]),
     [erx_shell_pipe:attach(Pipe, End, Pid) || {End, Pipe} <- Ends],

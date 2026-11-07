@@ -1769,16 +1769,18 @@ to the corpus and follow rc
   the source's start, would hold that state in one place; split
   `outcome()` then into a unit's and a source's, since `run_unit` never
   gives `syntax_error` (`erlang/apps/erx_shell/src/erx_shell_parse.erl`).
-* [Medium] shell, a line's processes are found by group leader, not by
+* [Medium] shell, a job's processes are found by group leader, not by
   job tag: until the runtime's job tags exist (docs/design-shell.md,
-  "Jobs and their tags"), `erx_shell` runs each unit under a group leader
-  of its own that forwards io to the shell's group; on `Ctrl-C`, the heap
-  limit or a crash it kills every process that leader leads, and on a
-  normal end it hands them to the shell's group (`end_line/3`). The group
-  leader is a field any process can change, so a process that sets its
-  own escapes the line, one whose leader code in the line re-points to
-  the line's is killed with it, and work done by servers outside the line
-  is not the line's. Replace it with the job tag
+  "Jobs and their tags"), `erx_shell` runs each line and each `&` job
+  under a group leader of its own that forwards io to the shell's group;
+  stopping a job pauses every process that leader leads with
+  `erlang:suspend_process/1`, in passes, and `Ctrl-C`, `kill`, the heap
+  limit or a crash kill them (`pause/2`, `terminate/2`, `end_line/3`).
+  The group leader is a field any process can change, so a process that
+  sets its own escapes its job's stop and end, one whose leader code in
+  the job re-points to the job's is stopped and killed with it, and work
+  done by servers outside the job is not the job's. Each pass looks at
+  every process of the runtime. Replace it with the job tag
   (`erlang/apps/erx_shell/src/erx_shell.erl`).
 * [Medium] shell, a script's processes when its evaluator is killed:
   `erx_shell_script:run/2` runs a source in an evaluator process with a
@@ -1787,30 +1789,27 @@ to the corpus and follow rc
   through the line's own group leader (`erx_shell:end_line/3`); the
   script runner should do the same, sharing that code
   (`erlang/apps/erx_shell/src/erx_shell_script.erl`).
-* [Low] shell, background blocks of an interrupted line: `Ctrl-C` ends
-  every process the line started, its background blocks included, while
-  rc's `&` jobs ignore the interrupt and run on. Job control
-  (docs/design-shell.md, "Job control") decides what a background job
-  belongs to; until then a block started by an interrupted line ends with
-  it (`erlang/apps/erx_shell/src/erx_shell.erl`).
-* [Medium] shell, `erx_shell` as a `gen_statem` with `reading` and
-  `running` states: the shell is a plain process, as Eshell's evaluator
-  is, but the group protocol is plain messages, so a state machine could
-  send `get_line` and take its reply, the line's `DOWN` and the group's
-  interrupt as events, which drops the `loop`/`read` recursion and makes
-  a stale interrupt impossible by construction
+* [Medium] shell, what a done job leaves running is out of reach: a job
+  is done, reported and gone from the table when its first process ends,
+  and the processes it started that still run stay with its leader,
+  unlisted, so `jobs` does not show them and `kill` and `Ctrl-C` cannot
+  reach them until the session ends, where docs/design-shell.md keeps an
+  inner `&` block in its job. Keeping the job listed as running until its
+  leader leads nothing would make them its own; a foreground line would
+  then wait for them too (`erlang/apps/erx_shell/src/erx_shell.erl`,
+  `release/2`).
+* [Low] shell, `&` inside a piece run apart ends with an interrupted
+  line: a block that a pipeline's stage or a subshell of the foreground
+  line puts in the background stays in the line's job, as in a UNIX
+  subshell, so `Ctrl-C` ends it, where POSIX starts such a block with
+  `SIGINT` ignored. Only `&` on the shell's own line starts a job that
+  runs on (`erlang/apps/erx_shell/src/erx_shell_runner.erl`).
+* [Low] shell, a stopped line finishes as a job and what it changed is
+  dropped: a line that `Ctrl-Z` stopped and `fg` brought back ends as a
+  job, so its assignments and `cd` do not reach the shell, where a UNIX
+  shell has made them already. Taking a line's outcome when it ends in
+  the foreground through `fg` would keep them
   (`erlang/apps/erx_shell/src/erx_shell.erl`).
-* [Low] shell, a Ctrl-C right after a line is read can be lost:
-  `drop_interrupts` runs after `io:request` returns, so an interrupt the
-  group sends between its reply and that drop is taken as stale and the
-  line runs on until a second Ctrl-C. Sending the `io_request` directly
-  and receiving its reply and the interrupts in one `receive` drops only
-  those queued before the reply; the `gen_statem` above gives the same
-  (`erlang/apps/erx_shell/src/erx_shell.erl`, `read/3`).
-* [Low] shell, what a line's end means is decided inside `wait/5`'s
-  receive: a pure `unit_ended(Reason, Sh)` returning the text to show and
-  whether to go on would be tested without processes, as `after_parse/3`
-  is (`erlang/apps/erx_shell/src/erx_shell.erl`).
 * [Low] shell, the reading loop has no byte bound of its own: the parser
   caps a unit at 4 KiB, but the group's line and the shell's `Line`
   binary, in a process with no `max_heap_size`, hold whatever is typed or

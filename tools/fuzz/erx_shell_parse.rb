@@ -57,7 +57,9 @@ module ErxShellParseFuzz
   module_function
 
   def run(seed:)
-    sources = %w[erx_shell_lex erx_shell_parse].to_h { |name| [name, File.binread(File.join(SOURCE_DIR, "#{name}.erl"))] }
+    sources = %w[erx_shell_lex erx_shell_parse erx_shell_jobs].to_h do |name|
+      [name, File.binread(File.join(SOURCE_DIR, "#{name}.erl"))]
+    end
     output, status = fuzz(sources, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ inputs ok$/)
     FAULTS.each do |fault|

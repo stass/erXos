@@ -7,7 +7,8 @@ The command namespace (docs/design-shell.md, "Commands"): a map from a
 command's name to what it runs, built when a shell starts from the
 metadata of the command modules of the releases it holds.
 
-A name resolves, in order, to a builtin of the runner (`cd`), then to an
+A name resolves, in order, to a builtin of the runner (`cd`, and the job
+builtins `jobs`, `fg`, `bg` and `kill`), then to an
 Erlang command, a module that implements erx_cmd and declares
 `-erx_command(Name)`. Two modules that declare one name leave it
 unresolved: it runs nothing, and whatis names both. A name that holds a
@@ -28,12 +29,14 @@ modules, loading them but running no command body.
 
 -type entry() :: #{name := binary(), module := module(), usage := binary(),
                    needs := [atom()], fields := [atom()]}.
--type command() :: {builtin, cd} | {erlang, entry()} | {conflict, [module()]}.
+-type command() :: {builtin, cd | jobs | fg | bg | kill} | {erlang, entry()} | {conflict, [module()]}.
 -type table() :: #{binary() => command()}.
 -type problem() :: {module(), malformed_metadata | no_run}.
 
 %% The runner's builtins: what acts on the runner's own state.
--define(BUILTINS, #{<<"cd">> => {builtin, cd}}).
+-define(BUILTINS, #{<<"cd">> => {builtin, cd}, <<"jobs">> => {builtin, jobs},
+                    <<"fg">> => {builtin, fg}, <<"bg">> => {builtin, bg},
+                    <<"kill">> => {builtin, kill}}).
 
 -doc """
 The table of the given modules, each with its attributes and exports, and
