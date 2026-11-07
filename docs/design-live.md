@@ -1414,25 +1414,53 @@ handled (`erx_trace:handled/2` counts them), and the trace has at most
 a window of 256 entries out beyond those acknowledged, however many
 acknowledgements arrive. An entry that finds the window shut is dropped
 and counted by row, and so is a session message past the 4,096 one
-round of 10 ms takes; the next delivery starts with one `dropped` entry
-per row, with the count, at the time of the first entry it delivers,
-and a trace that ends reports what it still counts. A slow receiver, a
-receiver that never acknowledges, or a trace whose output feeds itself
-(the console's driver traced while the shell prints) therefore holds at
-most 256 entries in the receiver and counters in the trace, and two
-traces at once hold twice that. A receiver that acknowledges entries it
-has not handled can only fill its own mailbox. The trace's own
-processes, the trace process and the printer, are spawned with the
-spawn option `{sensitive, true}` (OTP edit 51 of
-[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), which makes a
-process sensitive from its first instruction, so no trace session, its
-own or another's, ever sees them run, whatever it selects.
+round of 10 ms takes. Once the window is open again, the next round
+hands the merger one `dropped` entry per row, with the count, stamped
+with the round's time, and the merger releases it in time order like
+any other entry, so it never prints ahead of an entry held from before
+it; a `dropped` entry that then finds the window shut is counted again
+with its count, and a trace that ends reports what it still counts,
+last. A slow receiver, a receiver that never acknowledges, or a trace
+whose output feeds itself (the console's driver traced while the shell
+prints) therefore holds at most 256 entries in the receiver, for which
+the trace keeps only counters, and two traces at once hold twice that.
+A receiver that acknowledges entries it has not handled can only fill
+its own mailbox. What the trace process holds itself, the round's
+batch, the merger's held entries and the session messages waiting in
+its mailbox, is bounded by its heap: it is spawned with `max_heap_size`
+at 2,097,152 words (16 MiB with 64-bit words), `kill => true` and its
+message queue on the heap, so a flood of session messages from busy
+schedulers, which ERTS delivers without flow control, or entries the
+merger holds kill the trace process at a garbage collection, never the
+system domain; the kill also logs ERTS's error report. The bound is an
+estimate to be measured: a full round is 4,096 session messages and
+4,096 entries per ring read, some 25 words an entry, and about two
+rounds are held, some 600,000 words for the `erts` row and the backend
+ring, each kernel ring adding about 200,000. The trace's own processes, the trace process and
+the printer, are spawned with the spawn option `{erx_untraced, true}`
+(OTP edit 52 of
+[design-runtime.md](design-runtime.md#the-edits-outside-syserxos)),
+which keeps a process out of every trace session from its first
+instruction to its end: no session, its own or another's, opened before
+or after, sees it run, call a traced function or anything else, whatever
+it selects. It does only that: unlike `sensitive`, it hides nothing
+from `process_info` or crash dumps and leaves `seq_trace`, which is no
+session, as it is: a caller holding a sequential trace token passes it
+to the trace process and the printer, and the system's sequential
+tracer then sees the trace's stream. An untraced process takes no
+session's flags when it is created and uses up no parent's
+`set_on_first_spawn`.
 
 **The end.** The receiver holds a monitor of the trace process, whose
 pid `erx_trace:start/3` returns and which spawns the shell's printer
-and so is known to it. The trace process ends `normal` after a stop or
-when the receiver ends, having delivered what it still held; any other
-reason is a failure, and the printer then prints one escaped line,
+and so is known to it, after the session opened, so a refused trace
+leaves no printer. The trace process ends `normal` after a stop, having
+delivered what it still held, when the receiver ends, with nobody left
+to deliver to, or when the caller of `erx_trace:start/3` or
+`erx_trace:print/2` dies before it has
+taken the reference, since nobody could then stop it. Any other reason
+is a failure, `killed` for a trace process past its heap bound
+included, and the printer then prints one escaped line,
 `erx:trace failed:` and the reason. The shell's
 printer writes one line per entry, the time in seconds, the row, the
 event, each field as `name=value` (`pid` and `domain` first, `cpu`,
@@ -2155,14 +2183,21 @@ reference tables and field projections are covered by the drift check.
   gets 256 entries of 1,000 and then one `dropped` entry per row with the
   count, which a window seeded to stay open, or to drop without
   reporting, fails; a hundred acknowledgements open the window to 256
-  and no further, which a window seeded without its cap fails; a round's
+  and no further, which a window seeded without its cap fails; a row's
+  `dropped` entry is not reported while the window is shut, goes out
+  after an entry held from before its round and never ahead of it, and,
+  when it finds the window shut, is counted again with its count, which
+  a report seeded to skip the merger, to ignore the shut window or to
+  count it as one fails; a round's
   batch past 4,096 session messages counts the rest as dropped; a
   `trace_ts` tuple of the wrong shape, and a stop, acknowledgement,
   timer or monitor message with another reference, are ignored, which a
   check seeded to take them fails; a full read is read again and a
   refused ring is read no more. A process spawned with
-  `{sensitive, true}` under a trace session over every process is never
-  seen, where one spawned without it is, on the hosted runtime. The stopgap's
+  `{erx_untraced, true}` under a trace session over every process, with
+  call tracing of the function it calls, is never seen, where one spawned
+  without it is, and its mailbox still shows in `process_info`, on the
+  hosted runtime. The stopgap's
   ring and its four-CPU case are in
   [design-stopgap.md](design-stopgap.md#verification).
 * **Host link:** session replacement; a recorded hello and its calls

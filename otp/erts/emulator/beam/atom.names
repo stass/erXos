@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 #
-# Modified by erXos: adds the atoms of erx_trace_ring's BIFs.
+# Modified by erXos: adds the atoms of erx_trace_ring's BIFs, and erx_untraced.
 #
 
 #
@@ -288,6 +288,7 @@ atom error_handler
 atom error_info
 atom error_logger
 atom error_only
+atom erx_untraced
 atom erts_code_purger
 atom erts_debug
 atom erts_dflags

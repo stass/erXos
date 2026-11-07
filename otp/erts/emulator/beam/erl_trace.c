@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: the summed trace flags keep erx_untraced as they keep sensitive, and meta tracing skips an untraced process.
+ *
  * %CopyrightEnd%
  */
 
@@ -1218,8 +1220,8 @@ erts_call_trace(Process* p, ErtsCodeInfo *info, Binary *match_spec,
             /* Trace disabled */
             return 0;
         }
-        if (ERTS_IS_PROC_SENSITIVE(p)) {
-            /* No trace messages for sensitive processes. */
+        if (ERTS_IS_P_TRACE_HIDDEN(p)) {
+            /* No trace messages for sensitive or untraced processes. */
             return 0;
         }
 	tracee_flags = F_TRACE_CALLS | F_NOW_TS;
@@ -3796,9 +3798,9 @@ Uint32 erts_sum_all_trace_flags(ErtsPTabElementCommon* t_p)
     Uint32 all_flags = t_p->tracee.all_trace_flags;
 
 
-    if (all_flags & F_SENSITIVE) {
+    if (all_flags & ERTS_TRACE_HIDDEN_FLAGS) {
         ASSERT(!(all_flags & TRACEE_FLAGS));
-        all_flags = F_SENSITIVE;
+        all_flags &= ERTS_TRACE_HIDDEN_FLAGS;
     }
     else {
         all_flags = 0;

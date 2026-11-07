@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: a process spawned erx_untraced hits no breakpoint, as a sensitive one does not.
+ *
  * %CopyrightEnd%
  */
  
@@ -1001,7 +1003,7 @@ erts_generic_breakpoint(Process* c_p, ErtsCodeInfo *info, Eterm* reg)
     ASSERT(BeamIsOpCode(info->u.op, op_i_func_info_IaaI));
 #endif
 
-    if (!ERTS_IS_PROC_SENSITIVE(c_p)) {
+    if (!ERTS_IS_P_TRACE_HIDDEN(c_p)) {
         for (g = info->gen_bp; g; g = g->next) {
             bp_flags |= do_session_breakpoint(c_p, info, reg, g);
         }

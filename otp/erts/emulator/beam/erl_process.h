@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed.
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}.
  *
  * %CopyrightEnd%
  */
@@ -1488,9 +1488,9 @@ void erts_check_for_holes(Process* p);
 #define SPO_IX_NO_SMSG          12
 #define SPO_IX_NO_EMSG          13
 #define SPO_IX_ASYNC_DIST       14
-#define SPO_IX_SENSITIVE        15
+#define SPO_IX_ERX_UNTRACED     15
 
-#define SPO_NO_INDICES          (SPO_IX_SENSITIVE+1)
+#define SPO_NO_INDICES          (SPO_IX_ERX_UNTRACED+1)
 
 #define SPO_LINK                (1 << SPO_IX_LINK)
 #define SPO_MONITOR             (1 << SPO_IX_MONITOR)
@@ -1507,9 +1507,9 @@ void erts_check_for_holes(Process* p);
 #define SPO_NO_SMSG             (1 << SPO_IX_NO_SMSG)
 #define SPO_NO_EMSG             (1 << SPO_IX_NO_EMSG)
 #define SPO_ASYNC_DIST          (1 << SPO_IX_ASYNC_DIST)
-#define SPO_SENSITIVE           (1 << SPO_IX_SENSITIVE)
+#define SPO_ERX_UNTRACED        (1 << SPO_IX_ERX_UNTRACED)
 
-#define SPO_MAX_FLAG            SPO_SENSITIVE
+#define SPO_MAX_FLAG            SPO_ERX_UNTRACED
 
 #define SPO_USE_ARGS                 \
     (SPO_MIN_HEAP_SIZE               \
@@ -1768,9 +1768,12 @@ extern int erts_system_profile_ts_type;
 #define F_TRACE_SCHED_NO     F_TRACE_FLAG(20) /* Trace with scheduler id */
 #define F_TRACE_SCHED_EXIT   F_TRACE_FLAG(21)
 #define F_TRACE_RETURN_TO_MARK  F_TRACE_FLAG(22) /* temporary marker */
+/* erXos: spawned {erx_untraced, true}; no trace session sees the process,
+ * and the flag stays for its life (ERTS_IS_P_TRACE_HIDDEN). */
+#define F_ERX_UNTRACED       F_TRACE_FLAG(23)
 
 
-#define F_NUM_FLAGS          (ERTS_TRACE_TS_TYPE_BITS + 23)
+#define F_NUM_FLAGS          (ERTS_TRACE_TS_TYPE_BITS + 24)
 #ifdef DEBUG
 // Was there a point with this high 5?
 #  define F_INITIAL_TRACE_FLAGS 0 //(5 << F_NUM_FLAGS)

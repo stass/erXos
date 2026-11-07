@@ -365,8 +365,8 @@ fails until the list names it.
 ### The edits outside `sys/erxos`
 
 Everything the adapter adds lives in `sys/erxos`, the drivers and NIFs
-included. The edits to ERTS's own files, and those to four files of
-`kernel`, are these, each at a seam named above; an edit is one change
+included. The edits to ERTS's own files, and those to seven files of
+`kernel`, two of `stdlib` and the preloaded `erlang.erl`, are these, each at a seam named above; an edit is one change
 of behaviour, however many lines it touches:
 
 | File | Edit |
@@ -413,10 +413,11 @@ of behaviour, however many lines it touches:
 | `emulator/Makefile.in` | 49. `erl_compile_flags.h` holds `N/A` for the flags and `config.h` on erXos's targets, since they name host paths and `erlang:system_info(compile_info)` would serve them from the image |
 | `lib/stdlib/src/shell_default.erl` | 50. exports erXos's shortcuts, each a one-line call of its `erx` function ([design-live.md](design-live.md#erlang-in-every-domain)) |
 | `beam/bif.tab`, `beam/atom.names`, `emulator/Makefile.in` | 51. `erx_trace_ring:read/3` and `clocks/0` are BIFs (`nifs/erxos/erx_trace_ring_bif.c`), with the atoms `backend`, `kernel`, `present` and `unknown` they match and return ([design-live.md](design-live.md#tracing)) |
-| `beam/erl_process.h`, `beam/erl_process.c` | 52. the spawn option `{sensitive, true}` makes a process sensitive from its first instruction, as `process_flag(sensitive, true)` would if it ran first, so no trace session sees it run; `erx_trace` spawns its own processes so ([design-live.md](design-live.md#tracing)) |
+| `beam/erl_process.h`, `beam/erl_process.c`, `beam/erl_ptab.h`, `beam/erl_trace.c`, `beam/bif.c`, `beam/beam_bp.c`, `beam/emu/trace_instrs.tab`, `beam/jit/beam_jit_common.cpp`, `beam/atom.names`, `erts/preloaded/src/erlang.erl` | 52. the spawn option `{erx_untraced, true}` keeps a process out of every trace session for its whole life: the new process's trace flags hold `F_ERX_UNTRACED`, and it takes no session's flags at creation, neither new-process tracing nor its parent's `set_on_spawn`, which it does not use up; `erts_sum_all_trace_flags` keeps it as it keeps `sensitive`, so no session's flags take effect, whenever the session opened, and the call-trace breakpoint, meta-trace and return-to paths skip the process as they skip a sensitive one, through one macro, `ERTS_IS_P_TRACE_HIDDEN`; `process_flag(sensitive, _)` leaves it set. Unlike `sensitive` it hides nothing from `process_info` or crash dumps and leaves `save_calls` and `seq_trace`, which is no session, as they are. `erx_trace` spawns its own processes so ([design-live.md](design-live.md#tracing)) |
 
-Fifty-two edits outside `sys/erxos`, in fifty files, the JIT's
-directory and asmjit's `VirtMem`; the interpreter image is built without
+Fifty-two edits outside `sys/erxos`, in fifty-five named files outside
+the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
+the interpreter image is built without
 the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
 test for the own node, in channel creation or in `do_send`: every domain

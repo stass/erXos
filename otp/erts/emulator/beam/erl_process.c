@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; there are no poll threads.
+ * Modified by erXos: schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; there are no poll threads; the spawn option {erx_untraced, true} sets F_ERX_UNTRACED before any trace session's flags are copied in.
  *
  * %CopyrightEnd%
  */
@@ -12191,16 +12191,16 @@ erts_parse_spawn_opts(ErlSpawnOpts *sop, Eterm opts_list, Eterm *tag,
                 else {
                     result = -1;
                 }
-	    } else if (arg == am_sensitive) {
-                /* erXos: a process spawned sensitive is sensitive from its
-                 * first instruction, so no trace session ever sees it run
+	    } else if (arg == am_erx_untraced) {
+                /* erXos: a process spawned untraced is hidden from every
+                 * trace session from its first instruction to its end
                  * (erx_trace's own processes). */
-                if (sop->flags & SPO_SENSITIVE)
+                if (sop->flags & SPO_ERX_UNTRACED)
                     sop->multi_set = !0;
                 if (val == am_true)
-                    sop->flags |= SPO_SENSITIVE;
+                    sop->flags |= SPO_ERX_UNTRACED;
                 else if (val == am_false)
-                    sop->flags &= ~SPO_SENSITIVE;
+                    sop->flags &= ~SPO_ERX_UNTRACED;
                 else
                     result = -1;
 	    } else if (arg == am_message_queue_data) {
@@ -12564,10 +12564,14 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
 	    : STORE_NC(&p->htop, &p->off_heap, group_leader);
     }
 
-    ERTS_P_ALL_TRACE_FLAGS(p) = 0;
+    /* erXos: set before any session's flags are copied in, so every sum
+     * of them keeps it (erts_sum_all_trace_flags). */
+    ERTS_P_ALL_TRACE_FLAGS(p) = (so->flags & SPO_ERX_UNTRACED) ? F_ERX_UNTRACED : 0;
     p->common.tracee.first_ref = NULL;
 
-    if (erts_refc_read(&erts_new_procs_trace_cnt, 0)) {
+    /* erXos: an untraced process takes no session's flags at creation and
+     * uses up no parent's set_on_first_spawn or set_on_first_link. */
+    if (!(so->flags & SPO_ERX_UNTRACED) && erts_refc_read(&erts_new_procs_trace_cnt, 0)) {
         erts_rwmtx_rlock(&erts_trace_session_list_lock);
         for(ErtsTraceSession *s = &erts_trace_session_0; s; s = s->next) {
             Uint32 trace_flags;
@@ -12582,7 +12586,7 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
         erts_rwmtx_runlock(&erts_trace_session_list_lock);
     }
 
-    if (parent && ERTS_IS_P_TRACED(parent)) {
+    if (parent && !(so->flags & SPO_ERX_UNTRACED) && ERTS_IS_P_TRACED(parent)) {
         if (ERTS_IS_P_TRACED_FL(parent, F_TRACE_SOS|F_TRACE_SOS1)
             || (so->flags & SPO_LINK
                 && ERTS_IS_P_TRACED_FL(parent, F_TRACE_SOL|F_TRACE_SOL1))) {
@@ -12619,14 +12623,6 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
         }
     }
     ERTS_P_ALL_TRACE_FLAGS(p) = erts_sum_all_trace_flags(&p->common);
-    if (so->flags & SPO_SENSITIVE) {
-        /* erXos: as process_flag(sensitive, true) does, before the process
-         * first runs: a session may hold flags for it but sees no event. */
-        ErtsTracerRef *ref;
-        for (ref = p->common.tracee.first_ref; ref; ref = ref->next)
-            ref->flags |= F_SENSITIVE;
-        ERTS_P_ALL_TRACE_FLAGS(p) = F_SENSITIVE;
-    }
 
     p->uniq = 0;
     p->sig_qs.first = NULL;

@@ -17,16 +17,21 @@
 %% The window is the flow control: the trace has at most ?WINDOW entries out beyond those
 %% the receiver acknowledged, and the receiver acknowledges with {erx_trace_ack, Ref}
 %% after every ?ACK_EVERY entries it handled (handled/2). An entry that finds the window
-%% shut is dropped and counted by row; the next delivery starts with one dropped entry
-%% per row, with the count. So a slow or stuck receiver holds at most ?WINDOW entries,
-%% and the trace process holds counters, never a queue for it.
+%% shut is dropped and counted by row; once the window opens, the next round hands the
+%% merger one dropped entry per row, with the count, at the round's time (report/3), and
+%% it goes out in time order like any other entry. So a slow or stuck receiver holds at
+%% most ?WINDOW entries, and the trace process keeps counters for it, never a queue.
+%% What the trace process itself holds, the round's batch, the merger's held entries and
+%% the session messages in its mailbox, is bounded by its heap: it runs with a
+%% max_heap_size of ?MAX_HEAP_WORDS that kills it, and the receiver sees the end.
 %%
 %% The trace's reference is the trace process's alias, so stop/1 needs no table. The
-%% trace ends when stop/1 is called or the receiver ends; the session ends with the
-%% process. The receiver learns the end from a monitor of the trace process: it ends
-%% normal after a stop, and any other reason is a failure. The trace process and the
-%% printer are spawned sensitive (OTP edit 51 of design-runtime.md), so no trace session,
-%% theirs or another's, ever sees them run.
+%% trace ends when stop/1 is called, the receiver ends, or the caller dies before it has
+%% the reference; the session ends with the process. The receiver learns the end from a
+%% monitor of the trace process: it ends normal after a stop, and any other reason, a
+%% heap past its bound (killed) included, is a failure. The trace process and the printer
+%% are spawned with {erx_untraced, true} (OTP edit 52 of design-runtime.md), so no trace
+%% session, theirs or another's, ever sees them run.
 %%
 %% Nothing from a traced process is trusted: a session message reaches erx_tracer only
 %% in the shape ERTS sends for the running flag with a timestamp, and every field of
@@ -41,7 +46,7 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 
 -export([check/3, start/3, stop/1, handled/2, print/2, line/1]).
 %% The trace process's pure decisions, exported for test/erlang/erx_trace_tests.erl.
--export([classify/2, window/0, deliver/3, acked/1, buffer/3, cursor/3]).
+-export([classify/2, window/0, deliver/2, report/3, acked/1, buffer/3, cursor/3]).
 -export_type([spec/0, request/0, scope/0, domain_id/0, window/0]).
 
 %% The system domain's id, its node's creation (docs/design-domains.md: no node has a
@@ -61,8 +66,17 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 -define(WINDOW, 256).
 -define(ACK_EVERY, 64).
 -define(FLAGS, [running, monotonic_timestamp]).
-%% The trace's own processes run sensitive, so no session sees them.
--define(OWN, [{sensitive, true}]).
+%% The trace's own processes are spawned untraced (OTP edit 52), so no session sees them.
+-define(OWN, [{erx_untraced, true}]).
+%% The trace process's heap, its on-heap mailbox included, in words (16 MiB with 64-bit
+%% words): past it ERTS kills the process at a garbage collection, so neither a flood of
+%% session messages nor the merger's held entries can exhaust the system domain. An
+%% estimate, not a measurement: a full round is 4,096 session messages and 4,096 entries
+%% per ring read, some 25 words an entry, and about two rounds are held, some 600,000
+%% words for the erts row and the backend ring; each kernel ring adds about 200,000.
+-define(MAX_HEAP_WORDS, 2097152).
+-define(TRACE_OPTS, [{max_heap_size, #{size => ?MAX_HEAP_WORDS, kill => true}},
+                     {message_queue_data, on_heap} | ?OWN]).
 
 -type domain_id() :: 0..16#ffffffff.
 -type spec() :: #{select => [pid() | domain_id()], frames => boolean(), kernel => boolean()}.
@@ -84,7 +98,7 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
                     session := boolean()}.
 
 %% credit: entries the trace may still send. dropped: entries not sent, by row, since the
-%% last delivery that reported them.
+%% last report of them (report/3).
 -record(window, {credit = ?WINDOW :: 0..?WINDOW,
                  dropped = #{} :: #{erx_tracer:row() => pos_integer()}}).
 -opaque window() :: #window{}.
@@ -110,8 +124,9 @@ check(Spec, Scope, DomainOf) ->
 -doc """
 Starts a trace of Spec under Scope whose entries go to Receiver as
 `{erx_trace, Ref, Entry}`; Receiver acknowledges them with handled/2 and may monitor
-the returned pid to learn when the trace ends. The trace ends when Receiver ends or
-stop(Ref) is called.
+the returned pid to learn when the trace ends. The trace ends when Receiver ends,
+stop(Ref) is called, the caller dies before this returns, or the trace process passes
+its heap bound (reason killed).
 """.
 -spec start(term(), scope(), pid()) -> {ok, reference(), pid()} | {error, reason()}.
 start(Spec, Scope, Receiver) when is_pid(Receiver) ->
@@ -199,23 +214,33 @@ window() ->
     #window{}.
 
 -doc """
-The entries to send of Entries, released at Now, and the window after them. While the
-window is open, each row with dropped entries goes first as one dropped entry with the
-count, at the time of the first of Entries or at Now; then as many of Entries as the
-window allows. What does not fit is counted as dropped by row, a dropped entry that
-did not fit with its count.
+The entries to send of Entries and the window after them: as many as the window
+allows; the rest are counted as dropped by row, a dropped entry with its count.
 """.
--spec deliver(window(), [erx_tracer:entry()], non_neg_integer()) -> {window(), [erx_tracer:entry()]}.
-deliver(#window{credit = Credit, dropped = Dropped}, Entries, Now) ->
-    {Notices, Unreported} = lists:split(min(Credit, map_size(Dropped)), lists:sort(maps:to_list(Dropped))),
-    {Send, Rest} = lists:split(min(Credit - length(Notices), length(Entries)), Entries),
-    Time = case Entries of
-               [#{time := First} | _] -> First;
-               [] -> Now
-           end,
-    Window = #window{credit = Credit - length(Notices) - length(Send), dropped = maps:from_list(Unreported)},
-    {lists:foldl(fun(#{row := Row}, Acc) -> drop(Row, 1, Acc) end, Window, Rest),
-     [erx_tracer:dropped(Row, Count, Time) || {Row, Count} <- Notices] ++ Send}.
+-spec deliver(window(), [erx_tracer:entry()]) -> {window(), [erx_tracer:entry()]}.
+deliver(#window{credit = Credit} = Window, Entries) ->
+    {Send, Rest} = lists:split(min(Credit, length(Entries)), Entries),
+    {lists:foldl(fun undelivered/2, Window#window{credit = Credit - length(Send)}, Rest), Send}.
+
+undelivered(#{row := Row, event := dropped, fields := #{count := Count}}, Window) -> drop(Row, Count, Window);
+undelivered(#{row := Row}, Window) -> drop(Row, 1, Window).
+
+-doc """
+Window's drops reported to Merger at Now: while the window is open, one dropped entry
+per row, with the count and the time Now, joins the merger as any other entry does
+(erx_tracer:hold/2), so it goes out in time order, after every entry held from before
+Now. Returns the window without them, the merger, and what goes out at once.
+""".
+-spec report(window(), erx_tracer:merger(), non_neg_integer()) ->
+          {window(), erx_tracer:merger(), [erx_tracer:entry()]}.
+report(#window{credit = 0} = Window, Merger, _Now) ->
+    {Window, Merger, []};
+report(#window{dropped = Dropped} = Window, Merger, Now) ->
+    {Merger1, Late} = erx_tracer:hold(Merger, dropped_entries(Dropped, Now)),
+    {Window#window{dropped = #{}}, Merger1, Late}.
+
+dropped_entries(Dropped, Now) ->
+    [erx_tracer:dropped(Row, Count, Now) || {Row, Count} <- lists:sort(maps:to_list(Dropped))].
 
 -doc """
 The window after the receiver acknowledged ?ACK_EVERY (64) entries; it never opens
@@ -332,39 +357,48 @@ run(Spec, Scope, Target) ->
 spawn_trace(Request, Target) ->
     Caller = self(),
     Tag = make_ref(),
-    {Pid, Monitor} = spawn_opt(fun() -> trace_init(Request, Target, Caller, Tag) end, [monitor | ?OWN]),
+    {Pid, Monitor} = spawn_opt(fun() -> trace_init(Request, Target, Caller, Tag) end, [monitor | ?TRACE_OPTS]),
     receive
         {Tag, Reply} ->
             erlang:demonitor(Monitor, [flush]),
+            Pid ! {Tag, taken},
             Reply;
         {'DOWN', Monitor, process, Pid, Why} ->
             %% The trace process failed before it answered: a fault, not a refusal.
             error({erx_trace, Why})
     end.
 
-%% The receiver exists and is monitored before the session opens, so the rings' first
-%% entries have somewhere to go and a receiver that ends during the start ends the trace.
-%% A printer monitors this process from its first instruction, so whatever ends it, a
-%% refusal or a fault included, ends the printer too.
+%% The session opens first, so a refusal leaves no printer behind. Then the receiver
+%% exists and is monitored before the rings' first read, so their first entries have
+%% somewhere to go, and a receiver already ended answers its monitor at once, which ends
+%% the trace. The caller is watched until it has taken the reply: a caller that dies
+%% during the start would leave a trace nobody can stop, so the trace closes instead.
 trace_init(#{select := Select, kernel := Kernel}, Target, Caller, Tag) ->
-    Ref = alias(),
-    Receiver = receiver(Target, Ref),
-    Monitor = erlang:monitor(process, Receiver),
-    Rings = case Kernel of
-                true -> [backend | [{kernel, Cpu} || Cpu <- lists:seq(0, cpus() - 1)]];
-                false -> []
-            end,
-    Erts = [{erts, ?SYSTEM_DOMAIN} || Select =/= []],
+    CallerMonitor = erlang:monitor(process, Caller),
     case open_session(Select) of
         {ok, Session} ->
-            Expect = #{ref => Ref, timer => none, receiver => Monitor, session => Session =/= none},
+            Ref = alias(),
+            Receiver = receiver(Target, Ref),
+            Rings = case Kernel of
+                        true -> [backend | [{kernel, Cpu} || Cpu <- lists:seq(0, cpus() - 1)]];
+                        false -> []
+                    end,
+            Erts = [{erts, ?SYSTEM_DOMAIN} || Select =/= []],
+            Expect = #{ref => Ref, timer => none, receiver => erlang:monitor(process, Receiver),
+                       session => Session =/= none},
             Trace0 = #trace{expect = Expect, receiver = Receiver, session = Session,
                             cursors = maps:from_keys(Rings, present), merger = erx_tracer:new(Erts ++ Rings)},
             %% One read of each ring from the present starts it, or shows its refusal.
             {_Monotonic, Now} = erx_trace_ring:clocks(),
             Trace = read_rings(Trace0, Now, 1),
             Caller ! {Tag, {ok, Ref, self()}},
-            loop(arm(Trace));
+            receive
+                {Tag, taken} ->
+                    erlang:demonitor(CallerMonitor, [flush]),
+                    loop(arm(Trace));
+                {'DOWN', CallerMonitor, process, Caller, _Why} ->
+                    close(Trace)
+            end;
         error ->
             Caller ! {Tag, {error, scope}}
     end.
@@ -376,8 +410,8 @@ receiver(Receiver, _Ref) when is_pid(Receiver) ->
     Receiver.
 
 %% The trace session over the selection: each pid, and for the system domain every
-%% process of this runtime, which leaves out the trace's own processes since they run
-%% sensitive. A pid that ended since check/3 looked answers as one outside the scope.
+%% process of this runtime, which leaves out the trace's own processes since they are
+%% spawned untraced. A pid that ended since check/3 looked answers as one outside the scope.
 open_session([]) ->
     {ok, none};
 open_session(Select) ->
@@ -428,14 +462,16 @@ arm(#trace{expect = Expect} = Trace) ->
     Trace#trace{expect = Expect#{timer := erlang:start_timer(?TICK_MS, self(), tick)}}.
 
 %% One round: the clock pair for the batch, every ring read from its cursor, the batch,
-%% and what the merger lets go out by now.
+%% the window's drops so far, and what the merger lets go out by now.
 step(Trace0) ->
     {_Monotonic, Now} = Pair = erx_trace_ring:clocks(),
     #trace{batch = {_Count, Batch}} = Trace1 = read_rings(Trace0, Now, ?READS_PER_ROUND),
     Messages = lists:reverse(Batch),
-    Trace2 = merge(Trace1#trace{batch = {0, []}},
-                   fun(Merger) -> erx_tracer:erts(Merger, ?SYSTEM_DOMAIN, Messages, Pair, Now) end, Now),
-    merge(Trace2, fun(Merger) -> erx_tracer:release(Merger, Now) end, Now).
+    #trace{window = Window, merger = Merger} = Trace2 =
+        merge(Trace1#trace{batch = {0, []}}, fun(M) -> erx_tracer:erts(M, ?SYSTEM_DOMAIN, Messages, Pair, Now) end),
+    {Window1, Merger1, Late} = report(Window, Merger, Now),
+    Trace3 = send(Trace2#trace{window = Window1, merger = Merger1}, Late),
+    merge(Trace3, fun(M) -> erx_tracer:release(M, Now) end).
 
 read_rings(#trace{cursors = Cursors} = Trace, Now, Reads) ->
     lists:foldl(fun(Source, Acc) -> read_ring(Acc, Source, Now, Reads) end, Trace, maps:keys(Cursors)).
@@ -445,35 +481,32 @@ read_ring(Trace, _Source, _Now, 0) ->
 read_ring(#trace{cursors = Cursors} = Trace, Source, Now, Left) ->
     Result = erx_trace_ring:read(Source, maps:get(Source, Cursors), ?READ_MAX),
     {Again, Cursors1} = cursor(Cursors, Source, Result),
-    Read = merge(Trace#trace{cursors = Cursors1}, fun(Merger) -> erx_tracer:ring(Merger, Source, Result, Now) end, Now),
+    Read = merge(Trace#trace{cursors = Cursors1}, fun(Merger) -> erx_tracer:ring(Merger, Source, Result, Now) end),
     case Again of
         true -> read_ring(Read, Source, Now, Left - 1);
         false -> Read
     end.
 
 %% Feeds the merger and delivers what it lets out.
-merge(#trace{merger = Merger} = Trace, Feed, Now) ->
+merge(#trace{merger = Merger} = Trace, Feed) ->
     {Merger1, Out} = Feed(Merger),
-    send(Trace#trace{merger = Merger1}, Out, Now).
+    send(Trace#trace{merger = Merger1}, Out).
 
-send(#trace{expect = #{ref := Ref}, receiver = Receiver, window = Window} = Trace, Entries, Now) ->
-    {Window1, Send} = deliver(Window, Entries, Now),
+send(#trace{expect = #{ref := Ref}, receiver = Receiver, window = Window} = Trace, Entries) ->
+    {Window1, Send} = deliver(Window, Entries),
     erx_tracer:emit(Receiver, Ref, Send),
     Trace#trace{window = Window1}.
 
 %% Stopped: the session ends first, the messages it already sent are taken, a last round
 %% runs, and what is still held goes out, so the stream ends with the last events. Rows
-%% still counting dropped entries are reported even past the window: at most one entry
-%% per row more.
+%% still counting dropped entries are reported last, even past the window: at most one
+%% entry per row more.
 finish(#trace{session = Session} = Trace0) ->
     destroy(Session),
-    Trace1 = step(drain(Trace0, ?DRAIN)),
-    {Merger, Held} = erx_tracer:flush(Trace1#trace.merger),
-    {_Monotonic, Now} = erx_trace_ring:clocks(),
     #trace{expect = #{ref := Ref}, receiver = Receiver, window = Window} =
-        send(Trace1#trace{merger = Merger}, Held, Now),
-    erx_tracer:emit(Receiver, Ref, [erx_tracer:dropped(Row, Count, Now) ||
-                                       {Row, Count} <- lists:sort(maps:to_list(Window#window.dropped))]),
+        merge(step(drain(Trace0, ?DRAIN)), fun erx_tracer:flush/1),
+    {_Monotonic, Now} = erx_trace_ring:clocks(),
+    erx_tracer:emit(Receiver, Ref, dropped_entries(Window#window.dropped, Now)),
     unalias(Ref),
     ok.
 
@@ -509,6 +542,11 @@ printer(Ref, Monitor, Handled) ->
             io:put_chars(line(Entry)),
             printer(Ref, Monitor, handled(Ref, Handled));
         {'DOWN', Monitor, process, _Trace, normal} ->
+            ok;
+        {'DOWN', Monitor, process, _Trace, noproc} ->
+            %% The trace ended before this printer first ran, most likely after a
+            %% stop, though a kill or a fault in that window looks the same: what it
+            %% sent is printed above, and its reason is gone, so nothing is printed.
             ok;
         {'DOWN', Monitor, process, _Trace, Why} ->
             io:put_chars(failure(Why));

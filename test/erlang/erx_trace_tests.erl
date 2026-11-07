@@ -127,48 +127,72 @@ classify_test() ->
     ?assertEqual(ignore, erx_trace:classify({timeout, none, tick}, Expect#{timer := none})).
 
 entries(Row, Count) ->
-    [#{time => Time, row => Row, event => in, fields => #{}, reporter => runtime, late => false}
-     || Time <- lists:seq(1, Count)].
+    [entry(Row, Time) || Time <- lists:seq(1, Count)].
+
+entry(Row, Time) ->
+    #{time => Time, row => Row, event => in, fields => #{}, reporter => runtime, late => false}.
 
 %% Sends Entries one at a time, as rounds would, never acknowledging: what went out.
 unacknowledged(Window, Entries) ->
     lists:foldl(fun(Entry, {W, Sent}) ->
-                        {W1, Out} = erx_trace:deliver(W, [Entry], 0),
+                        {W1, Out} = erx_trace:deliver(W, [Entry]),
                         {W1, Sent ++ Out}
                 end, {Window, []}, Entries).
+
+%% A report's entries as a merger waiting for no source lets them out at Now.
+reported(Window, Now) ->
+    {Window1, Merger, []} = erx_trace:report(Window, erx_tracer:new([]), Now),
+    {_, Out} = erx_tracer:release(Merger, Now),
+    {Window1, Out}.
 
 %% A receiver that never acknowledges gets the window and no more, however much is
 %% traced; the rest is counted.
 window_test() ->
     {W1, Sent} = unacknowledged(erx_trace:window(), entries(erts, 1000)),
     ?assertEqual(256, length(Sent)),
-    ?assertMatch({_, []}, erx_trace:deliver(W1, entries(backend, 5), 0)),
-    %% Each acknowledgement opens the window by 64; the first delivery after it reports
-    %% each row's drops, at the time of the first entry it sends.
-    {W2, []} = erx_trace:deliver(W1, entries(backend, 5), 0),
-    {W3, Out} = erx_trace:deliver(erx_trace:acked(W2), entries(kernel, 100), 0),
-    ?assertMatch([#{row := backend, event := dropped, fields := #{count := 5}, time := 1},
-                  #{row := erts, event := dropped, fields := #{count := 744}, time := 1} | _], Out),
+    {W2, []} = erx_trace:deliver(W1, entries(backend, 5)),
+    %% An acknowledgement opens the window by 64, and the round's report hands each row's
+    %% drops to the merger, at the round's time.
+    {W3, Notices} = reported(erx_trace:acked(W2), 7),
+    ?assertMatch([#{row := backend, event := dropped, fields := #{count := 5}, time := 7},
+                  #{row := erts, event := dropped, fields := #{count := 744}, time := 7}], Notices),
+    %% Both go out with 62 of 100 entries of kernel; the 38 that did not fit are the next
+    %% report.
+    {W4, Out} = erx_trace:deliver(W3, Notices ++ entries(kernel, 100)),
     ?assertEqual(64, length(Out)),
-    %% The 38 entries of kernel that did not fit are the next report.
-    {_, [Report]} = erx_trace:deliver(erx_trace:acked(W3), [], 77),
-    ?assertMatch(#{row := kernel, event := dropped, fields := #{count := 38}, time := 77}, Report).
+    ?assertMatch({_, [#{row := kernel, event := dropped, fields := #{count := 38}, time := 77}]},
+                 reported(erx_trace:acked(W4), 77)).
 
 %% Acknowledgements never open the window past 256, however many arrive: a receiver
 %% that acknowledges what it has not handled still has at most 256 entries out.
 ack_bound_test() ->
     Flooded = lists:foldl(fun(_, W) -> erx_trace:acked(W) end, erx_trace:window(), lists:seq(1, 100)),
-    {_, Sent} = erx_trace:deliver(Flooded, entries(erts, 1000), 0),
+    {_, Sent} = erx_trace:deliver(Flooded, entries(erts, 1000)),
     ?assertEqual(256, length(Sent)).
 
-%% A report that does not fit the window waits with its count.
+%% A dropped entry that finds the window shut waits with its count, beside the row's
+%% new drops.
 report_wait_test() ->
-    {W1, _} = erx_trace:deliver(erx_trace:window(), entries(erts, 300), 0),
-    {W2, []} = erx_trace:deliver(W1, entries(backend, 1), 0),
-    Open1 = lists:foldl(fun(_, W) -> erx_trace:acked(W) end, W2, [1]),
-    %% 64 open: both reports go, then 62 entries.
-    {_, Out} = erx_trace:deliver(Open1, entries(kernel, 70), 0),
-    ?assertMatch([#{row := backend, fields := #{count := 1}}, #{row := erts, fields := #{count := 44}} | _], Out).
+    {W1, _} = erx_trace:deliver(erx_trace:window(), entries(erts, 300)),
+    {W2, [Notice]} = reported(erx_trace:acked(W1), 5),
+    {W3, _} = erx_trace:deliver(W2, entries(backend, 64)),
+    {W4, []} = erx_trace:deliver(W3, [Notice | entries(erts, 1)]),
+    ?assertMatch({_, [#{row := erts, fields := #{count := 45}}]}, reported(erx_trace:acked(W4), 9)).
+
+%% A row's drops join the merger at the round's time and go out in time order: after an
+%% entry held from before that time, never ahead of it, and not while the window is shut.
+report_test() ->
+    {Shut, _} = erx_trace:deliver(erx_trace:window(), entries(erts, 300)),
+    {Held, []} = erx_tracer:hold(erx_tracer:new([backend]), [entry(backend, 50)]),
+    ?assertEqual({Shut, Held, []}, erx_trace:report(Shut, Held, 100)),
+    {Open, Merger1, []} = erx_trace:report(erx_trace:acked(Shut), Held, 100),
+    ?assertMatch({_, []}, erx_tracer:release(Merger1, 100)),
+    {Merger2, []} = erx_tracer:ring(Merger1, backend, {ok, [], 7, 0}, 200),
+    ?assertMatch({_, [#{time := 50, row := backend, event := in},
+                      #{time := 100, row := erts, event := dropped, fields := #{count := 44}, late := false}]},
+                 erx_tracer:release(Merger2, 200)),
+    %% The counts went to the merger: the window reports nothing more.
+    ?assertMatch({_, []}, reported(Open, 300)).
 
 %% The round's batch holds 4,096 session messages; the next are counted as dropped erts
 %% entries.
@@ -178,8 +202,7 @@ buffer_test() ->
                              {{0, []}, erx_trace:window()}, lists:seq(1, 4100)),
     ?assertMatch({4096, _}, Batch),
     ?assertEqual(4096, length(element(2, Batch))),
-    {_, [Report]} = erx_trace:deliver(W, [], 5),
-    ?assertMatch(#{row := erts, event := dropped, fields := #{count := 4}}, Report).
+    ?assertMatch({_, [#{row := erts, event := dropped, fields := #{count := 4}}]}, reported(W, 5)).
 
 %% A ring moves to the next cursor and is read again after a full read; a refused ring
 %% is read no more, and the others go on.

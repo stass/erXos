@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: ERTS_TRACE_HIDDEN_FLAGS and ERTS_IS_P_TRACE_HIDDEN name the flags, sensitive and erx_untraced, that hide a process from every trace session.
+ *
  * %CopyrightEnd%
  */
 
@@ -64,8 +66,13 @@ typedef struct ErtsTracee_ {
 #define IS_SESSION_TRACED_ANY_FL(ref,tf) \
     ((ref)->tracer != NIL && (ref->flags & (tf)))
 
+/* erXos: the flags that hide a process from every trace session, so no
+ * session's flags take effect while one is set: sensitive, and
+ * erx_untraced (OTP edit 52 of erXos's design-runtime.md). */
+#define ERTS_TRACE_HIDDEN_FLAGS (F_SENSITIVE | F_ERX_UNTRACED)
+
 #define ERTS_IS_P_TRACED(p) \
-    ((p)->common.tracee.all_trace_flags & ~F_SENSITIVE)
+    ((p)->common.tracee.all_trace_flags & ~ERTS_TRACE_HIDDEN_FLAGS)
 
 #define ERTS_IS_P_TRACED_FL(p, tf) \
     ((p)->common.tracee.all_trace_flags & (tf))
@@ -74,6 +81,9 @@ typedef struct ErtsTracee_ {
 
 #define ERTS_IS_PROC_SENSITIVE(p) \
     ((p)->common.tracee.all_trace_flags & F_SENSITIVE)
+
+#define ERTS_IS_P_TRACE_HIDDEN(p) \
+    ((p)->common.tracee.all_trace_flags & ERTS_TRACE_HIDDEN_FLAGS)
 
 
 typedef struct {

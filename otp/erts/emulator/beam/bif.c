@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote.
+ * Modified by erXos: display_string/2 has no standard-input branch, and its write loop adds only what a write wrote; process_flag(sensitive, _) keeps the erx_untraced trace flag.
  *
  * %CopyrightEnd%
  */
@@ -2189,11 +2189,12 @@ BIF_RETTYPE process_flag_2(BIF_ALIST_2)
        if (is_sensitive) {
            for (ref = BIF_P->common.tracee.first_ref; ref; ref = ref->next)
                ref->flags |= F_SENSITIVE;
-	   ERTS_P_ALL_TRACE_FLAGS(BIF_P) = F_SENSITIVE;
+	   ERTS_P_ALL_TRACE_FLAGS(BIF_P) =
+               F_SENSITIVE | (ERTS_P_ALL_TRACE_FLAGS(BIF_P) & F_ERX_UNTRACED);
        } else {
            for (ref = BIF_P->common.tracee.first_ref; ref; ref = ref->next)
                ref->flags &= ~F_SENSITIVE;
-	   ERTS_P_ALL_TRACE_FLAGS(BIF_P) = 0;
+	   ERTS_P_ALL_TRACE_FLAGS(BIF_P) &= F_ERX_UNTRACED;
            ERTS_P_ALL_TRACE_FLAGS(BIF_P) = erts_sum_all_trace_flags(&BIF_P->common);
        }
        erts_proc_unlock(BIF_P, ERTS_PROC_LOCKS_ALL_MINOR);

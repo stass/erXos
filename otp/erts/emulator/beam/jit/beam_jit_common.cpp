@@ -17,6 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: return_to tracing skips a process spawned erx_untraced, as it skips a sensitive one.
+ *
  * %CopyrightEnd%
  */
 
@@ -1261,7 +1263,7 @@ void beam_jit_return_to_trace(Process *c_p,
     ErtsTracerRef *ref =
             get_tracer_ref_from_weak_id(&c_p->common, session_weak_id);
 
-    if (!ERTS_IS_PROC_SENSITIVE(c_p) && ref &&
+    if (!ERTS_IS_P_TRACE_HIDDEN(c_p) && ref &&
         IS_SESSION_TRACED_FL(ref, F_TRACE_RETURN_TO)) {
         ErtsCodePtr return_to_address;
         Uint *cpp;

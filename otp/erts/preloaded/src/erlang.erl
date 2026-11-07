@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: spawn_opt_option() includes {erx_untraced, boolean()}.
+%%
 %% %CopyrightEnd%
 %%
 -module(erlang).
@@ -10735,7 +10737,8 @@ Process max heap size configuration. For more info see
       | {min_bin_vheap_size, VSize :: non_neg_integer()}
       | {max_heap_size, Size :: max_heap_size()}
       | {message_queue_data, MQD :: message_queue_data()}
-      | {async_dist, Enabled :: boolean()}.
+      | {async_dist, Enabled :: boolean()}
+      | {erx_untraced, Untraced :: boolean()}.
 
 -doc """
 Returns the process identifier (pid) of a new process started by the application

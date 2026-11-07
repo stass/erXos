@@ -2430,26 +2430,18 @@ document's "residual risks accepted" paragraph.
   and the alias that is a trace's reference is its stop authority, though a reference can be
   forged inside a node, which both matter once a trace's receiver or caller is in another
   domain (P4); ERTS delivers session messages without flow control, so a session over many
-  busy processes on several schedulers can outpace the one trace process that discards the
-  excess, and its mailbox then grows; and `check/3` and the session message's shape need fuzz
+  busy processes on several schedulers can outpace the one trace process, which its
+  `max_heap_size` then kills, ending the trace with `killed`, rather than discarding the
+  excess; and `check/3` and the session message's shape need fuzz
   targets once Specs and relayed records come from other domains. The window's review left
-  these open: `deliver/3` stamps a `dropped` entry with `Now` when a delivery has no
-  entries, so it can print ahead of held entries up to 100 ms older, unmarked (emit it only
-  with entries, at the first one's time); the trace process should run with a
-  `max_heap_size` that kills it, so its held entries (a forged far-future `trace_ts` is
-  never released while a ring is read), its batch and its on-heap mailbox are bounded by
-  construction, and the merger's `lists:merge` over the held list after every read belongs
-  on the performance watch list; `{sensitive, true}` also hides the process's messages,
-  dictionary and stack from `process_info` and crash dumps and stops call and seq tracing,
-  which OTP edit 51 and "Tracing" should say, or a narrower spawn flag should replace it;
-  design-live.md's "The end" says a trace whose receiver ended delivered what it held, and
-  design-stopgap.md's row says the workload's lines do not feed the trace, though the
-  backend row records the parks and wakes printing causes; the printer is spawned before
-  the session opens, so a refusal can print `erx:trace failed: noproc` after
-  `{error, scope}` (spawn it after `open_session/1`); a caller that dies while the trace
-  starts leaves a trace nobody can stop; a forged `{erx_trace_ack, Ref}` can open a stuck
-  receiver's window (P4); `erlang.erl`'s `spawn_opt_option()` lacks `{sensitive,
-  boolean()}`; `expect()`'s `session` boolean shares a name with the session handle; and
+  these open: a forged far-future `trace_ts` is held until it is 100 ms older than the
+  clock, so it ends the trace only through the heap bound; the merger's `lists:merge` over
+  the held list after every read belongs on the performance watch list; a forged
+  `{erx_trace_ack, Ref}` can open a stuck receiver's window, and since ERTS stamps no
+  sender on a message, only an acknowledgement alias given to the receiver alone would tie
+  it to the receiver (P4); a trace that ends after a stop before the printer first ran
+  leaves the printer a `noproc` it ignores, so a fault in that window prints no failure
+  line; `expect()`'s `session` boolean shares a name with the session handle; and
   `park_then_wake?` mutates a set inside `any?`. P4, the trace facet, the
   relay, frame tracing and the host link's events stream, which need M5's connections, since
   the stopgap offers no lanes.

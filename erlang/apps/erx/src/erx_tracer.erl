@@ -25,7 +25,7 @@
 -module(erx_tracer).
 -moduledoc "erx:trace's merger: the sources' reads into one stream ordered by erx_clock_ns.".
 
--export([new/1, ring/4, erts/5, release/2, flush/1, dropped/3, emit/3, convert/2]).
+-export([new/1, ring/4, erts/5, hold/2, release/2, flush/1, dropped/3, emit/3, convert/2]).
 -export_type([merger/0, row/0, source/0, entry/0, clock_pair/0]).
 
 -define(HOLD_NS, 100000000).
@@ -94,6 +94,17 @@ Pair taken for the batch, at Now (erx_clock_ns, taken before the batch was drain
 erts(Merger, Domain, Messages, Pair, Now) ->
     take(Merger, {erts, Domain}, [erts_entry(Domain, Message, Pair) || Message <- Messages], Now).
 
+-doc """
+Holds Entries, a source's batch or entries of no source such as a trace's dropped
+entries: an entry older than one already sent goes out at once, marked late, and the
+rest join the held entries in time order. No source's shown time moves.
+""".
+-spec hold(merger(), [entry()]) -> {merger(), [entry()]}.
+hold(#merger{held = Held, sent = Sent} = Merger, Entries) ->
+    {Late, OnTime} = lists:partition(fun(#{time := Time}) -> Sent =/= none andalso Time < Sent end, Entries),
+    {Merger#merger{held = lists:merge(fun before/2, Held, lists:sort(fun before/2, OnTime))},
+     [Entry#{late := true} || Entry <- Late]}.
+
 -doc "Every held entry, in time order, for a trace that ends: nothing is left behind.".
 -spec flush(merger()) -> {merger(), [entry()]}.
 flush(#merger{held = Held} = Merger) ->
@@ -124,13 +135,9 @@ most that slew of the timestamp's distance from the pair.
 convert(Monotonic, {PairMonotonic, PairClock}) ->
     Monotonic + (PairClock - PairMonotonic).
 
-%% Holds a batch of Source: entries older than one already sent go out at once, marked
-%% late; the rest join the held entries in time order; and the source's shown time moves.
-take(#merger{held = Held, sent = Sent} = Merger, Source, Entries, Now) ->
-    {Late, OnTime} = lists:partition(fun(#{time := Time}) -> Sent =/= none andalso Time < Sent end, Entries),
-    Waiting = shown(Merger#merger.waiting, Source, batch_time(Entries, Now)),
-    Merged = lists:merge(fun before/2, Held, lists:sort(fun before/2, OnTime)),
-    {Merger#merger{waiting = Waiting, held = Merged}, [Entry#{late := true} || Entry <- Late]}.
+%% Holds a batch of Source (hold/2) and moves the source's shown time.
+take(#merger{waiting = Waiting} = Merger, Source, Entries, Now) ->
+    hold(Merger#merger{waiting = shown(Waiting, Source, batch_time(Entries, Now))}, Entries).
 
 %% The time a batch shows of its source: its latest entry, or the read's time if empty.
 batch_time([], Now) -> Now;

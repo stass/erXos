@@ -281,14 +281,34 @@ class RuntimeHostedSmokeTest < Minitest::Test
         /^ *\d+\.\d{9} kernel unsupported \[kernel\]$.*^ *\d+\.\d{9} backend (?:park|wake) \S+=\S+ slot=\d+ cpu=unknown thread=\d+ space=\d+ \[liberx trace\]$.*^kernel_done$/m,
       '{ok, S} = erx:trace(#{select => [self()]}), timer:sleep(50), erx:trace_stop(S), timer:sleep(100), self_done.' =>
         /^ *\d+\.\d{9} erts (?:in|out) pid=<[0-9.]+> domain=4 mfa=.* \[runtime\]$.*^self_done$/m,
-      # The spawn option {sensitive, true} (OTP edit 51): a session over every process sees
-      # a process spawned without it run, and never one spawned with it.
+      # The spawn option {erx_untraced, true} (OTP edit 52): a session over every process,
+      # opened before the spawn, with call tracing of timer:sleep/1, sees a process spawned
+      # without it run ({in, ...}) and call ({call, ...}), and one spawned with it do neither;
+      # unlike sensitive, the option hides nothing from process_info.
       'Seen = fun(Opts) -> Col = spawn(fun() -> receive {go, Fr, Pr} -> timer:sleep(100), ' \
-      'Fr ! {seen, [x || {trace, Qr, _, _} <- element(2, process_info(self(), messages)), Qr =:= Pr] =/= []} end end), ' \
-      'Ses = trace:session_create(sensitive_test, Col, []), trace:process(Ses, all, true, [running]), ' \
+      'Tags = [T || {trace, Qr, T, _} <- element(2, process_info(self(), messages)), Qr =:= Pr], ' \
+      'Fr ! {seen, {lists:member(in, Tags), lists:member(call, Tags)}} end end), ' \
+      'Ses = trace:session_create(untraced_test, Col, []), trace:process(Ses, all, true, [running, call]), ' \
+      'trace:function(Ses, {timer, sleep, 1}, true, []), ' \
       'Pr = spawn_opt(fun() -> timer:sleep(10) end, Opts), Col ! {go, self(), Pr}, ' \
-      'receive {seen, Bo} -> trace:session_destroy(Ses), Bo end end, {Seen([]), Seen([{sensitive, true}])}.' =>
-        /^\{true,false\}$/,
+      'receive {seen, Bo} -> trace:session_destroy(Ses), Bo end end, ' \
+      'Un = spawn_opt(fun() -> receive stop -> ok end end, [{erx_untraced, true}]), Un ! hello, ' \
+      '{messages, Ms} = process_info(Un, messages), Un ! stop, ' \
+      '{Seen([]), Seen([{erx_untraced, true}]), Ms}.' =>
+        /^\{\{true,true\},\{false,false\},\[hello\]\}$/,
+      # It holds against a session opened after the spawn on the untraced pid itself, after
+      # that process turns sensitive on and off, and against a parent's set_on_spawn: of
+      # the untraced process, the untraced child and the plain parent, only the parent runs
+      # in the session's view.
+      'Col2 = spawn(fun() -> receive {go2, F2, Ps} -> timer:sleep(100), F2 ! {seen2, lists:usort(' \
+      '[Q || {trace, Q, _, _} <- element(2, process_info(self(), messages)), lists:member(Q, Ps)])} end end), ' \
+      'Me = self(), Un2 = spawn_opt(fun() -> receive go -> process_flag(sensitive, true), ' \
+      'process_flag(sensitive, false), timer:sleep(10) end end, [{erx_untraced, true}]), ' \
+      'Par = spawn(fun() -> receive go -> Me ! {child, spawn_opt(fun() -> timer:sleep(10) end, ' \
+      '[{erx_untraced, true}])}, timer:sleep(10) end end), S2 = trace:session_create(untraced_later, Col2, []), ' \
+      'trace:process(S2, Un2, true, [running]), trace:process(S2, Par, true, [running, set_on_spawn]), ' \
+      'Un2 ! go, Par ! go, Ch = receive {child, Cx} -> Cx end, Col2 ! {go2, self(), [Un2, Ch, Par]}, ' \
+      'receive {seen2, Qs} -> trace:session_destroy(S2), Qs =:= [Par] end.' => /^true$/,
       # Two traces of every process at once, each printing what feeds the other and
       # itself, end when stopped: the window bounds what each has out.
       '{ok, TA} = erx:trace(#{select => [4]}), {ok, TB} = erx:trace(#{select => [4]}), timer:sleep(300), ' \
