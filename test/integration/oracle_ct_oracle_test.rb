@@ -45,10 +45,12 @@ class OracleCtOracleTest < Minitest::Test
                  .to_h { |event| [[event['suite'], event['testcase']], event['result']] }
       assert_equal 'passed', done.fetch(%w[oracle_cleanup_passing_SUITE reads_data])
       assert_equal 'passed', done.fetch(%w[oracle_cleanup_passing_SUITE writes_priv])
+      assert_equal 'passed', done.fetch(%w[oracle_cleanup_passing_SUITE priv_dir_under_cwd]),
+                   "stock's priv_dir is the run directory's log_private, as in plain Common Test"
       notes = File.read(result.fetch('log')).scan(/^erx-oracle-note (\S+) priv_dir (\d+)$/)
       assert_equal CLEANUP_SUITES.map { |suite| [suite, '1024'] }, notes
-      assert_empty Dir.glob(File.join(work, '{logs,priv}/**/log_private'))
-      refute_empty Dir.glob(File.join(work, 'priv/ct_run.*/*.logs/run.*')), 'each priv_dir was under work/priv'
+      assert_empty Dir.glob(File.join(work, 'logs/**/log_private'))
+      refute File.exist?(File.join(work, 'priv')), 'stock keeps no priv_dir root of its own'
       refute_empty Dir.glob(File.join(work, 'logs/ct_run.*/*.logs/run.*/suite.log'))
       assert File.file?(File.join(work, 'suites/oracle_cleanup_failing_SUITE_data/payload.txt'))
     end

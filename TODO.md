@@ -524,7 +524,10 @@ it; git history is the record of completed work.
   `/tmp` outside its `priv_dir` (files in its `data_dir` copy or straight in `/tmp`, or a `priv_dir` whose deletion
   failed, which is only noted) stays there, and once that fills `/tmp`, every later suite's job ends in
   `start_log_file`, where `filelib:ensure_path/1` cannot make its `priv_dir` (the hosted run answered `enoent`). Making
-  a `priv_dir` that cannot be made fail only its suite would close that.
+  a `priv_dir` that cannot be made fail only its suite would close that. And since the `priv_dir` is not below the
+  case's current directory on erXos, as it is on stock, a suite that names its `priv_dir` relative to that directory
+  (tar_SUITE:borderline strips the current directory's prefix) fails on erXos for that alone; moving the current
+  directory into the `priv_dir` tree would close that too.
 * [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
   for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
   `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its
