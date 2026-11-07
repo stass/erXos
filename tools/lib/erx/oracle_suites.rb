@@ -31,8 +31,8 @@ module Erx
     # group's suites, their _data and the helper modules they share.
     GROUPS = { 'emulator' => 'otp/erts/emulator/test', 'kernel' => 'otp/lib/kernel/test',
                'stdlib' => 'otp/lib/stdlib/test', 'compiler' => 'otp/lib/compiler/test' }.freeze
-    # The subset `make check-oracle-hosted` and `make check-oracle` run on
-    # every change, by group.
+    # The subset `make check-oracle-hosted` runs on every change, by group;
+    # `make check-oracle` runs it beside its whole groups (tools/erx).
     FAST = { 'kernel' => %w[file_SUITE], 'stdlib' => %w[filelib_SUITE] }.freeze
     # One table of known differences per group, named after it.
     KNOWN_DIFFERENCES = 'test/oracle/hosted_known_differences'
@@ -45,9 +45,16 @@ module Erx
     # erl2html2 parses each suite with syntax_tools' epp_dodger, and cover is
     # in tools.
     STOCK_APPLICATIONS = %w[common_test sasl syntax_tools tools].freeze
-    # The stock applications whose src directory a suite includes a header
-    # from: compiler's holds beam_opcodes.hrl, which its build generates.
-    STOCK_INCLUDES = %w[compiler].freeze
+    # Generated headers of stock's source tree that a group's test Makefile
+    # installs beside its suites (release_tests_spec), by group, each with the
+    # file it is generated from, which the image's receipt names as its
+    # source. compiler's beam_debug_info_SUITE includes beam_opcodes.hrl,
+    # which beam_makeops generates from genop.tab; compile_SUITE warnings
+    # compiles beam_debug_info_SUITE.erl again at run time, from the suite
+    # directory.
+    RELEASED_HEADERS = { 'compiler' => { 'lib/compiler/src/beam_opcodes.hrl' => 'lib/compiler/src/genop.tab' } }.freeze
+    # One of RELEASED_HEADERS in stock's source tree, with the file it is generated from.
+    ReleasedHeader = Data.define(:source_header, :generator)
     # Files of the test directories that are copied but not compiled, being
     # no module of their own name: kernel's code_a_test.erl is a source that
     # code_SUITE compiles itself, as code_b_test.
@@ -115,10 +122,14 @@ module Erx
     end
 
     # The reporter into `reporter` and `suites` with their data into `suite_directory`,
-    # compiled by stock's erlc. Returns each file written with its source.
-    def compile(reporter:, suite_directory:, suites:, erlc:, common_test:)
-      [*compile_reporter(reporter, erlc: erlc, common_test: common_test),
-       *compile_suites(suite_directory, suites, erlc: erlc)]
+    # compiled by stock's erlc. `stock_source` is stock's built source tree, which
+    # gives the reporter Common Test's headers and the group its RELEASED_HEADERS,
+    # all of which are found before anything compiles, so a missing one is
+    # refused first. Returns each file written with its source.
+    def compile(reporter:, suite_directory:, suites:, erlc:, stock_source:)
+      headers = released_headers(stock_source)
+      [*compile_reporter(reporter, erlc: erlc, common_test: File.join(stock_source, 'lib/common_test')),
+       *compile_suites(suite_directory, suites, erlc: erlc, headers: headers)]
     end
 
     # Stock's installed STOCK_APPLICATIONS, each copied whole to
@@ -178,12 +189,17 @@ module Erx
       [*reporter, *helpers].map { |source| Compiled.new(path: File.join(directory, "#{File.basename(source, '.erl')}.beam"), source: source) }
     end
 
-    # The suites with their _data, and every other module and header of the
+    # The suites with their _data and every other module and header of the
     # group's test directory, since a group's suites share helper modules
-    # there, all compiled together.
-    def compile_suites(directory, suites, erlc:)
+    # there, all compiled together beside `headers`, the group's
+    # RELEASED_HEADERS, which no file of the test directory may shadow.
+    def compile_suites(directory, suites, erlc:, headers:)
       helpers = Dir.glob(File.join(@source, '*.{erl,hrl}')).sort.reject { |path| path.end_with?('_SUITE.erl') }
+      shadowed = helpers.map { |path| File.basename(path) } & headers.map { |header| File.basename(header.source_header) }
+      raise Error, "#{@source} has its own #{shadowed.join(', ')}, which the release installs" unless shadowed.empty?
+
       FileUtils.cp(helpers, directory)
+      FileUtils.cp(headers.map(&:source_header), directory)
       sources = helpers + suites.flat_map do |suite|
         FileUtils.cp(File.join(@source, "#{suite}.erl"), directory)
         data = File.join(@source, "#{suite}_data")
@@ -193,15 +209,26 @@ module Erx
       end
       modules = sources.select { |path| File.dirname(path) == @source && path.end_with?('.erl') }
                        .reject { |path| NOT_MODULES.include?(File.basename(path)) }
-      includes = STOCK_INCLUDES.flat_map do |application|
-        ['-I', Dir.glob(File.join(File.expand_path('../lib/erlang/lib', File.dirname(erlc)), "#{application}-*/src")).fetch(0)]
-      end
-      erlang(erlc, '-I', directory, *includes, '-o', directory,
+      erlang(erlc, '-I', directory, '-o', directory,
              *modules.map { |path| File.join(directory, File.basename(path)) }, name: 'erlc-suites')
       copied = sources.map { |path| Compiled.new(path: File.join(directory, path.delete_prefix("#{@source}/")), source: path) }
-      copied + modules.map do |path|
-        Compiled.new(path: File.join(directory, "#{File.basename(path, '.erl')}.beam"), source: path)
+      installed = headers.map do |header|
+        Compiled.new(path: File.join(directory, File.basename(header.source_header)), source: header.generator)
       end
+      beams = modules.map { |path| Compiled.new(path: File.join(directory, "#{File.basename(path, '.erl')}.beam"), source: path) }
+      copied + installed + beams
+    end
+
+    # The group's RELEASED_HEADERS in stock's source tree `stock_source`, each
+    # with the file it is generated from; every missing file is refused at once.
+    def released_headers(stock_source)
+      headers = RELEASED_HEADERS.fetch(@group, {}).map do |header, generator|
+        ReleasedHeader.new(source_header: File.join(stock_source, header), generator: File.join(stock_source, generator))
+      end
+      missing = headers.flat_map { |header| [header.source_header, header.generator] }.reject { |path| File.file?(path) }
+      raise Error, "stock's source tree has no #{missing.join(' or ')}" unless missing.empty?
+
+      headers
     end
 
     def erlang(*argv, name:)

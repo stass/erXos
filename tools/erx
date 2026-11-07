@@ -440,13 +440,17 @@ module Erx
     end
 
     # The suites the system domain runs under HVF, compared with stock: the
-    # fast subset, then musl's libc-test in test tasks on LIBC_TEST_CPUS CPUs.
-    # OTP's four groups are not here yet (docs/plan.md, M3), so a run whose
-    # every part passed is still partial and exits 2, never 0. A failed part,
-    # or a host whose QEMU does not offer HVF, exits 1.
+    # fast subset and the CHECKED_GROUPS whole, then musl's libc-test in test
+    # tasks on LIBC_TEST_CPUS CPUs. Until all of OTP's four groups are here
+    # (docs/plan.md, M3), a run whose every part passed is still partial and
+    # exits 2, never 0. A failed part, or a host whose QEMU does not offer
+    # HVF, exits 1.
     LIBC_TEST_CPUS = 4
+    # OTP's groups whose every difference in the system domain is classified.
+    CHECKED_GROUPS = %w[compiler].freeze
 
-    def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil, libc_test: method(:check_libc_test))
+    def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil, libc_test: method(:check_libc_test),
+                          checked_groups: CHECKED_GROUPS)
       no_arguments(arguments)
       offered = accelerators || QemuGate.available_accelerators(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
       accel = QemuGate::SUITE_ACCELERATOR
@@ -454,17 +458,26 @@ module Erx
         Terminal.puts("failed: this host's QEMU does not offer #{accel}, which the oracle run needs")
         return 1
       end
-      status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}")], qemu_class: qemu_class)
+      status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}"),
+                            '--suites', ['fast', *checked_groups].join(',')], qemu_class: qemu_class)
       Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
       libc = libc_test.call([accel, LIBC_TEST_CPUS.to_s])
       Terminal.puts("libc-test #{accel} #{LIBC_TEST_CPUS} CPUs: #{libc.zero? ? 'passed' : 'failed'}")
       return 1 unless status.zero? && libc.zero?
 
-      fast = OracleSuites::FAST.flat_map { |group, suites| suites.map { |suite| "#{group}/#{suite}" } }
-      Terminal.puts("partial: the system domain runs #{fast.join(' and ')}; OTP's emulator, kernel, stdlib and " \
-                    'compiler groups are not classified there yet, so the check is not passed')
+      left = OracleSuites::GROUPS.keys - checked_groups
+      return 0 if left.empty?
+
+      fast = OracleSuites::FAST.reject { |group, _| checked_groups.include?(group) }
+                               .flat_map { |group, suites| suites.map { |suite| "#{group}/#{suite}" } }
+      runs = [*fast, *checked_groups.map { |group| "the #{group} group's suites" }]
+      Terminal.puts("partial: the system domain runs #{word_list(runs)}; OTP's #{word_list(left)} groups are not " \
+                    'classified there yet, so the check is not passed')
       2
     end
+
+    # `words`, at least one, as prose: "a", "a and b", "a, b and c".
+    def self.word_list(words) = [words[0..-2].join(', '), words.last].reject(&:empty?).join(' and ')
 
     def self.help(_arguments)
       Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | gates | pack [--medium] | status | setup [--jobs N]')

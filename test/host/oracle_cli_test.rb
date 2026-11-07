@@ -32,6 +32,9 @@ class OracleCliTest < Minitest::Test
       self
     end
 
+    # The group of each OracleQemu it made, in order.
+    def groups = @calls.grep(Hash).filter_map { |options| options[:group] }
+
     def run(suites, **options)
       @calls << [suites, options]
       Erx::OracleQemu::Outcome.new(result: OracleCliTest.comparison(passing: @passing), report: 'unused', seconds: 12.4)
@@ -47,12 +50,27 @@ class OracleCliTest < Minitest::Test
       assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
       assert_includes output, 'oracle qemu hvf: passed'
       refute_includes output, 'oracle qemu tcg'
-      assert_includes output, 'partial: the system domain runs kernel/file_SUITE and stdlib/filelib_SUITE; ' \
-                              "OTP's emulator, kernel, stdlib and compiler groups are not classified there yet"
+      assert_includes output, 'partial: the system domain runs kernel/file_SUITE, stdlib/filelib_SUITE and the ' \
+                              "compiler group's suites; OTP's emulator, kernel and stdlib groups are not classified there yet"
       options = { accel: 'hvf', cpus: 1, jobs: 4 }
-      assert_equal [[%w[file_SUITE], options], [%w[filelib_SUITE], options]], qemu.calls.grep(Array)
+      compiler = Erx::OracleSuites.suites(root: File.expand_path('../..', __dir__), group: 'compiler')
+      assert_equal [[%w[file_SUITE], options], [%w[filelib_SUITE], options], [compiler, options]],
+                   qemu.calls.grep(Array)
+      assert_equal %w[kernel stdlib compiler], qemu.calls.grep(Hash).filter_map { |call| call[:group] }
       assert_equal [%w[hvf 4]], libc_calls
       assert_includes output, 'libc-test hvf 4 CPUs: passed'
+    end
+  end
+
+  # With every group checked, a run whose every part passed is passed.
+  def test_check_oracle_passes_once_every_group_is_checked
+    Dir.mktmpdir do |directory|
+      qemu = FakeQemu.new(directory, passing: true)
+      status, output = run_cli('check-oracle', qemu_class: qemu, accelerators: %w[hvf], libc_test: ->(_) { 0 },
+                                               checked_groups: Erx::OracleSuites::GROUPS.keys)
+      assert_equal 0, status
+      refute_includes output, 'partial:'
+      assert_equal Erx::OracleSuites::GROUPS.keys.sort, qemu.groups.sort
     end
   end
 
@@ -257,6 +275,59 @@ class OracleCliTest < Minitest::Test
       suites = Erx::OracleSuites.new(root: root, out: directory, runner: nil, deadline: 1, group: 'compiler')
       suites.copy_stock_applications(lib, erl: File.join(directory, 'stock/bin/erl'))
       assert_equal %w[common_test sasl syntax_tools tools], Dir.children(lib).sort
+    end
+  end
+
+  # Records the commands it is handed and runs none.
+  class RecordingRunner
+    attr_reader :commands
+
+    def initialize = @commands = []
+    def run(argv, **) = @commands << argv
+  end
+
+  # OTP's compiler test Makefile installs compiler's generated
+  # beam_opcodes.hrl beside the suites. Without it compile_SUITE warnings
+  # fails, leaving workers that reload the compiler modules pre_load_check
+  # unloads, so pre_load_check fails on a host with several schedulers.
+  def test_the_compiler_suites_get_the_header_their_makefile_installs_beside_them
+    Dir.mktmpdir do |directory|
+      root = File.expand_path('../..', __dir__)
+      stock = File.join(directory, 'stock')
+      src = File.join(stock, 'lib/compiler/src')
+      FileUtils.mkdir_p(src)
+      File.write(File.join(src, 'beam_opcodes.hrl'), "-define(tag_u, 0).\n")
+      File.write(File.join(src, 'genop.tab'), "1: label/1\n")
+      compiled = %w[compiler stdlib].to_h do |group|
+        target = File.join(directory, group)
+        FileUtils.mkdir_p(target)
+        suites = Erx::OracleSuites.new(root: root, out: directory, runner: RecordingRunner.new, deadline: 1, group: group)
+        [group, suites.compile(reporter: target, suite_directory: target, suites: [], erlc: 'erlc', stock_source: stock)]
+      end
+      header = File.join(directory, 'compiler/beam_opcodes.hrl')
+      assert File.file?(header)
+      assert_includes compiled.fetch('compiler'),
+                      Erx::OracleSuites::Compiled.new(path: header, source: File.join(src, 'genop.tab'))
+      refute File.exist?(File.join(directory, 'stdlib/beam_opcodes.hrl'))
+      File.delete(File.join(src, 'genop.tab'))
+      runner = RecordingRunner.new
+      suites = Erx::OracleSuites.new(root: root, out: directory, runner: runner, deadline: 1, group: 'compiler')
+      error = assert_raises(Erx::Error) do
+        suites.compile(reporter: directory, suite_directory: File.join(directory, 'compiler'), suites: [], erlc: 'erlc',
+                       stock_source: stock)
+      end
+      assert_includes error.message, 'genop.tab'
+      assert_empty runner.commands, 'a missing header is refused before anything compiles'
+      File.write(File.join(src, 'genop.tab'), "1: label/1\n")
+      shadowing = File.join(directory, 'shadowing')
+      FileUtils.mkdir_p(File.join(shadowing, 'otp/lib/compiler/test'))
+      File.write(File.join(shadowing, 'otp/lib/compiler/test/beam_opcodes.hrl'), "-define(tag_u, 1).\n")
+      suites = Erx::OracleSuites.new(root: shadowing, out: directory, runner: RecordingRunner.new, deadline: 1, group: 'compiler')
+      error = assert_raises(Erx::Error) do
+        suites.compile(reporter: directory, suite_directory: File.join(directory, 'compiler'), suites: [], erlc: 'erlc',
+                       stock_source: stock)
+      end
+      assert_includes error.message, 'has its own beam_opcodes.hrl'
     end
   end
 

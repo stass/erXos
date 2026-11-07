@@ -67,7 +67,7 @@ module Erx
       oracle = Oracle.new(root: @root, runner: @runner)
       stock, erxos = oracle.with_runtime('jit') do |installation|
         tree = File.join(@out, 'tree')
-        fill_tree(tree, suites, installation: installation, common_test: File.join(oracle.source_path('jit'), 'lib/common_test'))
+        fill_tree(tree, suites, installation: installation, stock_source: oracle.source_path('jit'))
         [@suites.run_stock(tree, suites, erl: installation.fetch('erl')), run_erxos(tree, suites)]
       end
       result = OracleComparison.compare(stock: stock, erxos: erxos, known: table, runtime: 'hosted')
@@ -132,7 +132,7 @@ module Erx
 
     # The release's files: what the hosted runtime's own release holds, stock's
     # Common Test and SASL, the reporter, and the compiled suites with their data.
-    def fill_tree(tree, suites, installation:, common_test:)
+    def fill_tree(tree, suites, installation:, stock_source:)
       FileUtils.rm_rf(tree)
       prepare(tree)
       output = Runtime.output(root: @root)
@@ -149,7 +149,7 @@ module Erx
       FileUtils.cp(boot, File.join(prepare(tree, 'bin'), 'start.boot'))
       @suites.copy_stock_applications(prepare(tree, 'lib'), erl: installation.fetch('erl'))
       @suites.compile(reporter: prepare(tree, 'test/ct/reporter'), suite_directory: prepare(tree, 'test/ct/suites'),
-                      suites: suites, erlc: installation.fetch('erlc'), common_test: common_test)
+                      suites: suites, erlc: installation.fetch('erlc'), stock_source: stock_source)
     end
 
     # erXos's /tmp is gone with the runtime, so its events are what it printed.

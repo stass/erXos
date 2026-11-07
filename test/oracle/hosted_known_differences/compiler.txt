@@ -29,6 +29,12 @@ compile_SUITE      -  forms_2                  failed  cannot run: spawn port; o
 # the case compiles lib/compiler/src/compile.erl.
 compile_SUITE      -  makedep                  failed  cannot run: the release ships no sources
 
+# The case compiles every module of the test directory, which holds the
+# selected suites, and beam_types_SUITE.erl includes
+# compiler/src/beam_types.hrl: a run that leaves beam_types_SUITE out
+# passes the case on both sides and reports this row stale.
+compile_SUITE      -  warnings                 failed  cannot run: the release ships no sources
+
 # The release ships each application's beams and .app file, not its
 # .appup (tools/lib/erx/release_files.rb), which the case reads. erXos
 # updates replace a whole slot and reboot (docs/design-storage.md, System

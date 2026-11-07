@@ -157,7 +157,7 @@ module Erx
       end
       stock + @suites.compile(reporter: prepare(tree, 'test/ct/reporter'), suite_directory: prepare(tree, 'test/ct/suites'),
                               suites: suites, erlc: installation.fetch('erlc'),
-                              common_test: File.join(source, 'lib/common_test'))
+                              stock_source: source)
     end
 
     public

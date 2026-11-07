@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: p_run/3 counts a job that crashes as an error and waits for the other jobs,
+%% instead of failing at once and leaving them running into the next test case.
 -module(test_lib).
 
 -include_lib("common_test/include/ct.hrl").
@@ -218,8 +220,8 @@ p_run_loop(Test, List, N, Refs0, Errors0, Ws0) ->
 	{'DOWN',Ref,process,_,Res} ->
 	    {Errors,Ws} = case Res of
 			      ok -> {Errors0,Ws0};
-			      error -> {Errors0+1,Ws0};
-			      warning -> {Errors0,Ws0+1}
+			      warning -> {Errors0,Ws0+1};
+			      _ -> {Errors0+1,Ws0}
 			  end,
 	    Refs = Refs0 -- [Ref],
 	    p_run_loop(Test, List, N, Refs, Errors, Ws)

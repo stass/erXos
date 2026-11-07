@@ -175,6 +175,14 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/test/process_SUITE.erl`: `max_heap_size_test/5` fails with `{badmatch, noproc}` under a runner
   with no common_test, because `ct:log` delays its monitor past the process's death. It needs a run under `ct_run` to tell
   whether this is the runner alone.
+* [Medium] `tools/lib/erx/oracle_suites.rb`: the oracle runs each group's checked-in `*_SUITE.erl` only, on both
+  sides. OTP's compiler test Makefile (`release_tests_spec`) also generates about a dozen variant families from them
+  (`_no_opt`, `_post_opt`, `_inline`, `_r26`, `_no_ssa_opt`, `_no_type_opt`, `_cover`, `_dialyzer` and others), the
+  `lfe_*_SUITE`s from `.core` files and `property_test/`, compiled with `+clint +clint0 +ssalint`; stdlib's installs
+  `PropList.txt` and `DerivedCoreProperties.txt` into `unicode_SUITE_data`, `otp_version_tickets` into
+  `stdlib_SUITE_data` and two doctest guides. A code generation bug that shows only under `no_opt` or `r26` passes
+  the oracle. Building each group's suite directory from its own `release_tests_spec` would run the group as stock
+  defines it, and replace `RELEASED_HEADERS`.
 * [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
   group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
   `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
@@ -515,6 +523,26 @@ it; git history is the record of completed work.
   Both erXos sides read one table (design-build.md), so a row naming erXos's `passed` would be stale on hosted:
   if the cause is timing, the table needs a way to name a case whose stock result is not stable. Until then
   `make check-oracle` does not run the group. Reports: erxos-history `oracle-qemu/2026-11-06-compiler`.
+  depends on which suites ran before it in the runtime may be an erXos bug. Rerun the whole group once the boot script
+  above is fixed and explain each. Reports: erxos-history `oracle-hosted/2026-11-06-kernel` and `2026-11-06-kernel-2`.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
+  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
+  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
+  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
+* [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
+  parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
+  `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page
+  (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
+  backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
+  word, and a checkpoint of `parked N of N` at the shell.
+* [Medium] `test/oracle/hosted_known_differences/kernel.txt`: the kernel group is classified but for 63 differing
+  and 21 changed cases, each still to be judged by cause: prim_file_SUITE (23), error_logger_warn_SUITE (6),
+  logger_disk_log_h_SUITE and logger_std_h_SUITE (`undef` among them), code_coverage_SUITE ("This runtime system
+  does not support coverage" on the hosted interpreter), gen_udp_SUITE, prim_net_SUITE, os_SUITE,
+  erl_prim_loader_SUITE, disk_log_SUITE `close_deadlock`, application_SUITE's `systools:make_script` cases, the
+  `changed` rows whose suite also shows another status, and sendfile_SUITE's 7 cases the erXos run never reached. Reports: erxos-history `oracle-hosted/2026-11-06-kernel`.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.
