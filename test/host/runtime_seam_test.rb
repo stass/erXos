@@ -121,7 +121,8 @@ class RuntimeSeamTest < Minitest::Test
 
   # An ERTS object calling a name the Fiasco backend defines fails the native check: nothing
   # of liberx is read, so only the list can admit it. A listed liberx call passes, and
-  # [libsystem] admits nothing here. The hosted console's own list counts as unused nowhere here.
+  # [libsystem] admits nothing here. The hosted-only lists, the hosted liberx calls and the
+  # hosted console's own, count as unused nowhere here.
   def test_a_native_object_calling_a_backend_internal_name_fails
     compiler = ENV.fetch('ERX_CLANG', nil)
     skip 'the native check needs ERX_CLANG and its llvm-nm' if compiler.nil? || compiler.empty?
@@ -132,7 +133,8 @@ class RuntimeSeamTest < Minitest::Test
                          "int f(void) { return erx_fiasco_console_write() + erx_clock_ns(); }\n")
       object = File.join(directory, 'calls.o')
       assert system(compiler, '--target=aarch64-none-elf', '-c', source, '-o', object), 'clang compiles the seeded object'
-      report = Seam.check_elf_objects(objects: [object], imports_text: "[liberx]\nerx_clock_ns unused_call\n[libsystem]\nerx_fiasco_console_write\n[only_erx_stdio_nif]\nhosted_only_call\n",
+      report = Seam.check_elf_objects(objects: [object], imports_text: "[liberx]\nerx_clock_ns unused_call\n[libsystem]\nerx_fiasco_console_write\n" \
+                                                                   "[liberx_hosted]\nhosted_liberx_call\n[only_erx_stdio_nif]\nhosted_only_call\n",
                                       nm: File.join(File.dirname(compiler), 'llvm-nm'))
       assert_equal [Seam::Violation.new(object: object, name: 'erx_fiasco_console_write')], report.violations
       assert_equal %w[unused_call], report.unused

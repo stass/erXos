@@ -9,16 +9,16 @@ require_relative 'runtime'
 module Erx
   # `make check-runtime-seam`'s name check (docs/design-runtime.md, "What ERTS
   # imports"): ERTS's objects import from outside themselves only the names in
-  # sys/erxos/imports.txt, whose [liberx] section holds the liberx calls ERTS makes. What
+  # sys/erxos/imports.txt, whose [liberx] and [liberx_hosted] sections hold the liberx calls ERTS makes. What
   # else liberx defines counts as outside, so a call to a backend's internal name fails.
   module RuntimeSeam
     Violation = Data.define(:object, :name)
     Report = Data.define(:violations, :unused)
     IMPORTS_FILE = 'erts/emulator/sys/erxos/imports.txt'
-    # Sections only the hosted build uses: libSystem's names, and the calls of
-    # erx_stdio_nif.c, an object the native build does not link. The native check leaves
-    # them out, so they do not count as unused there.
-    HOSTED_ONLY = %w[libsystem only_erx_stdio_nif].freeze
+    # Sections only the hosted build uses: libSystem's names, the liberx calls only
+    # hosted objects make, and the calls of erx_stdio_nif.c, an object the native build
+    # does not link. The native check leaves them out, so they do not count as unused there.
+    HOSTED_ONLY = %w[libsystem liberx_hosted only_erx_stdio_nif].freeze
     NATIVE_ONLY = %w[musl stock_native].freeze
     NAME = /\A[A-Za-z_][A-Za-z0-9_$.]*\z/
     OWN_LIST_PREFIX = 'only_'
