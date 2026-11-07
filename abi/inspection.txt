@@ -1,3 +1,125 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
-# Inspection declarations share the ABI namespace and explicit projections.
+# The inspection schema (docs/design-abi.md, "Inspection schema"): units,
+# value types, stopgap reporters, kinds with their attributes in field
+# order, and paths. Its members have one namespace of their own; a root
+# limit, scalar, enum or flags is named by @name. tools/gen_abi.rb
+# generates erx_schema and the host tool's table from it.
+
+inspection 1
+  unit pages "pages"
+  unit bytes "bytes"
+  unit ns "ns"
+  unit words "words"
+
+  integer count 0 0xffffffffffffffff
+  integer page_count 0 0xffffffffffffffff unit pages
+  integer byte_count 0 0xffffffffffffffff unit bytes
+  integer duration 0 0xffffffffffffffff unit ns
+  integer word_count 0 0xffffffffffffffff unit words
+  integer cpu_index 0 63
+  integer cpus_online 0 @cpu_limit
+  integer budget_id 1 0xffffffff
+  integer domain_id 0 0xffffffff
+  integer principal_id 1 0xffffffff
+  integer thread_id 0 0xffffffffffffffff
+  integer arity 0 255
+  integer line_number 0 0xffffffff
+  text build_id 64
+  text name 255 utf8
+  text module_name 255 utf8
+  text file_name 4096 utf8
+  text digest 64
+  atoms dma_profile confined unconfined
+  atoms domain_state booting running ending
+  atoms process_state exiting garbage_collecting waiting running runnable suspended
+  atoms priority low normal high max
+  atoms module_origin boot_image overlay loaded
+  list urgency_counts count 64
+  list pids pid 1000
+  tuple location module_name name arity file_name line_number
+
+  stopgap liberx_pool kernel "liberx pool" "pages committed through liberx; not kernel objects, page tables or mapping records"
+
+  kind machine
+    attr build build_id reporters kernel visible any build all projections shell,host,proc,web
+    attr development boolean reporters kernel visible any build all projections shell,host,proc,web
+    attr dma_profile dma_profile reporters kernel visible any build all projections shell,host,proc,web
+    attr entropy_quality @entropy_quality reporters kernel visible all build all projections shell,host,proc,web
+    attr cpus_online cpus_online reporters kernel visible all build all projections shell,host,proc,web
+    attr memory_total byte_count reporters kernel visible all build all projections shell,host,proc,web
+    attr memory_free byte_count reporters kernel visible all build all projections shell,host,proc,web
+    attr uptime duration reporters kernel visible all build all projections shell,host,proc,web
+    attr boot_value @boot_value reporters kernel visible all build all projections shell,host,proc,web
+
+  kind cpu
+    attr running_thread thread_id reporters kernel visible all build all projections shell,host,proc,web
+    attr idle_time duration reporters kernel visible all build all projections shell,host,proc,web
+    attr ready_threads urgency_counts reporters kernel visible all build all projections shell,host,proc,web
+    attr interrupts count reporters kernel visible all build all projections shell,host,proc,web
+    attr throttled_groups count reporters kernel visible all build all projections shell,host,proc,web
+
+  kind budget
+    attr kind @budget_kind reporters kernel visible owner build all projections shell,host,proc,web
+    attr guarantee page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr cap page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr used page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr carved page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr lent page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr pinned page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr watch page_count reporters kernel visible owner build all projections shell,host,proc,web
+    attr spending page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr borrowing page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr room page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr deficit page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr give_back page_count reporters kernel,liberx_pool visible owner build all projections shell,host,proc,web
+    attr domain domain_id reporters service visible owner build all projections shell,host,proc,web
+
+  kind domain
+    attr name name reporters service visible owner build all projections shell,host,proc,web
+    attr principal principal_id reporters service visible owner build all projections shell,host,proc,web
+    attr state domain_state reporters service visible owner build all projections shell,host,proc,web
+    attr threads count reporters kernel visible owner build all projections shell,host,proc,web
+    attr atoms count reporters runtime visible owner build all projections shell,host,proc,web
+    attr ets_tables count reporters runtime visible owner build all projections shell,host,proc,web
+    attr modules count reporters runtime visible owner build all projections shell,host,proc,web
+    attr processes count reporters runtime visible owner build all projections shell,host,proc,web
+
+  kind process
+    attr domain domain_id reporters service visible owner build all projections shell,host,proc,web
+    attr state process_state reporters runtime visible owner build all projections shell,host,proc,web
+    attr priority priority reporters runtime visible owner build all projections shell,host,proc,web
+    attr reductions count reporters runtime visible owner build all projections shell,host,proc,web
+    attr location location reporters runtime visible owner build all projections shell,host,proc,web
+    attr heap_size word_count reporters runtime visible owner build all projections shell,host,proc,web
+    attr stack_size word_count reporters runtime visible owner build all projections shell,host,proc,web
+    attr message_queue_len count reporters runtime visible owner build all projections shell,host,proc,web
+    attr registered_name name reporters runtime visible owner build all projections shell,host,proc,web
+    attr group_leader pid reporters runtime visible owner build all projections shell,host,proc,web
+    attr trap_exit boolean reporters runtime visible owner build all projections shell,host,proc,web
+    attr links pids reporters runtime visible owner build all projections shell,host,proc,web
+    attr monitors pids reporters runtime visible owner build all projections shell,host,proc,web
+
+  kind module
+    attr version digest reporters runtime visible owner build all projections shell,host,proc,web
+    attr md5 digest reporters runtime visible owner build all projections shell,host,proc,web
+    attr source_file file_name reporters runtime visible owner build all projections shell,host,proc,web
+    attr origin module_origin reporters runtime visible owner build all projections shell,host,proc,web
+    attr source_in_image boolean reporters runtime visible owner build all projections shell,host,proc,web
+
+  path machine
+  path listing cpus
+    visible all
+  path cpu cpus *cpu_index
+  path listing budgets
+    visible all
+  path budget budgets *budget_id
+  path listing domains
+  path domain domains *domain_id
+  path budget domains *domain_id budget
+  path listing domains *domain_id modules
+  path module domains *domain_id modules *module_name
+  path listing domains *domain_id processes
+    entries pid 1048576
+  path listing processes
+  path process processes *pid

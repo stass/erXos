@@ -15,6 +15,7 @@ require_relative 'abi_emit_erlang'
 require_relative 'abi_emit_protocol'
 require_relative 'abi_emit_wire'
 require_relative 'generation_plan'
+require_relative 'abi_emit_inspection'
 require_relative 'json_input'
 require_relative 'output_directory'
 
@@ -38,6 +39,7 @@ module Erx
         root = File.expand_path(root)
         source = Sources.read(root: root, architecture: architecture)
         schema = Model.validate(source)
+        raise SchemaError, 'the ABI root includes no inspection schema' unless schema.inspection
         files = {
           'include/erx/abi.h' => CEmitter.header(schema),
           'include/erx/abi_reader.h' => CEmitter.reader_header(schema),
@@ -54,6 +56,7 @@ module Erx
         files.merge!(ErlangEmitter.outputs(schema))
         files.merge!(ProtocolEmitter.outputs(schema))
         files.merge!(WireEmitter.outputs(schema))
+        files.merge!(InspectionEmitter.outputs(schema))
         files.each do |path, bytes|
           raise SchemaError, "generated output is not ASCII: #{path}" unless bytes.ascii_only?
         end

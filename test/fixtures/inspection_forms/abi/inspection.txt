@@ -1,0 +1,45 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# Every value form, a stopgap reporter, every visibility, build and
+# projection, and every kind of path segment and path mark.
+inspection 7
+  unit pages "pages"
+  integer small -5 @width unit pages
+  integer index 0 9
+  text label 8 utf8
+  text raw 4
+  atoms shade light dark
+  list labels label 3
+  tuple pair index raw
+  list pairs pair 2
+  stopgap gap kernel "gap label" "what the gap sees"
+
+  kind thing
+    attr count small reporters kernel,gap visible owner build all projections shell,host
+    attr secret raw reporters service visible system_shell build development projections none
+    attr name label reporters runtime visible any build all projections proc
+    attr shade shade reporters kernel visible all build all projections web
+    attr pairs pairs reporters kernel visible any build all projections shell
+    attr flag boolean reporters kernel visible any build all projections shell
+    attr owner pid reporters kernel visible any build all projections shell
+    attr rights rights reporters kernel visible any build all projections shell
+    attr object object_type reporters kernel visible any build all projections shell
+    attr status status reporters kernel visible any build all projections shell
+    attr page @page reporters kernel visible any build all projections shell
+    attr colour @colour reporters kernel visible any build all projections shell
+    attr mode @mode reporters kernel visible any build all projections shell
+    attr labels labels reporters runtime visible any build development projections shell
+
+  path listing
+  path listing things
+    visible all
+  path thing things *index
+  path listing things *index secret
+    visible system_shell
+  path listing named
+  path thing named *label
+  path listing owners
+  path thing owners *pid
+  path listing log
+    entries label 100
+    append_only

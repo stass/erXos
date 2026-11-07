@@ -1,0 +1,272 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'minitest/autorun'
+require 'tmpdir'
+require_relative '../../tools/lib/erx/abi'
+
+# The reader of the inspection schema (docs/design-abi.md, "Inspection schema"):
+# one seeded bad schema for each rule of the grammar, the shape of a resolved
+# schema, the generated outputs of the checked-in schema, and the drift check
+# on them. test/host/erx_schema_test.rb runs the generated Erlang.
+class AbiInspectionTest < Minitest::Test
+  ROOT = File.expand_path('../..', __dir__)
+  ROOT_SOURCE = <<~ABI
+    abi 1
+    limit width u32 40
+    status ok 0 "success"
+    status inval -1 "invalid argument"
+    right read 0 "read"
+    right write 1 "write"
+    type budget 1
+      rights read,write
+      pass read
+    scalar page u64 range 0 1048576 align 4096
+    enum colour u32
+      value red 1
+      value blue 2
+    flags mode u32
+      bit fast 0
+      bit safe 1
+  ABI
+  BASE = <<~INSPECTION
+    inspection 1
+      integer index 0 9
+      kind thing
+        attr size index reporters kernel visible any build all projections shell
+      path listing
+      path listing things
+      path thing things *index
+  INSPECTION
+
+  def model(text, path: 'abi/inspection.txt')
+    declarations = Erx::ABI::Syntax.parse(ROOT_SOURCE, path: 'abi/erx_abi.txt') +
+                   Erx::ABI::Syntax.parse(text, path: path)
+    Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(declarations: declarations.freeze, inputs: {}.freeze))
+  end
+
+  def assert_refused(text, pattern, path: 'abi/inspection.txt')
+    error = assert_raises(Erx::ABI::SchemaError) { model(text, path: path) }
+    assert_match(pattern, error.message)
+  end
+
+  # BASE with LINES added as members of the schema.
+  def with(lines)
+    BASE + lines.lines.map { |line| "  #{line}" }.join
+  end
+
+  # BASE with an attribute line added to its kind.
+  def with_attr(line)
+    BASE.sub("    attr size", "    attr #{line}\n    attr size")
+  end
+
+  def test_base_schema_resolves_its_paths
+    inspection = model(BASE).inspection
+    assert_equal 1, inspection.version
+    assert_equal %w[listing listing thing], inspection.paths.map(&:kind)
+    root, things, thing = inspection.paths
+    assert_equal ['things'], root.literal_children
+    assert_equal 'index', things.variable_child
+    assert_equal [], thing.literal_children
+    assert_nil thing.variable_child
+    assert inspection.frozen? && inspection.paths.frozen? && thing.segments.last.frozen?
+  end
+
+  def test_a_root_without_an_inspection_schema_has_none
+    assert_nil Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(
+      declarations: Erx::ABI::Syntax.parse(ROOT_SOURCE, path: 'abi/erx_abi.txt'), inputs: {}
+    )).inspection
+  end
+
+  def test_the_declaration_itself
+    assert_refused(BASE, /belongs in abi\/inspection.txt/, path: 'abi/erx_abi.txt')
+    assert_refused(BASE + BASE, /exactly one inspection declaration/)
+    assert_refused(BASE.sub('inspection 1', 'inspection 0'), /must be positive/)
+    assert_refused(BASE.sub('inspection 1', 'inspection 1 2'), /expected inspection SCHEMA/)
+    assert_refused(with('frobnicate thing'), /unknown inspection member frobnicate/)
+    assert_refused(BASE.sub("  integer index 0 9\n", "  integer index 0 9\n    utf8\n"),
+                   /integer takes no four-space members/)
+  end
+
+  def test_names_are_declared_once_and_never_reserved
+    assert_refused(with('integer index 0 3'), /duplicate inspection member index/)
+    assert_refused(with('atoms thing a b'), /duplicate inspection member thing/)
+    %w[kernel service runtime boolean pid rights object_type status listing none].each do |name|
+      assert_refused(with("atoms #{name} a"), /#{name} is reserved/)
+    end
+    assert_refused(with('atoms Upper a'), /invalid inspection name/)
+    assert_refused(with('atoms with.dot a'), /invalid inspection name/)
+  end
+
+  def test_quoting_is_exactly_for_labels_and_scopes
+    assert_refused(with("unit pages pages\ninteger pc 0 1 unit pages"), /expected a quoted string/)
+    assert_refused(with("atoms \"quoted\" a"), /quoted token is not permitted/)
+    assert_refused(with("stopgap gap kernel \"label\" scope"), /expected a quoted string/)
+    assert_refused(with("unit pages \"bad\\x01\"\ninteger pc 0 1 unit pages"), /printable ASCII/)
+    assert_refused(with("unit pages \"\"\ninteger pc 0 1 unit pages"), /printable ASCII/)
+  end
+
+  def test_units_and_types_must_be_used
+    assert_refused(with('unit pages "pages"'), /unit pages is not used/)
+    assert_refused(with('integer spare 0 1'), /type spare is not used/)
+    assert_refused(BASE.sub("  kind thing\n", "  kind spare\n  kind thing\n"), /kind spare has no path/)
+    assert_refused(with('stopgap gap kernel "gap" "scope"'), /stopgap gap reports no attribute/)
+  end
+
+  def test_integer_bounds
+    assert_refused(with_attr('n bad reporters kernel visible any build all projections shell') +
+                   "  integer bad 9 0\n", /minimum exceeds its maximum/)
+    assert_refused(with_attr('n bad reporters kernel visible any build all projections shell') +
+                   "  integer bad 0 @colour\n", /@colour is not a root limit/)
+    assert_refused(with_attr('n bad reporters kernel visible any build all projections shell') +
+                   "  integer bad 0 0x10000000000000000\n", /outside the 64-bit range/)
+    assert_refused(with_attr('n bad reporters kernel visible any build all projections shell') +
+                   "  integer bad 0 9 unit missing\n", /undefined unit missing/)
+    assert_refused(with_attr('n bad reporters kernel visible any build all projections shell') +
+                   "  integer bad 0 9 units pages\n", /expected unit UNIT/)
+    model(with_attr('n bad reporters kernel visible any build all projections shell') +
+          "  integer bad -3 @width\n")
+  end
+
+  def test_text_list_tuple_and_atoms_bounds
+    attr = with_attr('n bad reporters kernel visible any build all projections shell')
+    assert_refused(attr + "  text bad 0\n", /bound must be 1 to 65536/)
+    assert_refused(attr + "  text bad 65537\n", /bound must be 1 to 65536/)
+    assert_refused(attr + "  text bad 8 ascii\n", /expected text NAME MAX \[utf8\]/)
+    assert_refused(attr + "  list bad index 1001\n", /bound must be 1 to 1000/)
+    assert_refused(attr + "  tuple bad index\n", /a tuple holds 2 to 16 values/)
+    assert_refused(attr + "  tuple bad #{(['index'] * 17).join(' ')}\n", /a tuple holds 2 to 16 values/)
+    assert_refused(attr + "  atoms bad a a\n", /duplicate atom/)
+    assert_refused(attr + "  atoms bad\n", /expected atoms NAME ATOM/)
+    model(attr + "  tuple bad #{(['index'] * 16).join(' ')}\n")
+  end
+
+  # No form takes an arbitrary term or an atom from the input, and a name
+  # that is not a declared type, a built-in or a root type is not a type.
+  def test_no_type_admits_an_arbitrary_term_or_an_input_atom
+    %w[term any atom binary @width @budget].each do |name|
+      assert_refused(with_attr("n #{name} reporters kernel visible any build all projections shell"),
+                     /undefined inspection type|is not a root scalar, enum or flags|not a root/)
+    end
+  end
+
+  def test_types_nest_at_most_eight_deep_and_never_cyclically
+    chain = (1..8).map { |level| "list l#{level} #{level == 1 ? 'index' : "l#{level - 1}"} 2\n" }.join
+    model(with_attr('n l7 reporters kernel visible any build all projections shell') + chain.lines.first(7).map { |line| "  #{line}" }.join)
+    assert_refused(with_attr('n l8 reporters kernel visible any build all projections shell') +
+                   chain.lines.map { |line| "  #{line}" }.join, /nested more than 8 deep/)
+    assert_refused(with_attr('n a reporters kernel visible any build all projections shell') +
+                   "  list a b 2\n  list b a 2\n", /refers to itself/)
+  end
+
+  def test_attributes_take_every_property_in_order
+    assert_refused(with_attr('n index reporters kernel visible any build all'), /expected attr KEY TYPE/)
+    assert_refused(with_attr('n index visible any reporters kernel build all projections shell'), /expected attr KEY TYPE/)
+    assert_refused(with_attr('size index reporters kernel visible any build all projections shell'), /duplicate attribute size/)
+    assert_refused(with_attr('n index reporters nobody visible any build all projections shell'), /undefined reporter nobody/)
+    assert_refused(with_attr('n index reporters kernel,kernel visible any build all projections shell'), /duplicate or empty/)
+    assert_refused(with_attr('n index reporters kernel visible some build all projections shell'), /unknown visibility some/)
+    assert_refused(with_attr('n index reporters kernel visible any build release projections shell'), /unknown build release/)
+    assert_refused(with_attr('n index reporters kernel visible any build all projections tty'), /unknown projection tty/)
+    assert_refused(with_attr('n index reporters kernel visible any build all projections shell,shell'), /duplicate or empty/)
+    model(with_attr('n index reporters kernel,service,runtime visible system_shell build development projections none'))
+  end
+
+  def test_a_stopgap_is_listed_with_its_category_and_has_its_own_label
+    gap = 'stopgap gap kernel "gap" "what it sees"'
+    assert_refused(with_attr('n index reporters service,gap visible any build all projections shell') + "  #{gap}\n",
+                   /stopgap gap is listed without its category kernel/)
+    assert_refused(with_attr('n index reporters kernel,gap visible any build all projections shell') +
+                   "  stopgap gap device \"gap\" \"scope\"\n", /stands in for kernel, service or runtime/)
+    assert_refused(with_attr('n index reporters kernel,gap visible any build all projections shell') +
+                   "  stopgap gap kernel \"kernel\" \"scope\"\n", /is a category's name/)
+    assert_refused(with_attr('n index reporters kernel,gap,other visible any build all projections shell') +
+                   "  #{gap}\n  stopgap other kernel \"gap\" \"scope\"\n", /is another stopgap's/)
+    stopgap = model(with_attr('n index reporters kernel,gap visible any build all projections shell') + "  #{gap}\n")
+              .inspection.stopgaps.fetch('gap')
+    assert_equal ['kernel', 'gap', 'what it sees'], [stopgap.category, stopgap.label, stopgap.scope]
+  end
+
+  def test_paths_have_declared_prefixes_and_resolve_uniquely
+    assert_refused(with('path thing other *index'), /proper prefix of this path is not declared/)
+    assert_refused(with('path thing things *index'), /declared twice/)
+    assert_refused(with('path listing things extra'), /literal segments or by one variable segment/)
+    assert_refused(with("integer other 0 3\npath thing things *other"), /declared twice/)
+    assert_refused(with("integer other 0 3\npath thing things *other more"),
+                   /differs in type from its prefix/)
+    assert_refused(with('path nothing things'), /undefined kind "nothing"/)
+    assert_refused(with("atoms shade a b\npath listing shades\npath listing shades *shade"),
+                   /an integer, a text of at most 256 bytes or a pid/)
+    assert_refused(with("text long 257\npath listing names\npath listing names *long"),
+                   /an integer, a text of at most 256 bytes or a pid/)
+    deep = (1..17).map { |count| "path listing #{(['a'] * count).join(' ')}" }.join("\n")
+    assert_refused(with(deep), /at most 16 segments/)
+    model(with("text short 256\npath listing names\npath listing names *short\npath listing pids\npath listing pids *pid"))
+  end
+
+  def test_path_marks
+    log = "path listing log\n  entries index 100\n  append_only\n"
+    assert model(with(log)).inspection.paths.last.append_only
+    assert_equal ['index', 100], model(with(log)).inspection.paths.last.entries
+    assert_refused(with("path listing log\n  append_only"), /append_only marks a path with entries/)
+    assert_refused(with("path listing log\n  entries index 0"), /bound must be 1/)
+    assert_refused(with("path listing log\n  entries nothing 4"), /undefined inspection type nothing/)
+    assert_refused(with("path listing log\n  visible all\n  visible any"), /duplicate path mark visible/)
+    assert_refused(with("path listing log\n  visible everyone"), /unknown visibility everyone/)
+    assert_refused(with("path listing log\n  hidden"), /unknown path mark hidden/)
+  end
+
+  # A path's visibility is its own mark and every mark above it.
+  def test_visibility_reaches_every_path_below_its_mark
+    text = BASE.sub("  path listing things\n", "  path listing things\n    visible all\n") +
+           "  path listing things *index secret\n    visible system_shell\n"
+    visibility = model(text).inspection.paths.to_h { |path| [path.segments.size, path.visibility] }
+    assert_equal({ 0 => [], 1 => ['all'], 2 => ['all'], 3 => %w[all system_shell] }, visibility)
+  end
+
+  def test_the_checked_in_schema_declares_the_budget_stopgap
+    inspection = Erx::ABI::Generator.plan(root: ROOT).schema.inspection
+    used = inspection.kinds.fetch('budget').find { |attr| attr.key == 'used' }
+    assert_equal %w[kernel liberx_pool], used.reporters
+    stopgap = inspection.stopgaps.fetch('liberx_pool')
+    assert_equal %w[kernel liberx\ pool], [stopgap.category, stopgap.label]
+    assert_equal %w[machine cpu budget domain process module], inspection.kinds.keys
+  end
+
+  # The checked-in table, which the drift check holds to the plan.
+  def test_the_host_table_matches_the_schema
+    load File.join(ROOT, 'tools/generated/abi_inspection.rb')
+    generated = Erx::ABI::Generated::Inspection
+    inspection = Erx::ABI::Generator.plan(root: ROOT).schema.inspection
+    assert_equal inspection.version, generated::SCHEMA
+    assert_equal inspection.kinds.transform_values { |attrs| attrs.map(&:key) }.merge('listing' => []),
+                 generated::KINDS.transform_values { |attrs| attrs.map { |attr| attr.fetch(:key) } }
+    assert_equal 'liberx pool', generated::STOPGAPS.fetch('liberx_pool').fetch(:label)
+    assert_equal ['processes', { type: 'pid' }], generated::PATHS.last.fetch(:segments)
+    assert generated::PATHS.frozen? && generated::PATHS.last.fetch(:segments).last.frozen?
+  end
+
+  def test_drift_check_catches_a_stale_schema_output
+    plan = Erx::ABI::Generator.plan(root: ROOT)
+    %w[erlang/apps/erx/src/generated/erx_schema.erl tools/generated/abi_inspection.rb].each do |output|
+      Dir.mktmpdir('erx-inspection-drift-') do |root|
+        Erx::ABI::Generator.publish(plan, root: root)
+        assert Erx::ABI::Generator.check(plan, root: root)
+        path = File.join(root, output)
+        File.binwrite(path, File.binread(path).sub('liberx pool', 'liberx_pool'))
+        error = assert_raises(Erx::Error) { Erx::ABI::Generator.check(plan, root: root) }
+        assert_match(/stale #{Regexp.escape(output)}/, error.message)
+      end
+    end
+  end
+
+  def test_a_root_without_inspection_cannot_plan_outputs
+    Dir.mktmpdir('erx-inspection-missing-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'abi'))
+      File.write(File.join(root, 'abi/erx_abi.txt'), "abi 1\n")
+      error = assert_raises(Erx::ABI::SchemaError) { Erx::ABI::Generator.plan(root: root, architecture: nil) }
+      assert_match(/includes no inspection schema/, error.message)
+    end
+  end
+end

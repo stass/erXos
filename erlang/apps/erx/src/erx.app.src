@@ -19,6 +19,7 @@
              erx_log,
              erx_manifest,
              erx_ns,
+             erx_schema,
              erx_stdio,
              erx_text,
              erx_text_tables,

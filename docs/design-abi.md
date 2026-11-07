@@ -499,7 +499,10 @@ adding one never exposes it by default:
 * `reporters`, a comma-separated list of the categories `kernel`,
   `service` and `runtime` and the stopgap reporters that may report it.
   A stopgap reporter is listed by its name, only on the attributes it
-  answers, so a validator refuses it anywhere else;
+  answers, so a validator refuses it anywhere else, and always beside
+  the category it stands in for, so removing the stopgap leaves the
+  attribute declared for that category; a stopgap no attribute lists
+  fails;
 * `visible`, the inspect facets that see it: `any`, every inspect facet;
   `owner`, a facet whose scope covers the path's owner, which for a path
   the machine owns is a facet of scope `all`; `all`, a facet of scope
@@ -526,7 +529,14 @@ Every proper prefix of a declared path is declared, no path is declared
 twice, and each declared path is extended either by literal segments or
 by one variable segment, never both, so each path a query names, as a
 term or as text, resolves to exactly one declaration or is refused. A
-record's children are derived from the declarations: the literal
+path's variable segment has the type of its prefix's at that position,
+and no variable segment holds the empty text, which a path's text cannot
+write. A path's text is its segments joined by `/`, with an optional
+leading `/`: a pid as `D.N.S`, an integer in canonical decimal and a
+text in `/proc`'s name encoding
+([design-live.md](design-live.md#the-proc-tree)); `erx_schema` reads only
+that spelling of each path, with or without the leading `/`, and has a fuzz target, since the text
+comes from `/proc` and the host. A record's children are derived from the declarations: the literal
 segments by which a declared path extends its path by one, or the values
 the collector of its variable segment reports.
 
@@ -543,13 +553,18 @@ A path's marks, at four spaces:
 * `visible CLASS`: the facets that reach the path and every path below
   it, of the attribute classes; any other caller gets `{error, scope}`,
   so the schema, not a list in the collector, refuses the machine-wide
-  paths and the crash record.
+  paths and the crash record. A path's visibility is its own mark and
+  every mark on its prefixes, each of which a caller must meet.
 
 A stopgap reporter appears in a record as `{stopgap, NAME}`. Its label
 and scope come from the schema, so a record carries no free text about
-who reported it, and a domain cannot invent a reporter. LABEL and SCOPE
-are printable ASCII, and the generator refuses a label equal to a
-category's name or to another stopgap's label. A stopgap reporter stands
+who reported it, and a domain cannot invent a reporter. LABEL and SCOPE,
+like a unit's label, are printable ASCII, a label at most 255 bytes and a
+scope at most 1,024, and the generator refuses a label equal to a
+category's name or to another stopgap's label. A member's name is
+neither a category's, a built-in type's, `listing` nor `none`; a text's
+MAX is at most 65,536, a record's bound, and an `entries` MAX at most
+2^32 - 1. A stopgap reporter stands
 for a stopgap component that does the kernel's, a service's or a
 runtime's work in its place, such as the Phase 1 backend of `liberx`
 counting a budget's pages in the kernel's place

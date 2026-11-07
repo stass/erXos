@@ -387,6 +387,33 @@ it; git history is the record of completed work.
   `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
   that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
   before those kinds are declared.
+* [Medium] `docs/design-live.md` [Inspection records](docs/design-live.md#inspection-records): `record()` has no
+  field for the sequence of a path marked `entries` (a domain's pids, the kernel log), nor for an append-only
+  entry's sequence number, so `erx_schema:validate_record/1` checks only the six declared keys and refuses any
+  other. Name the field and its paging (`offset`, `limit`, partial) and generate its validator with it.
+* [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): the name encoding writes "every
+  byte outside `A`-`Z`, `a`-`z`, `0`-`9` and `_+,:=@-`, and a leading `.`" as `%XX`; `.` is outside that set, so
+  the leading-`.` clause says nothing, unless `.` was meant to stay plain after the first byte. `erx_schema`
+  follows the letter (every `.` is `%2E`); settle it before `erx_procfs` writes names.
+* [Low] inspection bindings (`tools/lib/erx/abi_emit_inspection.rb`): `erx_schema` and the host tool's table
+  (`tools/generated/abi_inspection.rb`) are generated; the bounded C record builders of
+  [design-generation.md](docs/design-generation.md#inspection-and-diagnostics) are not, since their consumer is
+  erXos's kernel, and the host table has no Ruby validators yet. Generate each with its first consumer.
+* [Medium] inspection, `erx_schema` (`tools/lib/erx/abi_emit_inspection.rb`): `resolve_text/1` makes a pid segment
+  with the runtime's `list_to_pid/1`, which on erXos refuses a domain the runtime is not connected to, so the
+  answer depends on more than the text; the inspector must answer `unknown_path` and a path outside the scope
+  alike (design-live, Scope), or the parser should return the three integers and leave the pid to the inspector
+  after its scope check. `validate_record/1` leaves the record's `id` unchecked (type it as the path's last
+  variable segment), ignores an attribute's `build` (a release record may carry a `development` attribute), and
+  has no fuzz target over random terms. `cpu_index`'s bound 63 is written beside `@cpu_limit` because the grammar
+  has no `@limit - 1`. The domain kind lacks design-live's death record and group usage.
+* [High] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): a `status` file frames only tab,
+  newline and backslash and keeps every other byte, and `cat` writes a file's bytes unchanged, so
+  `cat /proc/processes/P/status` at a terminal shows a domain's chosen names (ESC, OSC 52, CSI) raw, which V9 does
+  not allow for attributed text. design-live's "`erx_render` escapes it" and design-shell's rule that bytes reaching
+  an Erlang command become `line` records leave open whether `cat`'s output is rendered. Decide: frame every class
+  of the line escape toward bytes too (an injective backslash form), or render `/proc` content through the line
+  escape at a terminal, or record it as a residual.
 * [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
   encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
   to a file the tree itself writes (for example as `%73tatus`).

@@ -104,14 +104,14 @@ module Erx
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :protocols, :inputs, keyword_init: true)
+                        :protocols, :inspection, :inputs, keyword_init: true)
 
     # Resolve types before readers and calls. No emitter receives an unchecked
     # declaration, and no output depends on hash insertion or include order.
     module Model
       TOP_LEVEL = %w[abi arch trap reg limit scalar enum flags bytes layout
                      status right type kind cap call reader translation service
-                     projection protocol].freeze
+                     projection protocol inspection].freeze
       TYPE_KINDS = %w[scalar enum flags bytes layout].freeze
       BASE_TYPES = [1, 2, 4, 8].flat_map do |size|
         [false, true].map do |signed|
@@ -164,6 +164,7 @@ module Erx
         services = validate_services(by_kind.fetch('service', []))
         projections = validate_projections(by_kind.fetch('projection', []), types)
         protocols = validate_protocols(by_kind.fetch('protocol', []), constants)
+        inspection = validate_inspection(by_kind, types, rights, objects)
         all_constants = constants.dup
         [type_constants(types), right_constants(rights)].each do |addition|
           addition.each do |name, value|
@@ -183,7 +184,7 @@ module Erx
                    calls: calls.freeze, readers: readers.sort_by(&:name).freeze,
                    translations: translations.freeze, services: services.freeze,
                    projections: projections.freeze, protocols: protocols,
-                   inputs: source.inputs).freeze
+                   inspection: inspection, inputs: source.inputs).freeze
         freeze_value(result)
       end
 
@@ -275,7 +276,7 @@ module Erx
       def unique_definitions(declarations)
         definitions = {}
         declarations.each do |declaration|
-          next if %w[abi arch trap reg cap].include?(declaration.kind)
+          next if %w[abi arch trap reg cap inspection].include?(declaration.kind)
           name = Syntax.identifier(declaration.args.first, line: declaration.line)
           declaration.fail!("duplicate definition #{name}") if definitions.key?(name) || BASE_TYPES.key?(name)
           definitions[name] = declaration
@@ -903,6 +904,17 @@ module Erx
       def validate_protocols(declarations, constants)
         require_relative 'abi_protocol'
         Protocols.validate(declarations, constants)
+      end
+
+      # The inspection schema's members have a namespace of their own and
+      # refer to root limits, scalars, enums, flags, rights, object types and
+      # statuses by name (docs/design-abi.md, "Inspection schema").
+      def validate_inspection(by_kind, types, rights, objects)
+        require_relative 'abi_inspection'
+        limits = by_kind.fetch('limit', []).to_h { |item| [item.args[0], Syntax.integer(item.args[2], line: item.line)] }
+        Inspection.validate(by_kind.fetch('inspection', []), limits: limits, types: types,
+                            rights: rights.keys, objects: objects.keys,
+                            statuses: by_kind.fetch('status', []).map { |item| item.args.first })
       end
 
       def validate_projections(declarations, types)

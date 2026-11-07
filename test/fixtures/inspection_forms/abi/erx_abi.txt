@@ -1,0 +1,24 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# A small ABI root whose inspection schema uses every value form, for
+# test/host/erx_schema_test.rb.
+abi 1
+include inspection.txt
+limit width u32 40
+status ok 0 "success"
+status inval -1 "invalid argument"
+right read 0 "read"
+right write 1 "write"
+type budget 1
+  rights read,write
+  pass read
+type space 2
+  rights read
+  pass none
+scalar page u64 range 0 1048576 align 4096
+enum colour u32
+  value red 1
+  value blue 2
+flags mode u32
+  bit fast 0
+  bit safe 1
