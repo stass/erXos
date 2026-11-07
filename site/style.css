@@ -592,7 +592,9 @@ p:last-child {
   padding: 14px 16px;
   overflow: auto;
   font: 13px/1.5 var(--mono);
-  white-space: pre;
+  /* Long lines wrap, as they do on a terminal of this width. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .xterm-host {
