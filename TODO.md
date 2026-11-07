@@ -2441,7 +2441,14 @@ document's "residual risks accepted" paragraph.
   sender on a message, only an acknowledgement alias given to the receiver alone would tie
   it to the receiver (P4); a trace that ends after a stop before the printer first ran
   leaves the printer a `noproc` it ignores, so a fault in that window prints no failure
-  line; `expect()`'s `session` boolean shares a name with the session handle; and
+  line; the trace process's 2 Mi-word heap bound is an estimate: measure a heavy trace's
+  peak with `kill => false` and size it from that, or bound the held list by count into
+  the window's counters, and measure the cost of its on-heap mailbox's lock under many
+  senders; `{erx_untraced, true}` rests on every ungated reader of a tracer ref's flags
+  using `ERTS_IS_P_TRACE_HIDDEN`, not `ERTS_IS_PROC_SENSITIVE`, which a chokepoint check
+  listing the allowed `ERTS_IS_PROC_SENSITIVE` sites would enforce; a kill of the trace
+  process during its start raises in the caller of `start/3` instead of returning an
+  error; `expect()`'s `session` boolean shares a name with the session handle; and
   `park_then_wake?` mutates a set inside `any?`. P4, the trace facet, the
   relay, frame tracing and the host link's events stream, which need M5's connections, since
   the stopgap offers no lanes.
