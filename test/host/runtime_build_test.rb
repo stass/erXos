@@ -5,6 +5,7 @@
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/origin'
 require_relative '../../tools/lib/erx/runtime'
 
 # What `tools/erx build runtime` decides, with OTP's configure and make replaced
@@ -18,8 +19,10 @@ class RuntimeBuildTest < Minitest::Test
   # emulator's make leaves an executable, xref of the serving set answers with
   # serving_reached in its log, and each step's name is recorded.
   class RecordingRunner
-    # The directories each application's make ran in, in order.
-    attr_reader :steps, :relinked, :options, :directories, :argvs
+    # The directories each application's make ran in, in order, those whose ../ebin
+    # was missing when it ran, and the preloaded sources the copy held when the
+    # preloaded make ran.
+    attr_reader :steps, :relinked, :options, :directories, :missing_ebins, :argvs, :preloaded_sources
     attr_accessor :fail_step, :link_leaves_nothing, :serving_reached
 
     def initialize(output, log_dir:)
@@ -28,6 +31,7 @@ class RuntimeBuildTest < Minitest::Test
       @steps = []
       @options = {}
       @directories = []
+      @missing_ebins = []
       @argvs = {}
     end
 
@@ -35,17 +39,24 @@ class RuntimeBuildTest < Minitest::Test
       @steps << name
       @options[name] = options
       @argvs[name] = argv
-      @directories << argv[argv.index('-C') + 1] if argv.first == 'gmake' && name != 'runtime-emulator'
+      record_application(argv[argv.index('-C') + 1]) if argv.first == 'gmake' &&
+                                                            !%w[runtime-emulator runtime-preloaded].include?(name)
       raise Erx::Error, "#{name} failed" if name == fail_step
 
       case name
       when 'runtime-copy', 'runtime-copy-generated' then FileUtils.cp_r("#{argv[-2]}.", argv[-1], preserve: true)
+      when 'runtime-preloaded' then @preloaded_sources = Dir.glob('*.erl', base: File.join(@output.root, 'erts/preloaded/src')).sort
       when 'runtime-emulator' then make_emulator
       when 'serving-set' then serving_log
       end
     end
 
     private
+
+    def record_application(directory)
+      @directories << directory
+      @missing_ebins << directory unless File.directory?(File.join(@output.root, File.dirname(directory), 'ebin'))
+    end
 
     # As erl prints xref's answer: one line per module reached.
     def serving_log
@@ -101,6 +112,8 @@ class RuntimeBuildTest < Minitest::Test
   end
 
   GRAMMAR = 'erts/preloaded/src/erx_9p_grammar.erl'
+  # The checkout itself, whose emulator and preloaded makefiles one case reads.
+  TREE = File.expand_path('../..', __dir__)
 
   def setup
     skip 'the hosted runtime builds only on macOS' unless RUBY_PLATFORM.include?('darwin')
@@ -177,12 +190,50 @@ class RuntimeBuildTest < Minitest::Test
                  @runner.directories
   end
 
-  # A tracked prebuilt beam in the copy could stay older than a source edit, so none of
-  # a built application's enters it.
-  def test_the_copy_leaves_out_every_built_applications_tracked_beams
+  # An application's make writes into ../ebin without creating it, and otp/ tracks none.
+  def test_each_application_make_finds_its_ebin
     build
-    excluded = @runner.argvs.fetch('runtime-copy').grep(/\A--exclude=/)
-    assert_equal Runtime::APPLICATIONS.map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }, excluded
+    assert_empty @runner.missing_ebins
+  end
+
+  # The emulator embeds the preloaded modules, so their own make compiles them before
+  # the emulator's make runs, from a copy that already holds the generated grammar.
+  def test_the_preloaded_modules_are_compiled_before_the_emulator_embeds_them
+    build
+    assert_equal ['gmake', '-j4', '-C', 'erts/preloaded/src', 'opt', "TARGET=#{Runtime::TARGET}"],
+                 @runner.argvs.fetch('runtime-preloaded')
+    assert_operator @runner.steps.index('runtime-preloaded'), :<, @runner.steps.index('runtime-emulator')
+    assert_includes @runner.preloaded_sources, File.basename(GRAMMAR)
+  end
+
+  # Every beam the emulator embeds is one the preloaded make compiles, in the tree
+  # itself: PRELOAD_BEAM names the preloaded Makefile's modules in erts/ebin, that
+  # Makefile's EBIN, and nothing else. So a grammar change reaches a rebuilt runtime,
+  # and with erts/ebin kept out of the copy (the next two cases) nothing else is embedded.
+  def test_the_emulator_embeds_exactly_what_the_preloaded_make_compiles
+    otp = File.join(TREE, 'otp')
+    embedded = File.read(File.join(otp, 'erts/emulator/Makefile.in'))[/^PRELOAD_BEAM =((?:.*\\\n)*.*\n)/, 1]
+    assert_equal '../../ebin', File.read(File.join(otp, 'erts/preloaded/src/Makefile'))[/^EBIN=(.*)$/, 1]
+    assert_equal Erx::ServingSet.preloaded(root: TREE).map { |name| "$(ERL_TOP)/erts/ebin/#{name}.beam" }.sort,
+                 embedded.split.reject { |word| word == '\\' }.sort
+  end
+
+  # A beam in the copy could stay newer than its source, and make would keep it over a
+  # source edit, embed it or ship it. So otp/ORIGIN.md lists every directory of the
+  # build's beams and boot scripts among its exclusions, and make check's origin check
+  # refuses any file under one.
+  def test_the_origin_record_excludes_every_build_output_directory
+    excluded = Erx::Origin.new(root: File.join(TREE, 'otp')).inventory.fetch('exclusions').map { |entry| entry.fetch('path') }
+    assert_empty Runtime::BUILD_OUTPUTS - excluded
+    assert_includes Runtime::BUILD_OUTPUTS, 'erts/ebin'
+  end
+
+  # The copy takes nothing from those directories either, so a stray file there, such as
+  # the output of a make run inside otp/, never reaches the build.
+  def test_the_copy_takes_nothing_from_a_build_output_directory
+    build
+    assert_equal Runtime::BUILD_OUTPUTS.map { |path| "--exclude=/#{path}/" },
+                 @runner.argvs.fetch('runtime-copy').grep(/\A--exclude=/)
   end
 
   def test_a_second_build_of_the_same_tree_does_not_configure_again
@@ -310,7 +361,7 @@ class RuntimeBuildTest < Minitest::Test
   # OTP's makefiles and the cross file read the generated headers through ERX_GEN.
   def test_configure_and_make_see_the_generated_tree
     build
-    %w[runtime-configure runtime-emulator runtime-kernel].each do |step|
+    %w[runtime-configure runtime-preloaded runtime-emulator runtime-kernel].each do |step|
       assert_equal File.join(@root, Erx::Generated::OUTPUT), @runner.options.fetch(step).fetch(:env).fetch('ERX_GEN'), step
     end
   end

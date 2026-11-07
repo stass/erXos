@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file.
+# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones.
 #
 # %CopyrightBegin%
 #
@@ -807,33 +807,34 @@ endif
 # Preloaded code.
 # 
 # This list must be consistent with PRE_LOADED_MODULES in
-# erts/preloaded/src/Makefile.
+# erts/preloaded/src/Makefile, whose opt target compiles them into
+# erts/ebin; make_preload strips each one as it embeds it.
 
-PRELOAD_BEAM =	$(ERL_TOP)/erts/preloaded/ebin/erts_code_purger.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erl_init.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/init.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/prim_buffer.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/prim_eval.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/prim_inet.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/prim_file.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_file_remote.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_9p_grammar.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_path.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_verity.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_erofs.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erx_erofs_file.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/zlib.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/prim_zip.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erl_prim_loader.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erlang.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erts_internal.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erl_tracer.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erts_literal_area_collector.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erts_trace_cleaner.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/erts_dirty_process_signal_handler.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/atomics.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/counters.beam \
-		$(ERL_TOP)/erts/preloaded/ebin/persistent_term.beam
+PRELOAD_BEAM =	$(ERL_TOP)/erts/ebin/erts_code_purger.beam \
+		$(ERL_TOP)/erts/ebin/erl_init.beam \
+		$(ERL_TOP)/erts/ebin/init.beam \
+		$(ERL_TOP)/erts/ebin/prim_buffer.beam \
+		$(ERL_TOP)/erts/ebin/prim_eval.beam \
+		$(ERL_TOP)/erts/ebin/prim_inet.beam \
+		$(ERL_TOP)/erts/ebin/prim_file.beam \
+		$(ERL_TOP)/erts/ebin/erx_file_remote.beam \
+		$(ERL_TOP)/erts/ebin/erx_9p_grammar.beam \
+		$(ERL_TOP)/erts/ebin/erx_path.beam \
+		$(ERL_TOP)/erts/ebin/erx_verity.beam \
+		$(ERL_TOP)/erts/ebin/erx_erofs.beam \
+		$(ERL_TOP)/erts/ebin/erx_erofs_file.beam \
+		$(ERL_TOP)/erts/ebin/zlib.beam \
+		$(ERL_TOP)/erts/ebin/prim_zip.beam \
+		$(ERL_TOP)/erts/ebin/erl_prim_loader.beam \
+		$(ERL_TOP)/erts/ebin/erlang.beam \
+		$(ERL_TOP)/erts/ebin/erts_internal.beam \
+		$(ERL_TOP)/erts/ebin/erl_tracer.beam \
+		$(ERL_TOP)/erts/ebin/erts_literal_area_collector.beam \
+		$(ERL_TOP)/erts/ebin/erts_trace_cleaner.beam \
+		$(ERL_TOP)/erts/ebin/erts_dirty_process_signal_handler.beam \
+		$(ERL_TOP)/erts/ebin/atomics.beam \
+		$(ERL_TOP)/erts/ebin/counters.beam \
+		$(ERL_TOP)/erts/ebin/persistent_term.beam
 
 ifeq ($(TARGET),win32)
 # On windows the preloaded objects are in a resource object.

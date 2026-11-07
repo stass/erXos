@@ -28,22 +28,6 @@ class Erx9pGrammarTest < Minitest::Test
     assert_match(/All \d+ tests passed/, output)
   end
 
-  # The emulator embeds otp/erts/preloaded/ebin/erx_9p_grammar.beam, which the
-  # runtime build does not compile (TODO.md, the preloaded beams), so the
-  # checked-in beam must be the generated grammar compiled as the preloaded
-  # modules are: a change to the table that this test does not see in the beam
-  # would be tested here and never shipped.
-  def test_the_preloaded_beam_is_the_generated_grammar_compiled
-    Dir.mktmpdir('erx-9p-grammar-beam') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+nowarn_deprecated_catch', '+deterministic', '-o', work,
-                                       File.join(ROOT, Erx::Generated::OUTPUT, GENERATED), stdin_data: '')
-      assert status.success?, output
-      assert_equal File.binread(File.join(ROOT, 'otp/erts/preloaded/ebin/erx_9p_grammar.beam')),
-                   File.binread(File.join(work, 'erx_9p_grammar.beam')),
-                   'recompile otp/erts/preloaded/ebin/erx_9p_grammar.beam from the generated grammar'
-    end
-  end
-
   def test_a_table_that_drops_the_name_bound_fails_the_cases
     source = with_table(->(text) { text.sub(NAME_KIND, 'text name max 256 utf8') }) do |root|
       schema = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root))

@@ -335,7 +335,11 @@ included; `sasl` and `tools` where a
 release asks for them. Each shipped application ships its beams, its
 `.app` and its `include/*.hrl` headers, so code compiled on erXos finds
 them through `include_lib` as on stock, and no `.appup`, since an update
-replaces a whole slot. erXos's own Erlang code is applications of its own
+replaces a whole slot. Every beam the emulator embeds or a release ships, the
+preloaded modules included, is compiled from source by the runtime build with
+`+deterministic`; `otp/` tracks no application's `ebin`, prebuilt beam or boot script,
+only the fixtures of OTP's test suites and examples.
+erXos's own Erlang code is applications of its own
 under `erlang/apps/` ([design.md](design.md#repository-layout)), listed
 after OTP's applications in the release file: `erx`, the runtime's
 services (`erx_connections`, `erx_dist`, `erx_program`, `erx_device`,

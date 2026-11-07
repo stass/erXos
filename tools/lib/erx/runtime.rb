@@ -36,21 +36,24 @@ module Erx
     # generated tree among them, so a change to a generator's input does too.
     SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES, Generated::OUTPUT].freeze
     # What the build copies over the OTP copy from the generated tree: the files the
-    # generators write beneath otp/, such as erts/preloaded/src/erx_9p_grammar.erl. The
-    # emulator still embeds the checked-in beams of otp/erts/preloaded/ebin (TODO.md).
+    # generators write beneath otp/, such as erts/preloaded/src/erx_9p_grammar.erl, which
+    # the emulator embeds compiled with the other preloaded modules (build_emulator).
     GENERATED_OTP = File.join(Generated::OUTPUT, 'otp')
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
     # OTP's applications in the release, each built by both runtimes: what a shell needs,
     # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
-    # loads without starting (ReleaseFiles::LOAD_ONLY). The build itself boots from the
-    # tracked bootstrap/bin/start.boot. OTP's `libs` and `start_scripts` targets
-    # are not usable: lib/tools's crashdump.erl includes public_key.hrl and
+    # loads without starting (ReleaseFiles::LOAD_ONLY). OTP's `libs` and `start_scripts`
+    # targets are not usable: lib/tools's crashdump.erl includes public_key.hrl and
     # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both.
     APPLICATIONS = %w[kernel stdlib compiler runtime_tools].freeze
-    # otp/ tracks prebuilt beams with their sources' file times, so make could keep one
-    # older than a source edit. These never enter the copy, and make compiles them.
-    BUILT_BEAMS = APPLICATIONS.map { |application| "--exclude=/lib/#{application}/ebin/*.beam" }.freeze
+    # Where OTP keeps beams and boot scripts built from its sources: the build's own make
+    # writes erts/ebin and each application's ebin, and the others held prebuilt copies.
+    # otp/ORIGIN.md excludes each, so make check refuses a file there, and the copy takes
+    # nothing from them, so a stray file, such as the output of a make run inside otp/,
+    # is neither kept by make over a newer source nor embedded nor shipped.
+    BUILD_OUTPUTS = ['bootstrap', 'erts/ebin', 'erts/preloaded/ebin',
+                     *APPLICATIONS.map { |application| "lib/#{application}/ebin" }].freeze
     # What configure reads from otp/ besides the cross file: the templates it turns into
     # the makefiles and headers make reads, its scripts, the release's version, which
     # it writes into the makefiles, and otp_build, which runs it.
@@ -183,7 +186,8 @@ module Erx
 
       FileUtils.rm_rf(@output.root) unless stored(in_copy('.erx-configure-stamp')) == stamp
       FileUtils.mkdir_p(@output.root)
-      @runner.run(['rsync', '-a', *BUILT_BEAMS, "#{otp}/", "#{@output.root}/"], name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
+      @runner.run(['rsync', '-a', *BUILD_OUTPUTS.map { |path| "--exclude=/#{path}/" }, "#{otp}/", "#{@output.root}/"],
+                  name: 'runtime-copy', deadline: DEADLINES.fetch(:copy))
       @runner.run(['rsync', '-a', "#{generated}/", "#{@output.root}/"], name: 'runtime-copy-generated',
                                                                           deadline: DEADLINES.fetch(:copy))
       paths = [otp, generated].flat_map { |tree| Dir.glob('**/*', File::FNM_DOTMATCH, base: tree) }.uniq.sort
@@ -218,7 +222,16 @@ module Erx
     # from lib/erl_interface, which the import excludes. The runtime is started
     # without them. The emulator's makefile runs erts/lib_src's make, whose archives
     # it links, on every build.
+    #
+    # The emulator embeds the preloaded modules, so they are compiled first, by
+    # erts/preloaded/src's own opt target, into erts/ebin, where the emulator's
+    # PRELOAD_BEAM names them and make_preload strips each one as it embeds it. The copy
+    # takes nothing from erts/ebin (BUILD_OUTPUTS), so what is embedded is compiled from
+    # the copy's sources, the generated grammar among them.
     def build_emulator(jobs:)
+      @runner.run(['gmake', "-j#{jobs}", '-C', 'erts/preloaded/src', 'opt', "TARGET=#{self.class::TARGET}"],
+                  name: 'runtime-preloaded', deadline: DEADLINES.fetch(:libs), chdir: @output.root,
+                  env: build_environment)
       # The archive comes in through LIBS, which is no make dependency, so each build
       # links again. Both executables go: beam.smp is copied from beam.emu, and the
       # makefile's empty .SECONDARY makes a missing beam.emu no reason to link while
@@ -231,8 +244,11 @@ module Erx
     end
 
     # An application's Erlang alone: runtime_tools's c_src holds the trace port drivers
-    # and the dyntrace NIF, which docs/design-runtime.md does not ship.
+    # and the dyntrace NIF, which docs/design-runtime.md does not ship. The application's
+    # make writes into ../ebin without creating it, and otp/ tracks no ebin, so the build
+    # makes the directory.
     def build_application(application, jobs:)
+      FileUtils.mkdir_p(in_copy(File.join('lib', application, 'ebin')))
       @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/src", 'opt', "TARGET=#{self.class::TARGET}"],
                   name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
@@ -249,6 +265,7 @@ module Erx
         'ERL_TOP' => @output.root,
         # No host path in a beam, so another checkout builds the same bytes.
         'ERL_COMPILE_FLAGS' => '+deterministic',
+        # The stock oracle's erl, erlc and escript run every Erlang step of the build.
         'PATH' => [File.dirname(@oracle.erl_path(HOST_OTP_FLAVOUR)), ENV.fetch('PATH')].join(File::PATH_SEPARATOR),
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,

@@ -17,22 +17,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Modified by erXos: prim_socket, prim_net and socket_registry are removed;
-# erx_file_remote, erx_path, erx_verity, erx_erofs, erx_erofs_file and the generated erx_9p_grammar are added, and the erXos ABI's Erlang header, which erXos's build generates into $(ERX_GEN), is on the include path.
+# Modified by erXos: prim_socket, prim_net and socket_registry are removed, from erts.app too;
+# erx_file_remote, erx_path, erx_verity, erx_erofs, erx_erofs_file and the generated erx_9p_grammar are added, and the erXos ABI's Erlang header, which erXos's build generates into $(ERX_GEN), is on the include path. No prebuilt beams are kept: erXos's runtime build runs the opt target, which compiles every module into $(EBIN), and the emulator embeds them from there; the copy target, which refreshed them, is removed.
 #
 # %CopyrightEnd%
-# 
-# Note, this makefile is not called during normal build process, it should
-# be used when the preloaded modules actually are to be updated (i.e. the 
-# beam files are to be recompiled, which is normally not done). 
-# The beam files are placed in the current directory and should be copied 
-# to the ../ebin directory by using the copy target.
 
 include $(ERL_TOP)/make/target.mk
 EBIN=../../ebin
 include $(ERL_TOP)/make/$(TARGET)/otp.mk
-
-STATIC_EBIN=../ebin
 
 include $(ERL_TOP)/erts/vsn.mk
 include $(ERL_TOP)/lib/kernel/vsn.mk
@@ -77,12 +69,11 @@ STUBS_FILES= $(PRE_LOADED_BEAM_MODULES:%=%.erl)
 
 TARGET_FILES = $(PRE_LOADED_MODULES:%=$(EBIN)/%.$(EMULATOR)) \
     $(APP_TARGET)
-STATIC_TARGET_FILES = $(PRE_LOADED_MODULES:%=$(STATIC_EBIN)/%.$(EMULATOR))
 
 APP_FILE= erts.app
 APP_SRC= $(APP_FILE).src
 APP_TARGET= $(EBIN)/$(APP_FILE)
-APP_ESOCK_MODS= prim_net, prim_socket, socket_registry,
+APP_ESOCK_MODS=
 
 
 KERNEL_SRC=$(ERL_TOP)/lib/kernel/src
@@ -119,10 +110,6 @@ $(TARGET_FILES): | $(EBIN)
 
 clean:
 	rm -rf $(EBIN)
-
-copy:
-	cp $(EBIN)/*.beam $(STATIC_EBIN)
-	$(V_ERL) -noshell -eval "[begin {ok, Bin} = file:read_file(File), {ok, {_, Stripped}} = beam_lib:strip(Bin), ok = file:write_file(File, zlib:gunzip(Stripped)) end || File <- filelib:wildcard(\"$(STATIC_EBIN)/*.beam\")]." -s init stop
 
 $(APP_TARGET): $(APP_SRC) $(ERL_TOP)/erts/vsn.mk
 	$(vsn_verbose)sed -e 's;%VSN%;$(VSN);' -e 's;%ESOCK_MODS%;$(APP_ESOCK_MODS);' $< > $@
@@ -165,7 +152,7 @@ $(DIA_PLT): $(ERL_FILES)
 	@echo "Building ($(basename $(DIA_PLT))) plt file"
 	@dialyzer --build_plt \
                   --output_plt $@ \
-                  -r ../ebin \
+                  -r $(EBIN) \
                      ../../../lib/kernel/ebin \
                      ../../../lib/stdlib/ebin \
                      ../../../lib/crypto/ebin \
@@ -176,7 +163,7 @@ $(DIA_PLT): $(ERL_FILES)
 dialyzer: $(DIA_PLT)
 	@echo "Running dialyzer on $(basename $(DIA_PLT))"
 	@dialyzer --plt $< \
-                  ../ebin \
+                  $(EBIN) \
                   $(DIA_WARNINGS) \
                   --verbose
 DEP_REL_TOP=../../../lib/

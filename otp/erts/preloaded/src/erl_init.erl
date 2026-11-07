@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: prim_socket and prim_net are not preloaded, so their on_load and
+%% init calls, and the if_loaded/2 guard that skipped them, are removed.
+%%
 %% %CopyrightEnd%
 %%
 -module(erl_init).
@@ -38,25 +41,12 @@ start(Mod, BootArgs) ->
     erl_tracer:on_load(),
     prim_buffer:on_load(),
     prim_file:on_load(),
-    %% prim_socket:on_load(), prim_net:on_load(),
-    if_loaded(
-      prim_socket,
-      fun () ->
-              prim_socket:on_load(),
-              prim_net:on_load(),
-              ok
-      end),
     %% Proceed to the specified boot module
     run(Mod, boot, BootArgs).
 
 restart() ->
     erts_internal:erase_persistent_terms(),
-    if_loaded(
-      prim_socket,
-      fun () ->
-              prim_socket:init(),
-              ok
-      end).
+    ok.
 
 
 run(M, F, A) ->
@@ -68,13 +58,3 @@ run(M, F, A) ->
             M:F(A)
     end.
 
-
-if_loaded(CondMod, Fun) ->
-    if_loaded(CondMod, Fun, erlang:loaded()).
-%%
-if_loaded(_CondMod, _Fun, []) ->
-    ok;
-if_loaded(CondMod, Fun, [CondMod | _]) ->
-    Fun();
-if_loaded(CondMod, Fun, [_ | Loaded]) ->
-    if_loaded(CondMod, Fun, Loaded).

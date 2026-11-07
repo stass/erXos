@@ -18,6 +18,7 @@ require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/runtime'
 require_relative '../../tools/lib/erx/runtime_seam'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../../tools/lib/erx/oracle_hosted'
 
 # The release file system against stock's prim_file (design-runtime.md, Files and
 # Verification). One set of prim_file calls runs twice over the same files: on the
@@ -653,7 +654,7 @@ class RuntimePrimFileTest < Minitest::Test
                 release_status: release_status.exitstatus, stock_status: stock_status.exitstatus)
   end
 
-  # The corpus, the applications, the tracked boot script and what an archive must hold.
+  # The corpus, the applications, their start_clean boot script and what an archive must hold.
   def fill_tree(tree)
     corpus = File.join(tree, 'corpus')
     FileUtils.mkdir_p(File.join(corpus, 'sub/deep'))
@@ -667,14 +668,25 @@ class RuntimePrimFileTest < Minitest::Test
     File.binwrite(File.join(tree, 'manifest'), Erx::Release.file_bytes(archive: OUTPUT.archive, path: 'system/manifest', codec: codec))
     File.write(File.join(tree, 'root'), "a root image's place\n")
     FileUtils.cp(File.join(ROOT, 'test/fixtures/erofs/compact.img'), File.join(tree, 'image.erofs'))
-    FileUtils.mkdir_p(File.join(tree, 'bin'))
-    FileUtils.cp(File.join(OUTPUT.root, 'bootstrap/bin/start.boot'), File.join(tree, 'bin/start.boot'))
     APPLICATIONS.each do |application|
       ebin = File.join(tree, 'lib', application, 'ebin')
       FileUtils.mkdir_p(ebin)
       FileUtils.cp(Dir.glob(File.join(OUTPUT.root, 'lib', application, 'ebin', '*.{beam,app}')), ebin)
     end
+    FileUtils.mkdir_p(File.join(tree, 'bin'))
+    FileUtils.cp(start_clean_boot(tree), File.join(tree, 'bin/start.boot'))
     FileUtils.mkdir_p(File.join(tree, 'test/ebin'))
+  end
+
+  # The boot script that starts kernel and stdlib from the tree's lib/<name>/ebin, made by
+  # systools as OTP's build makes its start_clean (Erx::OracleHosted.write_boot_script),
+  # beside the tree so it is not packed.
+  def start_clean_boot(tree)
+    directory = File.join(File.dirname(tree), 'boot')
+    FileUtils.mkdir_p(directory)
+    runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
+    Erx::OracleHosted.write_boot_script(tree: tree, otp: OUTPUT.root, runner: runner, directory: directory,
+                                        erl: Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR))
   end
 
   def codec = (@codec ||= Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: ROOT).schema))

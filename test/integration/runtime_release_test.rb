@@ -5,6 +5,8 @@
 require 'fileutils'
 require 'json'
 require 'minitest/autorun'
+require 'open3'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/native_runtime'
 require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/release'
@@ -65,14 +67,10 @@ class RuntimeReleaseTest < Minitest::Test
     assert_empty paths.grep(%r{\Asystem/lib/(?:kernel|stdlib)-[^/]+/ebin/erx_}), 'OTP applications hold no erx_ module'
   end
 
-  # Built here from the tree's sources, not the prebuilt beams otp/ tracks, and naming
-  # no path of this checkout.
-  def test_the_release_is_built_by_this_build_and_names_no_host_path
-    bytes = File.binread(OUTPUT.archive)
-    tracked = %w[kernel stdlib].flat_map { |application| Dir.glob(File.join(ROOT, 'otp/lib', application, 'ebin/*.beam')) }
-    refute_empty tracked
-    assert_empty tracked.select { |path| bytes.include?(File.binread(path)) }
-    refute_includes bytes, ROOT.b
+  # otp/ tracks no beam the release could hold (runtime_build_test), so every beam is
+  # built here, and none names a path of this checkout.
+  def test_the_release_names_no_host_path
+    refute_includes File.binread(OUTPUT.archive), ROOT.b
   end
 
   # What the native boot runs is what the hosted suites ran. The native build lives in
@@ -108,5 +106,49 @@ class RuntimeReleaseTest < Minitest::Test
     manifest = Erx::Release.file_bytes(archive: OUTPUT.archive, path: 'system/manifest', codec: @codec)
     assert_includes manifest, "-boot\0/bin/start\0"
     assert_raises(Erx::Error) { Erx::Release.file_bytes(archive: OUTPUT.archive, path: 'system/none', codec: @codec) }
+  end
+
+  # The emulator embeds erx_9p_grammar compiled from the source build/gen holds, so a
+  # change to the protocol table reaches a rebuilt runtime. make_preload strips each
+  # beam to the chunks loading needs, so every chunk it kept must be the same chunk of
+  # the generated source compiled here by the erlc the build used.
+  def test_the_embedded_grammar_is_the_generated_source_compiled
+    embedded = beam_chunks(embedded_beam('erx_9p_grammar'))
+    assert_includes embedded.keys, 'Code'
+    Dir.mktmpdir('erx-embedded-grammar') do |work|
+      source = File.join(ROOT, Erx::Generated::OUTPUT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
+      erlc = File.join(File.dirname(Erx::Oracle.new(root: ROOT).erl_path(Erx::Runtime::HOST_OTP_FLAVOUR)), 'erlc')
+      output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, erlc, '+deterministic', '-o', work, source,
+                                       stdin_data: '')
+      assert status.success?, output
+      compiled = beam_chunks(File.binread(File.join(work, 'erx_9p_grammar.beam')))
+      assert_equal embedded, compiled.slice(*embedded.keys)
+    end
+  end
+
+  private
+
+  # A module's bytes as the emulator's generated preload.c holds them, comments dropped:
+  # make_preload writes each byte as 0xNN and its printable text in a comment.
+  def embedded_beam(name)
+    preload = File.read(File.join(OUTPUT.root, 'erts/emulator', Erx::Runtime::TARGET, 'opt/emu/preload.c'))
+    array = preload[/^const unsigned char preloaded_#{name}\[\] = \{\n(.*?)^\};/m, 1]
+    refute_nil array, "preload.c embeds no #{name}"
+    array.gsub(%r{/\*.*?\*/}m, '').scan(/0x(\h\h)/).flatten.map(&:hex).pack('C*')
+  end
+
+  # A beam's IFF chunks by id: FOR1, the form's size, BEAM, then each chunk's id, size
+  # and bytes, padded to four.
+  def beam_chunks(bytes)
+    form, size, kind = bytes.unpack('a4Na4')
+    assert_equal %w[FOR1 BEAM], [form, kind]
+    chunks = {}
+    offset = 12
+    while offset < 8 + size
+      id, length = bytes.unpack("@#{offset}a4N")
+      chunks[id] = bytes.byteslice(offset + 8, length)
+      offset += 8 + ((length + 3) / 4 * 4)
+    end
+    chunks
   end
 end
