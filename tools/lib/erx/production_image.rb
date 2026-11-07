@@ -48,7 +48,7 @@ module Erx
     # The emulator's archive, which holds littlefs's objects beside ERTS's own
     # (otp/erts/emulator/Makefile.in's OS_OBJS), so its attribution carries
     # littlefs's BSD-3-Clause notice as well as OTP's.
-    LITTLEFS_ARCHIVE = 'libbeam.a'
+    EMULATOR_ARCHIVE = 'libbeam.a'
 
     # One of the archives that the root links, attributed whole under the license
     # stated here, with notices the tree paths of the documents that license names.
@@ -755,12 +755,13 @@ module Erx
     def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
       otp = erts.otp_archives.map do |path|
-        if File.basename(path) == LITTLEFS_ARCHIVE
-          Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0 AND BSD-3-Clause', status: 'permanent',
-                      notices: ['otp/LICENSE.txt', 'littlefs/LICENSE.md'])
-        else
-          Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0', status: 'permanent', notices: ['otp/LICENSE.txt'])
-        end
+        name = File.basename(path)
+        license, notices = if name == EMULATOR_ARCHIVE
+                             ['Apache-2.0 AND BSD-3-Clause', ['otp/LICENSE.txt', 'littlefs/LICENSE.md']]
+                           else
+                             ['Apache-2.0', ['otp/LICENSE.txt']]
+                           end
+        Archive.new(path: path, label: "otp #{name}", license: license, status: 'permanent', notices: notices)
       end
       [*otp,
        Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),

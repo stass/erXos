@@ -4,7 +4,8 @@ Repository: https://github.com/littlefs-project/littlefs
 
 Revision: v2.11.3 (6cb4e86540eca0d9ba62500a298385c9d863c8be)
 
-littlefs, the stopgap read-write file system of `/data`, imported as
+littlefs, the stopgap read-write file system of the data partition
+(`/data`) and of the vault's partition, imported as
 erXos's code ([design-stopgap.md](../docs/design-stopgap.md#littlefs-in-the-system-domain)).
 The files were taken from the release archive
 `https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz`,
@@ -26,9 +27,10 @@ by SPDX in its header. erXos's changes are under the same licence.
 
 Left out: the block-device emulators (`bd/`), the test and benchmark
 runners and their cases (`runners/`, `tests/`, `benches/`), the scripts,
-the Makefile, the GitHub workflows, `README.md`, `DESIGN.md` and
-`SPEC.md`. erXos builds the four source files directly (the ERTS
-emulator's Makefile, the host NIF test and the `lfs_image` fuzz target)
+the Makefile, the GitHub workflows (`.github/`), `.gitattributes`,
+`.gitignore`, `README.md`, `DESIGN.md` and `SPEC.md`. erXos builds the
+four source files directly (the ERTS emulator's Makefile, the host NIF
+test and the `lfs_image` fuzz target)
 and supplies the block device itself.
 
 Each file erXos changes says so in a `Modified by erXos` notice at its

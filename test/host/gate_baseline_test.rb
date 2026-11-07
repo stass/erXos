@@ -42,6 +42,7 @@ class GateBaselineTest < Minitest::Test
     'device_queue' => { seeds: 8, sources: %w[otp/erts/emulator/nifs/erxos/erx_device_queue.c] },
     'elf' => { seeds: 10, sources: %w[liberx/elf_plan.c] },
     'lane' => { seeds: 8, sources: %w[liberx/erx_lane.c] },
+    'lfs_image' => { seeds: 6, sources: %w[littlefs/lfs.c littlefs/lfs_util.c] },
     'log' => { seeds: 8, sources: %w[kernel/core/log.c] },
     'map' => { seeds: 6, sources: %w[kernel/core/map.c] },
     'pack' => { seeds: 11, sources: %w[kernel/core/pack.c kernel/crypto/blake3/blake3.c
@@ -79,7 +80,7 @@ class GateBaselineTest < Minitest::Test
   }.freeze
 
   IMPORTS = %w[fiasco/bootstrap fiasco/drivers-frst fiasco/kernel fiasco/l4re-core fiasco/libfdt fiasco/mk
-               kernel/crypto/blake3 kernel/crypto/chacha20 kernel/crypto/sha2 musl otp test/oracle/common_test].freeze
+               kernel/crypto/blake3 kernel/crypto/chacha20 kernel/crypto/sha2 littlefs musl otp test/oracle/common_test].freeze
 
   ARCHIVE_SOURCES = %w[kernel/core/admit.c kernel/core/budget.c kernel/core/cap.c kernel/core/debug_log.c
                        kernel/core/dispatch.c kernel/core/log.c kernel/core/map.c kernel/core/rng.c

@@ -320,7 +320,7 @@ it; git history is the record of completed work.
   and the task's objects released at its end.
 * [Medium] watchdog, `liberx/backend/api.h`: `erx_watchdog_pet` takes no `POWER` resource as `design-kernel.md`'s does.
 * [Medium] release comparison, `test/integration/runtime_release_test.rb`: the comparison of the hosted and production archives skips unless both were built from the same sources, and no gate builds both.
-* [Low] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses.
+* [Medium] production image, `tools/lib/erx/production_image.rb`: OTP's and musl's archives are attributed whole, though `libz`, `libzstd`, `libepcre` and `libryu` carry their own licenses. `libbeam.a`'s littlefs objects are the one exception, by a hand-written case in `archives` (`EMULATOR_ARCHIVE`) that nothing checks against the build: moving `lfs.o` out of `OS_OBJS` drops or misplaces littlefs's notice silently, and the archive is recorded `permanent` though littlefs is a stopgap. Replace the case with one table of the imports each archive holds, take each import's grant and notice from `config/provenance/import-notices.json`, and check the archive's members at pack time, as `CoreArchive::Built.objects` does for the boot cores.
 * [Low] musl, `musl/src/thread/erxos/clone.c`: the start takes three liberx calls in a required order, and the
   registers travel in the UTCB. One call taking the start state and the word to clear ends the order and the leak
   a failed clear-word call would leave, with the thread package's `erx_fiasco_reaper_start` as its second user.
@@ -470,8 +470,8 @@ it; git history is the record of completed work.
 * [Low] tooling, fetched source paths: `tools/lib/erx/libc_test.rb:24` spells libc-test's
   unpacked directory (`libc-test-63e36e9`) by hand, so a pin bump in `deps.lock` fails it with
   a missing-file error, and it reads the tree without checking its provenance record. Route
-  it through `Dependencies#fetched_tree`; `RcOracle::Build#source_tree` repeats the same check
-  by hand.
+  it through `Dependencies#fetched_tree`, which has no other caller until then;
+  `RcOracle::Build#source_tree` repeats the same check by hand.
 * [Low] tooling, `tools/lib/erx/libc_test.rb:158,270-279,454-457`, `tools/lib/erx/setup.rb`: (1)
   Every serial line between a test's run and end lines that matches `FILE.c:N: ` is
   attributed to that test, including kernel or root C output; a spurious disagreement, never a

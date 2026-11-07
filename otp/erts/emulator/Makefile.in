@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources into the emulator and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file.
+# Modified by erXos: builds erXos sources and littlefs (from $(ERX_TREE)/littlefs) into the emulator and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file.
 #
 # %CopyrightBegin%
 #

@@ -30,6 +30,8 @@ module Erx
                       'liberx/backend/hosted/start.c'].freeze
     # What the hosted archive is compiled from and the release's manifest, for the build record.
     LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 kernel/generated liberx].freeze
+    # Every tree a runtime is built from, whose digest marks a build stale.
+    SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES].freeze
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I include -I kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
     # OTP's applications in the release, each built by both runtimes: what a shell needs,
@@ -72,13 +74,13 @@ module Erx
       raise Error, 'hosted runtime not built: run tools/erx build runtime' unless File.file?(record)
       return if File.read(record) == source_digest(root: root)
 
-      raise Error, 'hosted runtime is stale, otp/, littlefs/, erlang/apps or liberx changed: run tools/erx build runtime'
+      raise Error, "hosted runtime is stale, a file under #{SOURCE_TREES.join(', ')} changed: run tools/erx build runtime"
     end
 
     def self.record_path(output) = File.join(output.root, '.erx-build-record')
 
     def self.source_digest(root:)
-      digests = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES].flat_map do |tree|
+      digests = SOURCE_TREES.flat_map do |tree|
         Dir.glob(File.join(tree, '**/*'), File::FNM_DOTMATCH, base: root).sort.filter_map do |path|
           absolute = File.join(root, path)
           "#{path} #{Digest::SHA256.file(absolute).hexdigest}" if File.file?(absolute)
