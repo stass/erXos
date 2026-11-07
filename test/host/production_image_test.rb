@@ -45,6 +45,21 @@ class ProductionImageTest < Minitest::Test
     assert_empty linked.uniq - Erx::ProductionImage::IMPORTS.keys
   end
 
+  # libbeam.a holds littlefs's objects (lfs.o and lfs_util.o, in the emulator's OS_OBJS), so
+  # its attribution names littlefs's licence beside OTP's; every notice named is a tree file.
+  def test_emulator_archive_carries_the_littlefs_notice
+    fiasco = Struct.new(:boot_core_archive) { def user_library(name) = "/fiasco/#{name}" }.new('/fiasco/boot_cores.a')
+    erts = Erx::NativeRuntime::Built.new(otp_archives: ['/otp/erl_main.o', '/otp/libbeam.a'], libc: '/musl/libc.a', otp: '/otp')
+    image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', fiasco: fiasco, runtime: nil)
+    archives = image.send(:archives, erts).to_h { |archive| [File.basename(archive.path), archive] }
+    assert_equal 'Apache-2.0 AND BSD-3-Clause', archives.fetch('libbeam.a').license
+    assert_equal %w[otp/LICENSE.txt littlefs/LICENSE.md], archives.fetch('libbeam.a').notices
+    assert_equal %w[otp/LICENSE.txt], archives.fetch('erl_main.o').notices
+    makefile = File.read(File.join(ROOT, 'otp/erts/emulator/Makefile.in'))
+    assert_match %r{^LFS_DIR = \$\(ERX_TREE\)/littlefs$}, makefile
+    archives.values.flat_map(&:notices).each { |notice| assert File.file?(File.join(ROOT, notice)), notice }
+  end
+
   # The dedication in each ChaCha20 file's header is the only licence statement it holds, and
   # attribution keeps that header as the file's notice. erXos's changes add BSD-2-Clause, whose
   # text is erXos's own LICENSE. No source file stands in as a notice document.

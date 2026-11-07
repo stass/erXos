@@ -45,9 +45,15 @@ module Erx
     # generator's stream, and OTP for the release's beams.
     IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent', 'otp' => 'permanent' }.freeze
 
-    # One of Fiasco's archives that the root links, attributed whole under the license
-    # stated here. TODO.md holds the gap: the boot cores hold BLAKE3 as well.
-    Archive = Data.define(:path, :label, :license, :status, :notice)
+    # The emulator's archive, which holds littlefs's objects beside ERTS's own
+    # (otp/erts/emulator/Makefile.in's OS_OBJS), so its attribution carries
+    # littlefs's BSD-3-Clause notice as well as OTP's.
+    LITTLEFS_ARCHIVE = 'libbeam.a'
+
+    # One of the archives that the root links, attributed whole under the license
+    # stated here, with notices the tree paths of the documents that license names.
+    # TODO.md holds the gap: the boot cores hold BLAKE3 as well.
+    Archive = Data.define(:path, :label, :license, :status, :notices)
 
     # flags are the archive header's, as the kernel's banner line reports them; test_code
     # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made. release
@@ -749,24 +755,30 @@ module Erx
     def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
       otp = erts.otp_archives.map do |path|
-        Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0', status: 'permanent', notice: 'otp/LICENSE.txt')
+        if File.basename(path) == LITTLEFS_ARCHIVE
+          Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0 AND BSD-3-Clause', status: 'permanent',
+                      notices: ['otp/LICENSE.txt', 'littlefs/LICENSE.md'])
+        else
+          Archive.new(path: path, label: "otp #{File.basename(path)}", license: 'Apache-2.0', status: 'permanent', notices: ['otp/LICENSE.txt'])
+        end
       end
       [*otp,
-       Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notice: 'musl/COPYRIGHT'),
+       Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),
        Archive.new(path: @fiasco.user_library('libgcc.a'), label: 'fiasco/l4re-core libgcc',
-                   license: 'GPL-3.0-only WITH GCC-exception-3.1', status: 'stopgap', notice: spdx),
+                   license: 'GPL-3.0-only WITH GCC-exception-3.1', status: 'stopgap', notices: [spdx]),
        Archive.new(path: @fiasco.user_library('libl4sys.p.a'), label: 'fiasco/l4re-core libl4sys',
-                   license: 'MIT', status: 'stopgap', notice: spdx),
+                   license: 'MIT', status: 'stopgap', notices: [spdx]),
        Archive.new(path: @fiasco.user_library('libsigma0.a'), label: 'fiasco/l4re-core libsigma0',
-                   license: 'MIT', status: 'stopgap', notice: spdx),
+                   license: 'MIT', status: 'stopgap', notices: [spdx]),
        Archive.new(path: @fiasco.boot_core_archive, label: 'kernel/core boot cores',
-                   license: 'BSD-2-Clause', status: 'permanent', notice: LICENSE)]
+                   license: 'BSD-2-Clause', status: 'permanent', notices: [LICENSE])]
     end
 
     def external_archive(archive)
       reference(archive.path).merge('path' => File.realpath(archive.path), 'label' => archive.label, 'license' => archive.license,
                                     'evidence' => 'archive built by the tree\'s own build, attributed as a whole',
-                                    'status' => archive.status, 'notices' => [reference(File.join(@root, archive.notice))])
+                                    'status' => archive.status,
+                                    'notices' => archive.notices.map { |notice| reference(File.join(@root, notice)) })
     end
 
     def reference(path)

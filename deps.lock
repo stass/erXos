@@ -64,16 +64,6 @@
       "status": "permanent"
     },
     {
-      "id": "littlefs",
-      "kind": "tar",
-      "version": "2.11.3",
-      "url": "https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz",
-      "sha256": "15521be8aaed133c453e7337714e029a9f62480ab41f59c4ba5d18297a076207",
-      "directory": "littlefs-2.11.3",
-      "license": "BSD-3-Clause",
-      "status": "stopgap"
-    },
-    {
       "id": "oracle-toolchain",
       "kind": "oci",
       "version": "3.4.12-bookworm",

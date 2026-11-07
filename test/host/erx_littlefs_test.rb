@@ -15,7 +15,7 @@ require 'tmpdir'
 class ErxLittlefsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
-  LITTLEFS = File.join(ROOT, 'build/third_party/littlefs/littlefs-2.11.3')
+  LITTLEFS = File.join(ROOT, 'littlefs')
   OTP = File.join(ROOT, 'build/oracle/jit/install/lib/erlang')
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
@@ -34,7 +34,6 @@ class ErxLittlefsTest < Minitest::Test
              deadline_ends_a_request refuses_bad_arguments].freeze
 
   def test_volume_cases_pass_under_one_dirty_io_scheduler
-    skip 'littlefs not fetched: ruby tools/erx fetch' unless File.file?(File.join(LITTLEFS, 'lfs.c'))
     skip 'stock OTP not built: make oracle-bootstrap' unless File.directory?(OTP)
 
     Dir.mktmpdir('erx-littlefs-') do |directory|

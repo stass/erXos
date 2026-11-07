@@ -4,8 +4,8 @@
 
 # littlefs images as /data mounts them (lfs_image_fuzz.c): raw blocks, and a volume
 # formatted in the harness with patches over its superblock, its metadata pairs and a
-# file's data. littlefs is the fetched source under build/third_party.
-littlefs = 'build/third_party/littlefs/littlefs-2.11.3'
+# file's data. littlefs is its import in littlefs/.
+littlefs = 'littlefs'
 Erx::PackFuzz.declare_target(
   sources: ["#{littlefs}/lfs.c", "#{littlefs}/lfs_util.c"],
   includes: [*Erx::PackFuzz::INCLUDES, littlefs, 'otp/erts/emulator/nifs/erxos'],

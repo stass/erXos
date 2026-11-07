@@ -77,13 +77,13 @@ module Erx
       raise Error, 'hosted runtime not built: run tools/erx build runtime' unless File.file?(record)
       return if File.read(record) == source_digest(root: root)
 
-      raise Error, 'hosted runtime is stale, otp/, erlang/apps or liberx changed: run tools/erx build runtime'
+      raise Error, 'hosted runtime is stale, otp/, littlefs/, erlang/apps or liberx changed: run tools/erx build runtime'
     end
 
     def self.record_path(output) = File.join(output.root, '.erx-build-record')
 
     def self.source_digest(root:)
-      digests = ['otp', ErlangApps::SOURCE, *LIBERX_TREES].flat_map do |tree|
+      digests = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES].flat_map do |tree|
         Dir.glob(File.join(tree, '**/*'), File::FNM_DOTMATCH, base: root).sort.filter_map do |path|
           absolute = File.join(root, path)
           "#{path} #{Digest::SHA256.file(absolute).hexdigest}" if File.file?(absolute)
