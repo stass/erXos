@@ -106,6 +106,8 @@ module Erx
         check_oracle(command_arguments, **collaborators)
       when 'load', 'watch'
         code_command(command, command_arguments)
+      when 'files'
+        files_command(command_arguments)
       when '--help', '-h', nil
         help(command_arguments, **collaborators)
       else
@@ -562,8 +564,32 @@ module Erx
                                                    out: Terminal.method(:puts))
     end
 
+    # tools/erx files --socket PATH --listen SOCK [--build HEX] [--once]: relays the UNIX
+    # socket SOCK, in an owner-only directory, to the host link's files stream of the guest
+    # whose host link socket is PATH (FilesRelay); --once serves one client and exits.
+    def self.files_command(arguments)
+      options = { once: false }
+      OptionParser.new do |flags|
+        flags.on('--socket PATH') { |value| options[:socket] = value }
+        flags.on('--listen SOCK') { |value| options[:listen] = value }
+        flags.on('--build HEX', /\A\h+\z/) { |value| options[:build] = value.downcase }
+        flags.on('--once') { options[:once] = true }
+      end.parse!(arguments)
+      no_arguments(arguments)
+      raise OptionParser::InvalidArgument, 'files needs --socket PATH and --listen SOCK' unless
+        options[:socket] && options[:listen]
+
+      require_relative 'lib/erx/files_relay'
+      UNIXSocket.open(options.fetch(:socket)) do |io|
+        link = HostlinkClient.new(io: io, expected_build: options[:build])
+        FilesRelay.new(link: link, listen: options.fetch(:listen), out: Terminal.method(:puts))
+                  .serve(connections: options[:once] ? 1 : nil)
+      end
+      0
+    end
+
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | conformance | check-boot-image | check-debug-log | check-qemu | fetch | generate | check | check-generated | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-erofs-oracle [--release PATH] [--accel hvf|tcg] | check-libc-test ACCEL CPUS | check-tla | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | status | setup [--jobs N]')
       0
     end
 

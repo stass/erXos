@@ -49,6 +49,7 @@ module Erx
       @receiver = HostlinkFrame::Receiver.new
       @session = nil
       @replies = {}
+      @files = []
       @bytes_sent = 0
     end
 
@@ -59,6 +60,7 @@ module Erx
       @credit = HostlinkFrame::Credit.new
       @receiver.session = nil
       @replies.clear
+      @files.clear
       reply = wait_until(@deadline) do
         transmit(wire)
         wait_hello(nonce, @hello_wait)
@@ -88,6 +90,26 @@ module Erx
         @replies.delete(id)
       end
     end
+
+# Sends body, one 9P2000.L message, on the files stream (docs/design-live.md, "Files
+# between the host and the machine"), within credit like any frame.
+def send_files(body)
+  raise Error, 'no host link session: send a hello first' unless @session
+  raise HostlinkFrame::TooLarge, "a files message of #{body.bytesize} bytes" if body.bytesize > HostlinkFrame::BODY_MAX
+
+  transmit([@sender.frame(:files, body)])
+end
+
+# The files stream's messages from the target, in order, waiting at most seconds for
+# the first when none is held. Each is the target's bytes, untrusted.
+def take_files(seconds)
+  pump(seconds) if @files.empty?
+  @files.shift(@files.size)
+end
+
+# The link, for a caller that waits on it beside other IO; it must read only through
+# take_files or await.
+def io = @io
 
     # The next call identifier of the session; identifiers grow within a session.
     def next_id = (@last_id += 1)
@@ -182,6 +204,8 @@ module Erx
         @replies[message.id] = decode(message.payload)
       in HostlinkFrame::Taken[frame] if frame.stream == :credit
         @credit.grant(frame)
+      in HostlinkFrame::Taken[frame] if frame.stream == :files
+        @files << frame.body
       else
         nil
       end
