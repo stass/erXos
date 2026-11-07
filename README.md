@@ -249,21 +249,15 @@ ok
   boot-selection record and boots the slot it names. The shell then reads
   the release's files from that slot's EROFS image at `/images/release`.
   The funnel does not check image hashes yet; that is M11.
-* **The command shell works at the console.** `erx_shell:start().` at
-  the Erlang shell starts an rc-language command shell, written in
-  Erlang: variables, lists, `for`, `if`, functions, pipelines,
-  redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
-  Its commands are Erlang commands (`echo`, `cat`, `ls`, `mkdir`, `rm`,
-  `mv`, `cp`, `ps`, `mount`, `true`, `false`). Its language is checked
-  against plan9port's rc, built on the host as the oracle. Job
-  control, record pipelines (`where`, `sort`, `count`) and running
-  programs are not on master yet.
+* **The command shell has begun.** `erx_shell` holds rc's tokenizer and
+  parser in Erlang, with a fuzz target and plan9port's rc built as the
+  host oracle. The evaluator, commands and job control are not built.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
   case with stock OTP, and each known difference is classified by cause
   (`test/oracle/hosted_known_differences/`). On QEMU the system domain
-  runs OTP's whole compiler group, kernel's `file_SUITE` and stdlib's
-  `filelib_SUITE` against stock.
+  runs kernel's `file_SUITE` and the whole compiler and stdlib groups
+  against stock, with every difference classified.
 * **The release** carries kernel, stdlib, compiler and runtime_tools (the
   last two loaded, not started), and the erXos applications `erx`,
   `erx_files`, `erx_uart`, `erx_blk` and `erx_shell`.
@@ -419,12 +413,14 @@ tools/erx status
 chooses. For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
-`tools/erx oracle qemu`: `file_SUITE`, `filelib_SUITE` and every `*_SUITE` of OTP's `compiler` group (not
-the variants its test Makefile generates from them) under Common
-Test in the system domain under QEMU with HVF, compared case by case with stock OTP on the host against the
+`tools/erx oracle qemu`: `file_SUITE` and every `*_SUITE` of OTP's `stdlib` and `compiler` groups (not
+the variants compiler's test Makefile generates from them) under Common
+Test in the system domain under QEMU with HVF, on one CPU, compared case by case with stock OTP on the host,
+run with as many schedulers, against the
 tables of known differences in `test/oracle/hosted_known_differences/`, then musl's libc-test in test tasks
-on four CPUs (`tools/erx check-libc-test hvf 4`). It says it is partial: OTP's
-`emulator`, `kernel` and `stdlib` groups do not
+on four CPUs (`tools/erx check-libc-test hvf 4`). The stdlib group takes about 40 minutes on stock and 30 on
+the guest. It says it is partial: OTP's
+`emulator` and `kernel` groups do not
 run there whole yet. Native benchmarks carry their own label, apart from Linux suite
 results. Interpreter benchmarks need a separate native bootstrap, built
 with `tools/erx oracle build --backend native --flavour emu`.

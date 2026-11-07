@@ -193,6 +193,9 @@ it; git history is the record of completed work.
   Test terminates and the suites after `sendfile_SUITE` never run (1029 cases; erxos-history
   `oracle-hosted/2026-11-06-kernel-boot`). Copying each suite's `_data` on entry and deleting it and its `priv_dir`
   on exit (a Common Test hook in the reporter, on both sides) would bound it by the largest suite instead.
+  in the 160 MiB cap without `enospc`, on the hosted runtime and on QEMU. The emulator group, run in three parts, fits too; a whole run of it has not been
+  measured. Kernel's `file_SUITE` bench and `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
+  reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
   case, trace why `dbg` is not found, and fix it or reword the row with its cause.
@@ -854,8 +857,8 @@ it; git history is the record of completed work.
   `need` and `wake` under a deadline.
 * [Low] stopgap bootstrap, `fiasco/bootstrap/server/src/erx_image.cc` (`erx_boot_args_cut`): a command line over
   `ERX_BOOT_STRINGS_MAX` (2,048 bytes) is cut at its last whole word without a word on the console, where
-  docs/design-kernel.md ("Configuration") says the boot reports the cut. The QEMU oracle's guest ran only the stdlib
-  suites that fit a 2,375-byte line, and nothing in its serial log said so. Print the cut, with both lengths, and
+  docs/design-kernel.md ("Configuration") says the boot reports the cut. Handed a 2,375-byte line naming every stdlib
+  suite, the QEMU oracle's guest ran only the suites named in its first 2,048 bytes, and its serial log said nothing. Print the cut, with both lengths, and
   check the line in a boot transcript test.
 * [Low] stopgap bootstrap, overlapping RAM regions:
   `Region_list::optimize` (`fiasco/bootstrap/server/src/region.cc`)

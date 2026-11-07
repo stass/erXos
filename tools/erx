@@ -449,7 +449,10 @@ module Erx
     # HVF, exits 1.
     LIBC_TEST_CPUS = 4
     # OTP's groups whose every difference in the system domain is classified.
-    CHECKED_GROUPS = %w[compiler].freeze
+    CHECKED_GROUPS = %w[stdlib compiler].freeze
+    # Each side's deadline: stock runs the stdlib group in about 2,500 s at the
+    # guest's one scheduler (erxos-history oracle-qemu/2026-11-06-stdlib).
+    ORACLE_DEADLINE = 7200
 
     def self.check_oracle(arguments, qemu_class: OracleQemu, accelerators: nil, libc_test: method(:check_libc_test),
                           checked_groups: CHECKED_GROUPS)
@@ -460,7 +463,7 @@ module Erx
         Terminal.puts("failed: this host's QEMU does not offer #{accel}, which the oracle run needs")
         return 1
       end
-      status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}"),
+      status = oracle_qemu(['--accel', accel, '--out', File.join(ROOT, "build/check-oracle/#{accel}"), '--deadline', ORACLE_DEADLINE.to_s,
                             '--suites', ['fast', *checked_groups].join(',')], qemu_class: qemu_class)
       Terminal.puts("oracle qemu #{accel}: #{status.zero? ? 'passed' : 'failed'}")
       libc = libc_test.call([accel, LIBC_TEST_CPUS.to_s])

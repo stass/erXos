@@ -50,13 +50,15 @@ class OracleCliTest < Minitest::Test
       assert_equal 2, status, 'a run that passed but leaves parts out is partial, not passed'
       assert_includes output, 'oracle qemu hvf: passed'
       refute_includes output, 'oracle qemu tcg'
-      assert_includes output, 'partial: the system domain runs kernel/file_SUITE, stdlib/filelib_SUITE and the ' \
-                              "compiler group's suites; OTP's emulator, kernel and stdlib groups are not classified there yet"
+      assert_includes output, "partial: the system domain runs kernel/file_SUITE, the stdlib group's suites and the " \
+                              "compiler group's suites; OTP's emulator and kernel groups are not classified there yet"
       options = { accel: 'hvf', cpus: 1, jobs: 4 }
-      compiler = Erx::OracleSuites.suites(root: File.expand_path('../..', __dir__), group: 'compiler')
-      assert_equal [[%w[file_SUITE], options], [%w[filelib_SUITE], options], [compiler, options]],
+      root = File.expand_path('../..', __dir__)
+      groups = %w[stdlib compiler].map { |group| Erx::OracleSuites.suites(root: root, group: group) }
+      assert_equal [[%w[file_SUITE], options], *groups.map { |suites| [suites, options] }],
                    qemu.calls.grep(Array)
       assert_equal %w[kernel stdlib compiler], qemu.calls.grep(Hash).filter_map { |call| call[:group] }
+      assert_equal [Erx::CLI::ORACLE_DEADLINE], qemu.calls.grep(Hash).map { |call| call[:deadline] }.uniq
       assert_equal [%w[hvf 4]], libc_calls
       assert_includes output, 'libc-test hvf 4 CPUs: passed'
     end
