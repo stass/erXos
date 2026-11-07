@@ -7,7 +7,9 @@
 %% the 9P2000.L codec erx_9p among them.
 %% It starts nothing of its own: kernel's hooks start the watchdog and the namespace's
 %% writer (kernel.erl) and the console (user_sup.erl), and the boot script's code path
-%% finds their modules here.
+%% finds their modules here. The console's first group runs erx_shell:console/0, so erx
+%% needs erx_shell at run time; erx_shell builds on erx, so that need is a runtime
+%% dependency, as kernel and stdlib name each other, not an application to start first.
 {application, erx,
  [{description, "erXos runtime services"},
   {vsn, "1"},
@@ -26,4 +28,5 @@
              erx_watchdog]},
   {registered, [erx_console, erx_ns, erx_watchdog]},
   {applications, [kernel, stdlib]},
+  {runtime_dependencies, ["erx_shell-1"]},
   {env, []}]}.
