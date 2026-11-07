@@ -1289,11 +1289,14 @@ a runtime report trusted or let a decoder bypass the output escaper
   wakes, preemptions and yield requests, throttling, faults, domain-level
   events, doorbell triggers and interrupts
   ([design-kernel.md](design-kernel.md#trace-ring)); `erx_tracer` drains
-  it with `erx_trace_read`. The runtime adapter's own events (parks, wakes,
-  capacity changes, refusals) go into ERTS's trace with the same timestamps
+  it with `erx_trace_read`. A park or a wake has one source, the layer
+  that carries it out: the kernel's ring, or on the stopgap the backend's
+  ([design-stopgap.md](design-stopgap.md#the-trace-ring)). The runtime
+  adapter adds to ERTS's trace only what it alone sees: capacity changes,
+  yield requests honoured, refusals, connection closes and unheld frames
   ([design-runtime.md](design-runtime.md#failure-handling-diagnostics-and-debuggability)).
 * **One timeline.** `erx:trace(Spec)` starts any mix of the three and
-  prints one stream ordered by monotonic time; the trace facet sends the
+  prints one stream ordered by `erx_clock_ns`; the trace facet sends the
   merged stream to the process that started the trace, the shell's printer
   for `erx:trace/1` and a view's process for the web
   ([design-web.md](design-web.md#views-on-the-line)), and ends a trace whose
@@ -1305,11 +1308,113 @@ a runtime report trusted or let a decoder bypass the output escaper
   event is 100 ms old, whichever comes first, so a source that stops
   answering delays the stream by at most 100 ms and holds at most 100 ms
   of the others' events; an event that arrives after later ones went out
-  is printed at once, marked `late`, never dropped.
+  is printed at once, marked `late`, never dropped. The merger does not
+  wait for a row whose call answered `ERX_ENOTSUP`.
 * **Scope.** A trace facet has a scope, as an inspect facet does. A scoped
   trace facet traces only the processes and programs of its domains,
   through each domain's own runtime, and only the frames those domains
   receive; the kernel trace ring needs a trace facet of scope `all`.
+
+**The request.** `Spec` is a map; a key left out takes its default:
+
+```erlang
+-type spec() :: #{select => [pid() | domain_id()],  % at most 16; default []
+                  frames => boolean(),              % default false
+                  kernel => boolean()}.             % default false
+-type domain_id() :: 0..16#ffffffff.
+```
+
+A pid traces that process and a domain id every process of the domain,
+each through OTP's trace session in its own runtime, with the flags
+`running` and `monotonic_timestamp`. `frames` adds the frames received by
+the selected domains and by the domains of the selected pids. `kernel`
+adds the `backend` and `kernel` rows below, unfiltered by `select`, so
+both need scope `all`. `erx:trace/1` returns
+`{error, badarg}` for anything but such a map, an unknown key, more than
+16 selections, no selection with `kernel` false, or `frames` with no
+selection; `{error, no_facet}` without a trace facet; and `{error, scope}`
+for a selection outside the facet's scope, an unknown domain id included,
+so the answer does not tell which domains exist, or for `kernel` without
+scope `all`.
+
+**Rows.** Each event belongs to a row, named by its source, and carries
+the reporter its collector assigns ([Inspection
+records](#inspection-records)):
+
+| Row | Reporter | On erXos's kernel | On the stopgap |
+| --- | --- | --- | --- |
+| `erts` | `runtime`, the system domain's included | OTP's trace events of the selection, its frames, and the adapter's events | OTP's `in` and `out` events of the selection; no frames, since the stopgap offers no lanes |
+| `backend` | `{stopgap, liberx_trace}`, labelled `liberx trace` | none: `erx_backend_trace_read` answers `ERX_ENOTSUP` and the row is left out | the root's ring ([design-stopgap.md](design-stopgap.md#the-trace-ring)) |
+| `kernel` | `kernel` | each CPU's ring, read with `erx_trace_read` | one `unsupported` line, from `erx_trace_read`'s `ERX_ENOTSUP` |
+
+A row whose call answers `ERX_ENOTSUP` is shown as `unsupported` when
+its reporter is `kernel`, and left out when its reporter is a stopgap's,
+since a stand-in that does not run reports nothing. On the stopgap the
+adapter emits none of its own events: what causes them, a grant that
+changes, a yield request or a lane, is a kernel mechanism the stopgap does
+not offer. The BIF `erx_trace_ring:read(Source, Cursor, Max)`, with
+`Source` either `backend` or `{kernel, Cpu}`, `Cursor` either `present` or
+a 64-bit cursor and `Max` from 1 to 512, makes the call of its row and
+returns `{ok, Records, Next, Overwritten}`, each record a tuple of the
+`erx_trace_record` fields after `seq`, or `{error, unsupported}` for
+`ERX_ENOTSUP` and `{error, Status}` for any other refusal; an argument
+outside those ranges raises `badarg`, and only the system domain's calls
+succeed. `present` starts at the ring's next index, so `erx_tracer` starts
+every ring there and counts as overwritten only records lost after the
+trace began. It reads each ring of a trace whose `Spec` sets `kernel`
+every 10 ms, and again at once after a read that returned `Max` records. A generated table
+names each event and its arguments from `enum trace_event`, and a value
+the table does not hold is shown as `{unknown, Value}`.
+
+**Clocks.** Ring records carry `erx_clock_ns`, and so does the stream. An
+OTP timestamp is `erlang:monotonic_time(nanosecond)`, which ERTS derives
+from `erx_clock_ns`
+(`otp/erts/emulator/sys/erxos/sys_time.c:77-80`) through its time
+correction, which slews it but does not step it. Each runtime converts its own events
+before they leave it: the BIF `erx_trace_ring:clocks/0` reads its Erlang
+monotonic time and `erx_clock_ns` back to back in C, and the relay, or in
+the system domain `erx_tracer`, adds their difference to every timestamp
+of a batch, taking the pair again for each batch. While the wall clock
+is not set the difference is constant, since the time supervisor finds
+nothing to correct (the same file's header comment); after
+`erx_time_set_wall` ERTS's correction may slew it, by at most 1 % in
+stock OTP, so an event's time is off by at most 1 % of its distance from
+its batch's pair.
+
+**The stream.** Each entry reaches the receiving process as
+`{erx_trace, Ref, entry()}`:
+
+```erlang
+-type entry() :: #{time := non_neg_integer(),         % erx_clock_ns
+                   row := erts | backend | kernel,
+                   event := atom() | {unknown, non_neg_integer()},
+                   fields := #{atom() => term()},
+                   reporter := reporter(),             % as in record()
+                   late := boolean()}.
+```
+
+An `erts` event is OTP's message tag, with the pid, the domain and the
+message's other elements as fields (`in` and `out` carry `mfa`). A
+ring event is its `trace_event` name, with `cpu` (an integer, or
+`unknown` when the record sets `cpu_unknown`), `thread`, `space` and its
+named arguments as fields. Two events report on
+a row itself: `unsupported`, with no fields, once at the trace's start
+for a row shown as unsupported, and `overwritten`, with
+`count`, for records a ring lost before they were read. The shell's
+printer writes one line per entry, the time in seconds, the row, the
+event, each field as `name=value` and the reporter's label in brackets,
+with `late` after a late one:
+
+```
+   40.993000112 kernel unsupported [kernel]
+   41.207113520 backend irq_deliver label=1 cpu=unknown thread=6 space=1 [liberx trace]
+   41.207119044 backend wake slot=2 result=ok cpu=unknown thread=4 space=1 [liberx trace]
+   41.207131870 erts in pid=<0.91.0> domain=4 mfa=timer:sleep/1 [runtime]
+```
+
+It builds the whole line and prints `erx_text:escape_line/1` of it, so no
+field, a rendered atom from a traced domain included, can end the line or
+carry a control character.
 
 ### Code from the host
 
@@ -1698,7 +1803,7 @@ grant's rights and bounds (V3).
 | `erx:ps() -> ok` | lists every process of every domain the caller's inspect facet covers, by domain, and under a session its programs: pid or program number, registered name or program name, current function, reductions, memory and queue length, each marked with its reporter; the `ps` command emits the same fields as records |
 | `erx:inspect(Path, Options) -> {ok, record()} \| {error, Reason}` | `Options` holds `offset`, `limit` and `timeout`; `Reason` includes `scope` and `no_facet` |
 | `erx:source(Pid \| {module(), atom(), arity()}) -> ok \| {error, Reason}` | prints the source lines around a process's current location or a function's first line; `{error, unsupported}` when the module's release carries no source |
-| `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events that prints in the shell; `erx:trace_stop(Ref)` ends it |
+| `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope`; `erx:trace_stop(Ref)` ends it |
 | `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([Window tokens](#window-tokens)) |
 | `erx:console_size(Width, Height) -> ok` | system domain only |
 | `erx_code:history(DomainId, Module) -> {ok, [{Hash, Time}]} \| {error, scope}` | the hashes loaded into a domain for a module, newest first, at most 16, through the caller's inspect facet ([The code store](#the-code-store)) |
@@ -1993,7 +2098,27 @@ reference tables and field projections are covered by the drift check.
   shell; a frame trace of a conversation between two traced domains, each
   frame appearing in its receiver's trace with the lane's peer, including
   a malformed frame shown as refused; a scoped trace facet that sees no
-  frame received by a domain outside its scope.
+  frame received by a domain outside its scope. The merger's pure core,
+  in host tests over scripted sources: an `unsupported` row does not hold
+  the stream, which a seeded merger that counts it as a source fails by
+  holding every event for 100 ms; an `overwritten` count reaches the
+  stream, which a seeded merger that drops it fails. The conversion, over
+  a scripted clock pair: an OTP event lands at its `erx_clock_ns` time,
+  which a seeded sign error fails. The decoder: an event value the table
+  does not hold gives `{unknown, Value}` and a set `cpu_unknown` gives
+  `cpu=unknown`, which a decoder seeded to name the value `park`, or to
+  print the stored CPU, fails. `erx:trace/1` with 17 selections, an
+  unknown key, no selection and `kernel` false, `frames` with no
+  selection, no trace facet, and `kernel` under a scoped facet, each with
+  its refusal, which a seeded check removed fails; an unknown domain id
+  and an existing one outside the facet's scope give the same `{error,
+  scope}`, which a check seeded to answer `badarg` for the unknown id
+  fails. `erx_trace_ring:read/3` with a bignum cursor raises `badarg`,
+  which a BIF seeded to truncate it fails. A traced process scheduled in a function whose name holds an
+  escape sequence and a newline, whose line shows them escaped, which a
+  printer seeded to skip `erx_text:escape_line/1` fails. The stopgap's
+  ring and its four-CPU case are in
+  [design-stopgap.md](design-stopgap.md#verification).
 * **Host link:** session replacement; a recorded hello and its calls
   replayed after a machine reset with entropy `good`, which match no
   session; a retried call executed once; 64 calls executing when a 65th

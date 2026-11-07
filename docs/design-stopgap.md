@@ -106,7 +106,7 @@ or a request, and no thread holds two. A wake or `l4_semaphore_up` follows the u
 | thread lock | one per task | the records' free states, the reaper's list |
 | umtx lock | one per task | the umtx table |
 | park lock | one per group | a group's epochs, parked list, ready list |
-| trace lock | root | [the trace ring](#the-trace-ring) |
+| trace lock | root | the trace ring's writes; its reader takes none ([The trace ring](#the-trace-ring)) |
 
 The service takes only the trace lock, and otherwise waits only on Fiasco's calls and `sigma0`.
 
@@ -444,6 +444,7 @@ backend gives the same rows and refusals ([The hosted backend](#the-hosted-backe
 | the time page, `erx_time_set_wall` | ERTS's time, deadlines | service fills a page mapped read-only into every task: the scale of the architecture's user-readable counter, the wall offset; reading is local | correct layout | none |
 | `erx_entropy_read`, `erx_entropy_add` | ERTS's `crypto` seed, the host link | service: `rng.c`, from the counter and the manifest's seed; each reply holds 16 bytes and each request 32, so the stubs loop | `erx: entropy: quality: low, from the counter alone` in the banner; at most 256 bytes a call; `ERX_ENTROPY_CREDIT` `ERX_ENOTSUP`, since no source is trusted | in the kernel |
 | `erx_debug_log`, `erx_log_read` | `liberx`, ERTS's crash path, test tasks; the Erlang log reader | service: [The console](#the-console) | correct | in the kernel |
+| `erx_backend_trace_read`, `erx_trace_read` | `erx_trace_ring:read/3`, for `erx:trace` | local, in the root: [The trace ring](#the-trace-ring) | the root's parks, wakes, IRQ deliveries and task starts and ends, reported by `liberx trace`; a cursor past the head, or `max` of 0 or over 512, `ERX_EINVAL`; an exhausted ring `ERX_ELIMIT`; `erx_backend_trace_read` in a task `ERX_ENOTSUP`; `erx_trace_read` `ERX_ENOTSUP` everywhere, so the kernel's row is `unsupported` | `erx_trace_read` over each CPU's kernel ring; `erx_backend_trace_read` `ERX_ENOTSUP` |
 | `erx_watchdog_pet`, the crash record, `erx_machine_end(res, how)` | M3's criteria | pet: a local atomic store in the root, which alone links it (a task's ERTS fails to link, so no task can call it), and hosted `ERX_OK` with no effect. End: [The end path](#the-end-path) | correct, except a kernel hang or a stalled watchdog | in the kernel (K19, K31) |
 | a thread's fault | a test task's fault | [Faults](#faults-and-the-fault-of-the-root-task) | crash record, thread `unknown`; ends the task, or the machine for the root | to the fault gate, with the thread's identity |
 | IPC gates, messages, lanes, `erx_mem_copy`, `erx_mem_child`, paged objects, `erx_vcpu_*` | none | none | `ERX_ENOTSUP` | supported |
@@ -839,8 +840,50 @@ is owed exactly one up, and the semaphore is the one the thread's umtx waits use
 
 ### The trace ring
 
-M4's `erx:trace` needs a timeline. The root's threads write park, wake, IRQ delivery, task start and task end to one ring of the
-inspector schema's records, under the trace lock. The kernel's row reports `unsupported`. Phase 2 adds a source, not a format.
+`erx:trace` lines up ERTS's scheduling with the parks, wakes and IRQ deliveries the backend carries out
+([Tracing](design-live.md#tracing)). The root keeps one ring of 4,096 `erx_trace_record` records, the layout and events of the
+kernel's rings ([Trace ring](design-kernel.md#trace-ring)), so erXos's kernel adds a source and not a format. The ring is static in
+`liberx/backend/core/trace_ring.c`, with a head word holding the next index, and backend initialisation touches its pages, so
+no write faults. That file is linked only into the root and the hosted process; a task links a stub whose reader answers
+`ERX_ENOTSUP` and whose writes do nothing, as only the root links `erx_watchdog_pet`, so a task has no ring.
+
+| Event | Written by, and when | Arguments |
+| --- | --- | --- |
+| `park` | an executor of the root, after releasing the park lock, when **Park** joined the parked list, before `l4_semaphore_down` | `slot`, `deadline` |
+| `wake` | the same executor, when its park ends: woken, timed out, or after the owed down of a timeout that found it taken off | `slot`, `result` |
+| `irq_deliver` | the root's dispatcher, for each delivery, before its **Trigger** | `label` |
+| `space_start` | the service, when `erx_space_create` makes a task | `target` |
+| `space_end` | the service, at [task exit](#task-exit) | `target`, `status` |
+
+The executor writes both records of its own park, so its `wake` follows its `park` in the ring by program order; a park
+that returns at once writes neither. A trigger between the release of the park lock and the `park` record puts its
+`irq_deliver` before the `park` it ends; the park protocol is not affected, and the timeline shows the records in the
+order they were written. `thread` and `space` are the writer's thread record index and task index, and `target` the
+task's index, each plus one so that 0 stays "none"; indices are reused, so on this ring they name a thread or task only
+within its life. `cpu` is the one CPU the writer's affinity mask names, where Fiasco must place it
+(`scheduler.cpp:96-103`); with any other mask the backend does not know the CPU and the record sets `cpu_unknown`. Only
+the root's threads write, so a test task's parks are absent.
+
+**Writing.** Under the trace lock the writer reads `erx_clock_ns`, takes index `i` from the head, and follows
+[Sequence-counted records](design-kernel.md#sequence-counted-records): it stores `seq` as `2i + 1`, each field with release
+order, then `seq` as `2i + 2` and the head as `i + 1`, each with release order. The clock is read under the lock, so the
+ring is in time order. A writer whose `2i + 2` would pass the sequence's terminal value writes nothing, and the ring is
+exhausted.
+
+**Reading.** `erx_backend_trace_read(cursor, records, max, result)` takes no lock, so no writer waits for a reader. It reads
+the head with acquire order. A cursor of `UINT64_MAX` copies nothing and returns the head as the next cursor, so a trace
+starts at the present; any other cursor past the head, or `max` of 0 or over 512, is `ERX_EINVAL`, and a cursor at the
+head of an exhausted ring is `ERX_ELIMIT`. A cursor more than 4,096 below the head moves up to the head less 4,096, and
+the records it skips count as overwritten. For each index `i` from there to the head, at most `max`, it loads `seq`,
+each field and `seq` again, all with acquire order, and keeps the copy only if both loads are `2i + 2`, counting any
+other as overwritten. It writes only within `records`, copies the event as stored, and returns the next cursor, the
+number kept and the number overwritten. Its caller is the BIF `erx_trace_ring:read/3` ([Tracing](design-live.md#tracing)).
+The hosted backend keeps the same ring and writes the parks, wakes and deliveries it carries out, each with
+`cpu_unknown`.
+
+**Reporters.** The ring's records carry the stopgap reporter `liberx_trace`, declared in `abi/inspection.txt` as standing in
+for the kernel and labelled `liberx trace`. `erx_trace_read`, the kernel's call, is refused, so the trace's `kernel` row and
+the inspector's `[kernel, trace]` are `unsupported`, reported by `kernel`.
 
 ## IPC gates and where transfer fits
 
@@ -1123,7 +1166,7 @@ Not in Phase 1, since they come with toybox and Track S's programs: executables 
 * When the watchdog ends the machine, log lines the reader had not taken are lost.
 * The crash frame may interleave with a console driver that is writing, and a kernel `WARN` or panic line may interleave at any time.
 * Any littlefs block error, deadline or driver restart makes the volume unavailable until reboot.
-* A test task's parks and wakes are absent from `erx:trace`.
+* A test task's parks and wakes are absent from `erx:trace`, and the trace ring's `thread`, `space` and `target` are reused indices, not object ids.
 * `erx_space_create`'s `parent`, `fault` and `label`, and all of `erx_group_configure` but the CPU set, are accepted and ignored.
 * A kernel hang or a stalled watchdog thread is caught only by the harness's deadline.
 
@@ -1163,7 +1206,8 @@ the tests.
 | **A task's write**, `native_task`'s `write` case: a task writes tab, newline, an escape sequence and every byte value through `erx_fiasco_task_write`, past two splits of `utcb_bytes_max`, and the suite finds exactly those bytes in the serial log, with Fiasco's carriage return ahead of each newline; lengths past the UTCB and an index past the thread table are refused. The `log` case holds `erx_debug_log` to its escape and its refusals. A task's link refuses a section `task.ld` does not name, in `test/host/libc_test_test.rb` | the write sent through `erx_debug_log`: the judge finds no such bytes |
 | **Task fault**: the record appears, and the machine continues | the fault ends the machine: the next line is missing |
 | **Interrupt**, the `native_irq` suite: a UART receive and a software object wake a parked executor, across CPUs at four; a trigger between the empty check and the park returns at once; `erx_group_take_ready` returns each label once and the oldest first; a timed park ends at its deadline on the time page's clock; ack lets the next character through, which the harness types through a FIFO when the transcript asks. Host: the ready list and flags in the Park row's model, and the page's scale and the wait against exact arithmetic in `test/host/fiasco_time_test.rb` | ack removed: the second character never arrives. Listed flag ignored: the status page's `ready` shows it twice. The interlock removed: the trigger before the park is lost. The dispatcher's trigger removed: a parked executor's deadline fires. The hooked trigger removed: the case's park reaches its deadline |
-| **Trace ring**: `erx:trace` shows a park, a wake and an IRQ delivery in order; the kernel's row `unsupported` | the dispatcher's write removed |
+| **Trace ring**, `test/host/trace_ring_test.rb`: records read back field by field; a cursor of `UINT64_MAX` returns the head and counts nothing; a reader lapped by more than 4,096 records counts exactly those skipped; a record a test hook rewrites between the reader's two `seq` loads is counted overwritten, not kept; a cursor past the head, `max` 0 and `max` 513 each `ERX_EINVAL`; a ring whose head a test hook sets to the last index writes it, then nothing, and its reader answers `ERX_ELIMIT`; under TSan, four writers and a reader, each kept record whole, its fields derived from its index; a task's call `ERX_ENOTSUP` | the second `seq` load removed: the hooked record is kept. The head start returning 0: the first read counts the ring as overwritten. The skip counted one short: the lapped count differs. The cursor check removed: the past-the-head case copies stale slots. The `max` bound removed: AddressSanitizer reports the write past `records`. The terminal check removed: the hooked ring wraps its count to 0 and the reader keeps nothing. The odd store moved after the fields: a kept record whose fields do not match its index. The ring linked into a task in place of the stub: the task's call succeeds |
+| **Trace on four CPUs**, the QEMU gate's `native_trace` suite: `erx:trace(#{select => [Driver], kernel => true})` over the console's driver, then a typed character, shows the `irq_deliver`, the parked executor's `wake` and the driver's `in` in that order, with the `wake` after its `park` for the same slot; a test task started and stopped shows `space_start` and `space_end` with the same `target` and the task's status; the kernel's row is one `unsupported` line reported by `kernel`; the suite never sets the wall clock, so the clock offset is constant | the dispatcher's write removed: no `irq_deliver`. The clock offset added with the wrong sign: the `in` comes out of order. `erx_trace_read` answering `ERX_OK` with no records: the `unsupported` line is missing, which shows the line comes from the call's answer |
 | **Watchdog**, the `native_watchdog` suite: pets hold the machine up past `erx.watchdog=1,2,2`; once they stop, a spinning first thread does not keep the machine from ending, with cause and time since the pet in the record | the end skipped: the guest's own line reports it. Pets ignored: the machine ends before the guest's line |
 | **A semaphore's wake across CPUs**, `tools/lib/erx/native_semaphore_race.rb` under `make check-native-seeds`, under HVF at 4 CPUs as every seed runs, on a test kernel whose up holds itself between the dequeue and the activation until the waiter is queued again or half a second passes: at least three raced downs each, followed by an IPC wait that lasts its whole length and by a down that times out; too few raced downs fail the case | the bit's wait removed: the IPC wait ends early and the second down reports an up that never came |
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |

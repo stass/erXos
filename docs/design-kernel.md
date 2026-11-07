@@ -7576,19 +7576,77 @@ Each CPU has a ring of 4,096 records of 64 bytes:
 typedef struct erx_trace_record {	/* a sequence-counted record */
 	_Atomic uint64_t seq;		/* 2 * index + 1 while written, then 2 * index + 2 */
 	_Atomic uint64_t time_ns;	/* monotonic */
-	_Atomic uint32_t event;		/* ERX_TR_*, from the ABI file */
+	_Atomic uint32_t event;		/* enum trace_event */
 	_Atomic uint16_t cpu;
-	_Atomic uint16_t flags;
+	_Atomic uint16_t flags;		/* trace_record_flags */
 	_Atomic uint64_t thread;	/* object id of the running thread, or 0 */
 	_Atomic uint64_t space;		/* object id of its space, or 0 */
 	_Atomic uint64_t arg[3];
 } erx_trace_record_t;
 ```
 
+`abi/kernel.txt` declares the record, its events and their arguments, and
+the generator gives the C type above, the readers and the name tables:
+
+```
+# A trace record ("Trace ring"): one event, written by its ring's one
+# writer as a sequence-counted record. event holds a trace_event and
+# flags trace_record_flags; a shared field is a plain integer, so they
+# are named here. thread and space are 0 when there is none. An args
+# line names and types the arg words an event uses, in order; the rest
+# are 0.
+enum trace_event u32
+  value park 1
+  value wake 2
+  value irq_deliver 3
+  value space_start 4
+  value space_end 5
+  args park slot:u64 deadline:u64
+  args wake slot:u64 result:status
+  args irq_deliver label:u64
+  args space_start target:u64
+  args space_end target:u64 status:i64
+flags trace_record_flags u16
+  bit cpu_unknown 0
+layout erx_trace_record shared 8 64
+  field seq u64 0
+  field time_ns u64 8
+  field event u32 16
+  field cpu u16 20
+  field flags u16 22
+  field thread u64 24
+  field space u64 32
+  field arg u64 40 count 3
+  atomic seq load acquire store release
+  writer seq trace_writer
+  owner seq kernel all
+  visibility seq internal
+  sequence seq terminal 0xffffffffffffffff exhaustion @limit recovery none
+```
+
+Every other field has `atomic NAME load acquire store release`, `writer NAME
+trace_writer`, `owner NAME kernel all` and `visibility NAME release` (`arg[]`
+for the array), as [Sequence-counted records](#sequence-counted-records)
+requires. `args` is the one member line `enum` gains. Each argument is
+`NAME:TYPE`, the type `u64`, `i64` or `status`, which decodes to the status's
+name and an undeclared value to unknown. The generator refuses an `args` line
+that names no member of its enum, repeats a member, has more than three
+arguments, or names an argument like a field of the record, and emits each
+event's name and typed arguments into the C, Erlang and Ruby tables; its
+tests give it each refused form, and a generator seeded to accept one
+fails them. `wake`'s
+`result` is the park's status, `ERX_OK` or `ERX_ETIMEDOUT`; `target` is the
+space started or ended, and `status` its exit status. `cpu_unknown` marks a
+record whose writer cannot name its CPU; the kernel always can and never sets
+it. These five events are the ones both the kernel's rings and the stopgap's
+record ([design-stopgap.md](design-stopgap.md#the-trace-ring)); each other
+kernel event extends the enum from 6 with its own `args` line.
+
 The kernel records dispatches and preemptions, yield requests and grace
 overruns, throttles and refills, parks and wakes, IPC sends, receives and
-replies, IRQ deliveries, upcalls, releases, faults, interrupts, budget
-refusals, asynchronous errors and panics. A CPU writes only its own ring,
+replies, IRQ deliveries, upcalls, releases, space starts and ends, faults,
+interrupts, budget refusals, asynchronous errors and panics. A CPU writes
+only its own ring,
 with interrupts masked, so writing never blocks, never allocates and never
 takes a lock. Each record is a sequence-counted record ([Sequence-counted
 records](#sequence-counted-records)), and the CPU is its one writer: it
@@ -7600,7 +7658,8 @@ names the index it expected, and counts any other record as overwritten.
 resource, copies records from the cursor that way into the caller's
 memory window ([Arguments and results](#arguments-and-results)) and
 returns the next cursor and how many were overwritten before they were
-read; the tracer merges the rings
+read. A cursor of `UINT64_MAX` copies nothing and returns the ring's next
+index, so a tracer starts at the present; the tracer merges the rings
 by timestamp ([design-live.md](design-live.md#tracing)).
 Before doubling the cursor would overflow the 64-bit sequence encoding,
 the CPU stops publishing trace records and reports trace exhaustion.

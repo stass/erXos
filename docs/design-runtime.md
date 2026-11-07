@@ -2947,9 +2947,12 @@ statistics, allocator and atom-table usage, each connection's frames sent,
 taken, refused and unheld and its busy time, each program port's state,
 each device's posted and completed buffers and interrupts, and the last
 crash dump ([design-live.md](design-live.md#inspection)). The adapter
-emits trace events for parks, wakes, capacity changes, yield requests
-honoured, refusals, connection closes and unheld frames; the kernel trace ring
-shows the executors' dispatches, so one viewer lines both up by time.
+emits trace events for capacity changes, yield requests honoured,
+refusals, connection closes and unheld frames. Parks and wakes are
+recorded by the layer that carries them out: the kernel trace ring, which
+also shows the executors' dispatches, or on the stopgap the backend's
+ring, where the adapter emits none of its own. One viewer lines them up
+by time ([design-live.md](design-live.md#tracing)).
 Hosted mode adds `lldb` and the sanitizers.
 
 ## Security
