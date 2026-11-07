@@ -21,7 +21,9 @@ module Erx
   module NativeCrash
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_crash/guest.c'].freeze
-    IMAGE_FIRST = 0x44000000
+    # QEMU virt's RAM starts here, and the root's image lies above it wherever
+    # root.ld places it, so a fault in the root's code has a pc at or above it.
+    RAM_FIRST = 0x4000_0000
     THREAD_UNKNOWN = (1 << 64) - 1
     ROOT_TASK = 0
     # The fault word's low bits: bit 1 says the access was a write.
@@ -63,7 +65,7 @@ module Erx
         'kind' => fault.fetch('kind') == kase.kind,
         'address' => kase.kind != MEMORY || fault.fetch('addr') == expected,
         'access' => kase.kind != MEMORY || (fault.fetch('cause') & WRITE_BIT != 0) == kase.write,
-        'pc' => fault.fetch('pc') >= IMAGE_FIRST,
+        'pc' => fault.fetch('pc') >= RAM_FIRST,
         'thread' => fault.fetch('thread') == THREAD_UNKNOWN,
         'space' => fault.fetch('space') == ROOT_TASK
       }.reject { |_name, agrees| agrees }.keys

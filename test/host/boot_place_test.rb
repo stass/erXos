@@ -10,6 +10,7 @@ require_relative '../fixtures/first_stage_fixture'
 require_relative '../fixtures/pack_fixture'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/boot_file'
+require_relative '../../tools/lib/erx/native_root'
 require_relative '../../tools/lib/erx/runner'
 
 # erx_boot_load_plan and the handoff record, from literal bytes. kernel/core/boot_place.c
@@ -19,6 +20,11 @@ class BootPlaceTest < Minitest::Test
   MEMORY = 0x4000_0000
   MEMORY_SIZE = 0x2000_0000
   MIB2 = 0x20_0000
+  # The archive a root linked by root.ld must clear on a 256 MiB machine: root.ld
+  # promises about 187 MiB, and this leaves slack for the first stage and for the
+  # device tree QEMU puts behind a long file, on its 2 MiB boundary.
+  ARCHIVE_ROOM = 176 * 1024 * 1024
+  ROOT_SCRIPT = File.expand_path('../../liberx/backend/fiasco/root.ld', __dir__)
   PT_LOAD = 1
   PT_DYNAMIC = 2
   PT_KIP = 0x10
@@ -126,6 +132,28 @@ class BootPlaceTest < Minitest::Test
     output = plan(archive(standard.merge('boot/stopgap-root' => fixed_root)))
     assert_match(/^root 44000000 2000 44000000$/, output)
     assert_equal 3, output.scan(/^copy /).size
+  end
+
+  # A program linked as the system's root is, through root.ld and the root's link flags.
+  def linked_root
+    compiler, linker = ENV.values_at('ERX_CLANG', 'ERX_LLD')
+    skip('set ERX_CLANG and ERX_LLD') if compiler.to_s.empty? || linker.to_s.empty?
+
+    source, object, program = %w[root.c root.o root.elf].map { |name| File.join(@directory, name) }
+    File.write(source, "void _start(void) { for (;;) ; }\n")
+    @runner.run([compiler, '--target=aarch64-none-elf', '-O1', '-ffreestanding', '-c', source, '-o', object],
+                name: 'compile-placed-root', deadline: 60)
+    @runner.run([linker, '-T', ROOT_SCRIPT, *Erx::NativeRoot::ROOT_LINK_FLAGS, '-o', program, object],
+                name: 'link-placed-root', deadline: 60)
+    File.binread(program)
+  end
+
+  def test_a_root_linked_by_root_ld_clears_a_176_mib_archive_on_256_mib
+    filler = "\0".b * ARCHIVE_ROOM
+    output = plan(archive(standard.merge('boot/stopgap-root' => linked_root, 'system/filler' => filler)),
+                  memory_size: 0x1000_0000)
+    assert_match(/^root \h+ \h+ \h+$/, output)
+    assert_operator output[/^archive \h+ (\h+)$/, 1].to_i(16), :>, ARCHIVE_ROOM
   end
 
   def test_a_reservation_moves_the_kernel_to_the_next_unit

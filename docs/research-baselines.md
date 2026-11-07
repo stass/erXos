@@ -77,6 +77,11 @@ All runs used `-M virt-11.1,gic-version=3 -m 512M -smp 1`.
   directly after it: a 64 MiB initrd gave `linux,initrd-start` `0x48000000`,
   `linux,initrd-end` `0x4c000000` and `x0` = `0x4c000000`; a 200 MiB initrd
   ended at `0x54800000`. The kernel must read `x0`, never assume an address.
+* A single file longer than 126 MiB (checked 2026-11-06, macOS 27.0.1 on
+  Apple Silicon, QEMU 11.1.3, HVF, 2 GiB, one CPU): a 165,613,568-byte erXos
+  test image loaded at `0x40200000` ends at `0x49ff1000`, and bootstrap's
+  region dump shows the device tree at `0x4a000000`, the next 2 MiB boundary
+  behind the file.
 * Under the ELF path QEMU passes nothing in `x0` and writes the 1 MiB device
   tree at the RAM base only when no ELF segment overlaps it. An ELF that
   overlaps the first MiB of RAM boots with no device tree at all, silently.

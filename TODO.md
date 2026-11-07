@@ -107,8 +107,9 @@ it; git history is the record of completed work.
 * [Low] stopgap, the crash suite's end-path row: `erx_machine_end` runs only with
   `ERX_END_OFF`; under `-no-reboot` both ends exit QEMU, so the suite cannot tell
   them apart, and the refusal of a bad `how` has no case.
-* [Low] tooling, `tools/lib/erx/native_crash.rb`: the pc check has no upper bound
-  and `test/guest/native_threads`'s `QUEUE_SETTLE_NS` trusts a 50 ms sleep to order
+* [Low] tooling, `tools/lib/erx/native_crash.rb`: the pc check asks only that the pc is at or
+  above RAM's start, with no upper bound and nothing tying it to the crash root's image,
+  whose range the guest could print beside its address; and `test/guest/native_threads`'s `QUEUE_SETTLE_NS` trusts a 50 ms sleep to order
   waiters, which a starved vCPU can break.
 * [Medium] stopgap, `liberx/backend/fiasco/service.c`: a root thread's handle is
   its index, with no generation, so a stale handle names the index's next

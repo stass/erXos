@@ -53,8 +53,10 @@ module Erx
     # suites, their data and stock's applications, is 55 MB for the compiler group,
     # near the 64 MiB the development layout leaves bootstrap for it. A 2 GiB
     # machine, whose Fiasco keeps about 123 MiB for kernel memory where the
-    # development machine's keeps 32 MiB, gives the system domain 1 GiB more and
-    # leaves the archive 480 MiB; nothing else of the manifest changes.
+    # development machine's keeps 32 MiB, gives the system domain 1 GiB more;
+    # nothing else of the manifest changes. The manifest's arithmetic would leave
+    # the archive 480 MiB; the root's fixed place holds it to about 187 MiB
+    # (liberx/backend/fiasco/root.ld).
     MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024)
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'

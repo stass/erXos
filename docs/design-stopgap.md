@@ -353,7 +353,8 @@ A test image may also name a larger machine (`ProductionImage::Machine`): its RA
 its `fiasco_reserve`, which grows with RAM because Fiasco sizes its kernel memory
 as 6% of it, and a growth added to both `root_memory` and `system_baseline` of the
 development manifest; the rest of the added RAM widens the archive's room
-below RAM. No other line of the manifest changes, and the manifest check proves the
+below RAM, up to the root's fixed place, which holds the archive to about 187 MiB
+(`liberx/backend/fiasco/root.ld` gives the arithmetic). No other line of the manifest changes, and the manifest check proves the
 grown manifest against the platform record with that RAM and reserve as it proves
 the development one. The production image always boots on the development machine,
 which is the platform record's own 512 MiB and 64 MiB. `OracleQemu` boots on 2 GiB

@@ -302,12 +302,14 @@ QEMU's `-kernel` loads a file with an arm64 Image header whose
 address in `x0`; with no `-initrd`, the device tree sits at RAM base
 plus the smaller of half the RAM and 128 MiB, `0x48000000` from 256 MiB
 of RAM up ([measured](research-baselines.md#boot-conventions)), so a
-single file up to 126 MiB long lies below it at those sizes. Where QEMU
-puts the device tree for a longer file was not measured, so the harness
-refuses a single file that does not end below the device tree's measured
-place for the RAM it gives the guest. In the
+single file up to 126 MiB long lies below it at those sizes. For a longer
+file QEMU puts the device tree at the next 2 MiB boundary behind the file
+([measured](research-baselines.md#boot-conventions)). The stand-in root's
+fixed place, 192 MiB into RAM (`liberx/backend/fiasco/root.ld` gives the
+arithmetic), bounds the single file to about 188 MiB. In the
 two-file form, for debugging, `-initrd` places the boot image at
-`0x48000000` with the device tree directly after it. Either way the
+`0x48000000` with the device tree directly after it, so the root's place
+bounds that archive to about 63 MiB. Either way the
 kernel reads every address and assumes none. U-Boot's `booti`
 implements the same protocol. The Raspberry Pi firmware loads the single
 file by the same protocol (`kernel8.img` on the Pi 4, `kernel_2712.img`
