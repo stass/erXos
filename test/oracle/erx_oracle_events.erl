@@ -15,7 +15,9 @@ suite's own unterminated print. The host skips and counts a line whose
 frame is wrong, and a gap in the sequence numbers shows it lost an event
 whatever happened to its line. The bytes go through `erlang:display_string/2`, one
 write per event, not through the io server, so no encoding of the output
-device can refuse them.
+device can refuse them. A write to the file that is refused ends the file,
+not the run: the frames go on, after a line `erx-oracle-note event report
+lost: Reason`.
 """.
 -behaviour(gen_event).
 
@@ -24,8 +26,9 @@ device can refuse them.
 -export([init/1, handle_event/2, handle_call/2, handle_info/2,
          terminate/2, code_change/3]).
 
-%% The open event report and the sequence number of the next event.
--type state() :: {file:io_device(), non_neg_integer()}.
+%% The open event report, or `lost` once a write to it was refused, and
+%% the sequence number of the next event.
+-type state() :: {file:io_device() | lost, non_neg_integer()}.
 
 -doc "Opens the report path supplied by the host oracle command.".
 -spec init(term()) -> {ok, state()} | {error, term()}.
@@ -41,15 +44,36 @@ init(_Arguments) ->
 
 -doc "Records supported Common Test events without changing their result.".
 -spec handle_event(term(), state()) -> {ok, state()}.
-handle_event(Event, {Device, Sequence}) ->
+handle_event(Event, {Report, Sequence}) ->
     case event_record(Event) of
-        ignore -> {ok, {Device, Sequence}};
+        ignore -> {ok, {Report, Sequence}};
         Record ->
             Bytes = iolist_to_binary(json:encode(Record)),
             true = byte_size(Bytes) < 32768,
-            ok = file:write(Device, [Bytes, $\n]),
+            Next = append(Report, Bytes),
             true = erlang:display_string(stdout, frame(Sequence, Bytes)),
-            {ok, {Device, Sequence + 1}}
+            {ok, {Next, Sequence + 1}}
+    end.
+
+%% Appends one event to the report, or gives the report up when the write
+%% is refused. On erXos the report shares /tmp with the suites under test,
+%% and a suite may fill it (sendfile_SUITE writes 510 MiB): the run goes on,
+%% and the host, which judges erXos's side by the frames on standard output
+%% only, still gets every event. Nothing is written to the file after the
+%% refused event, so it never holds test_done, the last event, and its
+%% reader (OracleResults.read) can only find the run incomplete. The note on
+%% standard output gives the reason, for the run's raw log.
+-spec append(file:io_device() | lost, binary()) -> file:io_device() | lost.
+append(lost, _Bytes) ->
+    lost;
+append(Device, Bytes) ->
+    case file:write(Device, [Bytes, $\n]) of
+        ok -> Device;
+        {error, Reason} ->
+            _ = file:close(Device),
+            Note = io_lib:format("~nerx-oracle-note event report lost: ~0p~n", [Reason]),
+            true = erlang:display_string(stdout, iolist_to_binary(Note)),
+            lost
     end.
 
 %% One event on standard output. The prefix is the twin of EVENT_PREFIX in
@@ -76,6 +100,8 @@ handle_info(_Message, State) ->
 
 -doc "Closes the event report when Common Test removes the handler.".
 -spec terminate(term(), state()) -> ok | {error, term()}.
+terminate(_Reason, {lost, _Sequence}) ->
+    ok;
 terminate(_Reason, {Device, _Sequence}) ->
     file:close(Device).
 

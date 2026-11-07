@@ -184,18 +184,6 @@ it; git history is the record of completed work.
   `stdlib_SUITE_data` and two doctest guides. A code generation bug that shows only under `no_opt` or `r26` passes
   the oracle. Building each group's suite directory from its own `release_tests_spec` would run the group as stock
   defines it, and replace `RELEASED_HEADERS`.
-* [Medium] `test/oracle/erx_ct_oracle.erl`, `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): a whole
-  group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
-  `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
-  in the 160 MiB cap without `enospc`. The emulator group, run in three parts, fits too; a whole run of it has not been
-  measured. The kernel group cannot run whole on erXos: in one runtime it fills `/tmp` in `sendfile_SUITE` (what filled it
-  is not measured), and then `erx_oracle_events` crashes on `enospc`, Common
-  Test terminates and the suites after `sendfile_SUITE` never run (1029 cases; erxos-history
-  `oracle-hosted/2026-11-06-kernel-boot`). Copying each suite's `_data` on entry and deleting it and its `priv_dir`
-  on exit (a Common Test hook in the reporter, on both sides) would bound it by the largest suite instead.
-  in the 160 MiB cap without `enospc`, on the hosted runtime and on QEMU. The emulator group, run in three parts, fits too; a whole run of it has not been
-  measured. Kernel's `file_SUITE` bench and `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
-  reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
   case, trace why `dbg` is not found, and fix it or reword the row with its cause.
@@ -494,16 +482,24 @@ it; git history is the record of completed work.
   report when no toolchain is found. (5) `leftovers` reads the flavour out of `step.argv`;
   store it on `Step`. `ERX_SOURCE_CACHE` names `build/third_party` but setup reads the sibling
   `build/downloads` (`archive_directory`); name the directory actually read.
-* [Medium] `test/oracle/erx_oracle_events.erl`, `test/oracle/common_test/test_server_ctrl.erl` (`start_minor_log_file`),
-  `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): the oracle reporter's event file (`events.jsonl`) and the
-  controller's logs share `/tmp` with the suites under test, so a suite that fills `/tmp` ends the reporting of the whole
-  run: the run dies when the reporter's own write is the one refused. `/tmp` gives back the space of deleted files; the
-  fill is real use: kernel's `file_SUITE` bench group writes a 256 MiB scratch file (`large_writes`, deleted only in
-  `end_per_group`) and `sendfile_SUITE`'s `init_per_suite` writes one file in 51 writes of 10 MiB (510 MiB) without checking the results.
-  Fix: put the reporter's output outside the suites' file system, or make the reporter survive `enospc` and report the
-  loss. Until then the kernel group's erXos side runs one runtime per suite, and those two suites cannot finish within the
-  cap: the erXos run never reaches sendfile_SUITE's last 7 cases (`t_sendfile_recvafter_remoteclose` to `end_per_suite`),
-  which the kernel table therefore cannot classify.
+* [Medium] `test/oracle/common_test/test_server_ctrl.erl` (`start_minor_log_file1`),
+  `config/manifest/qemu-virt-development.txt` (`tmp 167772160`): Common Test's own logs share `/tmp` with the suites
+  under test, so a suite that fills `/tmp` ends its own job and stops the suites after it. The kernel group therefore
+  cannot run whole on erXos. `sendfile_SUITE`'s `init_per_suite` writes one file in 51 writes of 10 MiB (510 MiB) into
+  its `priv_dir` without checking the results. The writes stop at the cap: the hook's note reads `erx-oracle-note
+  sendfile_SUITE priv_dir 166133770`. Common Test then fails to write case 7's log (`io:put_chars` `badarg`, cause
+  `{device,enospc}`, in `start_minor_log_file1`), and the suite job exits. So `end_per_suite` and `post_end_per_suite`
+  never run, and every later suite is killed with `cannot_create_log_dir` `enospc` until the run's end deletes the
+  file. Hosted run of `sendfile_SUITE`, `seq_trace_SUITE` and `standard_error_SUITE`: erxos-history
+  `oracle-hosted/2026-11-06-kernel-tmp-cleanup`. The event reporter survives `enospc`, and `erx_ct_oracle` deletes each
+  suite's `priv_dir` when the suite ends, so only a suite that fills the cap by itself stops a run. `file_SUITE`'s bench
+  group also writes 256 MiB (`large_writes`, deleted in `end_per_group`), but it has not stopped a run. The fix is the
+  owner's choice:
+  * give Common Test's logs space the suites cannot take, for example a second tree beside `/tmp`;
+  * raise the cap above the largest suite's use (about 640 MiB), with the system baseline grown to match;
+  * or make the oracle's `test_server_ctrl` drop a log it cannot write. That is an open-ended list of write sites: 12
+    direct `io:put_chars` calls in `test_server_ctrl` alone, plus `ct_logs`.
+  Until then, the kernel group on erXos runs without `sendfile_SUITE`, and the 14 rows of that suite stay unclassified.
 * [Medium] `tools/lib/erx/oracle_qemu.rb` (`command_line`): the guest's runtime still gets `-pa /lib/<app>/ebin`
   for the stock applications, which its code server also lists from `/lib`, as the hosted runtime's did. Check
   `code:get_path()` on the guest and drop the `-pa` words (`OracleHosted.erxos_command` is the model), and its
