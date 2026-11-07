@@ -53,7 +53,8 @@ records its table holds, as a killed program loses its stdio buffer.
 No command turns a record into bytes: read/1 and read_record/1 give a
 record with the order of its fields, which a stage passes on with emit/3,
 so the one place a record becomes text is emit/3, which renders it for
-the stream it meets, escaped toward the terminal.
+the stream it meets: a line of data as its bytes, any other record
+escaped toward the terminal.
 """.
 
 -export([emit/2, emit/3, say/2, report/3, read/1, read_record/1, finish/0,
@@ -137,10 +138,10 @@ read(Ctx) ->
 
 -doc """
 The next record of standard input with the order of its fields, or `eof`.
-A line, from a file or a program, becomes a record of one field, `line`,
-its text without the newline as data, `{data, {ok, Bytes}}`, which the
-terminal and a file show unchanged but for the terminal's escape of
-controls (erx_render).
+A line of bytes, from a file, a program or another command, becomes a
+record of one field, `line`, its text without the newline as data,
+`{data, {ok, Bytes}}`, which the terminal and a file show as its bytes
+(erx_render).
 """.
 -spec read_record(ctx()) -> {[atom()], rec()} | eof.
 read_record(Ctx) ->

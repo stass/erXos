@@ -458,16 +458,17 @@ one holder and the session knows them all
 where a stage meets something that reads bytes:
 
 * at the terminal, records render as aligned columns under a header line
-  of the field names, whose names and values `erx_render` writes with the
+  of the field names, whose names and attributed values `erx_render` writes with the
   line escape and measures as escaped. A table's shape is the fields its
   first record holds, and a record of another shape starts a new table. A
   table of one column has no header and nothing to align, so it prints
   each value as it comes: lines read into `line` records, `ls` and
   `count` print one value a line with no header. A record that is one
-  line of data, below, shows as the data: its tab and
-  backslash unchanged, and only its C0 and C1 controls other than tab,
-  DEL, bidirectional overrides, invisible format characters and invalid
-  UTF-8 escaped, as the line escape writes them; every other value, a
+  line of data, below, is written as its bytes and a newline, as `cat f`
+  writes the file and FreeBSD's `sort f` its lines: the line is the
+  output of the file's writer or of a program, not text a reporter
+  names, and a program's output reaches a tty unchanged
+  ([The tty](design-live.md#the-tty)); every other value, a
   `ps` field or an `ls` name, is text attributed to its source and keeps
   the line escape, so a tab of it shows as `\t`. A table
   of more columns holds its first
@@ -493,12 +494,15 @@ where a stage meets something that reads bytes:
   Only a record of one data value holding no newline, as every line read
   is, is a line of data; any other record, data beside other fields
   among them, renders as attributed text, so data never splits a row or
-  a field. Whatever a command marks as data, its controls are still
-  escaped at the terminal, so the mark changes only how tab and
-  backslash print, never what reaches the terminal raw. With its backslash unchanged, a line holding
-  the text `\x1b` shows as one holding ESC does: the data escape is not
-  reversible, and the terminal's view of a line is no evidence of its
-  bytes.
+  a field. A line is data because a command read it as bytes, from a
+  file, a program or another command's bytes, so what a record stage
+  shows of it at the terminal is what `cat` of the same bytes writes
+  there. A record written toward a file or a program is bytes from then
+  on: read back, its lines are data, so a `ps` name holding ESC, written
+  by `ps > f`, reaches the terminal through `cat f | sort` as through
+  `cat f`. The mark grants a command nothing: an Erlang command is
+  trusted session code and can write bytes to the terminal as any
+  program can.
 
 ### Starting programs
 
@@ -776,7 +780,12 @@ for its parser and for `where`'s predicates. Each program it starts holds
 only the descriptors, grants and rights its starter handed it, starts only
 what `/bin` lists and only with the right to start commands, and reaches
 the terminal only through the session's tty, which does not filter it, as
-on UNIX ([design-programs.md](design-programs.md#security)). A command acts only
+on UNIX ([design-programs.md](design-programs.md#security)). A line an
+Erlang command reads as bytes, from a file, a program or another
+command's bytes, reaches the terminal the same way, through `sort` or
+`where` as through `cat`; only text a command attributes to a source,
+such as a `ps` or an `ls` name in a record, passes through the line
+escape (V9 of [design-live.md](design-live.md#invariants)). A command acts only
 through what it was handed, and one with less than the session's runs in
 a domain of its own (SH1). An Erlang command run in the session's domain is
 trusted session code: the context is its interface, not a boundary.

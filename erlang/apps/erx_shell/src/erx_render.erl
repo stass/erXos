@@ -16,11 +16,11 @@ program without its newline, as erx_cmd:read_record/1 makes it. Data is
 the shell's own value, not the inspector's: `data` stands where a
 reporter would, so `where`, `sort` and value/1 take it as any `ok` value,
 and it never reaches the inspector. A record that is a line of data, one
-data value holding no newline, data_line/1, keeps its tab and backslash,
-toward a file exactly as read and toward the terminal with only its
-controls escaped; anything else, a data value beside other fields among
-it, renders as attributed text, so data never splits a field or a row.
-Whoever marks a value as data, its controls are escaped at the terminal.
+data value holding no newline, data_line/1, is written as its bytes and a
+newline, toward a file and toward the terminal alike, as `cat f` writes
+it and as FreeBSD's `sort f` does; anything else, a data value beside
+other fields or holding a newline, renders as attributed text, so data
+never splits a field or a row.
 
 Toward bytes, a file or a pipe, a record becomes one line, line/2, of the
 fields it holds, in the order given, separated by tabs, each value with
@@ -33,14 +33,9 @@ them.
 
 Toward the terminal, records render as a table: aligned columns under a
 header line of the field names, every value and name passed through the
-line escape, escape/1, since a record's text is attributed to its source,
-except a line of data, which passes through the data escape: its tab
-and backslash unchanged, every other control, DEL, byte of invalid UTF-8
-and unsafe code point escaped as the line escape writes it, so no
-control of a file reaches the terminal raw, where `cat f` would write it
-raw. With its backslash unchanged, a line holding the text `\x1b` shows
-as one holding ESC does: the data escape is not reversible, and what the
-terminal shows of a line is no evidence of its bytes.
+line escape, escape/1, since a record's text is attributed to its source.
+A line of data is not: it is a program's own output, which reaches the
+terminal unchanged as on UNIX, so its bytes are written as they are.
 A table's shape is the fields its first record holds, and a record of
 another shape starts a new table. A table of one column has no header
 and nothing to align, so it prints each value as it comes: lines read
@@ -75,8 +70,10 @@ terminal and flushes it before any other write there.
                  | {holding, Shape :: [atom()], Rows :: [[cell()]],
                     Count :: pos_integer(), Bytes :: non_neg_integer()}
                  | {printing, Shape :: [atom()], [column()]}.
-%% A value's escaped text and what kind of value it is, or a field's name.
--type cell() :: {binary(), integer | text | status | name}.
+%% A cell's text and kind: a value escaped as attributed text (`integer`,
+%% `text`, `status`), a field's escaped name (`name`), or a line of data's
+%% bytes unchanged (`data`).
+-type cell() :: {binary(), integer | text | status | name | data}.
 -type column() :: {Width :: non_neg_integer(), left | right}.
 
 -define(HELD_ROWS, 256).
@@ -185,8 +182,12 @@ column(Cells) ->
             end,
     {lists:max([width(Text) || {Text, _} <- Cells]), Align}.
 
-%% A row's cells joined by the gap, each padded to its column; the last is
-%% not padded on its right, so no line ends in spaces.
+%% A row of one cell, the only row a line of data makes, is its text and a
+%% newline, never measured or padded, so a data cell's bytes need not be
+%% UTF-8. A wider row's cells are joined by the gap, each padded to its
+%% column; the last is not padded on its right, so no line ends in spaces.
+row([{Text, _Kind}], _Columns) ->
+    [Text, $\n];
 row(Cells, Columns) ->
     Last = length(Cells),
     Padded = [pad(Text, Column, Index =:= Last)
@@ -206,9 +207,11 @@ width(Text) -> string:length(Text).
 
 row_bytes(Row) -> lists:sum([byte_size(Text) || {Text, _} <- Row]).
 
+%% A line of data is the one cell of its row and is shown as its bytes,
+%% as `cat f` writes them; every other value is escaped as attributed text.
 cells(Attrs) ->
     case data_line(Attrs) of
-        {data, Bytes} -> [{iolist_to_binary(escape(Bytes, data, [])), text}];
+        {data, Bytes} -> [{Bytes, data}];
         values -> [cell(Attr) || Attr <- Attrs]
     end.
 
@@ -224,29 +227,23 @@ point the terminal tables mark unsafe (C1 controls, bidirectional
 overrides, invisible format characters, unassigned) as `\u{N}`.
 """.
 -spec escape(binary()) -> binary().
-escape(Text) -> iolist_to_binary(escape(Text, attributed, [])).
+escape(Text) -> iolist_to_binary(escape(Text, [])).
 
-%% The line escape of attributed text, or the data escape of a line of
-%% data, which differs only in passing tab and backslash unchanged; a
-%% newline is a control there, since a line of data holds none. The data
-%% clause must come before the control clause, which would escape a tab.
-escape(<<>>, _Kind, Acc) ->
+escape(<<>>, Acc) ->
     lists:reverse(Acc);
-escape(<<C, Rest/binary>>, data, Acc) when C =:= $\t; C =:= $\\ ->
-    escape(Rest, data, [C | Acc]);
-escape(<<C, Rest/binary>>, attributed, Acc) when C =:= $\t; C =:= $\n; C =:= $\\ ->
-    escape(Rest, attributed, [separator(C) | Acc]);
-escape(<<C, Rest/binary>>, Kind, Acc) when C < 16#20; C =:= 16#7f ->
-    escape(Rest, Kind, [hex_byte(C) | Acc]);
-escape(<<C, Rest/binary>>, Kind, Acc) when C < 16#80 ->
-    escape(Rest, Kind, [C | Acc]);
-escape(<<Point/utf8, Rest/binary>>, Kind, Acc) ->
+escape(<<C, Rest/binary>>, Acc) when C =:= $\t; C =:= $\n; C =:= $\\ ->
+    escape(Rest, [separator(C) | Acc]);
+escape(<<C, Rest/binary>>, Acc) when C < 16#20; C =:= 16#7f ->
+    escape(Rest, [hex_byte(C) | Acc]);
+escape(<<C, Rest/binary>>, Acc) when C < 16#80 ->
+    escape(Rest, [C | Acc]);
+escape(<<Point/utf8, Rest/binary>>, Acc) ->
     case unsafe(Point) of
-        true -> escape(Rest, Kind, [io_lib:format("\\u{~.16b}", [Point]) | Acc]);
-        false -> escape(Rest, Kind, [<<Point/utf8>> | Acc])
+        true -> escape(Rest, [io_lib:format("\\u{~.16b}", [Point]) | Acc]);
+        false -> escape(Rest, [<<Point/utf8>> | Acc])
     end;
-escape(<<C, Rest/binary>>, Kind, Acc) ->
-    escape(Rest, Kind, [hex_byte(C) | Acc]).
+escape(<<C, Rest/binary>>, Acc) ->
+    escape(Rest, [hex_byte(C) | Acc]).
 
 hex_byte(C) -> io_lib:format("\\x~2.16.0b", [C]).
 

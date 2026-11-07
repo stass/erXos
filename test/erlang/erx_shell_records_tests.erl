@@ -296,11 +296,11 @@ records_through_cat_are_escaped_test() ->
     ?assertEqual({<<"|">>, Alone}, run_line(<<"recs hostile | cat">>)),
     ?assertEqual({<<"||">>, Alone}, run_line(<<"recs hostile | cat | cat -">>)).
 
-%% A line of a file is the file's data: through a record stage it reaches a
-%% file exactly as read, and the terminal with its tab and backslash
-%% unchanged and only its controls escaped: CR, backspace, ESC, a C1
-%% control as UTF-8 and as a raw byte, a bidirectional override and bytes
-%% that are not UTF-8.
+%% A line of a file is the file's data: through a record stage it reaches
+%% the terminal and a file exactly as read, as `cat f` and FreeBSD's
+%% `sort f` write it: tab, backslash, CR, backspace, ESC, a C1 control as
+%% UTF-8 and as a raw byte, a bidirectional override and bytes that are
+%% not UTF-8 all unchanged.
 lines_of_bytes_are_data_test() ->
     with_scratch_dir(
       fun(Dir) ->
@@ -308,15 +308,15 @@ lines_of_bytes_are_data_test() ->
               Out = list_to_binary(filename:join(Dir, "out")),
               Bytes = <<"b\tx\\y\n", "a", 27, "[2J\n", "c\x{9b}1m"/utf8, "\n",
                         "d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>,
+              Sorted = <<"a", 27, "[2J\n", "b\tx\\y\n", "c\x{9b}1m\n"/utf8,
+                         "d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>,
               ok = file:write_file(In, Bytes),
-              ?assertEqual({<<"|">>, <<"a\\x1b[2J\nb\tx\\y\nc\\u{9b}1m\n"
-                                       "d\\x0d\\x08\\x9b\\u{202e}\\xc0\\x80\n">>},
-                           run_line(<<"cat ", In/binary, " | sort">>)),
+              ?assertEqual({<<"|">>, Sorted}, run_line(<<"cat ", In/binary, " | sort">>)),
               ?assertEqual({<<"|">>, <<"b\tx\\y\n">>}, run_line(<<"cat ", In/binary, " | where 'line ~ b*'">>)),
+              ?assertEqual({<<"|">>, <<"d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>},
+                           run_line(<<"cat ", In/binary, " | where 'line ~ d*'">>)),
               ?assertEqual({<<"|">>, <<>>}, run_line(<<"cat ", In/binary, " | sort >", Out/binary>>)),
-              ?assertEqual({ok, <<"a", 27, "[2J\n", "b\tx\\y\n", "c\x{9b}1m\n"/utf8,
-                                  "d\r\b", 16#9b, "\x{202e}"/utf8, 16#c0, 16#80, "\n">>},
-                           file:read_file(Out))
+              ?assertEqual({ok, Sorted}, file:read_file(Out))
       end).
 
 %% Text a command attributes to a source keeps the line escape, whatever its
@@ -324,6 +324,18 @@ lines_of_bytes_are_data_test() ->
 attributed_text_keeps_the_line_escape_test() ->
     ?assertEqual({<<>>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed">>)),
     ?assertEqual({<<"|">>, <<"a\\tb\\\\c\nd\\te\\\\f\n">>}, run_line(<<"recs tabbed | cat">>)).
+
+%% One table of one column may hold lines of data and attributed records of
+%% the same field: each line of data, an empty one too, shows as its bytes,
+%% and each attributed value keeps the line escape.
+data_beside_attributed_lines_in_one_column_test() ->
+    with_scratch_dir(
+      fun(Dir) ->
+              In = list_to_binary(filename:join(Dir, "in")),
+              ok = file:write_file(In, <<"z\tq\\r", 27, "[1m\n\n">>),
+              ?assertEqual({<<"|">>, <<"z\tq\\r", 27, "[1m\n\n", "a\\tb\\\\c\nd\\te\\\\f\n">>},
+                           run_line(<<"{cat ", In/binary, "; recs tabbed} | cat">>))
+      end).
 
 %% Only a record of one data value holding no newline, as every line read
 %% is, is a line of data; a data value holding a newline, or beside other
