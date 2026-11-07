@@ -7779,8 +7779,8 @@ areas of groups, image manifests, the time page, the trace record, the
 the device-secret page with its status, the labels the device and sealing
 secrets are derived under, the crash record, and the virtio rings that drivers
 share with their devices. The inspection fragment declares the semantic
-record/path/field types, units, bounds, reporter categories and visibility
-requirements; service fragments declare operations, authority sources and
+record/path/field types, units, bounds, reporter categories, stopgap
+reporters and visibility requirements; service fragments declare operations, authority sources and
 request/reply bounds. They reference these shared declarations instead of
 copying them. The source marks each layout that is a
 sequence-counted record, the capability slot and the trace record among

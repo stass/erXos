@@ -267,23 +267,38 @@ with it.
 -type segment() :: atom() | integer() | binary() | pid().
 ```
 
-A reporter is one of three categories, or a stopgap that does a part's
-work in its place and reports what it can see of that work under its own
-name: `liberx`'s Phase 1 backend counts the pages of a budget in the
-kernel's place, so a budget's `used` is `{{stopgap, liberx_pool},
-{partial, Pages}}`, which a renderer prints as the value `[partial]`
-with the reporter `liberx pool` ([design-stopgap.md](design-stopgap.md#reporting-a-budget)).
-The schema declares each stopgap reporter with the category it stands in
-for, its label and the scope of what it sees; a record carries only its
-name, an atom of `erx_schema`. A value a stopgap answers in another
-reporter's place, `unsupported` and `partial` included, carries the
-stopgap's name, and no stopgap reports as `kernel`, so a stopgap's
-observation never passes for the kernel's.
+A reporter is one of three categories, or a stopgap reporter: a stopgap
+component that does the kernel's, a service's or a runtime's work in its
+place and reports what it can see of that work under its own name.
+`liberx`'s Phase 1 backend counts the pages of a budget in the kernel's
+place, so a budget's `used` is `{{stopgap, liberx_pool}, {partial,
+Pages}}`, which a renderer prints as the value `[partial]` with the
+reporter `liberx pool`
+([design-stopgap.md](design-stopgap.md#reporting-a-budget)). The schema
+declares each stopgap reporter with the category it stands in for, its
+label, the scope of what it sees and the attributes it may report; a
+record carries only its name, an atom of `erx_schema`. A value the
+kernel interface reports with the attribute's full meaning, or reports
+as `unsupported`, is `kernel`'s, whichever kernel backs the interface; a
+value a stopgap computes in another reporter's place carries the
+stopgap's name, so a stopgap's observation never passes for the
+kernel's.
+
+The collector of each source assigns the reporter, never the report: an
+attribute from `erx_object_info` is `kernel`'s or that of the stopgap
+reporter the system domain's `liberx` names for it, one from a service's
+records `service`'s, and one from a domain's agent `runtime`'s, whatever
+the agent's frame says. A value the inspector derives from other
+attributes, as a budget's spending and room, is `ok` only when every
+input is `ok`; otherwise it is `unsupported` when an input is and
+`unknown` when none is, and it carries the reporter of an input that is
+not `ok`, so a partial count never yields a room that reads as exact.
 
 `abi/inspection.txt`, included by the ABI root, declares the kinds, paths,
-attribute keys, types, units, bounds, the reporter categories each
-attribute admits, the stopgap reporters and visibility rules, in the
-grammar of [design-abi.md](design-abi.md#inspection-schema). Ruby generates bounded C builders, Erlang types and `erx_schema`,
+attribute keys, types, units, bounds, the reporters each attribute
+admits, the stopgap reporters and visibility rules, in the grammar of
+[design-abi.md](design-abi.md#inspection-schema). Ruby generates bounded
+C builders, Erlang types and `erx_schema`,
 Ruby bindings and validators, and shell/host/`/proc` projections from it
 ([design-generation.md](design-generation.md#inspection-and-diagnostics)).
 The maps above describe that generated interface. Kinds, attribute keys
@@ -961,12 +976,13 @@ and `>`, such as `<0xC0>`. Every other character passes unchanged, the
 backslash and `<` among them. Tokens are for the eye only: the data they
 render keeps its bytes, and a token is not an injective encoding, since
 text holding the eight characters `<U+202E>` looks like text that held
-U+202E. Where the exact data matters it travels in the framing toward
-bytes, which writes only tab, newline and backslash as `\t`, `\n` and
-`\\` ([Pipelines](design-shell.md#pipelines), [The /proc
-tree](#the-proc-tree)), or as a `/proc` name in its injective encoding.
-The two are separate steps: a value toward bytes passes the framing
-alone, and a value on a terminal passes the line escape alone. The escape takes whole text, since a record is
+U+202E. The line escape is not the framing toward bytes, which writes
+only tab, newline and backslash as `\t`, `\n` and `\\` so that a record
+stays one line and changes nothing else
+([Pipelines](design-shell.md#pipelines), [The /proc
+tree](#the-proc-tree)); a value written toward bytes is framed, and a
+value written to a terminal is escaped instead. The escape takes whole
+text, since a record is
 whole when it is displayed, and holds no state between calls. One record is
 one line under its source's name.
 

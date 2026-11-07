@@ -392,7 +392,23 @@ it; git history is the record of completed work.
 * [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): the grammar has no
   member for presentation types, which [design-display.md](docs/design-display.md#presentations) says the schema
   declares (each type's canonical text, the grammar that parses it back and the inspector path it names). Add the
-  member, with a closed set of text forms, before `erx_present` is generated.
+  member, with a closed set of text forms, before `erx_present` is generated. Settle its namespace: `domain`,
+  `program`, `budget`, `group`, `device` and `module` are kinds too, members share one namespace, and `pid` is a
+  built-in value type.
+* [Medium] `docs/design-abi.md` [Inspection schema](docs/design-abi.md#inspection-schema): `[kernel, crash]` and
+  `[kernel, trace]` repeat the fields of the crash-record and trace-record layouts, and the grammar has no form
+  that takes a kind's attributes from a root `layout`, so they would be copied by hand. Add one (`fields @layout`)
+  before those kinds are declared.
+* [High] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): a `status` file frames only tab,
+  newline and backslash and keeps every other byte, and `cat` writes a file's bytes unchanged, so
+  `cat /proc/processes/P/status` at a terminal shows a domain's chosen names (ESC, OSC 52, CSI) raw, which V9 does
+  not allow for attributed text. design-live's "`erx_render` escapes it" and design-shell's rule that bytes reaching
+  an Erlang command become `line` records leave open whether `cat`'s output is rendered. Decide: frame every class
+  of the line escape toward bytes too (an injective backslash form), or render `/proc` content through the line
+  escape at a terminal, or record it as a residual.
+* [Low] `docs/design-live.md` [The /proc tree](docs/design-live.md#the-proc-tree): an Erlang module named `status`
+  encodes to the entry `status`, the same name as the `status` file of `/proc/domains/N/modules`. Encode a name equal
+  to a file the tree itself writes (for example as `%73tatus`).
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so
