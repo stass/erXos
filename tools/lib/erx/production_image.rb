@@ -524,7 +524,9 @@ module Erx
       # a syntax error, an output longer than any FIFO, a debug log record, what
       # erlang:processes() lists, and a module compiled and a tracer started with compiler
       # and runtime_tools loaded and neither started, and an rc line the command shell's
-      # evaluator runs with its Erlang commands.
+      # evaluator runs with its Erlang commands, and erx:i(), whose machine rows the kernel
+      # interface reports unsupported under Fiasco and whose budget's used the liberx pool
+      # reports partial, with the pool's scope below the tables.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
@@ -552,7 +554,14 @@ module Erx
                        type: RC_EXPRESSION),
          # The echo of the line holds `echo rc:`, so only the output starts with rc:.
          console_point('rc-output', /\A(?:[0-9]+> )?rc: /n, whole: /\A(?:[0-9]+> )?rc: 2 hello world f \|\r*\n\z/n),
-         console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n)].freeze
+         console_point('rc-ending', /\A(?:[0-9]+> )?\{ok,<<>>\}\r*\n\z/n, type: "erx:i().\r"),
+         # The echo of the line holds erx:i(), so only the machine record's title matches.
+         console_point('inspect-machine', %r{\A/  machine\r*\n\z}n),
+         console_point('inspect-uptime', /\A  uptime +kernel +\[unsupported\]\r*\n\z/n),
+         console_point('inspect-used', /\A  used +liberx pool +\[partial\]\r*\n\z/n),
+         console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
+         console_point('inspect-scope', /\Aliberx pool: pages committed through liberx;/n),
+         console_point('inspect-answer', /\Aok\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the
