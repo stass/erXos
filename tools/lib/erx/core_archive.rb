@@ -239,11 +239,15 @@ module Erx
 
     # The seam's headers under root: each header's name => its root-relative
     # path, in include/erx/core/ or, generated, in build/gen/include/erx/core/.
-    # A generated header wins over a same-named file in the source tree, so
-    # the copy and the build audit that traces it back agree on its origin.
+    # A header both hold is refused, so neither silently stands in for the
+    # other and the build audit that traces the copy back names its one origin.
     def seam_headers(root)
       [SEAM_SOURCE, SEAM_GENERATED].each_with_object({}) do |source, found|
-        Dir.glob('*.h', base: File.join(root, source)).each { |header| found[header] = File.join(source, header) }
+        Dir.glob('*.h', base: File.join(root, source)).each do |header|
+          raise Error, "#{SEAM_SOURCE}/#{header} is at the path of a generated seam header; remove it" if found.key?(header)
+
+          found[header] = File.join(source, header)
+        end
       end.sort.to_h
     end
 

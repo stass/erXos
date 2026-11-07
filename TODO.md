@@ -411,11 +411,6 @@ it; git history is the record of completed work.
   OTP's `otp_SUITE:undefined_functions` under `check-oracle` to accept `shell_default`'s call of
   `erx:source/1`.
 
-* [Low] build, generated Erlang (`tools/lib/erx/abi.rb`, `abi/generated.json`): the ABI
-  generators' Erlang outputs (`erlang/apps/erx/src/generated/*.erl`,
-  `otp/erts/preloaded/src/erx_9p_grammar.erl`) are checked in under a drift check, against
-  CLAUDE.md's "Generated files are not checked in"; generate them into the build tree and have
-  the Erlang builds and host tests (`test/host/erx_trace_test.rb` among them) read them there.
 * [Low] files, `erx_9p` codec (`tools/lib/erx/abi_emit_wire.rb`, `abi/protocols/9p.txt`): a packed list's
   per-element size (`packed @p9_dirent_fixed`, 24) is declared rather than derived from the dirent tuple's wire
   widths, so a change to `dirent` would make the grammar's `packed_dirents/1` disagree with the bytes the codec
@@ -444,7 +439,7 @@ it; git history is the record of completed work.
   the leading-`.` clause says nothing, unless `.` was meant to stay plain after the first byte. `erx_schema`
   follows the letter (every `.` is `%2E`); settle it before `erx_procfs` writes names.
 * [Low] inspection bindings (`tools/lib/erx/abi_emit_inspection.rb`): `erx_schema` and the host tool's table
-  (`tools/generated/abi_inspection.rb`) are generated; the bounded C record builders of
+  (`build/gen/tools/generated/abi_inspection.rb`) are generated; the bounded C record builders of
   [design-generation.md](docs/design-generation.md#inspection-and-diagnostics) are not, since their consumer is
   erXos's kernel, and the host table has no Ruby validators yet. Generate each with its first consumer.
 * [Medium] inspection, `erx_schema` (`tools/lib/erx/abi_emit_inspection.rb`): `resolve_text/1` makes a pid segment
@@ -531,11 +526,11 @@ it; git history is the record of completed work.
   `include_flags` are pure functions of a root. A test or script that skips it compiles against a stale tree. Make it
   hold by construction: ensure returns a tree value (output root, paths, include flags, the stamp's outputs) that
   build libraries take instead of a root, or readers check the stamp (no regeneration) and refuse a stale tree.
-* [Medium] build tree of generated files, `tools/lib/erx/chokepoints.rb`, `tools/lib/erx/core_archive.rb`: a
-  generated file silently stands in for a tracked file of the same name (the chokepoint `sources:` map, the seam
-  copy), and every C include list must put `build/gen` ahead of the tree's directories. Once the tracked copies are
-  deleted, refuse a listed file at a generated output's path in `Checks`; the include order then stops mattering and
-  its repetition across the FLAGS constants and host tests can go.
+* [Low] build tree of generated files, `tools/lib/erx/runtime.rb`, `core_archive.rb`, `test/host/*_test.rb`: the
+  generated tree's include directories are spelled out by hand in each FLAGS constant (`-I build/gen -I
+  build/gen/include ... -I build/gen/kernel/generated`) and in host tests beside `Generated.include_flags`. No file
+  of the tree sits at a generated path (`Checks` refuses one), so their order decides nothing; derive
+  every list from `Generated.include_flags` and drop the repetition.
 * [Low] host tooling, `tools/lib/erx/` (QEMU suites and harnesses, e.g. `medium_boot.rb`, `native_irq.rb`,
   `deterministic_transcript.rb`): about a dozen error and verify messages quote guest text with `String#inspect`
   instead of `Erx::Terminal.escape`, the host terminal's one escaping function. `inspect` escapes control bytes, so
@@ -2137,8 +2132,8 @@ to the corpus and follow rc
   find other imports short of rows.
 * [Low] build, notice check (`tools/lib/erx/pack_provenance.rb`,
   `attribute`): a file of erXos's own that declares `BSD-2-Clause AND
-  Unicode-3.0` (`erlang/apps/erx/src/erx_text_tables.erl`,
-  `tools/generated/terminal_tables.rb`) takes the non-import branch, which
+  Unicode-3.0` (`build/gen/erlang/apps/erx/src/erx_text_tables.erl`,
+  `build/gen/tools/generated/terminal_tables.rb`) takes the non-import branch, which
   attaches only `LICENSE` and the file's header and never reads the notice
   profile, so the checked `Unicode-3.0` document does not reach its notice.
   Unverified that these files reach a packed image's records; if they do,

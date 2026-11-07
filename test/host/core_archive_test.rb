@@ -44,6 +44,18 @@ class CoreArchiveTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::CoreArchive.undefined_symbols("erx\e[31m U\n") }
   end
 
+  # The seam copy takes each header from the tree or from the generated tree,
+  # and refuses one both hold, so neither stands in for the other.
+  def test_a_seam_header_both_trees_hold_is_refused
+    tree(core: "int erx_core_value(void) { return 0; }\n")
+    root = File.join(@directory, 'tree')
+    assert_equal({ 'seam.h' => 'include/erx/core/seam.h' }, Erx::CoreArchive.seam_headers(root))
+    FileUtils.mkdir_p(File.join(root, 'build/gen/include/erx/core'))
+    File.write(File.join(root, 'build/gen/include/erx/core/seam.h'), "#define ERX_SEAM_VALUE 4\n")
+    error = assert_raises(Erx::Error) { Erx::CoreArchive.seam_headers(root) }
+    assert_match(%r{include/erx/core/seam.h is at the path of a generated seam header}, error.message)
+  end
+
   def test_the_kernel_cores_leave_out_the_bootstrap_ones
     root = File.expand_path('../..', __dir__)
     sources = Erx::CoreArchive.sources(root)
