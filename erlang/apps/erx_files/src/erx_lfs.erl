@@ -125,6 +125,9 @@ owner({start, Parent, Role, Name}) ->
             proc_lib:init_ack(Parent, {ok, self()}),
             State = #owner{secret = Secret, vol = Vol, worker = Worker, window = Window},
             ?MODULE:owner(run(mount, fun mount/1, fun mounted/2, State));
+        {error, {refused, no_device}} ->
+            %% A machine without a disk: no volume, and no line, as erx_blk has none.
+            proc_lib:init_ack(Parent, ignore);
         {error, Reason} ->
             log("no volume on the ~p window: ~p", [Role, Reason]),
             proc_lib:init_ack(Parent, ignore)

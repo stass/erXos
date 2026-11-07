@@ -74,14 +74,15 @@ call(Request) ->
     end.
 
 %% Any exception of the sequence, a bug or a NIF that changed, is one line and no driver as
-%% well: the application is permanent, so a raise here would end the boot.
+%% well: the application is permanent, so a raise here would end the boot. A machine with
+%% no disk is a configuration, not a fault, so it has no line, as an absent device's probe
+%% prints nothing on FreeBSD.
 init([]) ->
     case try start_device() catch Class:Raised -> {error, {Class, Raised}} end of
         {ok, State} ->
             log("virtio-mmio version ~b, capacity ~b sectors", [State#state.version, State#state.capacity]),
             {ok, State};
         {error, no_device} ->
-            log("no block device; the driver does not start", []),
             ignore;
         {error, Reason} ->
             log("the block device is not driven: ~0p", [Reason]),

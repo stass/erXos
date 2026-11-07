@@ -44,9 +44,13 @@ buffer_size() ->
 
 %% Whether the first registers of a transport say a virtio-mmio version 2 block device. The
 %% reason carries the word that disagreed, so the driver's one line says what it found.
+%% Device id 0 is an empty transport, whatever version it reports: QEMU's offer the legacy
+%% interface (version 1) unless told otherwise, and an empty one is no device, not a device
+%% of the wrong version.
 -spec identify(non_neg_integer(), non_neg_integer(), non_neg_integer()) ->
           ok | {error, {magic | version | device_id, non_neg_integer()}}.
 identify(Magic, _Version, _DeviceId) when Magic =/= ?ERX_VIRTIO_MMIO_MAGIC -> {error, {magic, Magic}};
+identify(_Magic, _Version, 0) -> {error, {device_id, 0}};
 identify(_Magic, Version, _DeviceId) when Version =/= ?ERX_VIRTIO_MMIO_VERSION -> {error, {version, Version}};
 identify(_Magic, _Version, DeviceId) when DeviceId =/= ?ERX_VIRTIO_ID_BLOCK -> {error, {device_id, DeviceId}};
 identify(_Magic, _Version, _DeviceId) -> ok.

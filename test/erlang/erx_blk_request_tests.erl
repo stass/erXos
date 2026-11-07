@@ -16,6 +16,9 @@ identify_test_() ->
      ?_assertEqual({error, {magic, 0}}, erx_blk_request:identify(0, 2, 2)),
      ?_assertEqual({error, {version, 1}}, erx_blk_request:identify(Magic, 1, 2)),
      ?_assertEqual({error, {device_id, 0}}, erx_blk_request:identify(Magic, 2, 0)),
+     %% QEMU's empty transport offers the legacy interface unless told otherwise: it is
+     %% still no device, not a device of the wrong version.
+     ?_assertEqual({error, {device_id, 0}}, erx_blk_request:identify(Magic, 1, 0)),
      ?_assertEqual({error, {device_id, 1}}, erx_blk_request:identify(Magic, 2, 1))].
 
 capacity_test_() ->
