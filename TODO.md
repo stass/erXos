@@ -1812,6 +1812,14 @@ to the corpus and follow rc
   rightly, since its notice is the header `leading_notice` keeps; a
   per-grant check must state what a file's own header counts for, and may
   find other imports short of rows.
+* [Low] build, notice check (`tools/lib/erx/pack_provenance.rb`,
+  `attribute`): a file of erXos's own that declares `BSD-2-Clause AND
+  Unicode-3.0` (`erlang/apps/erx/src/erx_text_tables.erl`,
+  `tools/generated/terminal_tables.rb`) takes the non-import branch, which
+  attaches only `LICENSE` and the file's header and never reads the notice
+  profile, so the checked `Unicode-3.0` document does not reach its notice.
+  Unverified that these files reach a packed image's records; if they do,
+  look up the profile for the selected grants other than erXos's own.
 * [Low] build, licence selection (`tools/lib/erx/license_expression.rb`,
   `PERMISSIVE`, and `PackProvenance#attribute`): the entry for ChaCha20's
   public-domain statement is global, so a file outside any import that

@@ -6,6 +6,7 @@
     "BSD-2-Clause": [{"path": "otp/LICENSES/BSD-2-Clause.txt", "sha256": "06413eaf2855d173db853258579d9f8013d1599c8d7340adc32383ce658352af"}],
     "BSD-3-Clause": [{"path": "otp/LICENSES/BSD-3-Clause.txt", "sha256": "8fff43829a246bf63d422e0bde3ae6300ceed0be445a5d4d0a553f2781002d52"}],
     "MIT": [{"path": "otp/LICENSES/MIT.txt", "sha256": "c181eed254a608399a1059ddf5cb72cb1f1a5841a083aaa30f3e6713853ddf9f"}],
+    "Unicode-3.0": [{"path": "config/provenance/notices/Unicode-3.0.txt", "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"}],
     "GPL-2.0-only": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
     "GPL-2.0-or-later": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
     "GPL-3.0-only": [{"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
