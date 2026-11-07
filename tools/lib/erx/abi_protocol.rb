@@ -184,6 +184,7 @@ module Erx
         reply = []
         checks = []
         directories = []
+        fids = []
         marker = nil
         refused = false
         children.each do |child|
@@ -194,6 +195,7 @@ module Erx
             attribute = fid_attribute(rest, child)
             request << [field_name, kind].freeze
             directories << field_name if attribute == 'directory'
+            fids << [field_name, attribute].freeze if attribute
           in ['reply', 2] then reply << field(rest, child, kinds)
           in ['reply', 3]
             # A bad name, kind or attribute word is reported as such first.
@@ -217,7 +219,7 @@ module Erx
           line.fail!('too many fields') if fields.size > MAX_FIELDS
         end
         { name: name, type: type, request: request.freeze, reply: refused ? nil : reply.freeze,
-          directories: directories.freeze,
+          directories: directories.freeze, fids: fids.freeze,
           checks: checks.map { |item| check(item, line, request, reply, kinds) }.freeze,
           writes: writes(marker, line, request, constants) }.freeze
       end

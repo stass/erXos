@@ -55,7 +55,7 @@ module Erx
 
       def emit
         [ErlangEmitter::NOTICE.chomp, header, wire_macros, decode, messages, encode, bodies,
-         operation_check, errors, getters, putters, kind_checks, helpers, wire_helpers].join("\n\n") + "\n"
+         fid_fields, operation_check, errors, getters, putters, kind_checks, helpers, wire_helpers].join("\n\n") + "\n"
       end
 
       private
@@ -83,10 +83,15 @@ module Erx
           %% operation. A field the table marks local is not on the wire: encoding drops it
           %% and decoding gives its atom. Decoding makes no atom; an error number of no error
           %% of the table decodes as eio (docs/design-files.md#errors).
+          %%
+          %% fids(Request) lists a request's fids, each with what the table says it names
+          %% (directory, node, or new for a fid the request makes), and map_fids(Fun, Request)
+          %% replaces each with Fun(Fid), so a bridge renames an edge's fids to its own from
+          %% the table rather than from a list of its own.
 
           -module(#{name}).
 
-          -export([decode/2, encode/2, encode/3]).
+          -export([decode/2, encode/2, encode/3, fids/1, map_fids/2]).
         ERLANG
       end
 
@@ -215,6 +220,29 @@ module Erx
         checks = fields.zip(values).map { |(_, kind), value| "#{check(kind)}(#{value})" }
         "body(#{term.call(values)}) ->\n    case #{conjunction(checks).gsub("\n", "\n    ")} of\n" \
           "        true ->\n            {#{type}, #{binary(segments, 13)}};\n        false ->\n            invalid\n    end"
+      end
+
+      # fids/1 and map_fids/2: a clause for each request of the table and none for any
+      # other term, so a request the table adds lists its own fids and never falls through.
+      def fid_fields
+        listed = ->(operation) { operation.fetch(:fids).to_h }
+        listing = @operations.map do |operation|
+          fids = listed.call(operation)
+          names = operation.fetch(:request).map { |field, _| fids.key?(field) ? variable(field) : '_' }
+          "fids(#{pattern(operation.fetch(:name), names)}) ->\n    " \
+            "[#{fids.map { |field, role| "{#{role}, #{variable(field)}}" }.join(', ')}]"
+        end
+        mapping = @operations.map do |operation|
+          fids = listed.call(operation)
+          names = operation.fetch(:request).map { |field, _| variable(field) }
+          mapped = operation.fetch(:request).map { |field, _| fids.key?(field) ? "Fun(#{variable(field)})" : variable(field) }
+          "map_fids(#{fids.empty? ? "_Fun" : "Fun"}, #{pattern(operation.fetch(:name), names)}) ->\n    #{pattern(operation.fetch(:name), mapped)}"
+        end
+        "%% The fids of a request term, in request order, each with what it names.\n" \
+          "-spec fids(tuple()) -> [{directory | node | new, non_neg_integer()}].\n" + listing.join(";\n") + ".\n\n" \
+          "%% A request term with each of its fids replaced by Fun(Fid).\n" \
+          "-spec map_fids(fun((non_neg_integer()) -> non_neg_integer()), tuple()) -> tuple().\n" +
+          mapping.join(";\n") + '.'
       end
 
       def operation_check

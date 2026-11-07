@@ -24,10 +24,15 @@
 %% operation. A field the table marks local is not on the wire: encoding drops it
 %% and decoding gives its atom. Decoding makes no atom; an error number of no error
 %% of the table decodes as eio (docs/design-files.md#errors).
+%%
+%% fids(Request) lists a request's fids, each with what the table says it names
+%% (directory, node, or new for a fid the request makes), and map_fids(Fun, Request)
+%% replaces each with Fun(Fid), so a bridge renames an edge's fids to its own from
+%% the table rather than from a list of its own.
 
 -module(erx_9p).
 
--export([decode/2, encode/2, encode/3]).
+-export([decode/2, encode/2, encode/3, fids/1, map_fids/2]).
 
 %% size[4] type[1] tag[2]
 -define(HEADER, 7).
@@ -889,6 +894,120 @@ body({reply, remove, ok}) ->
     {123, <<>>};
 body(_) ->
     invalid.
+
+%% The fids of a request term, in request order, each with what it names.
+-spec fids(tuple()) -> [{directory | node | new, non_neg_integer()}].
+fids({statfs, Fid}) ->
+    [{node, Fid}];
+fids({lopen, Fid, _}) ->
+    [{node, Fid}];
+fids({lcreate, Fid, _, _, _, _}) ->
+    [{directory, Fid}];
+fids({symlink, Fid, _, _, _}) ->
+    [{directory, Fid}];
+fids({mknod, Dfid, _, _, _, _, _}) ->
+    [{directory, Dfid}];
+fids({readlink, Fid}) ->
+    [{node, Fid}];
+fids({getattr, Fid, _}) ->
+    [{node, Fid}];
+fids({setattr, Fid, _}) ->
+    [{node, Fid}];
+fids({xattrwalk, Fid, NewFid, _}) ->
+    [{node, Fid}, {new, NewFid}];
+fids({xattrcreate, Fid, _, _, _}) ->
+    [{node, Fid}];
+fids({readdir, Fid, _, _}) ->
+    [{directory, Fid}];
+fids({fsync, Fid, _}) ->
+    [{node, Fid}];
+fids({lock, Fid, _, _, _, _, _, _}) ->
+    [{node, Fid}];
+fids({getlock, Fid, _, _, _, _, _}) ->
+    [{node, Fid}];
+fids({link, Dfid, Fid, _}) ->
+    [{directory, Dfid}, {node, Fid}];
+fids({mkdir, Dfid, _, _, _}) ->
+    [{directory, Dfid}];
+fids({renameat, OldDirFid, _, NewDirFid, _}) ->
+    [{directory, OldDirFid}, {directory, NewDirFid}];
+fids({unlinkat, DirFid, _, _}) ->
+    [{directory, DirFid}];
+fids({version, _, _}) ->
+    [];
+fids({auth, _, _, _, _}) ->
+    [];
+fids({attach, Fid, _, _, _, _}) ->
+    [{new, Fid}];
+fids({flush, _}) ->
+    [];
+fids({walk, Fid, NewFid, _}) ->
+    [{node, Fid}, {new, NewFid}];
+fids({read, Fid, _, _}) ->
+    [{node, Fid}];
+fids({write, Fid, _, _}) ->
+    [{node, Fid}];
+fids({clunk, Fid}) ->
+    [{node, Fid}];
+fids({remove, Fid}) ->
+    [{node, Fid}].
+
+%% A request term with each of its fids replaced by Fun(Fid).
+-spec map_fids(fun((non_neg_integer()) -> non_neg_integer()), tuple()) -> tuple().
+map_fids(Fun, {statfs, Fid}) ->
+    {statfs, Fun(Fid)};
+map_fids(Fun, {lopen, Fid, Flags}) ->
+    {lopen, Fun(Fid), Flags};
+map_fids(Fun, {lcreate, Fid, Name, Flags, Mode, Gid}) ->
+    {lcreate, Fun(Fid), Name, Flags, Mode, Gid};
+map_fids(Fun, {symlink, Fid, Name, Target, Gid}) ->
+    {symlink, Fun(Fid), Name, Target, Gid};
+map_fids(Fun, {mknod, Dfid, Name, Mode, Major, Minor, Gid}) ->
+    {mknod, Fun(Dfid), Name, Mode, Major, Minor, Gid};
+map_fids(Fun, {readlink, Fid}) ->
+    {readlink, Fun(Fid)};
+map_fids(Fun, {getattr, Fid, RequestMask}) ->
+    {getattr, Fun(Fid), RequestMask};
+map_fids(Fun, {setattr, Fid, Attr}) ->
+    {setattr, Fun(Fid), Attr};
+map_fids(Fun, {xattrwalk, Fid, NewFid, Name}) ->
+    {xattrwalk, Fun(Fid), Fun(NewFid), Name};
+map_fids(Fun, {xattrcreate, Fid, Name, Size, Flags}) ->
+    {xattrcreate, Fun(Fid), Name, Size, Flags};
+map_fids(Fun, {readdir, Fid, Offset, Count}) ->
+    {readdir, Fun(Fid), Offset, Count};
+map_fids(Fun, {fsync, Fid, Datasync}) ->
+    {fsync, Fun(Fid), Datasync};
+map_fids(Fun, {lock, Fid, Type, Flags, Start, Length, ProcId, ClientId}) ->
+    {lock, Fun(Fid), Type, Flags, Start, Length, ProcId, ClientId};
+map_fids(Fun, {getlock, Fid, Type, Start, Length, ProcId, ClientId}) ->
+    {getlock, Fun(Fid), Type, Start, Length, ProcId, ClientId};
+map_fids(Fun, {link, Dfid, Fid, Name}) ->
+    {link, Fun(Dfid), Fun(Fid), Name};
+map_fids(Fun, {mkdir, Dfid, Name, Mode, Gid}) ->
+    {mkdir, Fun(Dfid), Name, Mode, Gid};
+map_fids(Fun, {renameat, OldDirFid, OldName, NewDirFid, NewName}) ->
+    {renameat, Fun(OldDirFid), OldName, Fun(NewDirFid), NewName};
+map_fids(Fun, {unlinkat, DirFid, Name, Flags}) ->
+    {unlinkat, Fun(DirFid), Name, Flags};
+map_fids(_Fun, {version, Msize, Version}) ->
+    {version, Msize, Version};
+map_fids(_Fun, {auth, Afid, Uname, Aname, NUname}) ->
+    {auth, Afid, Uname, Aname, NUname};
+map_fids(Fun, {attach, Fid, Afid, Uname, Aname, NUname}) ->
+    {attach, Fun(Fid), Afid, Uname, Aname, NUname};
+map_fids(_Fun, {flush, OldTag}) ->
+    {flush, OldTag};
+map_fids(Fun, {walk, Fid, NewFid, Names}) ->
+    {walk, Fun(Fid), Fun(NewFid), Names};
+map_fids(Fun, {read, Fid, Offset, Count}) ->
+    {read, Fun(Fid), Offset, Count};
+map_fids(Fun, {write, Fid, Offset, Data}) ->
+    {write, Fun(Fid), Offset, Data};
+map_fids(Fun, {clunk, Fid}) ->
+    {clunk, Fun(Fid)};
+map_fids(Fun, {remove, Fid}) ->
+    {remove, Fun(Fid)}.
 
 %% Whether Operation is an operation of the table, or error: an error reply may
 %% answer any operation.

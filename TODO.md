@@ -1446,8 +1446,12 @@ it; git history is the record of completed work.
   repeats, stale grants). It keeps replies to calls nobody awaits without a
   bound, and a payload it refuses loses the rest of that read's frames.
 * [Low] live, host link (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`): the
-  terminal and files streams' bodies are dropped uncounted until their
-  consumers exist, so the inspector cannot see the loss.
+  terminal stream's bodies are dropped uncounted until a console session
+  consumes them, so the inspector cannot see the loss.
+* [Low] live, host link's 9P bridge (`erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl`):
+  its counts (discarded, stray replies) reach no inspector record yet; and
+  `tools/erx files` serves one client at a time and reaches only QEMU's UNIX
+  socket, like `load` and `watch`.
 * [Low] live, host-link driver (`erlang/apps/erx_uart/src/erx_pl011.erl`):
   the design's driver buffers at most 64 KiB of received bytes and drops
   and counts beyond that (design-system.md, "Drivers"); erx_pl011 sends

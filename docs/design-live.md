@@ -1611,6 +1611,22 @@ files stream, checking each message's size field against the stream's
 `msize` and nothing more, so any 9P2000.L client of the host mounts the
 socket and parses the target's bytes as it parses any server's.
 
+The bridge renames the host's fids to fids it holds itself, on the grant
+of each fid's tree, so it owns every fid of the 9P session and its end
+clunks them all ([design-files.md](design-files.md#fid-owners)). It
+answers some messages without a grant: `version`, with the smaller
+`msize`; anything but `version` before a session is open, and an
+`attach` whose `Afid` is not `NOFID`, with `einval`; `auth` with
+`enotsup`; a request on a fid it does not hold with `ebadf`; one that
+names fids of two trees with `exdev`. It keeps at most 32 requests
+pending, so a grant, which admits 64 in flight with the flushes waiting
+on them, always has room for their flushes, and 64 tags; a request
+beyond 32 fails with `emfile`, and a message beyond 64 tags or on a tag
+still pending is discarded and counted. It cuts a `read`'s or
+`readdir`'s `Count` to what an `Rread` of the session's `msize` holds
+and answers `lopen`'s and `lcreate`'s `Iounit` as `msize` less 24, so
+every reply fits a frame.
+
 The files stream lives inside a host-link session. Its first message is
 `version`, as 9P2000.L asks; the 9P session ends with the host-link
 session, and the bridge then clunks every fid it holds, so a replaced

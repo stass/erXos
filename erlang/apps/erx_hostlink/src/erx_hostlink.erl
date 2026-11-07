@@ -28,7 +28,11 @@ performs what `step/2` returns, in order, and feeds back what happened:
   without reporting reports `{error, failed}`, so no call stays executing;
 * a facet the session took into its table is monitored and its exit reported
   as `facet_down`; a facet it closes is ended;
-* `draw_entropy` is answered with a fresh session identifier.
+* `draw_entropy` is answered with a fresh session identifier;
+* each session that opens gets a 9P bridge of its own (erx_hostlink_files),
+  which takes the files stream's bodies and whose replies go out on that
+  stream, and the bridge ends with its session, which clunks every fid it
+  held (docs/design-live.md, "Files between the host and the machine").
 
 **Bounded output.** A host can ask for more output than it sends, by repeating
 a call whose kept reply is large. While the output queue holds more than
@@ -77,7 +81,9 @@ the root `{error, badarg}`. Casts reach no facet: none takes them.
     %% Input held while the output queue is over its backlog.
     held = <<>> :: binary(),
     %% Each executing worker's monitor and the call it answers, by its pid.
-    workers = #{} :: #{pid() => {reference(), erx_hostlink_session:serial(), pos_integer()}}
+    workers = #{} :: #{pid() => {reference(), erx_hostlink_session:serial(), pos_integer()}},
+    %% The current session's 9P bridge and its monitor.
+    files = none :: none | {pid(), reference()}
 }).
 
 -spec start_link() -> gen_server:start_ret().
@@ -132,6 +138,11 @@ handle_info({call_done, Worker, Reply, Opened}, #state{workers = Workers} = Stat
         error ->
             {noreply, State}
     end;
+handle_info({files_out, Bridge, Bytes}, #state{files = {Bridge, _}} = State) ->
+    {noreply, step({output, files, Bytes}, State)};
+handle_info({'DOWN', Ref, process, Bridge, _Reason}, #state{files = {Bridge, Ref}} = State) ->
+    %% A bridge that failed: the files stream has none until the next session.
+    {noreply, State#state{files = none}};
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #state{workers = Workers} = State) ->
     case maps:take(Pid, Workers) of
         {{_Monitor, Serial, Id}, Rest} ->
@@ -191,9 +202,12 @@ act({execute, Serial, Id, Target, Payload}, #state{workers = Workers} = State) -
 act({cast, _Serial, _Target, _Payload}, State) ->
     %% Neither the root nor the install facet takes casts.
     State;
+act({deliver, files, Body}, #state{files = {Bridge, _}} = State) ->
+    Bridge ! {files_in, self(), Body},
+    State;
 act({deliver, _Stream, _Body}, State) ->
-    %% The terminal and files streams have no consumer on this machine yet:
-    %% a console session and the 9P bridge come with their own services.
+    %% The terminal stream has no consumer on this machine yet: a console
+    %% session comes with its own service.
     State;
 act({monitor_facet, Facet}, State) ->
     _ = erlang:monitor(process, Facet),
@@ -202,11 +216,19 @@ act({close_facet, Facet}, State) ->
     exit(Facet, shutdown),
     State;
 act({session_opened, _Id, _Serial}, State) ->
-    State;
+    (end_files(State))#state{files = erx_hostlink_files:start(self(), #{})};
 act({session_ended, _Id, _Reason}, State) ->
-    State;
+    end_files(State);
 act(draw_entropy, #state{core = Core} = State) ->
     perform(erx_hostlink_session:step({entropy, entropy()}, Core), State).
+
+%% Ends the session's bridge, whose grants then clunk every fid it held.
+end_files(#state{files = none} = State) ->
+    State;
+end_files(#state{files = {Bridge, Ref}} = State) ->
+    erlang:demonitor(Ref, [flush]),
+    exit(Bridge, shutdown),
+    State#state{files = none}.
 
 %% Hands the driver the next frame unless one is being written. The driver
 %% answers {erx_console_written, self} once it is.
