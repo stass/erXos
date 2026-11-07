@@ -8655,6 +8655,54 @@ the authoritative list.
 
 ## L4 lineage
 
+### What erXos's kernel adds, in brief
+
+erXos's kernel is Fiasco's design rewritten in C17: capabilities as the
+only authority, a kernel stack per thread, IPC gates with an open wait,
+messages in the UTCB, IRQ objects, and quotas charged for every
+allocation, as [the ledger](#the-ledger) lists before its table of
+departures. The departures that matter, by what they buy:
+
+* **For Erlang runtimes and their users.** The kernel grants CPU time to
+  a tree of scheduling groups, and each runtime's own scheduler divides
+  its group's grant among its processes, with no donation
+  ([design-scheduler.md](design-scheduler.md)). Executors never wait in an
+  IPC but park on their group, so an IRQ object, Fiasco's own, may also be
+  bound to a group to wake its executors (the ledger's Executors and
+  Doorbells rows). Memory comes from memory objects with no user-level
+  pager, so no fault waits on another domain ([Memory](#memory)). Budgets
+  have a guarantee and a cap, and destroying one deletes everything
+  charged to it, as EROS's space banks do ([Budgets](#budgets)). Every
+  space has a parent it cannot outlive, and a stopped space posts one
+  exit record to its creator's fault gate (K18, K27). The per-CPU
+  [trace ring](#trace-ring) is declared in the ABI sources, and Erlang's
+  tracer shows its events in one viewer beside ERTS's own trace.
+* **For security.** No call takes an address for the kernel to follow;
+  bulk data crosses in memory windows (K7,
+  [Arguments and results](#arguments-and-results)). Every call reaches an
+  object through one lookup that checks the slot's generation, type and
+  rights, so a stale capability never names a new object (K1); rights
+  only shrink (K2); no mapping is writable and executable at once (K8);
+  and nothing a domain does panics the kernel (K12)
+  ([Invariants](#invariants)).
+* **For maintainers.** C17 with a [functional core](#overview), a
+  [stack proof](#stack-proof) in every build, every call and layout
+  generated from `abi/erx_abi.txt` ([The ABI file](#the-abi-file)), and
+  [chokepoint checks](#chokepoint-checks) that fail the build on a new
+  site. Fiasco's C++ is outside these rules.
+
+What Fiasco has, and erXos's kernel must earn, is proven code. Hence the
+switch at parity: M7 replaces the stopgap only once erXos's kernel runs
+every test and benchmark Phase 1's system ran on it ([plan.md](plan.md)).
+The licence is not a reason for the new kernel. Fiasco's kernel package
+is MIT, as `fiasco/kernel/LICENSE.spdx` declares; its GPL and LGPL parts
+are excluded from the import, and of Fiasco's code in the stopgap build
+only two files are GPL-2.0, by their own notices: `src/kern/kobject_rpc.h`
+in every build, and the kernel debugger's `jdb_object.cpp` in development
+builds ([dependency table](design.md#dependencies)).
+
+### The ledger
+
 erXos's kernel keeps Fiasco's model wherever erXos needs nothing else:
 capabilities as the only authority, held in a table per space; spaces
 created by any holder of a factory; a kernel stack per thread in a
