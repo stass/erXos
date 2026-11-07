@@ -1399,9 +1399,19 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   [design-domains.md](design-domains.md#the-funnel) less pids and
   references, at most 16 MiB decoded, and only then decoded with
   `binary_to_term/2` in safe mode, so it creates no atom. The tool decodes
-  target payloads with its own bounded decoder of the same grammar and
-  prints them through the line escape: to the host, the target is untrusted
-  too.
+  target payloads with its own bounded decoder of the same grammar,
+  `tools/lib/erx/etf.rb`, and prints them through the line escape: to the
+  host, the target is untrusted too. The tool's decoder takes at most
+  16 MiB of bytes and 16 MiB decoded, by an estimate of ERTS's heap words;
+  refuses bytes after the term; decodes atoms to values of its own, never
+  to Ruby symbols; finds repeated map keys by a digest of each key built
+  as it is decoded, never by Ruby's recursive hashing; and refuses a term
+  inside more than 1,024 containers in any position, the funnel's free
+  tail positions included (a list continued by list tails is one list):
+  its values are Ruby's, whose recursive comparison and printing overflow
+  the main thread's stack a few thousand levels down. Its encoder holds
+  the tool's own calls to the byte and depth bounds; the target checks
+  their decoded size.
 * **Resident bytes.** What a session makes `erx_hostlink` hold stays
   within the session's resident limit, 32 MiB (an estimate), charged to
   the system domain's budget, which holds one session's, since the link
