@@ -271,6 +271,13 @@ Error in process <0.150.0> with exit value:
   `where`, `sort` and `count`). Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control and
   running programs are not on master yet.
+* **The machine is an object** (M4). A host link over the second serial
+  line lets `tools/erx load` and `watch` replace modules in the running
+  system, and `tools/erx files` read the guest's files over 9P2000.L. At
+  the Erlang shell, `erx:i()` shows processes and kernel objects, `source(Pid)` shows the source line a process is at, and
+  `erx:trace/1` streams trace events; `/proc` serves the same records as
+  read-only files. Values the stopgap kernel cannot measure show as
+  unsupported or partial, never invented.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
   case with stock OTP, and each known difference is classified by cause
@@ -279,7 +286,8 @@ Error in process <0.150.0> with exit value:
   against stock, with every difference classified.
 * **The release** carries kernel, stdlib, compiler and runtime_tools (the
   last two loaded, not started), and the erXos applications `erx`,
-  `erx_files`, `erx_uart`, `erx_blk` and `erx_shell`.
+  `erx_files`, `erx_uart`, `erx_blk`, `erx_shell`, `erx_code` and
+  `erx_hostlink`.
 * **The build checks itself.** Generated ABI and hardware layers,
   reproducible boot images, fuzzing, ASan, UBSan, TSan and TLA+ models
   all run as build gates.
