@@ -202,8 +202,11 @@ it; git history is the record of completed work.
   group's `/tmp` use is bounded only by the cap. `erx_ct_oracle` copies every suite's `_data` (stdlib's are 25 MB) into
   `/tmp` before the run, and Common Test's logs and each `priv_dir` stay there. The whole stdlib group fits
   in the 160 MiB cap without `enospc`. The emulator group, run in three parts, fits too; a whole run of it has not been
-  measured. Kernel's `file_SUITE` bench and `sendfile_SUITE` write more than the cap by design. Copying each suite's `_data` on entry and deleting it and its `priv_dir` on exit (a Common Test hook in the
-  reporter, on both sides) would bound it by the largest suite instead.
+  measured. The kernel group cannot run whole on erXos: in one runtime it fills `/tmp` in `sendfile_SUITE` (what filled it
+  is not measured), and then `erx_oracle_events` crashes on `enospc`, Common
+  Test terminates and the suites after `sendfile_SUITE` never run (1029 cases; erxos-history
+  `oracle-hosted/2026-11-06-kernel-boot`). Copying each suite's `_data` on entry and deleting it and its `priv_dir`
+  on exit (a Common Test hook in the reporter, on both sides) would bound it by the largest suite instead.
 * [Medium] `test/oracle/hosted_known_differences/emulator.txt`: map_SUITE `t_tracing` fails on the hosted runtime
   with `dbg` undefined, although the oracle's hosted tree carries `runtime_tools`. Rerun the
   case, trace why `dbg` is not found, and fix it or reword the row with its cause.
@@ -493,10 +496,11 @@ it; git history is the record of completed work.
 * [Medium] `test/oracle/hosted_known_differences/kernel.txt`, `emulator.txt`: their rows come from runs that booted the
   oracle's tree from OTP's `bootstrap/bin/start.boot`, whose kernel and stdlib versions (11.0.3, 8.0.4) are not the
   shipped ones (11.0.4, 8.1.1). The tree boots its own start_clean (`OracleHosted.write_boot_script`), and the
-  compiler and stdlib tables are refreshed from runs that boot it; rerun the kernel and emulator groups and refresh
-  their tables. The kernel.txt rows of application_SUITE `script_start`, `distr_changed_tc1` and
-  `distr_changed_tc2` and global_SUITE `global_groups_change` give the old boot script as their cause, which no
-  longer holds; their cause is unknown until the rerun.
+  compiler and stdlib tables and kernel.txt's rows for the suites before `sendfile_SUITE` are refreshed from runs
+  that boot it. Rerun the emulator group and the kernel suites from `sendfile_SUITE` on (`seq_trace_SUITE`, the
+  socket suites, `standard_error_SUITE`, `wrap_log_reader_SUITE`, `zlib_SUITE`, `zzz_SUITE`) and the group functions of `gen_tcp_socket_SUITE`,
+  `interactive_shell_SUITE`, `net_SUITE` and `prim_net_SUITE` that an incomplete run leaves unresolved, and refresh
+  their rows.
 * [Low] `test/integration/runtime_prim_file_test.rb` (`build_fixture`): its tree boots OTP's `bootstrap/bin/start.boot`,
   whose kernel and stdlib specifications are the bootstrap's (11.0.3, 8.0.4), not the release's. The transcript it
   compares does not read them; boot it from `OracleHosted.write_boot_script` so no hosted tree carries them.
@@ -533,6 +537,21 @@ it; git history is the record of completed work.
   Both erXos sides read one table (design-build.md), so a row naming erXos's `passed` would be stale on hosted:
   if the cause is timing, the table needs a way to name a case whose stock result is not stable. Until then
   `make check-oracle` does not run the group. Reports: erxos-history `oracle-qemu/2026-11-06-compiler`.
+* [Low] `test/oracle/hosted_known_differences/kernel.txt`: stock's result of gen_tcp_misc_SUITE `bidirectional_traffic`
+  varies between runs (failed, user_skip, passed; erxos-history `oracle-hosted/2026-11-06-kernel`, `2026-11-06-kernel-2`,
+  `2026-11-06-kernel-boot`), while erXos skips it in every run that reaches it for want of a local address. Its row is stale whenever
+  stock skips too. Find what decides stock's result on the development host.
+* [Low] `test/oracle/hosted_known_differences/kernel.txt`: logger_disk_log_h_SUITE `sync`, `disk_log_full`,
+  `disk_log_wrap`, `disk_log_events`, `op_switch_to_sync` and inet_res_SUITE's 8 lookup cases failed on erXos in a
+  group run that booted OTP's bootstrap `start.boot` (erxos-history `oracle-hosted/2026-11-06-kernel`) and agree with
+  stock in one run that boots the tree's start_clean (`2026-11-06-kernel-boot`); file_SUITE bench `tiny_writes`
+  failed on stock once. No cause is established; if any recurs, trace it before giving it a row.
+* [Medium] `tools/lib/erx/production_image.rb`, QEMU suite: M3's demo has an idle machine show every executor
+  parked, and only the hosted suite checks it (`test/integration/runtime_hosted_smoke_test.rb`, through
+  `ERX_HOSTED_GROUP_REPORT`). On Fiasco the park table keeps the count in the group status page
+  (`liberx/backend/core/park_table.c`), but nothing reads it out: no BIF, and no reporter like the hosted
+  backend's `group_report_main`. Add a user-mode reporter to `liberx/backend/fiasco` behind a kernel command-line
+  word, and a checkpoint of `parked N of N` at the shell.
 * [Low] `tools/lib/erx/interpreter_image.rb`: the check reads the linked program's symbol table, so a link that
   discards locals (`-x`, hidden visibility turned local) could hide C++ while keeping `erl_start`. The root's link
   strips debug information only. Check the lld link map's input members as well, which no stripping changes.

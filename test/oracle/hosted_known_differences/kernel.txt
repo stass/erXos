@@ -25,9 +25,6 @@ file_SUITE     -      large_write         failed     cannot run: no distribution
 # file:allocate/3 answers enotsup on erXos's files, so the case skips.
 file_SUITE     files  allocate_file_size  user_skip  file:allocate/3 answers enotsup
 
-# The case matches prim_file's descriptor internals, which erXos's files
-# do not share.
-
 # Phase 1 limits, one row per suite and status where every difference has
 # the one cause, else per case; each reason names the cause the case shows.
 application_SUITE            -        failover                     failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
@@ -51,7 +48,6 @@ application_SUITE            *        *                            user_skip  ca
 bif_SUITE                    *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 code_SUITE                   -        ensure_loaded_many           failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 code_SUITE                   -        ensure_loaded_many_kill      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
-code_SUITE                   -        all_available                failed     cannot run: file system; only /tmp is writable in Phase 1
 code_SUITE                   -        pa_pz_option                 failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 code_SUITE                   -        remove_pa_pz_option          failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 code_SUITE                   -        sticky_dir                   failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
@@ -186,6 +182,7 @@ gen_tcp_misc_SUITE           inet_backend_default otp_17492                    u
 gen_tcp_misc_SUITE           inet_backend_default otp_18707                    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           inet_backend_default t_kernel_options             user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_misc_SUITE           tickets  otp_18357                    user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
+gen_tcp_misc_SUITE           inet_backend_default bidirectional_traffic        user_skip  cannot run: socket; no network stack in Phase 1: the case finds no local address and skips (TODO.md)
 gen_tcp_misc_SUITE           *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_socket_SUITE         *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 gen_tcp_socket_SUITE         *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
@@ -260,8 +257,17 @@ interactive_shell_SUITE      ssh      init_per_group               failed     ca
 kernel_config_SUITE          *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_SUITE                 *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_env_var_SUITE         *        *                            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+logger_proxy_SUITE           -        remote                       failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+logger_proxy_SUITE           -        remote_disconnect            failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+logger_proxy_SUITE           -        remote_emulator              failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+logger_simple_h_SUITE        -        replace_default              failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+logger_simple_h_SUITE        -        replace_file                 failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
+logger_simple_h_SUITE        -        replace_disk_log             failed     cannot run: spawn port; the case starts a standard_io peer, which needs a spawned port, and erXos spawns no ports in Phase 1
 logger_simple_h_SUITE        -        start_debug                  failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_simple_h_SUITE        -        start_crash                  failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
+rpc_SUITE                    -        called_node_dies             failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+rpc_SUITE                    -        multicall_node_dies          failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+rpc_SUITE                    -        multicall_mix                failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 logger_std_h_SUITE           -        rotate_on_start_compressed   failed     cannot run: os_mon, whose disksup file_SUITE:disc_free reads, is not in the release (design-runtime.md)
 net_SUITE                    *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 net_SUITE                    *        init_per_group               auto_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built; every case under the group skips, so its group functions never run
@@ -276,7 +282,12 @@ os_SUITE                     -        message_leak                 failed     ca
 os_SUITE                     -        max_size_command             failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 os_SUITE                     -        os_cmd_shell                 failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 os_SUITE                     -        cmd_exception                failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
-pg_SUITE                     *        *                            user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+pg_SUITE                     old_release *                            user_skip  cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+pg_SUITE                     cluster  *                            failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+pg_SUITE                     performance *                            failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+pg_SUITE                     monitor  *                            failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+pg_SUITE                     basic    overlay_missing              failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
+pg_SUITE                     basic    protocol_upgrade             failed     cannot run: socket; the case starts a peer whose control connection is TCP, and gen_tcp answers eprotonosupport (no network stack in Phase 1)
 sendfile_SUITE               *        *                            failed     cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
 seq_trace_SUITE              *        *                            failed     cannot run: spawn port; erXos spawns no ports in Phase 1 (os:cmd, open_port, to_erl)
 socket_SUITE                 *        *                            user_skip  cannot run: socket; no network stack in Phase 1: gen_tcp answers eprotonosupport, socket and net are not built
@@ -304,11 +315,11 @@ error_logger_warn_SUITE      -        *                            failed     ca
 logger_std_h_SUITE           -        crash_std_h_to_file          failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 logger_std_h_SUITE           -        crash_std_h_to_disk_log      failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 
-# Each makes a boot script with systools before it starts its peers.
-application_SUITE            -        script_start                 failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
-application_SUITE            distr_changed distr_changed_tc1            failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
-application_SUITE            distr_changed distr_changed_tc2            failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
-global_SUITE                 -        global_groups_change         failed     cause unknown: these failed in systools:make_script under OTP's bootstrap boot script, which the tree no longer boots, and the cases then start peer nodes (TODO.md)
+# Each makes a boot script with systools, then starts its peers.
+application_SUITE            -        script_start                 failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+application_SUITE            distr_changed distr_changed_tc1            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+application_SUITE            distr_changed distr_changed_tc2            failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
+global_SUITE                 -        global_groups_change         failed     cannot run: peer; no distribution in Phase 1 (design.md), and the case starts or needs a peer node
 
 # No network stack in Phase 1: cases that skip where their suite's other
 # cases fail, and group functions.
@@ -350,3 +361,4 @@ prim_file_SUITE              files    large_write                  auto_skip  ca
 
 # /tmp (erx_file_remote and its server).
 prim_file_SUITE              files/file_info file_write_file_info_opts    failed     /tmp answers einval for a time before 1970, which 9P2000.L's setattr cannot carry (TODO.md, erx_file_remote)
+prim_file_SUITE              files/open read_file_rename_race        failed     a read_file racing a rename over its name answers enoent on /tmp (TODO.md)
