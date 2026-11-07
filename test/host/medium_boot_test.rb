@@ -37,9 +37,14 @@ class MediumBootTest < Minitest::Test
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
     merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release)
-    assert_equal %w[banner image-identity boot-value root-identity release-shell image-md5 crc32c] +
+    assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c] +
                  Boot::COMMAND_SHELL.map { |point| point.fetch(:name) }, merged.map { |point| point.fetch(:name) }
-    assert_equal "erx_shell:start().\r", merged.find { |point| point.fetch(:name) == 'crc32c' }.fetch(:type)
+    typed = merged.to_h { |point| [point.fetch(:name), point[:type]] }
+    assert_equal "erl\r", typed.fetch('release-shell')
+    assert_match %r{\Aapplication:ensure_all_started\(erx_blk\)}, typed.fetch('erlang-shell')
+    assert_equal "erx_shell:start().\r", typed.fetch('crc32c')
+    assert_match merged.find { |point| point.fetch(:name) == 'erlang-shell' }.fetch(:pattern),
+                 "Eshell V16.0 (type help(). for help)\r\n"
     verify = merged.fetch(2).fetch(:verify)
     assert_match Boot::BOOT_VALUE, "erx: boot value normal slot b\r\n"
     verify.call("erx: boot value normal slot b\r\n")
@@ -53,7 +58,7 @@ class MediumBootTest < Minitest::Test
   # The shell reads stdlib's lists module from /images/release, and only its packed MD5
   # passes; a release without the module has nothing to read.
   def test_the_shell_reads_a_release_file_from_the_image_and_must_print_its_md5
-    shell, answer = Boot.image_checkpoints({ name: 'release-shell', pattern: /\AEshell V/n }, release)
+    shell, answer = Boot.image_checkpoints({ name: 'erlang-shell', pattern: /\AEshell V/n }, release)
     assert_match %r{file:read_file\("/images/release/system/lib/stdlib-7\.0/ebin/lists\.beam"\)}, shell.fetch(:type)
     assert shell.fetch(:type).end_with?(".\r")
     verify = answer.fetch(:verify)
@@ -64,14 +69,14 @@ class MediumBootTest < Minitest::Test
     ["{image_md5,<<\"#{hex.downcase}\">>}\n", "{image_md5,{error,enoent}}\n", "{image_md5,<<\"00\">>}\n"].each do |line|
       assert_raises(Erx::Error, line) { verify.call(line) }
     end
-    assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'release-shell' }, release.take(1)) }
+    assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'erlang-shell' }, release.take(1)) }
   end
 
   # After the image's answer the shell runs the CRC-32C primitive, and only the answer
   # the bitwise model gives passes: RFC 3720's check value, the chunked value, and the
   # refusal of one call over 65536 bytes.
   def test_the_shell_runs_the_crc32c_primitive_and_must_print_the_models_values
-    merged = Boot.checkpoints([{ name: 'image-identity' }, { name: 'release-shell', pattern: /\AEshell V/n }],
+    merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
                               Choice.new(slot: :a, offset: 0, length: 64), release: release)
     image_answer, crc = %w[image-md5 crc32c].map { |name| merged.find { |point| point.fetch(:name) == name } }
     assert_equal "#{Boot::CRC32C_EXPRESSION}\r", image_answer.fetch(:type)

@@ -246,13 +246,27 @@ class RuntimeConsoleTest < Minitest::Test
     nil
   end
 
-  def with_erxos
+  # The console's first shell: the command shell, at its prompt. The boot's log records
+  # may land between its banner and its prompt.
+  CONSOLE_RC = /^rc: the command shell; erl starts the Erlang shell\n(?:.*\n)*% \z/
+
+  # A session at the console's command shell.
+  def with_command_shell
     Dir.mktmpdir('erx-console') do |home|
       environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge('TZ' => 'UTC')
       spawn_session(environment, OUTPUT.beam, OUTPUT.archive, chdir: home) do |session|
-        session.wait_for(/^1> \z/)
+        session.wait_for(CONSOLE_RC)
         yield session
       end
+    end
+  end
+
+  # A session at an Erlang shell that `erl` started from the console's command shell.
+  def with_erxos
+    with_command_shell do |session|
+      session.type("erl\r")
+      session.wait_for(/^1> \z/)
+      yield session
     end
   end
 
@@ -275,9 +289,10 @@ class RuntimeConsoleTest < Minitest::Test
       session.type(keys)
       session.wait_for(pattern)
     end
-    # From the shell's own first line on, since the banner names the build.
+    # From the line after the shell's banner on, since the banner names the build, and
+    # erXos's names no Ctrl-G, which belongs to the console's menu.
     assert_match(%r{\AErlang/OTP 29 }, session.screen.to_s)
-    session.screen.to_s[/^Eshell.*/m]
+    session.screen.to_s[/^Eshell V[^\n]*\n(.*)/m, 1]
   end
 
   def keep_transcript(name, text)
@@ -446,15 +461,19 @@ class RuntimeConsoleTest < Minitest::Test
     end
   end
 
-  # The input ending while the command shell reads ends it, and then the Erlang shell
-  # below it, whose end of input ends the runtime with status 0.
+  # The input ending while a command shell started from `erl`'s Erlang shell reads ends
+  # it, and then the Erlang shell below it, whose end of input ends the runtime with
+  # status 0.
   def test_the_input_ending_under_the_command_shell_ends_both_shells
     Open3.popen2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
                   OUTPUT.beam, OUTPUT.archive) do |input, output, waiter|
-      input.write("erx_shell:start().\n")
+      input.write("erl\n")
       input.flush
       seen = +''
       begin
+        seen << output.readpartial(4096) until seen.include?("Eshell V")
+        input.write("erx_shell:start().\n")
+        input.flush
         seen << output.readpartial(4096) until seen.include?("exit ends it")
       rescue EOFError
         flunk "the runtime ended before the command shell started: #{seen.inspect}"
@@ -463,7 +482,7 @@ class RuntimeConsoleTest < Minitest::Test
       input.close
       seen << output.read
       assert_equal 0, waiter.value.exitstatus, seen
-      assert_match(/; under rc\r?\n/, seen)
+      assert_match(/% under rc\r?\n/, seen)
     end
   end
 
@@ -488,11 +507,13 @@ class RuntimeConsoleTest < Minitest::Test
     end
   end
 
-  # With no terminal, as on stock, the shell does not edit: it reads lines and halts at the end.
+  # With no terminal, as on stock, a shell does not edit: it reads lines, and the end of
+  # input ends the runtime. What follows `erl` in the same read stays with the command
+  # shell's group (TODO.md), so the Erlang shell's end of input is the next test's.
   def test_end_of_input_evaluates_what_was_read_and_halts_with_status_0
     {
       '' => [],
-      "1+1.\n2+2.\n" => [/\b2\n/, /\b4\n/]
+      "echo a\necho b\n" => [/% a\r?\n/, /% b\r?\n/]
     }.each do |input, patterns|
       output, status = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
                                         OUTPUT.beam, OUTPUT.archive, stdin_data: input)
@@ -508,6 +529,8 @@ class RuntimeConsoleTest < Minitest::Test
         pid = Process.spawn(Erx::Oracle::CLEAN_ERLANG_ENV, OUTPUT.beam, OUTPUT.archive, in: slave, out: slave, err: slave,
                                                                                          chdir: home)
         session = Session.new(master, master, pid, columns: 80)
+        session.wait_for(CONSOLE_RC)
+        session.type("erl\r")
         session.wait_for(/^1> \z/)
         refute slave.echo?, 'raw while the shell runs'
         session.type(line)
@@ -530,10 +553,52 @@ class RuntimeConsoleTest < Minitest::Test
     assert_match(/erx_stdio: reading standard input: /, output)
   end
 
-  def test_a_killed_shell_ends_the_runtime_and_restores_the_terminal
-    run_on_owned_terminal("exit(group:whereis_shell(), kill).\r") do |status, slave|
-      assert_equal 1, status.exitstatus
-      assert slave.echo?
+  # The console's first shell: `exit` ends it and a fresh one takes its place.
+  def test_exit_at_the_first_shell_starts_a_fresh_one
+    with_command_shell do |session|
+      session.type("exit\r")
+      session.wait_for(/^% exit\nrc: the command shell; erl starts the Erlang shell\n% \z/)
+      session.type("echo again\r")
+      session.wait_for(/^again\n% \z/)
+    end
+  end
+
+  # A crash of the first shell's process while it has the input starts a fresh one too:
+  # the Erlang shell kills it once q() has handed the input back.
+  KILL_FIRST_SHELL = '{dictionary, D} = process_info(element(3, sys:get_state(erx_console)), dictionary), ' \
+                     'Sh = proplists:get_value(shell, D), spawn(fun() -> timer:sleep(300), exit(Sh, kill) end), q().'
+
+  def test_a_crash_of_the_first_shell_starts_a_fresh_one
+    with_erxos do |session|
+      session.type("#{KILL_FIRST_SHELL}\r")
+      session.wait_for(/rc: the command shell; erl starts the Erlang shell\n% \z/)
+      session.type("echo after\r")
+      session.wait_for(/^after\n% \z/)
+    end
+  end
+
+  # q() and exit() end the Erlang shell `erl` started, and the command shell reads on;
+  # the runtime runs on.
+  def test_q_and_exit_end_the_erlang_shell_and_return_to_the_command_shell
+    with_erxos do |session|
+      session.type("q().\r")
+      session.wait_for(/^1> q\(\)\.\n% \z/)
+      session.type("erl\r")
+      session.wait_for(/^1> \z/)
+      session.type("exit().\r")
+      session.wait_for(/^1> exit\(\)\.\n% \z/)
+      session.type("echo running\r")
+      session.wait_for(/^running\n% \z/)
+    end
+  end
+
+  # A killed Erlang shell fails `erl`, which says why, and the command shell reads on.
+  def test_a_killed_erlang_shell_returns_to_the_command_shell
+    with_erxos do |session|
+      session.type("exit(group:whereis_shell(), kill).\r")
+      session.wait_for(/killed[^\n]*\n% \z/)
+      session.type("echo alive\r")
+      session.wait_for(/^alive\n% \z/)
     end
   end
 

@@ -1690,9 +1690,14 @@ for the driver. A session in another domain does the same beside its own
 tty ([design-live.md](design-live.md#the-tty)). `-user erx_console`
 ([Configuration](#configuration)) makes `user_sup` call `erx_console:start/0`,
 which starts the driver and two groups, as `user_drv` does: the shell's,
-`group:start(self(), {shell, start, [init]}, Options)`, which gets the input, and
+which runs the command shell (`{erx_shell, console, []}`) and gets the input, and
 a group with no shell registered as `user`, since `shell:prompt_width/1` calls
 `io:getopts(user)` from inside the shell's group and a group cannot answer itself.
+The command shell is the console's first shell, as a UNIX console's login shell is.
+When it ends, by `exit` or a crash, while input may still come, the console
+starts a fresh one, as getty starts another login; once the input has ended, its
+end ends the runtime, with status 0 if it ended normally and 1 if not, as stock's
+shell halts at the end of its input. With `-noshell` or `-noinput` there is no shell.
 
 The first shell needs no more than this. Its `erx_console`, group and terminal-less
 `prim_tty` over a raw-byte driver are the system shell's permanent path, not a
@@ -1700,14 +1705,16 @@ stand-in: the system shell's tty stays raw with every flag clear, so nothing lie
 between `prim_tty` and the driver ([design-live.md](design-live.md#the-tty)).
 Input bytes reach the group unchanged, and `prim_tty`'s bytes the driver unchanged.
 
-**A shell typed at the shell takes the console on a group of its own.** In Phase 1
+**A shell started from a shell takes the console on a group of its own.** In Phase 1
 the command shell runs in the system domain on its console
-([design-shell.md](design-shell.md)): `erx_shell:start()`, typed at the Erlang
-shell, calls `erx_console:run_shell/1`, which starts a group for it, as `user_drv`'s
+([design-shell.md](design-shell.md)): its `erl` command runs the Erlang shell, and
+`erx_shell:start()`, typed at that Erlang shell, starts another command shell.
+Each calls `erx_console:run_shell/1`, which starts a group for the shell, as `user_drv`'s
 `s` and `c` start a shell and connect to it, and gives that group the input; when
 its shell ends, the input goes back to the group below and the caller gets its
 answer; such shells may end in any order, and once the input has ended each group
-that gets the input is told so. As `user_drv` shows only its current group, the
+that gets the input is told so. `q()` typed at an Erlang shell started this way ends
+that shell, not the runtime, a documented difference from stock OTP. As `user_drv` shows only its current group, the
 groups below are not shown: their output is acknowledged and dropped, and their
 questions answered; `user`, which carries the logger's output, is always shown.
 `Ctrl-C` interrupts the command shell, which ends its running line and reads on. A line's output is bytes: it reaches the driver through

@@ -54,6 +54,21 @@ menu, and uses the session's tty
 namespace ([design-files.md](design-files.md)) and the spawn path
 ([design-programs.md](design-programs.md)).
 
+The command shell is the first shell of the system domain's console, as a
+UNIX console's login shell is. The console shows the release slogan, the
+line `rc: the command shell; erl starts the Erlang shell` and the prompt
+`% `. When that shell ends, by `exit` or a crash, while input may still
+come, the console starts a fresh one, as getty starts another login. Once
+the input has ended, the shell's end ends the runtime, with status 0 if
+the shell ended normally and 1 if not, as stock's shell halts at the end
+of its input. With `-noshell` or `-noinput` there is no shell. The
+`erl` command runs the Erlang shell on the console above the command
+shell until that shell ends. Its banner is `Eshell V... (type help(). for
+help)` and names no `Ctrl-G`, because `Ctrl-G` on the console belongs to
+the console's menu ([design-live.md](design-live.md#the-console)).
+`erx_shell:start().` typed at that Erlang shell starts another command
+shell above it, whose `exit` returns to the Erlang shell.
+
 ## Requirements
 
 * **S-R1.** A command shell per session with rc's language, line editing
@@ -213,7 +228,8 @@ what a terminal needs added:
   plan9port's rc exports lists, and programs get `PATH=/bin`.
 * **An escape to Erlang.** The builtin `erl EXPR` evaluates an Erlang
   expression in the session's evaluator and prints its value; the Erlang
-  shell itself is one `Ctrl-G` away.
+  shell itself is one `erl` away: with no argument, `erl` runs the Erlang
+  shell on the terminal above the command shell until that shell ends.
 * **Authority.** The shell runs inside the session's domain with that
   domain's authority and facets, and nothing more; neither the shell nor
   any command has authority of its own (SH1). `bind`, `mount` and
@@ -747,7 +763,14 @@ facets in their context ([design-live.md](design-live.md)); and `bind`,
 * **The command shell is not a POSIX shell.** Scripts written for `sh` do
   not run in it, and one-liners take rc's syntax
   ([The language](#the-language)); the Erlang shell stays one
-  `Ctrl-G` away, unchanged.
+  `erl` away, unchanged.
+* **`q()` ends the Erlang shell, not the runtime.** At any Erlang shell,
+  restricted ones included, `q()` ends that shell, as stock OTP's `exit()`
+  does, and the shell below it reads on; stock OTP's `q()` stops the
+  runtime. The Erlang shell is a shell started from the command shell, so
+  leaving it must not stop the machine the command shell runs on. `q()` is
+  a shell-local command, so a `user_default:q/0` does not replace it.
+  `c:q/0`, `init:stop/0` and `halt()` still stop the runtime.
 
 The shell has no persistent format and no version: scripts are text in
 rc's language, which the shell keeps as rc defines it, and Erlang commands
@@ -939,7 +962,7 @@ pauses the space ([design-programs.md](design-programs.md#job-control)).
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| Users expect POSIX shell syntax | high | friction at first use | the Erlang shell and rc's short manual are one `Ctrl-G` and one `help` away; a tcsh-compatible shell is in the roadmap |
+| Users expect POSIX shell syntax | high | friction at first use | the Erlang shell and rc's short manual are one `erl` and one `help` away; a tcsh-compatible shell is in the roadmap |
 | rc's oracle and the shell disagree where rc's behaviour is unspecified | medium | test noise | each difference is classified once and pinned by a test |
 | The relay's single path for terminal writes serialises a job's output through one process | low | a job of many chatty programs is bounded by the relay's throughput | the relay handles at most 4 KiB unanswered and the console is the bottleneck anyway; `tools/erx bench pipe` with a pipeline writing to the terminal |
 

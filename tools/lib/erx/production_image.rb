@@ -294,6 +294,14 @@ module Erx
       NARROW_CPUSET = 3
       # erx_console's first line, which only a release that started `kernel` writes.
       SLOGAN = { name: 'release-slogan', pattern: %r{\AErlang/OTP 29 }n, seconds: 240 }.freeze
+      # The banner of the command shell erx_console starts after the slogan, which ends the
+      # boot; its prompt, `% `, ends no line. erl typed there starts the Erlang shell.
+      COMMAND_SHELL_BANNER = 'rc: the command shell; erl starts the Erlang shell'
+      RELEASE_SHELL = { name: 'release-shell', pattern: /\A#{Regexp.escape(COMMAND_SHELL_BANNER)}\r*\n\z/n, seconds: 60 }.freeze
+      # What the person types at the command shell for the Erlang shell, whose banner starts
+      # with Eshell V and whose prompt, `1> `, ends no line.
+      ERL_LINE = "erl\r"
+      ERLANG_SHELL = { name: 'erlang-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze
       # kernel_sup's children at a boot with no carrier, in which_children's order: the last
       # started first (docs/design-runtime.md, Configuration).
       KERNEL_CHILDREN = %w[kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
@@ -327,9 +335,9 @@ module Erx
       # A tab and an escape sequence in a debug log record, typed as byte values.
       LOG_AFTER_HANDOFF = %(erx_log:debug(<<"after",9,"handoff",27,"[1m">>).\r)
       # Processes of the system domain, registered by name, that every booted release runs at
-      # the shell: init and the console as well as children of kernel_sup.
+      # the Erlang shell: init and the console as well as children of kernel_sup.
       SYSTEM_PROCESSES = %w[init code_server file_server_2 erx_console erx_watchdog].freeze
-      # erlang:processes() at the shell: how many it lists, which of SYSTEM_PROCESSES it
+      # erlang:processes() at the Erlang shell: how many it lists, which of SYSTEM_PROCESSES it
       # misses, and the emulator's flavour, emu for the interpreter image (docs/design-runtime.md, R10).
       PROCESSES_EXPRESSION = '{processes,length(erlang:processes()),' \
                              "[N||N<-[#{SYSTEM_PROCESSES.join(',')}],not lists:member(whereis(N),erlang:processes())]," \
@@ -354,7 +362,7 @@ module Erx
       end
 
       # accels run the whole matrix: every boot below at each CPU count. TCG is not one of them;
-      # it runs only the smoke, which smoke: true adds as SMOKE_CELLS: the plain boot to the shell
+      # it runs only the smoke, which smoke: true adds as SMOKE_CELLS: the plain boot to the command shell
       # at one CPU, and the deterministic transcript, without the boots that probe refusals, the
       # watchdog and the console.
       def call(accels:, cpus: [1, 4], jobs: 4, build: true, smoke: false)
@@ -375,8 +383,9 @@ module Erx
       # so a test image's mark shows. The manifest line
       # carries the numbers the source says, so a root that misread it fails. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
-      # release, `kernel` starts, and erx_console's two banners, written through erx_pl011,
-      # prove the release ran that far. The prompt ends no line, so no point names it.
+      # release, `kernel` starts, and erx_console's slogan and its command shell's banner,
+      # written through erx_pl011, prove the release ran that far. The command shell's
+      # prompt ends no line, so no point names it.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)))
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
@@ -396,8 +405,7 @@ module Erx
          point('root-watchdog', /\Aerx: root task: watchdog/n, /\Aerx: root task: watchdog #{watchdog}\r?\n\z/n),
          point('erts-start', /\Aerx: erts: erl_start runs/n, /\Aerx: erts: erl_start runs, #{arguments} arguments\r?\n\z/n, seconds: 60),
          point('erts-executors', /\Aerx: erts: \d+ schedulers and/n, /\Aerx: erts: #{count} schedulers and #{count} dirty CPU schedulers hold executor slots\r*\n\z/n, seconds: 60),
-         SLOGAN,
-         { name: 'release-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze].freeze
+         SLOGAN, RELEASE_SHELL].freeze
       end
 
       # Schedulers are one per CPU of the system's share on this machine.
@@ -406,39 +414,43 @@ module Erx
         (share & ((1 << cpus) - 1)).to_s(2).count('1')
       end
 
-      # A machine at rest at the shell, with the group's report on: once the prompt is up, a
-      # line of the report says every executor parked. The report writes a line only when the
-      # counts change, and a fast machine may park everything before the banner, so the person
-      # at the console keeps one scheduler busy for half a second first: the report must then show it
-      # wake and every executor park again. The report writes beside the console driver, so the
-      # slogan and the banner are looked for anywhere in a line, and its line may follow the
-      # unended prompt.
+      # A machine at rest at the Erlang shell, with the group's report on: once the prompt is
+      # up, a line of the report says every executor parked. The report writes a line only when
+      # the counts change, and a fast machine may park everything before the banner, so the
+      # person at the console starts the Erlang shell and keeps one scheduler busy for half a
+      # second first: the report must then show it wake and every executor park again. The
+      # report writes beside the console driver, so the slogan and the two shells' banners are
+      # looked for anywhere in a line, and its line may follow an unended prompt.
       def self.idle_checkpoints(cpus:, root:)
         # Each scheduler and each dirty CPU scheduler holds an executor slot.
         executors = 2 * schedulers(File.read(File.join(root, MANIFEST)), cpus: cpus)
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
          { name: 'release-slogan', pattern: %r{Erlang/OTP 29 }n, seconds: 240 }.freeze,
-         { name: 'release-shell', pattern: /Eshell V/n, seconds: 60, type: BUSY_EXPRESSION }.freeze,
+         { name: 'release-shell', pattern: /#{Regexp.escape(COMMAND_SHELL_BANNER)}/n, seconds: 60, type: ERL_LINE }.freeze,
+         { name: 'erlang-shell', pattern: /Eshell V/n, seconds: 60, type: BUSY_EXPRESSION }.freeze,
          # The report's bytes may fall inside the driver's, so the line is looked for at its end only.
          { name: 'idle-parked', pattern: /erx: root task: group: parked #{executors} of #{executors}\r*\n\z/n,
            seconds: EVAL_SECONDS }.freeze].freeze
       end
 
-      # A person at the serial console. The first line is typed at the boot's development
-      # warning, before the driver starts, so the FIFO holds it when the driver takes the UART. Each answer then
-      # types the next line: a line with a mistake rubbed out, under which the sum is 4 where
-      # the mistake is a syntax error, an output longer than any FIFO, a debug log record,
-      # what erlang:processes() lists, and a module compiled and a tracer started with
-      # compiler and runtime_tools loaded and neither started, and an rc line the command
-      # shell runs with its Erlang commands.
+      # A person at the serial console. The first line, erl, is typed at the boot's development
+      # warning, before the driver starts, so the FIFO holds it when the driver takes the UART,
+      # and the command shell reads it at its first prompt and starts the Erlang shell. At the
+      # Erlang shell's banner the person types a sum, and each answer then types the next
+      # line: a line with a mistake rubbed out, under which the sum is 4 where the mistake is
+      # a syntax error, an output longer than any FIFO, a debug log record, what
+      # erlang:processes() lists, and a module compiled and a tracer started with compiler
+      # and runtime_tools loaded and neither started, and an rc line the command shell's
+      # evaluator runs with its Erlang commands.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
-          point.fetch(:name) == 'development-warning' ? point.merge(type: "1+1.\r").freeze : point
+          point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
         end
         raise Error, 'the boot transcript has no development warning to type at' unless boot.any? { |point| point.key?(:type) }
 
         [*boot, SLOGAN,
-         console_point('shell', /\AEshell V/n),
+         console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
+         console_point('shell', ERLANG_SHELL.fetch(:pattern), type: "1+1.\r"),
          console_point('sum-echo', /1\+1\.\r*\n\z/n),
          console_point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
          console_point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{CONSOLE_LONG_BYTES},$x)),io:nl().\r"),
@@ -469,13 +481,13 @@ module Erx
       private_class_method :console_point
 
       # The release's boot with its children named, then the line that outlived the deadlines.
-      # init's -eval writes beside the shell, so a line of its may follow the unended prompt.
+      # init's -eval writes beside the command shell, so a line of its may follow the unended prompt.
       def self.survival_checkpoints(seconds:)
         children = KERNEL_CHILDREN.join(',')
         [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
          SLOGAN,
-         point('kernel-children', /\A(?:1> )?\[[a-z0-9_,]+\]\r*\n\z/n, /\A(?:1> )?\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
-         { name: 'past-the-deadlines', pattern: /\A(?:1> )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
+         point('kernel-children', /\A(?:% )?\[[a-z0-9_,]+\]\r*\n\z/n, /\A(?:% )?\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
+         { name: 'past-the-deadlines', pattern: /\A(?:% )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
       end
 
       # A machine with less RAM than root_memory: the same image boots to the root, which
@@ -513,7 +525,7 @@ module Erx
 
       private
 
-      # SMOKE_CELLS under TCG: the plain boot to the shell at one CPU, then the transcript.
+      # SMOKE_CELLS under TCG: the plain boot to the command shell at one CPU, then the transcript.
       # Each name sits beside the boot that earns it, so dropping a boot drops its cell, and
       # the gate then marks the declared cell not_run.
       def smoke_cells(built)
@@ -551,7 +563,7 @@ module Erx
         end
       end
 
-      # Two boots in deterministic mode, to the shell, whose transcripts must be the same
+      # Two boots in deterministic mode, to the command shell, whose transcripts must be the same
       # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG. The cell
       # carries how many lines the two agreed on.
       def deterministic(built)
@@ -576,15 +588,12 @@ module Erx
         window = proof.fetch(:pet) + proof.fetch(:period) + PET_MARGIN_SECONDS
         stopped = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
                                             points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
-                                                     { name: 'pet-stopped', pattern: /\A(?:1> )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
+                                                     { name: 'pet-stopped', pattern: /\A(?:% )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
                                                      { name: 'watchdog-fired', pattern: /#{Regexp.escape(CrashFrame::BEGIN_MARKER)}/n, seconds: window }.freeze])
         judge_missed_pet(File.binread(stopped.fetch('serial_log')))
         judge_missed_pet_time(stopped.fetch('checkpoints'), proof)
       end
 
-      # The record comes about the pet deadline D after the suspension, not at once and not
-      # long after: the first would mean a watchdog that is not waiting for pets, the second
-      # one that needs the machine's help to end it.
       # An rc line that the command shell runs with its Erlang commands, in a directory of
       # its own under /tmp: redirections to a file, a pipeline, substitutions, ls and ps.
       # Its one line of output names the line count, the file's words, ls's one name and
@@ -593,6 +602,9 @@ module Erx
                       'x=`{cat f | cat}; y=`{ls | cat}; ps | cat > p; s=$status; ' \
                       'echo rc: $#x $x $y $s">>).' "\r"
 
+      # The record comes about the pet deadline D after the suspension, not at once and not
+      # long after: the first would mean a watchdog that is not waiting for pets, the second
+      # one that needs the machine's help to end it.
       def judge_missed_pet_time(checkpoints, proof)
         at = ->(name) { checkpoints.find { |point| point.fetch('name') == name }.fetch('elapsed_seconds') }
         waited = at.call('watchdog-fired') - at.call('pet-stopped')

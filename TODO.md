@@ -1502,9 +1502,26 @@ to the corpus and follow rc
   keeps the state it had before the line, where the design sets `$status`
   to say the line was interrupted; it needs a way to set a variable through erx_shell_eval
   (`erlang/apps/erx_shell/src/erx_shell.erl`).
-* [Low] shell, a boot word that makes the command shell the console's first
-  shell, so that a person reaches it without typing `erx_shell:start().` at
-  the Erlang shell (`erlang/apps/erx/src/erx_console.erl`).
+* [Medium] console, a first shell started again while a shell above it has
+  the input writes its banner through `erx_console:write/1`, which is shown,
+  over the shell above, while its prompt goes through its hidden group and
+  is dropped, so when the shell above ends the line shows no prompt; a unit
+  of the old shell left waiting in `erl` writes its diagnostic when that
+  shell ends. Starting the fresh shell only once the input reaches the first
+  group again fixes both. A first shell that fails at its start is started
+  again at once, with no limit and no message, so a broken release spins
+  where it should halt with the reason; the restart decision wants a rate
+  (`erlang/apps/erx/src/erx_console.erl`,
+  `test/integration/runtime_console_test.rb`
+  `test_a_crash_of_the_first_shell_starts_a_fresh_one`, which kills the
+  shell 300 ms after `q()` and so depends on timing).
+* [Low] console, typeahead past a line that starts a shell (`erl`,
+  `erx_shell:start().`) stays in the group that read the line, which runs it
+  once the new shell ends, where on UNIX the program the line started reads
+  it: input arriving in one read goes to the group that has the input then,
+  and `group` keeps what one `get_line` did not take. Handing a group's unread
+  input to the group that takes the console needs a request `group` does not
+  have (`erlang/apps/erx/src/erx_console.erl`, `lib/kernel/src/group.erl`).
 * [Low] shell, a runner's reply of the wrong shape: `with_redirs`, a
   substitution's capture and `whatis` match the reply directly, so a
   runner that breaks its contract crashes the evaluator with the whole

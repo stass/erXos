@@ -1,7 +1,8 @@
 # The live machine: shell, inspector, tracing and code from the host
 
-The live machine is what a person sees of erXos: an Erlang shell on the
-serial console from which the whole machine is reachable as terms; one
+The live machine is what a person sees of erXos: a command shell on the
+serial console, with an Erlang shell one `erl` away, from which the whole
+machine is reachable as terms; one
 inspector that shows kernel objects, domains and the processes of every
 domain through a single schema whose every value carries a status and
 says who reported it; tracing of processes, of cross-domain frames and of
@@ -127,7 +128,8 @@ Functional:
 
 1. A line-editing shell on the serial console in every configuration
    that runs the system domain, with history and a job-control menu: in
-   development builds the system domain's Erlang shell, in release builds
+   development builds the system domain's command shell, with the Erlang
+   shell one `erl` away, in release builds
    a login whose session runs in the principal's own domain.
 2. One inspection interface for kernel objects (machine, CPUs, threads,
    groups, budgets, capabilities, mappings), domains with their connections and
@@ -756,8 +758,9 @@ reads them with `erx_log_read` and writes each as a log line
   ([design-system.md](design-system.md#the-vault)). In a development
   build the console logs `root` in at the UART at boot and at the host
   link's `console` line when the host opens it, each a login at a secure
-  line (**Secure lines**, above), so their first prompt is the system
-  shell's; a display's windows log no one in on their own, in any build.
+  line (**Secure lines**, above), so their first prompt is the command
+  shell's and the system shell is one `erl` away from it; a display's
+  windows log no one in on their own, in any build.
 * **Windows without a login.** A terminal window opened from a session
   shows that session's shell with no login, by a window token the console
   minted for that session's own request ([Window tokens](#window-tokens)).
@@ -1050,7 +1053,9 @@ is not escaped: a residual risk.
 ### The command shell
 
 Each session can run a command shell with rc's language beside its
-Erlang shell, in the same `Ctrl-G` menu; its language, commands, pipelines
+Erlang shell, both listed in the same `Ctrl-G` menu; the console starts
+the command shell first, and the shell's `erl` runs the Erlang shell above
+it; its language, commands, pipelines
 of records, jobs and terminal relay are
 [design-shell.md](design-shell.md). It runs on the session's tty above,
 and its Erlang commands reach the inspector, `/proc` and the code store

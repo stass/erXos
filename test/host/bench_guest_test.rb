@@ -17,7 +17,12 @@ class BenchGuestTest < Minitest::Test
     points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN)
     Erx::Transcript.new(checkpoints: points)
     typed = points.filter_map { |point| point[:type] }
-    assert_equal Erx::BenchGuest::FOOTPRINT_EXPRESSION + "\r", typed.first
+    # erl reaches the command shell first, and the footprint is typed at the Erlang shell's banner.
+    assert_equal ["erl\r", Erx::BenchGuest::FOOTPRINT_EXPRESSION + "\r"], typed.first(2)
+    shells = points.select { |point| %w[release-shell erlang-shell].include?(point.fetch(:name)) }
+    assert_equal [nil, typed[1]], shells.map { |point| point[:type] }
+    assert_match shells.first.fetch(:pattern), "rc: the command shell; erl starts the Erlang shell\r\n"
+    assert_match shells.last.fetch(:pattern), "Eshell V16.0 (type help(). for help)\r\n"
     assert_equal 4, typed.count { |line| line.include?('erx_otp_bench:run(') }
     assert_equal 'workload-switch', points.last.fetch(:name)
     refute points.last.key?(:type)

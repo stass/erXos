@@ -18,6 +18,8 @@
 %% limitations under the License.
 %%
 %% Modified by erXos: prompt_width/1 asks no group from erx_console, as from user_drv.
+%% q() ends the shell it is typed at, as exit() does, instead of stopping the runtime
+%% (docs/design-shell.md, "Compatibility and migration").
 %%
 %% %CopyrightEnd%
 %%
@@ -1165,6 +1167,8 @@ not_restricted(results, [_]) ->
     true;
 not_restricted(catch_exception, [_]) ->
     true;
+not_restricted(q, []) ->
+    true;
 not_restricted(exit, []) ->
     true;
 not_restricted(fl, []) ->
@@ -1260,6 +1264,7 @@ help() ->
          b()        -- display all variable bindings
          e(N)       -- repeat the expression in query <N>
          exit()     -- terminate the shell instance
+         q()        -- terminate the shell instance, as exit() does
          f()        -- forget all variable bindings
          f(X)       -- forget the binding of variable X
          ff()       -- forget all locally defined functions
@@ -1304,7 +1309,7 @@ help() ->
 %% non_builtin_local_func/3 (user_default/shell_default).
 %% fd, ft and td should not be exposed to the user
 -doc false.
-local_func() -> [v,h,b,f,fd,ff,fl,lf,lr,lt,rd,rf,rl,rp,rr,tf,save_module,history,results,catch_exception].
+local_func() -> [v,h,b,f,fd,ff,fl,lf,lr,lt,q,rd,rf,rl,rp,rr,tf,save_module,history,results,catch_exception].
 -doc false.
 local_func(Func) ->
     lists:member(Func, local_func()).
@@ -1550,6 +1555,10 @@ local_func(catch_exception, [_Other], _Bs, _Shell, _RT, _FT, _Lf, _Ef) ->
 local_func(exit, [], _Bs, Shell, _RT, _FT, _Lf, _Ef) ->
     shell_req(Shell, exit),                     %This terminates us
     exit(normal);
+%% erXos: q() at a shell ends that shell, as exit() does. c:q/0 and init:stop/0 still
+%% stop the runtime.
+local_func(q, [], Bs, Shell, RT, FT, Lf, Ef) ->
+    local_func(exit, [], Bs, Shell, RT, FT, Lf, Ef);
 local_func(F, As0, Bs0, _Shell, _RT, FT, Lf, Ef) when is_atom(F) ->
     {As,Bs} = expr_list(As0, Bs0, Lf, Ef),
     non_builtin_local_func(F,As,Bs, FT).

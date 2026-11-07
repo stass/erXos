@@ -17,6 +17,7 @@
              erx_cmd_count,
              erx_cmd_cp,
              erx_cmd_echo,
+             erx_cmd_erl,
              erx_cmd_false,
              erx_cmd_ls,
              erx_cmd_mkdir,

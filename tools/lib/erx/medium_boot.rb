@@ -62,19 +62,22 @@ module Erx
     end
 
     # The production boot's checkpoints with the boot value's inserted: the kernel
-    # prints "erx: boot image build ..." and then "erx: boot value ...". At the shell the
-    # person reads a release file from the slot's EROFS image (image_checkpoints), runs
-    # the CRC-32C primitive (crc32c_checkpoints), and then starts the command shell and
-    # types at it (command_shell_checkpoints). Each list takes the line before it and
-    # sets what the person types there.
+    # prints "erx: boot image build ..." and then "erx: boot value ...". The boot ends at
+    # the console's command shell, where the person starts the Erlang shell. There the
+    # person reads a release file from the slot's EROFS image (image_checkpoints), which
+    # waits for the image mounts, runs the CRC-32C primitive (crc32c_checkpoints), and
+    # then starts a nested command shell and types at it (command_shell_checkpoints),
+    # whose lines read the mounts. Each list takes the line before it and sets what the
+    # person types there.
     def checkpoints(points, choice, release:)
       at = points.index { |point| point.fetch(:name) == 'image-identity' }
       raise Error, 'the production checkpoints name no image-identity' unless at
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      shell, image_answer = image_checkpoints(points.last, release)
+      erlang, image_answer = image_checkpoints(ProductionImage::Run::ERLANG_SHELL, release)
       *crc32c, crc32c_answer = crc32c_checkpoints(image_answer)
-      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1], shell,
+      [*points[0..at], boot_value_checkpoint(choice), *points[(at + 1)...-1],
+       points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze, erlang,
        *crc32c, *command_shell_checkpoints(crc32c_answer)].freeze
     end
 
@@ -87,7 +90,7 @@ module Erx
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
     end
 
-    # After the Erlang shell's line previous, the person starts the command shell, and
+    # After the Erlang shell's line previous, the person starts a nested command shell, and
     # its lines follow (COMMAND_SHELL).
     def command_shell_checkpoints(previous)
       [previous.merge(type: "erx_shell:start().\r").freeze, *COMMAND_SHELL]
@@ -130,7 +133,7 @@ module Erx
     # The release file the shell reads from the image: stdlib's lists module, many blocks long.
     IMAGE_FILE = %r{\Asystem/lib/stdlib-[^/]+/ebin/lists\.beam\z}
 
-    # At the shell's banner, the person types an expression that waits for the block driver
+    # At the Erlang shell's banner, the person types an expression that waits for the block driver
     # to have started, which is when its image mounts are made, and prints the MD5 of
     # IMAGE_FILE as /images/release shows it, the system release's EROFS image in the slot
     # (docs/design-stopgap.md, "Image windows"); it must be the MD5 of the file the

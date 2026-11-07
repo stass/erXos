@@ -176,6 +176,30 @@ class ProductionImageTest < Minitest::Test
     assert_match(/refuses a test image/, error.message)
   end
 
+  # The boot ends at the command shell's banner. The person at the console types erl
+  # before the driver starts and the sum at the Erlang shell's banner; at rest, erl is
+  # typed at the command shell's banner and the busy loop at the Erlang shell's.
+  def test_the_console_boots_reach_the_erlang_shell_through_the_command_shell
+    run = Erx::ProductionImage::Run
+    rc = "rc: the command shell; erl starts the Erlang shell\r\n"
+    eshell = "Eshell V16.0 (type help(). for help)\r\n"
+    shells = ->(points) { points.drop_while { |point| point.fetch(:name) != 'release-shell' }.first(2) }
+    assert_match run::RELEASE_SHELL.fetch(:pattern), rc
+    refute_match run::RELEASE_SHELL.fetch(:pattern), "rc: the command shell; exit ends it\r\n"
+
+    console = run.console_checkpoints
+    assert_equal "erl\r", console.find { |point| point.fetch(:name) == 'development-warning' }.fetch(:type)
+    release, shell = shells.call(console)
+    assert_equal [%w[release-shell shell], nil, "1+1.\r"], [[release, shell].map { |point| point.fetch(:name) }, release[:type], shell[:type]]
+    assert_match release.fetch(:pattern), rc
+    assert_match shell.fetch(:pattern), eshell
+
+    release, erlang = shells.call(run.idle_checkpoints(cpus: 1, root: ROOT))
+    assert_equal ["erl\r", run::BUSY_EXPRESSION], [release, erlang].map { |point| point.fetch(:type) }
+    assert_match release.fetch(:pattern), "erx: root task: group: parked 2 of 2#{rc}"
+    assert_match erlang.fetch(:pattern), "1> #{eshell}"
+  end
+
   # A test image's kernel says so right after the development warning; a production boot's
   # transcript has no such line.
   def test_a_test_image_transcript_carries_its_mark_after_the_development_warning

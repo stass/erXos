@@ -40,8 +40,11 @@ shell's group as their group leader and run on. Either way the line's
 leader then ends. The runner needs no rule of its own for this, and its
 state from the line is dropped with the line's process.
 
-In Phase 1 the shell takes the system domain's console from the Erlang
-shell: start/0, typed at the Erlang shell, has erx_console run it on a
+In Phase 1 the shell is the first shell of the system domain's console:
+erx_console starts console/0 on its first group at boot, and starts it
+again whenever it ends while input may still come. Its `erl` runs the
+Erlang shell above it until that shell ends (erx_cmd_erl), and start/0,
+typed at an Erlang shell, has erx_console run another command shell on a
 group of its own until it ends, and the Erlang shell then reads on.
 
 Everything outside the language is the runner's (erx_shell_eval's
@@ -53,7 +56,7 @@ newline processing, and returns once they are written.
 erx_shell_runner, the runner of the session's domain, is the default.
 """.
 
--export([start/0, start/1, server/1]).
+-export([start/0, start/1, server/1, console/0]).
 -export([after_parse/3, prompt/2, reader/1, hand_over/2]).
 
 -export_type([options/0, terminal/0, reader/0]).
@@ -84,6 +87,8 @@ erx_shell_runner, the runner of the session's domain, is the default.
 %% Each unit runs within the heap the design gives every evaluator.
 -define(UNIT_HEAP_BYTES, (4 * 1024 * 1024)).
 -define(BANNER, <<"rc: the command shell; exit ends it\n">>).
+%% The console's own shell, which the console starts again when it ends.
+-define(CONSOLE_BANNER, <<"rc: the command shell; erl starts the Erlang shell\n">>).
 
 %%% Starting the shell
 
@@ -113,14 +118,36 @@ process the group then interrupts.
 """.
 -spec server({module(), terminal()}) -> pid().
 server({Runner, Terminal}) ->
-    proc_lib:spawn(fun() -> init(Runner, Terminal) end).
+    proc_lib:spawn(fun() -> init(Runner, Terminal, ?BANNER) end).
 
-init(Runner, Terminal = #{write := Write}) ->
+-doc """
+Starts the console's own command shell for a group, as server/1 does, with
+the default runner and the console's terminal: the shell erx_console starts
+on its first group at boot, and again whenever that shell ends.
+""".
+-spec console() -> pid().
+console() ->
+    Terminal = #{write => fun erx_console:write/1},
+    proc_lib:spawn(fun() -> ok = booted(), init(erx_shell_runner, Terminal, ?CONSOLE_BANNER) end).
+
+%% As stock's first shell does, the console's reads nothing until init has started
+%% the boot's applications, unless init was told -async_shell_start.
+booted() ->
+    case init:get_argument(async_shell_start) of
+        {ok, _} -> ok;
+        error ->
+            case init:notify_when_started(self()) of
+                started -> ok;
+                _ -> init:wait_until_started()
+            end
+    end.
+
+init(Runner, Terminal = #{write := Write}, Banner) ->
     process_flag(trap_exit, true),
     {RunnerFun, RunnerState} = Runner:new(Terminal),
     Sh = erx_shell_eval:new(#{<<"prompt">> => ?DEFAULT_PROMPT, <<"*">> => []},
                             RunnerFun, RunnerState),
-    ok = Write(?BANNER),
+    ok = Write(Banner),
     loop(Sh, reader(<<>>), Write, open).
 
 %%% The functional core

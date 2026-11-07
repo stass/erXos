@@ -192,7 +192,9 @@ erx: erts: erl_start runs, 32 arguments
 erx: erts: 1 schedulers and 1 dirty CPU schedulers hold executor slots
 Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 
-Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
+rc: the command shell; erl starts the Erlang shell
+% erl
+Eshell V17.1.1 (type help(). for help)
 
 % Which applications are running? Besides kernel and stdlib:
 % the UART driver, the file servers and the runtime services.
@@ -229,7 +231,7 @@ Error in process <0.103.0> with exit value:
 ok
 ```
 
-* **It boots to an Erlang shell** on QEMU `virt` (AArch64), under HVF and
+* **It boots to the command shell** on QEMU `virt` (AArch64), under HVF and
   TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs only the
   deterministic-mode transcript and a boot smoke.
 * **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
@@ -249,15 +251,22 @@ ok
   boot-selection record and boots the slot it names. The shell then reads
   the release's files from that slot's EROFS image at `/images/release`.
   The funnel does not check image hashes yet; that is M11.
-* **The command shell has begun.** `erx_shell` holds rc's tokenizer and
-  parser in Erlang, with a fuzz target and plan9port's rc built as the
-  host oracle. The evaluator, commands and job control are not built.
+* **The command shell works at the console.** The console's first shell
+  is an rc-language command shell, written in Erlang, and `erl` in it
+  starts the Erlang shell; `q()` there returns to the command shell.
+  The language has variables, lists, `for`, `if`, functions, pipelines,
+  redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
+  Its commands are Erlang commands (`echo`, `cat`, `ls`, `mkdir`, `rm`,
+  `mv`, `cp`, `ps`, `mount`, `erl`, `true`, `false`). Its language is checked
+  against plan9port's rc, built on the host as the oracle. Job
+  control, record pipelines (`where`, `sort`, `count`) and running
+  programs are not on master yet.
 * **Hosted mode** runs the runtime as a macOS process. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
   case with stock OTP, and each known difference is classified by cause
   (`test/oracle/hosted_known_differences/`). On QEMU the system domain
-  runs kernel's `file_SUITE` and the whole compiler and stdlib groups
-  against stock, with every difference classified.
+  runs OTP's whole compiler group, kernel's `file_SUITE` and stdlib's
+  `filelib_SUITE` against stock.
 * **The release** carries kernel, stdlib, compiler and runtime_tools (the
   last two loaded, not started), and the erXos applications `erx`,
   `erx_files`, `erx_uart`, `erx_blk` and `erx_shell`.
@@ -308,8 +317,8 @@ the native runtime built before `make check` can run. One command does it:
 ERX_SOURCE_CACHE=/path/to/other/checkout/build/third_party make setup
 ```
 
-`make setup` (`tools/erx setup --jobs N`) runs, in order: every source
-`deps.lock` pins, in its order, except those named below, the
+`make setup` (`tools/erx setup --jobs N`) runs, in order: the pinned
+`otp`, `musl`, `arm-registers`, `libc-test` and `plan9port` sources, the
 JIT oracle (`make oracle-bootstrap`), the `emu` oracle,
 `tools/erx build runtime` and `tools/erx build rc-oracle`. A step whose output is already valid is
 skipped, so a second run does nothing. Each build runs under a deadline
@@ -319,11 +328,8 @@ It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/third_party`; the archives in the `downloads` directory beside it
 are copied only after their SHA-256 matches `deps.lock`. Without it, the
 sources must already be there from `make fetch`. It does not fetch
-`arm-registers`, `tla-tools`, the oracle image or the Linux guest's
-kernel and busybox (`Erx::Setup::SKIPPED_SOURCES`): only
-`tools/erx sysreg refresh` reads the first, only `make check-tla` uses
-the second, the native oracle does not use the third, and only
-`make check-erofs-oracle` boots the Linux guest. If `ERX_CLANG` or `ERX_LLD`
+`tla-tools` or the oracle image: only `make check-tla` uses the first,
+and the native oracle does not use the second. If `ERX_CLANG` or `ERX_LLD`
 is unset, the builds use `/opt/homebrew/opt/llvm/bin/clang` and
 `/opt/homebrew/bin/ld.lld`; export them yourself for later commands.
 
@@ -416,14 +422,12 @@ tools/erx status
 chooses. For BeamAsm, repeat the oracle commands with `FLAVOUR=jit`. The full
 stock suites run inside an offline Linux container and keep their
 failures, skips and incomplete results. `make check-oracle` runs
-`tools/erx oracle qemu`: `file_SUITE` and every `*_SUITE` of OTP's `stdlib` and `compiler` groups (not
-the variants compiler's test Makefile generates from them) under Common
-Test in the system domain under QEMU with HVF, on one CPU, compared case by case with stock OTP on the host,
-run with as many schedulers, against the
+`tools/erx oracle qemu`: `file_SUITE`, `filelib_SUITE` and every `*_SUITE` of OTP's `compiler` group (not
+the variants its test Makefile generates from them) under Common
+Test in the system domain under QEMU with HVF, compared case by case with stock OTP on the host against the
 tables of known differences in `test/oracle/hosted_known_differences/`, then musl's libc-test in test tasks
-on four CPUs (`tools/erx check-libc-test hvf 4`). The stdlib group takes about 40 minutes on stock and 30 on
-the guest. It says it is partial: OTP's
-`emulator` and `kernel` groups do not
+on four CPUs (`tools/erx check-libc-test hvf 4`). It says it is partial: OTP's
+`emulator`, `kernel` and `stdlib` groups do not
 run there whole yet. Native benchmarks carry their own label, apart from Linux suite
 results. Interpreter benchmarks need a separate native bootstrap, built
 with `tools/erx oracle build --backend native --flavour emu`.

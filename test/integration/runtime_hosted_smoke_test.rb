@@ -13,7 +13,8 @@ require_relative '../../tools/lib/erx/runtime_seam'
 require_relative '../../tools/lib/erx/medium_boot'
 
 # ERTS built with ERLANG_OSTYPE=erxos, driven through a terminal as a person would:
-# `1>`, an expression, its answer, then halt, over erx_console and erx_stdio.
+# the command shell, `erl`, `1>`, an expression, its answer, then halt, over erx_console
+# and erx_stdio.
 #
 # `make check-runtime-hosted` builds the runtime and runs this. It is excused from
 # `make check`, which does not build the runtime. With no runtime, or one older
@@ -59,7 +60,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home) do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         writer.write("1+1.\n")
         read_until(reader, transcript, /^2\n.*^2> /m, deadline)
         writer.write("halt().\n")
@@ -78,7 +79,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home, 'ERX_HOSTED_VM_RUNS' => '1') do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         at_prompt = plain(transcript).scan(RUNS_LINE)
         report_runs('at 1>', at_prompt)
         writer.write("length(lists:seq(1, 4000000)).\n")
@@ -102,7 +103,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home, 'ERX_HOSTED_GROUP_REPORT' => '1') do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
         read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
         schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
@@ -128,7 +129,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home, 'ERX_HOSTED_GROUP_REPORT' => '1') do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         writer.write("{erlang:system_info(schedulers), erlang:system_info(dirty_cpu_schedulers)}.\n")
         read_until(reader, transcript, /^\{\d+,\d+\}\n.*^2> /m, deadline)
         schedulers, dirty = plain(transcript)[/^\{(\d+),(\d+)\}\n/, 0].scan(/\d+/).map(&:to_i)
@@ -149,7 +150,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home) do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         writer.write("[spawn(fun() -> (fun Spin() -> Spin() end)() end) || _ <- lists:seq(1, erlang:system_info(schedulers))], spinning.\n")
         read_until(reader, transcript, /\bspinning\n/, deadline)
         DIRTY_DISPATCH_ROUNDS.times do |round|
@@ -397,7 +398,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home) do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         answers = expected.each_with_index.map do |(expression, _), index|
           writer.write("#{expression}\n")
           read_until(reader, transcript, /^#{index + 2}> /, deadline)
@@ -465,7 +466,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
       spawn_shell(home, environment) do |reader, writer, pid|
         transcript = +''
         deadline = monotonic + BUDGET_SECONDS
-        read_until(reader, transcript, /^1> /, deadline)
+        erlang_shell(reader, writer, transcript, deadline)
         answers = expected.each_with_index.map do |(expression, _), index|
           writer.write("#{expression}\n")
           read_until(reader, transcript, /^#{index + 2}> /, deadline)
@@ -506,6 +507,15 @@ class RuntimeHostedSmokeTest < Minitest::Test
   end
 
   # The release's manifest holds every argument, and nothing of the host's environment reaches the page.
+  # Waits for the console's command shell, which the runtime starts at boot (the boot's log
+  # records may land between its banner and its prompt), starts an
+  # Erlang shell from it with `erl`, and waits for that shell's first prompt.
+  def erlang_shell(reader, writer, transcript, deadline)
+    read_until(reader, transcript, /^rc: the command shell; erl starts the Erlang shell\r?\n(?:[^\n]*\n)*% /, deadline)
+    writer.write("erl\n")
+    read_until(reader, transcript, /^1> /, deadline)
+  end
+
   def spawn_shell(home, extra_environment = {})
     environment = Erx::Oracle::CLEAN_ERLANG_ENV.merge(
       'TZ' => 'America/New_York', 'ERX_SMOKE_LEAK' => 'yes', **extra_environment

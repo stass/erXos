@@ -12,8 +12,8 @@ require_relative 'production_image'
 require_relative 'qemu'
 
 module Erx
-  # Gate G3's measurements on the development boot image: boot time to the shell, the
-  # footprint at shell start, and the four workloads of W1 (docs/design-scheduler.md,
+  # Gate G3's measurements on the development boot image: boot time to the command shell,
+  # the footprint at the Erlang shell's start, and the four workloads of W1 (docs/design-scheduler.md,
   # E-S1) under QEMU. One boot does all of it, as a person would: the harness types into the
   # Erlang shell, which loads the bench module's beam (the same bytes the stock host runs)
   # and prints one JSON line per measurement. The serial log is the only channel out.
@@ -89,9 +89,10 @@ module Erx
                "[binary:encode_hex(erx_otp_bench:module_info(md5),lowercase)]).\r"]
     end
 
-    # Everything typed after the boot, in order. The first line is typed at the development
-    # warning, before the console starts, and waits in the UART's queue for the shell; each
-    # later line is typed when the answer to the one before it has come.
+    # Everything typed at the Erlang shell, in order. The first line is typed at the Erlang
+    # shell's banner; each later line is typed when the answer to the one before it has
+    # come. The erl line that starts that shell is typed at the development warning, before
+    # the console starts, and waits in the UART's queue for the command shell.
     def exchanges(beam:, plan:)
       loads = load_lines(beam)
       [Exchange.new('footprint', "#{FOOTPRINT_EXPRESSION}\r", /\AG3FOOT \{/n, LOAD_SECONDS),
@@ -105,12 +106,13 @@ module Erx
        end]
     end
 
-    # The transcript the harness follows: the boot, then a checkpoint for each exchange's
-    # answer that types the next exchange's line.
+    # The transcript the harness follows: the boot to the command shell, the Erlang shell
+    # started there, then a checkpoint for each exchange's answer that types the next
+    # exchange's line.
     def checkpoints(beam:, plan:)
       steps = exchanges(beam: beam, plan: plan)
       boot = Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB).map do |point|
-        point.fetch(:name) == FIRST_LINE_AT ? point.merge(type: steps.first.line).freeze : point
+        point.fetch(:name) == FIRST_LINE_AT ? point.merge(type: ProductionImage::Run::ERL_LINE).freeze : point
       end
       raise Error, "the boot transcript has no #{FIRST_LINE_AT} point to type at" unless
         boot.any? { |point| point.key?(:type) }
@@ -121,7 +123,8 @@ module Erx
         point.freeze
       end
       [*boot, ProductionImage::Run::SLOGAN,
-       { name: 'release-shell', pattern: /\AEshell V/n, seconds: BOOT_SECONDS }.freeze,
+       ProductionImage::Run::RELEASE_SHELL.merge(seconds: BOOT_SECONDS).freeze,
+       ProductionImage::Run::ERLANG_SHELL.merge(seconds: LOAD_SECONDS, type: steps.first.line).freeze,
        *answers].freeze
     end
 

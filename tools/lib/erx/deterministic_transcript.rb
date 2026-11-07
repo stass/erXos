@@ -7,13 +7,13 @@ require_relative 'error'
 module Erx
   # Two deterministic-mode boots of one image must write the same serial transcript, byte
   # for byte (docs/design-stopgap.md, "Deterministic mode"). The compared span starts at the
-  # first line of erXos's banner and ends with the shell's "Eshell V" line: what comes before
-  # the banner is bootstrap's, and the harness ends the guest on a poll some time after the
-  # shell's line, so what follows it is cut wherever the poll fell.
+  # first line of erXos's banner and ends with the command shell's banner line: what comes
+  # before erXos's banner is bootstrap's, and the harness ends the guest on a poll some time
+  # after the command shell's line, so what follows it is cut wherever the poll fell.
   module DeterministicTranscript
     # The first line of the kernel's banner art (fiasco/kernel/src/kern/banner.cpp).
     BANNER = "             __  __\n"
-    SHELL = /\AEshell V/n
+    SHELL = /\Arc: the command shell; erl starts the Erlang shell\r*\n\z/n
     # The kernel's report of its timer, with the counter it read then: a span without it
     # would compare equal whether or not the guest's clock counts instructions.
     CLOCK = /\bcnt=[0-9]+\b/n

@@ -17,6 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: help/0 says that q() at a shell ends that shell (shell.erl).
+%%
 %% %CopyrightEnd%
 %%
 -module(c).
@@ -104,7 +106,7 @@ help() ->
                    "pi(X,Y,Z)  -- information about pid <X,Y,Z>\n"
                    "pid(X,Y,Z) -- convert X,Y,Z to a Pid\n"
                    "pwd()      -- print working directory\n"
-                   "q()        -- quit - shorthand for init:stop()\n"
+                   "q()        -- quit this shell; init:stop() stops the system\n"
                    "regs()     -- information about registered processes\n"
                    "uptime()   -- print node uptime\n"
                    "xm(M)      -- cross reference check a module\n"

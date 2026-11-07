@@ -10,6 +10,13 @@
 %% request of a shown group goes through prim_tty's terminal-less state to become bytes
 %% for the driver. It runs no line discipline and reads no program's bytes.
 %%
+%% The console's first group runs the command shell (erx_shell:console/0), the shell a
+%% person meets at boot, as a UNIX console's login shell is. When it ends, by `exit` or a
+%% crash, the console starts a fresh one on a new first group while input may still
+%% come, as getty starts another login, and ends the runtime once none can, as stock's
+%% shell does at the end of its input. With -noshell or -noinput there is no shell, and
+%% `user` is the first group.
+%%
 %% A shell typed at the shell takes the input on a group of its own (run_shell/1), as
 %% user_drv's `s` and `c` start a shell and connect to it, and gives it back to the group
 %% below when it ends; the groups below are not shown, so their output is acknowledged
@@ -39,19 +46,26 @@
 -behaviour(gen_server).
 
 -export([start/0, run_shell/1, write/1]).
--export([input/2]).
+-export([input/2, first_shell/1, after_first_shell/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--export_type([input_event/0]).
+-export_type([input_event/0, first_shell/0, after_first_shell/0]).
 
 -type input_event() :: {data, unicode:unicode_binary()} | interrupt | menu.
+%% The shell the console starts on its first group: the command shell, or none when
+%% init was told -noshell or -noinput, and `user` then gets the input.
+-type first_shell() :: {erx_shell, console, []} | none.
+%% What follows the first group's end: a fresh command shell, or the runtime's end with
+%% this status once no input can come.
+-type after_first_shell() :: restart | {halt, 0 | 1}.
 
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
 -define(LOG_POLL_MS, 100).
 
 -record(state, {driver :: pid(),
-                %% The group the console started with, which the others return the input to.
+                %% The group the console started with, which the others return the input to:
+                %% the command shell's, or `user` with no shell.
                 base :: pid(),
                 user :: pid(),
                 tty :: prim_tty:state(),
@@ -79,8 +93,11 @@ Runs Shell, a shell's start function as group:start/3 takes it, on a group of it
 own that gets the console's input until the shell ends, and returns then: `ok` if
 the shell ended normally, `{error, Reason}` with its exit reason if not. The group
 that had the input gets it back; shells started this way may end in any order.
-Ctrl-C interrupts the new group's shell. This is how a shell typed at the Erlang
-shell, such as the command shell (erx_shell:start/0), takes the console.
+Ctrl-C interrupts the new group's shell. This is how a shell typed at a shell
+takes the console: the Erlang shell from the command shell's `erl`
+(erx_cmd_erl), or another command shell from the Erlang shell's
+erx_shell:start/0. The Erlang shell's group completes Erlang, as on stock;
+any other shell's completes nothing.
 """.
 -spec run_shell({module(), atom(), [term()]}) -> ok | {error, term()}.
 run_shell(Shell = {Module, Function, Args})
@@ -101,12 +118,12 @@ init([]) ->
     process_flag(trap_exit, true),
     {ok, DriverPid, Terminal} = (driver_module()):start_link(self()),
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
-    %% as they are, and the shell's stock end-of-input branch ends the runtime.
+    %% as they are.
     TTY = banner(prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
     User = group:start(self(), noshell, [{name, user}]),
-    Group = case wants_shell() of
-                true -> group:start(self(), {shell, start, [init]}, group_options(Terminal));
-                false -> User
+    Group = case first_shell(shell_arguments()) of
+                none -> User;
+                Shell -> start_shell(Shell, Terminal)
             end,
     %% Where group:whereis_shell/0 looks, as it looks in user_drv.
     put(current_group, Group),
@@ -120,7 +137,7 @@ init([]) ->
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
 banner(TTY, Driver) ->
-    case wants_shell() of
+    case first_shell(shell_arguments()) =/= none of
         true ->
             Line = unicode:characters_to_binary([slogan(), $\n]),
             {Bytes, NewTTY} = prim_tty:handle_request(TTY, {putc, Line}),
@@ -137,11 +154,39 @@ slogan() ->
         Slogan -> Slogan
     end.
 
-wants_shell() ->
-    init:get_argument(noshell) =:= error andalso init:get_argument(noinput) =:= error.
+%% Whether init was told -noshell and -noinput.
+shell_arguments() ->
+    #{noshell => init:get_argument(noshell) =/= error,
+      noinput => init:get_argument(noinput) =/= error}.
+
+-doc """
+The shell the console starts on its first group, from whether init was told -noshell
+and -noinput: the command shell, or none if either was given.
+""".
+-spec first_shell(#{noshell := boolean(), noinput := boolean()}) -> first_shell().
+first_shell(#{noshell := false, noinput := false}) -> {erx_shell, console, []};
+first_shell(#{}) -> none.
+
+-doc """
+What the console does when the shell of its first group ends for Reason, given
+whether its input has ended: while input may still come, it starts a fresh command
+shell, whatever the reason; once none can, it ends the runtime, with status 0 if the
+shell ended normally, as stock's shell halts at the end of its input, and 1 if not.
+""".
+-spec after_first_shell(Reason :: term(), InputEnded :: boolean()) -> after_first_shell().
+after_first_shell(_Reason, false) -> restart;
+after_first_shell(normal, true) -> {halt, 0};
+after_first_shell(_Reason, true) -> {halt, 1}.
+
+%% Starts Shell on a new group with the options every shell but the Erlang shell
+%% gets: no completion, since the Erlang shell's would complete Erlang.
+start_shell(Shell, Terminal) ->
+    Options = [{expand_fun, fun(_Before, _Options) -> {no, [], []} end}
+               | group_options(Terminal)],
+    group:start(self(), Shell, Options).
 
 %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes as
-%% they are, and the shell's stock end-of-input branch ends the runtime.
+%% they are; at the end of input the Erlang shell's stock branch ends the runtime.
 group_options(Terminal) ->
     [{dumb, not Terminal},
      {expand_below, application:get_env(stdlib, shell_expand_location, below) =:= below}].
@@ -151,11 +196,12 @@ tty_options(false) -> #{input => cooked, output => raw}.
 
 -spec handle_call(term(), gen_server:from(), #state{}) ->
           {reply, term(), #state{}} | {noreply, #state{}}.
+handle_call({run_shell, Shell = {shell, start, _}}, From, State = #state{shells = Shells, terminal = Terminal}) ->
+    %% The Erlang shell completes Erlang, as on stock.
+    New = group:start(self(), Shell, group_options(Terminal)),
+    {noreply, gets_input(State#state{shells = [{New, From} | Shells]})};
 handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal = Terminal}) ->
-    %% No completion: the Erlang shell's would complete Erlang.
-    Options = [{expand_fun, fun(_Before, _Options) -> {no, [], []} end}
-               | group_options(Terminal)],
-    New = group:start(self(), Shell, Options),
+    New = start_shell(Shell, Terminal),
     {noreply, gets_input(State#state{shells = [{New, From} | Shells]})};
 handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
@@ -210,7 +256,8 @@ handle_info({erx_console_written, {Group, Reply}}, State) ->
 handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% user_sup kills `user` when the system stops: the runtime is on its way out.
     {stop, Reason, State};
-handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, shells = Shells}) ->
+handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, shells = Shells,
+                                                  terminal = Terminal, input_ended = Ended}) ->
     case lists:keytake(Pid, 1, Shells) of
         {value, {Pid, Caller}, Others} ->
             %% A shell run_shell/1 started has ended, and its group with it, in whatever
@@ -219,11 +266,26 @@ handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, 
             %% own exit, which follows, names a group the console no longer holds.
             gen_server:reply(Caller, shell_ended(Reason)),
             {noreply, gets_input(State#state{shells = Others})};
-        false when Pid =:= Driver; Pid =:= Base ->
+        false when Pid =:= Base ->
+            %% The first group's shell has ended, and the group with it: a fresh one takes
+            %% the first group's place. The old group's own exit, which follows, names a
+            %% group the console no longer holds.
+            case after_first_shell(Reason, Ended) of
+                restart ->
+                    New = start_shell(first_shell(shell_arguments()), Terminal),
+                    {noreply, gets_input(State#state{base = New})};
+                {halt, 0} ->
+                    erlang:halt(0),
+                    {stop, Reason, State};
+                {halt, Status} ->
+                    ended_by(Reason),
+                    erlang:halt(Status),
+                    {stop, Reason, State}
+            end;
+        false when Pid =:= Driver ->
             %% Nothing would read the terminal again, and its keys no longer signal: end
-            %% the runtime, whose exit restores the terminal, where stock starts another
-            %% shell.
-            erlang:display_string(stderr, lists:flatten(io_lib:format("erx_console: ended by ~p\r\n", [Reason]))),
+            %% the runtime, whose exit restores the terminal.
+            ended_by(Reason),
             erlang:halt(1),
             {stop, Reason, State};
         false ->
@@ -243,6 +305,9 @@ handle_info(Message, State = #state{user = User})
     end;
 handle_info(_Message, State) ->
     {noreply, State}.
+
+ended_by(Reason) ->
+    erlang:display_string(stderr, lists:flatten(io_lib:format("erx_console: ended by ~p\r\n", [Reason]))).
 
 %% Whether Pid is one of the console's groups: `user`, the one it started with, or one
 %% run_shell/1 started.

@@ -63,7 +63,7 @@ module Erx
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'
     # The line erx_ct_oracle prints when Common Test returns; the machine ends
-    # after its suite logs. The shell's prompt redraw may start its line, so the
+    # after its suite logs. The command shell's prompt, or its redraw, may start its line, so the
     # pattern is not anchored.
     RESULT = /erx-oracle-result /n
     # Stock's files whose licence the packer cannot attribute, as no SPDX line

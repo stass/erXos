@@ -168,7 +168,7 @@ class OracleCliTest < Minitest::Test
 
   # The system shell redraws its prompt before the reporter's io:format line.
   def test_qemu_result_line_is_found_after_the_shell_prompt
-    assert_match Erx::OracleQemu::RESULT, "1> \b\b\b\e[Jerx-oracle-result {ok,{81,4,{6,0}}}\r\n".b
+    assert_match Erx::OracleQemu::RESULT, "% \b\b\e[Jerx-oracle-result {ok,{81,4,{6,0}}}\r\n".b
     refute_match Erx::OracleQemu::RESULT, "erx-oracle-event 10 00000000 {}\r\n".b
   end
 

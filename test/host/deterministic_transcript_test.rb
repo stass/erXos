@@ -15,7 +15,7 @@ class DeterministicTranscriptTest < Minitest::Test
     "ARM generic timer: 62500000 Hz (62.5 MHz) interval=62500 cnt=13542012 periodic mode\r\n",
     "erx: root task: watchdog off\r\n",
     "erx: erts: erl_start runs, 10 arguments\r\n",
-    "Eshell V16.0 (press Ctrl+G to abort, type help(). for help)\r\n"
+    "rc: the command shell; erl starts the Erlang shell\r\n"
   ].join.b.freeze
 
   def compare_failure(first, second)
@@ -49,12 +49,12 @@ class DeterministicTranscriptTest < Minitest::Test
   end
 
   def test_what_precedes_the_banner_and_follows_the_shell_is_not_compared
-    other = BOOT.sub('0x40200000', '0x40300000') + "1> io:format(\"late\").\r\n"
+    other = BOOT.sub('0x40200000', '0x40300000') + "% erl\r\nEshell V16.0 (type help(). for help)\r\n"
     assert_equal 5, Erx::DeterministicTranscript.compare(BOOT, other)
   end
 
   def test_a_transcript_without_its_banner_shell_or_clock_has_no_span
-    [BOOT.sub('             __  __', 'x'), BOOT.sub('Eshell V', 'Eshell'), BOOT.sub('cnt=', 'count=')].each do |broken|
+    [BOOT.sub('             __  __', 'x'), BOOT.sub('command shell;', 'command shell'), BOOT.sub('cnt=', 'count=')].each do |broken|
       assert_raises(Erx::Error) { Erx::DeterministicTranscript.compare(BOOT, broken) }
       assert_raises(Erx::Error) { Erx::DeterministicTranscript.compare(broken, BOOT) }
     end
