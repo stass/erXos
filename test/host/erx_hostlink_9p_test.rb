@@ -9,16 +9,15 @@ require 'tmpdir'
 # Runs test/erlang/erx_hostlink_9p_tests.erl, the EUnit cases of the host link's 9P bridge
 # (erx_hostlink_9p's core and erx_hostlink_files over a real erx_fs grant of
 # erx_fs_test_tree), compiled from source on stock's emulator (ERX_ERL and ERX_ERLC, which
-# make check supplies) with the generated codec and grammar from build/gen.
+# make check supplies) with the generated codec and grammar checked into the tree.
 class ErxHostlink9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  GENERATED = File.join(ROOT, 'build/gen')
-  SOURCES = [File.join(GENERATED, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
-             *%w[erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx/src/generated/erx_manifest.erl
-                 erlang/apps/erx_files/src/erx_fs_grant.erl
-                 erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_version.erl
-                 erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl]
-               .map { |source| File.join(ROOT, source) }].freeze
+  SOURCES = %w[otp/erts/preloaded/src/erx_9p_grammar.erl
+               erlang/apps/erx/src/generated/erx_9p.erl erlang/apps/erx/src/generated/erx_manifest.erl
+               erlang/apps/erx_files/src/erx_fs_grant.erl
+               erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_version.erl
+               erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl]
+            .map { |source| File.join(ROOT, source) }.freeze
   TESTS = %w[test/erlang/erx_fs_test_tree.erl test/erlang/erx_hostlink_9p_tests.erl].freeze
 
   def test_the_bridge_passes_under_eunit
@@ -38,7 +37,7 @@ class ErxHostlink9pTest < Minitest::Test
   # The test tree declares the erx_fs behaviour, so it compiles once erx_fs is in work.
   def compile(work, sources)
     output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work,
-                                     '-I', File.join(GENERATED, 'erlang/apps/erx/include'),
+                                     '-I', File.join(ROOT, 'erlang/apps/erx/include'),
                                      '-o', work, *sources, stdin_data: '')
     assert status.success?, output
   end

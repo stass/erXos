@@ -9,15 +9,14 @@ require 'tmpdir'
 # Runs test/erlang/erx_hostlink_9p_exhaustive.erl, which enumerates every interleaving of a
 # host and a grant around the host link's 9P bridge core over a small bound, on stock's
 # emulator (ERX_ERL and ERX_ERLC, which make check supplies) with the generated codec and
-# grammar from build/gen. The core as it is must pass; each seeded fault, a copy of the core
+# grammar checked into the tree. The core as it is must pass; each seeded fault, a copy of the core
 # with one rule broken, must fail with the property it breaks, which shows the enumeration
 # reaches that property's failure (docs/design-live.md, "Files between the host and the
 # machine").
 class ErxHostlink9pExhaustiveTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  GENERATED = File.join(ROOT, 'build/gen')
-  SOURCES = [File.join(GENERATED, 'otp/erts/preloaded/src/erx_9p_grammar.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/generated/erx_9p.erl')].freeze
+  SOURCES = %w[otp/erts/preloaded/src/erx_9p_grammar.erl erlang/apps/erx/src/generated/erx_9p.erl]
+            .map { |source| File.join(ROOT, source) }.freeze
   CORE = File.join(ROOT, 'erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl')
   TARGET = File.join(ROOT, 'test/erlang/erx_hostlink_9p_exhaustive.erl')
   DEADLINE_SECONDS = '600'
@@ -77,7 +76,7 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
     Dir.mktmpdir('erx-hostlink-9p-exhaustive') do |work|
       core = File.join(work, 'erx_hostlink_9p.erl')
       File.binwrite(core, core_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', File.join(GENERATED, 'erlang/apps/erx/include'),
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', File.join(ROOT, 'erlang/apps/erx/include'),
                                        '-o', work, *SOURCES, core, TARGET, stdin_data: '')
       assert status.success?, output
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
