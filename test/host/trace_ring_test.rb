@@ -6,6 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/native_root'
 
 # erx-gate: sanitizers
 
@@ -71,6 +72,14 @@ class TraceRingTest < Minitest::Test
     assert status.success?, log
     assert_equal "stub: ok\n", log
   end
+
+# Only the root links the ring: a task's program links the stub in its place.
+def test_only_the_root_links_the_ring
+  assert_includes Erx::NativeRoot::SERVICE, RING
+  refute_includes Erx::NativeRoot::SERVICE, STUB
+  assert_includes Erx::NativeRoot::TASK, STUB
+  refute_includes Erx::NativeRoot::TASK, RING
+end
 
   SEEDS.each do |name, (original, replacement, mode, diagnostic)|
     define_method("test_seed_#{name.tr(' ', '_')}") do

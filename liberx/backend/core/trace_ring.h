@@ -32,6 +32,9 @@
 #define ERX_TRACE_RING_INDEX_LAST	((ERX_TRACE_RECORD_SEQ_TERMINAL - 3u) / 2u)
 #define ERX_TRACE_RING_HEAD_EXHAUSTED	(ERX_TRACE_RING_INDEX_LAST + 1u)
 
+/* The record's arg words, as abi/kernel.txt counts them. */
+#define ERX_TRACE_RING_ARGS	(sizeof(((erx_trace_record_t *)0)->arg) / sizeof(((erx_trace_record_t *)0)->arg[0]))
+
 typedef struct erx_trace_ring {
 	erx_trace_record_t	records[ERX_TRACE_RING_RECORDS];
 	_Atomic uint64_t	head;	/* the next index to write */
@@ -45,7 +48,7 @@ typedef struct erx_trace_entry {
 	uint16_t	flags;	/* trace_record_flags */
 	uint64_t	thread;	/* the writer's thread record index plus one, or 0 */
 	uint64_t	space;	/* its task index plus one, or 0 */
-	uint64_t	arg[3];
+	uint64_t	arg[ERX_TRACE_RING_ARGS];
 } erx_trace_entry_t;
 
 /*
@@ -61,7 +64,7 @@ bool	erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry);
 int	erx_trace_ring_read(const erx_trace_ring_t *ring, uint64_t cursor, erx_trace_record_t *records,
 	    uint32_t max, erx_trace_read_result_t *result);
 
-/* The root's or the hosted process's one ring, whose pages backend initialisation touches. */
+/* The root's or the hosted process's one ring. The root touches it as its service starts. */
 extern erx_trace_ring_t erx_trace_ring;
 
 /* Faults the ring's pages in, so that no write under the trace lock faults. */

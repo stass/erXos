@@ -2405,11 +2405,12 @@ document's "residual risks accepted" paragraph.
 ## Planned features
 
 * [Medium] tracer, `erx:trace` ([design-live.md](docs/design-live.md#tracing),
-  [design-stopgap.md](docs/design-stopgap.md#the-trace-ring)), in four packages: P1, the ABI's
-  `enum trace_event` with its `args` member line and `layout erx_trace_record`
-  ([design-kernel.md](docs/design-kernel.md#trace-ring)) with generator tests, the stopgap reporter
-  `liberx_trace` in `abi/inspection.txt`, and the ring in `liberx/backend/core/trace_ring.c` with
-  `erx_backend_trace_read` and its writers; P2, the BIFs `erx_trace_ring:read/3` and `clocks/0` and
+  [design-stopgap.md](docs/design-stopgap.md#the-trace-ring)), in four packages. P1's remainder:
+  the stopgap reporter `liberx_trace` in `abi/inspection.txt`, which the inspection schema refuses
+  as a stopgap that reports no attribute until it learns a reporter of trace rows; a test that the
+  park core's `trace` effect writes one `park` and one `wake` per sleeping park, none for one that
+  returns at once, with the returned status (`test/fixtures/fiasco_park_driver.c`'s is a no-op);
+  and the hosted ring through the function API. P2, the BIFs `erx_trace_ring:read/3` and `clocks/0` and
   the merger's pure core; P3, `erx:trace` in the system domain with the `native_trace` suite on four
   CPUs; P4, the trace facet, the relay, frame tracing and the host link's events stream, which need
   M5's connections, since the stopgap offers no lanes.

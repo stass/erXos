@@ -648,13 +648,16 @@ service_thread_set_affinity(uint32_t caller, uint64_t thread, uint64_t mask)
 	if (row->threads[index] == ERX_FIASCO_TASK_THREAD_ABSENT)
 		return (ERX_EINVAL);
 	row->affinity[index] = mask;
+	/* The trace names a started thread's CPU only once Fiasco has moved it; until then, unknown. */
 	if (task == ERX_FIASCO_TASK_ROOT)
-		erx_fiasco_trace_set_mask(index, mask);
+		erx_fiasco_trace_set_mask(index, row->threads[index] == ERX_FIASCO_TASK_THREAD_STARTED ? 0 : mask);
 	if (row->threads[index] != ERX_FIASCO_TASK_THREAD_STARTED)
 		return (ERX_OK);
 	param = service_sched_param(mask);
 	if (service_failed(l4_scheduler_run_thread(L4_BASE_SCHEDULER_CAP, erx_fiasco_task_thread_cap(task, index), &param)))
 		return (ERX_EINVAL);
+	if (task == ERX_FIASCO_TASK_ROOT)
+		erx_fiasco_trace_set_mask(index, mask);
 	return (ERX_OK);
 }
 

@@ -215,8 +215,8 @@ typedef struct erx_trace_read_result {
 
 /*
  * The root's trace ring (docs/design-stopgap.md, "The trace ring"): copies at most max of the
- * whole records from cursor on into records[0 .. kept) and takes no lock. A cursor of
- * UINT64_MAX copies nothing and returns the ring's head as next. Any other cursor past the
+ * whole records from cursor on into records[0 .. kept) and takes no lock. max and records
+ * are checked first, whatever the cursor. A cursor of UINT64_MAX copies nothing and returns the ring's head as next. Any other cursor past the
  * head, or max 0 or over ERX_TRACE_READ_MAX, is ERX_EINVAL; a cursor at the head of an
  * exhausted ring is ERX_ELIMIT. A cursor more than ERX_TRACE_RING_RECORDS below the head
  * starts that far below it, and the records it skips count as overwritten. In a task, which

@@ -63,6 +63,12 @@ module Erx
         liberx/backend/core/group_report.h
         liberx/backend/core/park_table.c
         liberx/backend/core/park_table.h
+        liberx/backend/core/trace_ring.c
+        liberx/backend/core/trace_ring.h
+        liberx/backend/fiasco/trace.c
+        liberx/backend/fiasco/trace.h
+        liberx/backend/fiasco/trace_stub.c
+        liberx/backend/hosted/trace.c
         liberx/backend/fiasco/libc_root.c
         liberx/backend/fiasco/libc_start.c
         liberx/backend/fiasco/libc_root_start.c

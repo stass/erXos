@@ -56,7 +56,7 @@ erx_trace_ring_put(erx_trace_ring_t *ring, const erx_trace_entry_t *entry)
 	(void)erx_trace_record_flags_store(record, entry->flags);
 	(void)erx_trace_record_thread_store(record, entry->thread);
 	(void)erx_trace_record_space_store(record, entry->space);
-	for (size_t arg = 0; arg < 3; arg++)
+	for (size_t arg = 0; arg < ERX_TRACE_RING_ARGS; arg++)
 		(void)erx_trace_record_arg_store(record, arg, entry->arg[arg]);
 	(void)erx_trace_record_seq_store(record, 2 * index + 2);
 	atomic_store_explicit(&ring->head, index + 1, memory_order_release);
@@ -82,7 +82,7 @@ trace_snapshot(const erx_trace_record_t *record, uint64_t index, erx_trace_entry
 	loaded &= erx_trace_record_flags_load(record, &entry->flags);
 	loaded &= erx_trace_record_thread_load(record, &entry->thread);
 	loaded &= erx_trace_record_space_load(record, &entry->space);
-	for (size_t arg = 0; arg < 3; arg++)
+	for (size_t arg = 0; arg < ERX_TRACE_RING_ARGS; arg++)
 		loaded &= erx_trace_record_arg_load(record, arg, &entry->arg[arg]);
 #ifdef ERX_TRACE_RING_TEST_HOOKS
 	erx_trace_ring_test_between(record);
@@ -101,7 +101,7 @@ trace_copy(erx_trace_record_t *out, uint64_t index, const erx_trace_entry_t *ent
 	(void)erx_trace_record_flags_store(out, entry->flags);
 	(void)erx_trace_record_thread_store(out, entry->thread);
 	(void)erx_trace_record_space_store(out, entry->space);
-	for (size_t arg = 0; arg < 3; arg++)
+	for (size_t arg = 0; arg < ERX_TRACE_RING_ARGS; arg++)
 		(void)erx_trace_record_arg_store(out, arg, entry->arg[arg]);
 }
 

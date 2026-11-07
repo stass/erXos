@@ -5,8 +5,8 @@
 
 /*
  * The root's writers of the trace ring (docs/design-stopgap.md, "The trace ring"). Every
- * write happens under the trace lock, which is held across no Fiasco call: the clock is
- * the architecture's counter, read in user mode.
+ * write happens under the trace lock, which is held across no Fiasco call: the clock,
+ * erx_fiasco_clock_ns, is the architecture's counter, read in user mode.
  */
 
 #include <stdatomic.h>
@@ -16,6 +16,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/trace_ring.h"
 #include "liberx/backend/fiasco/lock.h"
+#include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/trace.h"
@@ -36,7 +37,7 @@ static void
 trace_write(erx_trace_entry_t *entry)
 {
 	erx_fiasco_lock(&trace_lock);
-	entry->time_ns = erx_clock_ns();
+	entry->time_ns = erx_fiasco_clock_ns();
 	(void)erx_trace_ring_put(&erx_trace_ring, entry);
 	erx_fiasco_unlock(&trace_lock);
 }
