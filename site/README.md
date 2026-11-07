@@ -43,10 +43,18 @@ Opening `site/index.html` straight from disk shows the page with the
 recorded session; the Boot button needs the built site.
 
 `.github/workflows/site.yml` runs the same steps on GitHub, by hand only,
-and uploads `build/site` as a Pages artifact. It does not build the erXos
+and publishes `build/site` to GitHub Pages. It does not build the erXos
 image, which needs the whole erXos toolchain; it downloads a release
 asset's `image.boot`, named by its URL and SHA-256 as the workflow's
 inputs, and refuses one whose digest differs.
+
+To publish: in the repository settings, set Pages to deploy from GitHub
+Actions; attach an interactive production `image.boot` to a release; then
+run the `site` workflow with that asset's URL and SHA-256:
+
+```
+gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST
+```
 
 `ruby test/host/site_test.rb` tests the build step.
 

@@ -1,15 +1,15 @@
 # Builds the website (site/README.md) into a GitHub Pages artifact.
 #
-# Manual only, and it deploys nothing: it uploads build/site as a Pages
-# artifact. Publishing needs a deploy job and Pages enabled for the
-# repository, which are the owner's decision.
+# Manual only. The build job uploads build/site as a Pages artifact and the
+# deploy job publishes it; GitHub Pages must be enabled for the repository
+# with "GitHub Actions" as its source.
 #
 # The erXos image needs the full erXos toolchain (the cross compilers, the
 # OTP and Fiasco builds), which this job does not set up. It takes the image
 # from a URL instead, normally a release asset, and checks it against the
 # SHA-256 given with it.
 #
-# Before enabling: pin each action below to a full commit SHA.
+# Each action is pinned to the commit of the tag named beside it.
 name: site
 
 on:
@@ -30,10 +30,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Install build tools
@@ -54,6 +54,20 @@ jobs:
           echo "$IMAGE_SHA256  image.boot" | sha256sum --check
       - name: Build v64 and assemble the site
         run: ruby tools/build_site.rb --image image.boot
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
