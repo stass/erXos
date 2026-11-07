@@ -165,9 +165,11 @@ pixels. The [overview](docs/overview.md) tells the longer story.
 erXos is in Phase 1 of the [roadmap](docs/plan.md), which brings the
 system up on the stopgap Fiasco kernel. `tools/erx boot` builds a
 development image and boots it in QEMU. Below, it boots under HVF on one
-CPU. Then a few lines go to the shell. They list the running
-applications, write a file to `/tmp`, catch a crash with a monitor, and
-pass a token around a ring of 50,000 processes.
+CPU of the 160 MiB development machine, into the command shell. There a
+few commands list the root, write a file to `/tmp`, read it back and
+count the processes; then `erl` starts the Erlang shell, which catches a
+crash with a monitor and passes a token around a ring of 5,000
+processes. Lines starting `% ` in the Erlang shell are notes added here.
 
 ```
              __  __
@@ -182,53 +184,61 @@ Rev: Unknown version compiled with gcc 16.2.0 for Generic Platform
 Build: #1 No date
 
 development build: trusted code only
-erx: boot image build 3a3f6f0136127701 index bd404218592d42c4da90518b49450cac83eab54a48424c046f56e79e52d42380 flags 0x1 archive 0x4022c000+0x20b0000 bootargs 0
+erx: boot image build df85638cc0daa5ea index 97622c2ebb3940e67f01874bc45165c42c9d636437029447b0e279a1e1dbccc0 flags 0x1 archive 0x4022c000+0x17b4000 bootargs 0
 [... Fiasco's own start-up lines ...]
 erx: entropy: quality: low, from the counter alone
-erx: root task: build 3a3f6f0136127701 index bd404218592d42c4da90518b49450cac83eab54a48424c046f56e79e52d42380 entries 231
-erx: root task: manifest root_memory 402653184 baseline 134217728 units 3 pool pages 111153
+erx: root task: build df85638cc0daa5ea index 97622c2ebb3940e67f01874bc45165c42c9d636437029447b0e279a1e1dbccc0 entries 377
+erx: root task: manifest root_memory 100663296 baseline 81788928 units 3 pool pages 29575
 erx: root task: watchdog 1,5,60
-erx: erts: erl_start runs, 32 arguments
+erx: erts: erl_start runs, 40 arguments
 erx: erts: 1 schedulers and 1 dirty CPU schedulers hold executor slots
 Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 
 rc: the command shell; erl starts the Erlang shell
+% # The command shell runs rc's language, written in Erlang.
+% ls /
+NOTICES
+bin
+lib
+manifest
+root
+% echo hello from erXos > /tmp/hi
+% cat /tmp/hi
+hello from erXos
+% # How many processes run? Each is an Erlang process.
+% ps | count
+62
 % erl
 Eshell V17.1.1 (type help(). for help)
 
-% Which applications are running? Besides kernel and stdlib:
-% the UART driver, the file servers and the runtime services.
-1> [{A, element(2, application:get_key(A, description))} || {A, _, _} <- application:which_applications()].
-[{erx_uart,"erXos UART drivers"},
- {erx_files,"erXos file servers"},
- {erx,"erXos runtime services"},
- {stdlib,"ERTS  CXC 138 10"},
- {kernel,"ERTS  CXC 138 10"}]
-
-% Write a file to /tmp, served by a RAM file system written in
-% Erlang, and read it back.
-2> file:write_file("/tmp/hello.txt", <<"hello from erXos\n">>), file:read_file("/tmp/hello.txt").
-{ok,<<"hello from erXos\n">>}
-
-% Start a process that divides by zero, and catch its crash
+% Crash a process that divides by zero, and catch it
 % with a monitor. The shell carries on.
-3> {_, Ref} = spawn_monitor(fun() -> 1 / erlang:list_to_integer("0") end), receive {'DOWN', Ref, process, _, {Reason, _}} -> {crashed, Reason} end.
-=ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
-Error in process <0.103.0> with exit value:
+1> {_, R} = spawn_monitor(fun() -> 1 / list_to_integer("0") end).
+=ERROR REPORT==== 1-Jan-1970::00:00:02.651025 ===
+Error in process <0.150.0> with exit value:
 {badarith,[{erlang,'/',[1,0],[{error_info,#{module => erl_erts_errors}}]}]}
 
+{<0.150.0>,#Ref<0.3910384898.1.60465>}
+2> receive {'DOWN', R, _, _, {E, _}} -> {crashed, E} end.
 {crashed,badarith}
 
-% Define a ring: N processes, each passing a counted-down
-% token to the next, until it reaches zero.
-4> Ring = fun(N, Laps) -> Last = lists:foldl(fun(_, Next) -> spawn(fun Loop() -> receive 0 -> Next ! 0; T -> Next ! T - 1, Loop() end end) end, self(), lists:seq(1, N)), Alive = erlang:system_info(process_count), Last ! N * Laps, (fun Wait() -> receive 0 -> ok; T -> Last ! T - 1, Wait() end end)(), io:format("~b processes alive; one token went round a ring of ~b, ~b messages~n", [Alive, N, N * Laps]) end.
+% A ring of N processes passes a token round it Laps times.
+3> Ring = fun(N, Laps) ->
+..     Last = lists:foldl(fun(_, Next) ->
+..         spawn(fun Loop() -> receive 0 -> Next ! 0;
+..                   T -> Next ! T - 1, Loop() end end)
+..       end, self(), lists:seq(1, N)),
+..     Alive = erlang:system_info(process_count),
+..     Last ! N * Laps,
+..     (fun Wait() -> receive 0 -> ok;
+..                    T -> Last ! T - 1, Wait() end end)(),
+..     {Alive, N * Laps}
+..   end.
 #Fun<erl_eval.41.130099583>
 
-% Run it: 50,000 processes alive at once, one token,
-% a million messages.
-5> Ring(50000, 20).
-50039 processes alive; one token went round a ring of 50000, 1000000 messages
-ok
+% 5,000 processes alive at once, 100,000 messages.
+4> Ring(5000, 20).
+{5061,100000}
 ```
 
 * **It boots to the command shell** on QEMU `virt` (AArch64), under HVF and

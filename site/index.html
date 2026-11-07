@@ -61,45 +61,53 @@
 
 erXos
 development build: trusted code only
-Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1]
+Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 
-Eshell V17.1.1 (press Ctrl+G to abort, type help(). for help)
-
-<span class="c">% Write a file to /tmp, a RAM file system written in</span>
-<span class="c">% Erlang, and read it back.</span>
-<span class="p">1&gt;</span> file:write_file(&quot;/tmp/hi&quot;, &lt;&lt;&quot;hello from erXos\n&quot;&gt;&gt;).
-ok
-<span class="p">2&gt;</span> file:read_file(&quot;/tmp/hi&quot;).
-{ok,&lt;&lt;&quot;hello from erXos\n&quot;&gt;&gt;}
+rc: the command shell; erl starts the Erlang shell
+<span class="p">%</span> <span class="c"># The command shell runs rc&#39;s language, written in Erlang.</span>
+<span class="p">%</span> ls /
+NOTICES
+bin
+lib
+manifest
+root
+<span class="p">%</span> echo hello from erXos &gt; /tmp/hi
+<span class="p">%</span> cat /tmp/hi
+hello from erXos
+<span class="p">%</span> <span class="c"># How many processes run? Each is an Erlang process.</span>
+<span class="p">%</span> ps | count
+62
+<span class="p">%</span> erl
+Eshell V17.1.1 (type help(). for help)
 
 <span class="c">% Crash a process that divides by zero, and catch it</span>
 <span class="c">% with a monitor. The shell carries on.</span>
-<span class="p">3&gt;</span> {_, R} = spawn_monitor(fun() -&gt; 1 / list_to_integer(&quot;0&quot;) end).
-{&lt;0.103.0&gt;,#Ref&lt;0.2715433271.3401580545.13457&gt;}
-=ERROR REPORT==== 1-Jan-1970::00:00:03.403519 ===
-Error in process &lt;0.103.0&gt; with exit value:
-{badarith,[{erlang,&#39;/&#39;,[1,0],[...]}]}
+<span class="p">1&gt;</span> {_, R} = spawn_monitor(fun() -&gt; 1 / list_to_integer(&quot;0&quot;) end).
+=ERROR REPORT==== 1-Jan-1970::00:00:02.651025 ===
+Error in process &lt;0.150.0&gt; with exit value:
+{badarith,[{erlang,&#39;/&#39;,[1,0],[{error_info,#{module =&gt; erl_erts_errors}}]}]}
 
-<span class="p">4&gt;</span> receive {&#39;DOWN&#39;, R, _, _, {E, _}} -&gt; {crashed, E} end.
+{&lt;0.150.0&gt;,#Ref&lt;0.3910384898.1.60465&gt;}
+<span class="p">2&gt;</span> receive {&#39;DOWN&#39;, R, _, _, {E, _}} -&gt; {crashed, E} end.
 {crashed,badarith}
 
 <span class="c">% A ring of N processes passes a token round it Laps times.</span>
-<span class="p">5&gt;</span> Ring = fun(N, Laps) -&gt;
-     Last = lists:foldl(fun(_, Next) -&gt;
-         spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0;
-                   T -&gt; Next ! T - 1, Loop() end end)
-       end, self(), lists:seq(1, N)),
-     Alive = erlang:system_info(process_count),
-     Last ! N * Laps,
-     (fun Wait() -&gt; receive 0 -&gt; ok;
-                    T -&gt; Last ! T - 1, Wait() end end)(),
-     {Alive, N * Laps}
-   end.
+<span class="p">3&gt;</span> Ring = fun(N, Laps) -&gt;
+<span class="p">..</span>     Last = lists:foldl(fun(_, Next) -&gt;
+<span class="p">..</span>         spawn(fun Loop() -&gt; receive 0 -&gt; Next ! 0;
+<span class="p">..</span>                   T -&gt; Next ! T - 1, Loop() end end)
+<span class="p">..</span>       end, self(), lists:seq(1, N)),
+<span class="p">..</span>     Alive = erlang:system_info(process_count),
+<span class="p">..</span>     Last ! N * Laps,
+<span class="p">..</span>     (fun Wait() -&gt; receive 0 -&gt; ok;
+<span class="p">..</span>                    T -&gt; Last ! T - 1, Wait() end end)(),
+<span class="p">..</span>     {Alive, N * Laps}
+<span class="p">..</span>   end.
 #Fun&lt;erl_eval.41.130099583&gt;
 
-<span class="c">% 10,000 processes alive at once, 200,000 messages.</span>
-<span class="p">6&gt;</span> Ring(10000, 20).
-{10039,200000}</pre>
+<span class="c">% 5,000 processes alive at once, 100,000 messages.</span>
+<span class="p">4&gt;</span> Ring(5000, 20).
+{5061,100000}</pre>
         </div>
       </div>
       <div class="terminal-chin">
@@ -119,7 +127,7 @@ Error in process &lt;0.103.0&gt; with exit value:
       </div>
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
-    <p class="terminal-hint" data-erx-hint hidden>At the <code>1&gt;</code> prompt, try <code>erx_shell:start().</code>, then <code>ls /</code> and <code>ps</code>.</p>
+    <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>ps | count</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
   </div>
 </section>
@@ -314,7 +322,7 @@ Error in process &lt;0.103.0&gt; with exit value:
       <div>
         <h3 class="label">Running</h3>
         <ul class="checks">
-          <li><span class="tag on">ON</span><span>Boots to an Erlang shell on QEMU <code>virt</code> (AArch64), on 1 to 8 CPUs.</span></li>
+          <li><span class="tag on">ON</span><span>Boots to the command shell on QEMU <code>virt</code> (AArch64), on 1 to 8 CPUs.</span></li>
           <li><span class="tag on">ON</span><span>ERTS runs in user mode as the system domain.</span></li>
           <li><span class="tag on">ON</span><span>The serial console's driver is an Erlang process.</span></li>
           <li><span class="tag on">ON</span><span>Files, per-domain namespaces and <code>/tmp</code> on a RAM file system written in Erlang.</span></li>
@@ -350,7 +358,7 @@ Error in process &lt;0.103.0&gt; with exit value:
         <strong>Boot erXos</strong> and your browser downloads the same boot
         image that QEMU runs, then starts it on v64, an AArch64 machine
         emulated in WebAssembly. The kernel, the system domain and the
-        Erlang shell all come up inside the page, in a few seconds.</p>
+        command shell all come up inside the page, in a few seconds.</p>
         <p>Nothing runs on a server, and nothing you type leaves your
         machine. Reset starts the machine again from the same image.</p>
       </div>
@@ -388,16 +396,16 @@ Error in process &lt;0.103.0&gt; with exit value:
     <div class="cells">
       <div>
         <span class="label"><b>T1</b></span>
-        <h3>Erlang first</h3>
-        <p>The console opens in the Erlang shell. Write a file to the RAM
-        file system and read it back:
-        <code>file:write_file("/tmp/hi", "hello"), file:read_file("/tmp/hi").</code></p>
+        <h3>The command shell first</h3>
+        <p>The console opens in the command shell, rc's language written
+        in Erlang. Write a file to the RAM file system and read it back:
+        <code>echo hello &gt; /tmp/hi</code>, then <code>cat /tmp/hi</code>.</p>
       </div>
       <div>
         <span class="label"><b>T2</b></span>
-        <h3>Then the command shell</h3>
-        <p><code>erx_shell:start().</code> starts the rc-language command
-        shell, itself an Erlang program.</p>
+        <h3>Then Erlang</h3>
+        <p><code>erl</code> starts the Erlang shell. <code>q().</code> ends
+        it and brings back the <code>%</code> prompt.</p>
       </div>
       <div>
         <span class="label"><b>T3</b></span>
