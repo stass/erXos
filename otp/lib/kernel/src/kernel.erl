@@ -275,8 +275,17 @@ init(safe) ->
             shutdown => infinity,
             type => supervisor,
             modules => [erx_ramfs_sup]},
+    %% erXos: the system shell's /proc, the inspector's tree at scope all
+    %% (design-live.md, The /proc tree); every Phase 1 runtime is the system
+    %% domain's.
+    Proc = #{id => erx_procfs,
+             start => {erx_procfs, start_link, []},
+             restart => permanent,
+             shutdown => brutal_kill,
+             type => worker,
+             modules => [erx_procfs]},
 
-    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp]}}.
+    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp, Proc]}}.
 
 start_distribution(Part) ->
     Rpc = #{id => rex,

@@ -3,7 +3,8 @@
 
 %% Erlang file servers (docs/design-files.md, "Serving the erx_fs behaviour"): the
 %% erx_fs behaviour and its grant's pure core, the version counter, and the RAM file
-%% system's core (docs/design-tmp.md).
+%% system's core (docs/design-tmp.md), and /proc, the inspector's tree
+%% (docs/design-live.md, "The /proc tree").
 {application, erx_files,
  [{description, "erXos file servers"},
   {vsn, "1"},
@@ -13,10 +14,14 @@
              erx_lfs,
              erx_lfs_sup,
              erx_littlefs,
+             erx_procfs,
+             erx_procfs_core,
              erx_ramfs,
              erx_ramfs_core,
              erx_ramfs_serving,
              erx_ramfs_sup]},
   {registered, [erx_ramfs, erx_lfs]},
   {applications, [kernel, stdlib, erx]},
+  %% /proc renders values with erx_shell's erx_render, a library it starts nothing of.
+  {runtime_dependencies, ["erx_shell-1"]},
   {env, []}]}.

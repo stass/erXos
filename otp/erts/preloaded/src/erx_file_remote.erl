@@ -104,6 +104,8 @@
 %% The most bytes one read answers, 4 KiB short of 2 GiB: a larger count reads short, as a
 %% read may, and the caller reads on.
 -define(READ_MAX, 16#7ffff000).
+%% What read_file asks for at a time of a file whose size is 0, as stock's NIF does.
+-define(END_PIECE, 16384).
 
 %% Reading -----------------------------------------------------------------
 
@@ -691,7 +693,8 @@ without_cr(Line) ->
     Line.
 
 %% The whole file, as stock's read_file reads it: up to the size getattr answers once the
-%% file is open, or to its end if that comes first.
+%% file is open, or to its end if that comes first; a file whose size is 0, as a /proc
+%% file's is, is read to its end.
 -spec read_file(grant(), where()) -> {ok, binary()} | {error, posix()} | resume().
 read_file(Grant, Where) ->
     case open(Grant, Where, [read]) of
@@ -705,7 +708,17 @@ read_file(Grant, Where) ->
 
 contents(File) ->
     case size_of(File) of
+        {ok, 0} -> to_end(File, 0, []);
         {ok, Size} -> contents(File, 0, Size, []);
+        Error -> Error
+    end.
+
+%% Stock's read_file reads a file of size 0 in 16 KiB pieces until a read comes up short.
+to_end(File, Offset, Parts) ->
+    case read_at(File, Offset, ?END_PIECE) of
+        {ok, Data} when byte_size(Data) =:= ?END_PIECE -> to_end(File, Offset + ?END_PIECE, [Data | Parts]);
+        {ok, Data} -> {ok, iolist_to_binary(lists:reverse(Parts, [Data]))};
+        eof -> {ok, iolist_to_binary(lists:reverse(Parts, []))};
         Error -> Error
     end.
 

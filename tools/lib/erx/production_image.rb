@@ -526,7 +526,9 @@ module Erx
       # and runtime_tools loaded and neither started, and an rc line the command shell's
       # evaluator runs with its Erlang commands, and erx:i(), whose machine rows the kernel
       # interface reports unsupported under Fiasco and whose budget's used the liberx pool
-      # reports partial, with the pool's scope below the tables.
+      # reports partial, with the pool's scope below the tables, and the same statuses in
+      # /proc: ls and cat through the command shell's evaluator, then file:read_file/1 of a
+      # process's status file, which is size 0 and read to its end as stock reads one.
       def self.console_checkpoints
         boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
@@ -561,7 +563,21 @@ module Erx
          console_point('inspect-used', /\A  used +liberx pool +\[partial\]\r*\n\z/n),
          console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
          console_point('inspect-scope', /\Aliberx pool: pages committed through liberx;/n),
-         console_point('inspect-answer', /\Aok\r*\n\z/n)].freeze
+         console_point('inspect-answer', /\Aok\r*\n\z/n, type: PROC_EXPRESSION),
+         # ls /proc, sorted, then the console process's status, the machine's and the system
+         # domain's budget's, each attribute a line of name, value and reporter. The console's
+         # terminal-less rendering writes each tab of the file as CHT, ESC [ I.
+         console_point('proc-ls-domains', /\A(?:[0-9]+> )?domains\r*\n\z/n),
+         console_point('proc-ls-processes', /\Aprocesses\r*\n\z/n),
+         console_point('proc-ls-status', /\Astatus\r*\n\z/n),
+         console_point('proc-process-domain', /\Adomain#{TAB}4#{TAB}service\r*\n\z/n),
+         console_point('proc-process-name', /\Aregistered_name#{TAB}erx_console#{TAB}runtime\r*\n\z/n),
+         console_point('proc-machine-uptime', /\Auptime#{TAB}\[unsupported\]#{TAB}kernel\r*\n\z/n),
+         console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}liberx pool\r*\n\z/n),
+         console_point('proc-ending', /\A\{ok,<<>>\}\r*\n\z/n, type: PROC_READ_EXPRESSION),
+         # The echo of the line holds {proc_read, so only the answer matches.
+         console_point('proc-read', /\A(?:[0-9]+> )?\{proc_read,/n,
+                       whole: /\A(?:[0-9]+> )?\{proc_read,true,true,true\}\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the
@@ -694,6 +710,20 @@ module Erx
       # its own under /tmp: redirections to a file, a pipeline, substitutions, ls and ps.
       # Its one line of output names the line count, the file's words, ls's one name and
       # the statuses of `ps | cat`, then the Erlang shell prints how the source ended.
+      # A tab of a file as the console writes it: the byte, or CHT where it renders tabs.
+      TAB = '(?:\t|\e\[I)'
+      # /proc through the command shell's evaluator: the console process's directory is its
+      # pid's text without brackets.
+      PROC_EXPRESSION = 'P=tl(lists:droplast(pid_to_list(whereis(erx_console)))),' \
+                        'erx_shell_script:run(["ls /proc; cat /proc/processes/",P,' \
+                        '"/status /proc/status /proc/domains/4/budget/status"]).' "\r"
+      # The same status file through file:read_file/1: every line of it is a field escape's
+      # name, value and reporter, and the console's line says so. B is LOAD_ONLY_EXPRESSION's.
+      PROC_READ_EXPRESSION = '{ok,PB}=file:read_file(["/proc/processes/",P,"/status"]),' \
+                             '{proc_read,binary:match(PB,<<"registered_name\\terx_console\\truntime\\n">>)=/=nomatch,' \
+                             'binary:last(PB)=:=$\\n,' \
+                             'lists:all(fun(L)->length(binary:split(L,<<"\\t">>,[global]))=:=3 end,' \
+                             'binary:split(PB,<<"\\n">>,[global,trim_all]))}.' "\r"
       RC_EXPRESSION = 'erx_shell_script:run(<<"mkdir /tmp/rc; cd /tmp/rc; echo hello > f; echo world >> f; ' \
                       'x=`{cat f | cat}; y=`{ls | cat}; ps | cat > p; s=$status; ' \
                       'echo rc: $#x $x $y $s">>).' "\r"

@@ -469,6 +469,28 @@ it; git history is the record of completed work.
   Not collected yet: `[groups]`, `[budgets]`, `[domains]` and a domain's record, modules, exports, connections
   and paginated `[domains, Id, processes]`; `erx:inspect/2`, `erx:ps/0`, `erx:domains/0` and the `shell_default`
   shortcuts.
+* [Medium] /proc (`erlang/apps/erx_files/src/erx_procfs.erl`, `erx_procfs_core.erl`; design-live's
+  [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts one tree of scope `all` and mounts
+  it at `/proc` in every runtime, since every Phase 1 runtime is the system domain's; when domains come (M5), start
+  a tree per inspect facet, linked to it, and the system shell's tree with the console, presenting the system-shell
+  facet. A pid's directory is its pid's text, `0.N.S` until pids print their domain id (the inspector item above),
+  so plan.md's `4.N.S` names nothing yet. The design leaves open: a text entry spelled `status`, a module of that
+  name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
+  inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
+  answers `{error, unsupported}` holds (one line, `[unsupported]`). Not built: `source`, `crash`,
+  `/proc/kernel/log` and `/proc/kernel/crash`, which have no inspector path yet. An open asks the inspector in the
+  grant's process, so a slow query holds the grant's other requests, and each walk step collects a record (or, for
+  a CPU or thread, the listing) only to learn that it exists; the machine record is asked once per status open for
+  the build's projection. The tree's grant is a direct child of `kernel_safe_sup` and shares its restart budget
+  with `erx_ns` and `/tmp`; give it a supervisor of its own. The 256-snapshot bound counts a directory like a
+  status file, but a `/proc/processes` snapshot is a list of about 17 words an entry, so 256 of them over about
+  1,000 processes pass the grant's heap limit (estimated); weigh snapshots by size or pack listings into one
+  binary. A scoped tree cannot walk `[domains]`, which the inspector closes to scoped callers, so its own domain's
+  subtree is unreachable; make the inspector list a scoped caller's own domains there. Smaller: a listing's
+  `status` file is empty; an open `.unknown` whose listing has since come whole still reads `[unknown]`; statfs
+  says `namelen` 255 while an encoded name reaches 765 bytes; `erx_fs_grant`'s lopen does not clunk a handle whose
+  reply its check rejects, as lcreate does; and `erx_file_remote`'s read of a size-0 file takes a short piece as
+  its end, so an error after the first unit of a piece reads as end of file where stock answers the error.
 * [Medium] kernel reports, `liberx` and `abi/erx_abi.txt` (design-abi's
   [Inspection schema](docs/design-abi.md#inspection-schema)):
   `erx_info_budget` declares only the fields master and the budget redesign on branch `design-budget-caps` agree on
