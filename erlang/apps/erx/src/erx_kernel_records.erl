@@ -28,20 +28,25 @@ partial mask is its own liberx's, so nothing a domain says reaches either
 mask. The pure core, record/5 and listing/4, takes the answers as data.
 """.
 
--export([machine/0, cpus/0, group/0, budget/0, threads/0]).
+-export([machine/0, cpus/0, group/0, budget/0, threads/0, system_domain/0]).
 -export([record/5, listing/4]).
 -export_type([answer/0]).
 
 -include("generated/erx_abi.hrl").
 
-%% The system domain's id: its group, budget and threads are the ones the
-%% root can name (docs/design-stopgap.md, "Reporting kernel objects").
--define(SYSTEM_DOMAIN, 0).
+%% The system domain's id, its node's creation (docs/design-domains.md: no
+%% node has a creation below 4): its group, budget and threads are the ones
+%% the root can name (docs/design-stopgap.md, "Reporting kernel objects").
+-define(SYSTEM_DOMAIN, 4).
 %% No machine has more CPUs, and no space more threads, than a listing reads.
 -define(MAX_CPUS, 64).
 -define(MAX_THREADS, 128).
 
 -type answer() :: {ok, binary()} | {error, integer()}.
+
+-doc "The id of the domain whose group, budget and threads these records describe.".
+-spec system_domain() -> non_neg_integer().
+system_domain() -> ?SYSTEM_DOMAIN.
 
 %%% Effects: the calls, made on the inspector's own capabilities.
 

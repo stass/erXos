@@ -9,7 +9,9 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([source/1]).
+-export([i/0, i/1, source/1]).
+
+%%% Source lines: erx:source/1.
 
 -doc """
 Prints the source lines around a process's current location, or around a
@@ -21,3 +23,44 @@ whose source only the inspector reaches.
 -spec source(pid() | mfa()) -> ok | {error, erx_source:reason()}.
 source(Target) ->
     erx_source:print(Target).
+
+%%% The inspector: erx:i/0,1.
+
+%% The scope of the caller's inspect facet. In Phase 1 every shell runs in
+%% the system domain, whose facet is the system shell's, of scope `all`;
+%% a session's own facet replaces it when sessions run in their domains.
+-define(SCOPE, all).
+
+-doc """
+Prints the machine (erx_inspector:overview/1): the machine's record, the
+CPUs, the system domain's group, budget and threads, and the processes,
+each value with its reporter, at most 80 columns wide.
+""".
+-spec i() -> ok.
+i() ->
+    Sections = erx_inspector:overview(?SCOPE),
+    io:put_chars(erx_render:overview(Sections, build(Sections))).
+
+-doc """
+Prints the record of Path, a path of abi/inspection.txt such as
+`[processes, Pid]` or `[domains, 4, budget]`, each value with its
+reporter; `{error, scope}` for a path that names nothing the caller may
+see, `{error, unsupported}` for one the inspector cannot collect.
+""".
+-spec i([erx_schema:segment()]) -> ok | {error, scope | unsupported}.
+i(Path) ->
+    case erx_inspector:inspect(Path, ?SCOPE) of
+        {ok, Record} ->
+            {ok, Machine} = erx_inspector:inspect([], ?SCOPE),
+            io:put_chars(erx_render:record(Record, build([{[], {ok, Machine}}])));
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% Which build's projection to show: development only when the kernel
+%% reports the machine as a development build.
+build(Sections) ->
+    case lists:keyfind([], 1, Sections) of
+        {[], {ok, #{attrs := #{development := {kernel, {ok, true}}}}}} -> development;
+        _ -> release
+    end.

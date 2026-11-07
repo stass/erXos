@@ -12,7 +12,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../../erlang/apps/erx/include/generated/erx_abi.hrl").
 
--define(BUDGET_PATH, [domains, 0, budget]).
+-define(BUDGET_PATH, [domains, 4, budget]).
 -define(KIND, ?ERX_INFO_BUDGET_REPORTED_KIND).
 -define(GUARANTEE, ?ERX_INFO_BUDGET_REPORTED_GUARANTEE).
 -define(CAP, ?ERX_INFO_BUDGET_REPORTED_CAP).
@@ -102,8 +102,8 @@ erange_ends_a_listing_test() ->
               end,
     {ok, Records} = erx_kernel_records:listing(thread, Answers, 0, 128),
     %% A thread's id and path are the report's id, not the listing's index.
-    ?assertEqual([{[domains, 0, threads, 10], 10}, {[domains, 0, threads, 12], 12},
-                  {[domains, 0, threads, 14], 14}],
+    ?assertEqual([{[domains, 4, threads, 10], 10}, {[domains, 4, threads, 12], 12},
+                  {[domains, 4, threads, 14], 14}],
                  [{Path, Id} || #{path := Path, id := Id} <- Records]),
     ?assertEqual([{kernel, unsupported}], lists:usort([Attr || #{attrs := Attrs} <- Records,
                                                               Attr <- maps:values(Attrs)])),
@@ -124,6 +124,6 @@ cpu_listing_paths_test() ->
 
 every_record_validates_test() ->
     ?assertMatch({ok, #{kind := group}},
-                 erx_kernel_records:record(group, [domains, 0, group], 0,
+                 erx_kernel_records:record(group, [domains, 4, group], 0,
                                            {ok, <<5:64/little, 0:64, 0:32, 1:32/little, 2:32/little,
                                                   25:32/little>>}, 0)).

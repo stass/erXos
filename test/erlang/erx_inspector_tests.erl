@@ -1,0 +1,246 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The inspector's process records, scopes and renderers (docs/design-live.md,
+%% "Inspection", V2 and V9): each process attribute from a constructed
+%% process_info answer, with a seed that flips its status; the scope rules
+%% for paths and attributes; every status and reporter as erx_render prints
+%% it, each with a seed that changes the record and must change the text;
+%% hostile names through the line escape; and erx:i/0's overview within 80
+%% columns.
+-module(erx_inspector_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+-include("../../erlang/apps/erx/include/generated/erx_abi.hrl").
+
+-define(SYSTEM, 4).
+
+%%% Process records
+
+info() ->
+    [{status, waiting}, {priority, normal}, {reductions, 120},
+     {current_location, {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2405}]}},
+     {heap_size, 233}, {stack_size, 9}, {message_queue_len, 2}, {registered_name, worker},
+     {group_leader, self()}, {trap_exit, true}, {links, [self()]}, {monitors, [{process, self()}]}].
+
+attrs(Info) ->
+    {ok, #{attrs := Attrs}} = erx_process_records:record(self(), Info, ?SYSTEM),
+    Attrs.
+
+with(Key, Value) -> lists:keystore(Key, 1, info(), {Key, Value}).
+
+every_attribute_is_runtime_ok_but_the_domain_test() ->
+    Attrs = attrs(info()),
+    {ok, Keys} = erx_schema:attributes(process),
+    ?assertEqual(lists:sort(Keys), lists:sort(maps:keys(Attrs))),
+    ?assertEqual({service, {ok, ?SYSTEM}}, maps:get(domain, Attrs)),
+    ?assertEqual({runtime, {ok, waiting}}, maps:get(state, Attrs)),
+    ?assertEqual({runtime, {ok, <<"worker">>}}, maps:get(registered_name, Attrs)),
+    ?assertEqual({runtime, {ok, {<<"gen_server">>, <<"loop">>, 7, <<"gen_server.erl">>, 2405}}},
+                 maps:get(location, Attrs)),
+    ?assert(lists:all(fun({runtime, {ok, _}}) -> true; ({service, {ok, _}}) -> true; (_) -> false end,
+                      maps:values(Attrs))).
+
+no_registered_name_is_empty_test() ->
+    ?assertEqual({runtime, {ok, <<>>}}, maps:get(registered_name, attrs(with(registered_name, [])))).
+
+location_without_position_test() ->
+    Attrs = attrs(with(current_location, {erlang, hibernate, 3, []})),
+    ?assertEqual({runtime, {ok, {<<"erlang">>, <<"hibernate">>, 3, <<>>, 0}}}, maps:get(location, Attrs)).
+
+link_to_a_port_is_partial_test() ->
+    [Port | _] = erlang:ports(),
+    ?assertEqual({runtime, {ok, [self()]}}, maps:get(links, attrs(info()))),
+    ?assertEqual({runtime, {partial, [self()]}}, maps:get(links, attrs(with(links, [self(), Port])))).
+
+links_beyond_the_bound_are_partial_test() ->
+    Pids = lists:duplicate(1001, self()),
+    ?assertEqual({runtime, {ok, lists:duplicate(1000, self())}},
+                 maps:get(links, attrs(with(links, lists:sublist(Pids, 1000))))),
+    ?assertEqual({runtime, {partial, lists:duplicate(1000, self())}},
+                 maps:get(links, attrs(with(links, Pids)))).
+
+monitor_of_a_name_is_partial_test() ->
+    Named = [{process, self()}, {process, {logger, node()}}],
+    ?assertEqual({runtime, {partial, [self()]}}, maps:get(monitors, attrs(with(monitors, Named)))).
+
+name_longer_than_the_schema_is_invalid_test() ->
+    Long = list_to_atom(lists:duplicate(200, 16#e9)),
+    ?assertEqual({runtime, {error, invalid}}, maps:get(registered_name, attrs(with(registered_name, Long)))).
+
+gone_process_is_no_record_test() ->
+    ?assertEqual(none, erx_process_records:record(self(), undefined, ?SYSTEM)).
+
+live_process_record_test() ->
+    {ok, #{path := Path, attrs := Attrs}} = erx_process_records:process(self(), ?SYSTEM),
+    ?assertEqual([processes, self()], Path),
+    ?assertMatch({runtime, {ok, running}}, maps:get(state, Attrs)).
+
+%%% Scopes
+
+foreign_pid() ->
+    binary_to_term(<<131, 88, 119, 9, "erx@other", 1:32, 0:32, 7:32>>).
+
+reachable(Path, Scope) -> erx_inspector:reachable(Path, erx_schema:resolve(Path), Scope).
+
+machine_paths_need_scope_all_test() ->
+    ?assertEqual({ok, machine}, reachable([], [5])),
+    ?assertEqual({ok, machine}, reachable([cpus], all)),
+    ?assertEqual(error, reachable([cpus], [?SYSTEM])),
+    ?assertEqual(error, reachable([cpus, 0], [?SYSTEM])),
+    ?assertEqual(error, reachable([budgets], [?SYSTEM])).
+
+domain_paths_need_their_domain_test() ->
+    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([domains, ?SYSTEM, budget], [?SYSTEM])),
+    ?assertEqual(error, reachable([domains, ?SYSTEM, budget], [5])),
+    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([processes, self()], [?SYSTEM])),
+    ?assertEqual(error, reachable([processes, self()], [5])).
+
+unknown_and_unreachable_paths_answer_as_scope_test() ->
+    ?assertEqual(error, reachable([nothing], all)),
+    ?assertEqual(error, reachable([processes, foreign_pid()], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, foreign_pid()], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([cpus], [?SYSTEM])),
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9, budget], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([nothing], all)).
+
+dead_process_answers_as_scope_test() ->
+    {Pid, Ref} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN', Ref, process, Pid, _} -> ok end,
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, Pid], all)).
+
+uncollected_path_is_unsupported_test() ->
+    ?assertEqual({error, unsupported}, erx_inspector:inspect([groups], all)),
+    ?assertEqual({error, unsupported}, erx_inspector:entries([domains], all)).
+
+process_paths_test() ->
+    {ok, #{kind := process, id := Self}} = erx_inspector:inspect([processes, self()], all),
+    ?assertEqual(self(), Self),
+    {ok, #{kind := listing, children := Children}} = erx_inspector:inspect([processes], all),
+    ?assert(lists:member(self(), Children)),
+    {ok, Records} = erx_inspector:entries([processes], all),
+    ?assert(lists:any(fun(#{id := Id}) -> Id =:= self() end, Records)),
+    ?assertEqual({ok, []}, erx_inspector:entries([processes], [5])).
+
+machine() ->
+    {ok, Machine} = erx_kernel_records:record(machine, [], 0, {error, ?ERX_ENOTSUP}, 0),
+    Machine.
+
+scoped_record_keeps_what_the_scope_sees_test() ->
+    #{attrs := All} = erx_inspector:scoped(machine(), machine, all),
+    #{attrs := Scoped} = erx_inspector:scoped(machine(), machine, [?SYSTEM]),
+    ?assertEqual(9, map_size(All)),
+    ?assertEqual([build, development, dma_profile], lists:sort(maps:keys(Scoped))),
+    Process = maps:get(attrs, element(2, erx_process_records:record(self(), info(), ?SYSTEM))),
+    Record = #{kind => process, attrs => Process},
+    ?assertEqual(Process, maps:get(attrs, erx_inspector:scoped(Record, {domain, ?SYSTEM}, [?SYSTEM]))),
+    ?assertEqual(#{}, maps:get(attrs, erx_inspector:scoped(Record, {domain, ?SYSTEM}, [5]))).
+
+%%% Renderers
+
+process_record(Attrs) ->
+    #{schema => 1, path => [processes, self()], kind => process, id => self(),
+      attrs => Attrs, children => []}.
+
+rendered(Attr) ->
+    iolist_to_binary(erx_render:record(process_record(#{reductions => Attr}), release)).
+
+%% Each status prints as itself beside its reporter, never as a number or a
+%% blank, and flipping the status or the reporter changes the line.
+each_status_renders_as_itself_test_() ->
+    Cases = [{{ok, 42}, <<"42">>}, {{partial, 42}, <<"[partial]">>}, {unknown, <<"[unknown]">>},
+             {unsupported, <<"[unsupported]">>}, {{timeout, 500}, <<"[timeout 500]">>},
+             {{error, invalid}, <<"[error]">>}],
+    [?_test(begin
+                Text = rendered({runtime, Value}),
+                ?assertMatch({match, _}, re:run(Text, <<"reductions  runtime  \\Q", Shown/binary, "\\E\n">>)),
+                ?assertNotEqual(Text, rendered({service, Value})),
+                [?assertNotEqual(Text, rendered({runtime, Other})) || {Other, _} <- Cases, Other =/= Value]
+            end) || {Value, Shown} <- Cases].
+
+stopgap_reporter_is_named_with_its_scope_test() ->
+    Reported = ?ERX_INFO_BUDGET_REPORTED_KIND bor ?ERX_INFO_BUDGET_REPORTED_GUARANTEE
+        bor ?ERX_INFO_BUDGET_REPORTED_CAP bor ?ERX_INFO_BUDGET_REPORTED_CARVED
+        bor ?ERX_INFO_BUDGET_REPORTED_LENT,
+    Report = <<0:32/little, Reported:32/little, 100:64/little, 400:64/little, 30:64/little,
+               20:64/little, 10:64/little, 0:64/little>>,
+    {ok, Budget} = erx_kernel_records:record(budget, [domains, ?SYSTEM, budget], 0, {ok, Report},
+                                             ?ERX_INFO_BUDGET_REPORTED_USED),
+    Text = iolist_to_binary(erx_render:record(Budget, release)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  used +liberx pool  \\[partial\\]\n">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  spending +liberx pool  \\[unknown\\]\n">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  guarantee +kernel +100\n">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"\nliberx pool: pages committed through liberx;">>)),
+    {ok, Exact} = erx_kernel_records:record(budget, [domains, ?SYSTEM, budget], 0, {ok, Report}, 0),
+    ?assertEqual(nomatch, re:run(iolist_to_binary(erx_render:record(Exact, release)), <<"liberx">>)).
+
+hostile_names() ->
+    [<<"evil", 16#1b, "[2J", 16#1b, "]0;title", 7>>, <<"rtl", 16#e2, 16#80, 16#ae, "txt">>,
+     <<"c1", 16#c2, 16#9b, "31m">>, <<"bad", 16#ff, 16#fe, "utf8">>, <<"over", 16#c0, 16#af>>,
+     <<"line", $\n, "break", $\r, $\t>>, <<"zw", 16#e2, 16#80, 16#8b, "sp">>].
+
+%% No byte of a rendering is a control but its newlines, and no bidi
+%% override, C1 control or invalid UTF-8 survives.
+assert_clean(Text) ->
+    ?assertEqual(nomatch, re:run(Text, <<"[\\x00-\\x09\\x0b-\\x1f\\x7f]">>)),
+    ?assertMatch(Chars when is_binary(Chars), unicode:characters_to_binary(Text)),
+    Chars = unicode:characters_to_list(Text),
+    ?assertEqual([], [C || C <- Chars, C >= 16#80, C =< 16#9f]),
+    ?assertEqual([], [C || C <- Chars, C >= 16#200b, C =< 16#200f]),
+    ?assertEqual([], [C || C <- Chars, C >= 16#202a, C =< 16#202e]).
+
+hostile_names_are_escaped_test_() ->
+    [?_test(begin
+                Attrs = #{registered_name => {runtime, {ok, Name}},
+                          location => {runtime, {ok, {Name, Name, 0, Name, 1}}}},
+                Record = process_record(Attrs),
+                Single = iolist_to_binary(erx_render:record(Record, release)),
+                assert_clean(Single),
+                ?assertEqual(4, length(binary:matches(Single, <<"\n">>))),
+                Overview = iolist_to_binary(erx_render:overview([{[processes], {ok, [Record]}}], release)),
+                assert_clean(Overview)
+            end) || Name <- hostile_names()].
+
+hostile_path_segment_is_escaped_test() ->
+    Record = #{schema => 1, path => [domains, 4, modules, hd(hostile_names())], kind => module,
+               id => x, attrs => #{}, children => []},
+    assert_clean(iolist_to_binary(erx_render:record(Record, release))).
+
+overview_shows_error_statuses_test() ->
+    Text = iolist_to_binary(erx_render:overview([{[groups], {error, unsupported}},
+                                                 {[cpus], {error, scope}}], release)),
+    ?assertEqual(<<"/groups  [unsupported]\n/cpus  [error]\n">>, Text).
+
+overview_names_a_cells_own_reporter_test() ->
+    {ok, A} = erx_process_records:record(self(), info(), ?SYSTEM),
+    B = A#{id := list_to_pid("<0.1.0>"),
+           attrs := (maps:get(attrs, A))#{reductions := {service, {ok, 7}}}},
+    Text = iolist_to_binary(erx_render:overview([{[processes], {ok, [A, B]}}], release)),
+    ?assertMatch({match, _}, re:run(Text, <<"\n  by +runtime +runtime +runtime">>)),
+    ?assertMatch({match, _}, re:run(Text, <<"7 \\(service\\)">>)).
+
+%% The overview of a machine whose kernel answers nothing, with this node's
+%% processes and a process whose name is as long as the schema allows,
+%% fits 80 columns on every line.
+overview_fits_80_columns_test() ->
+    Long = list_to_atom(lists:duplicate(255, $n)),
+    Pid = spawn(fun() -> receive stop -> ok end end),
+    true = register(Long, Pid),
+    Threads = erx_kernel_records:listing(thread, fun(Index) when Index < 3 ->
+                                                         {ok, <<Index:64/little, 1:32/little, 2:32/little,
+                                                                3:32/little, 0:32/little>>};
+                                                    (_) -> {error, ?ERX_ERANGE}
+                                                 end, 0, 128),
+    Sections = [{[], {ok, machine()}},
+                {[cpus], erx_kernel_records:listing(cpu, fun(0) -> {error, ?ERX_ENOTSUP};
+                                                            (_) -> {error, ?ERX_ERANGE}
+                                                         end, 0, 64)},
+                {[domains, ?SYSTEM, group], {error, unsupported}},
+                {[domains, ?SYSTEM, threads], Threads},
+                {[processes], erx_inspector:entries([processes], all)}],
+    Text = iolist_to_binary(erx_render:overview(Sections, development)),
+    Pid ! stop,
+    Lines = binary:split(Text, <<"\n">>, [global, trim]),
+    ?assert(length(Lines) > 20),
+    ?assertEqual([], [Line || Line <- Lines, string:length(Line) > 80]),
+    ?assertMatch({match, _}, re:run(Text, <<"nnnnnnnnnnnnnnnnn\\.\\.\\.">>)).

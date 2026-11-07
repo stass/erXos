@@ -55,6 +55,7 @@ terminal and flushes it before any other write there.
 """.
 
 -export([value/1, line/2, table/0, table_record/3, table_flush/1]).
+-export([record/2, overview/2]).
 
 -export_type([attr/0, data/0, table/0]).
 
@@ -227,4 +228,197 @@ text(Value) when is_binary(Value) -> Value;
 text(Value) when is_integer(Value) -> integer_to_binary(Value);
 text(Value) when is_atom(Value) -> atom_to_binary(Value);
 text(Value) when is_pid(Value) -> list_to_binary(pid_to_list(Value));
+%% An inspected location, {Module, Function, Arity, File, Line}, the file
+%% and line shown when it has a source position.
+text({Module, Function, Arity, <<>>, 0})
+  when is_binary(Module), is_binary(Function), is_integer(Arity) ->
+    function(Module, Function, Arity);
+text({Module, Function, Arity, File, Line})
+  when is_binary(Module), is_binary(Function), is_integer(Arity), is_binary(File), is_integer(Line) ->
+    iolist_to_binary([function(Module, Function, Arity), " (", File, $:, integer_to_binary(Line), $)]);
 text(Value) -> iolist_to_binary(io_lib:format("~0tp", [Value])).
+
+function(Module, Function, Arity) ->
+    iolist_to_binary([Module, $:, Function, $/, integer_to_binary(Arity)]).
+
+%%% Inspection records
+
+-doc """
+An inspection record toward the terminal, as erx:i/1 prints it
+(docs/design-live.md, "Inspection"): a title line of its path and kind,
+then a line for each attribute it holds that the shell projection shows
+in Build, in the schema's order, with its name, its reporter and its
+value; then its children; then the scope of each stopgap reporter it
+names. Nothing is cut.
+""".
+-spec record(erx_schema:record(), release | development) -> iodata().
+record(#{children := Children} = Record, Build) ->
+    [block(Record, Build, infinity,
+           [[{<<"children">>, name}, {<<>>, name}, {children(Children), text}]]),
+     notes([Record])].
+
+-doc """
+What erx:i/0 prints, from erx_inspector:overview/1's sections: each under
+its path, a record as erx:i/1 shows it but without its children, each CPU
+as such a record, and threads and processes as tables of a row each,
+with a line under the header (`by`) naming each column's reporter; a cell
+whose reporter is not its column's carries its own in parentheses. A path
+the inspector does not answer shows its status. Below them, the scope of
+each stopgap reporter named. Every line fits 80 columns: a text column
+other than the last is cut at 20 columns and the last at what is left,
+the end of a cut value shown as `...`, as FreeBSD's ps cuts its last
+column; erx:i/1 shows any record whole.
+""".
+-spec overview([{[erx_schema:segment()], erx_inspector:answer() | erx_inspector:entries()}],
+               release | development) -> iodata().
+overview(Sections, Build) ->
+    [[section(Path, Answer, Build) || {Path, Answer} <- Sections],
+     notes(lists:append([section_records(Answer) || {_Path, Answer} <- Sections]))].
+
+%% The screen erx:i/0 fits, and how wide a cut column may be.
+-define(SCREEN, 80).
+-define(CUT_COLUMN, 20).
+-define(MORE, <<"...">>).
+
+section(_Path, {ok, Record}, Build) when is_map(Record) ->
+    block(Record, Build, ?SCREEN, []);
+section(Path, {error, Reason}, _Build) ->
+    [title(Path), ?GAP, error_status(Reason), $\n];
+section(Path, {Status, Records}, Build) ->
+    Count = [integer_to_binary(length(Records)), <<" entries">>,
+             case Status of partial -> <<" [partial]">>; ok -> <<>> end],
+    [title(Path), ?GAP, Count, $\n, entries(Records, Build)].
+
+error_status(unsupported) -> <<"[unsupported]">>;
+error_status(_Reason) -> <<"[error]">>.
+
+section_records({ok, Record}) when is_map(Record) -> [Record];
+section_records({Status, Records}) when Status =:= ok; Status =:= partial -> Records;
+section_records(_Error) -> [].
+
+%% A listing's entries: a thread or a process a row each, anything else a
+%% record each.
+entries([#{kind := thread} | _] = Records, _Build) ->
+    rows(Records, <<"thread">>, [{state, <<"state">>}, {wait, <<"wait">>}]);
+entries([#{kind := process} | _] = Records, _Build) ->
+    rows(Records, <<"pid">>, [{state, <<"state">>}, {reductions, <<"reductions">>},
+                              {message_queue_len, <<"queue">>}, {registered_name, <<"name">>},
+                              {location, <<"current">>}]);
+entries(Records, Build) ->
+    [block(Record, Build, ?SCREEN, []) || Record <- Records].
+
+%% A record's title and a line per attribute: name, reporter, value; then
+%% the Extra lines, aligned with them.
+block(#{path := Path, kind := Kind, attrs := Attrs}, Build, Width, Extra) ->
+    Keys = case erx_schema:fields(Kind, shell, Build) of
+               {ok, Fields} -> [Key || Key <- Fields, is_map_key(Key, Attrs)];
+               error -> []
+           end,
+    Lines = [[{escaped(atom_to_binary(Key)), name}, {reporter(maps:get(Key, Attrs)), name},
+              cell(maps:get(Key, Attrs))] || Key <- Keys],
+    [title(Path), ?GAP, escaped(atom_to_binary(Kind)), $\n, layout(Lines ++ Extra, Width)].
+
+%% A table of a row per record: the id, then a cell for each column, under
+%% a header and a line of each column's reporter, the first record's.
+rows([#{attrs := First} | _] = Records, IdLabel, Columns) ->
+    Reporters = [case maps:find(Key, First) of
+                     {ok, {Reporter, _}} -> Reporter;
+                     error -> none
+                 end || {Key, _Label} <- Columns],
+    Header = [{IdLabel, name} | [{Label, name} || {_Key, Label} <- Columns]],
+    By = [{<<"by">>, name} | [{reporter_label(Reporter), name} || Reporter <- Reporters]],
+    Rows = [[{escaped(text(Id)), text}
+             | [row_cell(maps:find(Key, Attrs), Reporter)
+                || {{Key, _Label}, Reporter} <- lists:zip(Columns, Reporters)]]
+            || #{id := Id, attrs := Attrs} <- Records],
+    layout([Header, By | Rows], ?SCREEN).
+
+%% A row's cell: the value, a location by its function alone, with its
+%% reporter when it is not its column's; an attribute the record does not
+%% hold is an empty cell.
+row_cell({ok, {Reporter, _} = Attr}, Reporter) ->
+    cell(brief(Attr));
+row_cell({ok, {Reporter, _} = Attr}, _Column) ->
+    {Text, Kind} = cell(brief(Attr)),
+    {<<Text/binary, " (", (reporter_label(Reporter))/binary, ")">>, Kind};
+row_cell(error, _Column) ->
+    {<<>>, text}.
+
+brief({Reporter, {ok, {Module, Function, Arity, File, Line}}})
+  when is_binary(Module), is_binary(Function), is_integer(Arity), is_binary(File), is_integer(Line) ->
+    {Reporter, {ok, function(Module, Function, Arity)}};
+brief(Attr) ->
+    Attr.
+
+reporter({Reporter, _Value}) -> reporter_label(Reporter).
+
+reporter_label(none) -> <<>>;
+reporter_label(Reporter) ->
+    case erx_schema:reporter_label(Reporter) of
+        {ok, Label} -> escaped(Label);
+        error -> <<"[invalid]">>
+    end.
+
+%% Lines of cells, indented, aligned and joined by the gap. Toward a screen
+%% each text cell but the last is cut at ?CUT_COLUMN and the last at what
+%% the screen has left; an integer is never cut.
+layout([], _Width) ->
+    [];
+layout(Lines, infinity) ->
+    Columns = [column(Cells) || Cells <- transpose(Lines)],
+    [[?GAP, row(Cells, Columns)] || Cells <- Lines];
+layout(Lines, Width) ->
+    Cut = [[cut(Cell, ?CUT_COLUMN) || Cell <- lists:droplast(Cells)] ++ [lists:last(Cells)]
+           || Cells <- Lines],
+    Leading = [column(Cells) || Cells <- lists:droplast(transpose(Cut))],
+    Room = Width - byte_size(?GAP) * (length(Leading) + 1)
+        - lists:sum([W || {W, _} <- Leading]),
+    Fitted = [lists:droplast(Cells) ++ [cut(lists:last(Cells), max(Room, byte_size(?MORE)))]
+              || Cells <- Cut],
+    layout(Fitted, infinity).
+
+cut({_Text, integer} = Cell, _Width) ->
+    Cell;
+cut({Text, Kind} = Cell, Width) ->
+    case width(Text) > Width of
+        true -> {iolist_to_binary([string:slice(Text, 0, Width - width(?MORE)), ?MORE]), Kind};
+        false -> Cell
+    end.
+
+children(unknown) -> <<"[unknown]">>;
+children({partial, _Segments}) -> <<"[partial]">>;
+children(Segments) -> escaped(lists:join(<<" ">>, [segment(Segment) || Segment <- Segments])).
+
+%% A path as /proc writes it, each segment escaped.
+title(Path) ->
+    escaped([$/ | lists:join($/, [segment(Segment) || Segment <- Path])]).
+
+segment(Segment) when is_binary(Segment) -> Segment;
+segment(Segment) -> text(Segment).
+
+escaped(Text) -> erx_text:escape_line(Text).
+
+%% Below a table, the scope of each stopgap reporter it names, wrapped to
+%% the screen.
+notes(Records) ->
+    Stopgaps = lists:usort([Name || #{attrs := Attrs} <- Records,
+                                    {{stopgap, Name}, _Value} <- maps:values(Attrs)]),
+    [note(Name) || Name <- Stopgaps].
+
+note(Name) ->
+    case erx_schema:stopgap(Name) of
+        {ok, #{label := Label, scope := Scope}} ->
+            wrap(string:lexemes(escaped([Label, <<": ">>, Scope]), " "), <<>>);
+        error ->
+            []
+    end.
+
+wrap([], Line) ->
+    [Line, $\n];
+wrap([Word | Words], <<>>) ->
+    wrap(Words, Word);
+wrap([Word | Words], Line) ->
+    case width(Line) + 1 + width(Word) > ?SCREEN of
+        true -> [Line, $\n | wrap(Words, <<"  ", Word/binary>>)];
+        false -> wrap(Words, <<Line/binary, " ", Word/binary>>)
+    end.
