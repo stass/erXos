@@ -467,14 +467,11 @@ it; git history is the record of completed work.
   A `CommandError` from `qemu --version` timing out maps to `timed_out`, and a QEMU or HVF crash
   after the bootstrap memory line maps to `failed`, so host problems read as erXos's; the
   `cancelled` branch (line 208) is unreachable from `run_guest`, which passes no `cancelled:`.
-* [Low] tooling, fetched source paths: `tools/fuzz/lfs_image_target.rb:8`,
-  `test/host/erx_littlefs_test.rb:18` and `tools/lib/erx/libc_test.rb:24` spell a source's
-  unpacked directory (`littlefs-2.11.3`, `libc-test-63e36e9`) by hand, so a pin bump in
-  `deps.lock` fails them with a missing-file compiler error, and they read the tree without
-  checking its provenance record. Route them through `Dependencies#fetched_tree`, as the ERTS
-  build does (`Runtime::FETCHED_SOURCES`); `RcOracle::Build#source_tree` repeats the same check
-  by hand. Also `otp/erts/emulator/Makefile.in`: a make of the emulator run outside
-  `tools/erx` gets no `ERX_LITTLEFS` and fails on a missing `/lfs.c`.
+* [Low] tooling, fetched source paths: `tools/lib/erx/libc_test.rb:24` spells libc-test's
+  unpacked directory (`libc-test-63e36e9`) by hand, so a pin bump in `deps.lock` fails it with
+  a missing-file error, and it reads the tree without checking its provenance record. Route
+  it through `Dependencies#fetched_tree`; `RcOracle::Build#source_tree` repeats the same check
+  by hand.
 * [Low] tooling, `tools/lib/erx/libc_test.rb:158,270-279,454-457`, `tools/lib/erx/setup.rb`: (1)
   Every serial line between a test's run and end lines that matches `FILE.c:N: ` is
   attributed to that test, including kernel or root C output; a spurious disagreement, never a

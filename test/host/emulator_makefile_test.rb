@@ -6,7 +6,6 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/runtime'
 
 # The emulator's makefile reaches erts/lib_src's archives (ethread, erts_internal)
 # only through lib_src's stamp, obj/TARGET/TYPE/MADE. This test runs GNU make on the
@@ -67,16 +66,14 @@ class EmulatorMakefileTest < Minitest::Test
   end
 
   # Every $(ERX_...) variable the makefile reads and does not assign itself is one
-  # both runtime builds put in make's environment, by name or as a fetched source's
-  # tree (Runtime::FETCHED_SOURCES, which both merge). A name neither sets expands to
+  # both runtime builds put in make's environment. A name neither sets expands to
   # nothing without a word from make, and `-I$(NAME)/include` then searches /include.
   def test_every_erx_variable_the_makefile_reads_is_set_by_both_builds
     makefile = File.read(MAKEFILE_IN)
     read = makefile.scan(/\$\((ERX_[A-Z0-9_]+)\)/).flatten.uniq
     assigned = makefile.scan(/^(ERX_[A-Z0-9_]+)[ \t]*[:?+]?=/).flatten
     BUILD_ENVIRONMENTS.each do |file|
-      set = File.read(File.expand_path("../../#{file}", __dir__)).scan(/'(ERX_[A-Z0-9_]+)' =>/).flatten +
-            Erx::Runtime::FETCHED_SOURCES.keys
+      set = File.read(File.expand_path("../../#{file}", __dir__)).scan(/'(ERX_[A-Z0-9_]+)' =>/).flatten
       assert_empty read - assigned - set, "#{file}'s build environment does not set what #{MAKEFILE_IN} reads"
     end
   end

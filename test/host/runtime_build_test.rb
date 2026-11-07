@@ -3,10 +3,8 @@
 # frozen_string_literal: true
 
 require 'fileutils'
-require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/dependencies'
 require_relative '../../tools/lib/erx/runtime'
 
 # What `tools/erx build runtime` decides, with OTP's configure and make replaced
@@ -100,7 +98,6 @@ class RuntimeBuildTest < Minitest::Test
     write_otp('erts/preloaded/src/Makefile', "PRE_LOADED_ERL_MODULES = \\\n\tinit \\\n\terlang\n\n" \
                                               "PRE_LOADED_BEAM_MODULES = \\\n\tprim_eval\n")
     @output = Runtime.output(root: @root)
-    fetch_littlefs
     @runner = RecordingRunner.new(@output, log_dir: File.join(@root, 'logs'))
     # What xref answers in a tree whose serving list is current: the list, preloaded
     # modules and the name of a fun call, which the check leaves out.
@@ -119,54 +116,12 @@ class RuntimeBuildTest < Minitest::Test
 
   def write_otp(path, text) = write_tree(File.join('otp', path), text)
 
-  # deps.lock's littlefs as `tools/erx fetch` leaves it: its tree and the
-  # provenance record of its pin.
-  def fetch_littlefs
-    FileUtils.copy_file(File.expand_path('../../deps.lock', __dir__), File.join(@root, 'deps.lock'))
-    lock = Erx::DependencySchema.parse(File.binread(File.join(@root, 'deps.lock')))
-    entry = lock.find { |source| source.fetch('id') == 'littlefs' }
-    FileUtils.mkdir_p(File.join(littlefs_parent, entry.fetch('directory')))
-    File.write(File.join(littlefs_parent, '.source.json'), JSON.pretty_generate(entry))
-  end
-
-  def littlefs_parent = File.join(@root, 'build/third_party/littlefs')
-
-  def littlefs_tree
-    lock = Erx::DependencySchema.parse(File.binread(File.join(@root, 'deps.lock')))
-    File.join(littlefs_parent, lock.find { |source| source.fetch('id') == 'littlefs' }.fetch('directory'))
-  end
-
   def build
     @runner.steps.clear
     Runtime.new(root: @root, runner: @runner, oracle: FakeOracle.new, sdk_root: @sdk).build
   end
 
   def configured? = @runner.steps.include?('runtime-configure')
-
-  # A checkout set up before deps.lock pinned littlefs: the build names the
-  # source and the command that fetches it before any step runs, instead of
-  # leaving make to miss lfs.c deep in the emulator's build.
-  def test_a_source_that_is_not_fetched_fails_before_any_step
-    FileUtils.rm_rf(littlefs_parent)
-    error = assert_raises(Erx::Error) { build }
-    assert_equal 'source littlefs is not fetched; run `ruby tools/erx fetch --source littlefs`', error.message
-    assert_empty @runner.steps
-  end
-
-  def test_a_source_of_another_pin_fails_before_any_step
-    marker = File.join(littlefs_parent, '.source.json')
-    File.write(marker, JSON.generate(JSON.parse(File.read(marker)).merge('sha256' => '0' * 64)))
-    error = assert_raises(Erx::Error) { build }
-    assert_match(/\Abuild\/third_party\/littlefs does not hold deps\.lock's pin of littlefs; remove it and run /, error.message)
-    assert_empty @runner.steps
-  end
-
-  # make reaches littlefs only through the tree the check accepted.
-  def test_the_emulator_compiles_littlefs_from_its_verified_tree
-    build
-    assert_equal littlefs_tree,
-                 @runner.options.fetch('runtime-emulator').fetch(:env).fetch('ERX_LITTLEFS')
-  end
 
   # The build reads xref's answer back from the step's log, so it runs as every other
   # step does, and refuses a serving list the beams have outgrown or left behind.

@@ -48,15 +48,6 @@ class SetupTest < Minitest::Test
     assert_empty fetched.map { |source| source.fetch('kind') } - %w[tar git file]
   end
 
-  # The ERTS build compiles littlefs, so a checkout set up before deps.lock
-  # pinned it must fetch it: setup's sources come from deps.lock.
-  def test_a_tree_without_littlefs_fetches_it
-    Dir.mktmpdir('erx-setup-') do |root|
-      FileUtils.copy_file(File.expand_path('../../deps.lock', __dir__), File.join(root, 'deps.lock'))
-      assert_includes Erx::Setup.new(root: root).plan.map(&:name), 'source-littlefs'
-    end
-  end
-
   def test_archive_directory_is_the_sibling_downloads_of_the_cache
     assert_equal '/x/build/downloads', Erx::Setup.archive_directory('/x/build/third_party')
   end

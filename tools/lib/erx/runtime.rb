@@ -5,7 +5,6 @@
 require 'digest'
 require 'fileutils'
 require 'open3'
-require_relative 'dependencies'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'hosted_sources'
@@ -57,10 +56,6 @@ module Erx
     DEADLINES = { compile: 120, copy: 300, configure: 1_800, emulator: 1_800, libs: 1_800 }.freeze
     # What the build leaves for the hosted smoke test and the seam check.
     Output = Data.define(:root, :beam, :objects, :liberx, :archive)
-    # The deps.lock sources ERTS's emulator compiles, each by the make variable
-    # that names its tree (otp/erts/emulator/Makefile.in). make learns a tree only
-    # from here, after Dependencies#fetched_tree has checked it is the pinned one.
-    FETCHED_SOURCES = { 'ERX_LITTLEFS' => 'littlefs' }.freeze
 
     def self.output(root:)
       otp = File.join(root, 'build/runtime/hosted/otp')
@@ -113,7 +108,6 @@ module Erx
     def build(jobs: 4)
       raise Error, 'the hosted runtime builds only on macOS' unless RUBY_PLATFORM.include?('darwin')
 
-      fetched_sources # refuses a source that is not fetched, before any step
       @oracle.verify(HOST_OTP_FLAVOUR)
       FileUtils.rm_f(self.class.record_path(@output))
       digest = self.class.source_digest(root: @root)
@@ -128,16 +122,6 @@ module Erx
     end
 
     private
-
-    # The make variables naming each fetched source's tree. The first build step
-    # asks for them, so a source that is missing or of another pin fails the build
-    # with the command that fetches it before anything runs.
-    def fetched_sources
-      @fetched_sources ||= begin
-        dependencies = Dependencies.new(root: @root, runner: @runner)
-        FETCHED_SOURCES.transform_values { |id| dependencies.fetched_tree(id) }.freeze
-      end
-    end
 
     # make removes nothing, so a beam it built for a module whose source has since left
     # otp/lib, or moved to erlang/apps, would stay in the copy's ebin and reach the release.
@@ -242,7 +226,7 @@ module Erx
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,
         'ERX_TREE' => @root
-      ).merge(fetched_sources).freeze
+      ).freeze
     end
 
     def sdk_root
